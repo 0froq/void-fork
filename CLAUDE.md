@@ -15,7 +15,7 @@ Make sure to run `lint` and `fmt` after major changes.
 
 ## Status
 
-Phase 1 (local dev) is complete. Phase 2 Steps 1–5 (platform, dispatch, deploy CLI) are implemented — stateless deploy works. Binding provisioning (D1/KV/R2) comes in Step 7.
+Phase 1 (local dev) is complete. Phase 2 Steps 1–5 (platform, dispatch, deploy CLI) are implemented — stateless deploy works. Step 7 (binding provisioning) and Step 8 (GitHub OAuth auth + `vite-cloud login`) are done. Remote migrations and runtime inference remain.
 
 ## Monorepo Structure
 
@@ -65,10 +65,11 @@ src/
   migrations/
     runner.ts               # Applies .sql files to local SQLite via better-sqlite3
   deploy/
-    cli.ts                  # CLI entry: `vite-cloud deploy`
+    cli.ts                  # CLI entry: `vite-cloud deploy|link|login`
     deploy.ts               # Orchestrator: build → package → upload → print URL
     project.ts              # Reads/creates .vite-cloud/project.json
-    auth.ts                 # Token from VITE_CLOUD_TOKEN or ~/.vite-cloud/credentials.json
+    auth.ts                 # Token read/save + runLogin() (local server + browser OAuth)
+    login.ts                # Login command UI (@clack/prompts)
     package.ts              # Packages dist/ into FormData (worker + assets + manifest)
     client.ts               # HTTP client for platform API
     types.ts                # DeployManifest type
@@ -121,30 +122,45 @@ CF Worker serving the Control Plane API. Uses Hono, D1, R2, KV, and Workers for 
 
 ```
 src/
-  index.ts                  # Hono app mounting route groups
-  env.ts                    # PlatformEnv type (D1, R2, KV, DISPATCH, secrets)
+  index.ts                  # Hono app mounting route groups + auth middleware
+  env.ts                    # PlatformEnv type (D1, R2, KV, DISPATCH, secrets, Variables)
   types.ts                  # User, Project, Deployment, Resource, DeployManifest
   id.ts                     # generateId(prefix) → "proj_a1b2c3d4e5f6"
   db.ts                     # Typed D1 query wrappers (CRUD for all tables)
+  auth/
+    jwt.ts                  # HS256 JWT sign/verify via Web Crypto API
+    github.ts               # GitHub OAuth helpers (authorize URL, code→token, user profile)
+  middleware/
+    auth.ts                 # Bearer token verification, sets userId/userLogin on context
   routes/
+    auth.ts                 # GET /auth/login + GET /auth/callback (GitHub OAuth flow)
     projects.ts             # POST /projects, GET /projects/:id
-    deploy.ts               # POST /projects/:id/deploy (multipart upload)
+    deploy.ts               # POST /projects/:id/deploy (multipart upload + ownership check)
 migrations/
   0001_initial.sql          # users, projects, deployments, resources tables
 ```
+
+### Auth Flow
+
+`GET /auth/login?redirect=http://localhost:{port}/callback` → HMAC-signed state → GitHub OAuth → `GET /auth/callback` → exchange code → upsert user → sign JWT → redirect to CLI with `?token=`.
+
+Auth middleware on `/projects/*` extracts Bearer token, verifies JWT, sets `c.get("userId")` and `c.get("userLogin")`. Deploy endpoint checks `project.user_id === c.get("userId")` for ownership.
 
 ### Deploy Endpoint Flow
 
 `POST /projects/:id/deploy` receives multipart form data:
 
-1. `asset:<path>` fields → stored in R2 at `{projectId}/current/{path}`
-2. `worker:<path>` fields → uploaded to CF dispatch namespace via API
-3. KV routing updated: `slug → { workerName, projectId }`
-4. Deployment marked as `live`
+1. Ownership check: `project.user_id` must match authenticated user
+2. `asset:<path>` fields → stored in R2 at `{projectId}/current/{path}`
+3. `worker:<path>` fields → uploaded to CF dispatch namespace via API
+4. KV routing updated: `slug → { workerName, projectId }`
+5. Deployment marked as `live`
 
 ### Secrets (via `wrangler secret put`)
 
-`CF_API_TOKEN`, `CF_ACCOUNT_ID`, `JWT_SECRET`
+`CF_API_TOKEN`, `CF_ACCOUNT_ID`, `JWT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
+
+Optional env var: `AUTH_REDIRECT_URI` (defaults to `https://api.vite.cloud/auth/callback`). For local dev, set in `.dev.vars`.
 
 ## `dispatch` Architecture
 
@@ -187,7 +203,7 @@ src/
 
 ## Testing
 
-Unit tests run from root with `pnpm test` (vitest). 68 tests across 6 files.
+Unit tests run from root with `pnpm test` (vitest). 80 tests across 8 files.
 
 | Test file                                              | Covers                                   |
 | ------------------------------------------------------ | ---------------------------------------- |
@@ -197,6 +213,8 @@ Unit tests run from root with `pnpm test` (vitest). 68 tests across 6 files.
 | `packages/vite-cloud/test/unit/response.test.ts`       | Return value → Response (8 tests)        |
 | `packages/vite-cloud/test/unit/inference.test.ts`      | AST-based binding inference (10 tests)   |
 | `packages/dispatch/test/unit/hostname.test.ts`         | Slug extraction from hostname (12 tests) |
+| `packages/platform/test/unit/provision.test.ts`        | Binding provisioning engine (7 tests)    |
+| `packages/platform/test/unit/jwt.test.ts`              | JWT sign/verify round-trip (5 tests)     |
 
 ## Playground
 
