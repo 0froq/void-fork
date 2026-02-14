@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
+    "miniflare": "^4",
     "typescript": "catalog:",
     "wrangler": "catalog:"
   }
