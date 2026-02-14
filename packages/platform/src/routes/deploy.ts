@@ -16,6 +16,10 @@ app.post("/:id/deploy", async (c) => {
     return c.json({ error: "project not found" }, 404);
   }
 
+  if (project.user_id !== c.get("userId")) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+
   const formData = await c.req.formData();
   const manifestRaw = formData.get("manifest") as string | null;
   const manifest: DeployManifest = manifestRaw

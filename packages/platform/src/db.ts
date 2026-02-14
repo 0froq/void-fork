@@ -27,6 +27,18 @@ export async function getUserByGithubId(db: D1Database, githubId: number): Promi
   return db.prepare("SELECT * FROM users WHERE github_id = ?").bind(githubId).first<User>();
 }
 
+export async function updateUser(
+  db: D1Database,
+  id: string,
+  githubLogin: string,
+  email: string | null,
+): Promise<void> {
+  await db
+    .prepare("UPDATE users SET github_login = ?, email = ? WHERE id = ?")
+    .bind(githubLogin, email, id)
+    .run();
+}
+
 // --- Projects ---
 
 export async function createProject(

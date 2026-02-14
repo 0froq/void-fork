@@ -6,9 +6,8 @@ const app = new Hono<PlatformEnv>();
 
 // List all projects for the current user
 app.get("/", async (c) => {
-  // Hardcoded dev user for Phase 2 (auth comes later)
-  const DEV_USER_ID = "user_dev000000000";
-  const projects = await getProjectsByUserId(c.env.DB, DEV_USER_ID);
+  const userId = c.get("userId");
+  const projects = await getProjectsByUserId(c.env.DB, userId);
   return c.json(projects);
 });
 
@@ -31,10 +30,8 @@ app.post("/", async (c) => {
     return c.json({ error: "slug already taken" }, 409);
   }
 
-  // Hardcoded dev user for Phase 2 (auth comes later)
-  const DEV_USER_ID = "user_dev000000000";
-
-  const project = await createProject(c.env.DB, DEV_USER_ID, body.slug, body.name);
+  const userId = c.get("userId");
+  const project = await createProject(c.env.DB, userId, body.slug, body.name);
   return c.json(project, 201);
 });
 

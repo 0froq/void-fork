@@ -9,5 +9,12 @@ export interface PlatformEnv extends Env {
     CF_API_TOKEN: string;
     CF_ACCOUNT_ID: string;
     JWT_SECRET: string;
+    GITHUB_CLIENT_ID: string;
+    GITHUB_CLIENT_SECRET: string;
+    AUTH_REDIRECT_URI?: string;
+  };
+  Variables: {
+    userId: string;
+    userLogin: string;
   };
 }
