@@ -54,12 +54,6 @@ importers:
       hono:
         specifier: ^4.11.9
         version: 4.11.9
-      oxc-walker:
-        specifier: ^0.7.0
-        version: 0.7.0(oxc-parser@0.112.0)
-      tinyglobby:
-        specifier: ^0.2.15
-        version: 0.2.15
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20260214.0
@@ -70,6 +64,12 @@ importers:
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.6.2
+      oxc-walker:
+        specifier: ^0.7.0
+        version: 0.7.0(oxc-parser@0.112.0)
+      tinyglobby:
+        specifier: ^0.2.15
+        version: 0.2.15
       tsdown:
         specifier: 'catalog:'
         version: 0.20.3(typescript@5.9.3)
