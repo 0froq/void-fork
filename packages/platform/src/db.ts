@@ -51,6 +51,14 @@ export async function getProjectBySlug(db: D1Database, slug: string): Promise<Pr
   return db.prepare("SELECT * FROM projects WHERE slug = ?").bind(slug).first<Project>();
 }
 
+export async function getProjectsByUserId(db: D1Database, userId: string): Promise<Project[]> {
+  const result = await db
+    .prepare("SELECT * FROM projects WHERE user_id = ? ORDER BY created_at DESC")
+    .bind(userId)
+    .all<Project>();
+  return result.results;
+}
+
 // --- Deployments ---
 
 export async function createDeployment(

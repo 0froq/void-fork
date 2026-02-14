@@ -1,8 +1,16 @@
 import { Hono } from "hono";
 import type { PlatformEnv } from "../env";
-import { createProject, getProject, getProjectBySlug } from "../db";
+import { createProject, getProject, getProjectBySlug, getProjectsByUserId } from "../db";
 
 const app = new Hono<PlatformEnv>();
+
+// List all projects for the current user
+app.get("/", async (c) => {
+  // Hardcoded dev user for Phase 2 (auth comes later)
+  const DEV_USER_ID = "user_dev000000000";
+  const projects = await getProjectsByUserId(c.env.DB, DEV_USER_ID);
+  return c.json(projects);
+});
 
 // Create a new project
 app.post("/", async (c) => {

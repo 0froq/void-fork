@@ -14,7 +14,7 @@
     "dev": "tsdown --watch"
   },
   "dependencies": {
-    "@clack/prompts": "^1.0.1"
+    "@clack/prompts": "catalog:"
   },
   "devDependencies": {
     "tsdown": "catalog:",

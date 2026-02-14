@@ -1,5 +1,13 @@
 const DEFAULT_API_URL = "https://vite-cloud-platform.workers.dev";
 
+export interface ProjectResponse {
+  id: string;
+  user_id: string;
+  slug: string;
+  name: string;
+  created_at: string;
+}
+
 export interface CreateProjectResponse {
   id: string;
   slug: string;
@@ -23,6 +31,21 @@ export class PlatformClient {
   constructor(token: string, apiUrl?: string) {
     this.token = token;
     this.baseUrl = apiUrl ?? process.env.VITE_CLOUD_API_URL ?? DEFAULT_API_URL;
+  }
+
+  async listProjects(): Promise<ProjectResponse[]> {
+    const res = await fetch(`${this.baseUrl}/projects`, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Failed to list projects: ${res.status} ${body}`);
+    }
+
+    return res.json();
   }
 
   async createProject(slug: string, name: string): Promise<CreateProjectResponse> {
