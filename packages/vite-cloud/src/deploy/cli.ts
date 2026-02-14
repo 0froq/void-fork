@@ -2,6 +2,7 @@
 
 import { runDeploy } from "./deploy";
 import { runLink } from "./link";
+import { runLoginCommand } from "./login";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -19,16 +20,22 @@ if (command === "deploy") {
     console.error(err.message ?? err);
     process.exit(1);
   });
+} else if (command === "login") {
+  runLoginCommand().catch((err) => {
+    console.error(err.message ?? err);
+    process.exit(1);
+  });
 } else {
   console.log(`vite-cloud CLI
 
 Usage:
-  vite-cloud deploy        Build and deploy to Vite Cloud
-  vite-cloud link [slug]   Link to an existing project
+  vite-cloud login          Log in with GitHub
+  vite-cloud deploy         Build and deploy to Vite Cloud
+  vite-cloud link [slug]    Link to an existing project
 
 Environment:
   VITE_CLOUD_TOKEN     Auth token (or use ~/.vite-cloud/credentials.json)
-  VITE_CLOUD_API_URL   Platform API URL (default: https://vite-cloud-platform.workers.dev)
+  VITE_CLOUD_API_URL   Platform API URL (default: https://api.vite.cloud)
 `);
   if (command && command !== "help" && command !== "--help" && command !== "-h") {
     console.error(`Unknown command: ${command}`);
