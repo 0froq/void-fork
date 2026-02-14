@@ -93,12 +93,13 @@ export async function runLogin(): Promise<string> {
     });
 
     // 5-minute timeout
-    setTimeout(
+    const timeout = setTimeout(
       () => {
         server.close();
         reject(new Error("Login timed out after 5 minutes"));
       },
       5 * 60 * 1000,
     );
+    timeout.unref();
   });
 }
