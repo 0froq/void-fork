@@ -3,6 +3,8 @@
 import { runDeploy } from "./deploy";
 import { runLink } from "./link";
 import { runLoginCommand } from "./login";
+import { getToken, removeToken } from "./auth";
+import { PlatformClient } from "./client";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -25,11 +27,35 @@ if (command === "deploy") {
     console.error(err.message ?? err);
     process.exit(1);
   });
+} else if (command === "logout") {
+  if (removeToken()) {
+    console.log("Logged out.");
+  } else {
+    console.log("Not logged in.");
+  }
+} else if (command === "whoami") {
+  const token = getToken();
+  if (!token) {
+    console.error("Not logged in. Run `vcd login` first.");
+    process.exit(1);
+  }
+  const client = new PlatformClient(token);
+  client
+    .whoami()
+    .then((user) => {
+      console.log(user.login);
+    })
+    .catch((err) => {
+      console.error(err.message ?? err);
+      process.exit(1);
+    });
 } else {
   console.log(`vite-cloud CLI (alias: vcd)
 
 Usage:
   vcd login          Log in with GitHub
+  vcd logout         Log out and remove credentials
+  vcd whoami         Show the logged-in GitHub username
   vcd deploy         Build and deploy to Vite Cloud
   vcd link [slug]    Link to an existing project
 

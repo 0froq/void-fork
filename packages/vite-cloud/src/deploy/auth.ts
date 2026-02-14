@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -33,6 +33,15 @@ export function getToken(): string | null {
 export function saveToken(token: string): void {
   mkdirSync(CREDENTIALS_DIR, { recursive: true });
   writeFileSync(CREDENTIALS_PATH, JSON.stringify({ token }, null, 2) + "\n", { mode: 0o600 });
+}
+
+export function removeToken(): boolean {
+  try {
+    rmSync(CREDENTIALS_PATH);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const DEFAULT_API_URL = "https://api.vite.cloud";

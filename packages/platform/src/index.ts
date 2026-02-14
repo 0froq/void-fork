@@ -9,6 +9,8 @@ const app = new Hono<PlatformEnv>();
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 app.route("/auth", auth);
+app.use("/me", authMiddleware);
+app.get("/me", (c) => c.json({ login: c.get("userLogin") }));
 app.use("/projects/*", authMiddleware);
 app.route("/projects", projects);
 app.route("/projects", deploy);
