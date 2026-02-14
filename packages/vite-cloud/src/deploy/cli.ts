@@ -26,12 +26,12 @@ if (command === "deploy") {
     process.exit(1);
   });
 } else {
-  console.log(`vite-cloud CLI
+  console.log(`vite-cloud CLI (alias: vcd)
 
 Usage:
-  vite-cloud login          Log in with GitHub
-  vite-cloud deploy         Build and deploy to Vite Cloud
-  vite-cloud link [slug]    Link to an existing project
+  vcd login          Log in with GitHub
+  vcd deploy         Build and deploy to Vite Cloud
+  vcd link [slug]    Link to an existing project
 
 Environment:
   VITE_CLOUD_TOKEN     Auth token (or use ~/.vite-cloud/credentials.json)

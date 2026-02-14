@@ -2,7 +2,8 @@
   "name": "vite-cloud",
   "version": "0.0.1",
   "bin": {
-    "vite-cloud": "dist/deploy/cli.mjs"
+    "vite-cloud": "dist/deploy/cli.mjs",
+    "vcd": "dist/deploy/cli.mjs"
   },
   "files": [
     "dist"
