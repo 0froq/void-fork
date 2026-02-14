@@ -1,5 +1,5 @@
 import { parseSync } from "vite";
-import { walk } from "oxc-walker";
+import { walk } from "estree-walker";
 
 export interface InferredBindings {
   needsD1: boolean;
@@ -28,7 +28,7 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
     return result;
   }
 
-  walk(parsed.program, {
+  walk(parsed.program as any, {
     enter(node: any) {
       if (node.type !== "MemberExpression") return;
       if (node.computed) return;

@@ -21,13 +21,13 @@ Phase 1 (local dev) is complete. Phase 2 Steps 1–5 (platform, dispatch, deploy
 
 pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-workspace.yaml` (typescript, tsdown, vite, @cloudflare/workers-types, wrangler).
 
-| Package                      | npm name             | Purpose                                                  |
-| ---------------------------- | -------------------- | -------------------------------------------------------- |
-| `packages/vite-cloud`        | `vite-cloud`         | Core Vite plugin — routing, inference, migrations, CLI   |
-| `packages/platform`          | `@vite-cloud/platform` (private) | Control Plane API — projects, deploys, CF API proxy |
-| `packages/dispatch`          | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets |
-| `packages/create-vite-cloud` | `create-vite-cloud`  | `npm create vite-cloud` scaffolding CLI                  |
-| `playground/`                | (private)            | Dev/test app exercising all features                     |
+| Package                      | npm name                         | Purpose                                                |
+| ---------------------------- | -------------------------------- | ------------------------------------------------------ |
+| `packages/vite-cloud`        | `vite-cloud`                     | Core Vite plugin — routing, inference, migrations, CLI |
+| `packages/platform`          | `@vite-cloud/platform` (private) | Control Plane API — projects, deploys, CF API proxy    |
+| `packages/dispatch`          | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets   |
+| `packages/create-vite-cloud` | `create-vite-cloud`              | `npm create vite-cloud` scaffolding CLI                |
+| `playground/`                | (private)                        | Dev/test app exercising all features                   |
 
 ## `vite-cloud` Architecture
 
@@ -61,7 +61,7 @@ src/
     handler.ts              # defineHandler(), defineMiddleware() — identity functions with types
     response.ts             # convertReturnValue() — return → Response
   inference/
-    walk.ts                 # AST walking with vite's parseSync + oxc-walker
+    walk.ts                 # AST walking with vite's parseSync + estree-walker
   migrations/
     runner.ts               # Applies .sql files to local SQLite via better-sqlite3
   deploy/
@@ -136,6 +136,7 @@ migrations/
 ### Deploy Endpoint Flow
 
 `POST /projects/:id/deploy` receives multipart form data:
+
 1. `asset:<path>` fields → stored in R2 at `{projectId}/current/{path}`
 2. `worker:<path>` fields → uploaded to CF dispatch namespace via API
 3. KV routing updated: `slug → { workerName, projectId }`
@@ -188,14 +189,14 @@ src/
 
 Unit tests run from root with `pnpm test` (vitest). 68 tests across 6 files.
 
-| Test file                                        | Covers                                       |
-| ------------------------------------------------ | -------------------------------------------- |
-| `packages/vite-cloud/test/unit/parse-filename.test.ts` | Route filename parsing (30 tests)     |
-| `packages/vite-cloud/test/unit/scan.test.ts`           | Filesystem scanning (5 tests)         |
-| `packages/vite-cloud/test/unit/compile.test.ts`        | Code generation (3 tests)             |
-| `packages/vite-cloud/test/unit/response.test.ts`       | Return value → Response (8 tests)     |
-| `packages/vite-cloud/test/unit/inference.test.ts`      | AST-based binding inference (10 tests)|
-| `packages/dispatch/test/unit/hostname.test.ts`         | Slug extraction from hostname (12 tests)|
+| Test file                                              | Covers                                   |
+| ------------------------------------------------------ | ---------------------------------------- |
+| `packages/vite-cloud/test/unit/parse-filename.test.ts` | Route filename parsing (30 tests)        |
+| `packages/vite-cloud/test/unit/scan.test.ts`           | Filesystem scanning (5 tests)            |
+| `packages/vite-cloud/test/unit/compile.test.ts`        | Code generation (3 tests)                |
+| `packages/vite-cloud/test/unit/response.test.ts`       | Return value → Response (8 tests)        |
+| `packages/vite-cloud/test/unit/inference.test.ts`      | AST-based binding inference (10 tests)   |
+| `packages/dispatch/test/unit/hostname.test.ts`         | Slug extraction from hostname (12 tests) |
 
 ## Playground
 
