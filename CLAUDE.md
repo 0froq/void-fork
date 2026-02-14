@@ -19,11 +19,11 @@ Phase 1 (local dev) is implemented and working end-to-end. `vite dev` serves API
 
 pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-workspace.yaml` (typescript, tsdown, vite, @cloudflare/vite-plugin).
 
-| Package | npm name | Purpose |
-|---------|----------|---------|
+| Package                      | npm name            | Purpose                                           |
+| ---------------------------- | ------------------- | ------------------------------------------------- |
 | `packages/vite-plugin-cloud` | `vite-plugin-cloud` | Core Vite plugin — routing, inference, migrations |
-| `packages/create-vite-cloud` | `create-vite-cloud` | `npm create vite-cloud` scaffolding CLI |
-| `playground/` | (private) | Dev/test app exercising all features |
+| `packages/create-vite-cloud` | `create-vite-cloud` | `npm create vite-cloud` scaffolding CLI           |
+| `playground/`                | (private)           | Dev/test app exercising all features              |
 
 ## `vite-plugin-cloud` Architecture
 
@@ -70,18 +70,19 @@ src/
 
 ### Package Exports
 
-| Subpath | What |
-|---------|------|
-| `vite-plugin-cloud` | `viteCloud()` default export + `defineHandler` + `RequestContext` type |
-| `vite-plugin-cloud/handler` | `defineHandler()` standalone |
-| `vite-plugin-cloud/context` | `createRequestContext()` + `RequestContext` type |
-| `vite-plugin-cloud/response` | `convertReturnValue()` |
+| Subpath                      | What                                                                   |
+| ---------------------------- | ---------------------------------------------------------------------- |
+| `vite-plugin-cloud`          | `viteCloud()` default export + `defineHandler` + `RequestContext` type |
+| `vite-plugin-cloud/handler`  | `defineHandler()` standalone                                           |
+| `vite-plugin-cloud/context`  | `createRequestContext()` + `RequestContext` type                       |
+| `vite-plugin-cloud/response` | `convertReturnValue()`                                                 |
 
 Build output uses `.mjs` / `.d.mts` extensions (tsdown 0.20.3 default).
 
 ### Route Filename Parsing Rules
 
 Applied in order to a path relative to `routes/`:
+
 1. Strip extension (`.ts`, `.js`, `.mts`, `.mjs`)
 2. Strip env suffix (`.dev`, `.prod`)
 3. Strip HTTP method suffix (`.get`, `.post`, `.put`, `.delete`, `.patch`) — default `*`
@@ -94,30 +95,31 @@ Files/dirs starting with `_` are ignored by the scanner.
 
 ## Tooling
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| pnpm | 10.x | Package manager with workspaces + catalog |
-| tsdown | 0.20.3 | Build (rolldown-based, ESM, DTS) |
-| vitest | 4.x | Unit tests |
-| oxlint | 1.47.x | Linting |
-| oxfmt | 0.32.x | Formatting (double quotes, semis) |
-| vite | 8.0.0-beta.14 | Dev server + build |
+| Tool   | Version       | Purpose                                   |
+| ------ | ------------- | ----------------------------------------- |
+| pnpm   | 10.x          | Package manager with workspaces + catalog |
+| tsdown | 0.20.3        | Build (rolldown-based, ESM, DTS)          |
+| vitest | 4.x           | Unit tests                                |
+| oxlint | 1.47.x        | Linting                                   |
+| oxfmt  | 0.32.x        | Formatting (double quotes, semis)         |
+| vite   | 8.0.0-beta.14 | Dev server + build                        |
 
 ## Testing
 
 Unit tests live in `packages/vite-plugin-cloud/test/unit/`. Run from root with `pnpm test`.
 
-| Test file | Covers |
-|-----------|--------|
-| `parse-filename.test.ts` | Route filename parsing (30 tests) |
-| `scan.test.ts` | Filesystem scanning (5 tests) |
-| `compile.test.ts` | Code generation (3 tests) |
-| `response.test.ts` | Return value → Response conversion (8 tests) |
-| `inference.test.ts` | AST-based binding inference (10 tests) |
+| Test file                | Covers                                       |
+| ------------------------ | -------------------------------------------- |
+| `parse-filename.test.ts` | Route filename parsing (30 tests)            |
+| `scan.test.ts`           | Filesystem scanning (5 tests)                |
+| `compile.test.ts`        | Code generation (3 tests)                    |
+| `response.test.ts`       | Return value → Response conversion (8 tests) |
+| `inference.test.ts`      | AST-based binding inference (10 tests)       |
 
 ## Playground
 
 `playground/` is a React SPA with API routes demonstrating:
+
 - Static route: `routes/api/hello.get.ts`
 - CRUD routes: `routes/api/users/index.get.ts`, `index.post.ts`, `[id].get.ts`
 - Middleware: `middleware/01.logger.ts`
