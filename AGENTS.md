@@ -233,14 +233,15 @@ Tests run from root with `pnpm test` (vitest). 127 tests across 15 files.
 
 Platform integration tests call the Hono app via `app.fetch(request, env)` with **real** Miniflare D1/KV/R2 bindings and **mocked** external fetch calls (GitHub API, CF API). This tests the full request→middleware→route→DB→response chain.
 
-| Test file                                                        | Covers                                                    |
-| ---------------------------------------------------------------- | --------------------------------------------------------- |
-| `packages/platform/test/integration/api-health.test.ts`          | Health endpoint smoke test (1 test)                       |
-| `packages/platform/test/integration/api-me.test.ts`              | Auth middleware: missing/invalid/expired JWT, valid (4)    |
-| `packages/platform/test/integration/api-projects.test.ts`        | Projects CRUD: auth, list, create, validation, dupes (7)  |
-| `packages/platform/test/integration/api-deploy.test.ts`          | Deploy pipeline: auth, provisioning, migrations, R2, KV, failure modes (12) |
+| Test file                                                 | Covers                                                                      |
+| --------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `packages/platform/test/integration/api-health.test.ts`   | Health endpoint smoke test (1 test)                                         |
+| `packages/platform/test/integration/api-me.test.ts`       | Auth middleware: missing/invalid/expired JWT, valid (4)                     |
+| `packages/platform/test/integration/api-projects.test.ts` | Projects CRUD: auth, list, create, validation, dupes (7)                    |
+| `packages/platform/test/integration/api-deploy.test.ts`   | Deploy pipeline: auth, provisioning, migrations, R2, KV, failure modes (12) |
 
 Shared helpers in `packages/platform/test/integration/helpers.ts`:
+
 - `setupEnv()` / `teardownEnv()` — Miniflare lifecycle (D1, KV, R2 bindings)
 - `clearTables()` — D1 cleanup between tests (FK order)
 - `createTestUser()` / `createTestProject()` — factories with JWT signing
