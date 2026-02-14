@@ -59,6 +59,8 @@ function collectFiles(dir: string): string[] {
   const files: string[] = [];
   const entries = readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
+    // Skip hidden directories (e.g. .vite/) — internal build artifacts
+    if (entry.isDirectory() && entry.name.startsWith(".")) continue;
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {
       files.push(...collectFiles(fullPath));
