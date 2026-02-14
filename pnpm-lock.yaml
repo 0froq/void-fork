@@ -6,9 +6,6 @@ settings:
 
 catalogs:
   default:
-    '@cloudflare/vite-plugin':
-      specifier: ^1.25.0
-      version: 1.25.0
     tsdown:
       specifier: ^0.20.3
       version: 0.20.3
@@ -51,6 +48,9 @@ importers:
 
   packages/vite-plugin-cloud:
     dependencies:
+      '@cloudflare/vite-plugin':
+        specifier: ^1.25.0
+        version: 1.25.0(vite@8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1))(workerd@1.20260212.0)(wrangler@4.65.0(@cloudflare/workers-types@4.20260214.0))
       oxc-walker:
         specifier: ^0.7.0
         version: 0.7.0(oxc-parser@0.112.0)
@@ -61,9 +61,6 @@ importers:
         specifier: ^0.2.15
         version: 0.2.15
     devDependencies:
-      '@cloudflare/vite-plugin':
-        specifier: 'catalog:'
-        version: 1.25.0(vite@8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1))(workerd@1.20260212.0)(wrangler@4.65.0(@cloudflare/workers-types@4.20260214.0))
       '@cloudflare/workers-types':
         specifier: ^4.20260214.0
         version: 4.20260214.0
@@ -92,9 +89,9 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@cloudflare/vite-plugin':
-        specifier: 'catalog:'
-        version: 1.25.0(vite@8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1))(workerd@1.20260212.0)(wrangler@4.65.0(@cloudflare/workers-types@4.20260214.0))
+      '@cloudflare/workers-types':
+        specifier: ^4.20260214.0
+        version: 4.20260214.0
       '@types/react':
         specifier: ^19.2.14
         version: 19.2.14

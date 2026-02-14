@@ -6,4 +6,3 @@ catalog:
   typescript: ^5.9.3
   tsdown: ^0.20.3
   vite: 8.0.0-beta.14
-  "@cloudflare/vite-plugin": ^1.25.0
