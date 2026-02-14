@@ -4,6 +4,7 @@ dist
 *.tsbuildinfo
 .DS_Store
 .wrangler
+playground/project.json
 .claude
 plan.md
 TODOs.md

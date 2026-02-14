@@ -2,6 +2,10 @@
   "name": "vite-cloud-dispatch",
   "main": "src/index.ts",
   "compatibility_date": "2026-02-12",
+  "routes": [
+    { "pattern": "*.vitecloud.app/*", "zone_name": "vitecloud.app" },
+  ],
+  "workers_dev": true,
   "dispatch_namespaces": [
     {
       "binding": "DISPATCH",
