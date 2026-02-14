@@ -944,11 +944,11 @@ The current design doesn't address secrets (API keys, tokens). Likely solution: 
 - [x] Worker upload to CF dispatch namespace via API
 - [x] KV-based routing table (`slug → { workerName, projectId }`)
 - [ ] Auth (GitHub OAuth → JWT)
-- [ ] Provisioning engine (D1, KV, R2 creation via CF API)
+- [x] Provisioning engine (D1, KV, R2 creation via CF API)
 - [ ] Remote migration execution
 - [ ] Runtime JIT inference (Proxy-based) + manifest merging
 
-**Milestone:** Stateless deploy works (Steps 1–5 complete). Auth and binding provisioning remain.
+**Milestone:** Stateless deploy works (Steps 1–5 complete). Provisioning engine done (Step 7). Auth and remote migrations remain.
 
 ### Phase 3: GitHub & Production Readiness (Weeks 11–16)
 
