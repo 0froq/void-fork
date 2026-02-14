@@ -6,5 +6,14 @@ export default defineConfig({
   dts: true,
   clean: true,
   external: ["vite", "@cloudflare/vite-plugin", "better-sqlite3"],
-  inlineOnly: ["fdir", "picomatch", "tinyglobby", "estree-walker"],
+  inlineOnly: [
+    "fdir",
+    "picomatch",
+    "tinyglobby",
+    "estree-walker",
+    "@clack/prompts",
+    "@clack/core",
+    "sisteransi",
+    "picocolors",
+  ],
 });
