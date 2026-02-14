@@ -11,6 +11,7 @@ pnpm -r build       # Build all packages
 pnpm test            # Run vitest (unit + integration tests)
 pnpm lint            # oxlint
 pnpm fmt             # oxfmt --write .
+pnpm deploy          # Build all + deploy platform & dispatch workers
 ```
 
 Make sure to run `lint` and `fmt` after major changes.
