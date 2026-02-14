@@ -8,7 +8,7 @@ This is the development repo of Vite Cloud.
 
 ```
 pnpm -r build       # Build all packages
-pnpm test            # Run vitest (unit tests only for now)
+pnpm test            # Run vitest (unit + integration tests)
 pnpm lint            # oxlint
 pnpm fmt             # oxfmt --write .
 ```
@@ -203,14 +203,16 @@ src/
 | pnpm     | 10.x          | Package manager with workspaces + catalog |
 | tsdown   | 0.20.3        | Build (rolldown-based, ESM, DTS)          |
 | wrangler | 4.x           | CF Worker dev/deploy (platform, dispatch) |
-| vitest   | 4.x           | Unit tests                                |
+| vitest   | 4.x           | Unit + integration tests                  |
 | oxlint   | 1.47.x        | Linting                                   |
 | oxfmt    | 0.32.x        | Formatting (double quotes, semis)         |
 | vite     | 8.0.0-beta.14 | Dev server + build                        |
 
 ## Testing
 
-Unit tests run from root with `pnpm test` (vitest). 103 tests across 11 files.
+Tests run from root with `pnpm test` (vitest). 127 tests across 15 files.
+
+### Unit Tests
 
 | Test file                                                   | Covers                                       |
 | ----------------------------------------------------------- | -------------------------------------------- |
@@ -225,6 +227,23 @@ Unit tests run from root with `pnpm test` (vitest). 103 tests across 11 files.
 | `packages/platform/test/unit/provision.test.ts`             | Binding provisioning engine (7 tests)        |
 | `packages/platform/test/unit/jwt.test.ts`                   | JWT sign/verify round-trip (5 tests)         |
 | `packages/platform/test/unit/remote-runner.test.ts`         | Remote D1 migration execution (7 tests)      |
+
+### Integration Tests
+
+Platform integration tests call the Hono app via `app.fetch(request, env)` with **real** Miniflare D1/KV/R2 bindings and **mocked** external fetch calls (GitHub API, CF API). This tests the full request→middleware→route→DB→response chain.
+
+| Test file                                                        | Covers                                                    |
+| ---------------------------------------------------------------- | --------------------------------------------------------- |
+| `packages/platform/test/integration/api-health.test.ts`          | Health endpoint smoke test (1 test)                       |
+| `packages/platform/test/integration/api-me.test.ts`              | Auth middleware: missing/invalid/expired JWT, valid (4)    |
+| `packages/platform/test/integration/api-projects.test.ts`        | Projects CRUD: auth, list, create, validation, dupes (7)  |
+| `packages/platform/test/integration/api-deploy.test.ts`          | Deploy pipeline: auth, provisioning, migrations, R2, KV, failure modes (12) |
+
+Shared helpers in `packages/platform/test/integration/helpers.ts`:
+- `setupEnv()` / `teardownEnv()` — Miniflare lifecycle (D1, KV, R2 bindings)
+- `clearTables()` — D1 cleanup between tests (FK order)
+- `createTestUser()` / `createTestProject()` — factories with JWT signing
+- `mockCfApi()` — URL-based fetch mock for CF API with configurable overrides
 
 ## Playground
 
@@ -243,3 +262,4 @@ Verified working: `cd playground && pnpm dev` → all API routes respond, D1 que
 - **`import.meta.resolve()`** is the right way to resolve subpath exports from ESM plugin code. `createRequire().resolve()` fails for ESM-only exports (no `require` condition).
 - **Worker bundles are sensitive to transitive imports.** A single re-export of `defineHandler` from the main plugin entry drags in vite + lightningcss + wrangler. The `resolveId` redirect is critical.
 - **Miniflare D1 SQLite path** is NOT `<persist>/d1/<id>.db`. It's `<persist>/v3/d1/miniflare-D1DatabaseObject/<hmac-hash>.sqlite` where the hash is derived from `database_id`.
+- **Miniflare D1 `exec()` with multi-statement SQL** fails with `Cannot read properties of undefined (reading 'duration')`. Split into individual statements and use `db.batch(stmts.map(s => db.prepare(s)))` instead.
