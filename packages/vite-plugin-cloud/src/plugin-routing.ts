@@ -2,11 +2,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
 import { scanRoutes, type ScanResult } from "./router/scan";
-import {
-  compileRouteTable,
-  compileWorkerEntry,
-  type CompileOptions,
-} from "./router/compile";
+import { compileRouteTable, compileWorkerEntry, type CompileOptions } from "./router/compile";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 const VIRTUAL_ROUTES_ID = "virtual:vite-cloud-routes";
@@ -32,8 +28,7 @@ export function routingPlugin(root: string): Plugin {
   // 1. "vite-plugin-cloud" bare import would pull in the entire plugin
   // 2. "rou3" is a dep of vite-plugin-cloud, not the user's project
   // 3. Virtual modules have no filesystem location for relative resolution
-  const resolveFile = (specifier: string) =>
-    fileURLToPath(import.meta.resolve(specifier));
+  const resolveFile = (specifier: string) => fileURLToPath(import.meta.resolve(specifier));
 
   const handlerFile = resolveFile("vite-plugin-cloud/handler");
   const compileOptions: CompileOptions = {
