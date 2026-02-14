@@ -19,6 +19,7 @@ export interface DeployResponse {
   url: string;
   assets: number;
   workers: number;
+  migrations?: number;
 }
 
 /**

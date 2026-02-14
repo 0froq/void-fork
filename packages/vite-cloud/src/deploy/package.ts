@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { InferredBindings } from "../inference/walk";
+import type { MigrationFile } from "../migrations/validate";
 import type { DeployManifest } from "./types";
 
 /**
@@ -15,6 +16,7 @@ export function packageBuild(
   distDir: string,
   workerDirName: string,
   bindings: InferredBindings,
+  migrations?: MigrationFile[],
 ): FormData {
   const formData = new FormData();
 
@@ -23,6 +25,18 @@ export function packageBuild(
   if (bindings.needsD1) manifest.bindings.d1 = ["DB"];
   if (bindings.needsKV) manifest.bindings.kv = ["KV"];
   if (bindings.needsR2) manifest.bindings.r2 = ["STORAGE"];
+
+  // Add migration metadata to manifest + SQL content as FormData entries
+  if (migrations && migrations.length > 0) {
+    manifest.migrations = migrations.map((m) => ({
+      name: m.name,
+      destructive: m.destructive,
+    }));
+    for (const m of migrations) {
+      formData.append(`migration:${m.name}`, new Blob([m.sql]), m.name);
+    }
+  }
+
   formData.append("manifest", JSON.stringify(manifest));
 
   // Add worker files

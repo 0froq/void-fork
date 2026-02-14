@@ -62,15 +62,17 @@ src/
     walk.ts                 # AST walking with vite's parseSync + estree-walker
   migrations/
     runner.ts               # Applies .sql files to local SQLite via better-sqlite3
+    collect.ts              # Reads .sql files from migrations/ dir, sorted by filename
+    validate.ts             # Destructive-op detection + pragma enforcement
   deploy/
     cli.ts                  # CLI entry: `vite-cloud deploy|link|login`
-    deploy.ts               # Orchestrator: build → package → upload → print URL
+    deploy.ts               # Orchestrator: build → collect/validate migrations → package → upload
     project.ts              # Reads/creates .vite-cloud/project.json
     auth.ts                 # Token read/save + runLogin() (local server + browser OAuth)
     login.ts                # Login command UI (@clack/prompts)
-    package.ts              # Packages dist/ into FormData (worker + assets + manifest)
+    package.ts              # Packages dist/ into FormData (worker + assets + migrations + manifest)
     client.ts               # HTTP client for platform API
-    types.ts                # DeployManifest type
+    types.ts                # DeployManifest, MigrationMeta types
 ```
 
 ### Key Design Decisions
@@ -130,10 +132,13 @@ src/
     github.ts               # GitHub OAuth helpers (authorize URL, code→token, user profile)
   middleware/
     auth.ts                 # Bearer token verification, sets userId/userLogin on context
+  migrations/
+    remote-runner.ts        # Executes migrations on remote D1 via CF REST API
+    validate.ts             # Server-side destructive-op validation (defense in depth)
   routes/
     auth.ts                 # GET /auth/login + GET /auth/callback (GitHub OAuth flow)
     projects.ts             # POST /projects, GET /projects/:id
-    deploy.ts               # POST /projects/:id/deploy (multipart upload + ownership check)
+    deploy.ts               # POST /projects/:id/deploy (migrations → assets → worker)
 migrations/
   0001_initial.sql          # users, projects, deployments, resources tables
 ```
@@ -149,10 +154,14 @@ Auth middleware on `/projects/*` extracts Bearer token, verifies JWT, sets `c.ge
 `POST /projects/:id/deploy` receives multipart form data:
 
 1. Ownership check: `project.user_id` must match authenticated user
-2. `asset:<path>` fields → stored in R2 at `{projectId}/current/{path}`
-3. `worker:<path>` fields → uploaded to CF dispatch namespace via API
-4. KV routing updated: `slug → { workerName, projectId }`
-5. Deployment marked as `live`
+2. Provision bindings (D1, KV, R2) — creates CF resources if needed
+3. `migration:<name>` fields → validated, then executed on D1 via CF REST API (status: `"migrating"`)
+4. `asset:<path>` fields → stored in R2 at `{projectId}/current/{path}`
+5. `worker:<path>` fields → uploaded to CF dispatch namespace via API
+6. KV routing updated: `slug → { workerName, projectId }`
+7. Deployment marked as `live`
+
+**Key invariant:** Worker is never deployed unless all migrations succeed. On migration failure, deployment is marked `"failed"` and the existing worker keeps running.
 
 ### Secrets (via `wrangler secret put`)
 
@@ -201,18 +210,21 @@ src/
 
 ## Testing
 
-Unit tests run from root with `pnpm test` (vitest). 80 tests across 8 files.
+Unit tests run from root with `pnpm test` (vitest). 103 tests across 11 files.
 
-| Test file                                              | Covers                                   |
-| ------------------------------------------------------ | ---------------------------------------- |
-| `packages/vite-cloud/test/unit/parse-filename.test.ts` | Route filename parsing (30 tests)        |
-| `packages/vite-cloud/test/unit/scan.test.ts`           | Filesystem scanning (5 tests)            |
-| `packages/vite-cloud/test/unit/compile.test.ts`        | Code generation (3 tests)                |
-| `packages/vite-cloud/test/unit/response.test.ts`       | Return value → Response (8 tests)        |
-| `packages/vite-cloud/test/unit/inference.test.ts`      | AST-based binding inference (10 tests)   |
-| `packages/dispatch/test/unit/hostname.test.ts`         | Slug extraction from hostname (12 tests) |
-| `packages/platform/test/unit/provision.test.ts`        | Binding provisioning engine (7 tests)    |
-| `packages/platform/test/unit/jwt.test.ts`              | JWT sign/verify round-trip (5 tests)     |
+| Test file                                                   | Covers                                       |
+| ----------------------------------------------------------- | -------------------------------------------- |
+| `packages/vite-cloud/test/unit/parse-filename.test.ts`      | Route filename parsing (30 tests)            |
+| `packages/vite-cloud/test/unit/scan.test.ts`                | Filesystem scanning (5 tests)                |
+| `packages/vite-cloud/test/unit/compile.test.ts`             | Code generation (3 tests)                    |
+| `packages/vite-cloud/test/unit/response.test.ts`            | Return value → Response (8 tests)            |
+| `packages/vite-cloud/test/unit/inference.test.ts`           | AST-based binding inference (10 tests)       |
+| `packages/vite-cloud/test/unit/validate-migrations.test.ts` | Destructive-op detection + pragma (12 tests) |
+| `packages/vite-cloud/test/unit/collect-migrations.test.ts`  | Migration file collection (4 tests)          |
+| `packages/dispatch/test/unit/hostname.test.ts`              | Slug extraction from hostname (12 tests)     |
+| `packages/platform/test/unit/provision.test.ts`             | Binding provisioning engine (7 tests)        |
+| `packages/platform/test/unit/jwt.test.ts`                   | JWT sign/verify round-trip (5 tests)         |
+| `packages/platform/test/unit/remote-runner.test.ts`         | Remote D1 migration execution (7 tests)      |
 
 ## Playground
 
