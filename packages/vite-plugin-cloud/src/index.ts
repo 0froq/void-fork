@@ -32,11 +32,13 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
   // Infer bindings synchronously from source files
   const bindings = inferProjectBindings(root, options);
 
-  // Build the Cloudflare plugin config based on inferred bindings
-  const cfBindings: Record<string, unknown> = {};
+  // Build the worker config with inferred bindings
+  const workerConfig: Record<string, unknown> = {
+    main: join(root, ".vite-cloud", "entry.ts"),
+  };
 
   if (bindings.needsD1) {
-    cfBindings.d1_databases = [
+    workerConfig.d1_databases = [
       {
         binding: "DB",
         database_name: "default",
@@ -46,7 +48,7 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
   }
 
   if (bindings.needsKV) {
-    cfBindings.kv_namespaces = [
+    workerConfig.kv_namespaces = [
       {
         binding: "KV",
         id: "local",
@@ -55,7 +57,7 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
   }
 
   if (bindings.needsR2) {
-    cfBindings.r2_buckets = [
+    workerConfig.r2_buckets = [
       {
         binding: "STORAGE",
         bucket_name: "default",
@@ -67,9 +69,8 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
     routingPlugin(root),
     migrationPlugin(root),
     cloudflare({
-      main: join(root, ".vite-cloud", "entry.ts"),
-      persistState: join(root, ".vite-cloud"),
-      ...cfBindings,
+      persistState: { path: join(root, ".vite-cloud") },
+      config: workerConfig,
     }),
   ];
 }

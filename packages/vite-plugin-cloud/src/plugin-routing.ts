@@ -1,7 +1,12 @@
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
 import { scanRoutes, type ScanResult } from "./router/scan";
-import { compileRouteTable, compileWorkerEntry } from "./router/compile";
+import {
+  compileRouteTable,
+  compileWorkerEntry,
+  type CompileOptions,
+} from "./router/compile";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 const VIRTUAL_ROUTES_ID = "virtual:vite-cloud-routes";
@@ -22,14 +27,30 @@ export function routingPlugin(root: string): Plugin {
     scan = await scanRoutes(root);
   }
 
+  // Pre-resolve all runtime module paths so generated code uses absolute paths.
+  // This is necessary because:
+  // 1. "vite-plugin-cloud" bare import would pull in the entire plugin
+  // 2. "rou3" is a dep of vite-plugin-cloud, not the user's project
+  // 3. Virtual modules have no filesystem location for relative resolution
+  const resolveFile = (specifier: string) =>
+    fileURLToPath(import.meta.resolve(specifier));
+
+  const handlerFile = resolveFile("vite-plugin-cloud/handler");
+  const compileOptions: CompileOptions = {
+    rou3Path: resolveFile("rou3"),
+    contextPath: resolveFile("vite-plugin-cloud/context"),
+    responsePath: resolveFile("vite-plugin-cloud/response"),
+  };
+
   function generateEntryFile() {
     const outDir = join(root, ".vite-cloud");
     mkdirSync(outDir, { recursive: true });
-    writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry());
+    writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(compileOptions));
   }
 
   return {
     name: "vite-cloud:routing",
+    enforce: "pre",
 
     async buildStart() {
       await rescan();
@@ -40,12 +61,17 @@ export function routingPlugin(root: string): Plugin {
       if (id === VIRTUAL_ROUTES_ID) {
         return RESOLVED_VIRTUAL_ROUTES_ID;
       }
+      // Redirect bare "vite-plugin-cloud" imports to the lightweight handler
+      // subpath to avoid pulling the entire plugin into the Worker bundle.
+      if (id === "vite-plugin-cloud") {
+        return handlerFile;
+      }
     },
 
     async load(id) {
       if (id === RESOLVED_VIRTUAL_ROUTES_ID) {
         if (!scan) await rescan();
-        return compileRouteTable(scan!, routesDir, middlewareDir);
+        return compileRouteTable(scan!, routesDir, middlewareDir, compileOptions);
       }
     },
 

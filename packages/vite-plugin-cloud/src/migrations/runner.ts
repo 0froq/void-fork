@@ -1,5 +1,29 @@
+import { createHash, createHmac } from "node:crypto";
 import { readFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+
+/**
+ * Compute the miniflare D1 SQLite database path.
+ * Miniflare uses a deterministic hash based on the database_id
+ * to store local D1 data.
+ */
+export function getMiniflareDatabasePath(persistRoot: string, databaseId: string): string {
+  const uniqueKey = "miniflare-D1DatabaseObject";
+
+  // Step 1: SHA-256 of the unique key
+  const key = createHash("sha256").update(uniqueKey).digest();
+
+  // Step 2: HMAC-SHA-256 of database_id, take first 16 bytes
+  const nameHmac = createHmac("sha256", key).update(databaseId).digest().subarray(0, 16);
+
+  // Step 3: HMAC-SHA-256 of nameHmac, take first 16 bytes
+  const hmac = createHmac("sha256", key).update(nameHmac).digest().subarray(0, 16);
+
+  // Step 4: Concatenate to get the filename hash
+  const hash = Buffer.concat([nameHmac, hmac]).toString("hex");
+
+  return join(persistRoot, "v3", "d1", uniqueKey, `${hash}.sqlite`);
+}
 
 /**
  * Apply unapplied SQL migrations from the migrations directory to a local SQLite database.

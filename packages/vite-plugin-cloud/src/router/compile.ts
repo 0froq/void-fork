@@ -1,5 +1,14 @@
 import type { ScanResult } from "./scan";
 
+export interface CompileOptions {
+  /** Absolute path to the rou3 module entry */
+  rou3Path: string;
+  /** Absolute path to the vite-plugin-cloud/context module */
+  contextPath: string;
+  /** Absolute path to the vite-plugin-cloud/response module */
+  responsePath: string;
+}
+
 /**
  * Generate the code for the virtual route table module (virtual:vite-cloud-routes).
  * This module:
@@ -11,10 +20,13 @@ export function compileRouteTable(
   scan: ScanResult,
   routesDir: string,
   middlewareDir: string,
+  options: CompileOptions,
 ): string {
   const lines: string[] = [];
 
-  lines.push(`import { createRouter, addRoute, findRoute } from 'rou3';`);
+  lines.push(
+    `import { createRouter, addRoute, findRoute } from ${JSON.stringify(options.rou3Path)};`,
+  );
   lines.push("");
 
   // Generate lazy imports for each route handler
@@ -74,11 +86,11 @@ export function compileRouteTable(
  * 4. Lazy-loads and executes the handler
  * 5. Converts the return value to a Response
  */
-export function compileWorkerEntry(): string {
+export function compileWorkerEntry(options: CompileOptions): string {
   return `
 import { matchRoute, middleware } from 'virtual:vite-cloud-routes';
-import { createRequestContext } from 'vite-plugin-cloud/context';
-import { convertReturnValue } from 'vite-plugin-cloud/response';
+import { createRequestContext } from ${JSON.stringify(options.contextPath)};
+import { convertReturnValue } from ${JSON.stringify(options.responsePath)};
 
 export default {
   async fetch(request, rawEnv, executionContext) {
