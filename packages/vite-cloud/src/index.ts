@@ -68,7 +68,7 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
   return [
     routingPlugin(root),
     migrationPlugin(root),
-    cloudflare({
+    ...cloudflare({
       persistState: { path: join(root, ".vite-cloud") },
       config: workerConfig,
     }),
@@ -76,6 +76,5 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
 }
 
 // Re-export runtime types and functions
-export type { ViteCloudOptions };
 export { defineHandler, defineMiddleware } from "./runtime/handler";
 export type { CloudContext, CloudEnv } from "./runtime/handler";
