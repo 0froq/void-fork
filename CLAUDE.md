@@ -67,7 +67,7 @@ src/
   deploy/
     cli.ts                  # CLI entry: `vite-cloud deploy`
     deploy.ts               # Orchestrator: build → package → upload → print URL
-    project.ts              # Reads/creates project.json in project root
+    project.ts              # Reads/creates .vite-cloud/project.json
     auth.ts                 # Token from VITE_CLOUD_TOKEN or ~/.vite-cloud/credentials.json
     package.ts              # Packages dist/ into FormData (worker + assets + manifest)
     client.ts               # HTTP client for platform API

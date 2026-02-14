@@ -6,7 +6,7 @@ export interface ProjectConfig {
   slug: string;
 }
 
-const PROJECT_FILE = "project.json";
+const PROJECT_FILE = ".vite-cloud/project.json";
 
 /**
  * Read the project config from the project root.

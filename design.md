@@ -780,16 +780,16 @@ No Cloudflare account needed. The user's identity is managed entirely by us.
 
 ### 10.2 Project Identity
 
-Each project is identified by a `project.json` file in the repo root (auto-created on first deploy):
+Each project is identified by a `.vite-cloud/project.json` file (auto-created on first deploy):
 
 ```json
 {
   "projectId": "proj_a1b2c3d4",
-  "name": "my-app"
+  "slug": "my-app"
 }
 ```
 
-This file should be committed. It's how the CLI knows which remote project to deploy to.
+This lives inside `.vite-cloud/` which is gitignored by default (like Vercel's `.vercel/`). The CLI recreates it on first deploy if missing.
 
 ---
 
@@ -1044,10 +1044,10 @@ my-app/
 │   └── 002_add_posts.sql
 ├── public/
 │   └── favicon.ico
-├── project.json              (auto-generated on first deploy)
 ├── vite.config.ts
 ├── package.json
-└── .vite-cloud/              (gitignored, local dev data)
+└── .vite-cloud/              (gitignored, local dev data + project config)
+    ├── project.json
     ├── d1/local.db
     ├── kv/
     ├── r2/
