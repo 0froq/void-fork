@@ -34,6 +34,21 @@ export class PlatformClient {
     this.baseUrl = apiUrl ?? process.env.VITE_CLOUD_API_URL ?? DEFAULT_API_URL;
   }
 
+  async whoami(): Promise<{ login: string }> {
+    const res = await fetch(`${this.baseUrl}/me`, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Failed to fetch user info: ${res.status} ${body}`);
+    }
+
+    return res.json();
+  }
+
   async listProjects(): Promise<ProjectResponse[]> {
     const res = await fetch(`${this.baseUrl}/projects`, {
       headers: {
