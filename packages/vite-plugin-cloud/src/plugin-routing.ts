@@ -82,13 +82,17 @@ export function routingPlugin(root: string): Plugin {
       const handleFileChange = async (path: string) => {
         if (!path.startsWith(routesDir) && !path.startsWith(middlewareDir)) return;
 
-        // Re-scan and invalidate the virtual module so Vite re-loads it
+        // Re-scan and invalidate the virtual module in ALL environments.
+        // The route table virtual module lives in the workerd environment,
+        // not the client — so we must iterate all environments.
         await rescan();
 
-        const mod = devServer.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ROUTES_ID);
-        if (mod) {
-          devServer.moduleGraph.invalidateModule(mod);
-          devServer.ws.send({ type: "full-reload" });
+        for (const env of Object.values(devServer.environments)) {
+          const mod = env.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ROUTES_ID);
+          if (mod) {
+            env.moduleGraph.invalidateModule(mod);
+            env.hot.send({ type: "full-reload" });
+          }
         }
       };
 
