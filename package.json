@@ -6,6 +6,7 @@
     "test": "vitest",
     "lint": "oxlint",
     "fmt": "oxfmt --write .",
+    "check": "pnpm -r --parallel typecheck",
     "deploy": "pnpm -r build && pnpm run --filter @vite-cloud/platform deploy && pnpm run --filter @vite-cloud/dispatch deploy"
   },
   "devDependencies": {

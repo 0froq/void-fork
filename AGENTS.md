@@ -7,14 +7,15 @@ This is the development repo of Vite Cloud.
 ## Quick Reference
 
 ```
-pnpm -r build       # Build all packages
+pnpm -r build        # Build all packages
 pnpm test            # Run vitest (unit + integration tests)
 pnpm lint            # oxlint
 pnpm fmt             # oxfmt --write .
+pnpm check           # Typecheck all packages (tsc --noEmit)
 pnpm run deploy      # Build all + deploy platform & dispatch workers
 ```
 
-Make sure to run `lint` and `fmt` after major changes.
+Make sure to run `lint`, `fmt`, and `check` after major changes.
 
 ## Monorepo Structure
 
