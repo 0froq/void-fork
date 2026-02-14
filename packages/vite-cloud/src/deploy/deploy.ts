@@ -6,6 +6,7 @@ import { readProjectConfig, writeProjectConfig } from "./project";
 import { packageBuild } from "./package";
 import { PlatformClient } from "./client";
 import { inferProjectBindings } from "../plugin-inference";
+import { promptProjectSelection } from "./prompt";
 
 /**
  * Run the full deploy pipeline:
@@ -31,17 +32,24 @@ export async function runDeploy(root: string): Promise<void> {
   // 2. Read or create project config
   let config = readProjectConfig(root);
   if (!config) {
-    // Read package.json for project name/slug
-    const pkgPath = join(root, "package.json");
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-    const name = pkg.name ?? "my-app";
-    const slug = name.replace(/^@[^/]+\//, "").replace(/[^a-z0-9-]/g, "-");
+    const projects = await client.listProjects();
 
-    console.log(`Creating project "${slug}"...`);
-    const project = await client.createProject(slug, name);
-    config = { projectId: project.id, slug: project.slug };
-    writeProjectConfig(root, config);
-    console.log(`Project created: ${config.slug}`);
+    if (projects.length > 0) {
+      // User has existing projects — let them choose
+      const result = await promptProjectSelection(projects);
+
+      if (result.action === "select") {
+        config = { projectId: result.project.id, slug: result.project.slug };
+        writeProjectConfig(root, config);
+        console.log(`Linked to ${config.slug}`);
+      } else {
+        // User wants to create a new project — fall through
+        config = await createNewProject(root, client);
+      }
+    } else {
+      // No existing projects — go straight to create flow
+      config = await createNewProject(root, client);
+    }
   }
 
   // 3. Build
@@ -65,6 +73,22 @@ export async function runDeploy(root: string): Promise<void> {
 
   console.log(`\nDeployed! ${result.url}`);
   console.log(`  ${result.workers} worker module(s), ${result.assets} static asset(s)`);
+}
+
+import type { ProjectConfig } from "./project";
+
+async function createNewProject(root: string, client: PlatformClient): Promise<ProjectConfig> {
+  const pkgPath = join(root, "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+  const name = pkg.name ?? "my-app";
+  const slug = name.replace(/^@[^/]+\//, "").replace(/[^a-z0-9-]/g, "-");
+
+  console.log(`Creating project "${slug}"...`);
+  const project = await client.createProject(slug, name);
+  const config = { projectId: project.id, slug: project.slug };
+  writeProjectConfig(root, config);
+  console.log(`Project created: ${config.slug}`);
+  return config;
 }
 
 /**

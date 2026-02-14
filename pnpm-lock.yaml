@@ -6,6 +6,9 @@ settings:
 
 catalogs:
   default:
+    '@clack/prompts':
+      specifier: ^1.0.1
+      version: 1.0.1
     '@cloudflare/workers-types':
       specifier: ^4.20260214.0
       version: 4.20260214.0
@@ -42,7 +45,7 @@ importers:
   packages/create-vite-cloud:
     dependencies:
       '@clack/prompts':
-        specifier: ^1.0.1
+        specifier: 'catalog:'
         version: 1.0.1
     devDependencies:
       tsdown:
@@ -82,6 +85,9 @@ importers:
 
   packages/vite-cloud:
     dependencies:
+      '@clack/prompts':
+        specifier: 'catalog:'
+        version: 1.0.1
       '@cloudflare/vite-plugin':
         specifier: ^1.25.0
         version: 1.25.0(vite@8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1))(workerd@1.20260212.0)(wrangler@4.65.0(@cloudflare/workers-types@4.20260214.0))

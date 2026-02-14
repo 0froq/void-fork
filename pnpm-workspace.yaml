@@ -3,6 +3,7 @@ packages:
   - playground
 
 catalog:
+  "@clack/prompts": ^1.0.1
   "@cloudflare/workers-types": ^4.20260214.0
   typescript: ^5.9.3
   tsdown: ^0.20.3
