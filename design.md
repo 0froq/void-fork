@@ -396,10 +396,11 @@ The exception is `unstorage`, which is a genuine thin adapter with no runtime ov
 
 ### 5.1 Static Analysis with oxc
 
-Vite 7+ ships with oxc-powered `parseSync` / `parse` APIs. Since we're already building a Vite plugin, we should use the parser that ships with Vite itself rather than adding a separate dependency. The inference scans all files in `routes/`:
+Vite 7+ ships with oxc-powered `parseSync` / `parse` APIs. Since we're already building a Vite plugin, we use the parser that ships with Vite itself rather than adding a separate dependency. The AST is walked with `estree-walker` (lightweight, no native deps). The inference scans all files in `routes/` and `middleware/`:
 
 ```ts
 import { parseSync } from "vite";
+import { walk } from "estree-walker";
 
 function inferBindings(code: string, filename: string): BindingManifest {
   const { program } = parseSync(filename, code);
@@ -407,14 +408,13 @@ function inferBindings(code: string, filename: string): BindingManifest {
   const bindings = { needsD1: false, needsKV: false, needsR2: false };
 
   // Walk the ESTree-compatible AST looking for:
-  // - ctx.env.db    → needsD1
-  // - ctx.env.kv    → needsKV
-  // - ctx.env.storage → needsR2
+  // - *.env.DB      → needsD1
+  // - *.env.KV      → needsKV
+  // - *.env.STORAGE → needsR2
   walk(program, {
-    MemberExpression(node) {
-      if (isCtxEnvAccess(node, "db")) bindings.needsD1 = true;
-      if (isCtxEnvAccess(node, "kv")) bindings.needsKV = true;
-      if (isCtxEnvAccess(node, "storage")) bindings.needsR2 = true;
+    enter(node) {
+      if (node.type !== "MemberExpression") return;
+      // check for *.env.DB/KV/STORAGE patterns
     },
   });
 
@@ -916,34 +916,39 @@ The current design doesn't address secrets (API keys, tokens). Likely solution: 
 
 ## 14. Implementation Phases
 
-### Phase 1: Local Dev (Weeks 1–4)
+### Phase 1: Local Dev ✅
 
-- [ ] `create-vite-cloud` scaffolding CLI
-- [ ] Vite plugin wrapping `@cloudflare/vite-plugin`
-- [ ] `defineHandler` with type inference
-- [ ] File-based routing from `routes/` (compiles to Worker `fetch` handler)
-- [ ] HTTP method routing via filename suffix (`.get.ts`, `.post.ts`)
-- [ ] Dynamic params, catch-all, and route groups
-- [ ] Middleware from `middleware/` directory with ordering
-- [ ] Binding inference via oxc `parseSync` (imported from `vite`)
-- [ ] Local runtime with D1/KV/R2 (via CF plugin's local bindings)
-- [ ] Hot reload for API handlers (via Environment API HMR)
-- [ ] Local migration runner
+- [x] `create-vite-cloud` scaffolding CLI
+- [x] Vite plugin wrapping `@cloudflare/vite-plugin`
+- [x] `defineHandler` / `defineMiddleware` with type inference (Hono-based)
+- [x] File-based routing from `routes/` (compiles to Hono app)
+- [x] HTTP method routing via filename suffix (`.get.ts`, `.post.ts`)
+- [x] Dynamic params, catch-all, and route groups
+- [x] Middleware from `middleware/` directory with ordering
+- [x] Binding inference via oxc `parseSync` (imported from `vite`) + estree-walker
+- [x] Local runtime with D1/KV/R2 (via CF plugin's local bindings)
+- [x] Hot reload for API handlers (via Environment API HMR)
+- [x] Local migration runner
 
-**Milestone:** A user can run `npm create vite-cloud`, add a route file in `routes/api/` using `defineHandler` that queries a database, and see it work locally with zero config.
+**Note:** The runtime framework is **Hono** (~14KB, CF Workers native). Route handlers receive a Hono `Context` object (`c`) instead of the custom `RequestContext` described in Section 3.4. `c.env.DB`, `c.env.KV`, `c.env.STORAGE` (uppercase CF convention). Handlers can return plain values (auto-converted) or use Hono's `c.json()` / `c.text()` directly.
 
-### Phase 2: Platform & Deploy (Weeks 5–10)
+**Milestone:** ✅ A user can run `npm create vite-cloud`, add a route file using `defineHandler` that queries a database, and see it work locally with zero config.
 
-- [ ] Control Plane API (auth, projects, deploy)
+### Phase 2: Platform & Deploy (in progress)
+
+- [x] Control Plane API (projects, deploy endpoint) — `packages/platform/`
+- [x] Dispatch worker + `*.vitecloud.app` routing — `packages/dispatch/`
+- [x] Static asset serving via R2 (SPA fallback, cache headers)
+- [x] `vite-cloud deploy` CLI command — `packages/vite-cloud/src/deploy/`
+- [x] D1 schema for users, projects, deployments, resources
+- [x] Worker upload to CF dispatch namespace via API
+- [x] KV-based routing table (`slug → { workerName, projectId }`)
+- [ ] Auth (GitHub OAuth → JWT)
 - [ ] Provisioning engine (D1, KV, R2 creation via CF API)
-- [ ] Dispatch worker + routing
-- [ ] Static asset serving via R2
-- [ ] `vite deploy` command in the plugin
 - [ ] Remote migration execution
-- [ ] `*.vitecloud.app` subdomain routing
 - [ ] Runtime JIT inference (Proxy-based) + manifest merging
 
-**Milestone:** A user can deploy their app to a live URL with one command.
+**Milestone:** Stateless deploy works (Steps 1–5 complete). Auth and binding provisioning remain.
 
 ### Phase 3: GitHub & Production Readiness (Weeks 11–16)
 
