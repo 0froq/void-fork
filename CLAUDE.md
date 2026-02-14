@@ -13,7 +13,7 @@ pnpm fmt             # oxfmt --write .
 
 ## Status
 
-Phase 1 (local dev) is implemented. The core plugin, scaffolding CLI, and playground app are built. No integration tests with workerd yet — only unit tests (56 tests across 5 files). The playground builds but has not been fully tested end-to-end with `vite dev` (the CF plugin integration may need iteration).
+Phase 1 (local dev) is implemented and working end-to-end. `vite dev` serves API routes, runs middleware, applies D1 migrations, and handles dynamic params. `vite build` produces a working Worker bundle (~7.5 KB). No integration tests with workerd yet — only unit tests (56 tests across 5 files).
 
 ## Monorepo Structure
 
@@ -60,9 +60,13 @@ src/
 - **`parseSync` comes from `vite`** (not `oxc-parser` directly). Vite 8 re-exports it.
 - **rou3** is used at runtime for route matching (tiny radix-tree router, ~2KB).
 - **Virtual modules**: `virtual:vite-cloud-routes` holds the route table. A real file `.vite-cloud/entry.ts` is generated as the CF plugin entrypoint (imports the virtual module).
+- **Import redirection**: The routing plugin's `resolveId` hook redirects bare `"vite-plugin-cloud"` imports to `vite-plugin-cloud/handler` (the lightweight subpath). Without this, route files pull the entire plugin (vite, @cloudflare/vite-plugin, lightningcss) into the Worker bundle. Uses `import.meta.resolve()` to compute absolute paths at plugin init.
+- **Pre-resolved paths in codegen**: Generated virtual module code uses absolute paths for `rou3`, `vite-plugin-cloud/context`, and `vite-plugin-cloud/response` (resolved via `import.meta.resolve()`). Virtual modules have no filesystem location, so bare specifiers can't resolve from them.
+- **CF plugin API**: Worker config (`main`, `d1_databases`, `kv_namespaces`, `r2_buckets`) goes inside the `config` option of `cloudflare()`, NOT as top-level properties. `persistState` takes `{ path: string }`, not a raw string.
 - **Binding inference** runs synchronously in the `viteCloud()` body (before plugin init) using `readFileSync` + `parseSync`. Looks for `*.env.db`, `*.env.kv`, `*.env.storage` member expressions.
 - **Env mapping**: CF plugin bindings use uppercase (`DB`, `KV`, `STORAGE`). User code uses lowercase via `ctx.env.db`, `ctx.env.kv`, `ctx.env.storage`. The `createRequestContext` function maps between them.
 - **Route handlers** use lazy `import()` for code splitting. Middleware is eagerly imported.
+- **Migration DB path**: Miniflare stores D1 data at a deterministic path computed from the `database_id` using HMAC-SHA256. The `getMiniflareDatabasePath()` function in `migrations/runner.ts` replicates this algorithm so migrations target the correct SQLite file at `.vite-cloud/v3/d1/miniflare-D1DatabaseObject/<hash>.sqlite`.
 
 ### Package Exports
 
@@ -118,3 +122,12 @@ Unit tests live in `packages/vite-plugin-cloud/test/unit/`. Run from root with `
 - CRUD routes: `routes/api/users/index.get.ts`, `index.post.ts`, `[id].get.ts`
 - Middleware: `middleware/01.logger.ts`
 - Migration: `migrations/001_create_users.sql` (creates users table + seeds data)
+
+Verified working: `cd playground && pnpm dev` → all API routes respond, D1 queries work, middleware runs.
+
+## Pitfalls / Things That Broke
+
+- **tsdown 0.20.3** outputs `.mjs`/`.d.mts` extensions — package.json exports must match.
+- **`import.meta.resolve()`** is the right way to resolve subpath exports from ESM plugin code. `createRequire().resolve()` fails for ESM-only exports (no `require` condition).
+- **Worker bundles are sensitive to transitive imports.** A single re-export of `defineHandler` from the main plugin entry drags in vite + lightningcss + wrangler. The `resolveId` redirect is critical.
+- **Miniflare D1 SQLite path** is NOT `<persist>/d1/<id>.db`. It's `<persist>/v3/d1/miniflare-D1DatabaseObject/<hmac-hash>.sqlite` where the hash is derived from `database_id`.
