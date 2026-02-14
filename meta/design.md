@@ -554,17 +554,13 @@ Running `npm run dev` (which calls `vite dev`) starts Vite's dev server with the
 2. **`workerd` via `@cloudflare/vite-plugin`** — runs API handlers in the real Workers runtime.
 3. **Our routing layer** — transforms file-based routes from `routes/` into a single Worker `fetch` handler with routing logic, compiles `defineHandler` calls, registers middleware, and configures bindings.
 
+**Note:** The runtime framework is **Hono** (~14KB, CF Workers native). Route handlers receive a Hono `Context` object (`c`) instead of the custom `RequestContext` described in Section 3.4. `c.env.DB`, `c.env.KV`, `c.env.STORAGE` (uppercase CF convention). Handlers can return plain values (auto-converted) or use Hono's `c.json()` / `c.text()` directly.
+
 The Vite dev server proxies all `/api/*` requests to the `workerd` environment. From the user's perspective, `http://localhost:5173/api/hello` just works.
 
 ### 7.2 Local Storage Backends
 
-| Binding       | Local Implementation                          | Location                  |
-| ------------- | --------------------------------------------- | ------------------------- |
-| `env.db`      | SQLite via `workerd`'s built-in D1 local mode | `.vite-cloud/d1/local.db` |
-| `env.kv`      | unstorage `fs` driver                         | `.vite-cloud/kv/`         |
-| `env.storage` | Miniflare's local R2 emulation                | `.vite-cloud/r2/`         |
-
-All local data lives in `.vite-cloud/` (gitignored by default). The user can inspect the SQLite database directly with any SQLite client — useful for debugging.
+All local data are simulated by Miniflare via `@cloudflare/vite-plugin`'s `persistState` option and lives in `.vite-cloud/` (gitignored by default). The user can inspect the SQLite database directly with any SQLite client — useful for debugging.
 
 ### 7.3 Hot Reload
 
@@ -803,8 +799,8 @@ The framework should feel zero-config for simple cases but not trap advanced use
 // vite.config.ts
 viteCloud({
   d1: {
-    db: true, // default database
-    analytics: true, // second database, accessed as ctx.env.analytics
+    DB: true, // default database
+    DB_ANALYTICS: true, // second database, accessed as ctx.env.DB_ANALYTICS
   },
 });
 ```
@@ -812,9 +808,9 @@ viteCloud({
 ### 11.2 Scheduled Handlers (Cron)
 
 ```ts
-// src/api/_scheduled.ts
-export default defineScheduled((ctx) => {
-  ctx.env.db.prepare("DELETE FROM sessions WHERE expires < ?").bind(Date.now()).run();
+// routes/api/_jobs.ts
+export default defineJob((ctx) => {
+  ctx.env.DB.prepare("DELETE FROM sessions WHERE expires < ?").bind(Date.now()).run();
 });
 
 export const cron = "0 * * * *"; // every hour
@@ -914,67 +910,6 @@ The current design doesn't address secrets (API keys, tokens). Likely solution: 
 
 ---
 
-## 14. Implementation Phases
-
-### Phase 1: Local Dev ✅
-
-- [x] `create-vite-cloud` scaffolding CLI
-- [x] Vite plugin wrapping `@cloudflare/vite-plugin`
-- [x] `defineHandler` / `defineMiddleware` with type inference (Hono-based)
-- [x] File-based routing from `routes/` (compiles to Hono app)
-- [x] HTTP method routing via filename suffix (`.get.ts`, `.post.ts`)
-- [x] Dynamic params, catch-all, and route groups
-- [x] Middleware from `middleware/` directory with ordering
-- [x] Binding inference via oxc `parseSync` (imported from `vite`) + estree-walker
-- [x] Local runtime with D1/KV/R2 (via CF plugin's local bindings)
-- [x] Hot reload for API handlers (via Environment API HMR)
-- [x] Local migration runner
-
-**Note:** The runtime framework is **Hono** (~14KB, CF Workers native). Route handlers receive a Hono `Context` object (`c`) instead of the custom `RequestContext` described in Section 3.4. `c.env.DB`, `c.env.KV`, `c.env.STORAGE` (uppercase CF convention). Handlers can return plain values (auto-converted) or use Hono's `c.json()` / `c.text()` directly.
-
-**Milestone:** ✅ A user can run `npm create vite-cloud`, add a route file using `defineHandler` that queries a database, and see it work locally with zero config.
-
-### Phase 2: Platform & Deploy (in progress)
-
-- [x] Control Plane API (projects, deploy endpoint) — `packages/platform/`
-- [x] Dispatch worker + `*.vitecloud.app` routing — `packages/dispatch/`
-- [x] Static asset serving via R2 (SPA fallback, cache headers)
-- [x] `vite-cloud deploy` CLI command — `packages/vite-cloud/src/deploy/`
-- [x] D1 schema for users, projects, deployments, resources
-- [x] Worker upload to CF dispatch namespace via API
-- [x] KV-based routing table (`slug → { workerName, projectId }`)
-- [x] Auth (GitHub OAuth → JWT, `vite-cloud login` CLI command)
-- [x] Provisioning engine (D1, KV, R2 creation via CF API)
-- [ ] Remote migration execution
-- [ ] Runtime JIT inference (Proxy-based) + manifest merging
-
-**Milestone:** Stateless deploy works (Steps 1–5 complete). Provisioning engine done (Step 7). Auth done (Step 8). Remote migrations and runtime inference remain.
-
-### Phase 3: GitHub & Production Readiness (Weeks 11–16)
-
-- [ ] GitHub App for webhook-based deploys
-- [ ] Build infrastructure (container fleet + job queue)
-- [ ] Preview deployments per PR
-- [ ] Custom domains
-- [ ] Secrets management
-- [ ] Usage metering and limits enforcement
-- [ ] Billing integration (Stripe)
-- [ ] Dashboard (web UI for managing projects, viewing logs)
-- [ ] Rate limiting and abuse protection on free tier
-
-**Milestone:** Ready for public beta.
-
-### Phase 4: Growth (Post-Launch)
-
-- [ ] SSR support (leverage CF plugin's existing SSR capabilities)
-- [ ] Durable Objects (explicit opt-in)
-- [ ] Queues & Cron triggers
-- [ ] Analytics (built-in request analytics)
-- [ ] Team collaboration features
-- [ ] `vite-cloud` standalone CLI (for resource management)
-
----
-
 ## 15. Competitive Landscape
 
 | Feature            | Vite Cloud         | Vercel          | Cloudflare Pages         | NuxtHub                  |
@@ -1070,7 +1005,7 @@ export default defineHandler(() => {
 ```ts
 // routes/api/users/[id].get.ts
 export default defineHandler((ctx) => {
-  const user = ctx.env.db.prepare("SELECT * FROM users WHERE id = ?").bind(ctx.params.id).first();
+  const user = ctx.env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(ctx.params.id).first();
 
   if (!user) return new Response("Not found", { status: 404 });
   return user; // auto-serialized as JSON
@@ -1080,7 +1015,7 @@ export default defineHandler((ctx) => {
 ```ts
 // routes/api/users/[id].delete.ts
 export default defineHandler((ctx) => {
-  ctx.env.db.prepare("DELETE FROM users WHERE id = ?").bind(ctx.params.id).run();
+  ctx.env.DB.prepare("DELETE FROM users WHERE id = ?").bind(ctx.params.id).run();
 
   return null; // 204 No Content
 });
@@ -1095,7 +1030,7 @@ export default defineHandler(async (ctx) => {
   const file = formData.get("file") as File;
 
   const key = `uploads/${Date.now()}-${file.name}`;
-  await ctx.env.storage.put(key, file.stream(), {
+  await ctx.env.STORAGE.put(key, file.stream(), {
     httpMetadata: { contentType: file.type },
   });
 
@@ -1109,7 +1044,7 @@ export default defineHandler(async (ctx) => {
 // routes/api/session.get.ts
 export default defineHandler(async (ctx) => {
   const sessionId = ctx.request.headers.get("X-Session-Id");
-  const data = await ctx.env.kv.get(`session:${sessionId}`);
+  const data = await ctx.env.KV.get(`session:${sessionId}`);
   return data ?? { authenticated: false };
 });
 ```
@@ -1119,7 +1054,7 @@ export default defineHandler(async (ctx) => {
 export default defineHandler(async (ctx) => {
   const body = await ctx.request.json();
   const sessionId = crypto.randomUUID();
-  await ctx.env.kv.set(`session:${sessionId}`, JSON.stringify(body), { ttl: 3600 });
+  await ctx.env.KV.set(`session:${sessionId}`, JSON.stringify(body), { ttl: 3600 });
   return { sessionId };
 });
 ```
