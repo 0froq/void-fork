@@ -1,0 +1,23 @@
+{
+  "name": "create-vite-cloud",
+  "version": "0.0.1",
+  "bin": {
+    "create-vite-cloud": "dist/index.mjs"
+  },
+  "files": [
+    "dist",
+    "template"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.0.1"
+  },
+  "devDependencies": {
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}
