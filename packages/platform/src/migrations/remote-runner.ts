@@ -35,7 +35,7 @@ export async function runRemoteMigrations(
   const appliedResult = await queryD1(accountId, apiToken, databaseId, {
     sql: "SELECT name FROM _migrations",
   });
-  const applied = new Set(appliedResult.results.map((row: { name: string }) => row.name));
+  const applied = new Set(appliedResult.results.map((row) => row.name as string));
 
   const result: MigrationResult = { applied: [], skipped: [] };
 

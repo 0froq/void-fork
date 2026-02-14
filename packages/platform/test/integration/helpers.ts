@@ -47,8 +47,8 @@ export async function setupEnv(): Promise<TestEnv> {
 
   return {
     DB: db,
-    ASSETS: r2,
-    ROUTING: kv,
+    ASSETS: r2 as unknown as R2Bucket,
+    ROUTING: kv as unknown as KVNamespace,
     DISPATCH: {} as DispatchNamespace,
     CF_API_TOKEN,
     CF_ACCOUNT_ID,
@@ -117,9 +117,9 @@ export function cfError(message: string, status = 400): Response {
 }
 
 export interface CfApiMocks {
-  createD1: () => Response;
-  createKV: () => Response;
-  createR2: () => Response;
+  createD1: (url: string, init?: RequestInit) => Response;
+  createKV: (url: string, init?: RequestInit) => Response;
+  createR2: (url: string, init?: RequestInit) => Response;
   queryD1: (url: string, init?: RequestInit) => Response | Promise<Response>;
   uploadWorker: (url: string, init?: RequestInit) => Response | Promise<Response>;
 }

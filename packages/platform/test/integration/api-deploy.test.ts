@@ -202,12 +202,10 @@ describe("POST /projects/:id/deploy", () => {
     expect(res.status).toBe(200);
 
     // Find the worker upload call
-    const uploadCall = fetchMock.mock.calls.find(
-      (call: [string | URL | Request, RequestInit | undefined]) => {
-        const url = typeof call[0] === "string" ? call[0] : call[0].toString();
-        return url.includes("/workers/dispatch/") && call[1]?.method === "PUT";
-      },
-    );
+    const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
+      const url = typeof call[0] === "string" ? call[0] : String(call[0]);
+      return url.includes("/workers/dispatch/") && (call[1] as RequestInit)?.method === "PUT";
+    });
     expect(uploadCall).toBeDefined();
     const uploadUrl =
       typeof uploadCall![0] === "string" ? uploadCall![0] : uploadCall![0].toString();
@@ -269,14 +267,14 @@ describe("POST /projects/:id/deploy", () => {
     expect(res.status).toBe(200);
 
     // Verify no D1 creation call was made
-    const createD1Call = fetchMock.mock.calls.find(
-      (call: [string | URL | Request, RequestInit | undefined]) => {
-        const url = typeof call[0] === "string" ? call[0] : call[0].toString();
-        return (
-          url.includes("/d1/database") && !url.includes("/query") && call[1]?.method === "POST"
-        );
-      },
-    );
+    const createD1Call = fetchMock.mock.calls.find((call: unknown[]) => {
+      const url = typeof call[0] === "string" ? call[0] : String(call[0]);
+      return (
+        url.includes("/d1/database") &&
+        !url.includes("/query") &&
+        (call[1] as RequestInit)?.method === "POST"
+      );
+    });
     expect(createD1Call).toBeUndefined();
   });
 
