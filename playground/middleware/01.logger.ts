@@ -1,6 +1,6 @@
-import { defineHandler } from "vite-plugin-cloud";
+import { defineMiddleware } from "vite-cloud";
 
-export default defineHandler((ctx) => {
-  const url = new URL(ctx.request.url);
-  console.log(`[${ctx.request.method}] ${url.pathname}`);
+export default defineMiddleware(async (c, next) => {
+  console.log(`[${c.req.method}] ${c.req.path}`);
+  await next();
 });

@@ -1,9 +1,8 @@
-import { defineHandler } from "vite-plugin-cloud";
+import { defineHandler } from "vite-cloud";
 
-export default defineHandler(async (ctx) => {
-  const user = await ctx.env.db
-    .prepare("SELECT * FROM users WHERE id = ?")
-    .bind(ctx.params.id)
+export default defineHandler(async (c) => {
+  const user = await c.env.DB.prepare("SELECT * FROM users WHERE id = ?")
+    .bind(c.req.param("id"))
     .first();
 
   if (!user) {

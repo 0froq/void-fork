@@ -10,9 +10,9 @@ export interface InferredBindings {
 /**
  * Infer which Cloudflare bindings a source file uses by walking its AST.
  * Looks for member expressions like:
- *   *.env.db      → needsD1
- *   *.env.kv      → needsKV
- *   *.env.storage  → needsR2
+ *   *.env.DB      → needsD1
+ *   *.env.KV      → needsKV
+ *   *.env.STORAGE  → needsR2
  */
 export function inferBindingsFromSource(code: string, filename: string): InferredBindings {
   const result: InferredBindings = {
@@ -42,13 +42,13 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
       if (obj.property?.type !== "Identifier" || obj.property.name !== "env") return;
 
       switch (property.name) {
-        case "db":
+        case "DB":
           result.needsD1 = true;
           break;
-        case "kv":
+        case "KV":
           result.needsKV = true;
           break;
-        case "storage":
+        case "STORAGE":
           result.needsR2 = true;
           break;
       }

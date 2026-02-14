@@ -1,0 +1,74 @@
+import { describe, expect, it } from "vitest";
+import { compileRouteTable, compileWorkerEntry } from "../../src/router/compile";
+import type { ScanResult } from "../../src/router/scan";
+
+const testOptions = {
+  honoPath: "/resolved/hono/index.mjs",
+  responsePath: "/resolved/vite-cloud/runtime/response.mjs",
+};
+
+describe("compileRouteTable", () => {
+  it("generates valid module code with routes and middleware", () => {
+    const scan: ScanResult = {
+      routes: [
+        {
+          pattern: "/api/hello",
+          method: "get",
+          params: [],
+          catchAll: false,
+          env: null,
+          filePath: "api/hello.get.ts",
+        },
+        {
+          pattern: "/api/users/:id",
+          method: "*",
+          params: ["id"],
+          catchAll: false,
+          env: null,
+          filePath: "api/users/[id].ts",
+        },
+      ],
+      middleware: [{ order: 1, filePath: "01.logger.ts" }],
+    };
+
+    const code = compileRouteTable(scan, "/routes", "/middleware", testOptions);
+
+    // Should import Hono from resolved path
+    expect(code).toContain(`import { Hono } from "/resolved/hono/index.mjs"`);
+    // Should import convertReturnValue
+    expect(code).toContain(
+      `import { convertReturnValue } from "/resolved/vite-cloud/runtime/response.mjs"`,
+    );
+    // Should import middleware eagerly
+    expect(code).toContain('import middleware0 from "/middleware/01.logger.ts"');
+    // Should create Hono app
+    expect(code).toContain("const app = new Hono()");
+    // Should register middleware
+    expect(code).toContain("app.use(middleware0)");
+    // Should register routes with correct methods
+    expect(code).toContain('app.get("/api/hello"');
+    expect(code).toContain('app.all("/api/users/:id"');
+    // Should have lazy imports within route handlers
+    expect(code).toContain('import("/routes/api/hello.get.ts")');
+    expect(code).toContain('import("/routes/api/users/[id].ts")');
+    // Should export app as default
+    expect(code).toContain("export default app");
+  });
+
+  it("handles empty scan result", () => {
+    const scan: ScanResult = { routes: [], middleware: [] };
+    const code = compileRouteTable(scan, "/routes", "/middleware", testOptions);
+
+    expect(code).toContain("const app = new Hono()");
+    expect(code).toContain("export default app");
+  });
+});
+
+describe("compileWorkerEntry", () => {
+  it("generates valid worker entry code", () => {
+    const code = compileWorkerEntry();
+
+    expect(code).toContain("import app from 'virtual:vite-cloud-routes'");
+    expect(code).toContain("export default app");
+  });
+});

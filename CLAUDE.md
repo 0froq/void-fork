@@ -11,9 +11,11 @@ pnpm lint            # oxlint
 pnpm fmt             # oxfmt --write .
 ```
 
+Make sure to run `lint` and `fmt` after major changes.
+
 ## Status
 
-Phase 1 (local dev) is implemented and working end-to-end. `vite dev` serves API routes, runs middleware, applies D1 migrations, and handles dynamic params. `vite build` produces a working Worker bundle (~7.5 KB). No integration tests with workerd yet — only unit tests (56 tests across 5 files).
+Phase 1 (local dev) is implemented and working end-to-end. `vite dev` serves API routes, runs middleware, applies D1 migrations, and handles dynamic params. `vite build` produces a working Worker bundle. No integration tests with workerd yet — only unit tests (56 tests across 5 files).
 
 ## Monorepo Structure
 
@@ -21,17 +23,25 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 
 | Package                      | npm name            | Purpose                                           |
 | ---------------------------- | ------------------- | ------------------------------------------------- |
-| `packages/vite-plugin-cloud` | `vite-plugin-cloud` | Core Vite plugin — routing, inference, migrations |
+| `packages/vite-cloud`        | `vite-cloud`        | Core Vite plugin — routing, inference, migrations |
 | `packages/create-vite-cloud` | `create-vite-cloud` | `npm create vite-cloud` scaffolding CLI           |
 | `playground/`                | (private)           | Dev/test app exercising all features              |
 
-## `vite-plugin-cloud` Architecture
+## `vite-cloud` Architecture
 
 The main export `viteCloud()` returns an array of Vite plugins + the `cloudflare()` plugin:
 
 ```
 viteCloud() → [routingPlugin, migrationPlugin, cloudflare({...inferredBindings})]
 ```
+
+### Runtime Framework
+
+**Hono** is used as the runtime framework. The generated virtual module creates a Hono app with file-based routes and middleware. Route handlers receive a Hono `Context` object (`c`) and can use the full Hono API (`c.json()`, `c.text()`, `c.req.param()`, etc.) plus the Hono middleware ecosystem.
+
+- `defineHandler(fn)` — wraps a route handler `(c: CloudContext) => unknown`
+- `defineMiddleware(fn)` — wraps Hono middleware `(c, next) => void`
+- Handlers can return plain objects/strings (auto-converted via `convertReturnValue`) or use Hono's `c.json()` / `c.text()` directly.
 
 ### Source Layout
 
@@ -44,11 +54,10 @@ src/
   router/
     parse-filename.ts       # Route filename → RouteDefinition (pure function)
     scan.ts                 # Filesystem scanner using tinyglobby
-    compile.ts              # Generates virtual module code + worker entry
+    compile.ts              # Generates Hono app code + worker entry
   runtime/
-    handler.ts              # defineHandler() — identity function with types
+    handler.ts              # defineHandler(), defineMiddleware() — identity functions with types
     response.ts             # convertReturnValue() — return → Response
-    context.ts              # createRequestContext() — env mapping (DB→db, etc.)
   inference/
     walk.ts                 # AST walking with vite's parseSync + oxc-walker
   migrations/
@@ -58,24 +67,23 @@ src/
 ### Key Design Decisions
 
 - **`parseSync` comes from `vite`** (not `oxc-parser` directly). Vite 8 re-exports it.
-- **rou3** is used at runtime for route matching (tiny radix-tree router, ~2KB).
-- **Virtual modules**: `virtual:vite-cloud-routes` holds the route table. A real file `.vite-cloud/entry.ts` is generated as the CF plugin entrypoint (imports the virtual module).
-- **Import redirection**: The routing plugin's `resolveId` hook redirects bare `"vite-plugin-cloud"` imports to `vite-plugin-cloud/handler` (the lightweight subpath). Without this, route files pull the entire plugin (vite, @cloudflare/vite-plugin, lightningcss) into the Worker bundle. Uses `import.meta.resolve()` to compute absolute paths at plugin init.
-- **Pre-resolved paths in codegen**: Generated virtual module code uses absolute paths for `rou3`, `vite-plugin-cloud/context`, and `vite-plugin-cloud/response` (resolved via `import.meta.resolve()`). Virtual modules have no filesystem location, so bare specifiers can't resolve from them.
+- **Hono** is the runtime framework (~14KB, CF Workers native). Generated code creates a `new Hono()` app, registers middleware with `app.use()`, and registers routes with `app.get()` / `app.post()` / etc.
+- **Virtual modules**: `virtual:vite-cloud-routes` holds the Hono app. A real file `.vite-cloud/entry.ts` is generated as the CF plugin entrypoint (re-exports the virtual module's app).
+- **Import redirection**: The routing plugin's `resolveId` hook redirects bare `"vite-cloud"` imports to `vite-cloud/handler` (the lightweight subpath). Without this, route files pull the entire plugin (vite, @cloudflare/vite-plugin, lightningcss) into the Worker bundle. Uses `import.meta.resolve()` to compute absolute paths at plugin init.
+- **Pre-resolved paths in codegen**: Generated virtual module code uses absolute paths for `hono` and `vite-cloud/response` (resolved via `import.meta.resolve()`). Virtual modules have no filesystem location, so bare specifiers can't resolve from them.
 - **CF plugin API**: Worker config (`main`, `d1_databases`, `kv_namespaces`, `r2_buckets`) goes inside the `config` option of `cloudflare()`, NOT as top-level properties. `persistState` takes `{ path: string }`, not a raw string.
-- **Binding inference** runs synchronously in the `viteCloud()` body (before plugin init) using `readFileSync` + `parseSync`. Looks for `*.env.db`, `*.env.kv`, `*.env.storage` member expressions.
-- **Env mapping**: CF plugin bindings use uppercase (`DB`, `KV`, `STORAGE`). User code uses lowercase via `ctx.env.db`, `ctx.env.kv`, `ctx.env.storage`. The `createRequestContext` function maps between them.
+- **Binding inference** runs synchronously in the `viteCloud()` body (before plugin init) using `readFileSync` + `parseSync`. Looks for `*.env.DB`, `*.env.KV`, `*.env.STORAGE` member expressions.
+- **Env naming**: Uses standard CF uppercase convention. `c.env.DB`, `c.env.KV`, `c.env.STORAGE`. No mapping layer needed.
 - **Route handlers** use lazy `import()` for code splitting. Middleware is eagerly imported.
 - **Migration DB path**: Miniflare stores D1 data at a deterministic path computed from the `database_id` using HMAC-SHA256. The `getMiniflareDatabasePath()` function in `migrations/runner.ts` replicates this algorithm so migrations target the correct SQLite file at `.vite-cloud/v3/d1/miniflare-D1DatabaseObject/<hash>.sqlite`.
 
 ### Package Exports
 
-| Subpath                      | What                                                                   |
-| ---------------------------- | ---------------------------------------------------------------------- |
-| `vite-plugin-cloud`          | `viteCloud()` default export + `defineHandler` + `RequestContext` type |
-| `vite-plugin-cloud/handler`  | `defineHandler()` standalone                                           |
-| `vite-plugin-cloud/context`  | `createRequestContext()` + `RequestContext` type                       |
-| `vite-plugin-cloud/response` | `convertReturnValue()`                                                 |
+| Subpath               | What                                                                                      |
+| --------------------- | ----------------------------------------------------------------------------------------- |
+| `vite-cloud`          | `viteCloud()` default export + `defineHandler` + `defineMiddleware` + `CloudContext` type |
+| `vite-cloud/handler`  | `defineHandler()`, `defineMiddleware()`, `CloudContext`, `CloudEnv` types                 |
+| `vite-cloud/response` | `convertReturnValue()`                                                                    |
 
 Build output uses `.mjs` / `.d.mts` extensions (tsdown 0.20.3 default).
 
@@ -106,7 +114,7 @@ Files/dirs starting with `_` are ignored by the scanner.
 
 ## Testing
 
-Unit tests live in `packages/vite-plugin-cloud/test/unit/`. Run from root with `pnpm test`.
+Unit tests live in `packages/vite-cloud/test/unit/`. Run from root with `pnpm test`.
 
 | Test file                | Covers                                       |
 | ------------------------ | -------------------------------------------- |
@@ -122,7 +130,7 @@ Unit tests live in `packages/vite-plugin-cloud/test/unit/`. Run from root with `
 
 - Static route: `routes/api/hello.get.ts`
 - CRUD routes: `routes/api/users/index.get.ts`, `index.post.ts`, `[id].get.ts`
-- Middleware: `middleware/01.logger.ts`
+- Middleware: `middleware/01.logger.ts` (uses `defineMiddleware`)
 - Migration: `migrations/001_create_users.sql` (creates users table + seeds data)
 
 Verified working: `cd playground && pnpm dev` → all API routes respond, D1 queries work, middleware runs.

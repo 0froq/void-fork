@@ -18,6 +18,6 @@
     "@vitejs/plugin-react": "^5.1.4",
     "typescript": "^5.9.3",
     "vite": "^8.0.0-beta.14",
-    "vite-plugin-cloud": "^0.0.1"
+    "vite-cloud": "^0.0.1"
   }
 }

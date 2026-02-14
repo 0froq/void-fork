@@ -1,12 +1,7 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: [
-    "src/index.ts",
-    "src/runtime/handler.ts",
-    "src/runtime/response.ts",
-    "src/runtime/context.ts",
-  ],
+  entry: ["src/index.ts", "src/runtime/handler.ts", "src/runtime/response.ts"],
   format: "esm",
   dts: true,
   clean: true,

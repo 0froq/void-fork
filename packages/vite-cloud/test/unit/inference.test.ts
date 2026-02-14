@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { inferBindingsFromSource, mergeBindings } from "../../src/inference/walk";
 
 describe("inferBindingsFromSource", () => {
-  it("detects ctx.env.db", () => {
+  it("detects c.env.DB", () => {
     const code = `
-      export default defineHandler((ctx) => {
-        return ctx.env.db.prepare('SELECT 1').first()
+      export default defineHandler((c) => {
+        return c.env.DB.prepare('SELECT 1').first()
       })
     `;
     const result = inferBindingsFromSource(code, "test.ts");
@@ -14,20 +14,20 @@ describe("inferBindingsFromSource", () => {
     expect(result.needsR2).toBe(false);
   });
 
-  it("detects ctx.env.kv", () => {
+  it("detects c.env.KV", () => {
     const code = `
-      export default defineHandler(async (ctx) => {
-        return ctx.env.kv.get('key')
+      export default defineHandler(async (c) => {
+        return c.env.KV.get('key')
       })
     `;
     const result = inferBindingsFromSource(code, "test.ts");
     expect(result.needsKV).toBe(true);
   });
 
-  it("detects ctx.env.storage", () => {
+  it("detects c.env.STORAGE", () => {
     const code = `
-      export default defineHandler(async (ctx) => {
-        await ctx.env.storage.put('key', 'value')
+      export default defineHandler(async (c) => {
+        await c.env.STORAGE.put('key', 'value')
       })
     `;
     const result = inferBindingsFromSource(code, "test.ts");
@@ -36,9 +36,9 @@ describe("inferBindingsFromSource", () => {
 
   it("detects multiple bindings in one file", () => {
     const code = `
-      export default defineHandler(async (ctx) => {
-        const user = ctx.env.db.prepare('SELECT 1').first()
-        await ctx.env.kv.set('key', 'val')
+      export default defineHandler(async (c) => {
+        const user = c.env.DB.prepare('SELECT 1').first()
+        await c.env.KV.set('key', 'val')
         return user
       })
     `;
@@ -50,18 +50,18 @@ describe("inferBindingsFromSource", () => {
 
   it("ignores unrelated member expressions", () => {
     const code = `
-      const x = foo.bar.db
+      const x = foo.bar.DB
       const y = something.env.other
     `;
     const result = inferBindingsFromSource(code, "test.ts");
     expect(result.needsD1).toBe(false);
   });
 
-  it("handles destructured env access patterns", () => {
-    // This pattern: obj.env.db — any *.env.db triggers it
+  it("handles env access patterns", () => {
+    // This pattern: obj.env.DB — any *.env.DB triggers it
     const code = `
-      const handler = (ctx) => {
-        const result = ctx.env.db.prepare('SELECT 1').all()
+      const handler = (c) => {
+        const result = c.env.DB.prepare('SELECT 1').all()
         return result
       }
     `;

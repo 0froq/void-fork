@@ -1,5 +1,5 @@
 {
-  "name": "vite-plugin-cloud",
+  "name": "vite-cloud",
   "version": "0.0.1",
   "files": [
     "dist"
@@ -14,10 +14,6 @@
       "types": "./dist/runtime/handler.d.mts",
       "import": "./dist/runtime/handler.mjs"
     },
-    "./context": {
-      "types": "./dist/runtime/context.d.mts",
-      "import": "./dist/runtime/context.mjs"
-    },
     "./response": {
       "types": "./dist/runtime/response.d.mts",
       "import": "./dist/runtime/response.mjs"
@@ -29,8 +25,8 @@
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.25.0",
+    "hono": "^4.11.9",
     "oxc-walker": "^0.7.0",
-    "rou3": "^0.7.12",
     "tinyglobby": "^0.2.15"
   },
   "devDependencies": {

@@ -25,16 +25,15 @@ export function routingPlugin(root: string): Plugin {
 
   // Pre-resolve all runtime module paths so generated code uses absolute paths.
   // This is necessary because:
-  // 1. "vite-plugin-cloud" bare import would pull in the entire plugin
-  // 2. "rou3" is a dep of vite-plugin-cloud, not the user's project
+  // 1. "vite-cloud" bare import would pull in the entire plugin
+  // 2. "hono" is a dep of vite-cloud, not the user's project
   // 3. Virtual modules have no filesystem location for relative resolution
   const resolveFile = (specifier: string) => fileURLToPath(import.meta.resolve(specifier));
 
-  const handlerFile = resolveFile("vite-plugin-cloud/handler");
+  const handlerFile = resolveFile("vite-cloud/handler");
   const compileOptions: CompileOptions = {
-    rou3Path: resolveFile("rou3"),
-    contextPath: resolveFile("vite-plugin-cloud/context"),
-    responsePath: resolveFile("vite-plugin-cloud/response"),
+    honoPath: resolveFile("hono"),
+    responsePath: resolveFile("vite-cloud/response"),
   };
 
   // Generate the entry file eagerly (at plugin creation time, during viteCloud()).
@@ -42,7 +41,7 @@ export function routingPlugin(root: string): Plugin {
   // which is before any hooks like buildStart fire.
   const outDir = join(root, ".vite-cloud");
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(compileOptions));
+  writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry());
 
   return {
     name: "vite-cloud:routing",
@@ -56,9 +55,9 @@ export function routingPlugin(root: string): Plugin {
       if (id === VIRTUAL_ROUTES_ID) {
         return RESOLVED_VIRTUAL_ROUTES_ID;
       }
-      // Redirect bare "vite-plugin-cloud" imports to the lightweight handler
+      // Redirect bare "vite-cloud" imports to the lightweight handler
       // subpath to avoid pulling the entire plugin into the Worker bundle.
-      if (id === "vite-plugin-cloud") {
+      if (id === "vite-cloud") {
         return handlerFile;
       }
     },
