@@ -42,11 +42,12 @@ export function routingPlugin(root: string): Plugin {
     responsePath: resolveFile("vite-plugin-cloud/response"),
   };
 
-  function generateEntryFile() {
-    const outDir = join(root, ".vite-cloud");
-    mkdirSync(outDir, { recursive: true });
-    writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(compileOptions));
-  }
+  // Generate the entry file eagerly (at plugin creation time, during viteCloud()).
+  // The CF plugin needs the `main` file to exist at config resolution time,
+  // which is before any hooks like buildStart fire.
+  const outDir = join(root, ".vite-cloud");
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(compileOptions));
 
   return {
     name: "vite-cloud:routing",
@@ -54,7 +55,6 @@ export function routingPlugin(root: string): Plugin {
 
     async buildStart() {
       await rescan();
-      generateEntryFile();
     },
 
     resolveId(id) {
