@@ -297,7 +297,7 @@ export default defineHandler((ctx) => {
 
 Following Nitro v3's `defineHandler` pattern (and Vite's own `defineConfig` convention), route handlers are wrapped in a `defineHandler` call. This provides full type inference without requiring the user to import and annotate types manually.
 
-`defineHandler` is a thin identity function at runtime — it simply returns the function passed to it. Its value is purely in the type system: it provides the typed `RequestContext` without the user needing to import the type or annotate the parameter. This is auto-imported (no explicit import needed), following the same pattern Nitro uses.
+`defineHandler` is a thin identity function at runtime — it simply returns the function passed to it. Its value is purely in the type system: it provides the typed `RequestContext` without the user needing to import the type or annotate the parameter.
 
 The `RequestContext` shape:
 
@@ -385,7 +385,8 @@ We should **not** adopt Nitro as a dependency or build on h3. Here's why:
 
 - **Nitro is a server framework.** Vite Cloud is a Vite plugin that compiles to Cloudflare Workers. Nitro's value is its cross-platform runtime abstraction (Node, Deno, Bun, Workers, etc.) — but we don't need that. We target exactly one runtime.
 - **h3 adds an abstraction layer over Request/Response.** The Workers runtime already has excellent native Web API support. Adding h3 means teaching users two APIs (`event` vs `Request`) and adding a compatibility layer.
-- **We take the patterns, not the packages.** `defineHandler` (from `defineEventHandler`), file-based routing, auto-imports, middleware conventions — these are great ideas we adopt. But we implement them directly against the Workers runtime API.
+- **We take the patterns, not the packages.** `defineHandler` (from `defineEventHandler`), file-based routing, middleware conventions — these are great ideas we adopt. But we implement them directly against the Workers runtime API.
+- **We are not doing auto-imports like Nitro.** Prefer explicit imports so type-inference can work without global types.
 
 The exception is `unstorage`, which is a genuine thin adapter with no runtime overhead and real value in its driver system.
 
@@ -919,7 +920,7 @@ The current design doesn't address secrets (API keys, tokens). Likely solution: 
 
 - [ ] `create-vite-cloud` scaffolding CLI
 - [ ] Vite plugin wrapping `@cloudflare/vite-plugin`
-- [ ] `defineHandler` with auto-imports and type inference
+- [ ] `defineHandler` with type inference
 - [ ] File-based routing from `routes/` (compiles to Worker `fetch` handler)
 - [ ] HTTP method routing via filename suffix (`.get.ts`, `.post.ts`)
 - [ ] Dynamic params, catch-all, and route groups
