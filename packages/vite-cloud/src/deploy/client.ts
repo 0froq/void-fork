@@ -1,4 +1,4 @@
-const DEFAULT_API_URL = "https://vite-cloud-platform.workers.dev";
+const DEFAULT_API_URL = "https://api.vite.cloud";
 
 export interface ProjectResponse {
   id: string;
