@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { PlatformEnv } from "../env";
 import type { DeployManifest } from "../types";
 import { getProject, createDeployment, updateDeploymentStatus } from "../db";
+import { provisionBindings } from "../provisioning/provision";
 
 const DISPATCH_NAMESPACE = "vite-cloud-users";
 
@@ -17,16 +18,24 @@ app.post("/:id/deploy", async (c) => {
 
   const formData = await c.req.formData();
   const manifestRaw = formData.get("manifest") as string | null;
-  // Manifest parsed for future use (binding provisioning in Step 7)
-  if (manifestRaw) {
-    JSON.parse(manifestRaw) as DeployManifest;
-  }
+  const manifest: DeployManifest = manifestRaw
+    ? (JSON.parse(manifestRaw) as DeployManifest)
+    : { bindings: {} };
 
   // Create deployment record
   const deployment = await createDeployment(c.env.DB, projectId, manifestRaw);
 
   try {
     await updateDeploymentStatus(c.env.DB, deployment.id, "uploading");
+
+    // Provision bindings (D1, KV, R2) — creates CF resources if needed
+    const workerBindings = await provisionBindings(
+      c.env.DB,
+      c.env.CF_ACCOUNT_ID,
+      c.env.CF_API_TOKEN,
+      projectId,
+      manifest,
+    );
 
     // 1. Upload static assets to R2
     const assetKeys: string[] = [];
@@ -57,11 +66,12 @@ app.post("/:id/deploy", async (c) => {
       }
     }
 
-    // Add metadata part
+    // Add metadata part (include provisioned bindings)
     const metadata = {
       main_module: "index.js",
       compatibility_date: "2026-02-12",
       compatibility_flags: ["nodejs_compat"],
+      bindings: workerBindings.length > 0 ? workerBindings : undefined,
     };
     workerFormData.append(
       "metadata",

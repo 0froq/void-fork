@@ -7,7 +7,7 @@
     {
       "binding": "DB",
       "database_name": "vite-cloud-platform",
-      "database_id": "local",
+      "database_id": "f85c1d7d-7b41-4f85-88e5-ad37966825e7",
       "migrations_dir": "migrations",
     },
   ],
@@ -20,7 +20,7 @@
   "kv_namespaces": [
     {
       "binding": "ROUTING",
-      "id": "local",
+      "id": "9250c33f3db6494ebe8ad6272812c8c0",
     },
   ],
   "dispatch_namespaces": [
