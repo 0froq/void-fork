@@ -18,6 +18,6 @@
     "@vitejs/plugin-react": "^5.1.4",
     "typescript": "catalog:",
     "vite": "catalog:",
-    "vite-plugin-cloud": "workspace:*"
+    "vite-cloud": "workspace:*"
   }
 }

@@ -1,0 +1,43 @@
+{
+  "name": "vite-cloud",
+  "version": "0.0.1",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./handler": {
+      "types": "./dist/runtime/handler.d.mts",
+      "import": "./dist/runtime/handler.mjs"
+    },
+    "./response": {
+      "types": "./dist/runtime/response.d.mts",
+      "import": "./dist/runtime/response.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch"
+  },
+  "dependencies": {
+    "@cloudflare/vite-plugin": "^1.25.0",
+    "hono": "^4.11.9",
+    "oxc-walker": "^0.7.0",
+    "tinyglobby": "^0.2.15"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260214.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "better-sqlite3": "^12.6.2",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  },
+  "peerDependencies": {
+    "vite": "^8.0.0-beta.14"
+  }
+}

@@ -1,9 +1,8 @@
-import { defineHandler } from "vite-plugin-cloud";
+import { defineHandler } from "vite-cloud";
 
-export default defineHandler(async (ctx) => {
-  const body = await ctx.request.json<{ name: string; email: string }>();
-  await ctx.env.db
-    .prepare("INSERT INTO users (name, email) VALUES (?, ?)")
+export default defineHandler(async (c) => {
+  const body = await c.req.json<{ name: string; email: string }>();
+  await c.env.DB.prepare("INSERT INTO users (name, email) VALUES (?, ?)")
     .bind(body.name, body.email)
     .run();
   return { created: true };
