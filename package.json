@@ -6,7 +6,7 @@
     "test": "vitest",
     "lint": "oxlint",
     "fmt": "oxfmt --write .",
-    "deploy": "pnpm -r build && pnpm --filter @vite-cloud/platform deploy && pnpm --filter @vite-cloud/dispatch deploy"
+    "deploy": "pnpm -r build && pnpm run --filter @vite-cloud/platform deploy && pnpm run --filter @vite-cloud/dispatch deploy"
   },
   "devDependencies": {
     "oxfmt": "^0.32.0",
