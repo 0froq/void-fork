@@ -49,4 +49,33 @@ Implementation Progress
 
 ### Phase 4: Growth (Post-Launch)
 
-See [Roadmap](./roadmap/md).
+#### v1.1 — Full-Stack & Observability
+
+- [ ] SSR support (minimal `src/ssr.entry.ts` convention)
+- [ ] Meta-framework adapters (TanStack Start, SolidStart, SvelteKit, Analog)
+- [ ] Auth via better-auth integration (`auth: true` zero-config)
+- [ ] Per-route observability (request volume, latency, error rates per route)
+- [ ] Core Web Vitals monitoring (injected `web-vitals` → Analytics Engine)
+- [ ] Privacy-first SPA analytics (no cookies, GDPR-compliant)
+- [ ] Server-side error tracking (unhandled exceptions with route context)
+- [ ] Client-side error tracking (with Rolldown source map advantage)
+
+#### v1.2 — Ecosystem & Power Users
+
+- [ ] Preview environments with database forks (cloned D1 per PR)
+- [ ] Integration marketplace (Resend, Stripe plugin architecture)
+- [ ] Escape hatches — Tier 1: Workers AI, Vectorize, Hyperdrive (one-line config)
+- [ ] Escape hatches — Tier 2: Durable Objects (`src/objects/` convention)
+- [ ] D1 → Hyperdrive upgrade path
+- [ ] AI code generation (`vite generate route` scaffolding)
+- [ ] Edge WebSockets via `defineWebSocket` (if demand signals)
+
+#### v2.0 — Team & Enterprise
+
+- [ ] Environment promotion (staging → production with migration validation)
+- [ ] Team RBAC & audit logs
+- [ ] Managed auth SSO (SAML/OIDC via better-auth enterprise plugin)
+- [ ] AI dashboard assistant (query analysis, performance insights)
+- [ ] Team plan launch ($50 base + $15/seat)
+
+See [Roadmap](./roadmap.md) for detailed feature specs and prioritization.
