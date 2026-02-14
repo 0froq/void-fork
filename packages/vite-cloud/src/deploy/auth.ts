@@ -37,6 +37,14 @@ export function saveToken(token: string): void {
 
 const DEFAULT_API_URL = "https://api.vite.cloud";
 
+function page(title: string, message: string): string {
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title} - Vite Cloud</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#fafafa;color:#111}.card{text-align:center;padding:3rem}h1{font-size:1.5rem;font-weight:600;margin-bottom:.75rem}p{color:#666;font-size:1rem}</style>
+</head><body><div class="card"><h1>${title}</h1><p>${message}</p></div></body></html>`;
+}
+
 /**
  * Start a local HTTP server, open the browser to the platform login page,
  * and wait for the OAuth callback with a JWT token.
@@ -59,18 +67,14 @@ export async function runLogin(): Promise<string> {
       const token = url.searchParams.get("token");
       if (!token) {
         res.writeHead(400, { "Content-Type": "text/html" });
-        res.end(
-          "<html><body><h1>Login failed</h1><p>No token received. Please try again.</p></body></html>",
-        );
+        res.end(page("Login failed", "No token received. Please try again."));
         server.close();
         reject(new Error("No token received from callback"));
         return;
       }
 
       res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(
-        "<html><body><h1>Login successful!</h1><p>You can close this tab and return to the terminal.</p></body></html>",
-      );
+      res.end(page("Login successful!", "You can close this tab and return to the terminal."));
       server.close();
       resolve(token);
     });
