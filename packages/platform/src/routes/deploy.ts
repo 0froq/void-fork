@@ -3,6 +3,8 @@ import type { PlatformEnv } from "../env";
 import type { DeployManifest } from "../types";
 import { getProject, createDeployment, updateDeploymentStatus } from "../db";
 import { provisionBindings } from "../provisioning/provision";
+import { runRemoteMigrations, type RemoteMigration } from "../migrations/remote-runner";
+import { validateMigrationSQL } from "../migrations/validate";
 
 const DISPATCH_NAMESPACE = "vite-cloud-users";
 
@@ -41,7 +43,56 @@ app.post("/:id/deploy", async (c) => {
       manifest,
     );
 
-    // 1. Upload static assets to R2
+    // 1. Run migrations (before worker deploy — key invariant)
+    let migrationsApplied = 0;
+    const migrationEntries: RemoteMigration[] = [];
+    for (const [key, value] of formData.entries()) {
+      if (key.startsWith("migration:")) {
+        const name = key.slice("migration:".length);
+        const sql = await (value as Blob).text();
+
+        // Server-side validation (defense in depth)
+        const validation = validateMigrationSQL(sql);
+        if (!validation.allowed) {
+          await updateDeploymentStatus(c.env.DB, deployment.id, "failed");
+          return c.json({ error: `destructive migration rejected: ${name}` }, 400);
+        }
+
+        migrationEntries.push({ name, sql });
+      }
+    }
+
+    if (migrationEntries.length > 0) {
+      // Find the D1 resource for this project
+      const d1Resource = workerBindings.find((b) => b.type === "d1");
+      if (!d1Resource || !d1Resource.id) {
+        await updateDeploymentStatus(c.env.DB, deployment.id, "failed");
+        return c.json({ error: "migrations require a D1 database but none is provisioned" }, 400);
+      }
+
+      await updateDeploymentStatus(c.env.DB, deployment.id, "migrating");
+
+      try {
+        const result = await runRemoteMigrations(
+          c.env.CF_ACCOUNT_ID,
+          c.env.CF_API_TOKEN,
+          d1Resource.id,
+          migrationEntries,
+        );
+        migrationsApplied = result.applied.length;
+      } catch (err) {
+        await updateDeploymentStatus(c.env.DB, deployment.id, "failed");
+        return c.json(
+          {
+            error: "migration failed",
+            details: err instanceof Error ? err.message : String(err),
+          },
+          502,
+        );
+      }
+    }
+
+    // 2. Upload static assets to R2
     const assetKeys: string[] = [];
     for (const [key, value] of formData.entries()) {
       if (key.startsWith("asset:")) {
@@ -57,7 +108,7 @@ app.post("/:id/deploy", async (c) => {
       }
     }
 
-    // 2. Upload worker to dispatch namespace via CF API
+    // 3. Upload worker to dispatch namespace via CF API
     const workerName = `user-${project.slug}`;
     const workerFormData = new FormData();
 
@@ -111,10 +162,10 @@ app.post("/:id/deploy", async (c) => {
       return c.json({ error: "worker upload failed", details: error }, 502);
     }
 
-    // 3. Update KV routing table
+    // 4. Update KV routing table
     await c.env.ROUTING.put(project.slug, JSON.stringify({ workerName, projectId }));
 
-    // 4. Mark deployment as live
+    // 5. Mark deployment as live
     await updateDeploymentStatus(c.env.DB, deployment.id, "live");
 
     return c.json({
@@ -122,6 +173,7 @@ app.post("/:id/deploy", async (c) => {
       url: `https://${project.slug}.vitecloud.app`,
       assets: assetKeys.length,
       workers: workerFiles.length,
+      ...(migrationsApplied > 0 && { migrations: migrationsApplied }),
     });
   } catch (err) {
     await updateDeploymentStatus(c.env.DB, deployment.id, "failed");

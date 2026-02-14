@@ -14,8 +14,6 @@ Implementation Progress
 - [x] Hot reload for API handlers (via Environment API HMR)
 - [x] Local migration runner
 
-
-
 **Milestone:** ✅ A user can run `npm create vite-cloud`, add a route file using `defineHandler` that queries a database, and see it work locally with zero config.
 
 ## Phase 2: Platform & Deploy (in progress)
@@ -29,9 +27,9 @@ Implementation Progress
 - [x] KV-based routing table (`slug → { workerName, projectId }`)
 - [x] Auth (GitHub OAuth → JWT, `vite-cloud login` CLI command)
 - [x] Provisioning engine (D1, KV, R2 creation via CF API)
-- [ ] Zero-downtime remote migration execution
+- [x] Zero-downtime remote migration execution
 
-**Milestone:** Stateless deploy works (Steps 1–5 complete). Provisioning engine done (Step 7). Auth done (Step 8). Remote migrations remain.
+**Milestone:** ✅ Full deploy pipeline complete. Stateless deploy, provisioning, auth, and remote migrations all working. Migrations run before worker deploy (zero-downtime guarantee). Destructive-op detection with pragma override.
 
 ### Phase 3: GitHub & Production Readiness (Weeks 11–16)
 

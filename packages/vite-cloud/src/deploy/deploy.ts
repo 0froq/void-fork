@@ -7,6 +7,8 @@ import { packageBuild } from "./package";
 import { PlatformClient } from "./client";
 import { inferProjectBindings } from "../plugin-inference";
 import { promptProjectSelection } from "./prompt";
+import { collectMigrations } from "../migrations/collect";
+import { validateMigrations } from "../migrations/validate";
 
 /**
  * Run the full deploy pipeline:
@@ -59,20 +61,37 @@ export async function runDeploy(root: string): Promise<void> {
   // 4. Infer bindings
   const bindings = inferProjectBindings(root);
 
-  // 5. Detect worker directory name from dist/
+  // 5. Collect and validate migrations
+  const migrationsDir = join(root, "migrations");
+  const rawMigrations = collectMigrations(migrationsDir);
+  let validatedMigrations;
+  if (rawMigrations.length > 0) {
+    try {
+      validatedMigrations = validateMigrations(rawMigrations);
+      console.log(`Found ${validatedMigrations.length} migration(s)`);
+    } catch (err: any) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
+  // 6. Detect worker directory name from dist/
   const workerDirName = detectWorkerDir(root);
 
-  // 6. Package
+  // 7. Package
   console.log("Packaging...");
   const distDir = join(root, "dist");
-  const formData = packageBuild(distDir, workerDirName, bindings);
+  const formData = packageBuild(distDir, workerDirName, bindings, validatedMigrations);
 
-  // 7. Upload
+  // 8. Upload
   console.log("Deploying...");
   const result = await client.deploy(config.projectId, formData);
 
   console.log(`\nDeployed! ${result.url}`);
   console.log(`  ${result.workers} worker module(s), ${result.assets} static asset(s)`);
+  if (result.migrations) {
+    console.log(`  ${result.migrations} migration(s) applied`);
+  }
 }
 
 import type { ProjectConfig } from "./project";

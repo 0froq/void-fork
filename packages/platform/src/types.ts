@@ -17,7 +17,7 @@ export interface Project {
 export interface Deployment {
   id: string;
   project_id: string;
-  status: "pending" | "uploading" | "live" | "failed";
+  status: "pending" | "uploading" | "migrating" | "live" | "failed";
   manifest: string | null;
   created_at: string;
   deployed_at: string | null;
@@ -32,10 +32,16 @@ export interface Resource {
   created_at: string;
 }
 
+export interface MigrationMeta {
+  name: string;
+  destructive: boolean;
+}
+
 export interface DeployManifest {
   bindings: {
     d1?: string[];
     kv?: string[];
     r2?: string[];
   };
+  migrations?: MigrationMeta[];
 }

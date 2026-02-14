@@ -125,12 +125,14 @@ User opt-in: all of this is enabled with a single config flag and can be toggled
 
 ```ts
 export default defineConfig({
-  plugins: [viteCloud({
-    observability: true  // enables all three
-    // or granularly:
-    // observability: { analytics: true, vitals: true, errors: true }
-  })]
-})
+  plugins: [
+    viteCloud({
+      observability: true, // enables all three
+      // or granularly:
+      // observability: { analytics: true, vitals: true, errors: true }
+    }),
+  ],
+});
 ```
 
 ---
@@ -175,16 +177,16 @@ This is deliberately minimal. No page routing, no data loading conventions, no s
 Vite Cloud should be a deployment target for meta-frameworks, not a competitor. The user's `vite.config.ts` composes both plugins:
 
 ```ts
-import { defineConfig } from 'vite'
-import { tanstackStart } from '@tanstack/start/vite'
-import { viteCloud } from 'vite-cloud'
+import { defineConfig } from "vite";
+import { tanstackStart } from "@tanstack/start/vite";
+import { viteCloud } from "vite-cloud";
 
 export default defineConfig({
   plugins: [
-    tanstackStart(),  // routing, SSR, data loading
-    viteCloud(),      // deployment, bindings, provisioning
-  ]
-})
+    tanstackStart(), // routing, SSR, data loading
+    viteCloud(), // deployment, bindings, provisioning
+  ],
+});
 ```
 
 How they coexist: the meta-framework handles page routes, SSR, and data loading (server functions, `"use server"`, load functions). Our `routes/` directory handles standalone API endpoints not tied to pages (webhooks, cron handlers, external integrations). The Worker's fetch handler composes: meta-framework's handler gets first priority for page/asset requests, our file-based router handles `/api/*`.
@@ -225,13 +227,15 @@ Progressive customization — when users need more, they write standard better-a
 
 ```ts
 export default defineConfig({
-  plugins: [viteCloud({
-    auth: {
-      socialProviders: { github: { clientId, clientSecret } },
-      plugins: [twoFactor(), passkey(), organization()]
-    }
-  })]
-})
+  plugins: [
+    viteCloud({
+      auth: {
+        socialProviders: { github: { clientId, clientSecret } },
+        plugins: [twoFactor(), passkey(), organization()],
+      },
+    }),
+  ],
+});
 ```
 
 Our value-add on top of better-auth:
@@ -281,13 +285,13 @@ Start with 3–4 first-party plugins. Open the plugin spec for third-party contr
 
 A tiered model for progressive disclosure of Cloudflare complexity:
 
-| Tier | Mechanism | CF Account Needed | We Provision | Examples |
-|------|-----------|-------------------|-------------|----------|
-| Auto | Inference from code | No | Yes | D1, KV, R2 |
-| 1 | One-line config opt-in | No | Yes | Workers AI, Vectorize, Hyperdrive |
-| 2 | Convention directory (`src/objects/`) | No | Yes | Durable Objects |
-| 3 | Raw `wrangler.jsonc` passthrough | Yes (maybe) | No | Queues config, mTLS, Email Workers |
-| 4 | Full Worker takeover (`worker: './src/worker.ts'`) | No | Yes (bindings only) | Custom fetch handler |
+| Tier | Mechanism                                          | CF Account Needed | We Provision        | Examples                           |
+| ---- | -------------------------------------------------- | ----------------- | ------------------- | ---------------------------------- |
+| Auto | Inference from code                                | No                | Yes                 | D1, KV, R2                         |
+| 1    | One-line config opt-in                             | No                | Yes                 | Workers AI, Vectorize, Hyperdrive  |
+| 2    | Convention directory (`src/objects/`)              | No                | Yes                 | Durable Objects                    |
+| 3    | Raw `wrangler.jsonc` passthrough                   | Yes (maybe)       | No                  | Queues config, mTLS, Email Workers |
+| 4    | Full Worker takeover (`worker: './src/worker.ts'`) | No                | Yes (bindings only) | Custom fetch handler               |
 
 **Tier 1** — Workers AI, Vectorize, Hyperdrive, Browser Rendering. One line in config: `ai: true` or `vectorize: 'my-index'`. We provision and bind, they show up as typed `ctx.env.ai`, etc. Requires explicit opt-in because of cost implications.
 
@@ -426,24 +430,31 @@ v2.0
 ## Key Design Decisions Captured
 
 ### On SSR
+
 Do not build an SSR framework. Provide a minimal `src/ssr.entry.ts` convention for users who want basic SSR without a meta-framework. For anything beyond that, be a deployment target for meta-frameworks (TanStack Start, SolidStart, SvelteKit, Analog). The meta-framework handles routing, SSR, data loading. We handle deployment, provisioning, and platform features.
 
 ### On Meta-Framework Compatibility
+
 Vite Cloud should compose with meta-frameworks, not compete. Both plugins coexist in `vite.config.ts`. The meta-framework gets first priority for page/asset requests; our file-based router handles `/api/*`. Per-framework adapter packages (`vite-cloud/tanstack`, etc.) are thin bridges (<100 lines each) that expose `ctx.env` bindings inside each framework's server function convention. The positioning: "framework-agnostic NuxtHub."
 
 ### On Frontend Observability
+
 We control both the deployment (Worker sits in front of every request) and the bundler output (Rolldown). This uniquely positions us to offer integrated analytics, error tracking, and CWV monitoring. All three share one infrastructure pattern (injected script → beacon → Analytics Engine → dashboard). The Rolldown advantage on source maps is structural: we can optimize the format for fast server-side resolution in ways no other platform can, because we produce the maps. The combined value ($50+/mo of tooling included in Pro at $20/mo) is a strong conversion driver.
 
 ### On Auth
+
 Do not build a custom auth library. Integrate with better-auth (zero-config). Our value is the wiring (auto-migration, middleware integration, observability), not the auth logic. Users who already know better-auth bring their knowledge. Users who leave can take their code. Reduces lock-in perception, which helps adoption.
 
 ### On D1 Scaling
+
 Be honest about D1's ceilings. It's the right default for most apps. When users outgrow it (>10 GB, write-heavy, need Postgres features), the upgrade path is Hyperdrive + external Postgres. Users who outgrow D1 are running serious production workloads and should be on Pro/Team plans. Good for business.
 
 ### On Escape Hatches
+
 For any Cloudflare feature we don't abstract, the user treats it as an external service on their own CF account, communicating with the main app over HTTP. This keeps our operational surface small. The boundary is clear: Tiers Auto–2 are managed by us. Tier 3+ is "bring your own Cloudflare."
 
 ### On Migration Safety
+
 Migrations are additive-only by default. Destructive operations require explicit pragma. Deploy pipeline: validate → dry-run (shadow DB) → snapshot (if destructive) → migrate (in transaction) → deploy worker → health check. New Worker never deploys unless migration commits. Data rollback is always explicit, never automatic.
 
 ---
