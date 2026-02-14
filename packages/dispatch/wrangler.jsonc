@@ -1,0 +1,23 @@
+{
+  "name": "vite-cloud-dispatch",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-02-12",
+  "dispatch_namespaces": [
+    {
+      "binding": "DISPATCH",
+      "namespace": "vite-cloud-users",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "vite-cloud-assets",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "ROUTING",
+      "id": "local",
+    },
+  ],
+}

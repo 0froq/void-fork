@@ -80,7 +80,7 @@ No config files. No YAML. No dashboard. Just code.
 
 ### Core components:
 
-**Vite Plugin (`vite-plugin-cloud`):** The user-facing package. Installed as a Vite plugin. Handles file-based API routing, binding inference, local dev server orchestration, and the `deploy` command. Built on top of `@cloudflare/vite-plugin` rather than reimplementing the workerd integration from scratch (see Section 6).
+**Vite Plugin (`vite-cloud`):** The user-facing package. Installed as a Vite plugin. Handles file-based API routing, binding inference, local dev server orchestration, and the `deploy` command. Built on top of `@cloudflare/vite-plugin` rather than reimplementing the workerd integration from scratch (see Section 6).
 
 **Local Runtime:** Delegates to `@cloudflare/vite-plugin` for running user Worker code inside `workerd` via the Vite Environment API. D1 is backed by a local SQLite file. KV and R2 are backed by the local filesystem. Hot-reloads on file change.
 
@@ -109,7 +109,7 @@ The scaffolded `vite.config.ts`:
 
 ```ts
 import { defineConfig } from "vite";
-import viteCloud from "vite-plugin-cloud";
+import viteCloud from "vite-cloud";
 
 export default defineConfig({
   plugins: [viteCloud()],

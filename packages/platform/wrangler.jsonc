@@ -1,0 +1,33 @@
+{
+  "name": "vite-cloud-platform",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-02-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vite-cloud-platform",
+      "database_id": "local",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "vite-cloud-assets",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "ROUTING",
+      "id": "local",
+    },
+  ],
+  "dispatch_namespaces": [
+    {
+      "binding": "DISPATCH",
+      "namespace": "vite-cloud-users",
+    },
+  ],
+  // Secrets (via `wrangler secret put`): CF_API_TOKEN, CF_ACCOUNT_ID, JWT_SECRET
+}

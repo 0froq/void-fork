@@ -5,3 +5,5 @@ dist
 .DS_Store
 .wrangler
 .claude
+plan.md
+TODOs.md
