@@ -7,7 +7,18 @@ import { inferProjectBindings, type InferenceOptions } from "./plugin-inference"
 import { scanJobsSync } from "./jobs/scan";
 import { validateSsrEntry } from "./ssr/entry";
 
-export type ViteCloudOptions = InferenceOptions;
+export type AuthProvider = "github" | "google" | "email";
+
+export interface ViteCloudOptions extends InferenceOptions {
+  auth?: boolean | AuthProvider[];
+}
+
+function normalizeAuth(auth: boolean | AuthProvider[] | undefined): AuthProvider[] | null {
+  if (!auth) return null;
+  if (auth === true) return ["email"];
+  if (auth.length === 0) return null;
+  return auth;
+}
 
 /**
  * Vite Cloud plugin — the main entry point.
@@ -23,6 +34,7 @@ export type ViteCloudOptions = InferenceOptions;
 export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
   // Resolve root relative to CWD — this runs at config time
   const root = process.cwd();
+  const authProviders = normalizeAuth(options.auth);
 
   // Infer bindings synchronously from source files
   const bindings = inferProjectBindings(root, options);
@@ -34,7 +46,8 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
     main: join(root, ".vite-cloud", "entry.ts"),
   };
 
-  if (bindings.needsD1) {
+  // Auth requires D1 (user table) and KV (sessions)
+  if (bindings.needsD1 || authProviders) {
     workerConfig.d1_databases = [
       {
         binding: "DB",
@@ -44,13 +57,15 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
     ];
   }
 
+  const kvNamespaces: { binding: string; id: string }[] = [];
   if (bindings.needsKV) {
-    workerConfig.kv_namespaces = [
-      {
-        binding: "KV",
-        id: "local",
-      },
-    ];
+    kvNamespaces.push({ binding: "KV", id: "local" });
+  }
+  if (authProviders) {
+    kvNamespaces.push({ binding: "AUTH_KV", id: "auth-local" });
+  }
+  if (kvNamespaces.length > 0) {
+    workerConfig.kv_namespaces = kvNamespaces;
   }
 
   if (bindings.needsR2) {
@@ -86,7 +101,7 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
         : undefined;
 
   return [
-    routingPlugin(root),
+    routingPlugin(root, { auth: authProviders }),
     migrationPlugin(root),
     ...cloudflare({
       ...(inspectorPort === false || Number.isFinite(inspectorPort)
@@ -101,3 +116,4 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
 // Re-export runtime types and functions
 export { defineHandler, defineMiddleware, defineJob, defineRender } from "./runtime/handler";
 export type { CloudContext, CloudEnv, RenderAssetTags } from "./runtime/handler";
+export type { AuthUser } from "./runtime/auth";

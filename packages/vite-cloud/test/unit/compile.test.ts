@@ -6,6 +6,7 @@ const testOptions = {
   honoPath: "/resolved/hono/index.mjs",
   responsePath: "/resolved/vite-cloud/runtime/response.mjs",
   reactRefresh: true,
+  auth: null,
 };
 
 describe("compileRouteTable", () => {

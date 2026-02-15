@@ -33,7 +33,16 @@ function injectWorkersTypesReferencePlugin() {
 }
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/runtime/handler.ts", "src/runtime/response.ts", "src/cli/cli.ts"],
+  entry: [
+    "src/index.ts",
+    "src/runtime/handler.ts",
+    "src/runtime/response.ts",
+    "src/runtime/auth.ts",
+    "src/auth/session.ts",
+    "src/auth/password.ts",
+    "src/auth/schema.ts",
+    "src/cli/cli.ts",
+  ],
   format: "esm",
   dts: true,
   clean: true,

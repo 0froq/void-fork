@@ -9,6 +9,7 @@ import {
   type CompileOptions,
   type SsrCompileOptions,
 } from "./router/compile";
+import type { AuthProvider } from "./index";
 import {
   getPrerenderConfig,
   validatePrerenderPath,
@@ -28,7 +29,11 @@ const LOAD_ID_FILTER = /^virtual:vite-cloud-routes$/;
  * - Generates virtual modules for the route table and worker entry
  * - Watches for file changes and triggers HMR
  */
-export function routingPlugin(root: string): Plugin {
+interface RoutingPluginOptions {
+  auth: AuthProvider[] | null;
+}
+
+export function routingPlugin(root: string, options: RoutingPluginOptions): Plugin {
   let scan: ScanResult | null = null;
   let ssr: SsrCompileOptions | null = null;
   let prerenderPaths: string[] = [];
@@ -70,7 +75,23 @@ export function routingPlugin(root: string): Plugin {
     honoPath: resolveFile("hono"),
     responsePath: resolveFile("vite-cloud/response"),
     reactRefresh: false,
+    auth: null,
   };
+
+  if (options.auth) {
+    const providers = options.auth;
+    const hasEmail = providers.includes("email");
+    const hasGitHub = providers.includes("github");
+    const hasGoogle = providers.includes("google");
+    compileOptions.auth = {
+      providers,
+      sessionPath: resolveFile("vite-cloud/auth/session"),
+      passwordPath: hasEmail ? resolveFile("vite-cloud/auth/password") : null,
+      schemaPath: resolveFile("vite-cloud/auth/schema"),
+      githubProviderPath: hasGitHub ? resolveFile("@hono/oauth-providers/github") : null,
+      googleProviderPath: hasGoogle ? resolveFile("@hono/oauth-providers/google") : null,
+    };
+  }
 
   // Generate the entry file eagerly (at plugin creation time, during viteCloud()).
   // The CF plugin needs the `main` file to exist at config resolution time,
