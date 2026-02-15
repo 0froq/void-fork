@@ -84,9 +84,9 @@ if (command === "deploy") {
   console.log(`vite-cloud CLI (alias: vcd)
 
 Usage:
-  vcd login          Log in with GitHub
+  vcd login          Log in with GitHub or Google
   vcd logout         Log out and remove credentials
-  vcd whoami         Show the logged-in GitHub username
+  vcd whoami         Show the logged-in username
   vcd list           List your projects
   vcd secret put <name|name=value> [--project <name>]
                      Set a project secret (inline value, prompt, or stdin)
