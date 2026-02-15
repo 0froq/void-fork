@@ -44,7 +44,7 @@ Key invariant: the new Worker is never deployed unless the migration committed s
 
 Map file conventions to Cloudflare Cron Triggers and Queues:
 
-- `routes/api/_jobs/send-emails.ts` with an exported `cron` schedule string → creates a Cron Trigger, binds automatically
+- `jobs/send-emails.ts` with an exported `cron` schedule string → creates a Cron Trigger, binds automatically
 - `queues/` directory where each file is a queue consumer → provisions Queue, binds to worker
 
 No wrangler config needed. The provisioning engine handles creation via CF API. Background processing is one of the first things users need after basic CRUD, and this is trivially easy to build since it's just codegen + provisioning — no new runtime primitives.
