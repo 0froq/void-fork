@@ -6,7 +6,8 @@ import type { SecretArgs } from "./secret-args";
 import { intro, outro, log, cancel, isCancel, password } from "@clack/prompts";
 
 export async function runSecretCommand(root: string, args: SecretArgs): Promise<void> {
-  intro("vite-cloud secret");
+  console.log();
+  intro("\x1b[34mvite-cloud secret\x1b[0m");
 
   const token = getToken();
   if (!token) {

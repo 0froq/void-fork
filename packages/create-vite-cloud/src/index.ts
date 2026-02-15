@@ -16,6 +16,7 @@ const FRAMEWORKS = {
 type Framework = keyof typeof FRAMEWORKS;
 
 async function main() {
+  console.log();
   intro("create-vite-cloud");
 
   const projectName = await text({

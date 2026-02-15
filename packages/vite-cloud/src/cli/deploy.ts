@@ -57,7 +57,8 @@ export function inferDefaultProjectNameAndSlug(root: string): { name: string; sl
  * 5. Print live URL
  */
 export async function runDeploy(root: string, options?: RunDeployOptions): Promise<void> {
-  intro("vite-cloud deploy");
+  console.log();
+  intro("\x1b[34mvite-cloud deploy\x1b[0m");
 
   // 1. Auth
   const token = getToken();

@@ -2,7 +2,8 @@ import { intro, outro, log, spinner, select, isCancel, cancel } from "@clack/pro
 import { getToken, runLogin, saveToken } from "./auth";
 
 export async function runLoginCommand(): Promise<void> {
-  intro("vite-cloud login");
+  console.log();
+  intro("\x1b[34mvite-cloud login\x1b[0m");
 
   const existing = getToken();
   if (existing) {

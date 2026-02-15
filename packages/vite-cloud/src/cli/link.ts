@@ -5,7 +5,8 @@ import { readProjectConfig, writeProjectConfig } from "./project";
 import { promptProjectSelection } from "./prompt";
 
 export async function runLink(root: string, slug?: string): Promise<void> {
-  intro("vite-cloud link");
+  console.log();
+  intro("\x1b[34mvite-cloud link\x1b[0m");
 
   // Check if already linked
   const existing = readProjectConfig(root);

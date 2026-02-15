@@ -5,7 +5,8 @@ import { readProjectConfig, removeProjectConfig } from "./project";
 import { resolveProjectBySlug } from "./deploy";
 
 export async function runDeleteCommand(root: string, slug?: string): Promise<void> {
-  intro("vite-cloud delete");
+  console.log();
+  intro("\x1b[34mvite-cloud delete\x1b[0m");
 
   const token = getToken();
   if (!token) {
@@ -27,7 +28,8 @@ export async function runDeleteCommand(root: string, slug?: string): Promise<voi
   } else {
     const config = readProjectConfig(root);
     if (!config) {
-      throw new Error("No linked project found. Pass a project name: vcd delete <name>");
+      log.error("No linked project found. Pass a project name: vcd delete <name>");
+      process.exit(1);
     }
     projectId = config.projectId;
     projectSlug = config.slug;
