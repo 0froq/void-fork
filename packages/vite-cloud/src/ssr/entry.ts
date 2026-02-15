@@ -2,10 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseSync } from "vite";
 
-export const SSR_SERVER_ENTRY_RELATIVE_PATHS = ["src/ssr.entry.ts", "src/ssr.entry.tsx"] as const;
+export const SSR_SERVER_ENTRY_RELATIVE_PATHS = ["src/main.ssr.ts", "src/main.ssr.tsx"] as const;
 export const SSR_CLIENT_ENTRY_RELATIVE_PATHS = [
-  "src/client.entry.ts",
-  "src/client.entry.tsx",
+  "src/main.client.ts",
+  "src/main.client.tsx",
 ] as const;
 
 interface ResolvedEntry {

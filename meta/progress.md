@@ -35,7 +35,7 @@ Implementation Progress
 
 - [x] Secrets management
 - [x] Cron & background jobs (file convention)
-- [x] SSR support (minimal `src/ssr.entry.ts` convention)
+- [x] SSR support (minimal `src/main.ssr.ts` convention)
 - [ ] Auth via better-auth integration (`auth: true` zero-config)
 
 **Milestone:**

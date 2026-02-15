@@ -20,7 +20,7 @@ describe("playground/ssr build", () => {
     const code = readFileSync(workerEntry, "utf-8");
     expect(code).toContain("renderSsrResponse(c, mod)");
     expect(code).toContain('new URL("/.vite/manifest.json", request.url)');
-    expect(code).toContain('SSR_CLIENT_ENTRY_ID = "src/client.entry.tsx"');
+    expect(code).toContain('SSR_CLIENT_ENTRY_ID = "src/main.client.tsx"');
 
     const wranglerConfig = JSON.parse(
       readFileSync(join(ROOT, "playground/ssr/dist/playground_ssr/wrangler.json"), "utf-8"),

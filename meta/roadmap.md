@@ -144,10 +144,10 @@ export default defineConfig({
 **Scores:** Complexity 2 · OpCost 1 · Conversion 3 · Composite 36
 **Phase:** v1.1
 
-We do not build our own SSR framework. Instead, we provide a thin convention: the user exports a `render` function from `src/ssr.entry.ts`, and our Worker calls it for non-API, non-asset requests.
+We do not build our own SSR framework. Instead, we provide a thin convention: the user exports a `render` function from `src/main.ssr.ts`, and our Worker calls it for non-API, non-asset requests.
 
 ```ts
-// src/ssr.entry.ts
+// src/main.ssr.ts
 import { renderToReadableStream } from 'react-dom/server'
 import App from './App'
 
@@ -431,7 +431,7 @@ v2.0
 
 ### On SSR
 
-Do not build an SSR framework. Provide a minimal `src/ssr.entry.ts` convention for users who want basic SSR without a meta-framework. For anything beyond that, be a deployment target for meta-frameworks (TanStack Start, SolidStart, SvelteKit, Analog). The meta-framework handles routing, SSR, data loading. We handle deployment, provisioning, and platform features.
+Do not build an SSR framework. Provide a minimal `src/main.ssr.ts` convention for users who want basic SSR without a meta-framework. For anything beyond that, be a deployment target for meta-frameworks (TanStack Start, SolidStart, SvelteKit, Analog). The meta-framework handles routing, SSR, data loading. We handle deployment, provisioning, and platform features.
 
 ### On Meta-Framework Compatibility
 

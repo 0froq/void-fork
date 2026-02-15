@@ -30,9 +30,9 @@ describe("ssr entry helpers", () => {
 
   it("validates exported render function", () => {
     const root = createTempRoot();
-    const file = join(root, "src", "ssr.entry.ts");
+    const file = join(root, "src", "main.ssr.ts");
     writeFileSync(
-      join(root, "src", "client.entry.tsx"),
+      join(root, "src", "main.client.tsx"),
       "import { hydrateRoot } from 'react-dom/client'; hydrateRoot(document, null);",
     );
     writeFileSync(
@@ -46,9 +46,9 @@ describe("ssr entry helpers", () => {
 
   it("supports tsx ssr entry files", () => {
     const root = createTempRoot();
-    const file = join(root, "src", "ssr.entry.tsx");
+    const file = join(root, "src", "main.ssr.tsx");
     writeFileSync(
-      join(root, "src", "client.entry.ts"),
+      join(root, "src", "main.client.ts"),
       "console.log('client entry');",
     );
     writeFileSync(
@@ -63,15 +63,15 @@ describe("ssr entry helpers", () => {
   it("throws when both ts and tsx ssr entries exist", () => {
     const root = createTempRoot();
     writeFileSync(
-      join(root, "src", "client.entry.ts"),
+      join(root, "src", "main.client.ts"),
       "console.log('client entry');",
     );
     writeFileSync(
-      join(root, "src", "ssr.entry.ts"),
+      join(root, "src", "main.ssr.ts"),
       "export async function render(request, env) { return new Response('ok'); }",
     );
     writeFileSync(
-      join(root, "src", "ssr.entry.tsx"),
+      join(root, "src", "main.ssr.tsx"),
       "export async function render(request, env) { return new Response('ok'); }",
     );
 
@@ -81,11 +81,11 @@ describe("ssr entry helpers", () => {
   it("throws for missing render export", () => {
     const root = createTempRoot();
     writeFileSync(
-      join(root, "src", "client.entry.ts"),
+      join(root, "src", "main.client.ts"),
       "console.log('client entry');",
     );
     writeFileSync(
-      join(root, "src", "ssr.entry.ts"),
+      join(root, "src", "main.ssr.ts"),
       "export const notRender = () => new Response('ok');",
     );
 
@@ -95,7 +95,7 @@ describe("ssr entry helpers", () => {
   it("throws when server entry exists without client entry", () => {
     const root = createTempRoot();
     writeFileSync(
-      join(root, "src", "ssr.entry.ts"),
+      join(root, "src", "main.ssr.ts"),
       "export async function render(request, env) { return new Response('ok'); }",
     );
 
@@ -105,7 +105,7 @@ describe("ssr entry helpers", () => {
   it("throws when client entry exists without server entry", () => {
     const root = createTempRoot();
     writeFileSync(
-      join(root, "src", "client.entry.ts"),
+      join(root, "src", "main.client.ts"),
       "console.log('client entry');",
     );
 

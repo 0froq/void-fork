@@ -63,7 +63,7 @@ describe("playground/ssr dev routing", () => {
         expect(rootHtml).toContain("Vite Cloud SSR Playground");
         expect(rootHtml).toContain("Rendered URL: <!-- -->/");
         expect(rootHtml).toContain('<script type="module" src="/@vite/client"></script>');
-        expect(rootHtml).toContain('<script type="module" src="/src/client.entry.tsx"></script>');
+        expect(rootHtml).toContain('<script type="module" src="/src/main.client.tsx"></script>');
         expect(rootHtml).toContain("__vite_plugin_react_preamble_installed__ = true");
 
         const nestedResponse = await fetch(`${BASE}/dashboard`);
@@ -71,7 +71,7 @@ describe("playground/ssr dev routing", () => {
         const nestedHtml = await nestedResponse.text();
         expect(nestedHtml).toContain("Rendered URL: <!-- -->/dashboard");
 
-        const clientEntryResponse = await fetch(`${BASE}/src/client.entry.tsx`);
+        const clientEntryResponse = await fetch(`${BASE}/src/main.client.tsx`);
         expect(clientEntryResponse.status).toBe(200);
         const contentType = clientEntryResponse.headers.get("content-type") ?? "";
         expect(contentType).toContain("javascript");

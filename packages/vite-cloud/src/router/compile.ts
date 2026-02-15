@@ -10,9 +10,9 @@ export interface CompileOptions {
 }
 
 export interface SsrCompileOptions {
-  /** Absolute path to src/ssr.entry.ts(x) */
+  /** Absolute path to src/main.ssr.ts(x) */
   serverEntryPath: string;
-  /** Relative project path for src/client.entry.ts(x), e.g. src/client.entry.tsx */
+  /** Relative project path for src/main.client.ts(x), e.g. src/main.client.tsx */
   clientEntryRelativePath: string;
 }
 

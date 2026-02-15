@@ -6,15 +6,15 @@ Vite Cloud supports framework-agnostic SSR via explicit server and client entrie
 
 SSR mode is enabled when both of these exist:
 
-- `src/ssr.entry.ts` or `src/ssr.entry.tsx`
-- `src/client.entry.ts` or `src/client.entry.tsx`
+- `src/main.ssr.ts` or `src/main.ssr.tsx`
+- `src/main.client.ts` or `src/main.client.tsx`
 
 Only one server entry and one client entry may exist.
 If only one side is present, build/deploy fails with a clear error.
 
 ## Render API
 
-`src/ssr.entry.ts(x)` must export:
+`src/main.ssr.ts(x)` must export:
 
 ```ts
 render(request: Request, env: CloudEnv["Bindings"]): Response | Promise<Response>
@@ -38,7 +38,7 @@ export async function render(request: Request, env: { KV: KVNamespace }) {
 }
 ```
 
-`src/client.entry.ts(x)` should hydrate/mount your app:
+`src/main.client.ts(x)` should hydrate/mount your app:
 
 ```tsx
 import { hydrateRoot } from "react-dom/client";
@@ -54,7 +54,7 @@ You do not manually add script/link tags in SSR HTML.
 Vite Cloud injects client assets automatically:
 
 - In production: reads `dist/client/.vite/manifest.json` and injects entry script, CSS, and modulepreload links.
-- In dev: injects a module script for `/src/client.entry.ts(x)`.
+- In dev: injects a module script for `/src/main.client.ts(x)`.
 
 ## Request flow
 

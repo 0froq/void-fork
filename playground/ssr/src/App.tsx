@@ -16,7 +16,7 @@ export default function App({ url, visitCount }: AppProps) {
       <button type="button" onClick={() => setCount((value) => value + 1)}>
         Counter: {count}
       </button>
-      <p>This page was rendered on the worker via src/ssr.entry.tsx.</p>
+      <p>This page was rendered on the worker via src/main.ssr.tsx.</p>
     </main>
   );
 }

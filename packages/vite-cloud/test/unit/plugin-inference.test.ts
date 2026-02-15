@@ -21,10 +21,10 @@ describe("inferProjectBindings", () => {
     }
   });
 
-  it("infers bindings from src/ssr.entry.tsx", () => {
+  it("infers bindings from src/main.ssr.tsx", () => {
     const root = createTempRoot();
     writeFileSync(
-      join(root, "src", "ssr.entry.tsx"),
+      join(root, "src", "main.ssr.tsx"),
       `
       export async function render(request, env) {
         await env.KV.put("k", "v");
