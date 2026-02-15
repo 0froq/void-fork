@@ -84,19 +84,45 @@ The `assetTags` values are computed by Vite Cloud:
 
 ## SSG (Prerender)
 
-You can pre-render static HTML by exporting a `prerender` path list from `src/main.ssr.ts(x)`:
+You can pre-render static HTML by exporting a `prerender` path list or function from `src/main.ssr.ts(x)`.
+
+### Static array
 
 ```ts
 export const prerender = ["/", "/about", "/pricing"];
 ```
 
-Behavior:
+### Function
+
+For dynamic path lists (CMS content, markdown files, etc.), export a function:
+
+```ts
+// Arrow function
+export const prerender = async () => {
+  const { readdirSync } = await import("node:fs");
+  const files = readdirSync("content/blog");
+  return ["/", ...files.map((f) => `/blog/${f.replace(".md", "")}`)];
+};
+```
+
+```ts
+// Named function
+export async function prerender() {
+  const res = await fetch("https://cms.example.com/api/posts");
+  const posts = await res.json();
+  return ["/", ...posts.map((p) => `/blog/${p.slug}`)];
+}
+```
+
+The function runs at build time in Node.js (inside `closeBundle`), so `fetch()`, dynamic `import("node:fs")`, etc. all work. Use dynamic `import()` for Node.js-only APIs so the top-level import doesn't fail in the CF worker at runtime.
+
+### Behavior
 
 - runs during production build
 - each path is rendered through your SSR entry and written to `dist/client`
 - output shape is always `<path>/index.html` (for example `/about` -> `about/index.html`)
 - `/about/` is normalized to `/about`
-- prerender paths must be absolute and non-dynamic
+- prerender paths must be absolute and must not contain dynamic segments
 - any prerender failure hard-fails the build
 
 At runtime, these generated HTML files are served as static assets before SSR fallback.

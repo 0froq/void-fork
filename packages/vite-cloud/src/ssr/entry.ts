@@ -18,6 +18,11 @@ export interface SsrEntries {
   client: ResolvedEntry;
 }
 
+export type PrerenderConfig =
+  | { type: "none" }
+  | { type: "static"; paths: string[] }
+  | { type: "function" };
+
 function resolveSingleEntry(
   root: string,
   entries: readonly string[],
@@ -143,15 +148,15 @@ export function validateSsrEntry(root: string): string | null {
 }
 
 /**
- * Read optional static prerender paths from `export const prerender = [...]`
- * in the server entry. Paths must be absolute and non-dynamic.
+ * Detect prerender configuration from the SSR server entry.
+ * Returns the config type and, for static arrays, the extracted paths.
  */
-export function getSsrPrerenderPaths(root: string): string[] {
+export function getPrerenderConfig(root: string): PrerenderConfig {
   const entry = resolveSingleEntry(root, SSR_SERVER_ENTRY_RELATIVE_PATHS, "SSR");
-  if (!entry) return [];
+  if (!entry) return { type: "none" };
 
   const source = readFileSync(entry.absolutePath, "utf-8");
-  if (!source.includes("prerender")) return [];
+  if (!source.includes("prerender")) return { type: "none" };
 
   let parsed: ReturnType<typeof parseSync>;
   try {
@@ -165,30 +170,48 @@ export function getSsrPrerenderPaths(root: string): string[] {
   const program = parsed.program as { body?: any[] };
   const body = program.body ?? [];
 
-  let prerenderNode: any | null = null;
   for (const node of body) {
     if (node.type !== "ExportNamedDeclaration") continue;
+
+    // export async function prerender() { ... }
     const declaration = node.declaration;
+    if (declaration?.type === "FunctionDeclaration") {
+      if (declaration.id?.name === "prerender") {
+        return { type: "function" };
+      }
+      continue;
+    }
+
     if (declaration?.type !== "VariableDeclaration") continue;
     for (const decl of declaration.declarations ?? []) {
-      if (decl.id?.type === "Identifier" && decl.id.name === "prerender") {
-        prerenderNode = decl.init;
-        break;
+      if (decl.id?.type !== "Identifier" || decl.id.name !== "prerender") continue;
+      const init = decl.init;
+      if (!init) continue;
+
+      // export const prerender = async () => [...]
+      if (init.type === "ArrowFunctionExpression" || init.type === "FunctionExpression") {
+        return { type: "function" };
       }
+
+      // export const prerender = [...]
+      if (init.type === "ArrayExpression") {
+        return { type: "static", paths: extractStaticPaths(init, entry.relativePath) };
+      }
+
+      throw new Error(
+        `Invalid SSR prerender export at ${entry.relativePath}: expected string array literal or function.`,
+      );
     }
-    if (prerenderNode) break;
   }
 
-  if (!prerenderNode) return [];
-  if (prerenderNode.type !== "ArrayExpression") {
-    throw new Error(
-      `Invalid SSR prerender export at ${entry.relativePath}: expected string array literal.`,
-    );
-  }
+  return { type: "none" };
+}
 
+function extractStaticPaths(arrayNode: any, relativePath: string): string[] {
   const normalized: string[] = [];
   const seen = new Set<string>();
-  for (const element of prerenderNode.elements ?? []) {
+
+  for (const element of arrayNode.elements ?? []) {
     if (!element) continue;
 
     let value: string | null = null;
@@ -204,15 +227,13 @@ export function getSsrPrerenderPaths(root: string): string[] {
 
     if (typeof value !== "string") {
       throw new Error(
-        `Invalid SSR prerender export at ${entry.relativePath}: all entries must be string literals.`,
+        `Invalid SSR prerender export at ${relativePath}: all entries must be string literals.`,
       );
     }
 
-    const path = normalizePrerenderPath(value, entry.relativePath);
+    const path = normalizePrerenderPath(value, relativePath);
     if (seen.has(path)) {
-      throw new Error(
-        `Invalid SSR prerender export at ${entry.relativePath}: duplicate path "${path}".`,
-      );
+      throw new Error(`Invalid SSR prerender export at ${relativePath}: duplicate path "${path}".`);
     }
     seen.add(path);
     normalized.push(path);
@@ -221,18 +242,49 @@ export function getSsrPrerenderPaths(root: string): string[] {
   return normalized;
 }
 
+/**
+ * Convenience wrapper: returns static paths or empty array.
+ */
+export function getSsrPrerenderPaths(root: string): string[] {
+  const config = getPrerenderConfig(root);
+  return config.type === "static" ? config.paths : [];
+}
+
 function normalizePrerenderPath(path: string, relativePath: string): string {
   if (!path.startsWith("/")) {
     throw new Error(
       `Invalid SSR prerender export at ${relativePath}: "${path}" must start with "/".`,
     );
   }
-  if (/[:*\[\]]/.test(path)) {
+
+  if (/[:*[\]]/.test(path)) {
     throw new Error(
       `Invalid SSR prerender export at ${relativePath}: "${path}" must not be dynamic.`,
     );
   }
 
+  if (path.length > 1 && path.endsWith("/")) {
+    return path.slice(0, -1);
+  }
+  return path;
+}
+
+/**
+ * Validate a prerender path returned by a user function at build time.
+ * Returns the normalized path.
+ */
+export function validatePrerenderPath(path: unknown): string {
+  if (typeof path !== "string") {
+    throw new Error(`Prerender function returned non-string path: ${JSON.stringify(path)}.`);
+  }
+  if (!path.startsWith("/")) {
+    throw new Error(`Prerender function returned invalid path "${path}": must start with "/".`);
+  }
+  if (/[:*[\]]/.test(path)) {
+    throw new Error(
+      `Prerender function returned invalid path "${path}": must not contain dynamic segments.`,
+    );
+  }
   if (path.length > 1 && path.endsWith("/")) {
     return path.slice(0, -1);
   }

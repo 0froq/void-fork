@@ -100,13 +100,45 @@ describe("compileRouteTable", () => {
     expect(code).toContain('from "/@react-refresh"');
     expect(code).toContain("__vite_plugin_react_preamble_installed__ = true");
   });
+
+  it("exports __resolvePrerenderPaths returning null when SSR is disabled", () => {
+    const scan: ScanResult = { routes: [], middleware: [], jobs: [] };
+    const code = compileRouteTable(scan, "/routes", "/middleware", "/jobs", null, testOptions);
+
+    expect(code).toContain("export async function __resolvePrerenderPaths() { return null; }");
+  });
+
+  it("exports __resolvePrerenderPaths that imports SSR entry when SSR is enabled", () => {
+    const scan: ScanResult = { routes: [], middleware: [], jobs: [] };
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/jobs",
+      {
+        serverEntryPath: "/src/main.ssr.ts",
+        clientEntryRelativePath: "src/main.client.tsx",
+      },
+      testOptions,
+    );
+
+    expect(code).toContain("export async function __resolvePrerenderPaths()");
+    expect(code).toContain('import("/src/main.ssr.ts")');
+    expect(code).toContain("const p = mod.prerender;");
+    expect(code).toContain('if (typeof p === "function") return await p();');
+    expect(code).toContain("if (Array.isArray(p)) return p;");
+    expect(code).toContain("return null;");
+  });
 });
 
 describe("compileWorkerEntry", () => {
-  it("generates valid worker entry code", () => {
+  it("generates valid worker entry code with __resolvePrerenderPaths re-export", () => {
     const code = compileWorkerEntry();
 
-    expect(code).toContain("import app, { scheduled } from 'virtual:vite-cloud-routes'");
+    expect(code).toContain(
+      "import app, { scheduled, __resolvePrerenderPaths } from 'virtual:vite-cloud-routes'",
+    );
     expect(code).toContain("export default { fetch: app.fetch, scheduled }");
+    expect(code).toContain("export { __resolvePrerenderPaths }");
   });
 });
