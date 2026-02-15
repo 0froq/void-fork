@@ -122,6 +122,8 @@ export interface CfApiMocks {
   createR2: (url: string, init?: RequestInit) => Response;
   queryD1: (url: string, init?: RequestInit) => Response | Promise<Response>;
   uploadWorker: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  setWorkerSecret: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  deleteWorkerSecret: (url: string, init?: RequestInit) => Response | Promise<Response>;
 }
 
 const defaultMocks: CfApiMocks = {
@@ -130,6 +132,8 @@ const defaultMocks: CfApiMocks = {
   createR2: () => cfSuccess({ name: "test-bucket" }),
   queryD1: () => cfSuccess([{ results: [] }]),
   uploadWorker: () => new Response("ok", { status: 200 }),
+  setWorkerSecret: () => cfSuccess({}),
+  deleteWorkerSecret: () => cfSuccess({}),
 };
 
 export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeof vi.fn> {
@@ -141,6 +145,12 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
     const method = init?.method ?? "GET";
 
     // Order matters: more specific patterns first
+    if (method === "PUT" && url.includes("/workers/dispatch/") && url.includes("/secrets")) {
+      return mocks.setWorkerSecret(url, init);
+    }
+    if (method === "DELETE" && url.includes("/workers/dispatch/") && url.includes("/secrets/")) {
+      return mocks.deleteWorkerSecret(url, init);
+    }
     if (method === "PUT" && url.includes("/workers/dispatch/")) {
       return mocks.uploadWorker(url, init);
     }

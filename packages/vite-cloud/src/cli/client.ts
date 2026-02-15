@@ -22,6 +22,11 @@ export interface DeployResponse {
   migrations?: number;
 }
 
+export interface SecretResponse {
+  ok: boolean;
+  name: string;
+}
+
 /**
  * HTTP client for the Vite Cloud platform API.
  */
@@ -94,6 +99,40 @@ export class PlatformClient {
     if (!res.ok) {
       const body = await res.text();
       throw new Error(`Deploy failed: ${res.status} ${body}`);
+    }
+
+    return res.json();
+  }
+
+  async setSecret(projectId: string, name: string, value: string): Promise<SecretResponse> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}/secrets/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.token}`,
+      },
+      body: JSON.stringify({ value }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Failed to set secret: ${res.status} ${body}`);
+    }
+
+    return res.json();
+  }
+
+  async deleteSecret(projectId: string, name: string): Promise<SecretResponse> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}/secrets/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Failed to delete secret: ${res.status} ${body}`);
     }
 
     return res.json();
