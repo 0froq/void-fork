@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getRequestedProjectSlug, resolveProjectBySlug } from "../../src/deploy/deploy";
+import { getRequestedProjectSlug, resolveProjectBySlug } from "../../src/cli/deploy";
 
 describe("getRequestedProjectSlug", () => {
   afterEach(() => {
