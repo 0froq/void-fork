@@ -3,7 +3,8 @@ import { getToken } from "./auth";
 import { PlatformClient } from "./client";
 
 export async function runListCommand(): Promise<void> {
-  intro("vite-cloud list");
+  console.log();
+  intro("\x1b[34mvite-cloud list\x1b[0m");
 
   const token = getToken();
   if (!token) {
