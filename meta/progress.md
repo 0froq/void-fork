@@ -36,7 +36,7 @@ Implementation Progress
 - [x] Secrets management
 - [x] Cron & background jobs (file convention)
 - [x] SSR support (minimal `src/main.ssr.ts` convention)
-- [ ] Auth via better-auth integration (`auth: true` zero-config)
+- [ ] Zero config auth (via `hono/basic-auth` and `@hono/oauth-providers`)
 
 **Milestone:**
 
