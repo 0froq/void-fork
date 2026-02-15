@@ -9,6 +9,7 @@ import { inferProjectBindings } from "../plugin-inference";
 import { promptProjectSelection, promptProjectSlug } from "./prompt";
 import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
+import { scanJobsSync } from "../jobs/scan";
 
 export interface RunDeployOptions {
   projectSlug?: string;
@@ -123,10 +124,14 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
 
   const distDir = join(root, "dist");
   const workerDirName = detectWorkerDir(root, distDir);
+  const schedules = scanJobsSync(root).map((job) => ({
+    name: job.name,
+    cron: job.cron,
+  }));
 
   // 7. Package
   console.log("Packaging...");
-  const formData = packageBuild(distDir, workerDirName, bindings, validatedMigrations);
+  const formData = packageBuild(distDir, workerDirName, bindings, validatedMigrations, schedules);
 
   // 8. Upload
   console.log("Deploying...");
@@ -136,6 +141,9 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   console.log(`  ${result.workers} worker module(s), ${result.assets} static asset(s)`);
   if (result.migrations) {
     console.log(`  ${result.migrations} migration(s) applied`);
+  }
+  if (schedules.length > 0) {
+    console.log(`  ${schedules.length} cron job(s) scheduled`);
   }
 }
 
@@ -188,9 +196,7 @@ export function detectWorkerDir(root: string, distDir: string): string {
   }
 
   if (candidates.length === 0) {
-    throw new Error(
-      `No worker output directory found in ${distDir}. Expected ${expectedPath}.`,
-    );
+    throw new Error(`No worker output directory found in ${distDir}. Expected ${expectedPath}.`);
   }
 
   throw new Error(

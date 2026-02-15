@@ -12,6 +12,13 @@ export interface CloudEnv extends Env {
 export type CloudContext = Context<CloudEnv>;
 
 type HandlerFn = (c: CloudContext) => unknown | Promise<unknown>;
+type JobController = ScheduledController;
+type JobExecutionContext = ExecutionContext;
+type JobFn = (
+  controller: JobController,
+  env: CloudEnv["Bindings"],
+  ctx: JobExecutionContext,
+) => unknown | Promise<unknown>;
 
 /**
  * Identity function that provides type inference for route handlers.
@@ -28,5 +35,13 @@ export function defineHandler(handler: HandlerFn): HandlerFn {
 export function defineMiddleware(
   handler: MiddlewareHandler<CloudEnv>,
 ): MiddlewareHandler<CloudEnv> {
+  return handler;
+}
+
+/**
+ * Identity function that provides type inference for scheduled jobs.
+ * At runtime it simply returns the function passed to it.
+ */
+export function defineJob(handler: JobFn): JobFn {
   return handler;
 }

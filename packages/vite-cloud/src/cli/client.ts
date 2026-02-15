@@ -105,14 +105,17 @@ export class PlatformClient {
   }
 
   async setSecret(projectId: string, name: string, value: string): Promise<SecretResponse> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/secrets/${encodeURIComponent(name)}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.token}`,
+    const res = await fetch(
+      `${this.baseUrl}/projects/${projectId}/secrets/${encodeURIComponent(name)}`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.token}`,
+        },
+        body: JSON.stringify({ value }),
       },
-      body: JSON.stringify({ value }),
-    });
+    );
 
     if (!res.ok) {
       const body = await res.text();
@@ -123,12 +126,15 @@ export class PlatformClient {
   }
 
   async deleteSecret(projectId: string, name: string): Promise<SecretResponse> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/secrets/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${this.token}`,
+    const res = await fetch(
+      `${this.baseUrl}/projects/${projectId}/secrets/${encodeURIComponent(name)}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+        },
       },
-    });
+    );
 
     if (!res.ok) {
       const body = await res.text();

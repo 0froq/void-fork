@@ -30,11 +30,13 @@ Confirm:
 ## Migration workflow
 
 1. Update dependencies
+
 - Remove `@cloudflare/vite-plugin` if it is only used for runtime/deploy.
 - Add `vite-cloud`.
 - Keep existing framework plugins (React/Vue/Svelte/etc.).
 
 2. Update Vite config
+
 - Replace `cloudflare(...)` plugin usage with `viteCloud()`.
 - Keep plugin order stable unless there is a known conflict.
 - Keep unrelated Vite settings unchanged.
@@ -51,6 +53,7 @@ export default defineConfig({
 ```
 
 3. Migrate API surface to file-based routes
+
 - Create `routes/` if missing.
 - Convert each existing endpoint into route files:
   - `routes/api/users.get.ts`
@@ -60,21 +63,25 @@ export default defineConfig({
 - If there is shared logic, move it into regular modules and import from route files.
 
 4. Migrate middleware
+
 - Move request-wide middleware to `middleware/*.ts`.
 - Export with `defineMiddleware`.
 - Preserve behavior order by filename prefix when needed (`01.auth.ts`, `02.logger.ts`).
 
 5. Preserve bindings with Vite Cloud conventions
+
 - Keep Cloudflare-style uppercase names on `c.env` (`DB`, `KV`, `STORAGE`, etc.).
 - Remove manual binding config from Vite plugin config where Vite Cloud now infers usage.
 - Ensure route code actually references required bindings so inference can detect them.
 
 6. Migrations
+
 - Place SQL files in `migrations/` (sorted by filename).
 - Keep destructive operations gated by explicit pragma if needed.
 - If old migrations live elsewhere, copy/rename into this directory with stable ordering.
 
 7. Deploy workflow migration
+
 - Replace old deploy instructions with:
   - `vcd login`
   - `vcd deploy`
@@ -83,6 +90,7 @@ export default defineConfig({
   - or `VITE_CLOUD_PROJECT=<slug> vcd deploy`
 
 8. Post-migration cleanup (remove obsolete Wrangler wiring)
+
 - If the app no longer uses direct Wrangler workflows, remove `wrangler.jsonc`.
 - Remove direct `wrangler` dependency/devDependency from `package.json` when it is only used for old deploy/dev scripts.
 - Remove or rewrite npm scripts that call `wrangler` directly (for example old deploy/publish scripts).
@@ -93,6 +101,7 @@ export default defineConfig({
 Apply these filename rules exactly when mapping old handlers to `routes/`:
 
 1. Extension and suffix parsing order
+
 - Strip extension (`.ts`, `.js`, `.mts`, `.mjs`).
 - Strip env suffix (`.dev`, `.prod`).
 - Strip HTTP method suffix (`.get`, `.post`, `.put`, `.delete`, `.patch`).
@@ -100,30 +109,36 @@ Apply these filename rules exactly when mapping old handlers to `routes/`:
 - Remove route group segments `(group-name)` from URL path.
 
 2. Method mapping
+
 - `users.get.ts` matches only `GET /users`.
 - `users.post.ts` matches only `POST /users`.
 - `users.ts` matches all methods.
 - Split multi-method handlers into one file per method when preserving behavior matters.
 
 3. Dynamic and catch-all params
+
 - `[id]` -> `:id`
 - `[...slug]` -> catch-all named param
 - `[...]` -> catch-all unnamed fallback
 - Use folder nesting for multiple params: `routes/api/org/[org]/repo/[repo].get.ts`.
 
 4. Route groups and organization
+
 - Directories like `(internal)` are for code organization only and do not appear in URL.
 - Use them when reorganizing large route sets without changing public paths.
 
 5. Ignored files
+
 - Files or directories starting with `_` are ignored by route scanner.
 - Do not place active handlers under `_legacy`, `_draft`, etc.
 
 6. Middleware behavior
+
 - Middleware files live in `middleware/` and run in filename order.
 - Prefix numerically if order is important (`01.auth.ts`, `02.logger.ts`).
 
 7. Concrete mapping examples
+
 - `src/worker.ts` handling `GET /api/users/:id` -> `routes/api/users/[id].get.ts`
 - single handler switching on method for `/api/users` -> `routes/api/users.get.ts` and `routes/api/users.post.ts`
 - legacy `GET /health` endpoint -> `routes/health.get.ts`

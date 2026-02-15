@@ -18,6 +18,7 @@ export function routingPlugin(root: string): Plugin {
   let scan: ScanResult | null = null;
   const routesDir = join(root, "routes");
   const middlewareDir = join(root, "middleware");
+  const jobsDir = join(root, "jobs");
 
   async function rescan() {
     scan = await scanRoutes(root);
@@ -65,7 +66,7 @@ export function routingPlugin(root: string): Plugin {
     async load(id) {
       if (id === RESOLVED_VIRTUAL_ROUTES_ID) {
         if (!scan) await rescan();
-        return compileRouteTable(scan!, routesDir, middlewareDir, compileOptions);
+        return compileRouteTable(scan!, routesDir, middlewareDir, jobsDir, compileOptions);
       }
     },
 
@@ -74,7 +75,13 @@ export function routingPlugin(root: string): Plugin {
       const watcher = devServer.watcher;
 
       const handleFileChange = async (path: string) => {
-        if (!path.startsWith(routesDir) && !path.startsWith(middlewareDir)) return;
+        if (
+          !path.startsWith(routesDir) &&
+          !path.startsWith(middlewareDir) &&
+          !path.startsWith(jobsDir)
+        ) {
+          return;
+        }
 
         // Re-scan and invalidate the virtual module in ALL environments.
         // The route table virtual module lives in the workerd environment,

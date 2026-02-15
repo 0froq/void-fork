@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { InferredBindings } from "../inference/walk";
 import type { MigrationFile } from "../migrations/validate";
-import type { DeployManifest } from "./types";
+import type { DeployManifest, ScheduleMeta } from "./types";
 
 /**
  * Package the build output into a FormData ready for upload.
@@ -17,6 +17,7 @@ export function packageBuild(
   workerDirName: string,
   bindings: InferredBindings,
   migrations?: MigrationFile[],
+  schedules?: ScheduleMeta[],
 ): FormData {
   const formData = new FormData();
 
@@ -35,6 +36,10 @@ export function packageBuild(
     for (const m of migrations) {
       formData.append(`migration:${m.name}`, new Blob([m.sql]), m.name);
     }
+  }
+
+  if (schedules && schedules.length > 0) {
+    manifest.schedules = schedules;
   }
 
   formData.append("manifest", JSON.stringify(manifest));
