@@ -68,6 +68,14 @@ npx vcd login
 
 ## 7. Deploy
 
+Set secrets once before deploying:
+
+```bash
+npx vcd secret put KEY=value
+```
+
+Then run:
+
 ```bash
 npx vcd deploy
 ```
