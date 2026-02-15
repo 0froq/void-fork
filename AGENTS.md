@@ -98,7 +98,7 @@ src/
 | `vite-cloud/handler`  | `defineHandler()`, `defineMiddleware()`, `CloudContext`, `CloudEnv` types                 |
 | `vite-cloud/response` | `convertReturnValue()`                                                                    |
 
-The CLI binary is at `dist/deploy/cli.mjs` (declared in `bin` field of package.json).
+The CLI binary is at `dist/cli/cli.mjs` (declared in `bin` field of package.json).
 
 Build output uses `.mjs` / `.d.mts` extensions (tsdown 0.20.3 default).
 
