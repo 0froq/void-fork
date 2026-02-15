@@ -1,5 +1,14 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getRequestedProjectSlug, resolveProjectBySlug } from "../../src/cli/deploy";
+import {
+  getRequestedProjectSlug,
+  inferDefaultProjectNameAndSlug,
+  resolveProjectBySlug,
+} from "../../src/cli/deploy";
+
+const tempDirs: string[] = [];
 
 describe("getRequestedProjectSlug", () => {
   afterEach(() => {
@@ -46,5 +55,36 @@ describe("resolveProjectBySlug", () => {
     expect(() => resolveProjectBySlug([], "missing")).toThrow(
       'No project found with slug "missing".',
     );
+  });
+});
+
+describe("inferDefaultProjectNameAndSlug", () => {
+  afterEach(() => {
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop()!;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("derives slug from a scoped package name", () => {
+    const root = mkdtempSync(join(tmpdir(), "vite-cloud-test-"));
+    tempDirs.push(root);
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "@acme/my-app" }));
+
+    expect(inferDefaultProjectNameAndSlug(root)).toEqual({
+      name: "@acme/my-app",
+      slug: "my-app",
+    });
+  });
+
+  it("uses fallback values when package name is missing", () => {
+    const root = mkdtempSync(join(tmpdir(), "vite-cloud-test-"));
+    tempDirs.push(root);
+    writeFileSync(join(root, "package.json"), JSON.stringify({}));
+
+    expect(inferDefaultProjectNameAndSlug(root)).toEqual({
+      name: "my-app",
+      slug: "my-app",
+    });
   });
 });
