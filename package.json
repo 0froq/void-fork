@@ -7,13 +7,21 @@
     "lint": "oxlint",
     "fmt": "oxfmt --write .",
     "check": "pnpm -r --parallel typecheck",
-    "deploy": "pnpm -r build && pnpm run --filter @vite-cloud/platform deploy && pnpm run --filter @vite-cloud/dispatch deploy"
+    "ready": "oxlint && oxfmt --check && pnpm check && pnpm -r build && vitest --run",
+    "deploy": "pnpm ready && pnpm run --filter @vite-cloud/platform deploy && pnpm run --filter @vite-cloud/dispatch deploy",
+    "prepare": "husky"
   },
   "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "oxfmt": "^0.32.0",
     "oxlint": "^1.47.0",
     "typescript": "catalog:",
     "vitest": "^4.0.18"
+  },
+  "lint-staged": {
+    "*": "oxfmt --no-error-on-unmatched-pattern",
+    "*.{js,jsx,ts,tsx,mjs,cjs}": "oxlint"
   },
   "packageManager": "pnpm@10.29.3",
   "pnpm": {
