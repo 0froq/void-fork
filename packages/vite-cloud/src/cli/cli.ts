@@ -72,14 +72,13 @@ Usage:
   vcd logout         Log out and remove credentials
   vcd whoami         Show the logged-in GitHub username
   vcd list           List your projects
-  vcd deploy [--project <slug>]
+  vcd deploy [--project <name>]
                      Build and deploy to Vite Cloud
-  vcd link [slug]    Link to an existing project
+  vcd link [name]    Link to an existing project
 
 Environment:
   VITE_CLOUD_TOKEN     Auth token (or use ~/.vite-cloud/credentials.json)
-  VITE_CLOUD_API_URL   Platform API URL (default: https://api.vite.cloud)
-  VITE_CLOUD_PROJECT   Deploy target project slug override
+  VITE_CLOUD_PROJECT   Deploy target project name override
 `);
   if (command && command !== "help" && command !== "--help" && command !== "-h") {
     console.error(`Unknown command: ${command}`);
