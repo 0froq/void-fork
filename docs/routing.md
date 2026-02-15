@@ -4,7 +4,7 @@ Vite Cloud routing runs on a generated Hono app.
 
 It uses a file-system router from `routes/` plus optional global middleware from `middleware/`.
 
-If `src/main.ssr.ts` exists, route handlers still run first and SSR is used as a fallback for unmatched non-API requests.
+If `src/main.ssr.ts` exists, route handlers still run first and SSR is used as a fallback for unmatched non-API requests via `render(c, assetTags)`.
 
 ## Route files
 

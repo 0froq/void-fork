@@ -89,6 +89,7 @@ describe("compileRouteTable", () => {
     expect(code).toContain("return fetchFromAssets(c)");
     expect(code).toContain('import("/src/main.ssr.ts")');
     expect(code).toContain("return renderSsrResponse(c, mod)");
+    expect(code).toContain("return render(c, assetTags)");
     expect(code).toContain('const SSR_CLIENT_ENTRY_ID = "src/main.client.tsx"');
     expect(code).toContain('const SSR_CLIENT_ENTRY_URL = "/src/main.client.tsx"');
     expect(code).toContain('new URL("/.vite/manifest.json", request.url)');
