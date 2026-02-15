@@ -16,7 +16,7 @@ Implementation Progress
 
 **Milestone:** ✅ A user can run `npm create vite-cloud`, add a route file using `defineHandler` that queries a database, and see it work locally with zero config.
 
-## Phase 2: Platform & Deploy (in progress)
+## Phase 2: Platform & Deploy ✅
 
 - [x] Control Plane API (projects, deploy endpoint) — `packages/platform/`
 - [x] Dispatch worker + `*.vitecloud.app` routing — `packages/dispatch/`
@@ -31,13 +31,21 @@ Implementation Progress
 
 **Milestone:** ✅ Full deploy pipeline complete. Stateless deploy, provisioning, auth, and remote migrations all working. Migrations run before worker deploy (zero-downtime guarantee). Destructive-op detection with pragma override.
 
-### Phase 3: GitHub & Production Readiness (Weeks 11–16)
+### Phase 3: Developer facing features (in progress)
+
+- [ ] Secrets management
+- [ ] Cron & background jobs (file convention)
+- [ ] SSR support (minimal `src/ssr.entry.ts` convention)
+- [ ] Auth via better-auth integration (`auth: true` zero-config)
+
+**Milestone:** 
+
+### Phase 4: GitHub & Production Readiness
 
 - [ ] GitHub App for webhook-based deploys
 - [ ] Build infrastructure (CF containers)
 - [ ] Preview deployments per PR
 - [ ] Custom domains
-- [ ] Secrets management
 - [ ] Usage metering and limits enforcement
 - [ ] Billing integration (Stripe)
 - [ ] Dashboard (web UI for managing projects, viewing logs)
@@ -45,13 +53,11 @@ Implementation Progress
 
 **Milestone:** Ready for public beta.
 
-### Phase 4: Growth (Post-Launch)
+### Phase 5: Growth (Post-Launch)
 
 #### v1.1 — Full-Stack & Observability
 
-- [ ] SSR support (minimal `src/ssr.entry.ts` convention)
 - [ ] Meta-framework adapters (TanStack Start, SolidStart, SvelteKit, Analog)
-- [ ] Auth via better-auth integration (`auth: true` zero-config)
 - [ ] Per-route observability (request volume, latency, error rates per route)
 - [ ] Core Web Vitals monitoring (injected `web-vitals` → Analytics Engine)
 - [ ] Privacy-first SPA analytics (no cookies, GDPR-compliant)

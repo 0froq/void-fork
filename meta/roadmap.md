@@ -395,12 +395,12 @@ v0.1  ✅ DONE
 v1.0 ← NEXT
 │  ├── Zero-downtime migrations
 │  ├── Cron & background jobs (file convention)
+│  ├── SSR support (minimal entry point convention)
+│  ├── Auth via better-auth integration
 │  ├── GitHub integration (push to deploy)
 │  └── Basic user dashboard
 │
 v1.1
-│  ├── SSR support (minimal entry point convention)
-│  ├── Auth via better-auth integration
 │  ├── Meta-framework adapters (TanStack Start, SolidStart, SvelteKit)
 │  ├── Per-route observability
 │  ├── Core Web Vitals monitoring
