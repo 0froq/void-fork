@@ -1,4 +1,4 @@
-import { intro, outro, spinner, select, isCancel, cancel } from "@clack/prompts";
+import { intro, outro, log, spinner, select, isCancel, cancel } from "@clack/prompts";
 import { getToken, runLogin, saveToken } from "./auth";
 
 export async function runLoginCommand(): Promise<void> {
@@ -6,8 +6,8 @@ export async function runLoginCommand(): Promise<void> {
 
   const existing = getToken();
   if (existing) {
-    console.log("Already logged in.");
-    console.log("To re-login, delete ~/.vite-cloud/credentials.json and run again.");
+    log.warn("Already logged in.");
+    outro("To re-login, delete ~/.vite-cloud/credentials.json and run again.");
     return;
   }
 

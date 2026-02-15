@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { intro, outro, log, note, spinner } from "@clack/prompts";
 import { getToken } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
 import { packageBuild } from "./package";
@@ -56,13 +57,12 @@ export function inferDefaultProjectNameAndSlug(root: string): { name: string; sl
  * 5. Print live URL
  */
 export async function runDeploy(root: string, options?: RunDeployOptions): Promise<void> {
+  intro("vite-cloud deploy");
+
   // 1. Auth
   const token = getToken();
   if (!token) {
-    console.error(
-      "Error: No auth token found.\n" +
-        "Set VITE_CLOUD_TOKEN environment variable or run `vite-cloud login`.",
-    );
+    log.error("No auth token found. Run `vcd login` first.");
     process.exit(1);
   }
 
@@ -89,7 +89,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
       if (result.action === "select") {
         config = { projectId: result.project.id, slug: result.project.slug };
         writeProjectConfig(root, config);
-        console.log(`Linked to ${config.slug}`);
+        log.step(`Linked to ${config.slug}`);
       } else {
         // User wants to create a new project — fall through
         config = await createNewProject(root, client);
@@ -103,7 +103,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   }
 
   // 3. Build
-  console.log("Building...");
+  log.step("Building...");
   execSync("npx vite build", { cwd: root, stdio: "inherit" });
 
   // 4. Infer bindings
@@ -116,9 +116,9 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   if (rawMigrations.length > 0) {
     try {
       validatedMigrations = validateMigrations(rawMigrations);
-      console.log(`Found ${validatedMigrations.length} migration(s)`);
+      log.info(`Found ${validatedMigrations.length} migration(s)`);
     } catch (err: any) {
-      console.error(`Error: ${err.message}`);
+      log.error(err.message);
       process.exit(1);
     }
   }
@@ -131,8 +131,10 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   }));
   const ssrEntry = validateSsrEntry(root);
 
-  // 7. Package
-  console.log("Packaging...");
+  // 7. Package & Upload
+  const s = spinner();
+
+  s.start("Packaging...");
   const formData = packageBuild(
     distDir,
     workerDirName,
@@ -142,21 +144,23 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
     Boolean(ssrEntry),
   );
 
-  // 8. Upload
-  console.log("Deploying...");
+  s.message("Deploying...");
   const result = await client.deploy(config.projectId, formData);
+  s.stop("Deployed!");
 
-  console.log(`\nDeployed! ${result.url}`);
-  console.log(`  ${result.workers} worker module(s), ${result.assets} static asset(s)`);
+  const summary = [`${result.workers} worker module(s), ${result.assets} static asset(s)`];
   if (result.migrations) {
-    console.log(`  ${result.migrations} migration(s) applied`);
+    summary.push(`${result.migrations} migration(s) applied`);
   }
   if (schedules.length > 0) {
-    console.log(`  ${schedules.length} cron job(s) scheduled`);
+    summary.push(`${schedules.length} cron job(s) scheduled`);
   }
   if (ssrEntry) {
-    console.log("  SSR enabled");
+    summary.push("SSR enabled");
   }
+  note(summary.join("\n"), result.url);
+
+  outro("Done!");
 }
 
 async function createNewProject(
@@ -168,11 +172,11 @@ async function createNewProject(
   const projectSlug = slug ?? inferred.slug;
   const name = inferred.name;
 
-  console.log(`Creating project "${projectSlug}"...`);
+  log.step(`Creating project "${projectSlug}"...`);
   const project = await client.createProject(projectSlug, name);
   const config = { projectId: project.id, slug: project.slug };
   writeProjectConfig(root, config);
-  console.log(`Project created: ${config.slug}`);
+  log.success(`Project created: ${config.slug}`);
   return config;
 }
 

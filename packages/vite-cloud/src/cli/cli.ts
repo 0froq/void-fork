@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { log, intro, outro, note } from "@clack/prompts";
 import { runDeploy } from "./deploy";
 import { runLink } from "./link";
 import { runLoginCommand } from "./login";
@@ -42,24 +43,24 @@ if (command === "deploy") {
   });
 } else if (command === "logout") {
   if (removeToken()) {
-    console.log("Logged out.");
+    log.success("Logged out.");
   } else {
-    console.log("Not logged in.");
+    log.info("Not logged in.");
   }
 } else if (command === "whoami") {
   const token = getToken();
   if (!token) {
-    console.error("Not logged in. Run `vcd login` first.");
+    log.error("Not logged in. Run `vcd login` first.");
     process.exit(1);
   }
   const client = new PlatformClient(token);
   client
     .whoami()
     .then((user) => {
-      console.log(user.login);
+      log.info(user.login);
     })
     .catch((err) => {
-      console.error(err.message ?? err);
+      log.error(err.message ?? err);
       process.exit(1);
     });
 } else if (command === "list") {
@@ -88,28 +89,35 @@ if (command === "deploy") {
     process.exit(1);
   });
 } else {
-  console.log(`vite-cloud CLI (alias: vcd)
+  intro("vite-cloud");
 
-Usage:
-  vcd login          Log in with GitHub or Google
-  vcd logout         Log out and remove credentials
-  vcd whoami         Show the logged-in username
-  vcd list           List your projects
-  vcd secret put <name|name=value> [--project <name>]
-                     Set a project secret (inline value, prompt, or stdin)
-  vcd secret delete <name> [--project <name>]
-                     Delete a project secret
-  vcd deploy [--project <name>]
-                     Build and deploy to Vite Cloud
-  vcd delete [name]  Delete a project and all its resources
-  vcd link [name]    Link to an existing project
-
-Environment:
-  VITE_CLOUD_TOKEN     Auth token (or use ~/.vite-cloud/credentials.json)
-  VITE_CLOUD_PROJECT   Deploy target project name override
-`);
   if (command && command !== "help" && command !== "--help" && command !== "-h") {
-    console.error(`Unknown command: ${command}`);
+    log.error(`Unknown command: ${command}`);
     process.exit(1);
   }
+
+  note(
+    [
+      "vcd login                          Log in with GitHub or Google",
+      "vcd logout                         Log out and remove credentials",
+      "vcd whoami                         Show the logged-in username",
+      "vcd list                           List your projects",
+      "vcd deploy [--project <name>]      Build and deploy to Vite Cloud",
+      "vcd delete [name]                  Delete a project and all its resources",
+      "vcd link [name]                    Link to an existing project",
+      "vcd secret put <name> [--project]  Set a project secret",
+      "vcd secret delete <name>           Delete a project secret",
+    ].join("\n"),
+    "Commands",
+  );
+
+  note(
+    [
+      "VITE_CLOUD_TOKEN     Auth token (or use ~/.vite-cloud/credentials.json)",
+      "VITE_CLOUD_PROJECT   Deploy target project name override",
+    ].join("\n"),
+    "Environment",
+  );
+
+  outro("https://vite.cloud");
 }

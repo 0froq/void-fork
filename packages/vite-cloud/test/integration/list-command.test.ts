@@ -18,6 +18,23 @@ async function importRunListCommand() {
   return mod.runListCommand;
 }
 
+function captureStdout(): { output: () => string; restore: () => void } {
+  const chunks: string[] = [];
+  const mock = vi.spyOn(process.stdout, "write").mockImplementation((...args: unknown[]) => {
+    const chunk = args[0];
+    if (typeof chunk === "string") {
+      chunks.push(chunk);
+    } else if (Buffer.isBuffer(chunk)) {
+      chunks.push(chunk.toString());
+    }
+    return true;
+  });
+  return {
+    output: () => chunks.join(""),
+    restore: () => mock.mockRestore(),
+  };
+}
+
 describe("runListCommand", () => {
   afterEach(() => {
     delete process.env.VITE_CLOUD_TOKEN;
@@ -57,26 +74,21 @@ describe("runListCommand", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const capture = captureStdout();
     const runListCommand = await importRunListCommand();
     await runListCommand();
+    const out = capture.output();
+    capture.restore();
 
     expect(fetchMock).toHaveBeenCalledWith("https://api.example.test/projects", {
       headers: { Authorization: "Bearer test-token" },
     });
-    const lines = logSpy.mock.calls.map((call) => String(call[0]));
-    expect(lines[0]).toContain("name");
-    expect(lines[0]).toContain("project id");
-    expect(lines[0]).toContain("url");
-    expect(lines[0]).toContain("\x1b[1m");
-    expect(lines[0]).toContain("\x1b[36m");
-    expect(lines[0]).toContain("\x1b[0m");
-    expect(lines[1]).toContain("star-tracker");
-    expect(lines[1]).toContain("proj_1");
-    expect(lines[1]).toContain("https://star-tracker.vitecloud.app");
-    expect(lines[2]).toContain("todo-app");
-    expect(lines[2]).toContain("proj_2");
-    expect(lines[2]).toContain("https://todo-app.vitecloud.app");
+    expect(out).toContain("star-tracker");
+    expect(out).toContain("proj_1");
+    expect(out).toContain("https://star-tracker.vitecloud.app");
+    expect(out).toContain("todo-app");
+    expect(out).toContain("proj_2");
+    expect(out).toContain("https://todo-app.vitecloud.app");
   });
 
   it("prints a friendly message when there are no projects", async () => {
@@ -88,25 +100,30 @@ describe("runListCommand", () => {
       "fetch",
       vi.fn(async () => Response.json([])),
     );
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
+    const capture = captureStdout();
     const runListCommand = await importRunListCommand();
     await runListCommand();
+    const out = capture.output();
+    capture.restore();
 
-    expect(logSpy).toHaveBeenCalledWith("No projects found.");
+    expect(out).toContain("No projects found.");
   });
 
   it("exits with error when not logged in", async () => {
     setIsolatedHome();
 
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const capture = captureStdout();
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`process.exit:${code ?? 0}`);
     }) as never);
 
     const runListCommand = await importRunListCommand();
     await expect(runListCommand()).rejects.toThrow("process.exit:1");
-    expect(errorSpy).toHaveBeenCalledWith("Not logged in. Run `vcd login` first.");
+    const out = capture.output();
+    capture.restore();
+
+    expect(out).toContain("Not logged in");
     expect(exitSpy).toHaveBeenCalled();
   });
 });

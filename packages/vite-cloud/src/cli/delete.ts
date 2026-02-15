@@ -9,7 +9,7 @@ export async function runDeleteCommand(root: string, slug?: string): Promise<voi
 
   const token = getToken();
   if (!token) {
-    console.error("Not logged in. Run `vcd login` first.");
+    log.error("Not logged in. Run `vcd login` first.");
     process.exit(1);
   }
 
@@ -74,7 +74,7 @@ export async function runDeleteCommand(root: string, slug?: string): Promise<voi
   const localConfig = readProjectConfig(root);
   if (localConfig?.projectId === projectId) {
     removeProjectConfig(root);
-    console.log("Removed local .vite-cloud/project.json");
+    log.step("Removed local .vite-cloud/project.json");
   }
 
   outro(`Deleted ${projectSlug}`);
