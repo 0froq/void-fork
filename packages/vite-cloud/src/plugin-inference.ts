@@ -52,7 +52,8 @@ export function inferProjectBindings(root: string, options?: InferenceOptions): 
   const ssrEntry = getSsrEntryPath(root);
   if (ssrEntry) {
     const code = readFileSync(ssrEntry, "utf-8");
-    allBindings.push(inferBindingsFromSource(code, "ssr.entry.ts"));
+    const filename = ssrEntry.split("/").pop() ?? "ssr.entry.ts";
+    allBindings.push(inferBindingsFromSource(code, filename));
   }
 
   return mergeBindings(allBindings);

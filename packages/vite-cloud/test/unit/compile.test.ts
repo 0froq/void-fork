@@ -80,7 +80,7 @@ describe("compileRouteTable", () => {
       testOptions,
     );
 
-    expect(code).toContain('app.all("/**"');
+    expect(code).toContain("app.notFound(async (c) => {");
     expect(code).toContain('if (c.req.path === "/api" || c.req.path.startsWith("/api/"))');
     expect(code).toContain('import("/src/ssr.entry.ts")');
     expect(code).toContain("return mod.render(c.req.raw, c.env)");
