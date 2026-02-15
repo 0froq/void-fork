@@ -35,12 +35,20 @@ async function deriveKey(password: string, salt: Uint8Array<ArrayBuffer>): Promi
   );
 }
 
+/**
+ * Hash a plaintext password using PBKDF2-SHA256 (310 000 iterations).
+ * Returns a string in the format `{saltBase64}:{hashBase64}`.
+ */
 export async function hashPassword(password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const hash = await deriveKey(password, salt);
   return `${toBase64(salt.buffer)}:${toBase64(hash)}`;
 }
 
+/**
+ * Verify a plaintext password against a stored hash.
+ * Uses constant-time comparison to prevent timing attacks.
+ */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [saltB64, hashB64] = stored.split(":");
   if (!saltB64 || !hashB64) return false;

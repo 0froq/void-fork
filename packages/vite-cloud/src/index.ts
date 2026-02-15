@@ -7,9 +7,18 @@ import { inferProjectBindings, type InferenceOptions } from "./plugin-inference"
 import { scanJobsSync } from "./jobs/scan";
 import { validateSsrEntry } from "./ssr/entry";
 
+/** Supported authentication providers. */
 export type AuthProvider = "github" | "google" | "email";
 
+/** Options for the {@link viteCloud} plugin. */
 export interface ViteCloudOptions extends InferenceOptions {
+  /**
+   * Enable built-in auth routes and session management.
+   *
+   * - `true` enables email-only auth.
+   * - An array of {@link AuthProvider} names enables specific providers.
+   * - `false` / `undefined` disables auth entirely.
+   */
   auth?: boolean | AuthProvider[];
 }
 

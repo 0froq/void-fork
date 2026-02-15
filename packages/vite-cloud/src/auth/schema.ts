@@ -1,5 +1,7 @@
+/** Name of the D1 table that stores user accounts. */
 export const AUTH_USERS_TABLE = "auth_users";
 
+/** SQL DDL statement that creates the auth tables (idempotent via `IF NOT EXISTS`). */
 export const CREATE_AUTH_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS auth_users (
     id TEXT PRIMARY KEY,
@@ -14,6 +16,7 @@ export const CREATE_AUTH_TABLES_SQL = `
   )
 `;
 
+/** Generate a random user ID (UUID v4). */
 export function generateUserId(): string {
   return crypto.randomUUID();
 }
