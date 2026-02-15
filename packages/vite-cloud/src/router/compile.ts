@@ -18,6 +18,7 @@ export function compileRouteTable(
   routesDir: string,
   middlewareDir: string,
   jobsDir: string,
+  ssrEntryPath: string | null,
   options: CompileOptions,
 ): string {
   const lines: string[] = [];
@@ -54,6 +55,22 @@ export function compileRouteTable(
     lines.push(`});`);
   }
   lines.push("");
+
+  if (ssrEntryPath) {
+    lines.push(`app.all("/**", async (c) => {`);
+    lines.push(`  if (c.req.path === "/api" || c.req.path.startsWith("/api/")) {`);
+    lines.push(`    return new Response("Not Found", { status: 404 });`);
+    lines.push(`  }`);
+    lines.push(`  const mod = await import(${JSON.stringify(ssrEntryPath)});`);
+    lines.push(`  if (typeof mod.render !== "function") {`);
+    lines.push(
+      `    throw new Error("Invalid SSR entry: expected exported render(request, env) function.");`,
+    );
+    lines.push(`  }`);
+    lines.push(`  return mod.render(c.req.raw, c.env);`);
+    lines.push(`});`);
+    lines.push("");
+  }
 
   if (scan.jobs.length > 0) {
     for (let i = 0; i < scan.jobs.length; i++) {

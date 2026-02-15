@@ -4,12 +4,12 @@ import type { Plugin } from "vite";
 import { scanRoutes, type ScanResult } from "./router/scan";
 import { compileRouteTable, compileWorkerEntry, type CompileOptions } from "./router/compile";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { validateSsrEntry, SSR_ENTRY_RELATIVE_PATHS } from "./ssr/entry";
 
 const VIRTUAL_ROUTES_ID = "virtual:vite-cloud-routes";
-const RESOLVED_VIRTUAL_ROUTES_ID = "\0" + VIRTUAL_ROUTES_ID;
 // Rolldown resolveId hook filters currently require RegExp for `id`.
 const RESOLVE_ID_FILTER = /^(virtual:vite-cloud-routes|vite-cloud)$/;
-const LOAD_ID_FILTER = RESOLVED_VIRTUAL_ROUTES_ID;
+const LOAD_ID_FILTER = /^virtual:vite-cloud-routes$/;
 
 /**
  * Vite plugin that provides file-based routing.
@@ -19,12 +19,16 @@ const LOAD_ID_FILTER = RESOLVED_VIRTUAL_ROUTES_ID;
  */
 export function routingPlugin(root: string): Plugin {
   let scan: ScanResult | null = null;
+  let ssrEntryPath: string | null = null;
   const routesDir = join(root, "routes");
   const middlewareDir = join(root, "middleware");
   const jobsDir = join(root, "jobs");
+  const srcDir = join(root, "src");
+  const ssrEntryAbsPaths = new Set(SSR_ENTRY_RELATIVE_PATHS.map((path) => join(root, path)));
 
   async function rescan() {
     scan = await scanRoutes(root);
+    ssrEntryPath = validateSsrEntry(root);
   }
 
   // Pre-resolve all runtime module paths so generated code uses absolute paths.
@@ -59,7 +63,7 @@ export function routingPlugin(root: string): Plugin {
       filter: { id: RESOLVE_ID_FILTER },
       handler(id) {
         if (id === VIRTUAL_ROUTES_ID) {
-          return RESOLVED_VIRTUAL_ROUTES_ID;
+          return VIRTUAL_ROUTES_ID;
         }
         // Redirect bare "vite-cloud" imports to the lightweight handler
         // subpath to avoid pulling the entire plugin into the Worker bundle.
@@ -71,9 +75,17 @@ export function routingPlugin(root: string): Plugin {
 
     load: {
       filter: { id: LOAD_ID_FILTER },
-      async handler() {
+      async handler(id) {
+        if (id !== VIRTUAL_ROUTES_ID) return;
         if (!scan) await rescan();
-        return compileRouteTable(scan!, routesDir, middlewareDir, jobsDir, compileOptions);
+        return compileRouteTable(
+          scan!,
+          routesDir,
+          middlewareDir,
+          jobsDir,
+          ssrEntryPath,
+          compileOptions,
+        );
       },
     },
 
@@ -85,10 +97,13 @@ export function routingPlugin(root: string): Plugin {
         if (
           !path.startsWith(routesDir) &&
           !path.startsWith(middlewareDir) &&
-          !path.startsWith(jobsDir)
+          !path.startsWith(jobsDir) &&
+          !path.startsWith(srcDir)
         ) {
           return;
         }
+
+        if (path.startsWith(srcDir) && !ssrEntryAbsPaths.has(path)) return;
 
         // Re-scan and invalidate the virtual module in ALL environments.
         // The route table virtual module lives in the workerd environment,
@@ -96,7 +111,7 @@ export function routingPlugin(root: string): Plugin {
         await rescan();
 
         for (const env of Object.values(devServer.environments)) {
-          const mod = env.moduleGraph.getModuleById(RESOLVED_VIRTUAL_ROUTES_ID);
+          const mod = env.moduleGraph.getModuleById(VIRTUAL_ROUTES_ID);
           if (mod) {
             env.moduleGraph.invalidateModule(mod);
             env.hot.send({ type: "full-reload" });
@@ -105,6 +120,7 @@ export function routingPlugin(root: string): Plugin {
       };
 
       watcher.on("add", handleFileChange);
+      watcher.on("change", handleFileChange);
       watcher.on("unlink", handleFileChange);
     },
   };

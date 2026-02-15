@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { globSync } from "tinyglobby";
 import { join } from "node:path";
 import { inferBindingsFromSource, mergeBindings, type InferredBindings } from "./inference/walk";
+import { getSsrEntryPath } from "./ssr/entry";
 
 export interface InferenceOptions {
   /** Explicit binding overrides — takes precedence over inference */
@@ -14,7 +15,7 @@ export interface InferenceOptions {
 
 /**
  * Synchronously infer which Cloudflare bindings the project needs
- * by scanning all route and middleware files with oxc-parser.
+ * by scanning route/middleware files and optional src/ssr.entry.ts with oxc-parser.
  *
  * This runs once when viteCloud() is called (before plugins initialize),
  * so results are available to configure the Cloudflare plugin.
@@ -46,6 +47,12 @@ export function inferProjectBindings(root: string, options?: InferenceOptions): 
       const filename = file.split("/").pop()!;
       allBindings.push(inferBindingsFromSource(code, filename));
     }
+  }
+
+  const ssrEntry = getSsrEntryPath(root);
+  if (ssrEntry) {
+    const code = readFileSync(ssrEntry, "utf-8");
+    allBindings.push(inferBindingsFromSource(code, "ssr.entry.ts"));
   }
 
   return mergeBindings(allBindings);

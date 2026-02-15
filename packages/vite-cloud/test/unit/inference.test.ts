@@ -24,6 +24,18 @@ describe("inferBindingsFromSource", () => {
     expect(result.needsKV).toBe(true);
   });
 
+  it("detects env.DB in SSR-style handlers", () => {
+    const code = `
+      export async function render(request, env) {
+        return Response.json(await env.DB.prepare('SELECT 1').first())
+      }
+    `;
+    const result = inferBindingsFromSource(code, "ssr.entry.ts");
+    expect(result.needsD1).toBe(true);
+    expect(result.needsKV).toBe(false);
+    expect(result.needsR2).toBe(false);
+  });
+
   it("detects c.env.STORAGE", () => {
     const code = `
       export default defineHandler(async (c) => {

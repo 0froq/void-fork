@@ -31,7 +31,8 @@ export default defineJob(async (controller, env) => {
 Handler signature:
 
 ```ts
-(controller: ScheduledController, env: CloudEnv["Bindings"], ctx: ExecutionContext) => unknown | Promise<unknown>
+(controller: ScheduledController, env: CloudEnv["Bindings"], ctx: ExecutionContext) =>
+  unknown | Promise<unknown>;
 ```
 
 Notes:

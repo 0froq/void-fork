@@ -27,7 +27,8 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | `packages/platform`          | `@vite-cloud/platform` (private) | Control Plane API — projects, deploys, CF API proxy    |
 | `packages/dispatch`          | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets   |
 | `packages/create-vite-cloud` | `create-vite-cloud`              | `npm create vite-cloud` scaffolding CLI                |
-| `playground/`                | (private)                        | Dev/test app exercising all features                   |
+| `playground/spa`             | (private)                        | SPA playground (routing, middleware, migrations, jobs) |
+| `playground/ssr`             | (private)                        | SSR playground (`src/ssr.entry.ts`)                    |
 
 ## `vite-cloud` Architecture
 
@@ -250,14 +251,19 @@ Shared helpers in `packages/platform/test/integration/helpers.ts`:
 
 ## Playground
 
-`playground/` is a React SPA with API routes demonstrating:
+`playground/spa` is a React SPA with API routes demonstrating:
 
 - Static route: `routes/api/hello.get.ts`
 - CRUD routes: `routes/api/users/index.get.ts`, `index.post.ts`, `[id].get.ts`
 - Middleware: `middleware/01.logger.ts` (uses `defineMiddleware`)
 - Migration: `migrations/001_create_users.sql` (creates users table + seeds data)
 
-Verified working: `cd playground && pnpm dev` → all API routes respond, D1 queries work, middleware runs.
+`playground/ssr` is a minimal React SSR app demonstrating `src/ssr.entry.ts` render fallback plus API routes.
+
+Verified working:
+
+- `cd playground/spa && pnpm dev`
+- `cd playground/ssr && pnpm dev`
 
 ## Pitfalls / Things That Broke
 

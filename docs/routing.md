@@ -4,6 +4,8 @@ Vite Cloud routing runs on a generated Hono app.
 
 It uses a file-system router from `routes/` plus optional global middleware from `middleware/`.
 
+If `src/ssr.entry.ts` exists, route handlers still run first and SSR is used as a fallback for unmatched non-API requests.
+
 ## Route files
 
 Create route handlers in `routes/**/*.ts` (`.mts`, `.js`, `.mjs` also supported).
@@ -27,7 +29,7 @@ export default defineHandler(async (c) => {
 Handler signature (Hono context):
 
 ```ts
-(c: CloudContext) => unknown | Promise<unknown>
+(c: CloudContext) => unknown | Promise<unknown>;
 ```
 
 `CloudContext` is a Hono `Context` with typed Cloudflare bindings on `c.env`.
@@ -51,6 +53,7 @@ Rules are applied to path segments relative to `routes/`:
 4. Strip trailing `index`
 5. Remove route-group directories like `(group)`
 6. Convert params:
+
 - `[id]` -> `:id`
 - `[...rest]` -> `**:rest`
 - `[...]` -> `**`

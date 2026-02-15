@@ -18,6 +18,7 @@ export function packageBuild(
   bindings: InferredBindings,
   migrations?: MigrationFile[],
   schedules?: ScheduleMeta[],
+  ssr?: boolean,
 ): FormData {
   const formData = new FormData();
 
@@ -40,6 +41,10 @@ export function packageBuild(
 
   if (schedules && schedules.length > 0) {
     manifest.schedules = schedules;
+  }
+
+  if (ssr) {
+    manifest.ssr = true;
   }
 
   formData.append("manifest", JSON.stringify(manifest));
