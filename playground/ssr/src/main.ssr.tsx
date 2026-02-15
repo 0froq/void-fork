@@ -3,21 +3,14 @@ import { defineRender } from "vite-cloud";
 import App from "./App";
 
 export const prerender = async () => {
-  const { readdirSync } = await import("node:fs");
-  const { join } = await import("node:path");
-  const blogDir = join(process.cwd(), "blog");
-  const files = readdirSync(blogDir).filter((f: string) => f.endsWith(".md"));
-  return ["/", "/about", ...files.map((f: string) => `/blog/${f.replace(".md", "")}`)];
+  const blogPaths = Object.keys(import.meta.glob("../blog/*.md")).map((f: string) => {
+    return `/blog/${f.split("/").pop()!.replace(".md", "")}`;
+  });
+  return ["/", "/about", ...blogPaths];
 };
 
 async function readBlogPost(slug: string): Promise<string | null> {
-  try {
-    const { readFileSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    return readFileSync(join(process.cwd(), "blog", `${slug}.md`), "utf-8");
-  } catch {
-    return null;
-  }
+  return (await import(`../blog/${slug}.md?raw`)).default;
 }
 
 export default defineRender(async (c, assetTags) => {

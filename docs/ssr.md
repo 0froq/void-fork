@@ -99,9 +99,10 @@ For dynamic path lists (CMS content, markdown files, etc.), export a function:
 ```ts
 // Arrow function
 export const prerender = async () => {
-  const { readdirSync } = await import("node:fs");
-  const files = readdirSync("content/blog");
-  return ["/", ...files.map((f) => `/blog/${f.replace(".md", "")}`)];
+  const posts = Object.keys(import.meta.glob("./content/blog/*.md")).map((file) => {
+    return `/blog/${file.split("/").pop()!.replace(".md", "")}`;
+  });
+  return ["/", ...posts];
 };
 ```
 
@@ -114,7 +115,13 @@ export async function prerender() {
 }
 ```
 
-The function runs at build time in Node.js (inside `closeBundle`), so `fetch()`, dynamic `import("node:fs")`, etc. all work. Use dynamic `import()` for Node.js-only APIs so the top-level import doesn't fail in the CF worker at runtime.
+The function runs during production build (inside `closeBundle`), so network calls like `fetch()` are supported.
+`src/main.ssr.ts(x)` is also bundled for the Cloudflare Worker runtime. Cloudflare Workers do not support Node built-ins like `node:fs`, so avoid `node:*` imports in this file (including inside `prerender`).
+
+For file-driven prerender lists and content loading, prefer Vite module graph APIs:
+
+- `import.meta.glob()` to discover matching files
+- dynamic imports like `await import(\`./content/blog/${slug}.md?raw\`)` to load file contents
 
 ### Behavior
 
