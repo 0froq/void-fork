@@ -29,7 +29,7 @@ export async function runSecretCommand(root: string, args: SecretArgs): Promise<
   }
 
   if (args.action === "put") {
-    const value = await readSecretValue();
+    const value = args.value ?? (await readSecretValue());
     await client.setSecret(projectId, args.name, value);
     console.log(`Secret ${args.name} set.`);
     return;
