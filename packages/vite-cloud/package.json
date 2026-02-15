@@ -32,8 +32,7 @@
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.25.0",
     "@cloudflare/workers-types": "catalog:",
-    "better-sqlite3": "^12.6.2",
-    "hono": "^4.11.9"
+    "better-sqlite3": "^12.6.2"
   },
   "devDependencies": {
     "@clack/prompts": "catalog:",
@@ -46,6 +45,7 @@
     "vite": "catalog:"
   },
   "peerDependencies": {
+    "hono": "^4.0.0",
     "vite": "^8.0.0-beta.14"
   }
 }
