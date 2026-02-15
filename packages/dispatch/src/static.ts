@@ -29,6 +29,13 @@ export async function serveStaticAsset(
   const object = await env.ASSETS.get(r2Key);
 
   if (!object) {
+    // SSG fallback: /foo -> /foo/index.html
+    if (!hasExtension(assetPath) && assetPath !== "" && assetPath !== "index.html") {
+      const nestedIndexPath = `${assetPath.replace(/\/+$/, "")}/index.html`;
+      const nested = await env.ASSETS.get(`${projectId}/current/${nestedIndexPath}`);
+      if (nested) return buildResponse(nested, nestedIndexPath);
+    }
+
     // Try index.html as final fallback
     if (assetPath !== "index.html") {
       const fallback = await env.ASSETS.get(`${projectId}/current/index.html`);

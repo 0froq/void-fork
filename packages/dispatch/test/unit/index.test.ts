@@ -84,6 +84,23 @@ describe("dispatch fetch handler", () => {
     expect(await response.text()).toBe("<html>ssr</html>");
   });
 
+  it("serves prerendered nested html before SSR fallback", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: { workerName: "user-app", projectId: "proj_1", ssr: true },
+      assets: {
+        "proj_1/current/about/index.html": { body: "<html>about</html>", contentType: "text/html" },
+      },
+      workerResponse: new Response("<html>ssr</html>", {
+        headers: { "Content-Type": "text/html" },
+      }),
+    });
+
+    const response = await app.fetch(new Request("https://my-app.vitecloud.app/about"), env);
+
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(await response.text()).toBe("<html>about</html>");
+  });
+
   it("keeps SPA index fallback for non-SSR projects", async () => {
     const { env, workerFetch } = createEnv({
       routing: { workerName: "user-app", projectId: "proj_1" },

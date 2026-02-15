@@ -2,7 +2,12 @@ import { describe, expect, it, afterEach } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getSsrServerEntryPath, hasSsrEntry, validateSsrEntry } from "../../src/ssr/entry";
+import {
+  getSsrPrerenderPaths,
+  getSsrServerEntryPath,
+  hasSsrEntry,
+  validateSsrEntry,
+} from "../../src/ssr/entry";
 
 const tempDirs: string[] = [];
 
@@ -113,5 +118,33 @@ describe("ssr entry helpers", () => {
     writeFileSync(join(root, "src", "main.client.ts"), "console.log('client entry');");
 
     expect(() => validateSsrEntry(root)).toThrow("SSR mode requires a server entry");
+  });
+
+  it("reads prerender paths and normalizes trailing slashes", () => {
+    const root = createTempRoot();
+    writeFileSync(join(root, "src", "main.client.ts"), "console.log('client entry');");
+    writeFileSync(
+      join(root, "src", "main.ssr.ts"),
+      `
+      export const prerender = ["/", "/about/", "/pricing"];
+      export async function render(c, assetTags) { return new Response("ok"); }
+      `,
+    );
+
+    expect(getSsrPrerenderPaths(root)).toEqual(["/", "/about", "/pricing"]);
+  });
+
+  it("rejects invalid prerender paths", () => {
+    const root = createTempRoot();
+    writeFileSync(join(root, "src", "main.client.ts"), "console.log('client entry');");
+    writeFileSync(
+      join(root, "src", "main.ssr.ts"),
+      `
+      export const prerender = ["about", "/blog/:slug", "/a", "/a"];
+      export async function render(c, assetTags) { return new Response("ok"); }
+      `,
+    );
+
+    expect(() => getSsrPrerenderPaths(root)).toThrow("Invalid SSR prerender export");
   });
 });

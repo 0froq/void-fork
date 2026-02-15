@@ -40,6 +40,18 @@ describe("serveStaticAsset", () => {
     const response = await serveStaticAsset(env, "proj", "/dashboard", { spaFallback: false });
     expect(response).toBeNull();
   });
+
+  it("serves prerendered nested index html when spa fallback is disabled", async () => {
+    const env = createEnv({
+      "proj/current/about/index.html": createObject("<h1>about</h1>", "text/html; charset=utf-8"),
+    });
+
+    const response = await serveStaticAsset(env, "proj", "/about", { spaFallback: false });
+    expect(response).not.toBeNull();
+    expect(response!.status).toBe(200);
+    expect(response!.headers.get("Cache-Control")).toBe("no-cache");
+    expect(await response!.text()).toBe("<h1>about</h1>");
+  });
 });
 
 describe("serveStaticAssetWithFallback", () => {

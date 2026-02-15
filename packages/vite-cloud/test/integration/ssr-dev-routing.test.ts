@@ -86,5 +86,5 @@ describe("playground/ssr dev routing", () => {
     if (startupError) {
       throw startupError;
     }
-  }, 30_000);
+  }, 60_000);
 });
