@@ -71,7 +71,7 @@ describe("playground/auth email flow", () => {
       });
       expect(registerRes.status).toBe(201);
 
-      const registerBody = await registerRes.json();
+      const registerBody: any = await registerRes.json();
       expect(registerBody.id).toBeDefined();
       expect(registerBody.email).toBe(email);
       expect(registerBody.name).toBe(name);
@@ -86,7 +86,7 @@ describe("playground/auth email flow", () => {
         headers: { Cookie: sessionCookie },
       });
       expect(meAuth.status).toBe(200);
-      const meBody = await meAuth.json();
+      const meBody: any = await meAuth.json();
       expect(meBody.provider).toBe("email");
       expect(meBody.id).toBe(registerBody.id);
       expect(meBody.email).toBe(email);
@@ -96,7 +96,7 @@ describe("playground/auth email flow", () => {
         headers: { Cookie: sessionCookie },
       });
       expect(profileAuth.status).toBe(200);
-      const profileBody = await profileAuth.json();
+      const profileBody: any = await profileAuth.json();
       expect(profileBody.user).toBeDefined();
       expect(profileBody.user.email).toBe(email);
 
@@ -146,7 +146,7 @@ describe("playground/auth email flow", () => {
         headers: { Cookie: newSessionCookie },
       });
       expect(meAfterLogin.status).toBe(200);
-      const meLoginBody = await meAfterLogin.json();
+      const meLoginBody: any = await meAfterLogin.json();
       expect(meLoginBody.email).toBe(email);
     } catch (err) {
       startupError = err instanceof Error ? err : new Error(String(err));
