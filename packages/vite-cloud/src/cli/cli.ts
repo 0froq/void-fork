@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { log, intro, outro, note } from "@clack/prompts";
+import { log, outro, note } from "@clack/prompts";
 import { runDeploy } from "./deploy";
 import { runLink } from "./link";
 import { runLoginCommand } from "./login";
@@ -89,7 +89,19 @@ if (command === "deploy") {
     process.exit(1);
   });
 } else {
-  intro("vite-cloud");
+  const BLUE = "\x1b[34m";
+  const RESET = "\x1b[0m";
+  console.log(
+    BLUE +
+      `
+        _ __                __                __
+ _   __(_) /____     _____/ /___  __  ______/ /
+| | / / / __/ _ \\   / ___/ / __ \\/ / / / __  /
+| |/ / / /_/  __/  / /__/ / /_/ / /_/ / /_/ /
+|___/_/\\__/\\___/   \\___/_/\\____/\\__,_/\\__,_/
+` +
+      RESET,
+  );
 
   if (command && command !== "help" && command !== "--help" && command !== "-h") {
     log.error(`Unknown command: ${command}`);
