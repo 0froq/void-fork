@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { globSync } from "tinyglobby";
 import { join } from "node:path";
 import { inferBindingsFromSource, mergeBindings, type InferredBindings } from "./inference/walk";
-import { getSsrEntryPath } from "./ssr/entry";
+import { getSsrServerEntryPath } from "./ssr/entry";
 
 export interface InferenceOptions {
   /** Explicit binding overrides — takes precedence over inference */
@@ -49,7 +49,7 @@ export function inferProjectBindings(root: string, options?: InferenceOptions): 
     }
   }
 
-  const ssrEntry = getSsrEntryPath(root);
+  const ssrEntry = getSsrServerEntryPath(root);
   if (ssrEntry) {
     const code = readFileSync(ssrEntry, "utf-8");
     const filename = ssrEntry.split("/").pop() ?? "ssr.entry.ts";

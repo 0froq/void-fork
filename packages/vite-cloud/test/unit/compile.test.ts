@@ -5,6 +5,7 @@ import type { ScanResult } from "../../src/router/scan";
 const testOptions = {
   honoPath: "/resolved/hono/index.mjs",
   responsePath: "/resolved/vite-cloud/runtime/response.mjs",
+  reactRefresh: true,
 };
 
 describe("compileRouteTable", () => {
@@ -76,14 +77,24 @@ describe("compileRouteTable", () => {
       "/routes",
       "/middleware",
       "/jobs",
-      "/src/ssr.entry.ts",
+      {
+        serverEntryPath: "/src/ssr.entry.ts",
+        clientEntryRelativePath: "src/client.entry.tsx",
+      },
       testOptions,
     );
 
     expect(code).toContain("app.notFound(async (c) => {");
-    expect(code).toContain('if (c.req.path === "/api" || c.req.path.startsWith("/api/"))');
+    expect(code).toContain("if (!shouldHandleSsrRequest(c))");
+    expect(code).toContain("return fetchFromAssets(c)");
     expect(code).toContain('import("/src/ssr.entry.ts")');
-    expect(code).toContain("return mod.render(c.req.raw, c.env)");
+    expect(code).toContain("return renderSsrResponse(c, mod)");
+    expect(code).toContain('const SSR_CLIENT_ENTRY_ID = "src/client.entry.tsx"');
+    expect(code).toContain('const SSR_CLIENT_ENTRY_URL = "/src/client.entry.tsx"');
+    expect(code).toContain('new URL("/.vite/manifest.json", request.url)');
+    expect(code).toContain('src="/@vite/client"');
+    expect(code).toContain('from "/@react-refresh"');
+    expect(code).toContain("__vite_plugin_react_preamble_installed__ = true");
   });
 });
 
