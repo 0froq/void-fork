@@ -10,7 +10,8 @@ import {
   type SsrCompileOptions,
 } from "./router/compile";
 import {
-  getSsrPrerenderPaths,
+  getPrerenderConfig,
+  validatePrerenderPath,
   validateSsrEntries,
   SSR_SERVER_ENTRY_RELATIVE_PATHS,
   SSR_CLIENT_ENTRY_RELATIVE_PATHS,
@@ -31,6 +32,7 @@ export function routingPlugin(root: string): Plugin {
   let scan: ScanResult | null = null;
   let ssr: SsrCompileOptions | null = null;
   let prerenderPaths: string[] = [];
+  let hasPrerenderFn = false;
   let resolvedConfig: ResolvedConfig | null = null;
   const routesDir = join(root, "routes");
   const middlewareDir = join(root, "middleware");
@@ -51,7 +53,9 @@ export function routingPlugin(root: string): Plugin {
           clientEntryRelativePath: entries.client.relativePath,
         }
       : null;
-    prerenderPaths = entries ? getSsrPrerenderPaths(root) : [];
+    const prerenderConfig = entries ? getPrerenderConfig(root) : { type: "none" as const };
+    prerenderPaths = prerenderConfig.type === "static" ? prerenderConfig.paths : [];
+    hasPrerenderFn = prerenderConfig.type === "function";
   }
 
   // Pre-resolve all runtime module paths so generated code uses absolute paths.
@@ -166,7 +170,8 @@ export function routingPlugin(root: string): Plugin {
     async closeBundle() {
       if (!resolvedConfig || resolvedConfig.command !== "build" || resolvedConfig.build.watch)
         return;
-      if (!ssr || prerenderPaths.length === 0) return;
+      if (!ssr) return;
+      if (prerenderPaths.length === 0 && !hasPrerenderFn) return;
 
       const outDir = isAbsolute(resolvedConfig.build.outDir)
         ? resolvedConfig.build.outDir
@@ -190,14 +195,29 @@ export function routingPlugin(root: string): Plugin {
       const moduleUrl = pathToFileURL(workerEntry).href;
       const mod = (await dynamicImport(moduleUrl)) as {
         default?: { fetch?: (...args: any[]) => unknown };
+        __resolvePrerenderPaths?: () => Promise<string[] | null>;
       };
       const worker = mod.default;
       if (!worker || typeof worker.fetch !== "function") {
         throw new Error(`Invalid worker entry at ${workerEntry}: expected default fetch handler.`);
       }
 
+      let pathsToRender = prerenderPaths;
+      if (hasPrerenderFn) {
+        if (typeof mod.__resolvePrerenderPaths !== "function") {
+          throw new Error(`SSG failed: worker entry does not export __resolvePrerenderPaths.`);
+        }
+        const resolved = await mod.__resolvePrerenderPaths();
+        if (!Array.isArray(resolved)) {
+          throw new Error(`Prerender function must return an array of paths.`);
+        }
+        pathsToRender = resolved.map(validatePrerenderPath);
+      }
+
+      if (pathsToRender.length === 0) return;
+
       const env = createPrerenderEnv(clientDir);
-      for (const path of prerenderPaths) {
+      for (const path of pathsToRender) {
         const request = new Request(`http://vite-cloud.local${path}`, {
           headers: { Accept: "text/html" },
         });
@@ -263,6 +283,7 @@ function detectWorkerDir(root: string, distDir: string): string {
 
 function createExecutionContext(): ExecutionContext {
   return {
+    props: {},
     waitUntil() {},
     passThroughOnException() {},
   };

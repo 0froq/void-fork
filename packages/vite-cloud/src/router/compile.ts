@@ -251,6 +251,20 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push("");
   }
 
+  // __resolvePrerenderPaths helper for build-time prerender resolution
+  if (ssr) {
+    lines.push(`export async function __resolvePrerenderPaths() {`);
+    lines.push(`  const mod = await import(${JSON.stringify(ssr.serverEntryPath)});`);
+    lines.push(`  const p = mod.prerender;`);
+    lines.push(`  if (typeof p === "function") return await p();`);
+    lines.push(`  if (Array.isArray(p)) return p;`);
+    lines.push(`  return null;`);
+    lines.push(`}`);
+  } else {
+    lines.push(`export async function __resolvePrerenderPaths() { return null; }`);
+  }
+  lines.push("");
+
   lines.push(`export default app;`);
 
   return lines.join("\n");
@@ -261,7 +275,8 @@ window.__vite_plugin_react_preamble_installed__ = true;
  * Simply re-exports the Hono app from the virtual module.
  */
 export function compileWorkerEntry(): string {
-  return `import app, { scheduled } from 'virtual:vite-cloud-routes';
+  return `import app, { scheduled, __resolvePrerenderPaths } from 'virtual:vite-cloud-routes';
 
-export default { fetch: app.fetch, scheduled };`;
+export default { fetch: app.fetch, scheduled };
+export { __resolvePrerenderPaths };`;
 }
