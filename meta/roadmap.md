@@ -211,20 +211,43 @@ The positioning: "Use your favorite Vite-based framework. Deploy it on Vite Clou
 **Scores:** Complexity 2 · OpCost 2 · Conversion 5 · Composite 80
 **Phase:** v1.0 (Tier 1), v1.1 (Tier 2)
 
-**Do not build a custom auth library.** The built-in auth uses Hono's own middleware ecosystem (`@hono/oauth-providers`, `hono/jwt`). For advanced auth needs, a separate plugin (`@vite-cloud/plugin-better-auth`) provides smooth integration with better-auth.
+**Do not build a custom auth library.** The built-in auth uses Hono's own middleware ecosystem (`@hono/oauth-providers`) and KV-backed sessions. For advanced auth needs, a separate plugin (`@vite-cloud/plugin-better-auth`) provides smooth integration with better-auth.
 
-#### Tier 1: Built-in Lightweight Auth
+#### Identity Convention: `c.get("user")`
 
-What `auth: true` or `auth: { providers: ['github', 'google'] }` does in `vite.config.ts`:
+The foundation of auth in Vite Cloud is a convention, not a framework: any middleware that sets `c.get("user")` to an `AuthUser` shape makes the entire auth ecosystem work. The `AuthUser` type and `requireAuth()` helper are always available from `vite-cloud/auth`, regardless of whether the built-in auth provider is enabled.
+
+```ts
+// Always available, no config required
+import { requireAuth } from "vite-cloud/auth";
+import type { AuthUser } from "vite-cloud/auth";
+```
+
+This means route handlers never couple to a specific auth provider:
+
+```ts
+// routes/api/profile.get.ts
+import { requireAuth } from "vite-cloud/auth";
+
+export default defineHandler((c) => {
+  const user = requireAuth(c); // throws 401 if c.get("user") is null
+  return { name: user.name, email: user.email };
+});
+```
+
+This handler works identically whether the user is authenticated via the built-in OAuth provider, `@vite-cloud/plugin-better-auth`, Clerk, Auth0, or a custom middleware.
+
+#### Built-in Provider: OAuth + KV Sessions
+
+What `auth: { providers: ['github', 'google'] }` does in `vite.config.ts`:
 
 1. Auto-provisions D1 user table with schema: `{ id, provider, email, name, avatar_url, createdAt }`
 2. Auto-provisions KV namespace for session storage
 3. Generates OAuth login routes at `/auth/login/{provider}` and callback handler
-4. Mounts auth middleware that reads session cookie, validates token in KV, populates `c.get("user")`
+4. Mounts session middleware that reads cookie, validates token in KV, populates `c.get("user")`
 5. Generates `/auth/me` endpoint (returns current user or 401)
-6. Exposes `c.get("user")` in every route handler (`{ id, provider, email, name, avatar_url }`)
 
-**Zero additional dependencies** — uses only Hono's ecosystem: `@hono/oauth-providers`, `hono/jwt`, native Web Crypto.
+**Zero additional dependencies** — uses only `@hono/oauth-providers` and native Web Crypto.
 
 End-user developer experience:
 
@@ -258,56 +281,77 @@ if (res.ok) {
 }
 ```
 
-Protect a route (inline check):
-
-```ts
-// routes/api/profile.get.ts
-export default defineHandler((c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ error: "unauthorized" }, 401);
-  return { name: user.name, email: user.email };
-});
-```
-
-Or use the convenience helper:
-
-```ts
-// routes/api/profile.get.ts
-import { requireAuth } from "vite-cloud/auth";
-
-export default defineHandler((c) => {
-  const user = requireAuth(c); // throws 401 if not authenticated
-  return { name: user.name, email: user.email };
-});
-```
-
 Routes are mounted at `/auth/*` (not `/api/auth/*`): `/auth/login/{provider}`, `/auth/callback/{provider}`, `/auth/logout`, `/auth/me`.
 
-#### Tier 2: `@vite-cloud/plugin-better-auth` (Separate Plugin)
+Session architecture: KV-backed opaque tokens, not signed JWT cookies. Revocation is instant (delete the KV entry). Session cookie: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`. KV key: `session:<random-uuid>`. KV value: `{ userId, createdAt, expiresAt }` with native `expirationTtl`.
 
-A separate npm package for users who need email/password authentication, two-factor authentication, passkeys, organization management, multiple linked accounts, or additional OAuth providers beyond the built-in set.
+#### Bring Your Own Auth
 
-When installed, it overrides the built-in auth entirely (mutually exclusive with Tier 1). It auto-provisions better-auth's tables (users, accounts, sessions, verifications), generates a typed client (`import { authClient } from "@vite-cloud/plugin-better-auth/client"`), and auto-generates migration files when the schema changes.
+Users who prefer a different auth mechanism skip the `auth` config and write a middleware that populates `c.get("user")`. Everything downstream (`requireAuth()`, route handlers) works unchanged.
 
-The key invariant: `c.get("user")` works in both tiers. Route handler code does not change when upgrading from Tier 1 to Tier 2.
+Example with Clerk:
 
-#### Session Architecture: KV Opaque Tokens
+```ts
+// middleware/01.clerk.ts
+import { defineMiddleware } from "vite-cloud";
+import type { AuthUser } from "vite-cloud/auth";
 
-Sessions use KV-backed opaque tokens, not signed JWT cookies, for three reasons:
+export default defineMiddleware(async (c, next) => {
+  const sessionToken = c.req.header("Authorization")?.replace("Bearer ", "");
+  if (sessionToken) {
+    const session = await verifyClerkSession(sessionToken, c.env);
+    if (session) {
+      c.set("user", {
+        id: session.userId,
+        provider: "clerk",
+        email: session.email,
+        name: session.name,
+        avatar_url: session.imageUrl,
+      } satisfies AuthUser);
+    }
+  }
+  await next();
+});
+```
 
-1. **Revocation** — deleting a KV entry immediately invalidates a session. JWTs cannot be revoked before expiry without a deny-list.
-2. **Server-side state** — KV sessions can store metadata (last active timestamp, IP, device info) without inflating the cookie.
-3. **Size** — opaque session ID (~32 bytes) vs. JWT with claims (500+ bytes per request).
+Example with `hono/bearer-auth` for API-token routes:
 
-Session cookie: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`. KV key: `session:<random-uuid>`. KV value: `{ userId, createdAt, expiresAt }` with native `expirationTtl`.
+```ts
+// middleware/01.api-auth.ts
+import { defineMiddleware } from "vite-cloud";
+import { bearerAuth } from "hono/bearer-auth";
+
+export default defineMiddleware(
+  bearerAuth({
+    verifyToken: async (token, c) => {
+      const row = await c.env.DB.prepare("SELECT * FROM api_keys WHERE key = ?")
+        .bind(token)
+        .first();
+      if (row) {
+        c.set("user", {
+          id: row.user_id,
+          provider: "api-key",
+          email: row.email,
+          name: row.name,
+          avatar_url: null,
+        });
+        return true;
+      }
+      return false;
+    },
+  }),
+);
+```
+
+#### `@vite-cloud/plugin-better-auth` (Tier 2)
+
+A separate plugin for users who need email/password authentication, two-factor authentication, passkeys, organization management, multiple linked accounts, or additional OAuth providers beyond the built-in set. Auto-provisions better-auth's tables, generates a typed client, and auto-generates migration files when the schema changes. Populates `c.get("user")` — route handler code does not change when upgrading from the built-in provider.
 
 #### Score Rationale
 
 - **Complexity 2** (down from 4) — heavy lifting done by battle-tested Hono middleware. Our work is codegen: generate auth routes, add session middleware, write one D1 migration.
 - **OpCost 2** — auto-provision KV and D1. KV sessions self-clean via TTL. User table grows linearly.
-- **Conversion 5** — auth is the first problem every SaaS hits. "Add `auth: true`, get GitHub login with sessions" eliminates boilerplate.
-
-Users can opt out entirely (just don't set `auth`), use the built-in tier, upgrade to the better-auth plugin, or use any external auth service (Clerk, Auth0, etc.). Not mutually exclusive.
+- **Conversion 5** — auth is the first problem every SaaS hits. "Add `auth: { providers: ['github'] }`, get GitHub login with sessions" eliminates boilerplate. Users who outgrow it swap the provider, not their route code.
 
 ### 3.2 Preview Environments with Database Forks
 
@@ -506,7 +550,7 @@ We control both the deployment (Worker sits in front of every request) and the b
 
 ### On Auth
 
-Do not build a custom auth library. Tier 1 (built-in) uses Hono's own middleware ecosystem: `@hono/oauth-providers` for social login, `hono/jwt` for token operations. Vite Cloud's value-add is the wiring: auto-provisioning a user table (D1) and session store (KV), generating OAuth callback routes, and populating `c.get("user")` in every handler. Sessions are KV-backed opaque tokens, not signed JWTs, because revocation matters more than statelessness at this layer. Tier 2 (`@vite-cloud/plugin-better-auth`) is a separate plugin for users who need email/password, 2FA, passkeys, organizations, and other advanced auth features. The separation means the default path has zero additional dependencies, and users who outgrow Tier 1 adopt Tier 2 without changing their route handler code — both tiers populate `c.get("user")`. Users who already know better-auth bring their knowledge. Users who leave can take their code. Reduces lock-in perception, which helps adoption.
+Do not build a custom auth library. The auth design has two layers: (1) an identity convention (`c.get("user")` + `requireAuth()` from `vite-cloud/auth`) that is always available regardless of config, and (2) pluggable auth providers that populate that convention. The built-in provider uses `@hono/oauth-providers` for social login and KV-backed opaque tokens for sessions. `@vite-cloud/plugin-better-auth` is a separate plugin for email/password, 2FA, passkeys, and organizations. Users can also bring any auth mechanism (Clerk, Auth0, `hono/bearer-auth`, custom middleware) — they just write a middleware that sets `c.get("user")` and everything downstream works. Route handler code never couples to a specific auth provider. This composability reduces lock-in perception, which helps adoption.
 
 ### On D1 Scaling
 
