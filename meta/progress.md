@@ -33,7 +33,7 @@ Implementation Progress
 
 ### Phase 3: Developer facing features (in progress)
 
-- [ ] Secrets management
+- [x] Secrets management
 - [ ] Cron & background jobs (file convention)
 - [ ] SSR support (minimal `src/ssr.entry.ts` convention)
 - [ ] Auth via better-auth integration (`auth: true` zero-config)
