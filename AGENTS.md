@@ -15,7 +15,7 @@ pnpm check           # Typecheck all packages (tsc --noEmit)
 pnpm run deploy      # Build all + deploy platform & dispatch workers
 ```
 
-Make sure to run `lint`, `fmt`, and `check` after major changes.
+Make sure to run `lint`, `fmt`, and `check` after major changes. Tick off relevant steps in `meta/progress.md` when applicable.
 
 ## Monorepo Structure
 
