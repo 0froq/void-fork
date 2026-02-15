@@ -214,6 +214,42 @@ describe("POST /projects/:id/deploy", () => {
     );
   });
 
+  it("passes cron triggers to worker upload metadata", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "cron-app");
+    const fetchMock = mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            bindings: {},
+            schedules: [{ name: "sync", cron: "0 * * * *" }],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
+      const url = typeof call[0] === "string" ? call[0] : String(call[0]);
+      return url.includes("/workers/dispatch/") && (call[1] as RequestInit)?.method === "PUT";
+    });
+    expect(uploadCall).toBeDefined();
+
+    const workerFormData = (uploadCall![1] as RequestInit).body as FormData;
+    const metadataBlob = workerFormData.get("metadata");
+    expect(metadataBlob).toBeInstanceOf(Blob);
+    const metadata = JSON.parse(await (metadataBlob as Blob).text()) as {
+      triggers?: { crons?: string[] };
+    };
+
+    expect(metadata.triggers?.crons).toEqual(["0 * * * *"]);
+  });
+
   it("provisions D1 when manifest requires it", async () => {
     const user = await createTestUser(env.DB);
     const project = await createTestProject(env.DB, user.id, "d1-app");

@@ -1,9 +1,11 @@
 import { glob } from "tinyglobby";
 import { parseRouteFilename, type RouteDefinition } from "./parse-filename";
+import { scanJobs, type JobDefinition } from "../jobs/scan";
 
 export interface ScanResult {
   routes: RouteDefinition[];
   middleware: MiddlewareDefinition[];
+  jobs: JobDefinition[];
 }
 
 export interface MiddlewareDefinition {
@@ -22,9 +24,10 @@ const HANDLER_EXTENSIONS = ["ts", "mts", "js", "mjs"];
 export async function scanRoutes(root: string): Promise<ScanResult> {
   const pattern = `**/*.{${HANDLER_EXTENSIONS.join(",")}}`;
 
-  const [routeFiles, middlewareFiles] = await Promise.all([
+  const [routeFiles, middlewareFiles, jobs] = await Promise.all([
     glob(pattern, { cwd: `${root}/routes`, absolute: false }),
     glob(pattern, { cwd: `${root}/middleware`, absolute: false }).catch(() => [] as string[]),
+    scanJobs(root),
   ]);
 
   // Parse routes, filtering out files starting with _
@@ -50,5 +53,5 @@ export async function scanRoutes(root: string): Promise<ScanResult> {
     })
     .sort((a, b) => a.order - b.order);
 
-  return { routes, middleware };
+  return { routes, middleware, jobs };
 }

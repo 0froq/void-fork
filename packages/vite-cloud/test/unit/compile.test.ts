@@ -29,9 +29,10 @@ describe("compileRouteTable", () => {
         },
       ],
       middleware: [{ order: 1, filePath: "01.logger.ts" }],
+      jobs: [{ filePath: "sync.ts", name: "sync", cron: "0 * * * *" }],
     };
 
-    const code = compileRouteTable(scan, "/routes", "/middleware", testOptions);
+    const code = compileRouteTable(scan, "/routes", "/middleware", "/jobs", testOptions);
 
     // Should import Hono from resolved path
     expect(code).toContain(`import { Hono } from "/resolved/hono/index.mjs"`);
@@ -51,15 +52,20 @@ describe("compileRouteTable", () => {
     // Should have lazy imports within route handlers
     expect(code).toContain('import("/routes/api/hello.get.ts")');
     expect(code).toContain('import("/routes/api/users/[id].ts")');
+    // Should generate scheduled handler for cron jobs
+    expect(code).toContain("export async function scheduled(controller, env, ctx)");
+    expect(code).toContain('const job0Cron = "0 * * * *"');
+    expect(code).toContain('import("/jobs/sync.ts")');
     // Should export app as default
     expect(code).toContain("export default app");
   });
 
   it("handles empty scan result", () => {
-    const scan: ScanResult = { routes: [], middleware: [] };
-    const code = compileRouteTable(scan, "/routes", "/middleware", testOptions);
+    const scan: ScanResult = { routes: [], middleware: [], jobs: [] };
+    const code = compileRouteTable(scan, "/routes", "/middleware", "/jobs", testOptions);
 
     expect(code).toContain("const app = new Hono()");
+    expect(code).toContain("export async function scheduled() {}");
     expect(code).toContain("export default app");
   });
 });
@@ -68,7 +74,7 @@ describe("compileWorkerEntry", () => {
   it("generates valid worker entry code", () => {
     const code = compileWorkerEntry();
 
-    expect(code).toContain("import app from 'virtual:vite-cloud-routes'");
-    expect(code).toContain("export default app");
+    expect(code).toContain("import app, { scheduled } from 'virtual:vite-cloud-routes'");
+    expect(code).toContain("export default { fetch: app.fetch, scheduled }");
   });
 });

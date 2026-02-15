@@ -4,6 +4,7 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 import { routingPlugin } from "./plugin-routing";
 import { migrationPlugin } from "./plugin-migration";
 import { inferProjectBindings, type InferenceOptions } from "./plugin-inference";
+import { scanJobsSync } from "./jobs/scan";
 
 export interface ViteCloudOptions extends InferenceOptions {
   /** Override the routes directory (default: "routes") */
@@ -31,6 +32,7 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
 
   // Infer bindings synchronously from source files
   const bindings = inferProjectBindings(root, options);
+  const jobs = scanJobsSync(root);
 
   // Build the worker config with inferred bindings
   const workerConfig: Record<string, unknown> = {
@@ -65,6 +67,12 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
     ];
   }
 
+  if (jobs.length > 0) {
+    workerConfig.triggers = {
+      crons: jobs.map((job) => job.cron),
+    };
+  }
+
   return [
     routingPlugin(root),
     migrationPlugin(root),
@@ -76,5 +84,5 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
 }
 
 // Re-export runtime types and functions
-export { defineHandler, defineMiddleware } from "./runtime/handler";
+export { defineHandler, defineMiddleware, defineJob } from "./runtime/handler";
 export type { CloudContext, CloudEnv } from "./runtime/handler";

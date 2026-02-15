@@ -84,7 +84,10 @@ describe("runListCommand", () => {
     process.env.VITE_CLOUD_TOKEN = "test-token";
     process.env.VITE_CLOUD_API_URL = "https://api.example.test";
 
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json([])));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json([])),
+    );
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     const runListCommand = await importRunListCommand();
@@ -97,11 +100,9 @@ describe("runListCommand", () => {
     setIsolatedHome();
 
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(
-      ((code?: number) => {
-        throw new Error(`process.exit:${code ?? 0}`);
-      }) as never,
-    );
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as never);
 
     const runListCommand = await importRunListCommand();
     await expect(runListCommand()).rejects.toThrow("process.exit:1");

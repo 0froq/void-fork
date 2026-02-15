@@ -17,6 +17,7 @@ export function compileRouteTable(
   scan: ScanResult,
   routesDir: string,
   middlewareDir: string,
+  jobsDir: string,
   options: CompileOptions,
 ): string {
   const lines: string[] = [];
@@ -54,6 +55,35 @@ export function compileRouteTable(
   }
   lines.push("");
 
+  if (scan.jobs.length > 0) {
+    for (let i = 0; i < scan.jobs.length; i++) {
+      const job = scan.jobs[i];
+      lines.push(`const job${i}Cron = ${JSON.stringify(job.cron)};`);
+    }
+    lines.push("");
+    lines.push("export async function scheduled(controller, env, ctx) {");
+    lines.push("  switch (controller.cron) {");
+    for (let i = 0; i < scan.jobs.length; i++) {
+      const job = scan.jobs[i];
+      const filePath = JSON.stringify(`${jobsDir}/${job.filePath}`);
+      lines.push(`    case job${i}Cron: {`);
+      lines.push(`      const mod = await import(${filePath});`);
+      lines.push("      if (typeof mod.default === 'function') {");
+      lines.push("        await mod.default(controller, env, ctx);");
+      lines.push("      }");
+      lines.push("      return;");
+      lines.push("    }");
+    }
+    lines.push("    default:");
+    lines.push("      return;");
+    lines.push("  }");
+    lines.push("}");
+    lines.push("");
+  } else {
+    lines.push("export async function scheduled() {}");
+    lines.push("");
+  }
+
   lines.push(`export default app;`);
 
   return lines.join("\n");
@@ -64,7 +94,7 @@ export function compileRouteTable(
  * Simply re-exports the Hono app from the virtual module.
  */
 export function compileWorkerEntry(): string {
-  return `import app from 'virtual:vite-cloud-routes';
+  return `import app, { scheduled } from 'virtual:vite-cloud-routes';
 
-export default app;`;
+export default { fetch: app.fetch, scheduled };`;
 }

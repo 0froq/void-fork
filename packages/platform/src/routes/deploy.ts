@@ -127,6 +127,10 @@ app.post("/:id/deploy", async (c) => {
       compatibility_date: "2026-02-12",
       compatibility_flags: ["nodejs_compat"],
       bindings: workerBindings.length > 0 ? workerBindings : undefined,
+      triggers:
+        manifest.schedules && manifest.schedules.length > 0
+          ? { crons: manifest.schedules.map((schedule) => schedule.cron) }
+          : undefined,
     };
     workerFormData.append(
       "metadata",

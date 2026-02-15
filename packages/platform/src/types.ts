@@ -37,6 +37,11 @@ export interface MigrationMeta {
   destructive: boolean;
 }
 
+export interface ScheduleMeta {
+  name: string;
+  cron: string;
+}
+
 export interface DeployManifest {
   bindings: {
     d1?: string[];
@@ -44,4 +49,5 @@ export interface DeployManifest {
     r2?: string[];
   };
   migrations?: MigrationMeta[];
+  schedules?: ScheduleMeta[];
 }

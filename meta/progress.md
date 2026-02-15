@@ -38,7 +38,7 @@ Implementation Progress
 - [ ] SSR support (minimal `src/ssr.entry.ts` convention)
 - [ ] Auth via better-auth integration (`auth: true` zero-config)
 
-**Milestone:** 
+**Milestone:**
 
 ### Phase 4: GitHub & Production Readiness
 

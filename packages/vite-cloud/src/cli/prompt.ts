@@ -51,7 +51,8 @@ export async function promptProjectSlug(defaultSlug: string): Promise<string> {
       }
 
       // Allows lowercase alphanumeric with interior dashes.
-      const valid = slug.length === 1 ? /^[a-z0-9]$/.test(slug) : /^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slug);
+      const valid =
+        slug.length === 1 ? /^[a-z0-9]$/.test(slug) : /^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slug);
       if (!valid) {
         return "Slug must be lowercase alphanumeric with dashes.";
       }
