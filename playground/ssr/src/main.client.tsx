@@ -11,5 +11,5 @@ declare global {
 
 hydrateRoot(
   document.getElementById("root")!,
-  <App url={window.location.pathname} visitCount={window.__STATE__.visits} />
+  <App url={window.location.pathname} visitCount={window.__STATE__.visits} />,
 );

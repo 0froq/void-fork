@@ -31,10 +31,9 @@ import App from "./App";
 export async function render(request: Request, env: { KV: KVNamespace }) {
   const url = new URL(request.url);
   const html = renderToString(<App url={url.pathname} />);
-  return new Response(
-    `<!doctype html><html><body><div id="root">${html}</div></body></html>`,
-    { headers: { "content-type": "text/html; charset=utf-8" } },
-  );
+  return new Response(`<!doctype html><html><body><div id="root">${html}</div></body></html>`, {
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
 }
 ```
 
