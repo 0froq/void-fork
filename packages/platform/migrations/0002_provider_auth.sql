@@ -1,16 +1,5 @@
--- vite-cloud-pragma: allow-destructive
-CREATE TABLE users_new (
-  id TEXT PRIMARY KEY,
-  provider TEXT NOT NULL,
-  provider_id TEXT NOT NULL,
-  login TEXT NOT NULL,
-  email TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(provider, provider_id)
-);
-
-INSERT INTO users_new (id, provider, provider_id, login, email, created_at)
-  SELECT id, 'github', CAST(github_id AS TEXT), github_login, email, created_at FROM users;
-
-DROP TABLE users;
-ALTER TABLE users_new RENAME TO users;
+ALTER TABLE users ADD COLUMN provider TEXT NOT NULL DEFAULT 'github';
+ALTER TABLE users ADD COLUMN provider_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN login TEXT NOT NULL DEFAULT '';
+UPDATE users SET provider_id = CAST(github_id AS TEXT), login = github_login;
+CREATE UNIQUE INDEX idx_users_provider_id ON users(provider, provider_id);

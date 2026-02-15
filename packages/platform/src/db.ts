@@ -12,8 +12,11 @@ export async function createUser(
 ): Promise<User> {
   const id = generateId("user");
   await db
-    .prepare("INSERT INTO users (id, provider, provider_id, login, email) VALUES (?, ?, ?, ?, ?)")
-    .bind(id, provider, providerId, login, email)
+    // github_id/github_login are ghost columns from the pre-migration schema (NOT NULL, can't drop)
+    .prepare(
+      "INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login) VALUES (?, ?, ?, ?, ?, ABS(RANDOM()), ?)",
+    )
+    .bind(id, provider, providerId, login, email, login)
     .run();
   return {
     id,
@@ -47,8 +50,8 @@ export async function updateUser(
   email: string | null,
 ): Promise<void> {
   await db
-    .prepare("UPDATE users SET login = ?, email = ? WHERE id = ?")
-    .bind(login, email, id)
+    .prepare("UPDATE users SET login = ?, github_login = ?, email = ? WHERE id = ?")
+    .bind(login, login, email, id)
     .run();
 }
 

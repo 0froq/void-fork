@@ -54,12 +54,7 @@ export async function setupEnv(): Promise<TestEnv> {
   await db.batch(splitStatements(schema1).map((s) => db.prepare(s)));
 
   const schema2 = readFileSync(MIGRATION_0002, "utf-8");
-  // Strip comment lines (pragmas) before splitting
-  const cleaned2 = schema2
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("--"))
-    .join("\n");
-  for (const stmt of splitStatements(cleaned2)) {
+  for (const stmt of splitStatements(schema2)) {
     await db.prepare(stmt).run();
   }
 
@@ -102,8 +97,10 @@ export async function createTestUser(
   const id = `user_test${++userCounter}`;
   const pid = providerId ?? String(10000 + userCounter);
   await db
-    .prepare("INSERT INTO users (id, provider, provider_id, login, email) VALUES (?, ?, ?, ?, ?)")
-    .bind(id, provider, pid, login, null)
+    .prepare(
+      "INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login) VALUES (?, ?, ?, ?, ?, ABS(RANDOM()), ?)",
+    )
+    .bind(id, provider, pid, login, null, login)
     .run();
   const jwt = await signJwt({ sub: id, login }, JWT_SECRET);
   return { id, login, jwt };
