@@ -8,9 +8,9 @@
     "skipLibCheck": true,
     "declaration": true,
     "outDir": "dist",
-    "rootDir": "src",
-    "types": ["@cloudflare/workers-types"],
+    "rootDir": ".",
+    "types": ["node", "@cloudflare/workers-types"],
     "isolatedDeclarations": true
   },
-  "include": ["src"]
+  "include": ["src", "test"]
 }
