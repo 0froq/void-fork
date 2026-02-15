@@ -1,4 +1,4 @@
-import { intro, outro } from "@clack/prompts";
+import { intro, outro, log, cancel } from "@clack/prompts";
 import { getToken } from "./auth";
 import { PlatformClient } from "./client";
 import { readProjectConfig, writeProjectConfig } from "./project";
@@ -10,18 +10,15 @@ export async function runLink(root: string, slug?: string): Promise<void> {
   // Check if already linked
   const existing = readProjectConfig(root);
   if (existing) {
-    console.log(`Already linked to ${existing.slug} (${existing.slug}.vitecloud.app)`);
-    console.log(`To re-link, delete .vite-cloud/project.json and run again.`);
+    log.warn(`Already linked to ${existing.slug} (${existing.slug}.vitecloud.app)`);
+    outro("To re-link, delete .vite-cloud/project.json and run again.");
     return;
   }
 
   // Auth
   const token = getToken();
   if (!token) {
-    console.error(
-      "Error: No auth token found.\n" +
-        "Set VITE_CLOUD_TOKEN environment variable or run `vite-cloud login`.",
-    );
+    cancel("No auth token found. Run `vcd login` first.");
     process.exit(1);
   }
 
@@ -32,7 +29,7 @@ export async function runLink(root: string, slug?: string): Promise<void> {
     // Non-interactive: link by slug
     const project = projects.find((p) => p.slug === slug);
     if (!project) {
-      console.error(`Error: No project found with slug "${slug}".`);
+      cancel(`No project found with slug "${slug}".`);
       process.exit(1);
     }
     writeProjectConfig(root, { projectId: project.id, slug: project.slug });
@@ -42,14 +39,14 @@ export async function runLink(root: string, slug?: string): Promise<void> {
 
   // Interactive: prompt user to select
   if (projects.length === 0) {
-    console.error("No projects found. Run `vite-cloud deploy` to create one.");
+    cancel("No projects found. Run `vcd deploy` to create one.");
     process.exit(1);
   }
 
   const result = await promptProjectSelection(projects);
 
   if (result.action === "create") {
-    console.log("Run `vite-cloud deploy` to create a new project.");
+    outro("Run `vcd deploy` to create a new project.");
     return;
   }
 

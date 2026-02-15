@@ -3,12 +3,14 @@ import { PlatformClient } from "./client";
 import { readProjectConfig } from "./project";
 import { getRequestedProjectSlug, resolveProjectBySlug } from "./deploy";
 import type { SecretArgs } from "./secret-args";
-import { cancel, isCancel, password } from "@clack/prompts";
+import { intro, outro, log, cancel, isCancel, password } from "@clack/prompts";
 
 export async function runSecretCommand(root: string, args: SecretArgs): Promise<void> {
+  intro("vite-cloud secret");
+
   const token = getToken();
   if (!token) {
-    console.error("Not logged in. Run `vcd login` first.");
+    log.error("Not logged in. Run `vcd login` first.");
     process.exit(1);
   }
 
@@ -31,12 +33,12 @@ export async function runSecretCommand(root: string, args: SecretArgs): Promise<
   if (args.action === "put") {
     const value = args.value ?? (await readSecretValue());
     await client.setSecret(projectId, args.name, value);
-    console.log(`Secret ${args.name} set.`);
+    outro(`Secret ${args.name} set.`);
     return;
   }
 
   await client.deleteSecret(projectId, args.name);
-  console.log(`Secret ${args.name} deleted.`);
+  outro(`Secret ${args.name} deleted.`);
 }
 
 async function readSecretValue(): Promise<string> {
