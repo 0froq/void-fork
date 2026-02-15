@@ -5,13 +5,22 @@ import { runLink } from "./link";
 import { runLoginCommand } from "./login";
 import { getToken, removeToken } from "./auth";
 import { PlatformClient } from "./client";
+import { parseDeployArgs } from "./args";
 
 const args = process.argv.slice(2);
 const command = args[0];
 
 if (command === "deploy") {
   const root = process.cwd();
-  runDeploy(root).catch((err) => {
+  let deployArgs;
+  try {
+    deployArgs = parseDeployArgs(args.slice(1));
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
+
+  runDeploy(root, { projectSlug: deployArgs.projectSlug }).catch((err) => {
     console.error(err.message ?? err);
     process.exit(1);
   });
@@ -56,12 +65,14 @@ Usage:
   vcd login          Log in with GitHub
   vcd logout         Log out and remove credentials
   vcd whoami         Show the logged-in GitHub username
-  vcd deploy         Build and deploy to Vite Cloud
+  vcd deploy [--project <slug>]
+                     Build and deploy to Vite Cloud
   vcd link [slug]    Link to an existing project
 
 Environment:
   VITE_CLOUD_TOKEN     Auth token (or use ~/.vite-cloud/credentials.json)
   VITE_CLOUD_API_URL   Platform API URL (default: https://api.vite.cloud)
+  VITE_CLOUD_PROJECT   Deploy target project slug override
 `);
   if (command && command !== "help" && command !== "--help" && command !== "-h") {
     console.error(`Unknown command: ${command}`);

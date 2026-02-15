@@ -2,13 +2,40 @@ import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { getToken } from "./auth";
-import { readProjectConfig, writeProjectConfig } from "./project";
+import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
 import { packageBuild } from "./package";
-import { PlatformClient } from "./client";
+import { PlatformClient, type ProjectResponse } from "./client";
 import { inferProjectBindings } from "../plugin-inference";
 import { promptProjectSelection } from "./prompt";
 import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
+
+export interface RunDeployOptions {
+  projectSlug?: string;
+}
+
+export function getRequestedProjectSlug(options?: RunDeployOptions): string | null {
+  const cliSlug = options?.projectSlug?.trim();
+  if (cliSlug) {
+    return cliSlug;
+  }
+
+  const envSlug = process.env.VITE_CLOUD_PROJECT?.trim();
+  if (envSlug) {
+    return envSlug;
+  }
+
+  return null;
+}
+
+export function resolveProjectBySlug(projects: ProjectResponse[], slug: string): ProjectConfig {
+  const project = projects.find((candidate) => candidate.slug === slug);
+  if (!project) {
+    throw new Error(`No project found with slug "${slug}".`);
+  }
+
+  return { projectId: project.id, slug: project.slug };
+}
 
 /**
  * Run the full deploy pipeline:
@@ -18,7 +45,7 @@ import { validateMigrations } from "../migrations/validate";
  * 4. Upload to platform
  * 5. Print live URL
  */
-export async function runDeploy(root: string): Promise<void> {
+export async function runDeploy(root: string, options?: RunDeployOptions): Promise<void> {
   // 1. Auth
   const token = getToken();
   if (!token) {
@@ -31,8 +58,17 @@ export async function runDeploy(root: string): Promise<void> {
 
   const client = new PlatformClient(token);
 
-  // 2. Read or create project config
-  let config = readProjectConfig(root);
+  // 2. Resolve target project (CLI flag > env var > linked project file)
+  const requestedProjectSlug = getRequestedProjectSlug(options);
+  let config: ProjectConfig | null = null;
+
+  if (requestedProjectSlug) {
+    const projects = await client.listProjects();
+    config = resolveProjectBySlug(projects, requestedProjectSlug);
+  } else {
+    config = readProjectConfig(root);
+  }
+
   if (!config) {
     const projects = await client.listProjects();
 
@@ -93,8 +129,6 @@ export async function runDeploy(root: string): Promise<void> {
     console.log(`  ${result.migrations} migration(s) applied`);
   }
 }
-
-import type { ProjectConfig } from "./project";
 
 async function createNewProject(root: string, client: PlatformClient): Promise<ProjectConfig> {
   const pkgPath = join(root, "package.json");
