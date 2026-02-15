@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  detectWorkerDir,
   getRequestedProjectSlug,
   inferDefaultProjectNameAndSlug,
   resolveProjectBySlug,
@@ -86,5 +87,58 @@ describe("inferDefaultProjectNameAndSlug", () => {
       name: "my-app",
       slug: "my-app",
     });
+  });
+});
+
+describe("detectWorkerDir", () => {
+  afterEach(() => {
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop()!;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses expected dist/<environment-name> when present", () => {
+    const root = mkdtempSync(join(tmpdir(), "vite-cloud-test-"));
+    tempDirs.push(root);
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "star-tracker" }));
+    const dist = join(root, "dist");
+    mkdirSync(join(dist, "star_tracker"), { recursive: true });
+
+    expect(detectWorkerDir(root, dist)).toBe("star_tracker");
+  });
+
+  it("falls back to single non-client directory for custom output dirs", () => {
+    const root = mkdtempSync(join(tmpdir(), "vite-cloud-test-"));
+    tempDirs.push(root);
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "star-tracker" }));
+    const dist = join(root, "dist");
+    mkdirSync(join(dist, "worker"), { recursive: true });
+    mkdirSync(join(dist, "client"), { recursive: true });
+
+    expect(detectWorkerDir(root, dist)).toBe("worker");
+  });
+
+  it("throws when multiple fallback candidates exist", () => {
+    const root = mkdtempSync(join(tmpdir(), "vite-cloud-test-"));
+    tempDirs.push(root);
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "star-tracker" }));
+    const dist = join(root, "dist");
+    mkdirSync(join(dist, "worker-a"), { recursive: true });
+    mkdirSync(join(dist, "worker-b"), { recursive: true });
+
+    expect(() => detectWorkerDir(root, dist)).toThrow(
+      "Could not determine worker output directory",
+    );
+  });
+
+  it("derives env dir for scoped package names", () => {
+    const root = mkdtempSync(join(tmpdir(), "vite-cloud-test-"));
+    tempDirs.push(root);
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "@acme/star-tracker" }));
+    const dist = join(root, "dist");
+    mkdirSync(join(dist, "star_tracker"), { recursive: true });
+
+    expect(detectWorkerDir(root, dist)).toBe("star_tracker");
   });
 });

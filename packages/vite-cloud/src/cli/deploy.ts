@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { join } from "node:path";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { getToken } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
 import { packageBuild } from "./package";
@@ -121,12 +121,11 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
     }
   }
 
-  // 6. Detect worker directory name from dist/
-  const workerDirName = detectWorkerDir(root);
+  const distDir = join(root, "dist");
+  const workerDirName = detectWorkerDir(root, distDir);
 
   // 7. Package
   console.log("Packaging...");
-  const distDir = join(root, "dist");
   const formData = packageBuild(distDir, workerDirName, bindings, validatedMigrations);
 
   // 8. Upload
@@ -159,12 +158,44 @@ async function createNewProject(
 
 /**
  * Detect the worker output directory name.
- * Vite + @cloudflare/vite-plugin outputs worker files to dist/<package-name>/
+ * Cloudflare Vite plugin defaults worker build output to dist/<environmentName>,
+ * where environmentName is workerName with "-" replaced by "_".
+ * If not found, fall back to discovery for custom environment/outDir overrides.
  */
-function detectWorkerDir(root: string): string {
+export function detectWorkerDir(root: string, distDir: string): string {
   const pkgPath = join(root, "package.json");
   const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-  // The CF plugin uses the package name (without scope) as the output dir
-  const name: string = pkg.name ?? "worker";
-  return name.replace(/^@[^/]+\//, "");
+  const packageName: string = pkg.name ?? "worker";
+  const workerName = packageName.replace(/^@[^/]+\//, "");
+  const expected = workerName.replaceAll("-", "_");
+
+  const expectedPath = join(distDir, expected);
+  if (existsSync(expectedPath)) {
+    return expected;
+  }
+
+  if (!existsSync(distDir)) {
+    throw new Error(`Build output not found: ${distDir}`);
+  }
+
+  const candidates = readdirSync(distDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => name !== "client" && !name.startsWith("."));
+
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+
+  if (candidates.length === 0) {
+    throw new Error(
+      `No worker output directory found in ${distDir}. Expected ${expectedPath}.`,
+    );
+  }
+
+  throw new Error(
+    `Could not determine worker output directory in ${distDir}. Expected ${expectedPath}. Found multiple candidates: ${candidates.join(
+      ", ",
+    )}`,
+  );
 }
