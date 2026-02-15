@@ -164,7 +164,8 @@ export function routingPlugin(root: string): Plugin {
     },
 
     async closeBundle() {
-      if (!resolvedConfig || resolvedConfig.command !== "build" || resolvedConfig.build.watch) return;
+      if (!resolvedConfig || resolvedConfig.command !== "build" || resolvedConfig.build.watch)
+        return;
       if (!ssr || prerenderPaths.length === 0) return;
 
       const outDir = isAbsolute(resolvedConfig.build.outDir)
@@ -217,7 +218,9 @@ export function routingPlugin(root: string): Plugin {
 
         const html = await response.text();
         const outPath =
-          path === "/" ? join(clientDir, "index.html") : join(clientDir, path.slice(1), "index.html");
+          path === "/"
+            ? join(clientDir, "index.html")
+            : join(clientDir, path.slice(1), "index.html");
         mkdirSync(dirname(outPath), { recursive: true });
         writeFileSync(outPath, html);
       }

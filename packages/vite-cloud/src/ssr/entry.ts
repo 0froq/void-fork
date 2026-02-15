@@ -82,7 +82,9 @@ function validateServerRenderExport(entry: ResolvedEntry): void {
         return true;
       }
       if (declaration?.type === "CallExpression") {
-        return declaration.callee?.type === "Identifier" && declaration.callee.name === "defineRender";
+        return (
+          declaration.callee?.type === "Identifier" && declaration.callee.name === "defineRender"
+        );
       }
       return false;
     }
