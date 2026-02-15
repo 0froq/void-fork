@@ -1,7 +1,8 @@
 export interface User {
   id: string;
-  github_id: number;
-  github_login: string;
+  provider: string;
+  provider_id: string;
+  login: string;
   email: string | null;
   created_at: string;
 }

@@ -58,7 +58,7 @@ function page(title: string, message: string): string {
  * Start a local HTTP server, open the browser to the platform login page,
  * and wait for the OAuth callback with a JWT token.
  */
-export async function runLogin(): Promise<string> {
+export async function runLogin(provider = "github"): Promise<string> {
   const http = await import("node:http");
   const { exec } = await import("node:child_process");
 
@@ -70,6 +70,25 @@ export async function runLogin(): Promise<string> {
       if (url.pathname !== "/callback") {
         res.writeHead(404);
         res.end("Not found");
+        return;
+      }
+
+      const error = url.searchParams.get("error");
+      if (error === "email_conflict") {
+        const existing = url.searchParams.get("existing_provider");
+        res.writeHead(400, { "Content-Type": "text/html" });
+        res.end(
+          page(
+            "Login failed",
+            `This email is already registered with ${existing}. Please log in with ${existing} instead.`,
+          ),
+        );
+        server.close();
+        reject(
+          new Error(
+            `This email is already registered with ${existing}. Please log in with ${existing} instead.`,
+          ),
+        );
         return;
       }
 
@@ -97,7 +116,7 @@ export async function runLogin(): Promise<string> {
 
       const port = addr.port;
       const redirect = `http://localhost:${port}/callback`;
-      const loginUrl = `${apiUrl}/auth/login?redirect=${encodeURIComponent(redirect)}`;
+      const loginUrl = `${apiUrl}/auth/login?redirect=${encodeURIComponent(redirect)}&provider=${provider}`;
 
       // Open browser with platform detection
       const platform = process.platform;

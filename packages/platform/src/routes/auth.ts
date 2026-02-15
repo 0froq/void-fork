@@ -1,8 +1,13 @@
 import { Hono } from "hono";
 import type { PlatformEnv } from "../env";
 import { getGitHubAuthorizeUrl, exchangeCodeForToken, getGitHubUser } from "../auth/github";
+import {
+  getGoogleAuthorizeUrl,
+  exchangeCodeForToken as exchangeGoogleCode,
+  getGoogleUser,
+} from "../auth/google";
 import { signJwt } from "../auth/jwt";
-import { getUserByGithubId, createUser, updateUser } from "../db";
+import { getUserByProvider, getUserByEmail, createUser, updateUser } from "../db";
 
 const DEFAULT_REDIRECT_URI = "https://api.vite.cloud/auth/callback";
 
@@ -44,7 +49,7 @@ async function hmacVerifyState(data: string, signature: string, secret: string):
   return crypto.subtle.verify("HMAC", key, sigBytes, encoder.encode(data));
 }
 
-// GET /auth/login?redirect=http://localhost:PORT/callback
+// GET /auth/login?redirect=http://localhost:PORT/callback&provider=github|google
 app.get("/login", async (c) => {
   const redirect = c.req.query("redirect");
   if (!redirect) {
@@ -56,13 +61,24 @@ app.get("/login", async (c) => {
     return c.json({ error: "redirect must be a localhost URL" }, 400);
   }
 
+  const provider = c.req.query("provider") ?? "github";
+  if (provider !== "github" && provider !== "google") {
+    return c.json({ error: "provider must be github or google" }, 400);
+  }
+
   const nonce = crypto.randomUUID();
-  const stateData = JSON.stringify({ redirect, nonce });
+  const stateData = JSON.stringify({ redirect, nonce, provider });
   const stateEncoded = btoa(stateData);
   const signature = await hmacSignState(stateEncoded, c.env.JWT_SECRET);
   const state = `${stateEncoded}.${signature}`;
 
   const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
+
+  if (provider === "google") {
+    const url = getGoogleAuthorizeUrl(c.env.GOOGLE_CLIENT_ID, redirectUri, state);
+    return c.redirect(url);
+  }
+
   const url = getGitHubAuthorizeUrl(c.env.GITHUB_CLIENT_ID, redirectUri, state);
   return c.redirect(url);
 });
@@ -90,31 +106,66 @@ app.get("/callback", async (c) => {
     return c.json({ error: "invalid state signature" }, 400);
   }
 
-  const { redirect } = JSON.parse(atob(stateEncoded)) as { redirect: string; nonce: string };
+  const { redirect, provider } = JSON.parse(atob(stateEncoded)) as {
+    redirect: string;
+    nonce: string;
+    provider?: string;
+  };
 
   // Re-validate redirect after decoding
   if (!redirect.startsWith("http://localhost:") && !redirect.startsWith("http://127.0.0.1:")) {
     return c.json({ error: "invalid redirect" }, 400);
   }
 
-  // Exchange code for GitHub token
-  const ghToken = await exchangeCodeForToken(
-    c.env.GITHUB_CLIENT_ID,
-    c.env.GITHUB_CLIENT_SECRET,
-    code,
-  );
-  const ghUser = await getGitHubUser(ghToken);
+  const resolvedProvider = provider ?? "github";
+  let providerId: string;
+  let login: string;
+  let email: string | null;
+
+  if (resolvedProvider === "google") {
+    const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
+    const googleToken = await exchangeGoogleCode(
+      c.env.GOOGLE_CLIENT_ID,
+      c.env.GOOGLE_CLIENT_SECRET,
+      code,
+      redirectUri,
+    );
+    const googleUser = await getGoogleUser(googleToken);
+    providerId = googleUser.id;
+    login = googleUser.email;
+    email = googleUser.email;
+  } else {
+    const ghToken = await exchangeCodeForToken(
+      c.env.GITHUB_CLIENT_ID,
+      c.env.GITHUB_CLIENT_SECRET,
+      code,
+    );
+    const ghUser = await getGitHubUser(ghToken);
+    providerId = String(ghUser.id);
+    login = ghUser.login;
+    email = ghUser.email;
+  }
 
   // Upsert user
-  let user = await getUserByGithubId(c.env.DB, ghUser.id);
+  let user = await getUserByProvider(c.env.DB, resolvedProvider, providerId);
   if (user) {
-    await updateUser(c.env.DB, user.id, ghUser.login, ghUser.email);
+    await updateUser(c.env.DB, user.id, login, email);
   } else {
-    user = await createUser(c.env.DB, ghUser.id, ghUser.login, ghUser.email);
+    // Check for duplicate email across providers
+    if (email) {
+      const existing = await getUserByEmail(c.env.DB, email);
+      if (existing) {
+        const redirectUrl = new URL(redirect);
+        redirectUrl.searchParams.set("error", "email_conflict");
+        redirectUrl.searchParams.set("existing_provider", existing.provider);
+        return c.redirect(redirectUrl.toString());
+      }
+    }
+    user = await createUser(c.env.DB, resolvedProvider, providerId, login, email);
   }
 
   // Sign JWT
-  const jwt = await signJwt({ sub: user.id, login: ghUser.login }, c.env.JWT_SECRET);
+  const jwt = await signJwt({ sub: user.id, login }, c.env.JWT_SECRET);
 
   // Redirect back to CLI
   const redirectUrl = new URL(redirect);

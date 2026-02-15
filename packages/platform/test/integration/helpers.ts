@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 import { vi } from "vitest";
 import { signJwt } from "../../src/auth/jwt";
 
-const SCHEMA_PATH = fileURLToPath(new URL("../../migrations/0001_initial.sql", import.meta.url));
+const MIGRATION_0001 = fileURLToPath(new URL("../../migrations/0001_initial.sql", import.meta.url));
+const MIGRATION_0002 = fileURLToPath(
+  new URL("../../migrations/0002_provider_auth.sql", import.meta.url),
+);
 
 export const JWT_SECRET = "test-jwt-secret";
 export const CF_API_TOKEN = "test-cf-token";
@@ -20,9 +23,18 @@ export type TestEnv = {
   JWT_SECRET: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
 };
 
 let mf: Miniflare;
+
+function splitStatements(sql: string): string[] {
+  return sql
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 export async function setupEnv(): Promise<TestEnv> {
   mf = new Miniflare({
@@ -37,13 +49,19 @@ export async function setupEnv(): Promise<TestEnv> {
   const kv = await mf.getKVNamespace("ROUTING");
   const r2 = await mf.getR2Bucket("ASSETS");
 
-  // Apply schema — split into individual statements for Miniflare D1
-  const schema = readFileSync(SCHEMA_PATH, "utf-8");
-  const stmts = schema
-    .split(";")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  await db.batch(stmts.map((s) => db.prepare(s)));
+  // Apply migrations sequentially
+  const schema1 = readFileSync(MIGRATION_0001, "utf-8");
+  await db.batch(splitStatements(schema1).map((s) => db.prepare(s)));
+
+  const schema2 = readFileSync(MIGRATION_0002, "utf-8");
+  // Strip comment lines (pragmas) before splitting
+  const cleaned2 = schema2
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("--"))
+    .join("\n");
+  for (const stmt of splitStatements(cleaned2)) {
+    await db.prepare(stmt).run();
+  }
 
   return {
     DB: db,
@@ -55,6 +73,8 @@ export async function setupEnv(): Promise<TestEnv> {
     JWT_SECRET,
     GITHUB_CLIENT_ID: "test-github-client-id",
     GITHUB_CLIENT_SECRET: "test-github-client-secret",
+    GOOGLE_CLIENT_ID: "test-google-client-id",
+    GOOGLE_CLIENT_SECRET: "test-google-client-secret",
   };
 }
 
@@ -76,13 +96,14 @@ let userCounter = 0;
 export async function createTestUser(
   db: D1Database,
   login = "testuser",
-  githubId?: number,
+  provider = "github",
+  providerId?: string,
 ): Promise<{ id: string; login: string; jwt: string }> {
   const id = `user_test${++userCounter}`;
-  const gid = githubId ?? 10000 + userCounter;
+  const pid = providerId ?? String(10000 + userCounter);
   await db
-    .prepare("INSERT INTO users (id, github_id, github_login, email) VALUES (?, ?, ?, ?)")
-    .bind(id, gid, login, null)
+    .prepare("INSERT INTO users (id, provider, provider_id, login, email) VALUES (?, ?, ?, ?, ?)")
+    .bind(id, provider, pid, login, null)
     .run();
   const jwt = await signJwt({ sub: id, login }, JWT_SECRET);
   return { id, login, jwt };

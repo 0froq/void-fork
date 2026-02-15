@@ -133,22 +133,28 @@ src/
   auth/
     jwt.ts                  # HS256 JWT sign/verify via Web Crypto API
     github.ts               # GitHub OAuth helpers (authorize URL, code→token, user profile)
+    google.ts               # Google OAuth helpers (authorize URL, code→token, user profile)
   middleware/
     auth.ts                 # Bearer token verification, sets userId/userLogin on context
   migrations/
     remote-runner.ts        # Executes migrations on remote D1 via CF REST API
     validate.ts             # Server-side destructive-op validation (defense in depth)
   routes/
-    auth.ts                 # GET /auth/login + GET /auth/callback (GitHub OAuth flow)
+    auth.ts                 # GET /auth/login + GET /auth/callback (GitHub/Google OAuth flow)
     projects.ts             # POST /projects, GET /projects/:id
     deploy.ts               # POST /projects/:id/deploy (migrations → assets → worker)
 migrations/
   0001_initial.sql          # users, projects, deployments, resources tables
+  0002_provider_auth.sql    # Migrate users to provider-agnostic schema
 ```
 
 ### Auth Flow
 
-`GET /auth/login?redirect=http://localhost:{port}/callback` → HMAC-signed state → GitHub OAuth → `GET /auth/callback` → exchange code → upsert user → sign JWT → redirect to CLI with `?token=`.
+`GET /auth/login?redirect=http://localhost:{port}/callback&provider=github|google` → HMAC-signed state (includes `provider`) → GitHub or Google OAuth → `GET /auth/callback` → extract `provider` from state → exchange code → upsert user (with duplicate email check across providers) → sign JWT → redirect to CLI with `?token=`.
+
+The CLI's `vcd login` prompts user to choose GitHub or Google, then passes `provider` in the query string. On email conflict (same email registered under different provider), the callback redirects with `?error=email_conflict&existing_provider=...`.
+
+The `User` type uses provider-agnostic columns: `provider` (`"github"` | `"google"`), `provider_id` (TEXT — GitHub numeric ID cast to string, Google opaque sub), `login` (GitHub username or Google email).
 
 Auth middleware on `/projects/*` extracts Bearer token, verifies JWT, sets `c.get("userId")` and `c.get("userLogin")`. Deploy endpoint checks `project.user_id === c.get("userId")` for ownership.
 
@@ -168,7 +174,7 @@ Auth middleware on `/projects/*` extracts Bearer token, verifies JWT, sets `c.ge
 
 ### Secrets (via `wrangler secret put`)
 
-`CF_API_TOKEN`, `CF_ACCOUNT_ID`, `JWT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
+`CF_API_TOKEN`, `CF_ACCOUNT_ID`, `JWT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
 
 Optional env var: `AUTH_REDIRECT_URI` (defaults to `https://api.vite.cloud/auth/callback`). For local dev, set in `.dev.vars`.
 

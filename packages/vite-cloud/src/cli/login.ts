@@ -1,4 +1,4 @@
-import { intro, outro, spinner } from "@clack/prompts";
+import { intro, outro, spinner, select, isCancel, cancel } from "@clack/prompts";
 import { getToken, runLogin, saveToken } from "./auth";
 
 export async function runLoginCommand(): Promise<void> {
@@ -11,11 +11,25 @@ export async function runLoginCommand(): Promise<void> {
     return;
   }
 
+  const provider = await select({
+    message: "Choose a login provider:",
+    options: [
+      { value: "github", label: "GitHub" },
+      { value: "google", label: "Google" },
+    ],
+  });
+
+  if (isCancel(provider)) {
+    cancel("Login cancelled.");
+    process.exit(0);
+  }
+
+  const providerName = provider === "github" ? "GitHub" : "Google";
   const s = spinner();
-  s.start("Opening browser for GitHub login...");
+  s.start(`Opening browser for ${providerName} login...`);
 
   try {
-    const token = await runLogin();
+    const token = await runLogin(provider);
     saveToken(token);
     s.stop("Logged in!");
     outro("Token saved to ~/.vite-cloud/credentials.json");

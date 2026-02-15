@@ -48,9 +48,9 @@ describe("GET /me", () => {
     // Insert user with real timers
     const userId = "user_expired";
     await env.DB.prepare(
-      "INSERT INTO users (id, github_id, github_login, email) VALUES (?, ?, ?, ?)",
+      "INSERT INTO users (id, provider, provider_id, login, email) VALUES (?, ?, ?, ?, ?)",
     )
-      .bind(userId, 99999, "expired", null)
+      .bind(userId, "github", "99999", "expired", null)
       .run();
 
     // Sign JWT in the past so it's expired

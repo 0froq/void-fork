@@ -5,37 +5,50 @@ import { generateId } from "./id";
 
 export async function createUser(
   db: D1Database,
-  githubId: number,
-  githubLogin: string,
+  provider: string,
+  providerId: string,
+  login: string,
   email: string | null,
 ): Promise<User> {
   const id = generateId("user");
   await db
-    .prepare("INSERT INTO users (id, github_id, github_login, email) VALUES (?, ?, ?, ?)")
-    .bind(id, githubId, githubLogin, email)
+    .prepare("INSERT INTO users (id, provider, provider_id, login, email) VALUES (?, ?, ?, ?, ?)")
+    .bind(id, provider, providerId, login, email)
     .run();
   return {
     id,
-    github_id: githubId,
-    github_login: githubLogin,
+    provider,
+    provider_id: providerId,
+    login,
     email,
     created_at: new Date().toISOString(),
   };
 }
 
-export async function getUserByGithubId(db: D1Database, githubId: number): Promise<User | null> {
-  return db.prepare("SELECT * FROM users WHERE github_id = ?").bind(githubId).first<User>();
+export async function getUserByProvider(
+  db: D1Database,
+  provider: string,
+  providerId: string,
+): Promise<User | null> {
+  return db
+    .prepare("SELECT * FROM users WHERE provider = ? AND provider_id = ?")
+    .bind(provider, providerId)
+    .first<User>();
+}
+
+export async function getUserByEmail(db: D1Database, email: string): Promise<User | null> {
+  return db.prepare("SELECT * FROM users WHERE email = ?").bind(email).first<User>();
 }
 
 export async function updateUser(
   db: D1Database,
   id: string,
-  githubLogin: string,
+  login: string,
   email: string | null,
 ): Promise<void> {
   await db
-    .prepare("UPDATE users SET github_login = ?, email = ? WHERE id = ?")
-    .bind(githubLogin, email, id)
+    .prepare("UPDATE users SET login = ?, email = ? WHERE id = ?")
+    .bind(login, email, id)
     .run();
 }
 
