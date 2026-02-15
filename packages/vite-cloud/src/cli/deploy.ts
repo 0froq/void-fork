@@ -6,7 +6,7 @@ import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./pro
 import { packageBuild } from "./package";
 import { PlatformClient, type ProjectResponse } from "./client";
 import { inferProjectBindings } from "../plugin-inference";
-import { promptProjectSelection } from "./prompt";
+import { promptProjectSelection, promptProjectSlug } from "./prompt";
 import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
 
@@ -35,6 +35,14 @@ export function resolveProjectBySlug(projects: ProjectResponse[], slug: string):
   }
 
   return { projectId: project.id, slug: project.slug };
+}
+
+export function inferDefaultProjectNameAndSlug(root: string): { name: string; slug: string } {
+  const pkgPath = join(root, "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+  const name = pkg.name ?? "my-app";
+  const slug = name.replace(/^@[^/]+\//, "").replace(/[^a-z0-9-]/g, "-");
+  return { name, slug };
 }
 
 /**
@@ -85,8 +93,10 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
         config = await createNewProject(root, client);
       }
     } else {
-      // No existing projects — go straight to create flow
-      config = await createNewProject(root, client);
+      // No existing projects — confirm inferred slug, then create
+      const inferred = inferDefaultProjectNameAndSlug(root);
+      const slug = await promptProjectSlug(inferred.slug);
+      config = await createNewProject(root, client, slug);
     }
   }
 
@@ -130,14 +140,17 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   }
 }
 
-async function createNewProject(root: string, client: PlatformClient): Promise<ProjectConfig> {
-  const pkgPath = join(root, "package.json");
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-  const name = pkg.name ?? "my-app";
-  const slug = name.replace(/^@[^/]+\//, "").replace(/[^a-z0-9-]/g, "-");
+async function createNewProject(
+  root: string,
+  client: PlatformClient,
+  slug?: string,
+): Promise<ProjectConfig> {
+  const inferred = inferDefaultProjectNameAndSlug(root);
+  const projectSlug = slug ?? inferred.slug;
+  const name = inferred.name;
 
-  console.log(`Creating project "${slug}"...`);
-  const project = await client.createProject(slug, name);
+  console.log(`Creating project "${projectSlug}"...`);
+  const project = await client.createProject(projectSlug, name);
   const config = { projectId: project.id, slug: project.slug };
   writeProjectConfig(root, config);
   console.log(`Project created: ${config.slug}`);
