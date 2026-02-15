@@ -87,6 +87,9 @@ describe("compileRouteTable", () => {
     expect(code).toContain("app.notFound(async (c) => {");
     expect(code).toContain("if (!shouldHandleSsrRequest(c))");
     expect(code).toContain("return fetchFromAssets(c)");
+    expect(code).toContain("const prerendered = await fetchPrerenderedHtml(c)");
+    expect(code).toContain("if (prerendered)");
+    expect(code).toContain('const prerenderPath = normalizedPath === "/" ? "/index.html"');
     expect(code).toContain('import("/src/main.ssr.ts")');
     expect(code).toContain("return renderSsrResponse(c, mod)");
     expect(code).toContain("return render(c, assetTags)");

@@ -2,6 +2,8 @@ import { renderToString } from "react-dom/server";
 import { defineRender } from "vite-cloud";
 import App from "./App";
 
+export const prerender = ["/", "/about"];
+
 export default defineRender(async (c, assetTags) => {
   const url = new URL(c.req.url);
   const currentCount = Number((await c.env.KV.get("ssr:visits")) ?? "0");

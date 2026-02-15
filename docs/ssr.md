@@ -82,6 +82,25 @@ The `assetTags` values are computed by Vite Cloud:
 - In production: from `dist/client/.vite/manifest.json` (entry script, CSS, modulepreload)
 - In dev: includes Vite HMR client and React refresh preamble (when React plugin is active), plus the client entry script
 
+## SSG (Prerender)
+
+You can pre-render static HTML by exporting a `prerender` path list from `src/main.ssr.ts(x)`:
+
+```ts
+export const prerender = ["/", "/about", "/pricing"];
+```
+
+Behavior:
+
+- runs during production build
+- each path is rendered through your SSR entry and written to `dist/client`
+- output shape is always `<path>/index.html` (for example `/about` -> `about/index.html`)
+- `/about/` is normalized to `/about`
+- prerender paths must be absolute and non-dynamic
+- any prerender failure hard-fails the build
+
+At runtime, these generated HTML files are served as static assets before SSR fallback.
+
 ## Request flow
 
 With SSR enabled:
