@@ -9,7 +9,9 @@ export interface AuthUser {
   avatar_url: string | null;
 }
 
-export function requireAuth(c: Context<Env & { Variables: { user: AuthUser | null } }>): AuthUser {
+export function requireAuth<E extends Env & { Variables: { user: AuthUser | null } }>(
+  c: Context<E>,
+): AuthUser {
   const user = c.get("user");
   if (!user) throw new HTTPException(401, { message: "Unauthorized" });
   return user;
