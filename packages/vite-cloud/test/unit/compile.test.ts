@@ -78,8 +78,8 @@ describe("compileRouteTable", () => {
       "/middleware",
       "/jobs",
       {
-        serverEntryPath: "/src/ssr.entry.ts",
-        clientEntryRelativePath: "src/client.entry.tsx",
+        serverEntryPath: "/src/main.ssr.ts",
+        clientEntryRelativePath: "src/main.client.tsx",
       },
       testOptions,
     );
@@ -87,10 +87,10 @@ describe("compileRouteTable", () => {
     expect(code).toContain("app.notFound(async (c) => {");
     expect(code).toContain("if (!shouldHandleSsrRequest(c))");
     expect(code).toContain("return fetchFromAssets(c)");
-    expect(code).toContain('import("/src/ssr.entry.ts")');
+    expect(code).toContain('import("/src/main.ssr.ts")');
     expect(code).toContain("return renderSsrResponse(c, mod)");
-    expect(code).toContain('const SSR_CLIENT_ENTRY_ID = "src/client.entry.tsx"');
-    expect(code).toContain('const SSR_CLIENT_ENTRY_URL = "/src/client.entry.tsx"');
+    expect(code).toContain('const SSR_CLIENT_ENTRY_ID = "src/main.client.tsx"');
+    expect(code).toContain('const SSR_CLIENT_ENTRY_URL = "/src/main.client.tsx"');
     expect(code).toContain('new URL("/.vite/manifest.json", request.url)');
     expect(code).toContain('src="/@vite/client"');
     expect(code).toContain('from "/@react-refresh"');

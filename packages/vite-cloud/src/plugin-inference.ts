@@ -15,7 +15,7 @@ export interface InferenceOptions {
 
 /**
  * Synchronously infer which Cloudflare bindings the project needs
- * by scanning route/middleware files and optional src/ssr.entry.ts with oxc-parser.
+ * by scanning route/middleware files and optional src/main.ssr.ts with oxc-parser.
  *
  * This runs once when viteCloud() is called (before plugins initialize),
  * so results are available to configure the Cloudflare plugin.
@@ -52,7 +52,7 @@ export function inferProjectBindings(root: string, options?: InferenceOptions): 
   const ssrEntry = getSsrServerEntryPath(root);
   if (ssrEntry) {
     const code = readFileSync(ssrEntry, "utf-8");
-    const filename = ssrEntry.split("/").pop() ?? "ssr.entry.ts";
+    const filename = ssrEntry.split("/").pop() ?? "main.ssr.ts";
     allBindings.push(inferBindingsFromSource(code, filename));
   }
 

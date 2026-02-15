@@ -30,7 +30,7 @@ describe("inferBindingsFromSource", () => {
         return Response.json(await env.DB.prepare('SELECT 1').first())
       }
     `;
-    const result = inferBindingsFromSource(code, "ssr.entry.ts");
+    const result = inferBindingsFromSource(code, "main.ssr.ts");
     expect(result.needsD1).toBe(true);
     expect(result.needsKV).toBe(false);
     expect(result.needsR2).toBe(false);

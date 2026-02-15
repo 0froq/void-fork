@@ -28,7 +28,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | `packages/dispatch`          | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets   |
 | `packages/create-vite-cloud` | `create-vite-cloud`              | `npm create vite-cloud` scaffolding CLI                |
 | `playground/spa`             | (private)                        | SPA playground (routing, middleware, migrations, jobs) |
-| `playground/ssr`             | (private)                        | SSR playground (`src/ssr.entry.ts`)                    |
+| `playground/ssr`             | (private)                        | SSR playground (`src/main.ssr.ts`)                    |
 
 ## `vite-cloud` Architecture
 
@@ -258,7 +258,7 @@ Shared helpers in `packages/platform/test/integration/helpers.ts`:
 - Middleware: `middleware/01.logger.ts` (uses `defineMiddleware`)
 - Migration: `migrations/001_create_users.sql` (creates users table + seeds data)
 
-`playground/ssr` is a minimal React SSR app demonstrating `src/ssr.entry.ts` render fallback plus API routes.
+`playground/ssr` is a minimal React SSR app demonstrating `src/main.ssr.ts` render fallback plus API routes.
 
 Verified working:
 
