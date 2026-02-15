@@ -31,12 +31,12 @@
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.25.0",
+    "@cloudflare/workers-types": "catalog:",
     "better-sqlite3": "^12.6.2",
     "hono": "^4.11.9"
   },
   "devDependencies": {
     "@clack/prompts": "catalog:",
-    "@cloudflare/workers-types": "catalog:",
     "@types/better-sqlite3": "^7.6.13",
     "estree-walker": "^3.0.3",
     "tinyglobby": "^0.2.15",
