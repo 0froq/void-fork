@@ -75,10 +75,11 @@ export function routingPlugin(root: string): Plugin {
     name: "vite-cloud:routing",
     enforce: "pre",
     configResolved(config) {
-      compileOptions.reactRefresh = config.plugins.some((plugin) =>
-        plugin.name === "vite:react-babel" ||
-        plugin.name === "vite:react-refresh" ||
-        plugin.name === "vite:react-swc"
+      compileOptions.reactRefresh = config.plugins.some(
+        (plugin) =>
+          plugin.name === "vite:react-babel" ||
+          plugin.name === "vite:react-refresh" ||
+          plugin.name === "vite:react-swc",
       );
     },
     config(_, env) {
@@ -118,14 +119,7 @@ export function routingPlugin(root: string): Plugin {
       async handler(id) {
         if (id !== VIRTUAL_ROUTES_ID) return;
         if (!scan) await rescan();
-        return compileRouteTable(
-          scan!,
-          routesDir,
-          middlewareDir,
-          jobsDir,
-          ssr,
-          compileOptions,
-        );
+        return compileRouteTable(scan!, routesDir, middlewareDir, jobsDir, ssr, compileOptions);
       },
     },
 

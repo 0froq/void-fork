@@ -23,10 +23,12 @@ function resolveSingleEntry(
   entries: readonly string[],
   label: string,
 ): ResolvedEntry | null {
-  const matches = entries.map((relativePath) => ({
-    relativePath,
-    absolutePath: join(root, relativePath),
-  })).filter((entry) => existsSync(entry.absolutePath));
+  const matches = entries
+    .map((relativePath) => ({
+      relativePath,
+      absolutePath: join(root, relativePath),
+    }))
+    .filter((entry) => existsSync(entry.absolutePath));
 
   if (matches.length === 0) return null;
   if (matches.length > 1) {

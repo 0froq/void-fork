@@ -28,7 +28,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | `packages/dispatch`          | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets   |
 | `packages/create-vite-cloud` | `create-vite-cloud`              | `npm create vite-cloud` scaffolding CLI                |
 | `playground/spa`             | (private)                        | SPA playground (routing, middleware, migrations, jobs) |
-| `playground/ssr`             | (private)                        | SSR playground (`src/main.ssr.ts`)                    |
+| `playground/ssr`             | (private)                        | SSR playground (`src/main.ssr.ts`)                     |
 
 ## `vite-cloud` Architecture
 

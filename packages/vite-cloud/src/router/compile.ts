@@ -141,9 +141,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`  }`);
     lines.push(`  const headTags = [];`);
     lines.push(`  for (const cssFile of cssFiles) {`);
-    lines.push(
-      `    headTags.push(\`<link rel="stylesheet" href="/\${escapeHtml(cssFile)}">\`);`,
-    );
+    lines.push(`    headTags.push(\`<link rel="stylesheet" href="/\${escapeHtml(cssFile)}">\`);`);
     lines.push(`  }`);
     lines.push(`  for (const preloadFile of preloadFiles) {`);
     lines.push(
@@ -176,7 +174,9 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`  if (path === "/api" || path.startsWith("/api/")) return false;`);
     lines.push(`  if (/\\/[^/]+\\.[^/]+$/.test(path)) return false;`);
     lines.push(`  const destination = c.req.header("sec-fetch-dest");`);
-    lines.push(`  if (destination && destination !== "document" && destination !== "empty") return false;`);
+    lines.push(
+      `  if (destination && destination !== "document" && destination !== "empty") return false;`,
+    );
     lines.push(`  return true;`);
     lines.push(`}`);
     lines.push("");
@@ -186,7 +186,9 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`    return new Response("Not Found", { status: 404 });`);
     lines.push(`  }`);
     lines.push(`  const response = await assets.fetch(c.req.raw);`);
-    lines.push(`  return response.status === 404 ? new Response("Not Found", { status: 404 }) : response;`);
+    lines.push(
+      `  return response.status === 404 ? new Response("Not Found", { status: 404 }) : response;`,
+    );
     lines.push(`}`);
     lines.push("");
     lines.push(`async function renderSsrResponse(c, mod) {`);

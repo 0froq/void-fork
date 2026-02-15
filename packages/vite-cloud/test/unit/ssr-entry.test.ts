@@ -47,10 +47,7 @@ describe("ssr entry helpers", () => {
   it("supports tsx ssr entry files", () => {
     const root = createTempRoot();
     const file = join(root, "src", "main.ssr.tsx");
-    writeFileSync(
-      join(root, "src", "main.client.ts"),
-      "console.log('client entry');",
-    );
+    writeFileSync(join(root, "src", "main.client.ts"), "console.log('client entry');");
     writeFileSync(
       file,
       "export async function render(request, env) { return new Response('<div>ok</div>'); }",
@@ -62,10 +59,7 @@ describe("ssr entry helpers", () => {
 
   it("throws when both ts and tsx ssr entries exist", () => {
     const root = createTempRoot();
-    writeFileSync(
-      join(root, "src", "main.client.ts"),
-      "console.log('client entry');",
-    );
+    writeFileSync(join(root, "src", "main.client.ts"), "console.log('client entry');");
     writeFileSync(
       join(root, "src", "main.ssr.ts"),
       "export async function render(request, env) { return new Response('ok'); }",
@@ -80,10 +74,7 @@ describe("ssr entry helpers", () => {
 
   it("throws for missing render export", () => {
     const root = createTempRoot();
-    writeFileSync(
-      join(root, "src", "main.client.ts"),
-      "console.log('client entry');",
-    );
+    writeFileSync(join(root, "src", "main.client.ts"), "console.log('client entry');");
     writeFileSync(
       join(root, "src", "main.ssr.ts"),
       "export const notRender = () => new Response('ok');",
@@ -104,10 +95,7 @@ describe("ssr entry helpers", () => {
 
   it("throws when client entry exists without server entry", () => {
     const root = createTempRoot();
-    writeFileSync(
-      join(root, "src", "main.client.ts"),
-      "console.log('client entry');",
-    );
+    writeFileSync(join(root, "src", "main.client.ts"), "console.log('client entry');");
 
     expect(() => validateSsrEntry(root)).toThrow("SSR mode requires a server entry");
   });
