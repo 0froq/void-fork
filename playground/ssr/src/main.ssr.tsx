@@ -2,7 +2,23 @@ import { renderToString } from "react-dom/server";
 import { defineRender } from "vite-cloud";
 import App from "./App";
 
-export const prerender = ["/", "/about"];
+export const prerender = async () => {
+  const { readdirSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const blogDir = join(process.cwd(), "blog");
+  const files = readdirSync(blogDir).filter((f: string) => f.endsWith(".md"));
+  return ["/", "/about", ...files.map((f: string) => `/blog/${f.replace(".md", "")}`)];
+};
+
+async function readBlogPost(slug: string): Promise<string | null> {
+  try {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    return readFileSync(join(process.cwd(), "blog", `${slug}.md`), "utf-8");
+  } catch {
+    return null;
+  }
+}
 
 export default defineRender(async (c, assetTags) => {
   const url = new URL(c.req.url);
@@ -10,14 +26,20 @@ export default defineRender(async (c, assetTags) => {
   const nextCount = currentCount + 1;
   await c.env.KV.put("ssr:visits", String(nextCount));
 
-  const appHtml = renderToString(<App url={url.pathname} visitCount={nextCount} />);
+  const blogMatch = url.pathname.match(/^\/blog\/(.+)$/);
+  const blogContent = blogMatch ? await readBlogPost(blogMatch[1]) : null;
+
+  const appHtml = renderToString(
+    <App url={url.pathname} visitCount={nextCount} blogContent={blogContent} />,
+  );
+  const stateJson = JSON.stringify({ visits: nextCount, blogContent }).replace(/</g, "\\u003c");
   const html = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Vite Cloud SSR Playground</title>
-    <script>window.__STATE__={ visits: ${nextCount} }</script>
+    <script>window.__STATE__=${stateJson}</script>
     ${assetTags.head}
   </head>
   <body>
@@ -27,8 +49,6 @@ export default defineRender(async (c, assetTags) => {
 </html>`;
 
   return new Response(html, {
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-    },
+    headers: { "content-type": "text/html; charset=utf-8" },
   });
 });

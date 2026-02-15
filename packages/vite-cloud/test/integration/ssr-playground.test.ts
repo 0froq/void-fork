@@ -31,11 +31,21 @@ describe("playground/ssr build", () => {
     const clientManifest = join(ROOT, "playground/ssr/dist/client/.vite/manifest.json");
     const clientIndexHtml = join(ROOT, "playground/ssr/dist/client/index.html");
     const clientAboutHtml = join(ROOT, "playground/ssr/dist/client/about/index.html");
+    const clientBlogHelloHtml = join(
+      ROOT,
+      "playground/ssr/dist/client/blog/hello-world/index.html",
+    );
+    const clientBlogGettingStartedHtml = join(
+      ROOT,
+      "playground/ssr/dist/client/blog/getting-started/index.html",
+    );
 
     expect(existsSync(workerEntry)).toBe(true);
     expect(existsSync(clientManifest)).toBe(true);
     expect(existsSync(clientIndexHtml)).toBe(true);
     expect(existsSync(clientAboutHtml)).toBe(true);
+    expect(existsSync(clientBlogHelloHtml)).toBe(true);
+    expect(existsSync(clientBlogGettingStartedHtml)).toBe(true);
     expect(statSync(clientIndexHtml).isFile()).toBe(true);
     expect(statSync(clientAboutHtml).isFile()).toBe(true);
 
@@ -43,10 +53,19 @@ describe("playground/ssr build", () => {
     expect(code).toContain("renderSsrResponse(c, mod)");
     expect(code).toContain('new URL("/.vite/manifest.json", request.url)');
     expect(code).toContain('SSR_CLIENT_ENTRY_ID = "src/main.client.tsx"');
+    expect(code).toContain("__resolvePrerenderPaths");
 
     const aboutHtml = readFileSync(clientAboutHtml, "utf-8");
     expect(readFileSync(clientIndexHtml, "utf-8")).toContain("Rendered URL: <!-- -->/");
     expect(aboutHtml).toContain("Rendered URL: <!-- -->/about");
+
+    const blogHelloHtml = readFileSync(clientBlogHelloHtml, "utf-8");
+    expect(blogHelloHtml).toContain("Rendered URL: <!-- -->/blog/hello-world");
+    expect(blogHelloHtml).toContain("Hello World");
+
+    const blogGettingStartedHtml = readFileSync(clientBlogGettingStartedHtml, "utf-8");
+    expect(blogGettingStartedHtml).toContain("Rendered URL: <!-- -->/blog/getting-started");
+    expect(blogGettingStartedHtml).toContain("Getting Started with Vite Cloud");
 
     const wranglerConfig = JSON.parse(
       readFileSync(join(ROOT, "playground/ssr/dist/playground_ssr/wrangler.json"), "utf-8"),
