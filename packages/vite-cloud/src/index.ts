@@ -27,7 +27,7 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
   // Infer bindings synchronously from source files
   const bindings = inferProjectBindings(root, options);
   const jobs = scanJobsSync(root);
-  validateSsrEntry(root);
+  const ssrEntry = validateSsrEntry(root);
 
   // Build the worker config with inferred bindings
   const workerConfig: Record<string, unknown> = {
@@ -68,10 +68,30 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
     };
   }
 
+  if (ssrEntry) {
+    workerConfig.assets = {
+      binding: "ASSETS",
+      // Ensure non-asset route requests are evaluated by the worker first in local dev
+      // so SSR entry fallback behaves consistently with production routing.
+      run_worker_first: true,
+    };
+  }
+
+  const inspectorPortEnv = process.env.VITE_CLOUD_INSPECTOR_PORT;
+  const inspectorPort =
+    inspectorPortEnv === "false"
+      ? false
+      : typeof inspectorPortEnv === "string" && inspectorPortEnv.length > 0
+        ? Number.parseInt(inspectorPortEnv, 10)
+        : undefined;
+
   return [
     routingPlugin(root),
     migrationPlugin(root),
     ...cloudflare({
+      ...(inspectorPort === false || Number.isFinite(inspectorPort)
+        ? { inspectorPort: inspectorPort === false ? false : inspectorPort }
+        : {}),
       persistState: { path: join(root, ".vite-cloud") },
       config: workerConfig,
     }),

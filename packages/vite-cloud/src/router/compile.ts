@@ -57,7 +57,7 @@ export function compileRouteTable(
   lines.push("");
 
   if (ssrEntryPath) {
-    lines.push(`app.all("/**", async (c) => {`);
+    lines.push(`app.notFound(async (c) => {`);
     lines.push(`  if (c.req.path === "/api" || c.req.path.startsWith("/api/")) {`);
     lines.push(`    return new Response("Not Found", { status: 404 });`);
     lines.push(`  }`);

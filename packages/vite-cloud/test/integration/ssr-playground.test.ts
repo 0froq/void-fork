@@ -17,5 +17,14 @@ describe("playground/ssr build", () => {
 
     const code = readFileSync(workerEntry, "utf-8");
     expect(code).toContain("mod.render(c.req.raw, c.env)");
+
+    const wranglerConfig = JSON.parse(
+      readFileSync(join(ROOT, "playground/ssr/dist/playground_ssr/wrangler.json"), "utf-8"),
+    ) as {
+      assets?: { run_worker_first?: boolean };
+      kv_namespaces?: Array<{ binding: string }>;
+    };
+    expect(wranglerConfig.assets?.run_worker_first).toBe(true);
+    expect(wranglerConfig.kv_namespaces?.some((b) => b.binding === "KV")).toBe(true);
   });
 });
