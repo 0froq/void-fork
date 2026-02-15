@@ -58,6 +58,7 @@ Implementation Progress
 #### v1.1 — Full-Stack & Observability
 
 - [ ] Meta-framework adapters (TanStack Start, SolidStart, SvelteKit, Analog)
+- [ ] better-auth plugin (`@vite-cloud/better-auth`)
 - [ ] Per-route observability (request volume, latency, error rates per route)
 - [ ] Core Web Vitals monitoring (injected `web-vitals` → Analytics Engine)
 - [ ] Privacy-first SPA analytics (no cookies, GDPR-compliant)
