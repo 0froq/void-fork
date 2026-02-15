@@ -4,9 +4,11 @@ import { runDeploy } from "./deploy";
 import { runLink } from "./link";
 import { runLoginCommand } from "./login";
 import { runListCommand } from "./list";
+import { runSecretCommand } from "./secret";
 import { getToken, removeToken } from "./auth";
 import { PlatformClient } from "./client";
 import { parseDeployArgs } from "./args";
+import { parseSecretArgs } from "./secret-args";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -64,6 +66,20 @@ if (command === "deploy") {
     console.error(err.message ?? err);
     process.exit(1);
   });
+} else if (command === "secret") {
+  const root = process.cwd();
+  let secretArgs;
+  try {
+    secretArgs = parseSecretArgs(args.slice(1));
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
+
+  runSecretCommand(root, secretArgs).catch((err) => {
+    console.error(err.message ?? err);
+    process.exit(1);
+  });
 } else {
   console.log(`vite-cloud CLI (alias: vcd)
 
@@ -72,6 +88,10 @@ Usage:
   vcd logout         Log out and remove credentials
   vcd whoami         Show the logged-in GitHub username
   vcd list           List your projects
+  vcd secret put <name> [--project <name>]
+                     Set a project secret (value from prompt or stdin)
+  vcd secret delete <name> [--project <name>]
+                     Delete a project secret
   vcd deploy [--project <name>]
                      Build and deploy to Vite Cloud
   vcd link [name]    Link to an existing project

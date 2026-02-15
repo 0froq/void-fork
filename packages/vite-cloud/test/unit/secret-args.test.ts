@@ -1,0 +1,48 @@
+import { describe, expect, it } from "vitest";
+import { parseSecretArgs } from "../../src/cli/secret-args";
+
+describe("parseSecretArgs", () => {
+  it("parses put with project", () => {
+    expect(parseSecretArgs(["put", "API_KEY", "--project", "my-app"])).toEqual({
+      action: "put",
+      name: "API_KEY",
+      projectName: "my-app",
+    });
+  });
+
+  it("parses delete without project", () => {
+    expect(parseSecretArgs(["delete", "API_KEY"])).toEqual({
+      action: "delete",
+      name: "API_KEY",
+      projectName: undefined,
+    });
+  });
+
+  it("errors on extra delete positional value", () => {
+    expect(() => parseSecretArgs(["delete", "API_KEY", "extra"])).toThrow(
+      "Error: Usage: vcd secret delete <name> [--project <name>]",
+    );
+  });
+
+  it("errors on missing put name", () => {
+    expect(() => parseSecretArgs(["put"])).toThrow(
+      "Error: Usage: vcd secret put <name> [--project <name>]",
+    );
+  });
+
+  it("errors on extra put positional value", () => {
+    expect(() => parseSecretArgs(["put", "API_KEY", "abc123"])).toThrow(
+      "Error: Usage: vcd secret put <name> [--project <name>]",
+    );
+  });
+
+  it("errors on unknown action", () => {
+    expect(() => parseSecretArgs(["list"])).toThrow("Error: Usage: vcd secret <put|delete> ...");
+  });
+
+  it("errors on unsupported set action", () => {
+    expect(() => parseSecretArgs(["set", "API_KEY"])).toThrow(
+      "Error: Usage: vcd secret <put|delete> ...",
+    );
+  });
+});
