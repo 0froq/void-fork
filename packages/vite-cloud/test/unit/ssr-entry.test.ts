@@ -57,6 +57,19 @@ describe("ssr entry helpers", () => {
     expect(validateSsrEntry(root)).toBe(file);
   });
 
+  it("supports default defineRender export", () => {
+    const root = createTempRoot();
+    const file = join(root, "src", "main.ssr.ts");
+    writeFileSync(join(root, "src", "main.client.ts"), "console.log('client entry');");
+    writeFileSync(
+      file,
+      "import { defineRender } from 'vite-cloud'; export default defineRender(async () => new Response('ok'));",
+    );
+
+    expect(hasSsrEntry(root)).toBe(true);
+    expect(validateSsrEntry(root)).toBe(file);
+  });
+
   it("throws when both ts and tsx ssr entries exist", () => {
     const root = createTempRoot();
     writeFileSync(join(root, "src", "main.client.ts"), "console.log('client entry');");
@@ -80,7 +93,9 @@ describe("ssr entry helpers", () => {
       "export const notRender = () => new Response('ok');",
     );
 
-    expect(() => validateSsrEntry(root)).toThrow("expected `export function render(request, env)`");
+    expect(() => validateSsrEntry(root)).toThrow(
+      "expected `export function render(c, assetTags)` or `export default defineRender(...)`",
+    );
   });
 
   it("throws when server entry exists without client entry", () => {

@@ -53,7 +53,8 @@ function validateServerRenderExport(entry: ResolvedEntry): void {
   const source = readFileSync(absolutePath, "utf-8");
   if (
     /\bexport\s+(?:async\s+)?function\s+render\b/.test(source) ||
-    /\bexport\s+const\s+render\b/.test(source)
+    /\bexport\s+const\s+render\b/.test(source) ||
+    /\bexport\s+default\s+(?:defineRender\b|(?:async\s+)?function\b)/.test(source)
   ) {
     return;
   }
@@ -71,7 +72,23 @@ function validateServerRenderExport(entry: ResolvedEntry): void {
   const body = program.body ?? [];
 
   const hasRenderExport = body.some((node) => {
-    if (node.type !== "ExportNamedDeclaration") return false;
+    if (node.type === "ExportDefaultDeclaration") {
+      const declaration = node.declaration;
+      if (
+        declaration?.type === "FunctionDeclaration" ||
+        declaration?.type === "FunctionExpression" ||
+        declaration?.type === "ArrowFunctionExpression"
+      ) {
+        return true;
+      }
+      if (declaration?.type === "CallExpression") {
+        return declaration.callee?.type === "Identifier" && declaration.callee.name === "defineRender";
+      }
+      return false;
+    }
+    if (node.type !== "ExportNamedDeclaration") {
+      return false;
+    }
 
     const declaration = node.declaration;
     if (declaration?.type === "FunctionDeclaration") {
@@ -87,7 +104,7 @@ function validateServerRenderExport(entry: ResolvedEntry): void {
 
   if (!hasRenderExport) {
     throw new Error(
-      `Invalid SSR entry at ${relativePath}: expected \`export function render(request, env)\`.`,
+      `Invalid SSR entry at ${relativePath}: expected \`export function render(c, assetTags)\` or \`export default defineRender(...)\`.`,
     );
   }
 }

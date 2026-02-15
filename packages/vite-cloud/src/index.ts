@@ -99,5 +99,5 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
 }
 
 // Re-export runtime types and functions
-export { defineHandler, defineMiddleware, defineJob } from "./runtime/handler";
-export type { CloudContext, CloudEnv } from "./runtime/handler";
+export { defineHandler, defineMiddleware, defineJob, defineRender } from "./runtime/handler";
+export type { CloudContext, CloudEnv, RenderAssetTags } from "./runtime/handler";
