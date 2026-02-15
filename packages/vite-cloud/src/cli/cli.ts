@@ -5,6 +5,7 @@ import { runLink } from "./link";
 import { runLoginCommand } from "./login";
 import { runListCommand } from "./list";
 import { runSecretCommand } from "./secret";
+import { runDeleteCommand } from "./delete";
 import { getToken, removeToken } from "./auth";
 import { PlatformClient } from "./client";
 import { parseDeployArgs } from "./args";
@@ -80,6 +81,12 @@ if (command === "deploy") {
     console.error(err.message ?? err);
     process.exit(1);
   });
+} else if (command === "delete") {
+  const root = process.cwd();
+  runDeleteCommand(root, args[1]).catch((err) => {
+    console.error(err.message ?? err);
+    process.exit(1);
+  });
 } else {
   console.log(`vite-cloud CLI (alias: vcd)
 
@@ -94,6 +101,7 @@ Usage:
                      Delete a project secret
   vcd deploy [--project <name>]
                      Build and deploy to Vite Cloud
+  vcd delete [name]  Delete a project and all its resources
   vcd link [name]    Link to an existing project
 
 Environment:
