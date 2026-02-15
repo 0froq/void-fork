@@ -1,0 +1,81 @@
+import { intro, outro, note, log, text, isCancel, cancel, spinner } from "@clack/prompts";
+import { getToken } from "./auth";
+import { PlatformClient } from "./client";
+import { readProjectConfig, removeProjectConfig } from "./project";
+import { resolveProjectBySlug } from "./deploy";
+
+export async function runDeleteCommand(root: string, slug?: string): Promise<void> {
+  intro("vite-cloud delete");
+
+  const token = getToken();
+  if (!token) {
+    console.error("Not logged in. Run `vcd login` first.");
+    process.exit(1);
+  }
+
+  const client = new PlatformClient(token);
+
+  // Resolve project: positional arg, or fall back to linked project
+  let projectId: string;
+  let projectSlug: string;
+
+  if (slug) {
+    const projects = await client.listProjects();
+    const config = resolveProjectBySlug(projects, slug);
+    projectId = config.projectId;
+    projectSlug = config.slug;
+  } else {
+    const config = readProjectConfig(root);
+    if (!config) {
+      throw new Error("No linked project found. Pass a project name: vcd delete <name>");
+    }
+    projectId = config.projectId;
+    projectSlug = config.slug;
+  }
+
+  note(
+    [
+      "Worker deployments",
+      "D1 databases, KV namespaces, R2 buckets",
+      "Static assets",
+      "Deployment history",
+    ].join("\n"),
+    `Deleting ${projectSlug} will permanently remove`,
+  );
+
+  const confirmation = await text({
+    message: `Type "${projectSlug}" to confirm deletion:`,
+    validate(value) {
+      if (value !== projectSlug) {
+        return `Please type "${projectSlug}" exactly to confirm.`;
+      }
+    },
+  });
+
+  if (isCancel(confirmation)) {
+    cancel("Delete cancelled.");
+    process.exit(0);
+  }
+
+  const s = spinner();
+  s.start("Deleting project...");
+
+  const result = await client.deleteProject(projectId);
+
+  s.stop("Project deleted.");
+
+  if (result.warnings && result.warnings.length > 0) {
+    for (const warning of result.warnings) {
+      log.warn(warning);
+    }
+  }
+
+  // Remove local config if it pointed to this project
+  const localConfig = readProjectConfig(root);
+  if (localConfig?.projectId === projectId) {
+    removeProjectConfig(root);
+    console.log("Removed local .vite-cloud/project.json");
+  }
+
+  outro(`Deleted ${projectSlug}`);
+}

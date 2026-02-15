@@ -138,6 +138,10 @@ export interface CfApiMocks {
   createD1: (url: string, init?: RequestInit) => Response;
   createKV: (url: string, init?: RequestInit) => Response;
   createR2: (url: string, init?: RequestInit) => Response;
+  deleteD1: (url: string, init?: RequestInit) => Response;
+  deleteKV: (url: string, init?: RequestInit) => Response;
+  deleteR2: (url: string, init?: RequestInit) => Response;
+  deleteWorker: (url: string, init?: RequestInit) => Response;
   queryD1: (url: string, init?: RequestInit) => Response | Promise<Response>;
   uploadWorker: (url: string, init?: RequestInit) => Response | Promise<Response>;
   setWorkerSecret: (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -148,6 +152,10 @@ const defaultMocks: CfApiMocks = {
   createD1: () => cfSuccess({ uuid: "d1-test-uuid", name: "test-db" }),
   createKV: () => cfSuccess({ id: "kv-test-id", title: "test-kv" }),
   createR2: () => cfSuccess({ name: "test-bucket" }),
+  deleteD1: () => cfSuccess(null),
+  deleteKV: () => cfSuccess(null),
+  deleteR2: () => cfSuccess(null),
+  deleteWorker: () => new Response("ok", { status: 200 }),
   queryD1: () => cfSuccess([{ results: [] }]),
   uploadWorker: () => new Response("ok", { status: 200 }),
   setWorkerSecret: () => cfSuccess({}),
@@ -169,8 +177,20 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
     if (method === "DELETE" && url.includes("/workers/dispatch/") && url.includes("/secrets/")) {
       return mocks.deleteWorkerSecret(url, init);
     }
+    if (method === "DELETE" && url.includes("/workers/dispatch/")) {
+      return mocks.deleteWorker(url, init);
+    }
     if (method === "PUT" && url.includes("/workers/dispatch/")) {
       return mocks.uploadWorker(url, init);
+    }
+    if (method === "DELETE" && url.includes("/d1/database/")) {
+      return mocks.deleteD1(url, init);
+    }
+    if (method === "DELETE" && url.includes("/storage/kv/namespaces/")) {
+      return mocks.deleteKV(url, init);
+    }
+    if (method === "DELETE" && url.includes("/r2/buckets/")) {
+      return mocks.deleteR2(url, init);
     }
     if (method === "POST" && url.includes("/d1/database/") && url.includes("/query")) {
       return mocks.queryD1(url, init);

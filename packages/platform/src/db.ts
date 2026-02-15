@@ -160,3 +160,17 @@ export async function getProjectResources(db: D1Database, projectId: string): Pr
     .all<Resource>();
   return result.results;
 }
+
+// --- Deletion ---
+
+export async function deleteProjectResources(db: D1Database, projectId: string): Promise<void> {
+  await db.prepare("DELETE FROM resources WHERE project_id = ?").bind(projectId).run();
+}
+
+export async function deleteProjectDeployments(db: D1Database, projectId: string): Promise<void> {
+  await db.prepare("DELETE FROM deployments WHERE project_id = ?").bind(projectId).run();
+}
+
+export async function deleteProject(db: D1Database, id: string): Promise<void> {
+  await db.prepare("DELETE FROM projects WHERE id = ?").bind(id).run();
+}

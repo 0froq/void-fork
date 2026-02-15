@@ -22,6 +22,13 @@ export interface DeployResponse {
   migrations?: number;
 }
 
+export interface DeleteProjectResponse {
+  ok: boolean;
+  id: string;
+  slug: string;
+  warnings?: string[];
+}
+
 export interface SecretResponse {
   ok: boolean;
   name: string;
@@ -120,6 +127,22 @@ export class PlatformClient {
     if (!res.ok) {
       const body = await res.text();
       throw new Error(`Failed to set secret: ${res.status} ${body}`);
+    }
+
+    return res.json();
+  }
+
+  async deleteProject(projectId: string): Promise<DeleteProjectResponse> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Failed to delete project: ${res.status} ${body}`);
     }
 
     return res.json();

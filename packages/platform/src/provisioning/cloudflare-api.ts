@@ -69,3 +69,33 @@ export async function createR2Bucket(
     body: JSON.stringify({ name }),
   });
 }
+
+export async function deleteD1Database(
+  accountId: string,
+  apiToken: string,
+  databaseId: string,
+): Promise<void> {
+  await cfFetch(`${CF_API_BASE}/${accountId}/d1/database/${databaseId}`, apiToken, {
+    method: "DELETE",
+  });
+}
+
+export async function deleteKVNamespace(
+  accountId: string,
+  apiToken: string,
+  namespaceId: string,
+): Promise<void> {
+  await cfFetch(`${CF_API_BASE}/${accountId}/storage/kv/namespaces/${namespaceId}`, apiToken, {
+    method: "DELETE",
+  });
+}
+
+export async function deleteR2Bucket(
+  accountId: string,
+  apiToken: string,
+  bucketName: string,
+): Promise<void> {
+  await cfFetch(`${CF_API_BASE}/${accountId}/r2/buckets/${bucketName}`, apiToken, {
+    method: "DELETE",
+  });
+}
