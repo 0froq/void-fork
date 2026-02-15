@@ -7,6 +7,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 
 const VIRTUAL_ROUTES_ID = "virtual:vite-cloud-routes";
 const RESOLVED_VIRTUAL_ROUTES_ID = "\0" + VIRTUAL_ROUTES_ID;
+// Rolldown resolveId hook filters currently require RegExp for `id`.
+const RESOLVE_ID_FILTER = /^(virtual:vite-cloud-routes|vite-cloud)$/;
+const LOAD_ID_FILTER = RESOLVED_VIRTUAL_ROUTES_ID;
 
 /**
  * Vite plugin that provides file-based routing.
@@ -52,22 +55,26 @@ export function routingPlugin(root: string): Plugin {
       await rescan();
     },
 
-    resolveId(id) {
-      if (id === VIRTUAL_ROUTES_ID) {
-        return RESOLVED_VIRTUAL_ROUTES_ID;
-      }
-      // Redirect bare "vite-cloud" imports to the lightweight handler
-      // subpath to avoid pulling the entire plugin into the Worker bundle.
-      if (id === "vite-cloud") {
-        return handlerFile;
-      }
+    resolveId: {
+      filter: { id: RESOLVE_ID_FILTER },
+      handler(id) {
+        if (id === VIRTUAL_ROUTES_ID) {
+          return RESOLVED_VIRTUAL_ROUTES_ID;
+        }
+        // Redirect bare "vite-cloud" imports to the lightweight handler
+        // subpath to avoid pulling the entire plugin into the Worker bundle.
+        if (id === "vite-cloud") {
+          return handlerFile;
+        }
+      },
     },
 
-    async load(id) {
-      if (id === RESOLVED_VIRTUAL_ROUTES_ID) {
+    load: {
+      filter: { id: LOAD_ID_FILTER },
+      async handler() {
         if (!scan) await rescan();
         return compileRouteTable(scan!, routesDir, middlewareDir, jobsDir, compileOptions);
-      }
+      },
     },
 
     configureServer(devServer) {
