@@ -36,7 +36,7 @@ Implementation Progress
 - [x] Secrets management
 - [x] Cron & background jobs (file convention)
 - [x] SSR support (minimal `src/main.ssr.ts` convention)
-- [ ] Zero config auth (via `hono/basic-auth` and `@hono/oauth-providers`)
+- [x] Zero config auth (via `hono/basic-auth` and `@hono/oauth-providers`)
 
 **Milestone:**
 
@@ -49,6 +49,7 @@ Implementation Progress
 - [ ] Usage metering and limits enforcement
 - [ ] Billing integration (Stripe)
 - [ ] Dashboard (web UI for managing projects, viewing logs)
+- [ ] Email notifications (e.g. for failed project builds or billing issues)
 - [ ] Rate limiting and abuse protection on free tier
 
 **Milestone:** Ready for public beta.
