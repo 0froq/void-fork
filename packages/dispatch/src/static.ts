@@ -5,19 +5,23 @@ import type { Env } from "./env";
  *
  * - Hashed assets (containing a hash in filename) get immutable cache headers
  * - index.html gets no-cache
- * - Non-file paths fall back to index.html (SPA routing)
+ * - Non-file paths fall back to index.html when `spaFallback` is enabled
+ *
+ * Returns null when no static asset is found.
  */
 export async function serveStaticAsset(
-  request: Request,
   env: Env,
   projectId: string,
   pathname: string,
-): Promise<Response> {
+  options?: { spaFallback?: boolean },
+): Promise<Response | null> {
+  const spaFallback = options?.spaFallback ?? true;
+
   // Normalize pathname
   let assetPath = pathname.startsWith("/") ? pathname.slice(1) : pathname;
 
   // SPA fallback: if path doesn't look like a file, serve index.html
-  if (!hasExtension(assetPath)) {
+  if (spaFallback && !hasExtension(assetPath)) {
     assetPath = "index.html";
   }
 
@@ -28,14 +32,21 @@ export async function serveStaticAsset(
     // Try index.html as final fallback
     if (assetPath !== "index.html") {
       const fallback = await env.ASSETS.get(`${projectId}/current/index.html`);
-      if (fallback) {
-        return buildResponse(fallback, "index.html");
-      }
+      if (fallback) return buildResponse(fallback, "index.html");
     }
-    return new Response("Not Found", { status: 404 });
+    return null;
   }
 
   return buildResponse(object, assetPath);
+}
+
+export async function serveStaticAssetWithFallback(
+  env: Env,
+  projectId: string,
+  pathname: string,
+): Promise<Response> {
+  const response = await serveStaticAsset(env, projectId, pathname, { spaFallback: true });
+  return response ?? new Response("Not Found", { status: 404 });
 }
 
 function buildResponse(object: R2ObjectBody, path: string): Response {

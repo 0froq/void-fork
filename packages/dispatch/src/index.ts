@@ -1,10 +1,11 @@
 import type { Env } from "./env";
 import { extractSlug } from "./hostname";
-import { serveStaticAsset } from "./static";
+import { serveStaticAsset, serveStaticAssetWithFallback } from "./static";
 
 interface RoutingEntry {
   workerName: string;
   projectId: string;
+  ssr?: boolean;
 }
 
 export default {
@@ -30,7 +31,17 @@ export default {
       return worker.fetch(request);
     }
 
-    // Everything else → serve static assets from R2
-    return serveStaticAsset(request, env, routing.projectId, url.pathname);
+    // Everything else → static assets first.
+    // If SSR is enabled and static misses, dispatch to user worker for render().
+    if (routing.ssr) {
+      const staticResponse = await serveStaticAsset(env, routing.projectId, url.pathname, {
+        spaFallback: false,
+      });
+      if (staticResponse) return staticResponse;
+      const worker = env.DISPATCH.get(routing.workerName);
+      return worker.fetch(request);
+    }
+
+    return serveStaticAssetWithFallback(env, routing.projectId, url.pathname);
   },
 } satisfies ExportedHandler<Env>;

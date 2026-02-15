@@ -38,8 +38,12 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
 
       // Check if the object is *.env (i.e., a MemberExpression with .env)
       const obj = node.object;
-      if (obj?.type !== "MemberExpression") return;
-      if (obj.property?.type !== "Identifier" || obj.property.name !== "env") return;
+      const isViaContextEnv =
+        obj?.type === "MemberExpression" &&
+        obj.property?.type === "Identifier" &&
+        obj.property.name === "env";
+      const isDirectEnv = obj?.type === "Identifier" && obj.name === "env";
+      if (!isViaContextEnv && !isDirectEnv) return;
 
       switch (property.name) {
         case "DB":

@@ -32,7 +32,7 @@ describe("compileRouteTable", () => {
       jobs: [{ filePath: "sync.ts", name: "sync", cron: "0 * * * *" }],
     };
 
-    const code = compileRouteTable(scan, "/routes", "/middleware", "/jobs", testOptions);
+    const code = compileRouteTable(scan, "/routes", "/middleware", "/jobs", null, testOptions);
 
     // Should import Hono from resolved path
     expect(code).toContain(`import { Hono } from "/resolved/hono/index.mjs"`);
@@ -62,11 +62,28 @@ describe("compileRouteTable", () => {
 
   it("handles empty scan result", () => {
     const scan: ScanResult = { routes: [], middleware: [], jobs: [] };
-    const code = compileRouteTable(scan, "/routes", "/middleware", "/jobs", testOptions);
+    const code = compileRouteTable(scan, "/routes", "/middleware", "/jobs", null, testOptions);
 
     expect(code).toContain("const app = new Hono()");
     expect(code).toContain("export async function scheduled() {}");
     expect(code).toContain("export default app");
+  });
+
+  it("adds SSR fallback handler when ssr entry is provided", () => {
+    const scan: ScanResult = { routes: [], middleware: [], jobs: [] };
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/jobs",
+      "/src/ssr.entry.ts",
+      testOptions,
+    );
+
+    expect(code).toContain('app.all("/**"');
+    expect(code).toContain('if (c.req.path === "/api" || c.req.path.startsWith("/api/"))');
+    expect(code).toContain('import("/src/ssr.entry.ts")');
+    expect(code).toContain("return mod.render(c.req.raw, c.env)");
   });
 });
 

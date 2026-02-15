@@ -186,6 +186,31 @@ describe("POST /projects/:id/deploy", () => {
     });
   });
 
+  it("stores ssr flag in KV routing when manifest enables ssr", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "ssr-app");
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: { bindings: {}, ssr: true },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const routing = await env.ROUTING.get("ssr-app", "json");
+    expect(routing).toEqual({
+      workerName: "user-ssr-app",
+      projectId: project.id,
+      ssr: true,
+    });
+  });
+
   it("sends worker upload to correct CF API endpoint", async () => {
     const user = await createTestUser(env.DB);
     const project = await createTestProject(env.DB, user.id, "worker-app");

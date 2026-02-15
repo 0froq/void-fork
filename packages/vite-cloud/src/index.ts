@@ -5,6 +5,7 @@ import { routingPlugin } from "./plugin-routing";
 import { migrationPlugin } from "./plugin-migration";
 import { inferProjectBindings, type InferenceOptions } from "./plugin-inference";
 import { scanJobsSync } from "./jobs/scan";
+import { validateSsrEntry } from "./ssr/entry";
 
 export type ViteCloudOptions = InferenceOptions;
 
@@ -26,6 +27,7 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
   // Infer bindings synchronously from source files
   const bindings = inferProjectBindings(root, options);
   const jobs = scanJobsSync(root);
+  validateSsrEntry(root);
 
   // Build the worker config with inferred bindings
   const workerConfig: Record<string, unknown> = {

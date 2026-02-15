@@ -10,6 +10,7 @@ import { promptProjectSelection, promptProjectSlug } from "./prompt";
 import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
 import { scanJobsSync } from "../jobs/scan";
+import { validateSsrEntry } from "../ssr/entry";
 
 export interface RunDeployOptions {
   projectSlug?: string;
@@ -128,10 +129,18 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
     name: job.name,
     cron: job.cron,
   }));
+  const ssrEntry = validateSsrEntry(root);
 
   // 7. Package
   console.log("Packaging...");
-  const formData = packageBuild(distDir, workerDirName, bindings, validatedMigrations, schedules);
+  const formData = packageBuild(
+    distDir,
+    workerDirName,
+    bindings,
+    validatedMigrations,
+    schedules,
+    Boolean(ssrEntry),
+  );
 
   // 8. Upload
   console.log("Deploying...");
@@ -144,6 +153,9 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   }
   if (schedules.length > 0) {
     console.log(`  ${schedules.length} cron job(s) scheduled`);
+  }
+  if (ssrEntry) {
+    console.log("  SSR enabled");
   }
 }
 

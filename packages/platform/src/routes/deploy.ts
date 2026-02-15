@@ -167,7 +167,10 @@ app.post("/:id/deploy", async (c) => {
     }
 
     // 4. Update KV routing table
-    await c.env.ROUTING.put(project.slug, JSON.stringify({ workerName, projectId }));
+    await c.env.ROUTING.put(
+      project.slug,
+      JSON.stringify({ workerName, projectId, ...(manifest.ssr ? { ssr: true } : {}) }),
+    );
 
     // 5. Mark deployment as live
     await updateDeploymentStatus(c.env.DB, deployment.id, "live");

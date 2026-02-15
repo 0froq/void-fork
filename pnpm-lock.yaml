@@ -91,6 +91,9 @@ importers:
       '@cloudflare/vite-plugin':
         specifier: ^1.25.0
         version: 1.25.0(vite@8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1))(workerd@1.20260212.0)(wrangler@4.65.0(@cloudflare/workers-types@4.20260214.0))
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 4.20260214.0
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.6.2
@@ -101,9 +104,6 @@ importers:
       '@clack/prompts':
         specifier: 'catalog:'
         version: 1.0.1
-      '@cloudflare/workers-types':
-        specifier: 'catalog:'
-        version: 4.20260214.0
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
@@ -123,7 +123,7 @@ importers:
         specifier: 'catalog:'
         version: 8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)
 
-  playground:
+  playground/spa:
     dependencies:
       react:
         specifier: ^19.2.4
@@ -152,7 +152,38 @@ importers:
         version: 8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)
       vite-cloud:
         specifier: workspace:*
-        version: link:../packages/vite-cloud
+        version: link:../../packages/vite-cloud
+
+  playground/ssr:
+    dependencies:
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+      react-dom:
+        specifier: ^19.2.4
+        version: 19.2.4(react@19.2.4)
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20260214.0
+        version: 4.20260214.0
+      '@types/react':
+        specifier: ^19.2.14
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.14)
+      '@vitejs/plugin-react':
+        specifier: ^5.1.4
+        version: 5.1.4(vite@8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1))
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vite:
+        specifier: 'catalog:'
+        version: 8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)
+      vite-cloud:
+        specifier: workspace:*
+        version: link:../../packages/vite-cloud
 
 packages:
 
