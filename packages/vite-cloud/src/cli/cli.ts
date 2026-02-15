@@ -3,6 +3,7 @@
 import { runDeploy } from "./deploy";
 import { runLink } from "./link";
 import { runLoginCommand } from "./login";
+import { runListCommand } from "./list";
 import { getToken, removeToken } from "./auth";
 import { PlatformClient } from "./client";
 import { parseDeployArgs } from "./args";
@@ -58,6 +59,11 @@ if (command === "deploy") {
       console.error(err.message ?? err);
       process.exit(1);
     });
+} else if (command === "list") {
+  runListCommand().catch((err) => {
+    console.error(err.message ?? err);
+    process.exit(1);
+  });
 } else {
   console.log(`vite-cloud CLI (alias: vcd)
 
@@ -65,6 +71,7 @@ Usage:
   vcd login          Log in with GitHub
   vcd logout         Log out and remove credentials
   vcd whoami         Show the logged-in GitHub username
+  vcd list           List your projects
   vcd deploy [--project <slug>]
                      Build and deploy to Vite Cloud
   vcd link [slug]    Link to an existing project
