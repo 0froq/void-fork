@@ -6,7 +6,17 @@ describe("parseSecretArgs", () => {
     expect(parseSecretArgs(["put", "API_KEY", "--project", "my-app"])).toEqual({
       action: "put",
       name: "API_KEY",
+      value: undefined,
       projectName: "my-app",
+    });
+  });
+
+  it("parses put KEY=value inline form", () => {
+    expect(parseSecretArgs(["put", "API_KEY=abc123"])).toEqual({
+      action: "put",
+      name: "API_KEY",
+      value: "abc123",
+      projectName: undefined,
     });
   });
 
@@ -26,6 +36,12 @@ describe("parseSecretArgs", () => {
 
   it("errors on missing put name", () => {
     expect(() => parseSecretArgs(["put"])).toThrow(
+      "Error: Usage: vcd secret put <name> [--project <name>]",
+    );
+  });
+
+  it("errors on malformed put KEY= form", () => {
+    expect(() => parseSecretArgs(["put", "API_KEY="])).toThrow(
       "Error: Usage: vcd secret put <name> [--project <name>]",
     );
   });

@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 
 export type SecretArgs =
-  | { action: "put"; name: string; projectName?: string }
+  | { action: "put"; name: string; value?: string; projectName?: string }
   | { action: "delete"; name: string; projectName?: string };
 
 export function parseSecretArgs(args: string[]): SecretArgs {
@@ -39,7 +39,17 @@ export function parseSecretArgs(args: string[]): SecretArgs {
     if (value) {
       throw new Error("Error: Usage: vcd secret put <name> [--project <name>]");
     }
-    return { action, name, projectName };
+    const eqIndex = name.indexOf("=");
+    if (eqIndex === -1) {
+      return { action, name, projectName };
+    }
+
+    const key = name.slice(0, eqIndex);
+    const inlineValue = name.slice(eqIndex + 1);
+    if (!key || !inlineValue) {
+      throw new Error("Error: Usage: vcd secret put <name> [--project <name>]");
+    }
+    return { action, name: key, value: inlineValue, projectName };
   }
 
   if (action === "delete") {

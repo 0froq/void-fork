@@ -88,8 +88,8 @@ Usage:
   vcd logout         Log out and remove credentials
   vcd whoami         Show the logged-in GitHub username
   vcd list           List your projects
-  vcd secret put <name> [--project <name>]
-                     Set a project secret (value from prompt or stdin)
+  vcd secret put <name|name=value> [--project <name>]
+                     Set a project secret (inline value, prompt, or stdin)
   vcd secret delete <name> [--project <name>]
                      Delete a project secret
   vcd deploy [--project <name>]
