@@ -5,6 +5,15 @@ export interface CompileOptions {
   honoPath: string;
   /** Absolute path to the vite-cloud/response module */
   responsePath: string;
+  /** Whether to inject React Fast Refresh preamble in dev SSR HTML. */
+  reactRefresh: boolean;
+}
+
+export interface SsrCompileOptions {
+  /** Absolute path to src/ssr.entry.ts(x) */
+  serverEntryPath: string;
+  /** Relative project path for src/client.entry.ts(x), e.g. src/client.entry.tsx */
+  clientEntryRelativePath: string;
 }
 
 /**
@@ -18,7 +27,7 @@ export function compileRouteTable(
   routesDir: string,
   middlewareDir: string,
   jobsDir: string,
-  ssrEntryPath: string | null,
+  ssr: SsrCompileOptions | null,
   options: CompileOptions,
 ): string {
   const lines: string[] = [];
@@ -56,18 +65,157 @@ export function compileRouteTable(
   }
   lines.push("");
 
-  if (ssrEntryPath) {
-    lines.push(`app.notFound(async (c) => {`);
-    lines.push(`  if (c.req.path === "/api" || c.req.path.startsWith("/api/")) {`);
+  if (ssr) {
+    const clientEntryUrl = `/${ssr.clientEntryRelativePath}`;
+    lines.push(`const SSR_CLIENT_ENTRY_ID = ${JSON.stringify(ssr.clientEntryRelativePath)};`);
+    lines.push(`const SSR_CLIENT_ENTRY_URL = ${JSON.stringify(clientEntryUrl)};`);
+    lines.push(`let cachedSsrManifest = null;`);
+    lines.push("");
+    lines.push(`function escapeHtml(value) {`);
+    lines.push(`  return String(value).replace(/"/g, "&quot;");`);
+    lines.push(`}`);
+    lines.push("");
+    lines.push(`function getDevClientTags() {`);
+    lines.push(`  const headTags = [\`<script type="module" src="/@vite/client"></script>\`];`);
+    if (options.reactRefresh) {
+      lines.push(`  headTags.push(\`<script type="module">
+import RefreshRuntime from "/@react-refresh";
+RefreshRuntime.injectIntoGlobalHook(window);
+window.$RefreshReg$ = () => {};
+window.$RefreshSig$ = () => (type) => type;
+window.__vite_plugin_react_preamble_installed__ = true;
+</script>\`);`);
+    }
+    lines.push(
+      `  const bodyTag = \`<script type="module" src="\${escapeHtml(SSR_CLIENT_ENTRY_URL)}"></script>\`;`,
+    );
+    lines.push(`  return { head: headTags.join("\\n"), body: bodyTag };`);
+    lines.push(`}`);
+    lines.push("");
+    lines.push(`function collectManifestFiles(manifest, entryId) {`);
+    lines.push(`  const seen = new Set();`);
+    lines.push(`  const toVisit = [entryId];`);
+    lines.push(`  while (toVisit.length > 0) {`);
+    lines.push(`    const currentId = toVisit.pop();`);
+    lines.push(`    if (seen.has(currentId)) continue;`);
+    lines.push(`    seen.add(currentId);`);
+    lines.push(`    const chunk = manifest[currentId];`);
+    lines.push(`    if (!chunk || !Array.isArray(chunk.imports)) continue;`);
+    lines.push(`    for (const importedId of chunk.imports) toVisit.push(importedId);`);
+    lines.push(`  }`);
+    lines.push(`  return Array.from(seen);`);
+    lines.push(`}`);
+    lines.push("");
+    lines.push(`async function loadSsrManifest(request, env) {`);
+    lines.push(`  if (cachedSsrManifest) return cachedSsrManifest;`);
+    lines.push(`  const assets = env?.ASSETS;`);
+    lines.push(`  if (!assets || typeof assets.fetch !== "function") return null;`);
+    lines.push(`  const manifestUrl = new URL("/.vite/manifest.json", request.url);`);
+    lines.push(`  const response = await assets.fetch(new Request(manifestUrl.toString()));`);
+    lines.push(`  if (!response.ok) return null;`);
+    lines.push(`  cachedSsrManifest = await response.json();`);
+    lines.push(`  return cachedSsrManifest;`);
+    lines.push(`}`);
+    lines.push("");
+    lines.push(`async function getClientAssetTags(request, env) {`);
+    lines.push(`  const manifest = await loadSsrManifest(request, env);`);
+    lines.push(`  if (!manifest || typeof manifest !== "object") {`);
+    lines.push(`    return getDevClientTags();`);
+    lines.push(`  }`);
+    lines.push(`  const entry = manifest[SSR_CLIENT_ENTRY_ID];`);
+    lines.push(`  if (!entry || typeof entry !== "object" || typeof entry.file !== "string") {`);
+    lines.push(`    return { head: "", body: "" };`);
+    lines.push(`  }`);
+    lines.push(`  const ids = collectManifestFiles(manifest, SSR_CLIENT_ENTRY_ID);`);
+    lines.push(`  const cssFiles = new Set();`);
+    lines.push(`  const preloadFiles = new Set();`);
+    lines.push(`  for (const id of ids) {`);
+    lines.push(`    const chunk = manifest[id];`);
+    lines.push(`    if (!chunk || typeof chunk !== "object") continue;`);
+    lines.push(`    if (Array.isArray(chunk.css)) {`);
+    lines.push(`      for (const cssFile of chunk.css) cssFiles.add(cssFile);`);
+    lines.push(`    }`);
+    lines.push(`    if (id !== SSR_CLIENT_ENTRY_ID && typeof chunk.file === "string") {`);
+    lines.push(`      preloadFiles.add(chunk.file);`);
+    lines.push(`    }`);
+    lines.push(`  }`);
+    lines.push(`  const headTags = [];`);
+    lines.push(`  for (const cssFile of cssFiles) {`);
+    lines.push(
+      `    headTags.push(\`<link rel="stylesheet" href="/\${escapeHtml(cssFile)}">\`);`,
+    );
+    lines.push(`  }`);
+    lines.push(`  for (const preloadFile of preloadFiles) {`);
+    lines.push(
+      `    headTags.push(\`<link rel="modulepreload" href="/\${escapeHtml(preloadFile)}">\`);`,
+    );
+    lines.push(`  }`);
+    lines.push(
+      `  const bodyTag = \`<script type="module" src="/\${escapeHtml(entry.file)}"></script>\`;`,
+    );
+    lines.push(`  return { head: headTags.join("\\n"), body: bodyTag };`);
+    lines.push(`}`);
+    lines.push("");
+    lines.push(`function injectTagsIntoHtml(html, tags) {`);
+    lines.push(`  let next = html;`);
+    lines.push(`  if (tags.head) {`);
+    lines.push(`    next = next.includes("</head>")`);
+    lines.push(`      ? next.replace("</head>", \`\${tags.head}\\n</head>\`)`);
+    lines.push(`      : \`\${tags.head}\\n\${next}\`;`);
+    lines.push(`  }`);
+    lines.push(`  if (tags.body) {`);
+    lines.push(`    next = next.includes("</body>")`);
+    lines.push(`      ? next.replace("</body>", \`\${tags.body}\\n</body>\`)`);
+    lines.push(`      : \`\${next}\\n\${tags.body}\`;`);
+    lines.push(`  }`);
+    lines.push(`  return next;`);
+    lines.push(`}`);
+    lines.push("");
+    lines.push(`function shouldHandleSsrRequest(c) {`);
+    lines.push(`  const path = c.req.path;`);
+    lines.push(`  if (path === "/api" || path.startsWith("/api/")) return false;`);
+    lines.push(`  if (/\\/[^/]+\\.[^/]+$/.test(path)) return false;`);
+    lines.push(`  const destination = c.req.header("sec-fetch-dest");`);
+    lines.push(`  if (destination && destination !== "document" && destination !== "empty") return false;`);
+    lines.push(`  return true;`);
+    lines.push(`}`);
+    lines.push("");
+    lines.push(`async function fetchFromAssets(c) {`);
+    lines.push(`  const assets = c.env?.ASSETS;`);
+    lines.push(`  if (!assets || typeof assets.fetch !== "function") {`);
     lines.push(`    return new Response("Not Found", { status: 404 });`);
     lines.push(`  }`);
-    lines.push(`  const mod = await import(${JSON.stringify(ssrEntryPath)});`);
+    lines.push(`  const response = await assets.fetch(c.req.raw);`);
+    lines.push(`  return response.status === 404 ? new Response("Not Found", { status: 404 }) : response;`);
+    lines.push(`}`);
+    lines.push("");
+    lines.push(`async function renderSsrResponse(c, mod) {`);
     lines.push(`  if (typeof mod.render !== "function") {`);
     lines.push(
       `    throw new Error("Invalid SSR entry: expected exported render(request, env) function.");`,
     );
     lines.push(`  }`);
-    lines.push(`  return mod.render(c.req.raw, c.env);`);
+    lines.push(`  const rendered = await mod.render(c.req.raw, c.env);`);
+    lines.push(`  if (!(rendered instanceof Response)) return rendered;`);
+    lines.push(`  const contentType = rendered.headers.get("content-type") ?? "";`);
+    lines.push(`  if (!contentType.includes("text/html")) return rendered;`);
+    lines.push(`  const html = await rendered.text();`);
+    lines.push(`  const tags = await getClientAssetTags(c.req.raw, c.env);`);
+    lines.push(`  const headers = new Headers(rendered.headers);`);
+    lines.push(`  headers.delete("content-length");`);
+    lines.push(`  return new Response(injectTagsIntoHtml(html, tags), {`);
+    lines.push(`    status: rendered.status,`);
+    lines.push(`    statusText: rendered.statusText,`);
+    lines.push(`    headers,`);
+    lines.push(`  });`);
+    lines.push(`}`);
+    lines.push("");
+    lines.push(`app.notFound(async (c) => {`);
+    lines.push(`  if (!shouldHandleSsrRequest(c)) {`);
+    lines.push(`    return fetchFromAssets(c);`);
+    lines.push(`  }`);
+    lines.push(`  const mod = await import(${JSON.stringify(ssr.serverEntryPath)});`);
+    lines.push(`  return renderSsrResponse(c, mod);`);
     lines.push(`});`);
     lines.push("");
   }

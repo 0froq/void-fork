@@ -1,36 +1,60 @@
 # SSR
 
-Vite Cloud supports framework-agnostic SSR via a minimal entry convention.
+Vite Cloud supports framework-agnostic SSR via explicit server and client entries.
 
-## Entry file
+## Required entries
 
-Create `src/ssr.entry.ts` (or `src/ssr.entry.tsx`):
+SSR mode is enabled when both of these exist:
 
-```ts
-import { renderToReadableStream } from "react-dom/server";
-import App from "./App";
+- `src/ssr.entry.ts` or `src/ssr.entry.tsx`
+- `src/client.entry.ts` or `src/client.entry.tsx`
 
-export async function render(request: Request, env: { KV: KVNamespace }) {
-  const url = new URL(request.url);
-  const stream = await renderToReadableStream(<App url={url.pathname} />);
-  return new Response(stream, {
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
-}
-```
-
-If this file exists, SSR mode is enabled automatically.
-Only one SSR entry file should exist.
+Only one server entry and one client entry may exist.
+If only one side is present, build/deploy fails with a clear error.
 
 ## Render API
 
-Required export:
+`src/ssr.entry.ts(x)` must export:
 
 ```ts
 render(request: Request, env: CloudEnv["Bindings"]): Response | Promise<Response>
 ```
 
-If the SSR entry exists but does not export `render`, build/deploy fails with a clear error.
+If `render` is missing, build/deploy fails with a clear error.
+
+Example:
+
+```tsx
+import { renderToString } from "react-dom/server";
+import App from "./App";
+
+export async function render(request: Request, env: { KV: KVNamespace }) {
+  const url = new URL(request.url);
+  const html = renderToString(<App url={url.pathname} />);
+  return new Response(
+    `<!doctype html><html><body><div id="root">${html}</div></body></html>`,
+    { headers: { "content-type": "text/html; charset=utf-8" } },
+  );
+}
+```
+
+`src/client.entry.ts(x)` should hydrate/mount your app:
+
+```tsx
+import { hydrateRoot } from "react-dom/client";
+import App from "./App";
+
+hydrateRoot(document.getElementById("root")!, <App url={window.location.pathname} />);
+```
+
+## Client Asset Injection
+
+You do not manually add script/link tags in SSR HTML.
+
+Vite Cloud injects client assets automatically:
+
+- In production: reads `dist/client/.vite/manifest.json` and injects entry script, CSS, and modulepreload links.
+- In dev: injects a module script for `/src/client.entry.ts(x)`.
 
 ## Request flow
 
@@ -40,4 +64,4 @@ With SSR enabled:
 2. static asset hits are served from R2
 3. unmatched non-API requests fall back to `render(request, env)`
 
-Without SSR entry, non-API requests keep SPA static fallback behavior.
+Without SSR entries, non-API requests keep SPA static fallback behavior.

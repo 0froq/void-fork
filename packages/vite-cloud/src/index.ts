@@ -71,9 +71,9 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
   if (ssrEntry) {
     workerConfig.assets = {
       binding: "ASSETS",
-      // Ensure non-asset route requests are evaluated by the worker first in local dev
-      // so SSR entry fallback behaves consistently with production routing.
-      run_worker_first: true,
+      // Route HTML/document requests to the worker first for SSR, but let Vite dev
+      // internals and source module requests bypass to the asset worker.
+      run_worker_first: ["/**", "!/@*", "!/src/*", "!/node_modules/*"],
     };
   }
 

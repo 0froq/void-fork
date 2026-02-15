@@ -2,9 +2,18 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
 import { scanRoutes, type ScanResult } from "./router/scan";
-import { compileRouteTable, compileWorkerEntry, type CompileOptions } from "./router/compile";
+import {
+  compileRouteTable,
+  compileWorkerEntry,
+  type CompileOptions,
+  type SsrCompileOptions,
+} from "./router/compile";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { validateSsrEntry, SSR_ENTRY_RELATIVE_PATHS } from "./ssr/entry";
+import {
+  validateSsrEntries,
+  SSR_SERVER_ENTRY_RELATIVE_PATHS,
+  SSR_CLIENT_ENTRY_RELATIVE_PATHS,
+} from "./ssr/entry";
 
 const VIRTUAL_ROUTES_ID = "virtual:vite-cloud-routes";
 // Rolldown resolveId hook filters currently require RegExp for `id`.
@@ -19,16 +28,26 @@ const LOAD_ID_FILTER = /^virtual:vite-cloud-routes$/;
  */
 export function routingPlugin(root: string): Plugin {
   let scan: ScanResult | null = null;
-  let ssrEntryPath: string | null = null;
+  let ssr: SsrCompileOptions | null = null;
   const routesDir = join(root, "routes");
   const middlewareDir = join(root, "middleware");
   const jobsDir = join(root, "jobs");
   const srcDir = join(root, "src");
-  const ssrEntryAbsPaths = new Set(SSR_ENTRY_RELATIVE_PATHS.map((path) => join(root, path)));
+  const ssrEntryAbsPaths = new Set(
+    [...SSR_SERVER_ENTRY_RELATIVE_PATHS, ...SSR_CLIENT_ENTRY_RELATIVE_PATHS].map((path) =>
+      join(root, path),
+    ),
+  );
 
   async function rescan() {
     scan = await scanRoutes(root);
-    ssrEntryPath = validateSsrEntry(root);
+    const entries = validateSsrEntries(root);
+    ssr = entries
+      ? {
+          serverEntryPath: entries.server.absolutePath,
+          clientEntryRelativePath: entries.client.relativePath,
+        }
+      : null;
   }
 
   // Pre-resolve all runtime module paths so generated code uses absolute paths.
@@ -42,6 +61,7 @@ export function routingPlugin(root: string): Plugin {
   const compileOptions: CompileOptions = {
     honoPath: resolveFile("hono"),
     responsePath: resolveFile("vite-cloud/response"),
+    reactRefresh: false,
   };
 
   // Generate the entry file eagerly (at plugin creation time, during viteCloud()).
@@ -54,6 +74,26 @@ export function routingPlugin(root: string): Plugin {
   return {
     name: "vite-cloud:routing",
     enforce: "pre",
+    configResolved(config) {
+      compileOptions.reactRefresh = config.plugins.some((plugin) =>
+        plugin.name === "vite:react-babel" ||
+        plugin.name === "vite:react-refresh" ||
+        plugin.name === "vite:react-swc"
+      );
+    },
+    config(_, env) {
+      const entries = validateSsrEntries(root);
+      if (!entries || env.command !== "build") return;
+
+      return {
+        build: {
+          manifest: true,
+          rollupOptions: {
+            input: entries.client.absolutePath,
+          },
+        },
+      };
+    },
 
     async buildStart() {
       await rescan();
@@ -83,7 +123,7 @@ export function routingPlugin(root: string): Plugin {
           routesDir,
           middlewareDir,
           jobsDir,
-          ssrEntryPath,
+          ssr,
           compileOptions,
         );
       },
