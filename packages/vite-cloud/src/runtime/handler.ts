@@ -1,11 +1,16 @@
 import type { Context, Env, MiddlewareHandler } from "hono";
+import type { AuthUser } from "./auth";
 
 export interface CloudEnv extends Env {
   Bindings: {
     DB: D1Database;
     KV: KVNamespace;
     STORAGE: R2Bucket;
+    AUTH_KV: KVNamespace;
     [key: string]: unknown;
+  };
+  Variables: {
+    user: AuthUser | null;
   };
 }
 

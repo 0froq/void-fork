@@ -22,6 +22,22 @@
     "./response": {
       "types": "./dist/runtime/response.d.mts",
       "import": "./dist/runtime/response.mjs"
+    },
+    "./auth": {
+      "types": "./dist/runtime/auth.d.mts",
+      "import": "./dist/runtime/auth.mjs"
+    },
+    "./auth/session": {
+      "types": "./dist/auth/session.d.mts",
+      "import": "./dist/auth/session.mjs"
+    },
+    "./auth/password": {
+      "types": "./dist/auth/password.d.mts",
+      "import": "./dist/auth/password.mjs"
+    },
+    "./auth/schema": {
+      "types": "./dist/auth/schema.d.mts",
+      "import": "./dist/auth/schema.mjs"
     }
   },
   "scripts": {
@@ -32,6 +48,7 @@
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.25.0",
     "@cloudflare/workers-types": "catalog:",
+    "@hono/oauth-providers": "^0.8.5",
     "better-sqlite3": "^12.6.2"
   },
   "devDependencies": {
