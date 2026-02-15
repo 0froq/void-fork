@@ -3,7 +3,7 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
-    "test": "vitest",
+    "test": "vitest --run",
     "lint": "oxlint",
     "fmt": "oxfmt --write .",
     "check": "pnpm -r --parallel typecheck",
