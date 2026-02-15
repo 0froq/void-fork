@@ -211,7 +211,7 @@ The positioning: "Use your favorite Vite-based framework. Deploy it on Vite Clou
 **Scores:** Complexity 2 · OpCost 2 · Conversion 5 · Composite 80
 **Phase:** v1.0 (Tier 1), v1.1 (Tier 2)
 
-**Do not build a custom auth library.** The built-in auth uses Hono's own middleware ecosystem (`@hono/oauth-providers`) and KV-backed sessions. For advanced auth needs, a separate plugin (`@vite-cloud/plugin-better-auth`) provides smooth integration with better-auth.
+**Do not build a custom auth library.** The built-in auth uses Hono's middleware ecosystem for OAuth plus first-party email/password sign-in, both backed by KV sessions. For advanced auth needs, a separate plugin (`@vite-cloud/plugin-better-auth`) provides smooth integration with better-auth.
 
 #### Identity Convention: `c.get("user")`
 
@@ -237,17 +237,20 @@ export default defineHandler((c) => {
 
 This handler works identically whether the user is authenticated via the built-in OAuth provider, `@vite-cloud/plugin-better-auth`, Clerk, Auth0, or a custom middleware.
 
-#### Built-in Provider: OAuth + KV Sessions
+#### Built-in Provider: OAuth + Email/Password + KV Sessions
 
-What `auth: { providers: ['github', 'google'] }` does in `vite.config.ts`:
+What `auth: ['github', 'google', 'email']` does in `vite.config.ts`:
 
-1. Auto-provisions D1 user table with schema: `{ id, provider, email, name, avatar_url, createdAt }`
+1. Auto-provisions D1 user table with schema: `{ id, provider, email, name, avatar_url, password_hash, createdAt }` (password hash only used for `provider: "email"`)
 2. Auto-provisions KV namespace for session storage
 3. Generates OAuth login routes at `/auth/login/{provider}` and callback handler
-4. Mounts session middleware that reads cookie, validates token in KV, populates `c.get("user")`
-5. Generates `/auth/me` endpoint (returns current user or 401)
+4. Generates credential routes for email/password: `/auth/signup` and `/auth/login`
+5. Mounts session middleware that reads cookie, validates token in KV, populates `c.get("user")`
+6. Generates `/auth/me` endpoint (returns current user or 401)
 
-**Zero additional dependencies** — uses only `@hono/oauth-providers` and native Web Crypto.
+**Minimal additional auth framework dependencies** — uses `@hono/oauth-providers` plus native Web Crypto APIs (`crypto.subtle`) for password hashing and verification.
+
+`auth: true` is equivalent to `auth: ["email"]`.
 
 End-user developer experience:
 
@@ -256,15 +259,13 @@ End-user developer experience:
 export default defineConfig({
   plugins: [
     viteCloud({
-      auth: {
-        providers: ["github", "google"],
-      },
+      auth: ["github", "google", "email"],
     }),
   ],
 });
 ```
 
-Environment variables: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
+Environment variables (OAuth only): `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
 
 Frontend login link:
 
@@ -281,7 +282,7 @@ if (res.ok) {
 }
 ```
 
-Routes are mounted at `/auth/*` (not `/api/auth/*`): `/auth/login/{provider}`, `/auth/callback/{provider}`, `/auth/logout`, `/auth/me`.
+Routes are mounted at `/auth/*` (not `/api/auth/*`): `/auth/login/{provider}`, `/auth/callback/{provider}`, `/auth/signup`, `/auth/login` (email provider), `/auth/logout`, `/auth/me`.
 
 Session architecture: KV-backed opaque tokens, not signed JWT cookies. Revocation is instant (delete the KV entry). Session cookie: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`. KV key: `session:<random-uuid>`. KV value: `{ userId, createdAt, expiresAt }` with native `expirationTtl`.
 
@@ -345,13 +346,13 @@ export default defineMiddleware(
 
 #### `@vite-cloud/plugin-better-auth` (Tier 2)
 
-A separate plugin for users who need email/password authentication, two-factor authentication, passkeys, organization management, multiple linked accounts, or additional OAuth providers beyond the built-in set. Auto-provisions better-auth's tables, generates a typed client, and auto-generates migration files when the schema changes. Populates `c.get("user")` — route handler code does not change when upgrading from the built-in provider.
+A separate plugin for users who need advanced auth capabilities beyond the built-in provider: two-factor authentication, passkeys, organization management, multiple linked accounts, password reset/verification flows, or additional OAuth providers beyond the built-in set. Auto-provisions better-auth's tables, generates a typed client, and auto-generates migration files when the schema changes. Populates `c.get("user")` — route handler code does not change when upgrading from the built-in provider.
 
 #### Score Rationale
 
 - **Complexity 2** (down from 4) — heavy lifting done by battle-tested Hono middleware. Our work is codegen: generate auth routes, add session middleware, write one D1 migration.
 - **OpCost 2** — auto-provision KV and D1. KV sessions self-clean via TTL. User table grows linearly.
-- **Conversion 5** — auth is the first problem every SaaS hits. "Add `auth: { providers: ['github'] }`, get GitHub login with sessions" eliminates boilerplate. Users who outgrow it swap the provider, not their route code.
+- **Conversion 5** — auth is the first problem every SaaS hits. "Add `auth:  ['github', 'email']`, get social + email/password login with sessions" eliminates boilerplate. Users who outgrow it swap the provider, not their route code.
 
 ### 3.2 Preview Environments with Database Forks
 
