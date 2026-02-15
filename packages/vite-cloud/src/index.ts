@@ -6,14 +6,7 @@ import { migrationPlugin } from "./plugin-migration";
 import { inferProjectBindings, type InferenceOptions } from "./plugin-inference";
 import { scanJobsSync } from "./jobs/scan";
 
-export interface ViteCloudOptions extends InferenceOptions {
-  /** Override the routes directory (default: "routes") */
-  routesDir?: string;
-  /** Override the middleware directory (default: "middleware") */
-  middlewareDir?: string;
-  /** Override the migrations directory (default: "migrations") */
-  migrationsDir?: string;
-}
+export type ViteCloudOptions = InferenceOptions;
 
 /**
  * Vite Cloud plugin — the main entry point.
