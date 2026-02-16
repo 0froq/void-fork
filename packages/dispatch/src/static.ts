@@ -124,8 +124,8 @@ function hasExtension(path: string): boolean {
 }
 
 function isHashedAsset(path: string): boolean {
-  // Vite generates hashed filenames like: assets/index-abc123.js
-  return /assets\/.*-[a-zA-Z0-9]{8,}\.\w+$/.test(path);
+  // Vite/Rolldown only puts content-hashed files in assets/
+  return path.startsWith("assets/");
 }
 
 function guessContentType(path: string): string {
