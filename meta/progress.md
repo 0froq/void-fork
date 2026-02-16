@@ -42,6 +42,7 @@ Implementation Progress
 
 ### Phase 4: GitHub & Production Readiness
 
+- [ ] Admin dashboard
 - [ ] GitHub App for webhook-based deploys
 - [ ] Build infrastructure (CF containers)
 - [ ] Preview deployments per PR
@@ -58,7 +59,7 @@ Implementation Progress
 
 #### v1.1 — Full-Stack & Observability
 
-- [ ] Meta-framework adapters (TanStack Start, SolidStart, SvelteKit, Analog)
+- [ ] Meta-framework adapters (TanStack Start, React Router 7, SolidStart)
 - [ ] better-auth plugin (`@vite-cloud/better-auth`)
 - [ ] Per-route observability (request volume, latency, error rates per route)
 - [ ] Core Web Vitals monitoring (injected `web-vitals` → Analytics Engine)
