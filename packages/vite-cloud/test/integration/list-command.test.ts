@@ -18,9 +18,9 @@ async function importRunListCommand() {
   return mod.runListCommand;
 }
 
-function captureStdout(): { output: () => string; restore: () => void } {
+function captureOutput(): { output: () => string; restore: () => void } {
   const chunks: string[] = [];
-  const mock = vi.spyOn(process.stdout, "write").mockImplementation((...args: unknown[]) => {
+  const writeMock = vi.spyOn(process.stdout, "write").mockImplementation((...args: unknown[]) => {
     const chunk = args[0];
     if (typeof chunk === "string") {
       chunks.push(chunk);
@@ -29,9 +29,15 @@ function captureStdout(): { output: () => string; restore: () => void } {
     }
     return true;
   });
+  const logMock = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+    chunks.push(args.map(String).join(" ") + "\n");
+  });
   return {
     output: () => chunks.join(""),
-    restore: () => mock.mockRestore(),
+    restore: () => {
+      writeMock.mockRestore();
+      logMock.mockRestore();
+    },
   };
 }
 
@@ -74,7 +80,7 @@ describe("runListCommand", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const capture = captureStdout();
+    const capture = captureOutput();
     const runListCommand = await importRunListCommand();
     await runListCommand();
     const out = capture.output();
@@ -102,7 +108,7 @@ describe("runListCommand", () => {
       vi.fn(async () => Response.json([])),
     );
 
-    const capture = captureStdout();
+    const capture = captureOutput();
     const runListCommand = await importRunListCommand();
     await runListCommand();
     const out = capture.output();
@@ -114,7 +120,7 @@ describe("runListCommand", () => {
   it("exits with error when not logged in", async () => {
     setIsolatedHome();
 
-    const capture = captureStdout();
+    const capture = captureOutput();
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`process.exit:${code ?? 0}`);
     }) as never);
