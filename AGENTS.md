@@ -27,8 +27,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | `packages/platform`          | `@vite-cloud/platform` (private) | Control Plane API — projects, deploys, CF API proxy    |
 | `packages/dispatch`          | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets   |
 | `packages/create-vite-cloud` | `create-vite-cloud`              | `npm create vite-cloud` scaffolding CLI                |
-| `playground/spa`             | (private)                        | SPA playground (routing, middleware, migrations, jobs) |
-| `playground/ssr`             | (private)                        | SSR playground (`src/main.ssr.ts`)                     |
+| `playground/*`               | (private)                        | local apps for testing                                 |
 
 ## `vite-cloud` Architecture
 
@@ -183,7 +182,7 @@ Auth middleware on `/projects/*` extracts Bearer token, verifies JWT, sets `c.ge
 3. `migration:<name>` fields → validated, then executed on D1 via CF REST API (status: `"migrating"`)
 4. `asset:<path>` fields → stored in R2 at `{projectId}/current/{path}`
 5. `worker:<path>` fields → uploaded to CF dispatch namespace via API
-6. KV routing updated: `slug → { workerName, projectId }`
+6. KV routing updated: `slug → { workerName, projectId, version: deploymentId }`
 7. Deployment marked as `live`
 
 **Key invariant:** Worker is never deployed unless all migrations succeed. On migration failure, deployment is marked `"failed"` and the existing worker keeps running.
@@ -201,9 +200,10 @@ CF Worker routing `*.vitecloud.app` traffic to user workers and static assets. N
 ### Request Flow
 
 1. Extract slug from hostname (`{slug}.vitecloud.app`)
-2. KV lookup: `slug → { workerName, projectId }`
-3. `/api/*` → `env.DISPATCH.get(workerName).fetch(request)` (Workers for Platforms)
-4. Everything else → serve static assets from R2 (SPA fallback to `index.html`)
+2. KV lookup: `slug → { workerName, projectId, version }`
+3. Edge cache check via `caches.default` with versioned cache key (`?_v={version}`)
+4. `/api/*` → `env.DISPATCH.get(workerName).fetch(request)` (Workers for Platforms, not cached)
+5. Everything else → serve static assets from R2 (SPA fallback to `index.html`), cache response at edge
 
 ### Source Layout
 
@@ -215,10 +215,13 @@ src/
   static.ts                 # serveStaticAsset() — R2 lookup, SPA fallback, cache headers
 ```
 
-### Static Asset Serving
+### Edge Caching
 
-- Hashed assets (`assets/*-<hash>.js`) get `Cache-Control: public, max-age=31536000, immutable`
-- `index.html` gets `Cache-Control: no-cache`
+Static asset responses are cached at the CF edge via `caches.default`. Cache keys include a `version` from the KV routing entry (set to the deployment ID on each deploy), so new deploys instantly invalidate stale entries without purge APIs.
+
+- Hashed assets (`assets/*-<hash>.js`) get `Cache-Control: public, max-age=31536000, immutable` — cached at edge ~1 year
+- Non-hashed assets (`index.html` etc.) get `Cache-Control: public, s-maxage=60, max-age=0, must-revalidate` — cached at edge 60s, browser always revalidates
+- API routes and SSR-rendered responses are **not** edge-cached
 - Non-file paths fall back to `index.html` (SPA routing)
 
 ## Tooling
@@ -307,3 +310,4 @@ Verified working:
 - **ArkType `ArkErrors.map()` returns `ArkErrors`** (not a plain array), causing `Response.json()` serialization to crash via its custom `toJSON()`. Use `Array.from(issues, mapper)` instead of `issues.map(mapper)` when flattening Standard Schema issues.
 - **Standard Schema V1 types are inlined**, not imported from `@standard-schema/spec`. The spec explicitly allows this. Keeps the generated `routes.d.ts` self-contained and avoids requiring users to install the spec package.
 - **tsconfig `extends` does NOT merge `include`/`files`** — the child completely replaces the parent's. To make generated types discoverable, the `.vite-cloud/tsconfig.json` uses `"files"` (inherited when the child doesn't specify `files`) rather than `"include"` (overridden by the child's `include`).
+- **tsconfig `lib` must be explicit** for CF Workers packages. Without `"lib": ["ES2022"]`, TS defaults to including `lib.dom.d.ts` which shadows `@cloudflare/workers-types` globals (e.g. `CacheStorage.default`). Applied to `dispatch`, `vite-cloud`, `create-vite-cloud`. Not applied to `platform` (its tests use Miniflare/Node which needs DOM-compatible `URL` types).
