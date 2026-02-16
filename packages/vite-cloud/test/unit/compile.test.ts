@@ -10,20 +10,20 @@ const testOptions = {
 };
 
 describe("compileRouteTable", () => {
-  it("generates valid module code with routes and middleware", () => {
+  it("generates valid module code with named-export routes and middleware", () => {
     const scan: ScanResult = {
       routes: [
         {
           pattern: "/api/hello",
-          method: "get",
+          methods: ["GET"],
           params: [],
           catchAll: false,
           env: null,
-          filePath: "api/hello.get.ts",
+          filePath: "api/hello.ts",
         },
         {
           pattern: "/api/users/:id",
-          method: "*",
+          methods: ["GET", "PUT"],
           params: ["id"],
           catchAll: false,
           env: null,
@@ -48,11 +48,15 @@ describe("compileRouteTable", () => {
     expect(code).toContain("const app = new Hono()");
     // Should register middleware
     expect(code).toContain("app.use(middleware0)");
-    // Should register routes with correct methods
+    // Should register routes with named exports
     expect(code).toContain('app.get("/api/hello"');
-    expect(code).toContain('app.all("/api/users/:id"');
-    // Should have lazy imports within route handlers
-    expect(code).toContain('import("/routes/api/hello.get.ts")');
+    expect(code).toContain("mod.GET(c)");
+    expect(code).toContain('app.get("/api/users/:id"');
+    expect(code).toContain('app.put("/api/users/:id"');
+    expect(code).toContain("mod.PUT(c)");
+    // Should have shared lazy loaders
+    expect(code).toContain("async function _load_api_hello_ts()");
+    expect(code).toContain('import("/routes/api/hello.ts")');
     expect(code).toContain('import("/routes/api/users/[id].ts")');
     // Should generate scheduled handler for cron jobs
     expect(code).toContain("export async function scheduled(controller, env, ctx)");
@@ -60,6 +64,28 @@ describe("compileRouteTable", () => {
     expect(code).toContain('import("/jobs/sync.ts")');
     // Should export app as default
     expect(code).toContain("export default app");
+  });
+
+  it("falls back to app.all with mod.default for no HTTP exports", () => {
+    const scan: ScanResult = {
+      routes: [
+        {
+          pattern: "/api/legacy",
+          methods: [],
+          params: [],
+          catchAll: false,
+          env: null,
+          filePath: "api/legacy.ts",
+        },
+      ],
+      middleware: [],
+      jobs: [],
+    };
+
+    const code = compileRouteTable(scan, "/routes", "/middleware", "/jobs", null, testOptions);
+
+    expect(code).toContain('app.all("/api/legacy"');
+    expect(code).toContain("mod.default(c)");
   });
 
   it("handles empty scan result", () => {

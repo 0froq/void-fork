@@ -5,7 +5,7 @@ import { scanRoutes } from "../../src/router/scan";
 
 const TMP = join(import.meta.dirname, "__tmp_scan_test__");
 
-function createFile(path: string, content = "export default () => {}") {
+function createFile(path: string, content = "export const GET = () => {}") {
   const full = join(TMP, path);
   mkdirSync(join(full, ".."), { recursive: true });
   writeFileSync(full, content);
@@ -20,14 +20,21 @@ describe("scanRoutes", () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
-  it("discovers route files", async () => {
-    createFile("routes/api/hello.get.ts");
-    createFile("routes/api/users/index.ts");
+  it("discovers route files with methods from exports", async () => {
+    createFile("routes/api/hello.ts", "export const GET = () => {}");
+    createFile(
+      "routes/api/users/index.ts",
+      "export const GET = () => {}\nexport const POST = () => {}",
+    );
 
     const result = await scanRoutes(TMP);
     expect(result.routes).toHaveLength(2);
-    expect(result.routes.map((r) => r.pattern)).toContain("/api/hello");
-    expect(result.routes.map((r) => r.pattern)).toContain("/api/users");
+
+    const hello = result.routes.find((r) => r.pattern === "/api/hello")!;
+    expect(hello.methods).toEqual(["GET"]);
+
+    const users = result.routes.find((r) => r.pattern === "/api/users")!;
+    expect(users.methods).toEqual(["GET", "POST"]);
     expect(result.jobs).toEqual([]);
   });
 
@@ -62,8 +69,8 @@ describe("scanRoutes", () => {
   });
 
   it("sorts catch-all routes last", async () => {
-    createFile("routes/[...].ts");
-    createFile("routes/api/hello.ts");
+    createFile("routes/[...].ts", "export const GET = () => {}");
+    createFile("routes/api/hello.ts", "export const GET = () => {}");
 
     const result = await scanRoutes(TMP);
     expect(result.routes[0].pattern).toBe("/api/hello");

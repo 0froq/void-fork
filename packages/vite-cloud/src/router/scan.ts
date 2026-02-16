@@ -1,5 +1,7 @@
+import { join } from "node:path";
 import { glob } from "tinyglobby";
 import { parseRouteFilename, type RouteDefinition } from "./parse-filename";
+import { detectHttpExports } from "./detect-exports";
 import { scanJobs, type JobDefinition } from "../jobs/scan";
 
 export interface ScanResult {
@@ -30,10 +32,16 @@ export async function scanRoutes(root: string): Promise<ScanResult> {
     scanJobs(root),
   ]);
 
+  const routesDir = `${root}/routes`;
+
   // Parse routes, filtering out files starting with _
   const routes = routeFiles
     .filter((f) => !f.split("/").some((s) => s.startsWith("_")))
-    .map((f) => parseRouteFilename(f))
+    .map((f) => {
+      const route = parseRouteFilename(f);
+      route.methods = detectHttpExports(join(routesDir, f));
+      return route;
+    })
     // Sort: static routes before dynamic, catch-all last
     .sort((a, b) => {
       if (a.catchAll !== b.catchAll) return a.catchAll ? 1 : -1;

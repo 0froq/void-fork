@@ -1,8 +1,8 @@
 export interface RouteDefinition {
   /** URL pattern, e.g. "/api/users/:id" */
   pattern: string;
-  /** HTTP method (lowercase) or "*" for all methods */
-  method: string;
+  /** HTTP methods detected from named exports (e.g. ["GET", "POST"]) */
+  methods: string[];
   /** Parameter names extracted from the pattern */
   params: string[];
   /** Whether this route has a catch-all parameter */
@@ -14,7 +14,6 @@ export interface RouteDefinition {
 }
 
 const EXTENSIONS = [".ts", ".mts", ".js", ".mjs"];
-const HTTP_METHODS = ["get", "post", "put", "delete", "patch"];
 const ENV_SUFFIXES = ["dev", "prod"];
 
 /**
@@ -23,11 +22,10 @@ const ENV_SUFFIXES = ["dev", "prod"];
  * Rules (applied in order):
  * 1. Strip file extension (.ts, .js, .mts, .mjs)
  * 2. Check for env suffix (.dev, .prod) → strip and record
- * 3. Check for HTTP method suffix (.get, .post, etc.) → strip and record; default "*"
- * 4. Strip trailing "index" segment
- * 5. Remove route group directories: (groupname)
- * 6. Convert [param] → :param, [...param] → **:param, [...] → **
- * 7. Prefix with /
+ * 3. Strip trailing "index" segment
+ * 4. Remove route group directories: (groupname)
+ * 5. Convert [param] → :param, [...param] → **:param, [...] → **
+ * 6. Prefix with /
  */
 export function parseRouteFilename(relativePath: string): RouteDefinition {
   const filePath = relativePath;
@@ -57,28 +55,18 @@ export function parseRouteFilename(relativePath: string): RouteDefinition {
     }
   }
 
-  // 3. Check for HTTP method suffix
-  let method = "*";
-  for (const m of HTTP_METHODS) {
-    if (filename.endsWith(`.${m}`)) {
-      method = m;
-      filename = filename.slice(0, -(m.length + 1));
-      break;
-    }
-  }
-
   // Reassemble segments
   segments.push(filename);
 
-  // 4. Strip trailing "index"
+  // 3. Strip trailing "index"
   if (segments[segments.length - 1] === "index") {
     segments.pop();
   }
 
-  // 5. Remove route groups: (groupname)
+  // 4. Remove route groups: (groupname)
   const filtered = segments.filter((s) => !s.startsWith("(") || !s.endsWith(")"));
 
-  // 6. Convert dynamic segments
+  // 5. Convert dynamic segments
   const params: string[] = [];
   let catchAll = false;
 
@@ -102,12 +90,12 @@ export function parseRouteFilename(relativePath: string): RouteDefinition {
     return segment;
   });
 
-  // 7. Build pattern with leading /
+  // 6. Build pattern with leading /
   const pattern = "/" + converted.join("/");
 
   return {
     pattern,
-    method,
+    methods: [], // populated by scanner via export detection
     params,
     catchAll,
     env,

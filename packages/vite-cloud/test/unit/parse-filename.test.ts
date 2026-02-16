@@ -6,7 +6,7 @@ describe("parseRouteFilename", () => {
     it("simple file", () => {
       const r = parseRouteFilename("api/hello.ts");
       expect(r.pattern).toBe("/api/hello");
-      expect(r.method).toBe("*");
+      expect(r.methods).toEqual([]);
       expect(r.params).toEqual([]);
       expect(r.catchAll).toBe(false);
       expect(r.env).toBeNull();
@@ -46,66 +46,17 @@ describe("parseRouteFilename", () => {
     });
   });
 
-  describe("HTTP methods", () => {
-    it(".get suffix", () => {
-      const r = parseRouteFilename("hello.get.ts");
-      expect(r.pattern).toBe("/hello");
-      expect(r.method).toBe("get");
-    });
-
-    it(".post suffix", () => {
-      const r = parseRouteFilename("users.post.ts");
-      expect(r.pattern).toBe("/users");
-      expect(r.method).toBe("post");
-    });
-
-    it(".put suffix", () => {
-      const r = parseRouteFilename("users.put.ts");
-      expect(r.method).toBe("put");
-    });
-
-    it(".delete suffix", () => {
-      const r = parseRouteFilename("users.delete.ts");
-      expect(r.method).toBe("delete");
-    });
-
-    it(".patch suffix", () => {
-      const r = parseRouteFilename("users.patch.ts");
-      expect(r.method).toBe("patch");
-    });
-
-    it("no method suffix defaults to *", () => {
-      const r = parseRouteFilename("hello.ts");
-      expect(r.method).toBe("*");
-    });
-
-    it("method with nested path", () => {
-      const r = parseRouteFilename("api/users/index.get.ts");
-      expect(r.pattern).toBe("/api/users");
-      expect(r.method).toBe("get");
-    });
-  });
-
   describe("environment suffixes", () => {
     it(".dev suffix", () => {
-      const r = parseRouteFilename("debug.get.dev.ts");
+      const r = parseRouteFilename("debug.dev.ts");
       expect(r.pattern).toBe("/debug");
-      expect(r.method).toBe("get");
       expect(r.env).toBe("dev");
     });
 
     it(".prod suffix", () => {
-      const r = parseRouteFilename("health.get.prod.ts");
+      const r = parseRouteFilename("health.prod.ts");
       expect(r.pattern).toBe("/health");
-      expect(r.method).toBe("get");
       expect(r.env).toBe("prod");
-    });
-
-    it("env without method", () => {
-      const r = parseRouteFilename("debug.dev.ts");
-      expect(r.pattern).toBe("/debug");
-      expect(r.method).toBe("*");
-      expect(r.env).toBe("dev");
     });
   });
 
@@ -115,13 +66,6 @@ describe("parseRouteFilename", () => {
       expect(r.pattern).toBe("/users/:id");
       expect(r.params).toEqual(["id"]);
       expect(r.catchAll).toBe(false);
-    });
-
-    it("single param with method", () => {
-      const r = parseRouteFilename("users/[id].get.ts");
-      expect(r.pattern).toBe("/users/:id");
-      expect(r.method).toBe("get");
-      expect(r.params).toEqual(["id"]);
     });
 
     it("multiple params in nested dirs", () => {
@@ -165,33 +109,28 @@ describe("parseRouteFilename", () => {
     });
 
     it("group with dynamic param", () => {
-      const r = parseRouteFilename("api/(public)/[id].get.ts");
+      const r = parseRouteFilename("api/(public)/[id].ts");
       expect(r.pattern).toBe("/api/:id");
-      expect(r.method).toBe("get");
       expect(r.params).toEqual(["id"]);
     });
   });
 
   describe("complex combinations", () => {
-    it("nested dynamic with method and env", () => {
-      const r = parseRouteFilename("api/users/[id].get.dev.ts");
+    it("nested dynamic with env", () => {
+      const r = parseRouteFilename("api/users/[id].dev.ts");
       expect(r.pattern).toBe("/api/users/:id");
-      expect(r.method).toBe("get");
       expect(r.env).toBe("dev");
       expect(r.params).toEqual(["id"]);
     });
 
-    it("catch-all with method", () => {
-      const r = parseRouteFilename("files/[...path].get.ts");
-      expect(r.pattern).toBe("/files/**:path");
-      expect(r.method).toBe("get");
-      expect(r.catchAll).toBe(true);
-      expect(r.params).toEqual(["path"]);
+    it("preserves filePath", () => {
+      const r = parseRouteFilename("api/hello.ts");
+      expect(r.filePath).toBe("api/hello.ts");
     });
 
-    it("preserves filePath", () => {
-      const r = parseRouteFilename("api/hello.get.ts");
-      expect(r.filePath).toBe("api/hello.get.ts");
+    it("methods starts empty (populated by scanner)", () => {
+      const r = parseRouteFilename("api/hello.ts");
+      expect(r.methods).toEqual([]);
     });
   });
 });
