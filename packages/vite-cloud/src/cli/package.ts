@@ -1,8 +1,21 @@
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { InferredBindings } from "../inference/walk";
 import type { MigrationFile } from "../migrations/validate";
 import type { DeployManifest, ScheduleMeta } from "./types";
+
+/**
+ * Compute SHA-256 hex digests for all files in a directory.
+ */
+export function computeAssetHashes(dir: string): Record<string, string> {
+  const hashes: Record<string, string> = {};
+  for (const filePath of collectFiles(dir)) {
+    const rel = relative(dir, filePath);
+    hashes[rel] = createHash("sha256").update(readFileSync(filePath)).digest("hex");
+  }
+  return hashes;
+}
 
 /**
  * Package the build output into a FormData ready for upload.
@@ -19,6 +32,8 @@ export function packageBuild(
   migrations?: MigrationFile[],
   schedules?: ScheduleMeta[],
   ssr?: boolean,
+  neededPaths?: Set<string>,
+  assetHashes?: Record<string, string>,
 ): FormData {
   const formData = new FormData();
 
@@ -47,6 +62,10 @@ export function packageBuild(
     manifest.ssr = true;
   }
 
+  if (assetHashes) {
+    manifest.assetHashes = assetHashes;
+  }
+
   formData.append("manifest", JSON.stringify(manifest));
 
   // Add worker files
@@ -60,12 +79,13 @@ export function packageBuild(
     formData.append(`worker:${relativePath}`, new Blob([content]), relativePath);
   }
 
-  // Add client assets
+  // Add client assets (only needed paths when filtering)
   const clientDir = join(distDir, "client");
   try {
     const clientFiles = collectFiles(clientDir);
     for (const filePath of clientFiles) {
       const relativePath = relative(clientDir, filePath);
+      if (neededPaths && !neededPaths.has(relativePath)) continue;
       const content = readFileSync(filePath);
       formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
     }
@@ -79,15 +99,24 @@ export function packageBuild(
 /**
  * Package a static build (no worker) into a FormData ready for upload.
  */
-export function packageStaticBuild(outputDir: string, mode: "spa" | "ssg"): FormData {
+export function packageStaticBuild(
+  outputDir: string,
+  mode: "spa" | "ssg",
+  neededPaths?: Set<string>,
+  assetHashes?: Record<string, string>,
+): FormData {
   const formData = new FormData();
 
   const manifest: DeployManifest = { bindings: {}, static: mode };
+  if (assetHashes) {
+    manifest.assetHashes = assetHashes;
+  }
   formData.append("manifest", JSON.stringify(manifest));
 
   const files = collectFiles(outputDir);
   for (const filePath of files) {
     const relativePath = relative(outputDir, filePath);
+    if (neededPaths && !neededPaths.has(relativePath)) continue;
     const content = readFileSync(filePath);
     formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
   }

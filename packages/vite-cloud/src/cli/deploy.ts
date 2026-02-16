@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { intro, outro, log, note, spinner } from "@clack/prompts";
 import { getToken } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
-import { packageBuild, packageStaticBuild } from "./package";
+import { computeAssetHashes, packageBuild, packageStaticBuild } from "./package";
 import { PlatformClient, type ProjectResponse } from "./client";
 import { inferProjectBindings, FRAMEWORK_SCAN_DIRS, detectFramework } from "../plugin-inference";
 import { promptProjectSelection, promptProjectSlug } from "./prompt";
@@ -160,8 +160,14 @@ async function runStaticDeploy(
   // Package & Upload
   const s = spinner();
 
-  s.start("Packaging...");
-  const formData = packageStaticBuild(preset.outputDir, preset.mode);
+  s.start("Checking assets...");
+  const hashes = computeAssetHashes(preset.outputDir);
+  const totalAssets = Object.keys(hashes).length;
+  const needed = await client.checkAssets(config.projectId, hashes);
+  s.message(
+    `Uploading ${needed.length}/${totalAssets} assets (${totalAssets - needed.length} cached)`,
+  );
+  const formData = packageStaticBuild(preset.outputDir, preset.mode, new Set(needed), hashes);
 
   s.message("Deploying...");
   const result = await client.deploy(config.projectId, formData);
@@ -226,10 +232,26 @@ async function runFullDeploy(
       }));
   const isSsr = isFrameworkMode ? true : Boolean(validateSsrEntry(root));
 
-  // 7. Package & Upload
+  // 7. Check assets & Package & Upload
   const s = spinner();
 
-  s.start("Packaging...");
+  s.start("Checking assets...");
+  const clientDir = join(distDir, "client");
+  let neededPaths: Set<string> | undefined;
+  let assetHashes: Record<string, string> | undefined;
+  try {
+    assetHashes = computeAssetHashes(clientDir);
+    const totalAssets = Object.keys(assetHashes).length;
+    const needed = await client.checkAssets(config.projectId, assetHashes);
+    neededPaths = new Set(needed);
+    s.message(
+      `Uploading ${needed.length}/${totalAssets} assets (${totalAssets - needed.length} cached)`,
+    );
+  } catch {
+    // No client directory — API-only project
+  }
+
+  s.message("Packaging...");
   const formData = packageBuild(
     distDir,
     workerDirName,
@@ -237,6 +259,8 @@ async function runFullDeploy(
     validatedMigrations,
     schedules,
     isSsr,
+    neededPaths,
+    assetHashes,
   );
 
   s.message("Deploying...");
