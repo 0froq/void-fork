@@ -1,6 +1,6 @@
 This is the development repo of Vite Cloud.
 
-- This file describes the current state of the codebase.
+- This file describes the current state of the codebase. To understand Vite Cloud as a product, read the [Introduction](./docs/intro.md).
 - Refer to the [Design Doc](./meta/design.md) for the high-level vision and architecture.
 - Refer to the [Progress Doc](./meta/progress.md) for tracking progress.
 
