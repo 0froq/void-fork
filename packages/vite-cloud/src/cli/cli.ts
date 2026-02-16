@@ -63,7 +63,7 @@ if (command === "deploy") {
       log.error(err.message ?? err);
       process.exit(1);
     });
-} else if (command === "list") {
+} else if (command === "list" || command === "ls") {
   runListCommand().catch((err) => {
     console.error(err.message ?? err);
     process.exit(1);
@@ -113,7 +113,7 @@ if (command === "deploy") {
       "vcd login                          Log in with GitHub or Google",
       "vcd logout                         Log out and remove credentials",
       "vcd whoami                         Show the logged-in username",
-      "vcd list                           List your projects",
+      "vcd list|ls                        List your projects",
       "vcd deploy [--project <name>]      Build and deploy to Vite Cloud",
       "vcd delete [name]                  Delete a project and all its resources",
       "vcd link [name]                    Link to an existing project",
