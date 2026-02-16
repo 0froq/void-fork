@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeAll } from "vitest";
 import app from "../../src/index";
 import type { Env } from "../../src/env";
 
@@ -7,6 +7,19 @@ interface RoutingEntry {
   projectId: string;
   ssr?: boolean;
   mode?: "spa" | "ssg";
+}
+
+// Mock the CF Cache API global
+beforeAll(() => {
+  const mockCache = {
+    match: async () => undefined,
+    put: async () => {},
+  };
+  vi.stubGlobal("caches", { default: mockCache });
+});
+
+function createCtx(): ExecutionContext {
+  return { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 }
 
 function createEnv(options: {
@@ -48,6 +61,7 @@ describe("dispatch fetch handler", () => {
     const response = await app.fetch(
       new Request("https://my-app.vitecloud.app/api/hello", { method: "GET" }),
       env,
+      createCtx(),
     );
 
     expect(workerFetch).toHaveBeenCalledOnce();
@@ -65,6 +79,7 @@ describe("dispatch fetch handler", () => {
     const response = await app.fetch(
       new Request("https://my-app.vitecloud.app/assets/app-abc12345.js"),
       env,
+      createCtx(),
     );
 
     expect(workerFetch).not.toHaveBeenCalled();
@@ -79,7 +94,11 @@ describe("dispatch fetch handler", () => {
       }),
     });
 
-    const response = await app.fetch(new Request("https://my-app.vitecloud.app/dashboard"), env);
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/dashboard"),
+      env,
+      createCtx(),
+    );
 
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(await response.text()).toBe("<html>ssr</html>");
@@ -96,7 +115,11 @@ describe("dispatch fetch handler", () => {
       }),
     });
 
-    const response = await app.fetch(new Request("https://my-app.vitecloud.app/about"), env);
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/about"),
+      env,
+      createCtx(),
+    );
 
     expect(workerFetch).not.toHaveBeenCalled();
     expect(await response.text()).toBe("<html>about</html>");
@@ -110,7 +133,11 @@ describe("dispatch fetch handler", () => {
       },
     });
 
-    const response = await app.fetch(new Request("https://my-app.vitecloud.app/dashboard"), env);
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/dashboard"),
+      env,
+      createCtx(),
+    );
 
     expect(workerFetch).not.toHaveBeenCalled();
     expect(await response.text()).toBe("<html>spa</html>");
@@ -129,6 +156,7 @@ describe("dispatch static-only routing", () => {
     const response = await app.fetch(
       new Request("https://my-app.vitecloud.app/dashboard/settings"),
       env,
+      createCtx(),
     );
 
     expect(workerFetch).not.toHaveBeenCalled();
@@ -144,7 +172,11 @@ describe("dispatch static-only routing", () => {
       },
     });
 
-    const response = await app.fetch(new Request("https://my-app.vitecloud.app/about"), env);
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/about"),
+      env,
+      createCtx(),
+    );
 
     expect(workerFetch).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
@@ -159,7 +191,11 @@ describe("dispatch static-only routing", () => {
       },
     });
 
-    const response = await app.fetch(new Request("https://my-app.vitecloud.app/nonexistent"), env);
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/nonexistent"),
+      env,
+      createCtx(),
+    );
 
     expect(workerFetch).not.toHaveBeenCalled();
     expect(response.status).toBe(404);
@@ -172,7 +208,11 @@ describe("dispatch static-only routing", () => {
       assets: {},
     });
 
-    const response = await app.fetch(new Request("https://my-app.vitecloud.app/nonexistent"), env);
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/nonexistent"),
+      env,
+      createCtx(),
+    );
 
     expect(workerFetch).not.toHaveBeenCalled();
     expect(response.status).toBe(404);
@@ -187,7 +227,11 @@ describe("dispatch static-only routing", () => {
       },
     });
 
-    const response = await app.fetch(new Request("https://my-app.vitecloud.app/"), env);
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/"),
+      env,
+      createCtx(),
+    );
 
     expect(workerFetch).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
@@ -202,7 +246,11 @@ describe("dispatch static-only routing", () => {
       },
     });
 
-    const response = await app.fetch(new Request("https://my-app.vitecloud.app/styles.css"), env);
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/styles.css"),
+      env,
+      createCtx(),
+    );
 
     expect(workerFetch).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
@@ -217,7 +265,11 @@ describe("dispatch static-only routing", () => {
       },
     });
 
-    const response = await app.fetch(new Request("https://my-app.vitecloud.app/api/hello"), env);
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/api/hello"),
+      env,
+      createCtx(),
+    );
 
     // Static SPA: no worker, so /api falls through to SPA fallback
     expect(workerFetch).not.toHaveBeenCalled();

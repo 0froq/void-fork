@@ -49,7 +49,9 @@ describe("serveStaticAsset", () => {
     const response = await serveStaticAsset(env, "proj", "/about", { spaFallback: false });
     expect(response).not.toBeNull();
     expect(response!.status).toBe(200);
-    expect(response!.headers.get("Cache-Control")).toBe("no-cache");
+    expect(response!.headers.get("Cache-Control")).toBe(
+      "public, s-maxage=60, max-age=0, must-revalidate",
+    );
     expect(await response!.text()).toBe("<h1>about</h1>");
   });
 });

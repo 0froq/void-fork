@@ -112,7 +112,7 @@ function buildResponse(object: R2ObjectBody, path: string): Response {
   if (isHashedAsset(path)) {
     headers.set("Cache-Control", "public, max-age=31536000, immutable");
   } else {
-    headers.set("Cache-Control", "no-cache");
+    headers.set("Cache-Control", "public, s-maxage=60, max-age=0, must-revalidate");
   }
 
   return new Response(object.body, { headers });
