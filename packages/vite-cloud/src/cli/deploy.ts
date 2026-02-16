@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { intro, outro, log, note, spinner } from "@clack/prompts";
 import { getToken } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
-import { computeAssetHashes, packageBuild, packageStaticBuild } from "./package";
+import { computeAssetHashes, packageBuild, packageStaticBuild, readHeaderRules } from "./package";
 import { PlatformClient, type ProjectResponse } from "./client";
 import { inferProjectBindings, FRAMEWORK_SCAN_DIRS, detectFramework } from "../plugin-inference";
 import { promptProjectSelection, promptProjectSlug } from "./prompt";
@@ -167,7 +167,14 @@ async function runStaticDeploy(
   s.message(
     `Uploading ${needed.length}/${totalAssets} assets (${totalAssets - needed.length} cached)`,
   );
-  const formData = packageStaticBuild(preset.outputDir, preset.mode, new Set(needed), hashes);
+  const headers = readHeaderRules(preset.outputDir);
+  const formData = packageStaticBuild(
+    preset.outputDir,
+    preset.mode,
+    new Set(needed),
+    hashes,
+    headers,
+  );
 
   s.message("Deploying...");
   const result = await client.deploy(config.projectId, formData);
@@ -252,6 +259,7 @@ async function runFullDeploy(
   }
 
   s.message("Packaging...");
+  const headers = readHeaderRules(clientDir);
   const formData = packageBuild(
     distDir,
     workerDirName,
@@ -261,6 +269,7 @@ async function runFullDeploy(
     isSsr,
     neededPaths,
     assetHashes,
+    headers,
   );
 
   s.message("Deploying...");

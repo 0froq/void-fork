@@ -62,4 +62,5 @@ The plugin scans your source code at build time, infers which Cloudflare binding
 - [Cloudflare](./cloudflare.md) — bindings, wrangler config, and self-hosted deployment
 - [SSR](./ssr.md) — server-side rendering
 - [SSG](./ssg.md) — static site generation / prerendering
+- [Caching and Headers](./cache.md) — edge caching defaults and custom `_headers`
 - [CLI](./cli.md) — deploy, login, and project management
