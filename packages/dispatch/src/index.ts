@@ -7,6 +7,7 @@ interface RoutingEntry {
   projectId: string;
   ssr?: boolean;
   mode?: "spa" | "ssg";
+  version?: string;
 }
 
 export default {
@@ -18,14 +19,7 @@ export default {
       return new Response("Not Found", { status: 404 });
     }
 
-    // Edge cache: check for cached static asset responses (GET only)
-    const cache = caches.default;
-    if (request.method === "GET") {
-      const cached = await cache.match(request);
-      if (cached) return cached;
-    }
-
-    // Look up routing info from KV
+    // Look up routing info from KV (needed for cache version)
     const routingRaw = await env.ROUTING.get(slug);
     if (!routingRaw) {
       return new Response("Project not found", { status: 404 });
@@ -33,20 +27,32 @@ export default {
 
     const routing: RoutingEntry = JSON.parse(routingRaw);
 
+    // Versioned cache key: each deploy writes a new version to KV,
+    // so old cache entries are instantly bypassed without purging.
+    const cache = caches.default;
+    const cacheKey = routing.version
+      ? new Request(`${request.url}?_v=${routing.version}`)
+      : request;
+
+    if (request.method === "GET") {
+      const cached = await cache.match(cacheKey);
+      if (cached) return cached;
+    }
+
     // Static-only deploys (no worker)
     if (!routing.workerName) {
       if (routing.mode === "ssg") {
         return cacheResponse(
           ctx,
           cache,
-          request,
+          cacheKey,
           await serveSSGAsset(env, routing.projectId, url.pathname),
         );
       }
       return cacheResponse(
         ctx,
         cache,
-        request,
+        cacheKey,
         await serveStaticAssetWithFallback(env, routing.projectId, url.pathname),
       );
     }
@@ -63,7 +69,7 @@ export default {
       const staticResponse = await serveStaticAsset(env, routing.projectId, url.pathname, {
         spaFallback: false,
       });
-      if (staticResponse) return cacheResponse(ctx, cache, request, staticResponse);
+      if (staticResponse) return cacheResponse(ctx, cache, cacheKey, staticResponse);
       const worker = env.DISPATCH.get(routing.workerName);
       return worker.fetch(request);
     }
@@ -71,7 +77,7 @@ export default {
     return cacheResponse(
       ctx,
       cache,
-      request,
+      cacheKey,
       await serveStaticAssetWithFallback(env, routing.projectId, url.pathname),
     );
   },
@@ -79,6 +85,7 @@ export default {
 
 /**
  * Store successful static responses in the edge cache.
+ * Uses a versioned cache key so deploys instantly invalidate old entries.
  * TTL is controlled by the Cache-Control headers already set on the response:
  * - Hashed assets: `immutable` (cached ~1 year)
  * - Non-hashed (index.html etc): `s-maxage=60` (cached 60s at edge)
@@ -86,11 +93,11 @@ export default {
 function cacheResponse(
   ctx: ExecutionContext,
   cache: Cache,
-  request: Request,
+  cacheKey: Request,
   response: Response,
 ): Response {
-  if (request.method === "GET" && response.ok) {
-    ctx.waitUntil(cache.put(request, response.clone()));
+  if (cacheKey.method === "GET" && response.ok) {
+    ctx.waitUntil(cache.put(cacheKey, response.clone()));
   }
   return response;
 }

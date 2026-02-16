@@ -183,6 +183,7 @@ describe("POST /projects/:id/deploy", () => {
     expect(routing).toEqual({
       workerName: "user-routed-app",
       projectId: project.id,
+      version: expect.stringMatching(/^dpl_/),
     });
   });
 
@@ -208,6 +209,7 @@ describe("POST /projects/:id/deploy", () => {
       workerName: "user-ssr-app",
       projectId: project.id,
       ssr: true,
+      version: expect.stringMatching(/^dpl_/),
     });
   });
 
@@ -537,6 +539,7 @@ describe("POST /projects/:id/deploy (static)", () => {
     expect(routing).toEqual({
       projectId: project.id,
       mode: "spa",
+      version: expect.stringMatching(/^dpl_/),
     });
   });
 
@@ -558,6 +561,7 @@ describe("POST /projects/:id/deploy (static)", () => {
     expect(routing).toEqual({
       projectId: project.id,
       mode: "ssg",
+      version: expect.stringMatching(/^dpl_/),
     });
   });
 

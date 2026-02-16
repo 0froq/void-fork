@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeAll } from "vitest";
+import { describe, expect, it, vi, beforeAll, beforeEach } from "vitest";
 import app from "../../src/index";
 import type { Env } from "../../src/env";
 
@@ -7,15 +7,27 @@ interface RoutingEntry {
   projectId: string;
   ssr?: boolean;
   mode?: "spa" | "ssg";
+  version?: string;
 }
 
 // Mock the CF Cache API global
+const cacheStore = new Map<string, Response>();
+const mockCache = {
+  match: async (req: Request) => {
+    const cached = cacheStore.get(req.url);
+    return cached ? cached.clone() : undefined;
+  },
+  put: async (req: Request, res: Response) => {
+    cacheStore.set(req.url, res.clone());
+  },
+};
+
 beforeAll(() => {
-  const mockCache = {
-    match: async () => undefined,
-    put: async () => {},
-  };
   vi.stubGlobal("caches", { default: mockCache });
+});
+
+beforeEach(() => {
+  cacheStore.clear();
 });
 
 function createCtx(): ExecutionContext {
@@ -275,5 +287,47 @@ describe("dispatch static-only routing", () => {
     expect(workerFetch).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("<html>SPA</html>");
+  });
+});
+
+describe("edge cache versioning", () => {
+  it("invalidates cache when routing version changes", async () => {
+    const assets = {
+      "proj_1/current/index.html": { body: "<html>v1</html>", contentType: "text/html" },
+    };
+
+    // First request with version "dpl_1" — cache miss, populates cache
+    const { env: env1 } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa", version: "dpl_1" },
+      assets,
+    });
+    const res1 = await app.fetch(new Request("https://my-app.vitecloud.app/"), env1, createCtx());
+    expect(res1.status).toBe(200);
+    expect(await res1.text()).toBe("<html>v1</html>");
+
+    // Second request with same version — cache hit (R2 not called again)
+    const r2Get = vi.fn(async () => null);
+    const env2 = {
+      ROUTING: {
+        get: async () => JSON.stringify({ projectId: "proj_1", mode: "spa", version: "dpl_1" }),
+      },
+      DISPATCH: { get: () => ({ fetch: vi.fn() }) },
+      ASSETS: { get: r2Get },
+    } as unknown as Env;
+    const res2 = await app.fetch(new Request("https://my-app.vitecloud.app/"), env2, createCtx());
+    expect(res2.status).toBe(200);
+    expect(await res2.text()).toBe("<html>v1</html>");
+    expect(r2Get).not.toHaveBeenCalled();
+
+    // Third request with new version "dpl_2" — cache miss (version changed)
+    const { env: env3 } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa", version: "dpl_2" },
+      assets: {
+        "proj_1/current/index.html": { body: "<html>v2</html>", contentType: "text/html" },
+      },
+    });
+    const res3 = await app.fetch(new Request("https://my-app.vitecloud.app/"), env3, createCtx());
+    expect(res3.status).toBe(200);
+    expect(await res3.text()).toBe("<html>v2</html>");
   });
 });

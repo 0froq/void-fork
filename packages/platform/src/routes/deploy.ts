@@ -82,7 +82,10 @@ app.post("/:id/deploy", async (c) => {
       }
 
       // Update KV routing (no workerName for static deploys)
-      await c.env.ROUTING.put(project.slug, JSON.stringify({ projectId, mode: manifest.static }));
+      await c.env.ROUTING.put(
+        project.slug,
+        JSON.stringify({ projectId, mode: manifest.static, version: deployment.id }),
+      );
 
       // Mark deployment as live + update project mode
       await updateDeploymentStatus(c.env.DB, deployment.id, "live");
@@ -243,7 +246,12 @@ app.post("/:id/deploy", async (c) => {
     // 5. Update KV routing table
     await c.env.ROUTING.put(
       project.slug,
-      JSON.stringify({ workerName, projectId, ...(manifest.ssr ? { ssr: true } : {}) }),
+      JSON.stringify({
+        workerName,
+        projectId,
+        ...(manifest.ssr ? { ssr: true } : {}),
+        version: deployment.id,
+      }),
     );
 
     // 6. Mark deployment as live + update project mode
