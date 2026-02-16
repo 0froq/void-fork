@@ -49,16 +49,15 @@ Implementation Progress
 
 ### Phase 4: GitHub & Production Readiness
 
-- [ ] Admin dashboard
+- [ ] Dashboard (web UI for managing projects, viewing logs)
+- [ ] Usage tiers, metering and limits enforcement
+- [ ] Rate limiting and abuse protection on free tier
+- [ ] Billing integration (Stripe)
+- [ ] Email notifications (e.g. for failed project builds or billing issues)
 - [ ] GitHub App for webhook-based deploys
 - [ ] Build infrastructure (CF containers)
-- [ ] Preview deployments per PR
-- [ ] Custom domains
-- [ ] Usage metering and limits enforcement
-- [ ] Billing integration (Stripe)
-- [ ] Dashboard (web UI for managing projects, viewing logs)
-- [ ] Email notifications (e.g. for failed project builds or billing issues)
-- [ ] Rate limiting and abuse protection on free tier
+- [ ] Preview deployments per PR (paid)
+- [ ] Custom domains (paid)
 
 **Milestone:** Ready for public beta.
 
