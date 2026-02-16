@@ -1,5 +1,6 @@
 import type { Context, Env, MiddlewareHandler } from "hono";
 import type { AuthUser } from "./auth";
+import { convertReturnValue } from "./response";
 
 /**
  * Hono environment type for Vite Cloud workers.
@@ -30,6 +31,7 @@ export interface CloudEnv extends Env {
 export type CloudContext = Context<CloudEnv>;
 
 type HandlerFn = (c: CloudContext) => unknown | Promise<unknown>;
+type MiddlewareFn = MiddlewareHandler<CloudEnv>;
 
 /** Pre-rendered `<head>` and `<body>` asset tags injected by the SSR build. */
 export interface RenderAssetTags {
@@ -48,11 +50,58 @@ type JobFn = (
 ) => unknown | Promise<unknown>;
 
 /**
- * Identity function that provides type inference for route handlers.
- * At runtime it simply returns the function passed to it.
+ * Define a route handler, optionally composed with per-route middleware.
+ *
+ * Single argument: identity wrapper (backwards compatible).
+ * Multiple arguments: middleware chain + final handler, composed at runtime.
  */
-export function defineHandler(handler: HandlerFn): HandlerFn {
-  return handler;
+export function defineHandler(handler: HandlerFn): HandlerFn;
+export function defineHandler(m1: MiddlewareFn, handler: HandlerFn): HandlerFn;
+export function defineHandler(m1: MiddlewareFn, m2: MiddlewareFn, handler: HandlerFn): HandlerFn;
+export function defineHandler(
+  m1: MiddlewareFn,
+  m2: MiddlewareFn,
+  m3: MiddlewareFn,
+  handler: HandlerFn,
+): HandlerFn;
+export function defineHandler(
+  m1: MiddlewareFn,
+  m2: MiddlewareFn,
+  m3: MiddlewareFn,
+  m4: MiddlewareFn,
+  handler: HandlerFn,
+): HandlerFn;
+export function defineHandler(
+  m1: MiddlewareFn,
+  m2: MiddlewareFn,
+  m3: MiddlewareFn,
+  m4: MiddlewareFn,
+  m5: MiddlewareFn,
+  handler: HandlerFn,
+): HandlerFn;
+export function defineHandler(...args: (MiddlewareFn | HandlerFn)[]): HandlerFn {
+  if (args.length === 1) {
+    return args[0] as HandlerFn;
+  }
+  const middlewares = args.slice(0, -1) as MiddlewareFn[];
+  const handler = args[args.length - 1] as HandlerFn;
+
+  return async (c: CloudContext) => {
+    let index = 0;
+    const dispatch = async (): Promise<void> => {
+      if (index < middlewares.length) {
+        const mw = middlewares[index++];
+        const res = await mw(c, dispatch);
+        if (res instanceof Response) {
+          c.res = res;
+        }
+      } else {
+        c.res = convertReturnValue(await handler(c));
+      }
+    };
+    await dispatch();
+    return c.res;
+  };
 }
 
 /**

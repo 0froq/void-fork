@@ -24,7 +24,13 @@ export default defineHandler(async (c) => {
 
 ## `defineHandler`
 
-`defineHandler(fn)` is a typed identity helper for route handlers.
+`defineHandler` wraps a route handler with optional per-route middleware.
+
+### Basic usage
+
+```ts
+defineHandler(handler);
+```
 
 Handler signature (Hono context):
 
@@ -42,6 +48,34 @@ Return values:
 - object/array/number/boolean: JSON response
 
 You can also call Hono response helpers directly (`c.json()`, `c.text()`, etc.).
+
+### Per-route middleware
+
+`defineHandler` accepts one or more middleware before the final handler:
+
+```ts
+defineHandler(middleware1, middleware2, handler);
+```
+
+Middleware runs in order. Each middleware can short-circuit (return a response without calling `next()`) or post-process (modify the response after `await next()`). Both `defineMiddleware`-wrapped functions and raw Hono `MiddlewareHandler` functions are accepted.
+
+```ts
+// routes/api/admin/stats.get.ts
+import { defineHandler } from "vite-cloud";
+import { bearerAuth } from "hono/bearer-auth";
+
+const requireAdmin = async (c, next) => {
+  const user = c.get("user");
+  if (!user?.isAdmin) return c.json({ error: "forbidden" }, 403);
+  await next();
+};
+
+export default defineHandler(bearerAuth({ token: "secret" }), requireAdmin, (c) => {
+  return { stats: "..." };
+});
+```
+
+Up to 5 middleware can be passed before the handler, with full type inference for each position.
 
 ## Filename conventions
 
@@ -68,6 +102,13 @@ Examples:
 Files or directories starting with `_` are ignored.
 
 ## Middleware
+
+There are two ways to apply middleware:
+
+- **Global middleware** — runs on every request. Place files in `middleware/`.
+- **Per-route middleware** — runs on a single route. Pass to `defineHandler()` (see above).
+
+### Global middleware
 
 Place global middleware in `middleware/`.
 
@@ -154,23 +195,40 @@ export default defineMiddleware(rateLimiter({ windowMs: 60_000, limit: 100 }));
 
 ### Per-route middleware
 
-Apply Hono middleware to individual routes by composing inside the handler:
+Pass Hono middleware directly to `defineHandler` to apply it to a single route:
 
 ```ts
 // routes/api/webhooks/stripe.post.ts
 import { defineHandler } from "vite-cloud";
 import { bearerAuth } from "hono/bearer-auth";
 
-const auth = bearerAuth({ token: "webhook-secret" });
-
-export default defineHandler(async (c) => {
-  // Run middleware manually for this route only
-  const result = await auth(c, async () => {});
-  if (result) return result;
-
+export default defineHandler(bearerAuth({ token: "webhook-secret" }), async (c) => {
   const body = await c.req.json();
   return { received: true };
 });
+```
+
+This works with any Hono-compatible middleware — built-in, third-party, or custom:
+
+```ts
+// routes/api/protected.get.ts
+import { defineHandler, defineMiddleware } from "vite-cloud";
+import { cors } from "hono/cors";
+import { rateLimiter } from "hono-rate-limiter";
+
+const requireAuth = defineMiddleware(async (c, next) => {
+  if (!c.get("user")) return c.json({ error: "unauthorized" }, 401);
+  await next();
+});
+
+export default defineHandler(
+  cors({ origin: "https://example.com" }),
+  rateLimiter({ windowMs: 60_000, limit: 100 }),
+  requireAuth,
+  (c) => {
+    return { data: "protected" };
+  },
+);
 ```
 
 ### Hono utilities
