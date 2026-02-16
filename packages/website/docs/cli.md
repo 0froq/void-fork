@@ -36,10 +36,18 @@ Linked project state is stored in `.vite-cloud/project.json`.
 ## Deploy
 
 ```bash
-vcd deploy [--project <name>]
+vcd deploy [--project <name>] [--dir <path>] [--spa]
 ```
 
-Pipeline:
+The deploy command auto-detects your project type and chooses the right pipeline. See [Deployment Modes](./deployment-modes.md) for full details.
+
+| Flag               | Purpose                                           |
+| ------------------ | ------------------------------------------------- |
+| `--project <name>` | Target a specific project by slug                 |
+| `--dir <path>`     | Deploy a pre-built static directory (skips build) |
+| `--spa`            | Use SPA mode instead of SSG for static deploys    |
+
+For full (worker) deploys, the pipeline is:
 
 1. Build app (`vite build`)
 2. Detect framework mode (TanStack Start, React Router) or default Hono routing
@@ -49,6 +57,8 @@ Pipeline:
 6. Detect SSR entry (`src/main.ssr.ts`)
 7. Package worker + assets + manifest into a single upload
 8. Deploy to platform
+
+For static deploys (SPA or SSG), the pipeline is shorter: build (if needed) then upload assets.
 
 Project resolution precedence:
 
