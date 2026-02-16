@@ -23,15 +23,17 @@ export async function runListCommand(): Promise<void> {
   const rows = projects.map((p) => ({
     slug: p.slug,
     id: p.id.replace(/^proj_/, ""),
+    mode: p.mode ?? "worker",
     url: `https://${p.slug}.vitecloud.app`,
   }));
 
   const slugWidth = Math.max(...rows.map((r) => r.slug.length));
   const idWidth = Math.max(...rows.map((r) => r.id.length));
+  const modeWidth = Math.max(...rows.map((r) => r.mode.length));
 
   const lines = rows.map(
     (row) =>
-      `\x1b[0m\x1b[33m${row.slug}\x1b[0m${"".padEnd(slugWidth - row.slug.length)}  ${row.id.padEnd(idWidth)}  ${row.url}`,
+      `\x1b[0m\x1b[33m${row.slug}\x1b[0m${"".padEnd(slugWidth - row.slug.length)}  ${row.id.padEnd(idWidth)}  ${row.mode.padEnd(modeWidth)}  ${row.url}`,
   );
   note(lines.join("\n"), `${projects.length} project(s)`);
 }

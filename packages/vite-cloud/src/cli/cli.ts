@@ -25,7 +25,11 @@ if (command === "deploy") {
     process.exit(1);
   }
 
-  runDeploy(root, { projectSlug: deployArgs.projectSlug }).catch((err) => {
+  runDeploy(root, {
+    projectSlug: deployArgs.projectSlug,
+    dir: deployArgs.dir,
+    spa: deployArgs.spa,
+  }).catch((err) => {
     log.error(err.message ?? err);
     process.exit(1);
   });
@@ -115,6 +119,8 @@ if (command === "deploy") {
       "\x1b[0mvcd whoami                         \x1b[2mShow the logged-in username",
       "\x1b[0mvcd list, ls                       \x1b[2mList your projects",
       "\x1b[0mvcd deploy [--project <name>]      \x1b[2mBuild and deploy to Vite Cloud",
+      "\x1b[0m  --dir <path>                    \x1b[2mDeploy a static directory (skip build)",
+      "\x1b[0m  --spa                           \x1b[2mUse SPA mode (default: SSG)",
       "\x1b[0mvcd delete [name]                  \x1b[2mDelete a project and all its resources",
       "\x1b[0mvcd link [name]                    \x1b[2mLink to an existing project",
       "\x1b[0mvcd secret put <name> [--project]  \x1b[2mSet a project secret",

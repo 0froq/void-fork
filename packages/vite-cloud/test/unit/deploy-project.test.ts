@@ -40,6 +40,7 @@ describe("resolveProjectBySlug", () => {
           user_id: "user_1",
           slug: "my-app",
           name: "My App",
+          mode: "worker",
           created_at: "2026-02-15T00:00:00.000Z",
         },
       ],

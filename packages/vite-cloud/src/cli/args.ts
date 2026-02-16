@@ -2,6 +2,8 @@ import { parseArgs } from "node:util";
 
 export interface DeployArgs {
   projectSlug?: string;
+  dir?: string;
+  spa?: boolean;
 }
 
 export function parseDeployArgs(args: string[]): DeployArgs {
@@ -11,6 +13,8 @@ export function parseDeployArgs(args: string[]): DeployArgs {
       args,
       options: {
         project: { type: "string" },
+        dir: { type: "string" },
+        spa: { type: "boolean" },
       },
       allowPositionals: true,
       strict: true,
@@ -49,5 +53,8 @@ export function parseDeployArgs(args: string[]): DeployArgs {
     throw new Error("Error: --project requires a slug");
   }
 
-  return { projectSlug };
+  const dir = typeof parsed.values.dir === "string" ? parsed.values.dir : undefined;
+  const spa = parsed.values.spa === true ? true : undefined;
+
+  return { projectSlug, dir, spa };
 }
