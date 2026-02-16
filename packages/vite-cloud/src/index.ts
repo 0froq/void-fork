@@ -1,14 +1,29 @@
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import { routingPlugin } from "./plugin-routing";
 import { migrationPlugin } from "./plugin-migration";
-import { inferProjectBindings, type InferenceOptions } from "./plugin-inference";
+import {
+  inferProjectBindings,
+  FRAMEWORK_SCAN_DIRS,
+  type InferenceOptions,
+} from "./plugin-inference";
 import { scanJobsSync } from "./jobs/scan";
 import { validateSsrEntry } from "./ssr/entry";
 
 /** Supported authentication providers. */
 export type AuthProvider = "github" | "google" | "email";
+
+/** Supported meta-frameworks for platform sidecar mode. */
+export type Framework = "tanstack-start" | "react-router" | "solidstart";
+
+/** Server entry module for each supported framework. */
+const FRAMEWORK_ENTRIES: Record<Framework, string> = {
+  "tanstack-start": "@tanstack/react-start/server-entry",
+  "react-router": "react-router/server-entry",
+  solidstart: "solidstart/server-entry",
+};
 
 /** Options for the {@link viteCloud} plugin. */
 export interface ViteCloudOptions extends InferenceOptions {
@@ -20,6 +35,15 @@ export interface ViteCloudOptions extends InferenceOptions {
    * - `false` / `undefined` disables auth entirely.
    */
   auth?: boolean | AuthProvider[];
+
+  /**
+   * Enable meta-framework integration (platform sidecar mode).
+   *
+   * When set, Vite Cloud skips its own routing and entry generation,
+   * letting the framework handle routing/SSR while Vite Cloud provides
+   * bindings, migrations, and deployment.
+   */
+  framework?: Framework;
 }
 
 function normalizeAuth(auth: boolean | AuthProvider[] | undefined): AuthProvider[] | null {
@@ -43,17 +67,15 @@ function normalizeAuth(auth: boolean | AuthProvider[] | undefined): AuthProvider
 export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
   // Resolve root relative to CWD — this runs at config time
   const root = process.cwd();
+  const { framework } = options;
   const authProviders = normalizeAuth(options.auth);
 
   // Infer bindings synchronously from source files
-  const bindings = inferProjectBindings(root, options);
-  const jobs = scanJobsSync(root);
-  const ssrEntry = validateSsrEntry(root);
+  const scanDirs = framework ? FRAMEWORK_SCAN_DIRS : undefined;
+  const bindings = inferProjectBindings(root, options, scanDirs);
 
-  // Build the worker config with inferred bindings
-  const workerConfig: Record<string, unknown> = {
-    main: join(root, ".vite-cloud", "entry.ts"),
-  };
+  // Build the worker config with inferred bindings (no main/assets in framework mode)
+  const workerConfig: Record<string, unknown> = {};
 
   // Auth requires D1 (user table) and KV (sessions)
   if (bindings.needsD1 || authProviders) {
@@ -86,6 +108,50 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
     ];
   }
 
+  const inspectorPortEnv = process.env.VITE_CLOUD_INSPECTOR_PORT;
+  const inspectorPort =
+    inspectorPortEnv === "false"
+      ? false
+      : typeof inspectorPortEnv === "string" && inspectorPortEnv.length > 0
+        ? Number.parseInt(inspectorPortEnv, 10)
+        : undefined;
+
+  const inspectorPortOption: { inspectorPort?: number | false } =
+    inspectorPort === false
+      ? { inspectorPort: false }
+      : typeof inspectorPort === "number"
+        ? { inspectorPort }
+        : {};
+
+  const outDir = join(root, ".vite-cloud");
+  mkdirSync(outDir, { recursive: true });
+
+  if (framework) {
+    // Framework mode: no routing plugin, CF plugin uses viteEnvironment.
+    // The CF plugin needs `main` to create a proper worker environment
+    // (without it, the worker is treated as "assets-only" and cloudflare:*
+    // modules are not externalized during the SSR build).
+    workerConfig.main = FRAMEWORK_ENTRIES[framework];
+    workerConfig.compatibility_flags = ["nodejs_compat"];
+    writeFileSync(join(outDir, "framework.json"), JSON.stringify({ framework }));
+
+    return [
+      migrationPlugin(root),
+      ...cloudflare({
+        ...inspectorPortOption,
+        persistState: { path: join(root, ".vite-cloud") },
+        viteEnvironment: { name: "ssr" },
+        config: workerConfig,
+      }),
+    ];
+  }
+
+  // Default mode: full Hono routing + generated entry
+  const jobs = scanJobsSync(root);
+  const ssrEntry = validateSsrEntry(root);
+
+  workerConfig.main = join(root, ".vite-cloud", "entry.ts");
+
   if (jobs.length > 0) {
     workerConfig.triggers = {
       crons: jobs.map((job) => job.cron),
@@ -101,21 +167,11 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
     };
   }
 
-  const inspectorPortEnv = process.env.VITE_CLOUD_INSPECTOR_PORT;
-  const inspectorPort =
-    inspectorPortEnv === "false"
-      ? false
-      : typeof inspectorPortEnv === "string" && inspectorPortEnv.length > 0
-        ? Number.parseInt(inspectorPortEnv, 10)
-        : undefined;
-
   return [
     routingPlugin(root, { auth: authProviders }),
     migrationPlugin(root),
     ...cloudflare({
-      ...(inspectorPort === false || Number.isFinite(inspectorPort)
-        ? { inspectorPort: inspectorPort === false ? false : inspectorPort }
-        : {}),
+      ...inspectorPortOption,
       persistState: { path: join(root, ".vite-cloud") },
       config: workerConfig,
     }),
