@@ -7,8 +7,28 @@ import { runRemoteMigrations, type RemoteMigration } from "../migrations/remote-
 import { validateMigrationSQL } from "../migrations/validate";
 
 const DISPATCH_NAMESPACE = "vite-cloud-users";
+const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
 
 const app = new Hono<PlatformEnv>();
+
+// Check which assets need uploading
+app.post("/:id/assets/check", async (c) => {
+  const projectId = c.req.param("id");
+  const project = await getProject(c.env.DB, projectId);
+  if (!project) {
+    return c.json({ error: "project not found" }, 404);
+  }
+
+  if (project.user_id !== c.get("userId")) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+
+  const { assets } = await c.req.json<{ assets: Record<string, string> }>();
+  const manifestObj = await c.env.ASSETS.get(`${projectId}/asset-manifest.json`);
+  const existing: Record<string, string> = manifestObj ? await manifestObj.json() : {};
+  const needed = Object.keys(assets).filter((path) => existing[path] !== assets[path]);
+  return c.json({ needed });
+});
 
 // Deploy to a project
 app.post("/:id/deploy", async (c) => {
@@ -36,16 +56,30 @@ app.post("/:id/deploy", async (c) => {
     if (manifest.static) {
       await updateDeploymentStatus(c.env.DB, deployment.id, "uploading");
 
-      // Upload static assets to R2 (parallel)
+      // Upload static assets to R2 (concurrency-limited to match Workers connection limit)
       const assetUploads = collectAssetEntries(formData);
-      await Promise.all(
-        assetUploads.map(({ path, blob }) =>
-          c.env.ASSETS.put(`${projectId}/current/${path}`, blob, {
-            httpMetadata: { contentType: guessContentType(path) },
-          }),
-        ),
+      await uploadPool(assetUploads, R2_CONCURRENCY, ({ path, blob }) =>
+        c.env.ASSETS.put(`${projectId}/current/${path}`, blob, {
+          httpMetadata: { contentType: guessContentType(path) },
+        }),
       );
       const assetKeys = assetUploads.map((a) => a.path);
+
+      // Write updated asset manifest + delete stale assets
+      if (manifest.assetHashes) {
+        const oldObj = await c.env.ASSETS.get(`${projectId}/asset-manifest.json`);
+        const oldManifest: Record<string, string> = oldObj ? await oldObj.json() : {};
+        const stale = Object.keys(oldManifest).filter((p) => !(p in manifest.assetHashes!));
+        if (stale.length > 0) {
+          await uploadPool(stale, R2_CONCURRENCY, (path) =>
+            c.env.ASSETS.delete(`${projectId}/current/${path}`),
+          );
+        }
+        await c.env.ASSETS.put(
+          `${projectId}/asset-manifest.json`,
+          JSON.stringify(manifest.assetHashes),
+        );
+      }
 
       // Update KV routing (no workerName for static deploys)
       await c.env.ROUTING.put(project.slug, JSON.stringify({ projectId, mode: manifest.static }));
@@ -123,14 +157,12 @@ app.post("/:id/deploy", async (c) => {
       }
     }
 
-    // 2. Upload static assets to R2 (parallel)
+    // 2. Upload static assets to R2 (concurrency-limited to match Workers connection limit)
     const assetUploads = collectAssetEntries(formData);
-    await Promise.all(
-      assetUploads.map(({ path, blob }) =>
-        c.env.ASSETS.put(`${projectId}/current/${path}`, blob, {
-          httpMetadata: { contentType: guessContentType(path) },
-        }),
-      ),
+    await uploadPool(assetUploads, R2_CONCURRENCY, ({ path, blob }) =>
+      c.env.ASSETS.put(`${projectId}/current/${path}`, blob, {
+        httpMetadata: { contentType: guessContentType(path) },
+      }),
     );
     const assetKeys = assetUploads.map((a) => a.path);
 
@@ -192,13 +224,29 @@ app.post("/:id/deploy", async (c) => {
       return c.json({ error: "worker upload failed", details: error }, 502);
     }
 
-    // 4. Update KV routing table
+    // 4. Write updated asset manifest + delete stale assets
+    if (manifest.assetHashes) {
+      const oldObj = await c.env.ASSETS.get(`${projectId}/asset-manifest.json`);
+      const oldManifest: Record<string, string> = oldObj ? await oldObj.json() : {};
+      const stale = Object.keys(oldManifest).filter((p) => !(p in manifest.assetHashes!));
+      if (stale.length > 0) {
+        await uploadPool(stale, R2_CONCURRENCY, (path) =>
+          c.env.ASSETS.delete(`${projectId}/current/${path}`),
+        );
+      }
+      await c.env.ASSETS.put(
+        `${projectId}/asset-manifest.json`,
+        JSON.stringify(manifest.assetHashes),
+      );
+    }
+
+    // 5. Update KV routing table
     await c.env.ROUTING.put(
       project.slug,
       JSON.stringify({ workerName, projectId, ...(manifest.ssr ? { ssr: true } : {}) }),
     );
 
-    // 5. Mark deployment as live + update project mode
+    // 6. Mark deployment as live + update project mode
     await updateDeploymentStatus(c.env.DB, deployment.id, "live");
     await updateProjectMode(c.env.DB, projectId, "worker");
 
@@ -223,6 +271,21 @@ function collectAssetEntries(formData: FormData): { path: string; blob: Blob }[]
     }
   }
   return entries;
+}
+
+async function uploadPool<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<unknown>,
+): Promise<void> {
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const item = items[i++];
+      await fn(item);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
 }
 
 function guessContentType(path: string): string {

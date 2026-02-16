@@ -441,9 +441,14 @@ describe("POST /projects/:id/deploy", () => {
 function buildStaticDeployForm(opts: {
   mode: "spa" | "ssg";
   assets?: Record<string, string>;
+  assetHashes?: Record<string, string>;
 }): FormData {
   const form = new FormData();
-  form.append("manifest", JSON.stringify({ bindings: {}, static: opts.mode }));
+  const manifest: Record<string, unknown> = { bindings: {}, static: opts.mode };
+  if (opts.assetHashes) {
+    manifest.assetHashes = opts.assetHashes;
+  }
+  form.append("manifest", JSON.stringify(manifest));
   if (opts.assets) {
     for (const [path, content] of Object.entries(opts.assets)) {
       form.append(`asset:${path}`, new Blob([content]));
@@ -574,5 +579,189 @@ describe("POST /projects/:id/deploy (static)", () => {
       .bind(project.id)
       .first<{ mode: string }>();
     expect(row?.mode).toBe("ssg");
+  });
+});
+
+describe("POST /projects/:id/assets/check", () => {
+  it("returns all paths as needed when no manifest exists", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "check-new");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/assets/check`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({
+          assets: { "index.html": "abc123", "assets/app.js": "def456" },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { needed: string[] };
+    expect(body.needed.sort()).toEqual(["assets/app.js", "index.html"]);
+  });
+
+  it("returns empty needed list when all hashes match", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "check-match");
+
+    // Seed manifest
+    await env.ASSETS.put(
+      `${project.id}/asset-manifest.json`,
+      JSON.stringify({ "index.html": "abc123", "assets/app.js": "def456" }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/assets/check`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({
+          assets: { "index.html": "abc123", "assets/app.js": "def456" },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { needed: string[] };
+    expect(body.needed).toEqual([]);
+  });
+
+  it("returns only changed and new paths", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "check-partial");
+
+    // Seed manifest with two files
+    await env.ASSETS.put(
+      `${project.id}/asset-manifest.json`,
+      JSON.stringify({ "index.html": "abc123", "assets/old.js": "old111" }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/assets/check`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({
+          assets: {
+            "index.html": "abc123", // unchanged
+            "assets/old.js": "new222", // changed hash
+            "assets/new.js": "brand999", // new file
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { needed: string[] };
+    expect(body.needed.sort()).toEqual(["assets/new.js", "assets/old.js"]);
+  });
+
+  it("returns 401 without auth", async () => {
+    const res = await app.fetch(
+      new Request("http://localhost/projects/proj_fake/assets/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assets: {} }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 403 when user does not own project", async () => {
+    const alice = await createTestUser(env.DB, "alice-check");
+    const bob = await createTestUser(env.DB, "bob-check");
+    const project = await createTestProject(env.DB, alice.id, "check-forbidden");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/assets/check`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${bob.jwt}`,
+        },
+        body: JSON.stringify({ assets: {} }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("Deploy with assetHashes (manifest management)", () => {
+  it("writes asset manifest to R2 on deploy", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "manifest-write");
+
+    const hashes = { "index.html": "aaa111", "assets/app.js": "bbb222" };
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildStaticDeployForm({
+          mode: "spa",
+          assets: { "index.html": "<html>hi</html>", "assets/app.js": "console.log(1)" },
+          assetHashes: hashes,
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const manifestObj = await env.ASSETS.get(`${project.id}/asset-manifest.json`);
+    expect(manifestObj).not.toBeNull();
+    const stored = (await manifestObj!.json()) as Record<string, string>;
+    expect(stored).toEqual(hashes);
+  });
+
+  it("deletes stale R2 objects on deploy", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "manifest-stale");
+
+    // Seed old manifest and R2 objects
+    await env.ASSETS.put(
+      `${project.id}/asset-manifest.json`,
+      JSON.stringify({ "index.html": "aaa", "old-file.js": "bbb" }),
+    );
+    await env.ASSETS.put(`${project.id}/current/index.html`, "<html>old</html>");
+    await env.ASSETS.put(`${project.id}/current/old-file.js`, "old content");
+
+    // Deploy with only index.html (old-file.js removed)
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildStaticDeployForm({
+          mode: "spa",
+          assets: { "index.html": "<html>new</html>" },
+          assetHashes: { "index.html": "ccc" },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    // Stale file should be deleted
+    const stale = await env.ASSETS.get(`${project.id}/current/old-file.js`);
+    expect(stale).toBeNull();
+
+    // Current file should be updated
+    const current = await env.ASSETS.get(`${project.id}/current/index.html`);
+    expect(current).not.toBeNull();
+    expect(await current!.text()).toBe("<html>new</html>");
+
+    // Manifest should be updated
+    const manifestObj = await env.ASSETS.get(`${project.id}/asset-manifest.json`);
+    const stored = (await manifestObj!.json()) as Record<string, string>;
+    expect(stored).toEqual({ "index.html": "ccc" });
   });
 });

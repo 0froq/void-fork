@@ -18,4 +18,5 @@ export interface DeployManifest {
   schedules?: ScheduleMeta[];
   ssr?: boolean;
   static?: "spa" | "ssg";
+  assetHashes?: Record<string, string>;
 }
