@@ -113,7 +113,7 @@ if (command === "deploy") {
       "\x1b[0mvcd login                          \x1b[2mLog in with GitHub or Google",
       "\x1b[0mvcd logout                         \x1b[2mLog out and remove credentials",
       "\x1b[0mvcd whoami                         \x1b[2mShow the logged-in username",
-      "\x1b[0mvcd list|ls                        \x1b[2mList your projects",
+      "\x1b[0mvcd list, ls                       \x1b[2mList your projects",
       "\x1b[0mvcd deploy [--project <name>]      \x1b[2mBuild and deploy to Vite Cloud",
       "\x1b[0mvcd delete [name]                  \x1b[2mDelete a project and all its resources",
       "\x1b[0mvcd link [name]                    \x1b[2mLink to an existing project",
