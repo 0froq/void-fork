@@ -108,6 +108,11 @@ function buildResponse(object: R2ObjectBody, path: string): Response {
   const contentType = object.httpMetadata?.contentType ?? guessContentType(path);
   headers.set("Content-Type", contentType);
 
+  // ETag for conditional requests (enables 304 Not Modified)
+  if (object.httpEtag) {
+    headers.set("ETag", object.httpEtag);
+  }
+
   // Cache control: hashed assets are immutable, everything else is revalidated
   if (isHashedAsset(path)) {
     headers.set("Cache-Control", "public, max-age=31536000, immutable");

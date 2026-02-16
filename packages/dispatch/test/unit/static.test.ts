@@ -6,6 +6,7 @@ function createObject(body: string, contentType = "text/plain"): R2ObjectBody {
   return {
     body,
     httpMetadata: { contentType },
+    httpEtag: `"mock-etag"`,
   } as unknown as R2ObjectBody;
 }
 
@@ -53,6 +54,16 @@ describe("serveStaticAsset", () => {
       "public, s-maxage=60, max-age=0, must-revalidate",
     );
     expect(await response!.text()).toBe("<h1>about</h1>");
+  });
+
+  it("includes ETag from R2 object", async () => {
+    const env = createEnv({
+      "proj/current/index.html": createObject("<h1>hi</h1>", "text/html"),
+    });
+
+    const response = await serveStaticAsset(env, "proj", "/index.html");
+    expect(response).not.toBeNull();
+    expect(response!.headers.get("ETag")).toBe(`"mock-etag"`);
   });
 });
 

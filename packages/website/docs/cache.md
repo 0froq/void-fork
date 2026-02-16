@@ -26,6 +26,12 @@ Cache-Control: public, s-maxage=60, max-age=0, must-revalidate
 
 Cached at the edge for 60 seconds. Browsers always revalidate on the next request. Combined with versioned cache keys, this means new deploys are visible within seconds.
 
+### ETags and 304 Not Modified
+
+All static asset responses include an `ETag` header derived from the file's content hash in R2. When a browser revalidates a cached resource, it sends `If-None-Match` with the previous ETag. If the file hasn't changed, the edge returns a **304 Not Modified** with no body — saving bandwidth and speeding up page loads.
+
+This happens automatically for all static assets. No configuration is needed.
+
 ### API routes
 
 API responses (`/api/*`) and SSR-rendered pages that fall through to the worker are **not** edge-cached by the dispatch layer.

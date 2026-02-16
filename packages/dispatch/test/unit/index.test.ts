@@ -38,7 +38,7 @@ function createCtx(): ExecutionContext {
 
 function createEnv(options: {
   routing: RoutingEntry;
-  assets?: Record<string, { body: string; contentType?: string }>;
+  assets?: Record<string, { body: string; contentType?: string; etag?: string }>;
   workerResponse?: Response;
 }): { env: Env; workerFetch: ReturnType<typeof vi.fn> } {
   const workerFetch = vi.fn(async () => options.workerResponse ?? new Response("worker"));
@@ -57,6 +57,7 @@ function createEnv(options: {
         return {
           body: object.body,
           httpMetadata: { contentType: object.contentType ?? "text/plain" },
+          httpEtag: object.etag ?? `"${key}"`,
         } as unknown as R2ObjectBody;
       },
     },
@@ -425,6 +426,105 @@ describe("custom header rules", () => {
 
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(response.headers.get("X-Custom")).toBeNull();
+  });
+});
+
+describe("conditional requests (304)", () => {
+  it("returns 304 when If-None-Match matches ETag on fresh response", async () => {
+    const { env } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa" },
+      assets: {
+        "proj_1/current/index.html": {
+          body: "<html>SPA</html>",
+          contentType: "text/html",
+          etag: '"abc123"',
+        },
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/", {
+        headers: { "If-None-Match": '"abc123"' },
+      }),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(304);
+    expect(response.headers.get("ETag")).toBe('"abc123"');
+  });
+
+  it("returns 200 when If-None-Match does not match", async () => {
+    const { env } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa" },
+      assets: {
+        "proj_1/current/index.html": {
+          body: "<html>SPA</html>",
+          contentType: "text/html",
+          etag: '"abc123"',
+        },
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/", {
+        headers: { "If-None-Match": '"old-etag"' },
+      }),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<html>SPA</html>");
+  });
+
+  it("returns 304 on cache hit when If-None-Match matches", async () => {
+    const { env } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa", version: "dpl_1" },
+      assets: {
+        "proj_1/current/index.html": {
+          body: "<html>SPA</html>",
+          contentType: "text/html",
+          etag: '"abc123"',
+        },
+      },
+    });
+
+    // First request populates the edge cache
+    await app.fetch(new Request("https://my-app.vitecloud.app/"), env, createCtx());
+
+    // Second request with If-None-Match should return 304 from cache
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/", {
+        headers: { "If-None-Match": '"abc123"' },
+      }),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(304);
+  });
+
+  it("includes ETag header on static responses", async () => {
+    const { env } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa" },
+      assets: {
+        "proj_1/current/index.html": {
+          body: "<html>SPA</html>",
+          contentType: "text/html",
+          etag: '"my-etag"',
+        },
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/"),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("ETag")).toBe('"my-etag"');
   });
 });
 

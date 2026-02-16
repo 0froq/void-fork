@@ -38,7 +38,7 @@ export default {
 
     if (request.method === "GET") {
       const cached = await cache.match(cacheKey);
-      if (cached) return cached;
+      if (cached) return conditionalResponse(request, cached);
     }
 
     const pathname = url.pathname;
@@ -47,6 +47,7 @@ export default {
     if (!routing.workerName) {
       if (routing.mode === "ssg") {
         return cacheResponse(
+          request,
           ctx,
           cache,
           cacheKey,
@@ -58,6 +59,7 @@ export default {
         );
       }
       return cacheResponse(
+        request,
         ctx,
         cache,
         cacheKey,
@@ -83,6 +85,7 @@ export default {
       });
       if (staticResponse) {
         return cacheResponse(
+          request,
           ctx,
           cache,
           cacheKey,
@@ -94,6 +97,7 @@ export default {
     }
 
     return cacheResponse(
+      request,
       ctx,
       cache,
       cacheKey,
@@ -114,13 +118,42 @@ export default {
  * - Non-hashed (index.html etc): `s-maxage=60` (cached 60s at edge)
  */
 function cacheResponse(
+  request: Request,
   ctx: ExecutionContext,
   cache: Cache,
   cacheKey: Request,
   response: Response,
 ): Response {
   if (cacheKey.method === "GET" && response.ok) {
+    // Always cache the full 200 response at the edge
     ctx.waitUntil(cache.put(cacheKey, response.clone()));
   }
+  return conditionalResponse(request, response);
+}
+
+/**
+ * Check If-None-Match against the response's ETag.
+ * Returns 304 Not Modified when they match, avoiding sending the body.
+ */
+function conditionalResponse(request: Request, response: Response): Response {
+  const etag = response.headers.get("ETag");
+  if (!etag) return response;
+
+  const ifNoneMatch = request.headers.get("If-None-Match");
+  if (!ifNoneMatch) return response;
+
+  // Weak comparison per HTTP spec: strip W/ prefix before comparing
+  const normalize = (tag: string) => tag.replace(/^W\//, "");
+  const clientTags = ifNoneMatch.split(",").map((t) => normalize(t.trim()));
+  if (clientTags.includes(normalize(etag))) {
+    return new Response(null, {
+      status: 304,
+      headers: {
+        ETag: etag,
+        "Cache-Control": response.headers.get("Cache-Control") ?? "",
+      },
+    });
+  }
+
   return response;
 }
