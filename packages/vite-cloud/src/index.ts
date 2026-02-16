@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { cloudflare } from "@cloudflare/vite-plugin";
@@ -6,8 +6,10 @@ import { routingPlugin } from "./plugin-routing";
 import { migrationPlugin } from "./plugin-migration";
 import {
   inferProjectBindings,
+  detectFramework,
   FRAMEWORK_SCAN_DIRS,
   type InferenceOptions,
+  type Framework,
 } from "./plugin-inference";
 import { scanJobsSync } from "./jobs/scan";
 import { validateSsrEntry } from "./ssr/entry";
@@ -15,14 +17,10 @@ import { validateSsrEntry } from "./ssr/entry";
 /** Supported authentication providers. */
 export type AuthProvider = "github" | "google" | "email";
 
-/** Supported meta-frameworks for platform sidecar mode. */
-export type Framework = "tanstack-start" | "react-router" | "solidstart";
-
 /** Server entry module for each supported framework. */
 const FRAMEWORK_ENTRIES: Record<Framework, string> = {
   "tanstack-start": "@tanstack/react-start/server-entry",
   "react-router": "react-router/server-entry",
-  solidstart: "solidstart/server-entry",
 };
 
 /** Options for the {@link viteCloud} plugin. */
@@ -35,15 +33,6 @@ export interface ViteCloudOptions extends InferenceOptions {
    * - `false` / `undefined` disables auth entirely.
    */
   auth?: boolean | AuthProvider[];
-
-  /**
-   * Enable meta-framework integration (platform sidecar mode).
-   *
-   * When set, Vite Cloud skips its own routing and entry generation,
-   * letting the framework handle routing/SSR while Vite Cloud provides
-   * bindings, migrations, and deployment.
-   */
-  framework?: Framework;
 }
 
 function normalizeAuth(auth: boolean | AuthProvider[] | undefined): AuthProvider[] | null {
@@ -67,7 +56,7 @@ function normalizeAuth(auth: boolean | AuthProvider[] | undefined): AuthProvider
 export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
   // Resolve root relative to CWD — this runs at config time
   const root = process.cwd();
-  const { framework } = options;
+  const framework = detectFramework(root);
   const authProviders = normalizeAuth(options.auth);
 
   // Infer bindings synchronously from source files
@@ -133,7 +122,6 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
     // modules are not externalized during the SSR build).
     workerConfig.main = FRAMEWORK_ENTRIES[framework];
     workerConfig.compatibility_flags = ["nodejs_compat"];
-    writeFileSync(join(outDir, "framework.json"), JSON.stringify({ framework }));
 
     return [
       migrationPlugin(root),

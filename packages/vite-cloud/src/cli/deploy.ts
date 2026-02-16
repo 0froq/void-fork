@@ -6,7 +6,7 @@ import { getToken } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
 import { packageBuild } from "./package";
 import { PlatformClient, type ProjectResponse } from "./client";
-import { inferProjectBindings, FRAMEWORK_SCAN_DIRS } from "../plugin-inference";
+import { inferProjectBindings, FRAMEWORK_SCAN_DIRS, detectFramework } from "../plugin-inference";
 import { promptProjectSelection, promptProjectSlug } from "./prompt";
 import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
@@ -108,8 +108,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   execSync("npx vite build", { cwd: root, stdio: "inherit" });
 
   // 4. Detect framework mode
-  const frameworkConfigPath = join(root, ".vite-cloud", "framework.json");
-  const isFrameworkMode = existsSync(frameworkConfigPath);
+  const isFrameworkMode = detectFramework(root) !== undefined;
 
   // 5. Infer bindings (expanded scan dirs in framework mode)
   const bindings = inferProjectBindings(
