@@ -11,3 +11,4 @@ TODOs.md
 .pnpm-store
 .codex
 playground/*/.node-version
+.tanstack
