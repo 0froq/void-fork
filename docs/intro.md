@@ -15,8 +15,6 @@ export default defineConfig({
 
 ## Why Vite Cloud?
 
-### vs. raw Cloudflare (Workers + Pages)
-
 Cloudflare's primitives are powerful but require significant manual setup: creating `wrangler.json` configs, manually provisioning D1 databases / KV namespaces / R2 buckets, writing a monolithic `fetch` handler, and managing bindings across environments.
 
 Vite Cloud eliminates all of that:
@@ -27,23 +25,21 @@ Vite Cloud eliminates all of that:
 - **Local dev parity** — `vite dev` runs your handlers in the real `workerd` runtime with local D1 (SQLite), KV, and R2. What works locally works in production.
 - **One-command deploy** — `npx vcd deploy` builds, provisions resources, runs migrations, and deploys. No intermediate steps.
 
-### vs. Vercel / Netlify
+## Flexible by design
 
-Traditional deployment platforms run your server code on Node.js (often behind Lambda). Vite Cloud runs on Cloudflare Workers — edge-first with sub-millisecond cold starts, globally distributed by default.
+Vite Cloud adapts to your app's complexity rather than imposing a single architecture.
 
-- **Edge runtime** — every request runs close to the user, not in a single region.
-- **Integrated data layer** — D1, KV, and R2 are first-class, not bolt-on add-ons with separate billing.
-- **Framework-agnostic** — works with React, Vue, Svelte, Solid, or plain HTML. No framework lock-in.
-- **Transparent infrastructure** — your app runs on Cloudflare Workers. No proprietary runtime abstraction.
+### SPA + API routes
 
-### vs. meta-frameworks (Next.js, Nuxt, SvelteKit)
+The default starting point. Build your frontend with any UI library (React, Vue, Svelte, Solid, etc.) and add [Hono](https://hono.dev)-based API routes in `routes/`. Hono's full middleware ecosystem — CORS, auth, rate limiting, validation — works out of the box. This covers the majority of apps: a static frontend backed by serverless API endpoints with D1/KV/R2 access.
 
-Meta-frameworks bundle routing, rendering, and deployment into a single opinionated stack. Vite Cloud takes a different approach: it's a **Vite plugin**, not a framework.
+### Custom SSR / SSG
 
-- **Use any UI library** — Vite Cloud adds server capabilities to your existing Vite app. Keep your React, Vue, or Svelte setup as-is.
-- **SPA, SSR, or SSG** — choose what fits your app. Static SPA with API routes? SSR with streaming? Pre-rendered pages? All supported, no framework opinion imposed.
-- **Hono ecosystem** — route handlers run on [Hono](https://hono.dev), so its entire middleware ecosystem (CORS, auth, rate limiting, etc.) works out of the box.
-- **Progressive adoption** — start with a static SPA, add an API route, add a database. Each step is one file change, not an architecture rewrite.
+When you need server-rendered HTML, Vite Cloud provides the plumbing without dictating the framework. Add `src/main.ssr.ts` and `src/main.client.ts`, implement a `render(c, assetTags)` function, and Vite Cloud handles the rest — asset injection, dev HMR, and production builds. You can also export a `prerender` list for static generation. This is fully framework-agnostic: use `react-dom/server`, `vue/server-renderer`, or any library that produces HTML.
+
+### Meta-framework integration
+
+If you prefer a full meta-framework, Vite Cloud works as a deployment layer for frameworks that target Cloudflare Workers. TanStack Start is supported today, with React Router v7 support coming soon. In this mode, the framework owns routing and rendering while Vite Cloud handles provisioning, deployment, and infrastructure.
 
 ## How it works
 
