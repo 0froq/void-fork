@@ -10,5 +10,6 @@ TODOs.md
 .dev.vars
 .pnpm-store
 .codex
+.vitepress/cache
 playground/*/.node-version
 .tanstack
