@@ -1,4 +1,4 @@
-import { intro, outro, log } from "@clack/prompts";
+import { intro, outro, log, note } from "@clack/prompts";
 import { getToken } from "./auth";
 import { PlatformClient } from "./client";
 
@@ -20,9 +20,18 @@ export async function runListCommand(): Promise<void> {
     return;
   }
 
-  for (const project of projects) {
-    log.info(`${project.slug}  ${project.id}  https://${project.slug}.vitecloud.app`);
-  }
+  const rows = projects.map((p) => ({
+    slug: p.slug,
+    id: p.id.replace(/^proj_/, ""),
+    url: `https://${p.slug}.vitecloud.app`,
+  }));
 
-  outro(`${projects.length} project(s)`);
+  const slugWidth = Math.max(...rows.map((r) => r.slug.length));
+  const idWidth = Math.max(...rows.map((r) => r.id.length));
+
+  const lines = rows.map(
+    (row) =>
+      `\x1b[0m\x1b[33m${row.slug}\x1b[0m${"".padEnd(slugWidth - row.slug.length)}  ${row.id.padEnd(idWidth)}  ${row.url}`,
+  );
+  note(lines.join("\n"), `${projects.length} project(s)`);
 }
