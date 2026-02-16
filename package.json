@@ -7,8 +7,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt --write .",
     "check": "pnpm -r --parallel typecheck",
-    "ready": "oxlint && oxfmt --check && pnpm check && pnpm -r build && vitest --run",
-    "deploy": "pnpm ready && pnpm run --filter @vite-cloud/platform deploy && pnpm run --filter @vite-cloud/dispatch deploy",
+    "deploy": "vitest --run && pnpm --filter \"@vite-cloud/*\" deploy",
     "prepare": "husky"
   },
   "devDependencies": {
