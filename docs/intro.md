@@ -59,7 +59,7 @@ The plugin scans your source code at build time, infers which Cloudflare binding
 
 - [Quickstart](./quickstart.md) — get a running app in minutes
 - [Routing](./routing.md) — file-based routing, middleware, and Hono integration
-- [Cloudflare Env](./cloudflare-env.md) — D1, KV, and R2 bindings
+- [Cloudflare](./cloudflare.md) — bindings, wrangler config, and self-hosted deployment
 - [SSR](./ssr.md) — server-side rendering
 - [SSG](./ssg.md) — static site generation / prerendering
 - [CLI](./cli.md) — deploy, login, and project management

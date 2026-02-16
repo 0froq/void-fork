@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
-import { cloudflare } from "@cloudflare/vite-plugin";
+import { cloudflare, type WorkerConfig } from "@cloudflare/vite-plugin";
 import { routingPlugin } from "./plugin-routing";
 import { migrationPlugin } from "./plugin-migration";
 import {
@@ -42,6 +42,11 @@ function normalizeAuth(auth: boolean | AuthProvider[] | undefined): AuthProvider
   return auth;
 }
 
+/** Check whether a binding name already exists in a resolved bindings array. */
+function hasBinding(list: readonly { binding: string }[] | undefined, name: string): boolean {
+  return Array.isArray(list) && list.some((b) => b.binding === name);
+}
+
 /**
  * Vite Cloud plugin — the main entry point.
  *
@@ -52,6 +57,13 @@ function normalizeAuth(auth: boolean | AuthProvider[] | undefined): AuthProvider
  *
  * Binding inference runs synchronously here so results are available
  * before the Cloudflare plugin initializes.
+ *
+ * If the user has a `wrangler.json` / `wrangler.toml` in their project root,
+ * the Cloudflare plugin reads it and provides the resolved config to our
+ * config function. Bindings already defined there (with real IDs for
+ * production deployment) are preserved — we only add inferred bindings
+ * that are missing. This allows `vite build && wrangler deploy` to work
+ * for deploying directly to Cloudflare without the Vite Cloud platform.
  */
 export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
   // Resolve root relative to CWD — this runs at config time
@@ -63,39 +75,9 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
   const scanDirs = framework ? FRAMEWORK_SCAN_DIRS : undefined;
   const bindings = inferProjectBindings(root, options, scanDirs);
 
-  // Build the worker config with inferred bindings (no main/assets in framework mode)
+  // Core worker config — always set by viteCloud (main, triggers, assets).
+  // Bindings are handled separately in the config function below.
   const workerConfig: Record<string, unknown> = {};
-
-  // Auth requires D1 (user table) and KV (sessions)
-  if (bindings.needsD1 || authProviders) {
-    workerConfig.d1_databases = [
-      {
-        binding: "DB",
-        database_name: "default",
-        database_id: "local",
-      },
-    ];
-  }
-
-  const kvNamespaces: { binding: string; id: string }[] = [];
-  if (bindings.needsKV) {
-    kvNamespaces.push({ binding: "KV", id: "local" });
-  }
-  if (authProviders) {
-    kvNamespaces.push({ binding: "AUTH_KV", id: "auth-local" });
-  }
-  if (kvNamespaces.length > 0) {
-    workerConfig.kv_namespaces = kvNamespaces;
-  }
-
-  if (bindings.needsR2) {
-    workerConfig.r2_buckets = [
-      {
-        binding: "STORAGE",
-        bucket_name: "default",
-      },
-    ];
-  }
 
   const inspectorPortEnv = process.env.VITE_CLOUD_INSPECTOR_PORT;
   const inspectorPort =
@@ -115,6 +97,47 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
   const outDir = join(root, ".vite-cloud");
   mkdirSync(outDir, { recursive: true });
 
+  // Config function that merges inferred bindings with the resolved config.
+  // When the user has a wrangler.json with real binding IDs (for raw CF
+  // deployment), those take precedence. We only add placeholder bindings
+  // for inferred bindings that are missing from their config.
+  // When no wrangler.json exists, resolved config has empty bindings and
+  // all inferred bindings are added — matching the previous behavior.
+  function mergeBindings(resolved: WorkerConfig): Partial<WorkerConfig> {
+    const result: Record<string, unknown> = { ...workerConfig };
+
+    // D1 — auth requires a DB too
+    const d1: Record<string, unknown>[] = [];
+    if ((bindings.needsD1 || authProviders) && !hasBinding(resolved.d1_databases, "DB")) {
+      d1.push({ binding: "DB", database_name: "default", database_id: "local" });
+    }
+    if (d1.length > 0) {
+      result.d1_databases = [...(resolved.d1_databases ?? []), ...d1];
+    }
+
+    // KV — auth needs AUTH_KV for sessions
+    const kv: { binding: string; id: string }[] = [];
+    if (bindings.needsKV && !hasBinding(resolved.kv_namespaces, "KV")) {
+      kv.push({ binding: "KV", id: "local" });
+    }
+    if (authProviders && !hasBinding(resolved.kv_namespaces, "AUTH_KV")) {
+      kv.push({ binding: "AUTH_KV", id: "auth-local" });
+    }
+    if (kv.length > 0) {
+      result.kv_namespaces = [...(resolved.kv_namespaces ?? []), ...kv];
+    }
+
+    // R2
+    if (bindings.needsR2 && !hasBinding(resolved.r2_buckets, "STORAGE")) {
+      result.r2_buckets = [
+        ...(resolved.r2_buckets ?? []),
+        { binding: "STORAGE", bucket_name: "default" },
+      ];
+    }
+
+    return result as Partial<WorkerConfig>;
+  }
+
   if (framework) {
     // Framework mode: no routing plugin, CF plugin uses viteEnvironment.
     // The CF plugin needs `main` to create a proper worker environment
@@ -129,7 +152,7 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
         ...inspectorPortOption,
         persistState: { path: join(root, ".vite-cloud") },
         viteEnvironment: { name: "ssr" },
-        config: workerConfig,
+        config: mergeBindings,
       }),
     ];
   }
@@ -161,7 +184,7 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
     ...cloudflare({
       ...inspectorPortOption,
       persistState: { path: join(root, ".vite-cloud") },
-      config: workerConfig,
+      config: mergeBindings,
     }),
   ];
 }

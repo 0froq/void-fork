@@ -55,7 +55,7 @@ Handler signature (Hono context):
 (c: CloudContext) => unknown | Promise<unknown>;
 ```
 
-`CloudContext` is a Hono `Context` with typed Cloudflare bindings on `c.env` (see [Cloudflare Env](./cloudflare-env.md)).
+`CloudContext` is a Hono `Context` with typed Cloudflare bindings on `c.env` (see [Cloudflare](./cloudflare.md)).
 
 Return values:
 
