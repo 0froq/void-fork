@@ -36,21 +36,16 @@ app.post("/:id/deploy", async (c) => {
     if (manifest.static) {
       await updateDeploymentStatus(c.env.DB, deployment.id, "uploading");
 
-      // Upload static assets to R2
-      const assetKeys: string[] = [];
-      for (const [key, value] of formData.entries()) {
-        if (key.startsWith("asset:")) {
-          const assetPath = key.slice("asset:".length);
-          const r2Key = `${projectId}/current/${assetPath}`;
-          const blob = value as Blob;
-          await c.env.ASSETS.put(r2Key, await blob.arrayBuffer(), {
-            httpMetadata: {
-              contentType: guessContentType(assetPath),
-            },
-          });
-          assetKeys.push(assetPath);
-        }
-      }
+      // Upload static assets to R2 (parallel)
+      const assetUploads = collectAssetEntries(formData);
+      await Promise.all(
+        assetUploads.map(({ path, blob }) =>
+          c.env.ASSETS.put(`${projectId}/current/${path}`, blob, {
+            httpMetadata: { contentType: guessContentType(path) },
+          }),
+        ),
+      );
+      const assetKeys = assetUploads.map((a) => a.path);
 
       // Update KV routing (no workerName for static deploys)
       await c.env.ROUTING.put(project.slug, JSON.stringify({ projectId, mode: manifest.static }));
@@ -128,21 +123,16 @@ app.post("/:id/deploy", async (c) => {
       }
     }
 
-    // 2. Upload static assets to R2
-    const assetKeys: string[] = [];
-    for (const [key, value] of formData.entries()) {
-      if (key.startsWith("asset:")) {
-        const assetPath = key.slice("asset:".length);
-        const r2Key = `${projectId}/current/${assetPath}`;
-        const blob = value as Blob;
-        await c.env.ASSETS.put(r2Key, await blob.arrayBuffer(), {
-          httpMetadata: {
-            contentType: guessContentType(assetPath),
-          },
-        });
-        assetKeys.push(assetPath);
-      }
-    }
+    // 2. Upload static assets to R2 (parallel)
+    const assetUploads = collectAssetEntries(formData);
+    await Promise.all(
+      assetUploads.map(({ path, blob }) =>
+        c.env.ASSETS.put(`${projectId}/current/${path}`, blob, {
+          httpMetadata: { contentType: guessContentType(path) },
+        }),
+      ),
+    );
+    const assetKeys = assetUploads.map((a) => a.path);
 
     // 3. Upload worker to dispatch namespace via CF API
     const workerName = `user-${project.slug}`;
@@ -224,6 +214,16 @@ app.post("/:id/deploy", async (c) => {
     throw err;
   }
 });
+
+function collectAssetEntries(formData: FormData): { path: string; blob: Blob }[] {
+  const entries: { path: string; blob: Blob }[] = [];
+  for (const [key, value] of formData.entries()) {
+    if (key.startsWith("asset:")) {
+      entries.push({ path: key.slice("asset:".length), blob: value as Blob });
+    }
+  }
+  return entries;
+}
 
 function guessContentType(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase();
