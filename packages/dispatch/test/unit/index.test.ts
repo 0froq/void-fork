@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeAll, beforeEach } from "vitest";
 import app from "../../src/index";
 import type { Env } from "../../src/env";
+import type { HeaderRule } from "../../src/headers";
 
 interface RoutingEntry {
   workerName?: string;
@@ -8,6 +9,7 @@ interface RoutingEntry {
   ssr?: boolean;
   mode?: "spa" | "ssg";
   version?: string;
+  headers?: HeaderRule[];
 }
 
 // Mock the CF Cache API global
@@ -287,6 +289,142 @@ describe("dispatch static-only routing", () => {
     expect(workerFetch).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("<html>SPA</html>");
+  });
+});
+
+describe("custom header rules", () => {
+  it("applies header rules to static SPA responses", async () => {
+    const { env } = createEnv({
+      routing: {
+        projectId: "proj_1",
+        mode: "spa",
+        headers: [{ pattern: "/*", headers: [["X-Frame-Options", "DENY"]] }],
+      },
+      assets: {
+        "proj_1/current/index.html": { body: "<html>SPA</html>", contentType: "text/html" },
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/"),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-Frame-Options")).toBe("DENY");
+  });
+
+  it("applies header rules to static SSG responses", async () => {
+    const { env } = createEnv({
+      routing: {
+        projectId: "proj_1",
+        mode: "ssg",
+        headers: [{ pattern: "/*", headers: [["X-Custom", "ssg-value"]] }],
+      },
+      assets: {
+        "proj_1/current/index.html": { body: "<html>SSG</html>", contentType: "text/html" },
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/"),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-Custom")).toBe("ssg-value");
+  });
+
+  it("applies header rules to non-SSR worker static responses", async () => {
+    const { env } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        headers: [
+          {
+            pattern: "/assets/*",
+            headers: [["Cache-Control", "public, max-age=31536000, immutable"]],
+          },
+        ],
+      },
+      assets: {
+        "proj_1/current/assets/app.js": { body: "console.log(1)" },
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/assets/app.js"),
+      env,
+      createCtx(),
+    );
+
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+  });
+
+  it("does not apply header rules to API worker responses", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        headers: [{ pattern: "/*", headers: [["X-Frame-Options", "DENY"]] }],
+      },
+      workerResponse: new Response("api response"),
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/api/hello"),
+      env,
+      createCtx(),
+    );
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(response.headers.get("X-Frame-Options")).toBeNull();
+  });
+
+  it("applies header rules to SSR static hit responses", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+        headers: [{ pattern: "/assets/*", headers: [["X-Asset", "yes"]] }],
+      },
+      assets: {
+        "proj_1/current/assets/style.css": { body: "body{}", contentType: "text/css" },
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/assets/style.css"),
+      env,
+      createCtx(),
+    );
+
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(response.headers.get("X-Asset")).toBe("yes");
+  });
+
+  it("does not apply header rules to SSR worker fallback responses", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+        headers: [{ pattern: "/*", headers: [["X-Custom", "value"]] }],
+      },
+      workerResponse: new Response("<html>ssr</html>"),
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/dashboard"),
+      env,
+      createCtx(),
+    );
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(response.headers.get("X-Custom")).toBeNull();
   });
 });
 

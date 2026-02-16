@@ -20,6 +20,7 @@ export default extendConfig(
           {
             text: "Core",
             items: [
+              { text: "Deployment Modes", link: "/docs/deployment-modes" },
               { text: "Routing", link: "/docs/routing" },
               { text: "Configuration", link: "/docs/config" },
               { text: "Cloudflare", link: "/docs/cloudflare" },
@@ -28,10 +29,10 @@ export default extendConfig(
           {
             text: "Features",
             items: [
-              { text: "Deployment Modes", link: "/docs/deployment-modes" },
               { text: "SSR", link: "/docs/ssr" },
               { text: "SSG", link: "/docs/ssg" },
               { text: "Jobs", link: "/docs/jobs" },
+              { text: "Caching and Headers", link: "/docs/cache" },
             ],
           },
           {

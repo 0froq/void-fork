@@ -187,6 +187,36 @@ describe("POST /projects/:id/deploy", () => {
     });
   });
 
+  it("includes header rules in KV routing for full deploy", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "headers-full");
+    mockCfApi();
+
+    const headers = [
+      { pattern: "/*", headers: [["X-Frame-Options", "DENY"]] as [string, string][] },
+    ];
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: { bindings: {}, headers },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const routing = await env.ROUTING.get("headers-full", "json");
+    expect(routing).toEqual({
+      workerName: "user-headers-full",
+      projectId: project.id,
+      version: expect.stringMatching(/^dpl_/),
+      headers,
+    });
+  });
+
   it("stores ssr flag in KV routing when manifest enables ssr", async () => {
     const user = await createTestUser(env.DB);
     const project = await createTestProject(env.DB, user.id, "ssr-app");
@@ -444,11 +474,15 @@ function buildStaticDeployForm(opts: {
   mode: "spa" | "ssg";
   assets?: Record<string, string>;
   assetHashes?: Record<string, string>;
+  headers?: { pattern: string; headers: [string, string][] }[];
 }): FormData {
   const form = new FormData();
   const manifest: Record<string, unknown> = { bindings: {}, static: opts.mode };
   if (opts.assetHashes) {
     manifest.assetHashes = opts.assetHashes;
+  }
+  if (opts.headers) {
+    manifest.headers = opts.headers;
   }
   form.append("manifest", JSON.stringify(manifest));
   if (opts.assets) {
@@ -540,6 +574,37 @@ describe("POST /projects/:id/deploy (static)", () => {
       projectId: project.id,
       mode: "spa",
       version: expect.stringMatching(/^dpl_/),
+    });
+  });
+
+  it("includes header rules in KV routing when manifest has headers", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "headers-spa");
+
+    const headers = [
+      { pattern: "/*", headers: [["X-Frame-Options", "DENY"]] as [string, string][] },
+      {
+        pattern: "/assets/*",
+        headers: [["Cache-Control", "public, max-age=31536000, immutable"]] as [string, string][],
+      },
+    ];
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildStaticDeployForm({ mode: "spa", headers }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const routing = await env.ROUTING.get("headers-spa", "json");
+    expect(routing).toEqual({
+      projectId: project.id,
+      mode: "spa",
+      version: expect.stringMatching(/^dpl_/),
+      headers,
     });
   });
 

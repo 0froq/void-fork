@@ -44,6 +44,11 @@ export interface ScheduleMeta {
   cron: string;
 }
 
+export interface HeaderRule {
+  pattern: string;
+  headers: [string, string][];
+}
+
 export interface DeployManifest {
   bindings: {
     d1?: string[];
@@ -55,4 +60,5 @@ export interface DeployManifest {
   ssr?: boolean;
   static?: "spa" | "ssg";
   assetHashes?: Record<string, string>;
+  headers?: HeaderRule[];
 }

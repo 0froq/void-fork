@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { applyHeaderRules, type HeaderRule } from "./headers";
 import { extractSlug } from "./hostname";
 import { serveStaticAsset, serveStaticAssetWithFallback, serveSSGAsset } from "./static";
 
@@ -8,6 +9,7 @@ interface RoutingEntry {
   ssr?: boolean;
   mode?: "spa" | "ssg";
   version?: string;
+  headers?: HeaderRule[];
 }
 
 export default {
@@ -39,6 +41,8 @@ export default {
       if (cached) return cached;
     }
 
+    const pathname = url.pathname;
+
     // Static-only deploys (no worker)
     if (!routing.workerName) {
       if (routing.mode === "ssg") {
@@ -46,19 +50,27 @@ export default {
           ctx,
           cache,
           cacheKey,
-          await serveSSGAsset(env, routing.projectId, url.pathname),
+          applyHeaderRules(
+            await serveSSGAsset(env, routing.projectId, pathname),
+            pathname,
+            routing.headers,
+          ),
         );
       }
       return cacheResponse(
         ctx,
         cache,
         cacheKey,
-        await serveStaticAssetWithFallback(env, routing.projectId, url.pathname),
+        applyHeaderRules(
+          await serveStaticAssetWithFallback(env, routing.projectId, pathname),
+          pathname,
+          routing.headers,
+        ),
       );
     }
 
     // API routes → dispatch to user worker (not cached here)
-    if (url.pathname.startsWith("/api/") || url.pathname === "/api") {
+    if (pathname.startsWith("/api/") || pathname === "/api") {
       const worker = env.DISPATCH.get(routing.workerName);
       return worker.fetch(request);
     }
@@ -66,10 +78,17 @@ export default {
     // Everything else → static assets first.
     // If SSR is enabled and static misses, dispatch to user worker for render().
     if (routing.ssr) {
-      const staticResponse = await serveStaticAsset(env, routing.projectId, url.pathname, {
+      const staticResponse = await serveStaticAsset(env, routing.projectId, pathname, {
         spaFallback: false,
       });
-      if (staticResponse) return cacheResponse(ctx, cache, cacheKey, staticResponse);
+      if (staticResponse) {
+        return cacheResponse(
+          ctx,
+          cache,
+          cacheKey,
+          applyHeaderRules(staticResponse, pathname, routing.headers),
+        );
+      }
       const worker = env.DISPATCH.get(routing.workerName);
       return worker.fetch(request);
     }
@@ -78,7 +97,11 @@ export default {
       ctx,
       cache,
       cacheKey,
-      await serveStaticAssetWithFallback(env, routing.projectId, url.pathname),
+      applyHeaderRules(
+        await serveStaticAssetWithFallback(env, routing.projectId, pathname),
+        pathname,
+        routing.headers,
+      ),
     );
   },
 } satisfies ExportedHandler<Env>;
