@@ -6,7 +6,7 @@ import { getToken } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
 import { packageBuild } from "./package";
 import { PlatformClient, type ProjectResponse } from "./client";
-import { inferProjectBindings } from "../plugin-inference";
+import { inferProjectBindings, FRAMEWORK_SCAN_DIRS } from "../plugin-inference";
 import { promptProjectSelection, promptProjectSlug } from "./prompt";
 import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
@@ -107,10 +107,18 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   log.step("Building...");
   execSync("npx vite build", { cwd: root, stdio: "inherit" });
 
-  // 4. Infer bindings
-  const bindings = inferProjectBindings(root);
+  // 4. Detect framework mode
+  const frameworkConfigPath = join(root, ".vite-cloud", "framework.json");
+  const isFrameworkMode = existsSync(frameworkConfigPath);
 
-  // 5. Collect and validate migrations
+  // 5. Infer bindings (expanded scan dirs in framework mode)
+  const bindings = inferProjectBindings(
+    root,
+    undefined,
+    isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined,
+  );
+
+  // 6. Collect and validate migrations
   const migrationsDir = join(root, "migrations");
   const rawMigrations = collectMigrations(migrationsDir);
   let validatedMigrations;
@@ -126,11 +134,15 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
 
   const distDir = join(root, "dist");
   const workerDirName = detectWorkerDir(root, distDir);
-  const schedules = scanJobsSync(root).map((job) => ({
-    name: job.name,
-    cron: job.cron,
-  }));
-  const ssrEntry = validateSsrEntry(root);
+
+  // In framework mode: skip job scanning, SSR is always true
+  const schedules = isFrameworkMode
+    ? []
+    : scanJobsSync(root).map((job) => ({
+        name: job.name,
+        cron: job.cron,
+      }));
+  const isSsr = isFrameworkMode ? true : Boolean(validateSsrEntry(root));
 
   // 7. Package & Upload
   const s = spinner();
@@ -142,7 +154,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
     bindings,
     validatedMigrations,
     schedules,
-    Boolean(ssrEntry),
+    isSsr,
   );
 
   s.message("Deploying...");
@@ -156,8 +168,11 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   if (schedules.length > 0) {
     summary.push(`${schedules.length} cron job(s) scheduled`);
   }
-  if (ssrEntry) {
+  if (isSsr) {
     summary.push("SSR enabled");
+  }
+  if (isFrameworkMode) {
+    summary.push("Framework mode");
   }
   note(summary.join("\n"), result.url);
 

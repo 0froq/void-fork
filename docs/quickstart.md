@@ -107,6 +107,12 @@ Precedence is:
 2. `VITE_CLOUD_PROJECT`
 3. `.vite-cloud/project.json` (linked project in repo)
 
+## Next steps
+
+- [Cloudflare Env](./cloudflare-env.md) -- access D1, KV, and R2 bindings in your handlers
+- [Routing](./routing.md) -- file-based routing, middleware, and the Hono ecosystem
+- [Configuration](./config.md) -- explicit binding overrides and plugin options
+
 ## Notes
 
 - Commit `.vite-cloud/project.json` for deterministic CI deploys.
