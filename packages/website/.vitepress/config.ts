@@ -28,6 +28,7 @@ export default extendConfig(
           {
             text: "Features",
             items: [
+              { text: "Deployment Modes", link: "/docs/deployment-modes" },
               { text: "SSR", link: "/docs/ssr" },
               { text: "SSG", link: "/docs/ssg" },
               { text: "Jobs", link: "/docs/jobs" },
