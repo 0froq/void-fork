@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { inferBindingsFromSource, mergeBindings, type InferredBindings } from "./inference/walk";
 import { getSsrServerEntryPath } from "./ssr/entry";
 
+/** Directories to scan for binding inference in framework mode. */
+export const FRAMEWORK_SCAN_DIRS = ["src", "app", "routes", "server"] as const;
+
 export interface InferenceOptions {
   /** Explicit binding overrides — takes precedence over inference */
   bindings?: {
@@ -19,8 +22,14 @@ export interface InferenceOptions {
  *
  * This runs once when viteCloud() is called (before plugins initialize),
  * so results are available to configure the Cloudflare plugin.
+ *
+ * @param scanDirs - Override the default scan directories (e.g., for framework mode)
  */
-export function inferProjectBindings(root: string, options?: InferenceOptions): InferredBindings {
+export function inferProjectBindings(
+  root: string,
+  options?: InferenceOptions,
+  scanDirs?: readonly string[],
+): InferredBindings {
   // If user provided explicit overrides, use those
   if (options?.bindings) {
     return {
@@ -30,14 +39,14 @@ export function inferProjectBindings(root: string, options?: InferenceOptions): 
     };
   }
 
-  const dirs = ["routes", "middleware"];
+  const dirs = scanDirs ?? ["routes", "middleware"];
   const allBindings: InferredBindings[] = [];
 
   for (const dir of dirs) {
     const dirPath = join(root, dir);
     let files: string[];
     try {
-      files = globSync("**/*.{ts,mts,js,mjs}", { cwd: dirPath, absolute: true });
+      files = globSync("**/*.{ts,tsx,mts,js,jsx,mjs}", { cwd: dirPath, absolute: true });
     } catch {
       continue;
     }
