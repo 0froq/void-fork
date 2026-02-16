@@ -124,14 +124,37 @@ export function compileRouteTable(
     compileAuthRoutes(lines, auth);
   }
 
-  // Register routes with lazy-loaded handlers
+  // Register routes with lazy-loaded handlers (shared loader per file)
+  const seenFiles = new Set<string>();
   for (const route of scan.routes) {
-    const method = route.method === "*" ? "all" : route.method.toLowerCase();
-    const filePath = JSON.stringify(`${routesDir}/${route.filePath}`);
-    lines.push(`app.${method}(${JSON.stringify(route.pattern)}, async (c) => {`);
-    lines.push(`  const mod = await import(${filePath});`);
-    lines.push(`  return convertReturnValue(await mod.default(c));`);
-    lines.push(`});`);
+    const filePath = `${routesDir}/${route.filePath}`;
+    const varName = `_mod_${route.filePath.replace(/[^a-zA-Z0-9]/g, "_")}`;
+    const loaderName = `_load_${route.filePath.replace(/[^a-zA-Z0-9]/g, "_")}`;
+
+    if (!seenFiles.has(route.filePath)) {
+      seenFiles.add(route.filePath);
+      lines.push(`let ${varName};`);
+      lines.push(`async function ${loaderName}() {`);
+      lines.push(`  if (!${varName}) ${varName} = await import(${JSON.stringify(filePath)});`);
+      lines.push(`  return ${varName};`);
+      lines.push(`}`);
+    }
+
+    if (route.methods.length === 0) {
+      // No recognized HTTP exports — register as all()
+      lines.push(`app.all(${JSON.stringify(route.pattern)}, async (c) => {`);
+      lines.push(`  const mod = await ${loaderName}();`);
+      lines.push(`  return convertReturnValue(await mod.default(c));`);
+      lines.push(`});`);
+    } else {
+      for (const method of route.methods) {
+        const honoMethod = method.toLowerCase();
+        lines.push(`app.${honoMethod}(${JSON.stringify(route.pattern)}, async (c) => {`);
+        lines.push(`  const mod = await ${loaderName}();`);
+        lines.push(`  return convertReturnValue(await mod.${method}(c));`);
+        lines.push(`});`);
+      }
+    }
   }
   lines.push("");
 

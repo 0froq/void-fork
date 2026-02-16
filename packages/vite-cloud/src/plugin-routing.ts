@@ -9,6 +9,7 @@ import {
   type CompileOptions,
   type SsrCompileOptions,
 } from "./router/compile";
+import { generateRouteTypes } from "./codegen/route-types";
 import type { AuthProvider } from "./index";
 import {
   getPrerenderConfig,
@@ -48,6 +49,12 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       join(root, path),
     ),
   );
+
+  function writeRouteTypes() {
+    if (!scan) return;
+    const dts = generateRouteTypes(scan, routesDir, outDir);
+    writeFileSync(join(outDir, "routes.d.ts"), dts);
+  }
 
   async function rescan() {
     scan = await scanRoutes(root);
@@ -93,12 +100,29 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     };
   }
 
-  // Generate the entry file eagerly (at plugin creation time, during viteCloud()).
-  // The CF plugin needs the `main` file to exist at config resolution time,
-  // which is before any hooks like buildStart fire.
+  // Generate the entry file and tsconfig eagerly (at plugin creation time,
+  // during viteCloud()). The CF plugin needs the `main` file to exist at
+  // config resolution time, which is before any hooks like buildStart fire.
+  // The tsconfig.json allows users to extend it from their root tsconfig
+  // so generated types (.vite-cloud/routes.d.ts) are discovered automatically.
   const outDir = join(root, ".vite-cloud");
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry());
+  // Use "files" (not "include") so the user's tsconfig can extend this one
+  // and still define its own "include" without overriding the generated types.
+  // TypeScript inherits "files" from a base config when the child doesn't
+  // specify "files", even if the child specifies "include".
+  // Paths resolve relative to this tsconfig's directory (.vite-cloud/).
+  writeFileSync(
+    join(outDir, "tsconfig.json"),
+    JSON.stringify(
+      {
+        files: ["routes.d.ts"],
+      },
+      null,
+      2,
+    ) + "\n",
+  );
 
   return {
     name: "vite-cloud:routing",
@@ -128,6 +152,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
 
     async buildStart() {
       await rescan();
+      writeRouteTypes();
     },
 
     resolveId: {
@@ -173,6 +198,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         // The route table virtual module lives in the workerd environment,
         // not the client — so we must iterate all environments.
         await rescan();
+        writeRouteTypes();
 
         for (const env of Object.values(devServer.environments)) {
           const mod = env.moduleGraph.getModuleById(VIRTUAL_ROUTES_ID);

@@ -1,0 +1,150 @@
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { fetch as typedFetch, FetchError } from "../../src/runtime/fetch";
+
+declare module "vite-cloud/routes" {
+  interface RouteMap {
+    "/api/hello": {
+      GET: { input: {}; output: { ok: boolean } };
+    };
+    "/api/users": {
+      GET: { input: {}; output: { id: string; name: string }[] };
+      POST: { input: { body: { name: string } }; output: { created: boolean } };
+    };
+    "/api/users/:id": {
+      GET: { input: {}; output: { id: string; name: string } };
+    };
+    "/api/files/:name": {
+      GET: { input: {}; output: Record<string, never> };
+    };
+    "/api/items/:id": {
+      GET: { input: {}; output: { id: string } };
+      DELETE: { input: {}; output: undefined };
+    };
+  }
+}
+
+const originalFetch = globalThis.fetch;
+
+describe("typed fetch client", () => {
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("makes a GET request by default", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+
+    const result = await typedFetch("/api/hello");
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/hello",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("interpolates path params", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ id: "42", name: "Alice" }), { status: 200 }),
+    );
+
+    await typedFetch("/api/users/:id", { params: { id: "42" } });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/users/42", expect.anything());
+  });
+
+  it("encodes path params", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 200 }),
+    );
+
+    await typedFetch("/api/files/:name", { params: { name: "hello world.txt" } });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/files/hello%20world.txt",
+      expect.anything(),
+    );
+  });
+
+  it("builds query string", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify([]), { status: 200 }),
+    );
+
+    await typedFetch("/api/users", { query: { page: "1", limit: "10" } });
+
+    const url = vi.mocked(globalThis.fetch).mock.calls[0][0] as string;
+    expect(url).toContain("page=1");
+    expect(url).toContain("limit=10");
+  });
+
+  it("serializes body as JSON", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ created: true }), { status: 201 }),
+    );
+
+    await typedFetch("/api/users", { method: "POST", body: { name: "Alice" } });
+
+    const call = vi.mocked(globalThis.fetch).mock.calls[0];
+    const init = call[1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(JSON.stringify({ name: "Alice" }));
+    expect(new Headers(init.headers!).get("Content-Type")).toBe("application/json");
+  });
+
+  it("throws FetchError on non-OK response", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(new Response("Not Found", { status: 404 }));
+
+    const err = await typedFetch("/api/hello").catch((e: Error) => e);
+
+    expect(err).toBeInstanceOf(FetchError);
+    expect((err as FetchError).status).toBe(404);
+  });
+
+  it("returns undefined for 204 No Content", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(new Response(null, { status: 204 }));
+
+    const result = await typedFetch("/api/items/:id", { method: "DELETE" });
+    expect(result).toBeUndefined();
+  });
+
+  it("type: output is correctly narrowed per route", () => {
+    const _check = async () => {
+      const hello = await typedFetch("/api/hello");
+      // @ts-expect-error - 'missing' does not exist on { ok: boolean }
+      void hello.missing;
+      // @ts-expect-error - ok is boolean, toUpperCase exists only on string
+      void hello.ok.toUpperCase();
+
+      const users = await typedFetch("/api/users");
+      // array methods are available
+      void users.map;
+      // @ts-expect-error - toFixed does not exist on array
+      void users.toFixed();
+
+      const user = await typedFetch("/api/users/:id");
+      // @ts-expect-error - 'email' does not exist on { id: string; name: string }
+      void user.email;
+    };
+    void _check;
+    expect(true).toBe(true); // compile-time type test
+  });
+
+  it("type: rejects invalid paths and methods", () => {
+    // @ts-expect-error - "/api/nonexistent" is not in RouteMap
+    void typedFetch("/api/nonexistent").catch(() => {});
+
+    // @ts-expect-error - DELETE is not a valid method for /api/hello (only GET)
+    void typedFetch("/api/hello", { method: "DELETE" }).catch(() => {});
+
+    // @ts-expect-error - PATCH is not a valid method for /api/users (only GET, POST)
+    void typedFetch("/api/users", { method: "PATCH" }).catch(() => {});
+
+    expect(true).toBe(true); // compile-time type test
+  });
+});

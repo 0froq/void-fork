@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
+import type { StandardSchemaV1 } from "../../src/standard-schema";
 import { defineHandler, defineMiddleware } from "../../src/runtime/handler";
 import { convertReturnValue } from "../../src/runtime/response";
 
@@ -16,8 +17,34 @@ function createApp(handler: (c: any) => unknown) {
   return app;
 }
 
-function req() {
-  return new Request("http://localhost/test");
+function req(init?: RequestInit) {
+  return new Request("http://localhost/test", init);
+}
+
+/** Create a mock Standard Schema that passes through the input. */
+function passSchema(): StandardSchemaV1 {
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "test",
+      validate(value: unknown) {
+        return { value };
+      },
+    },
+  };
+}
+
+/** Create a mock Standard Schema that always fails. */
+function failSchema(message: string): StandardSchemaV1 {
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "test",
+      validate() {
+        return { issues: [{ message }] };
+      },
+    },
+  };
 }
 
 describe("defineHandler", () => {
@@ -187,5 +214,194 @@ describe("defineHandler", () => {
     // Hono catches thrown errors and returns a 500 response
     const res = await app.request(req());
     expect(res.status).toBe(500);
+  });
+});
+
+describe("defineHandler.withValidator", () => {
+  it("validates body and passes input to handler", async () => {
+    const handler = defineHandler.withValidator({
+      body: passSchema(),
+    })((_c, { body }) => {
+      return { received: body };
+    });
+
+    const app = new Hono();
+    app.post("/test", async (c) => {
+      return convertReturnValue(await (handler as any)(c));
+    });
+
+    const res = await app.request(
+      new Request("http://localhost/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Alice" }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ received: { name: "Alice" } });
+  });
+
+  it("returns 400 when body validation fails", async () => {
+    const handler = defineHandler.withValidator({
+      body: failSchema("name is required"),
+    })((_c, { body }) => {
+      return { received: body };
+    });
+
+    const app = new Hono();
+    app.post("/test", async (c) => {
+      return convertReturnValue(await (handler as any)(c));
+    });
+
+    const res = await app.request(
+      new Request("http://localhost/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    const json: any = await res.json();
+    expect(json.error).toBe("Validation failed");
+    expect(json.issues[0].slot).toBe("body");
+    expect(json.issues[0].issues[0].message).toBe("name is required");
+  });
+
+  it("returns 400 on invalid JSON body", async () => {
+    const handler = defineHandler.withValidator({
+      body: passSchema(),
+    })((_c, { body }) => {
+      return { received: body };
+    });
+
+    const app = new Hono();
+    app.post("/test", async (c) => {
+      return convertReturnValue(await (handler as any)(c));
+    });
+
+    const res = await app.request(
+      new Request("http://localhost/test", {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: "not json",
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    const json: any = await res.json();
+    expect(json.error).toBe("Invalid JSON body");
+  });
+
+  it("validates query params", async () => {
+    const handler = defineHandler.withValidator({
+      query: passSchema(),
+    })((_c, { query }) => {
+      return { query };
+    });
+
+    const app = new Hono();
+    app.get("/test", async (c) => {
+      return convertReturnValue(await (handler as any)(c));
+    });
+
+    const res = await app.request(new Request("http://localhost/test?page=2&limit=10"));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ query: { page: "2", limit: "10" } });
+  });
+
+  it("validates route params", async () => {
+    const handler = defineHandler.withValidator({
+      params: passSchema(),
+    })((_c, { params }) => {
+      return { params };
+    });
+
+    const app = new Hono();
+    app.get("/users/:id", async (c) => {
+      return convertReturnValue(await (handler as any)(c));
+    });
+
+    const res = await app.request(new Request("http://localhost/users/42"));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ params: { id: "42" } });
+  });
+
+  it("validates multiple slots simultaneously", async () => {
+    const handler = defineHandler.withValidator({
+      params: passSchema(),
+      body: passSchema(),
+    })((_c, { params, body }) => {
+      return { params, body };
+    });
+
+    const app = new Hono();
+    app.post("/users/:id", async (c) => {
+      return convertReturnValue(await (handler as any)(c));
+    });
+
+    const res = await app.request(
+      new Request("http://localhost/users/42", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Bob" }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      params: { id: "42" },
+      body: { name: "Bob" },
+    });
+  });
+
+  it("handler can return a raw Response", async () => {
+    const handler = defineHandler.withValidator({
+      body: passSchema(),
+    })((_c) => {
+      return new Response("created", { status: 201 });
+    });
+
+    const app = new Hono();
+    app.post("/test", async (c) => {
+      return convertReturnValue(await (handler as any)(c));
+    });
+
+    const res = await app.request(
+      new Request("http://localhost/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ok: true }),
+      }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(await res.text()).toBe("created");
+  });
+
+  it("handler can return null for 204", async () => {
+    const handler = defineHandler.withValidator({
+      body: passSchema(),
+    })(() => {
+      return null;
+    });
+
+    const app = new Hono();
+    app.post("/test", async (c) => {
+      return convertReturnValue(await (handler as any)(c));
+    });
+
+    const res = await app.request(
+      new Request("http://localhost/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    );
+
+    expect(res.status).toBe(204);
   });
 });

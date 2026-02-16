@@ -120,7 +120,7 @@ That's the entire configuration. The plugin does the rest.
 
 ### 3.2 File-Based Routing
 
-Mirroring Nitro v3's routing conventions, Vite Cloud uses filesystem routing to automatically map files to routes. Each route file exports a single default handler. The directory structure maps directly to URL paths.
+Inspired by Next.js and Nitro v3, Vite Cloud uses filesystem routing with **named HTTP method exports**. Each route file exports named constants (`GET`, `POST`, `PUT`, `DELETE`, etc.) corresponding to the HTTP methods it handles. The directory structure maps directly to URL paths.
 
 #### Directory Structure
 
@@ -132,9 +132,10 @@ src/                        (SPA — client-side app)
   App.tsx
 routes/                     (Server — Workers handlers)
   api/
-    test.ts                 <-- /api/test
-  hello.get.ts              <-- /hello (GET only)
-  hello.post.ts             <-- /hello (POST only)
+    hello.ts                <-- GET /api/hello
+    users/
+      index.ts              <-- GET + POST /api/users
+      [id].ts               <-- GET /api/users/:id
 vite.config.ts
 ```
 
@@ -152,23 +153,27 @@ routes/
 
 #### Static Routes
 
-Create a file in `routes/`. The filename becomes the route path. Export a default handler wrapped in `defineHandler`:
+Create a file in `routes/`. The filename becomes the route path. Export named HTTP method handlers wrapped in `defineHandler`:
 
 ```ts
-// routes/api/test.ts
-export default defineHandler((ctx) => {
+// routes/api/hello.ts
+import { defineHandler } from "vite-cloud";
+
+export const GET = defineHandler((c) => {
   return { hello: "API" };
 });
 ```
 
 #### Dynamic Routes — Single Param
 
-Use `[<param>]` syntax. The param is available on `ctx.params`:
+Use `[<param>]` syntax. The param is available via `c.req.param()`:
 
 ```ts
 // routes/hello/[name].ts
-export default defineHandler((ctx) => {
-  return `Hello ${ctx.params.name}!`;
+import { defineHandler } from "vite-cloud";
+
+export const GET = defineHandler((c) => {
+  return `Hello ${c.req.param("name")}!`;
 });
 ```
 
@@ -180,8 +185,10 @@ Each param is a separate folder. You cannot define multiple params in a single f
 
 ```ts
 // routes/hello/[name]/[age].ts
-export default defineHandler((ctx) => {
-  return `Hello ${ctx.params.name}! You are ${ctx.params.age} years old.`;
+import { defineHandler } from "vite-cloud";
+
+export const GET = defineHandler((c) => {
+  return `Hello ${c.req.param("name")}! You are ${c.req.param("age")} years old.`;
 });
 ```
 
@@ -191,8 +198,10 @@ Use `[...<param>]` to capture all remaining URL segments (including `/`):
 
 ```ts
 // routes/hello/[...name].ts
-export default defineHandler((ctx) => {
-  return `Hello ${ctx.params.name}!`;
+import { defineHandler } from "vite-cloud";
+
+export const GET = defineHandler((c) => {
+  return `Hello ${c.req.param("name")}!`;
 });
 ```
 
@@ -204,33 +213,33 @@ A file named `[...].ts` matches all routes not matched by any other handler:
 
 ```ts
 // routes/[...].ts
-export default defineHandler((ctx) => {
+import { defineHandler } from "vite-cloud";
+
+export const GET = defineHandler((c) => {
   return new Response("Not found", { status: 404 });
 });
 ```
 
-#### Specific HTTP Method
+#### Multiple HTTP Methods Per File
 
-Append the HTTP method to the filename: `hello.get.ts` only matches GET, `users.post.ts` only matches POST.
+Export multiple named handlers from the same file. The scanner detects which methods are exported:
 
 ```ts
-// routes/users/[id].get.ts
-export default defineHandler(async (ctx) => {
-  const user = ctx.env.db.prepare("SELECT * FROM users WHERE id = ?").bind(ctx.params.id).first();
-  return Response.json(user);
+// routes/api/users/index.ts
+import { defineHandler } from "vite-cloud";
+
+export const GET = defineHandler(async (c) => {
+  const result = await c.env.DB.prepare("SELECT * FROM users").all();
+  return result.results;
 });
-```
 
-```ts
-// routes/users.post.ts
-export default defineHandler(async (ctx) => {
-  const body = await ctx.request.json();
-  ctx.env.db.prepare("INSERT INTO users (name) VALUES (?)").bind(body.name).run();
+export const POST = defineHandler.withValidator({
+  body: mySchema,
+})((c, { body }) => {
+  c.env.DB.prepare("INSERT INTO users (name) VALUES (?)").bind(body.name).run();
   return { created: true };
 });
 ```
-
-A file without a method suffix (e.g., `hello.ts`) matches all HTTP methods.
 
 #### Route Groups
 
@@ -297,28 +306,45 @@ export default defineHandler((ctx) => {
 
 Following Nitro v3's `defineHandler` pattern (and Vite's own `defineConfig` convention), route handlers are wrapped in a `defineHandler` call. This provides full type inference without requiring the user to import and annotate types manually.
 
-`defineHandler` is a thin identity function at runtime — it simply returns the function passed to it. Its value is purely in the type system: it provides the typed `RequestContext` without the user needing to import the type or annotate the parameter.
+`defineHandler` is a thin identity function at runtime — it simply returns the function passed to it. Its value is purely in the type system: it provides the typed `CloudContext` (a Hono `Context` pre-typed with `CloudEnv`) without the user needing to annotate the parameter.
 
-The `RequestContext` shape:
+The handler receives a Hono `Context` with pre-typed bindings:
 
 ```ts
-interface RequestContext {
-  request: Request; // standard Web Request
-  params: Record<string, string>; // route params from [id] etc.
-  context: Record<string, any>; // mutable context (set by middleware)
-  env: {
-    db: D1Database; // auto-provisioned D1 instance
-    kv: KVNamespace; // auto-provisioned KV namespace
-    storage: R2Bucket; // auto-provisioned R2 bucket
-  };
-}
+// c.env.DB       — D1Database (auto-provisioned)
+// c.env.KV       — KVNamespace (auto-provisioned)
+// c.env.STORAGE  — R2Bucket (auto-provisioned)
+// c.req.param()  — route params
+// c.req.json()   — parsed JSON body
 ```
 
-**Why `defineHandler` over raw function exports?** Three reasons: (1) type inference without imports, (2) it gives us a compile-time marker for transforms and tree-shaking, and (3) it opens the door for future options like `defineHandler({ cache: 60 }, (ctx) => ...)` without breaking the API.
+**`defineHandler.withValidator()`** adds input validation using any Standard Schema-compatible library (Zod, Valibot, ArkType, etc.). Validators are specified for `body`, `query`, and/or `params` slots:
 
-**Return values** are automatically converted to responses, matching Nitro's behavior: objects/arrays are serialized as JSON with `application/json` content type, strings are sent as `text/html`, `null` produces a `204 No Content`, and `Response` objects are passed through as-is.
+```ts
+import * as v from "valibot";
+import { defineHandler } from "vite-cloud";
 
-The key design decision: **there is exactly one `db`, one `kv`, and one `storage` per project by default.** This removes the "which namespace?" question entirely. Power users who need multiple databases can configure them explicitly (see Section 9), but the default is one of each, automatically provisioned the moment you reference it.
+export const POST = defineHandler.withValidator({
+  body: v.object({
+    name: v.pipe(v.string(), v.minLength(1)),
+    email: v.pipe(v.string(), v.email()),
+  }),
+})(async (c, { body }) => {
+  // body is typed as { name: string; email: string }
+  await c.env.DB.prepare("INSERT INTO users (name, email) VALUES (?, ?)")
+    .bind(body.name, body.email)
+    .run();
+  return { created: true };
+});
+```
+
+Invalid input returns a 400 response with structured error details. The Standard Schema V1 types are inlined in the vite-cloud source (no `@standard-schema/spec` dependency required for users).
+
+`defineHandler` returns a `TypedHandler<V, R>` with phantom type carriers `__validators` and `__output`. These exist at the type level only — TypeScript's `typeof import(...)` reads them for the route type codegen system (see Section 3.7).
+
+**Return values** are automatically converted to responses: objects/arrays are serialized as JSON with `application/json` content type, strings are sent as `text/html`, `null` produces a `204 No Content`, and `Response` objects are passed through as-is.
+
+The key design decision: **there is exactly one `DB`, one `KV`, and one `STORAGE` per project by default.** This removes the "which namespace?" question entirely. Power users who need multiple databases can configure them explicitly (see Section 9), but the default is one of each, automatically provisioned the moment you reference it.
 
 ### 3.5 Code Splitting
 
@@ -342,6 +368,36 @@ export default defineConfig({
   ],
 });
 ```
+
+### 3.7 Typed Route System
+
+Vite Cloud generates a fully typed API client from the route files. The system has four parts:
+
+**1. Route type codegen** — The routing plugin generates `.vite-cloud/routes.d.ts` at `buildStart` and on file changes. It uses `typeof import(...)` so TypeScript resolves all types from the actual handler source — the codegen never analyzes types itself. Two helper types are inlined in the generated file:
+
+- `Serialize<T>` — models JSON serialization (Date→string, strips functions/bigint/undefined/Response)
+- `ExtractInput<V>` — extracts `StandardSchemaV1.InferInput` from each validator slot
+
+**2. `RouteMap` declaration merging** — The generated file uses `declare module "vite-cloud/routes"` to augment an empty `RouteMap` stub interface exported at the `vite-cloud/routes` subpath. This gives TypeScript a single merged type for all routes.
+
+**3. Typed `fetch` client** — `vite-cloud/client` exports a `fetch<P, M>()` function constrained by `RouteMap`. It infers output type from the route, validates method, and type-checks input (body/query/params) based on the handler's validators.
+
+```ts
+import { fetch } from "vite-cloud/client";
+
+const users = await fetch("/api/users"); // typed as User[]
+const user = await fetch("/api/users/:id", {
+  params: { id: "1" },
+}); // typed as User
+await fetch("/api/users", {
+  method: "POST",
+  body: { name: "Alice", email: "a@b.com" }, // body type-checked against validator
+});
+```
+
+**4. Seamless tsconfig** — The plugin generates `.vite-cloud/tsconfig.json` with a `files` entry pointing to `routes.d.ts`. Users extend it from their root tsconfig (`"extends": "./.vite-cloud/tsconfig.json"`) — no manual `include` entry needed. The `files` field is inherited because TypeScript only overrides `files` when the child also specifies it.
+
+The Standard Schema V1 types are inlined both in the vite-cloud source (`src/standard-schema.ts`) and in the generated `routes.d.ts`, so neither the framework nor the user needs `@standard-schema/spec` as a dependency.
 
 ---
 
@@ -964,12 +1020,11 @@ my-app/
 │       └── Header.vue
 ├── routes/
 │   ├── api/
-│   │   ├── health.get.ts    (GET /api/health)
+│   │   ├── hello.ts          (export const GET — /api/hello)
 │   │   ├── users/
-│   │   │   ├── index.get.ts (GET /api/users)
-│   │   │   ├── index.post.ts(POST /api/users)
-│   │   │   └── [id].get.ts  (GET /api/users/:id)
-│   │   └── upload.post.ts   (POST /api/upload — uses R2)
+│   │   │   ├── index.ts      (export const GET, POST — /api/users)
+│   │   │   └── [id].ts       (export const GET — /api/users/:id)
+│   │   └── upload.ts         (export const POST — /api/upload, uses R2)
 │   └── [...].ts              (catch-all fallback)
 ├── middleware/
 │   ├── 01.logger.ts
@@ -979,14 +1034,15 @@ my-app/
 │   └── 002_add_posts.sql
 ├── public/
 │   └── favicon.ico
+├── tsconfig.json             (extends ./.vite-cloud/tsconfig.json)
 ├── vite.config.ts
 ├── package.json
-└── .vite-cloud/              (gitignored, local dev data + project config)
-    ├── project.json
-    ├── d1/local.db
-    ├── kv/
-    ├── r2/
-    └── inferred-bindings.json
+└── .vite-cloud/              (gitignored, auto-generated)
+    ├── entry.ts              (worker entrypoint — re-exports virtual module)
+    ├── tsconfig.json         (includes routes.d.ts — user extends this)
+    ├── routes.d.ts           (RouteMap declaration — typed routes)
+    ├── project.json          (project identity — created on first deploy)
+    └── v3/                   (Miniflare persistence — D1, KV, R2)
 ```
 
 ## Appendix B: API Handler Examples
@@ -994,29 +1050,56 @@ my-app/
 **Simple JSON endpoint:**
 
 ```ts
-// routes/api/health.get.ts
-export default defineHandler(() => {
-  return { status: "ok", timestamp: Date.now() };
+// routes/api/hello.ts
+import { defineHandler } from "vite-cloud";
+
+export const GET = defineHandler((c) => {
+  return { message: "Hello!", timestamp: Date.now() };
 });
 ```
 
-**Database CRUD:**
+**Database CRUD with validation:**
 
 ```ts
-// routes/api/users/[id].get.ts
-export default defineHandler((ctx) => {
-  const user = ctx.env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(ctx.params.id).first();
+// routes/api/users/index.ts
+import * as v from "valibot";
+import { defineHandler } from "vite-cloud";
 
+export const GET = defineHandler(async (c) => {
+  const result = await c.env.DB.prepare("SELECT * FROM users").all();
+  return result.results;
+});
+
+export const POST = defineHandler.withValidator({
+  body: v.object({
+    name: v.pipe(v.string(), v.minLength(1)),
+    email: v.pipe(v.string(), v.email()),
+  }),
+})(async (c, { body }) => {
+  await c.env.DB.prepare("INSERT INTO users (name, email) VALUES (?, ?)")
+    .bind(body.name, body.email)
+    .run();
+  return { created: true };
+});
+```
+
+```ts
+// routes/api/users/[id].ts
+import * as v from "valibot";
+import { defineHandler } from "vite-cloud";
+
+export const GET = defineHandler.withValidator({
+  params: v.object({ id: v.string() }),
+})(async (c, { params }) => {
+  const user = await c.env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(params.id).first();
   if (!user) return new Response("Not found", { status: 404 });
-  return user; // auto-serialized as JSON
+  return user;
 });
-```
 
-```ts
-// routes/api/users/[id].delete.ts
-export default defineHandler((ctx) => {
-  ctx.env.DB.prepare("DELETE FROM users WHERE id = ?").bind(ctx.params.id).run();
-
+export const DELETE = defineHandler.withValidator({
+  params: v.object({ id: v.string() }),
+})(async (c, { params }) => {
+  await c.env.DB.prepare("DELETE FROM users WHERE id = ?").bind(params.id).run();
   return null; // 204 No Content
 });
 ```
@@ -1024,13 +1107,15 @@ export default defineHandler((ctx) => {
 **File upload to R2:**
 
 ```ts
-// routes/api/upload.post.ts
-export default defineHandler(async (ctx) => {
-  const formData = await ctx.request.formData();
+// routes/api/upload.ts
+import { defineHandler } from "vite-cloud";
+
+export const POST = defineHandler(async (c) => {
+  const formData = await c.req.formData();
   const file = formData.get("file") as File;
 
   const key = `uploads/${Date.now()}-${file.name}`;
-  await ctx.env.STORAGE.put(key, file.stream(), {
+  await c.env.STORAGE.put(key, file.stream(), {
     httpMetadata: { contentType: file.type },
   });
 
@@ -1038,24 +1123,17 @@ export default defineHandler(async (ctx) => {
 });
 ```
 
-**KV via unstorage:**
+**Typed client usage:**
 
 ```ts
-// routes/api/session.get.ts
-export default defineHandler(async (ctx) => {
-  const sessionId = ctx.request.headers.get("X-Session-Id");
-  const data = await ctx.env.KV.get(`session:${sessionId}`);
-  return data ?? { authenticated: false };
-});
-```
+// src/App.tsx
+import { fetch } from "vite-cloud/client";
 
-```ts
-// routes/api/session.post.ts
-export default defineHandler(async (ctx) => {
-  const body = await ctx.request.json();
-  const sessionId = crypto.randomUUID();
-  await ctx.env.KV.set(`session:${sessionId}`, JSON.stringify(body), { ttl: 3600 });
-  return { sessionId };
+// All types inferred from route handlers
+const users = await fetch("/api/users"); // User[]
+await fetch("/api/users", {
+  method: "POST",
+  body: { name: "Alice", email: "a@b.com" }, // validated against valibot schema
 });
 ```
 
@@ -1063,27 +1141,30 @@ export default defineHandler(async (ctx) => {
 
 ```ts
 // middleware/02.auth.ts
-export default defineHandler((ctx) => {
-  // Skip auth for public routes
-  if (!new URL(ctx.request.url).pathname.startsWith("/api/admin")) return;
+import { defineMiddleware } from "vite-cloud";
 
-  const token = ctx.request.headers.get("Authorization")?.replace("Bearer ", "");
+export default defineMiddleware(async (c, next) => {
+  if (!new URL(c.req.url).pathname.startsWith("/api/admin")) {
+    return next();
+  }
+  const token = c.req.header("Authorization")?.replace("Bearer ", "");
   if (!token) {
     return new Response("Unauthorized", { status: 401 });
   }
-  ctx.context.user = { token };
+  await next();
 });
 ```
 
 **Environment-specific debug route:**
 
 ```ts
-// routes/api/debug.get.dev.ts — only exists in development
-export default defineHandler((ctx) => {
+// routes/api/debug.dev.ts — only exists in development
+import { defineHandler } from "vite-cloud";
+
+export const GET = defineHandler((c) => {
   return {
-    bindings: Object.keys(ctx.env),
-    params: ctx.params,
-    headers: Object.fromEntries(ctx.request.headers),
+    bindings: Object.keys(c.env),
+    headers: Object.fromEntries(c.req.raw.headers),
   };
 });
 ```

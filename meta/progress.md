@@ -37,8 +37,14 @@ Implementation Progress
 - [x] Cron & background jobs (file convention)
 - [x] SSR support (minimal `src/main.ssr.ts` convention)
 - [x] Zero config auth (via `hono/basic-auth` and `@hono/oauth-providers`)
+- [x] Named method exports (`export const GET/POST/...` per file, replaces method-in-filename)
+- [x] `defineHandler.withValidator()` — Standard Schema input validation (body/query/params)
+- [x] Standard Schema V1 types inlined (no `@standard-schema/spec` dependency required)
+- [x] Route type codegen (`.vite-cloud/routes.d.ts` with `Serialize<T>` + `ExtractInput<V>`)
+- [x] Typed `fetch` client (`vite-cloud/client`) with path/method/input/output inference from `RouteMap`
+- [x] Seamless tsconfig (`.vite-cloud/tsconfig.json` generated, user extends it — no manual `include`)
 
-**Milestone:**
+**Milestone:** Fully typed API routes end-to-end. Route handlers with validators produce typed `RouteMap` via codegen. Client `fetch()` infers path, method, input, and output types automatically.
 
 ### Phase 4: GitHub & Production Readiness
 

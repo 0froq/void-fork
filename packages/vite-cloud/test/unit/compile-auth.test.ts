@@ -159,11 +159,11 @@ describe("compileRouteTable with auth", () => {
       routes: [
         {
           pattern: "/api/hello",
-          method: "get",
+          methods: ["GET"],
           params: [],
           catchAll: false,
           env: null,
-          filePath: "api/hello.get.ts",
+          filePath: "api/hello.ts",
         },
       ],
       middleware: [{ order: 1, filePath: "01.logger.ts" }],

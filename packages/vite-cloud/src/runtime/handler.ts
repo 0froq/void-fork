@@ -1,6 +1,7 @@
 import type { Context, Env, MiddlewareHandler } from "hono";
 import type { AuthUser } from "./auth";
 import { convertReturnValue } from "./response";
+import { runValidation, type ValidatorSlots, type HandlerInput } from "./validator";
 
 /**
  * Hono environment type for Vite Cloud workers.
@@ -50,27 +51,38 @@ type JobFn = (
 ) => unknown | Promise<unknown>;
 
 /**
+ * A typed handler with phantom type carriers for validators and return type.
+ * `__validators` and `__output` exist at the type level only —
+ * TypeScript's `typeof import(...)` reads them for codegen.
+ */
+export interface TypedHandler<V extends ValidatorSlots = {}, R = unknown> {
+  (c: CloudContext): Promise<Response> | Response | unknown | Promise<unknown>;
+  readonly __validators: V;
+  readonly __output: R;
+}
+
+/**
  * Define a route handler, optionally composed with per-route middleware.
  *
  * Single argument: identity wrapper (backwards compatible).
  * Multiple arguments: middleware chain + final handler, composed at runtime.
  */
-export function defineHandler(handler: HandlerFn): HandlerFn;
-export function defineHandler(m1: MiddlewareFn, handler: HandlerFn): HandlerFn;
-export function defineHandler(m1: MiddlewareFn, m2: MiddlewareFn, handler: HandlerFn): HandlerFn;
+export function defineHandler<R>(handler: (c: CloudContext) => R): TypedHandler<{}, R>;
+export function defineHandler(m1: MiddlewareFn, handler: HandlerFn): TypedHandler;
+export function defineHandler(m1: MiddlewareFn, m2: MiddlewareFn, handler: HandlerFn): TypedHandler;
 export function defineHandler(
   m1: MiddlewareFn,
   m2: MiddlewareFn,
   m3: MiddlewareFn,
   handler: HandlerFn,
-): HandlerFn;
+): TypedHandler;
 export function defineHandler(
   m1: MiddlewareFn,
   m2: MiddlewareFn,
   m3: MiddlewareFn,
   m4: MiddlewareFn,
   handler: HandlerFn,
-): HandlerFn;
+): TypedHandler;
 export function defineHandler(
   m1: MiddlewareFn,
   m2: MiddlewareFn,
@@ -78,15 +90,15 @@ export function defineHandler(
   m4: MiddlewareFn,
   m5: MiddlewareFn,
   handler: HandlerFn,
-): HandlerFn;
-export function defineHandler(...args: (MiddlewareFn | HandlerFn)[]): HandlerFn {
+): TypedHandler;
+export function defineHandler(...args: (MiddlewareFn | HandlerFn)[]): TypedHandler {
   if (args.length === 1) {
-    return args[0] as HandlerFn;
+    return args[0] as TypedHandler;
   }
   const middlewares = args.slice(0, -1) as MiddlewareFn[];
   const handler = args[args.length - 1] as HandlerFn;
 
-  return async (c: CloudContext) => {
+  return (async (c: CloudContext) => {
     let index = 0;
     const dispatch = async (): Promise<void> => {
       if (index < middlewares.length) {
@@ -101,7 +113,32 @@ export function defineHandler(...args: (MiddlewareFn | HandlerFn)[]): HandlerFn 
     };
     await dispatch();
     return c.res;
-  };
+  }) as TypedHandler;
+}
+
+/**
+ * Create a handler with input validation using Standard Schema validators.
+ *
+ * ```ts
+ * export const POST = defineHandler.withValidator({
+ *   body: mySchema,
+ * })((c, { body }) => {
+ *   return { received: body };
+ * });
+ * ```
+ */
+export namespace defineHandler {
+  export function withValidator<V extends ValidatorSlots>(
+    validators: V,
+  ): <R>(handler: (c: CloudContext, input: HandlerInput<V>) => R) => TypedHandler<V, R> {
+    return <R>(handler: (c: CloudContext, input: HandlerInput<V>) => R): TypedHandler<V, R> => {
+      return (async (c: CloudContext) => {
+        const result = await runValidation(validators, c);
+        if (!result.ok) return result.response;
+        return convertReturnValue(await handler(c, result.input));
+      }) as TypedHandler<V, R>;
+    };
+  }
 }
 
 /**
@@ -129,3 +166,5 @@ export function defineJob(handler: JobFn): JobFn {
 export function defineRender(handler: RenderFn): RenderFn {
   return handler;
 }
+
+export type { ValidatorSlots, HandlerInput } from "./validator";

@@ -40,6 +40,17 @@
       "types": "./dist/auth/schema.d.mts",
       "import": "./dist/auth/schema.mjs"
     },
+    "./validator": {
+      "types": "./dist/runtime/validator.d.mts",
+      "import": "./dist/runtime/validator.mjs"
+    },
+    "./routes": {
+      "types": "./dist/routes-stub.d.mts"
+    },
+    "./client": {
+      "types": "./dist/runtime/fetch.d.mts",
+      "import": "./dist/runtime/fetch.mjs"
+    },
     "./env": {
       "types": "./env.d.ts"
     }
@@ -59,14 +70,18 @@
     "@clack/prompts": "catalog:",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.10.0",
+    "arktype": "^2.1.29",
     "estree-walker": "^3.0.3",
     "tinyglobby": "^0.2.15",
     "tsdown": "catalog:",
     "typescript": "catalog:",
-    "vite": "catalog:"
+    "valibot": "^1.2.0",
+    "vite": "catalog:",
+    "zod": "^4.3.6"
   },
   "peerDependencies": {
     "hono": "^4.0.0",
     "vite": "^8.0.0-beta.14"
-  }
+  },
+  "peerDependenciesMeta": {}
 }
