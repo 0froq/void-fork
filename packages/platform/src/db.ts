@@ -68,7 +68,7 @@ export async function createProject(
     .prepare("INSERT INTO projects (id, user_id, slug, name) VALUES (?, ?, ?, ?)")
     .bind(id, userId, slug, name)
     .run();
-  return { id, user_id: userId, slug, name, created_at: new Date().toISOString() };
+  return { id, user_id: userId, slug, name, mode: "worker", created_at: new Date().toISOString() };
 }
 
 export async function getProject(db: D1Database, id: string): Promise<Project | null> {
@@ -85,6 +85,10 @@ export async function getProjectsByUserId(db: D1Database, userId: string): Promi
     .bind(userId)
     .all<Project>();
   return result.results;
+}
+
+export async function updateProjectMode(db: D1Database, id: string, mode: string): Promise<void> {
+  await db.prepare("UPDATE projects SET mode = ? WHERE id = ?").bind(mode, id).run();
 }
 
 // --- Deployments ---

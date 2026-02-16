@@ -44,6 +44,7 @@ Implementation Progress
 - [x] Typed `fetch` client (`vite-cloud/client`) with path/method/input/output inference from `RouteMap`
 - [x] Seamless tsconfig (`.vite-cloud/tsconfig.json` generated, user extends it — no manual `include`)
 - [x] Raw Cloudflare deployment (`vite build && wrangler deploy`) — `mergeBindings` config function preserves user's `wrangler.json` bindings, only adds placeholders for missing inferred bindings
+- [x] Static deployment (`--dir`, `--spa`, VitePress/Vite auto-detection, SSG 404.html fallback)
 
 **Milestone:** Fully typed API routes end-to-end. Route handlers with validators produce typed `RouteMap` via codegen. Client `fetch()` infers path, method, input, and output types automatically. Users can deploy to their own Cloudflare account without the Vite Cloud platform.
 

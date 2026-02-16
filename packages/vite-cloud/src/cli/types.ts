@@ -17,4 +17,5 @@ export interface DeployManifest {
   migrations?: MigrationMeta[];
   schedules?: ScheduleMeta[];
   ssr?: boolean;
+  static?: "spa" | "ssg";
 }

@@ -3,9 +3,10 @@ import app from "../../src/index";
 import type { Env } from "../../src/env";
 
 interface RoutingEntry {
-  workerName: string;
+  workerName?: string;
   projectId: string;
   ssr?: boolean;
+  mode?: "spa" | "ssg";
 }
 
 function createEnv(options: {
@@ -113,5 +114,114 @@ describe("dispatch fetch handler", () => {
 
     expect(workerFetch).not.toHaveBeenCalled();
     expect(await response.text()).toBe("<html>spa</html>");
+  });
+});
+
+describe("dispatch static-only routing", () => {
+  it("serves SPA with index.html fallback for unknown paths", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa" },
+      assets: {
+        "proj_1/current/index.html": { body: "<html>SPA</html>", contentType: "text/html" },
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/dashboard/settings"),
+      env,
+    );
+
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<html>SPA</html>");
+  });
+
+  it("serves SSG with nested index.html for clean URLs", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: { projectId: "proj_1", mode: "ssg" },
+      assets: {
+        "proj_1/current/about/index.html": { body: "<html>About</html>", contentType: "text/html" },
+      },
+    });
+
+    const response = await app.fetch(new Request("https://my-app.vitecloud.app/about"), env);
+
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<html>About</html>");
+  });
+
+  it("serves SSG 404.html with status 404 for unknown paths", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: { projectId: "proj_1", mode: "ssg" },
+      assets: {
+        "proj_1/current/404.html": { body: "<html>Not Found</html>", contentType: "text/html" },
+      },
+    });
+
+    const response = await app.fetch(new Request("https://my-app.vitecloud.app/nonexistent"), env);
+
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("<html>Not Found</html>");
+  });
+
+  it("returns plain 404 for SSG when no 404.html exists", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: { projectId: "proj_1", mode: "ssg" },
+      assets: {},
+    });
+
+    const response = await app.fetch(new Request("https://my-app.vitecloud.app/nonexistent"), env);
+
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("Not Found");
+  });
+
+  it("serves SSG root index.html for / path", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: { projectId: "proj_1", mode: "ssg" },
+      assets: {
+        "proj_1/current/index.html": { body: "<html>Home</html>", contentType: "text/html" },
+      },
+    });
+
+    const response = await app.fetch(new Request("https://my-app.vitecloud.app/"), env);
+
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<html>Home</html>");
+  });
+
+  it("serves SSG static file by exact path", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: { projectId: "proj_1", mode: "ssg" },
+      assets: {
+        "proj_1/current/styles.css": { body: "body{}", contentType: "text/css" },
+      },
+    });
+
+    const response = await app.fetch(new Request("https://my-app.vitecloud.app/styles.css"), env);
+
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("body{}");
+  });
+
+  it("does not dispatch to worker for /api routes on static deploys", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa" },
+      assets: {
+        "proj_1/current/index.html": { body: "<html>SPA</html>", contentType: "text/html" },
+      },
+    });
+
+    const response = await app.fetch(new Request("https://my-app.vitecloud.app/api/hello"), env);
+
+    // Static SPA: no worker, so /api falls through to SPA fallback
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<html>SPA</html>");
   });
 });

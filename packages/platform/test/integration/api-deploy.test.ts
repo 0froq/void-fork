@@ -437,3 +437,142 @@ describe("POST /projects/:id/deploy", () => {
     expect(dpl?.status).toBe("failed");
   });
 });
+
+function buildStaticDeployForm(opts: {
+  mode: "spa" | "ssg";
+  assets?: Record<string, string>;
+}): FormData {
+  const form = new FormData();
+  form.append("manifest", JSON.stringify({ bindings: {}, static: opts.mode }));
+  if (opts.assets) {
+    for (const [path, content] of Object.entries(opts.assets)) {
+      form.append(`asset:${path}`, new Blob([content]));
+    }
+  }
+  return form;
+}
+
+describe("POST /projects/:id/deploy (static)", () => {
+  it("succeeds with static SPA deploy (no worker upload)", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "spa-site");
+    // No mockCfApi needed — static deploys don't call CF API
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildStaticDeployForm({
+          mode: "spa",
+          assets: {
+            "index.html": "<html>SPA</html>",
+            "assets/app-abc123.js": "console.log('spa')",
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      deployment: string;
+      url: string;
+      assets: number;
+      workers: number;
+    };
+    expect(body.deployment).toMatch(/^dpl_/);
+    expect(body.url).toBe("https://spa-site.vitecloud.app");
+    expect(body.assets).toBe(2);
+    expect(body.workers).toBe(0);
+  });
+
+  it("stores static assets in R2", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "static-r2");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildStaticDeployForm({
+          mode: "ssg",
+          assets: {
+            "index.html": "<html>SSG</html>",
+            "about/index.html": "<html>About</html>",
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const html = await env.ASSETS.get(`${project.id}/current/index.html`);
+    expect(html).not.toBeNull();
+    expect(await html!.text()).toBe("<html>SSG</html>");
+
+    const about = await env.ASSETS.get(`${project.id}/current/about/index.html`);
+    expect(about).not.toBeNull();
+    expect(await about!.text()).toBe("<html>About</html>");
+  });
+
+  it("writes KV routing with mode for static SPA", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "kv-spa");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildStaticDeployForm({ mode: "spa" }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const routing = await env.ROUTING.get("kv-spa", "json");
+    expect(routing).toEqual({
+      projectId: project.id,
+      mode: "spa",
+    });
+  });
+
+  it("writes KV routing with mode for static SSG", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "kv-ssg");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildStaticDeployForm({ mode: "ssg" }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const routing = await env.ROUTING.get("kv-ssg", "json");
+    expect(routing).toEqual({
+      projectId: project.id,
+      mode: "ssg",
+    });
+  });
+
+  it("updates project mode column on static deploy", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "mode-update");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildStaticDeployForm({ mode: "ssg" }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const row = await env.DB.prepare("SELECT mode FROM projects WHERE id = ?")
+      .bind(project.id)
+      .first<{ mode: string }>();
+    expect(row?.mode).toBe("ssg");
+  });
+});

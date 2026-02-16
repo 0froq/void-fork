@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { intro, outro, log, note, spinner } from "@clack/prompts";
 import { getToken } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
-import { packageBuild } from "./package";
+import { packageBuild, packageStaticBuild } from "./package";
 import { PlatformClient, type ProjectResponse } from "./client";
 import { inferProjectBindings, FRAMEWORK_SCAN_DIRS, detectFramework } from "../plugin-inference";
 import { promptProjectSelection, promptProjectSlug } from "./prompt";
@@ -12,9 +12,12 @@ import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
 import { scanJobsSync } from "../jobs/scan";
 import { validateSsrEntry } from "../ssr/entry";
+import { detectPreset, type StaticPreset } from "./preset";
 
 export interface RunDeployOptions {
   projectSlug?: string;
+  dir?: string;
+  spa?: boolean;
 }
 
 export function getRequestedProjectSlug(options?: RunDeployOptions): string | null {
@@ -51,10 +54,11 @@ export function inferDefaultProjectNameAndSlug(root: string): { name: string; sl
 /**
  * Run the full deploy pipeline:
  * 1. Check auth
- * 2. Run vite build
- * 3. Package output
- * 4. Upload to platform
- * 5. Print live URL
+ * 2. Resolve project + deploy mode
+ * 3. Build (if needed)
+ * 4. Package output
+ * 5. Upload to platform
+ * 6. Print live URL
  */
 export async function runDeploy(root: string, options?: RunDeployOptions): Promise<void> {
   console.log();
@@ -103,6 +107,85 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
     }
   }
 
+  // 3. Resolve deploy mode: project.json > CLI flags > auto-detection
+  let preset: StaticPreset | null = null;
+
+  if (config.mode && config.mode !== "full") {
+    // project.json has a persisted static mode
+    preset = {
+      buildCommand: null,
+      outputDir: config.outputDir ?? join(root, "dist"),
+      mode: config.mode,
+    };
+    // Re-detect build command (project.json stores mode, not command)
+    const detected = detectPreset(root, { dir: options?.dir, spa: options?.spa });
+    if (detected) {
+      preset.buildCommand = detected.buildCommand;
+      preset.outputDir = config.outputDir ?? detected.outputDir;
+    }
+  } else if (!config.mode) {
+    // No persisted mode — detect from CLI flags + project structure
+    preset = detectPreset(root, { dir: options?.dir, spa: options?.spa });
+  }
+  // config.mode === "full" → preset stays null → full deploy
+
+  if (preset) {
+    await runStaticDeploy(root, config, client, preset, options);
+  } else {
+    await runFullDeploy(root, config, client);
+  }
+}
+
+async function runStaticDeploy(
+  root: string,
+  config: ProjectConfig,
+  client: PlatformClient,
+  preset: StaticPreset,
+  options?: RunDeployOptions,
+): Promise<void> {
+  const modeLabel = preset.mode === "spa" ? "Static SPA" : "Static SSG";
+  log.info(`${modeLabel} deploy`);
+
+  // Build (if needed)
+  if (preset.buildCommand) {
+    log.step("Building...");
+    execSync(preset.buildCommand, { cwd: root, stdio: "inherit" });
+  }
+
+  if (!existsSync(preset.outputDir)) {
+    log.error(`Output directory not found: ${preset.outputDir}`);
+    process.exit(1);
+  }
+
+  // Package & Upload
+  const s = spinner();
+
+  s.start("Packaging...");
+  const formData = packageStaticBuild(preset.outputDir, preset.mode);
+
+  s.message("Deploying...");
+  const result = await client.deploy(config.projectId, formData);
+  s.stop("Deployed!");
+
+  // Persist mode to project.json
+  config.mode = preset.mode;
+  if (!options?.dir) {
+    // Only persist outputDir if it was auto-detected (not --dir)
+    config.outputDir = preset.outputDir;
+  }
+  writeProjectConfig(root, config);
+
+  const summary = [`${modeLabel} — ${result.assets} static asset(s)`];
+  note(summary.join("\n"), result.url);
+
+  outro("Done!");
+}
+
+async function runFullDeploy(
+  root: string,
+  config: ProjectConfig,
+  client: PlatformClient,
+): Promise<void> {
   // 3. Build
   log.step("Building...");
   execSync("npx vite build", { cwd: root, stdio: "inherit" });
@@ -159,6 +242,11 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   s.message("Deploying...");
   const result = await client.deploy(config.projectId, formData);
   s.stop("Deployed!");
+
+  // Persist mode
+  config.mode = "full";
+  delete config.outputDir;
+  writeProjectConfig(root, config);
 
   const summary = [`${result.workers} worker module(s), ${result.assets} static asset(s)`];
   if (result.migrations) {

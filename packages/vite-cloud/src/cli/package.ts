@@ -77,6 +77,25 @@ export function packageBuild(
 }
 
 /**
+ * Package a static build (no worker) into a FormData ready for upload.
+ */
+export function packageStaticBuild(outputDir: string, mode: "spa" | "ssg"): FormData {
+  const formData = new FormData();
+
+  const manifest: DeployManifest = { bindings: {}, static: mode };
+  formData.append("manifest", JSON.stringify(manifest));
+
+  const files = collectFiles(outputDir);
+  for (const filePath of files) {
+    const relativePath = relative(outputDir, filePath);
+    const content = readFileSync(filePath);
+    formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
+  }
+
+  return formData;
+}
+
+/**
  * Recursively collect all file paths in a directory.
  */
 function collectFiles(dir: string): string[] {

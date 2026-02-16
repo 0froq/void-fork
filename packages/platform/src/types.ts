@@ -12,6 +12,7 @@ export interface Project {
   user_id: string;
   slug: string;
   name: string;
+  mode: string;
   created_at: string;
 }
 
@@ -52,4 +53,5 @@ export interface DeployManifest {
   migrations?: MigrationMeta[];
   schedules?: ScheduleMeta[];
   ssr?: boolean;
+  static?: "spa" | "ssg";
 }

@@ -1,11 +1,12 @@
 import type { Env } from "./env";
 import { extractSlug } from "./hostname";
-import { serveStaticAsset, serveStaticAssetWithFallback } from "./static";
+import { serveStaticAsset, serveStaticAssetWithFallback, serveSSGAsset } from "./static";
 
 interface RoutingEntry {
-  workerName: string;
+  workerName?: string;
   projectId: string;
   ssr?: boolean;
+  mode?: "spa" | "ssg";
 }
 
 export default {
@@ -24,6 +25,14 @@ export default {
     }
 
     const routing: RoutingEntry = JSON.parse(routingRaw);
+
+    // Static-only deploys (no worker)
+    if (!routing.workerName) {
+      if (routing.mode === "ssg") {
+        return serveSSGAsset(env, routing.projectId, url.pathname);
+      }
+      return serveStaticAssetWithFallback(env, routing.projectId, url.pathname);
+    }
 
     // API routes → dispatch to user worker
     if (url.pathname.startsWith("/api/") || url.pathname === "/api") {

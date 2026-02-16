@@ -47,6 +47,51 @@ export async function serveStaticAsset(
   return buildResponse(object, assetPath);
 }
 
+/**
+ * Serve a static SSG asset from R2.
+ *
+ * Resolution order:
+ * 1. Exact file path
+ * 2. <path>/index.html (for clean URLs)
+ * 3. 404.html with status 404
+ * 4. Plain 404 response
+ */
+export async function serveSSGAsset(
+  env: Env,
+  projectId: string,
+  pathname: string,
+): Promise<Response> {
+  let assetPath = pathname.startsWith("/") ? pathname.slice(1) : pathname;
+
+  // Try exact path (e.g. /styles.css, /about.html)
+  if (assetPath && hasExtension(assetPath)) {
+    const object = await env.ASSETS.get(`${projectId}/current/${assetPath}`);
+    if (object) return buildResponse(object, assetPath);
+  }
+
+  // For paths without extension: try <path>/index.html
+  if (!hasExtension(assetPath)) {
+    // Root path → index.html
+    const indexPath = assetPath ? `${assetPath.replace(/\/+$/, "")}/index.html` : "index.html";
+    const index = await env.ASSETS.get(`${projectId}/current/${indexPath}`);
+    if (index) return buildResponse(index, indexPath);
+  }
+
+  // Fallback: serve 404.html with 404 status
+  const notFoundPage = await env.ASSETS.get(`${projectId}/current/404.html`);
+  if (notFoundPage) {
+    return new Response(notFoundPage.body, {
+      status: 404,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-cache",
+      },
+    });
+  }
+
+  return new Response("Not Found", { status: 404 });
+}
+
 export async function serveStaticAssetWithFallback(
   env: Env,
   projectId: string,

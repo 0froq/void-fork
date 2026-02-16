@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { PlatformEnv } from "../env";
 import type { DeployManifest } from "../types";
-import { getProject, createDeployment, updateDeploymentStatus } from "../db";
+import { getProject, createDeployment, updateDeploymentStatus, updateProjectMode } from "../db";
 import { provisionBindings } from "../provisioning/provision";
 import { runRemoteMigrations, type RemoteMigration } from "../migrations/remote-runner";
 import { validateMigrationSQL } from "../migrations/validate";
@@ -32,6 +32,42 @@ app.post("/:id/deploy", async (c) => {
   const deployment = await createDeployment(c.env.DB, projectId, manifestRaw);
 
   try {
+    // Static-only deploy path: skip worker upload, bindings, and migrations
+    if (manifest.static) {
+      await updateDeploymentStatus(c.env.DB, deployment.id, "uploading");
+
+      // Upload static assets to R2
+      const assetKeys: string[] = [];
+      for (const [key, value] of formData.entries()) {
+        if (key.startsWith("asset:")) {
+          const assetPath = key.slice("asset:".length);
+          const r2Key = `${projectId}/current/${assetPath}`;
+          const blob = value as Blob;
+          await c.env.ASSETS.put(r2Key, await blob.arrayBuffer(), {
+            httpMetadata: {
+              contentType: guessContentType(assetPath),
+            },
+          });
+          assetKeys.push(assetPath);
+        }
+      }
+
+      // Update KV routing (no workerName for static deploys)
+      await c.env.ROUTING.put(project.slug, JSON.stringify({ projectId, mode: manifest.static }));
+
+      // Mark deployment as live + update project mode
+      await updateDeploymentStatus(c.env.DB, deployment.id, "live");
+      await updateProjectMode(c.env.DB, projectId, manifest.static);
+
+      return c.json({
+        deployment: deployment.id,
+        url: `https://${project.slug}.vitecloud.app`,
+        assets: assetKeys.length,
+        workers: 0,
+      });
+    }
+
+    // Full deploy path (existing behavior)
     await updateDeploymentStatus(c.env.DB, deployment.id, "uploading");
 
     // Provision bindings (D1, KV, R2) — creates CF resources if needed
@@ -172,8 +208,9 @@ app.post("/:id/deploy", async (c) => {
       JSON.stringify({ workerName, projectId, ...(manifest.ssr ? { ssr: true } : {}) }),
     );
 
-    // 5. Mark deployment as live
+    // 5. Mark deployment as live + update project mode
     await updateDeploymentStatus(c.env.DB, deployment.id, "live");
+    await updateProjectMode(c.env.DB, projectId, "worker");
 
     return c.json({
       deployment: deployment.id,
