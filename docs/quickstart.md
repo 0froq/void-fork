@@ -109,7 +109,7 @@ Precedence is:
 
 ## Next steps
 
-- [Cloudflare Env](./cloudflare-env.md) -- access D1, KV, and R2 bindings in your handlers
+- [Cloudflare](./cloudflare.md) -- bindings, wrangler config, and self-hosted deployment
 - [Routing](./routing.md) -- file-based routing, middleware, and the Hono ecosystem
 - [Configuration](./config.md) -- explicit binding overrides and plugin options
 

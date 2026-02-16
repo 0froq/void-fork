@@ -43,8 +43,9 @@ Implementation Progress
 - [x] Route type codegen (`.vite-cloud/routes.d.ts` with `Serialize<T>` + `ExtractInput<V>`)
 - [x] Typed `fetch` client (`vite-cloud/client`) with path/method/input/output inference from `RouteMap`
 - [x] Seamless tsconfig (`.vite-cloud/tsconfig.json` generated, user extends it — no manual `include`)
+- [x] Raw Cloudflare deployment (`vite build && wrangler deploy`) — `mergeBindings` config function preserves user's `wrangler.json` bindings, only adds placeholders for missing inferred bindings
 
-**Milestone:** Fully typed API routes end-to-end. Route handlers with validators produce typed `RouteMap` via codegen. Client `fetch()` infers path, method, input, and output types automatically.
+**Milestone:** Fully typed API routes end-to-end. Route handlers with validators produce typed `RouteMap` via codegen. Client `fetch()` infers path, method, input, and output types automatically. Users can deploy to their own Cloudflare account without the Vite Cloud platform.
 
 ### Phase 4: GitHub & Production Readiness
 
@@ -65,7 +66,8 @@ Implementation Progress
 
 #### v1.1 — Full-Stack & Observability
 
-- [ ] Meta-framework adapters (TanStack Start, React Router 7, SolidStart)
+- [x] Meta-framework adapters (TanStack Start, React Router — framework mode)
+- [ ] SolidStart adapter
 - [ ] better-auth plugin (`@vite-cloud/better-auth`)
 - [ ] Per-route observability (request volume, latency, error rates per route)
 - [ ] Core Web Vitals monitoring (injected `web-vitals` → Analytics Engine)
