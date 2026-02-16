@@ -84,11 +84,12 @@ describe("runListCommand", () => {
       headers: { Authorization: "Bearer test-token" },
     });
     expect(out).toContain("star-tracker");
-    expect(out).toContain("proj_1");
     expect(out).toContain("https://star-tracker.vitecloud.app");
     expect(out).toContain("todo-app");
-    expect(out).toContain("proj_2");
     expect(out).toContain("https://todo-app.vitecloud.app");
+    // IDs are displayed with proj_ prefix trimmed
+    expect(out).toContain(" 1 ");
+    expect(out).toContain(" 2 ");
   });
 
   it("prints a friendly message when there are no projects", async () => {
