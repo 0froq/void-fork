@@ -14,11 +14,11 @@ export type PromptResult = SelectResult | CreateResult;
 
 export async function promptProjectSelection(projects: ProjectResponse[]): Promise<PromptResult> {
   const options = [
+    { value: "__create__", label: "Create new project" },
     ...projects.map((p) => ({
       value: p.id,
       label: `${p.slug} (${p.slug}.vitecloud.app)`,
     })),
-    { value: "__create__", label: "Create new project" },
   ];
 
   const result = await select({

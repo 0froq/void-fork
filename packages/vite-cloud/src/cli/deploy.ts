@@ -92,11 +92,11 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
         writeProjectConfig(root, config);
         log.step(`Linked to ${config.slug}`);
       } else {
-        // User wants to create a new project — fall through
-        config = await createNewProject(root, client);
+        const inferred = inferDefaultProjectNameAndSlug(root);
+        const slug = await promptProjectSlug(inferred.slug);
+        config = await createNewProject(root, client, slug);
       }
     } else {
-      // No existing projects — confirm inferred slug, then create
       const inferred = inferDefaultProjectNameAndSlug(root);
       const slug = await promptProjectSlug(inferred.slug);
       config = await createNewProject(root, client, slug);
