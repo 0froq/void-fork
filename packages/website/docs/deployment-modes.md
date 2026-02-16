@@ -4,7 +4,7 @@ Vite Cloud supports three deployment modes. The mode is auto-detected on first d
 
 ## Full (Worker + Assets)
 
-The default for projects using the `vite-cloud` plugin with API routes, SSR, jobs, or any backend code. This is what [Quickstart](./quickstart.md) walks through.
+The default for projects using the `vite-cloud` plugin with support for [API routes](./routing.md), [SSR](./ssr.md), [SSG](./ssg.md), [jobs](./jobs.md), or any backend code that runs in Cloudflare Workers. This is what [Quickstart](./quickstart.md) walks through.
 
 ```bash
 vcd deploy
