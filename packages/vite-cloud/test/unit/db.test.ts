@@ -77,9 +77,35 @@ describe("createDb", () => {
       expect(mockD1.stmt.bind).toHaveBeenCalledWith("Alice", 1);
     });
 
+    it("generates WHERE with IN for array values", async () => {
+      await db.list("users", { where: { id: [1, 2, 3] } });
+      expect(mockD1.mock.prepare).toHaveBeenCalledWith("SELECT * FROM users WHERE id IN (?, ?, ?)");
+      expect(mockD1.stmt.bind).toHaveBeenCalledWith(1, 2, 3);
+    });
+
+    it("generates WHERE mixing scalar and array values", async () => {
+      await db.list("users", { where: { name: "Alice", id: [1, 2] } });
+      expect(mockD1.mock.prepare).toHaveBeenCalledWith(
+        "SELECT * FROM users WHERE name = ? AND id IN (?, ?)",
+      );
+      expect(mockD1.stmt.bind).toHaveBeenCalledWith("Alice", 1, 2);
+    });
+
+    it("generates SELECT with select columns", async () => {
+      await db.list("users", { select: ["name", "email"] });
+      expect(mockD1.mock.prepare).toHaveBeenCalledWith("SELECT name, email FROM users");
+    });
+
     it("generates SELECT with ORDER BY", async () => {
       await db.list("users", { orderBy: "name DESC" });
       expect(mockD1.mock.prepare).toHaveBeenCalledWith("SELECT * FROM users ORDER BY name DESC");
+    });
+
+    it("generates SELECT with orderBy array", async () => {
+      await db.list("users", { orderBy: ["name ASC", "created_at DESC"] });
+      expect(mockD1.mock.prepare).toHaveBeenCalledWith(
+        "SELECT * FROM users ORDER BY name ASC, created_at DESC",
+      );
     });
 
     it("generates SELECT with LIMIT and OFFSET", async () => {
@@ -112,6 +138,11 @@ describe("createDb", () => {
       await db.get("users", { where: { id: 1 } });
       expect(mockD1.mock.prepare).toHaveBeenCalledWith("SELECT * FROM users WHERE id = ? LIMIT 1");
       expect(mockD1.stmt.bind).toHaveBeenCalledWith(1);
+    });
+
+    it("generates SELECT with select columns", async () => {
+      await db.get("users", { select: ["name"] });
+      expect(mockD1.mock.prepare).toHaveBeenCalledWith("SELECT name FROM users LIMIT 1");
     });
   });
 
@@ -176,6 +207,25 @@ describe("createDb", () => {
       await db.raw("SELECT 1");
       expect(mockD1.mock.prepare).toHaveBeenCalledWith("SELECT 1");
       expect(mockD1.stmt.all).toHaveBeenCalled();
+    });
+  });
+
+  describe("count", () => {
+    it("generates COUNT query", async () => {
+      mockD1.stmt.first.mockResolvedValue({ count: 42 });
+      const result = await db.count("users");
+      expect(mockD1.mock.prepare).toHaveBeenCalledWith("SELECT COUNT(*) AS count FROM users");
+      expect(result).toBe(42);
+    });
+
+    it("generates COUNT with WHERE", async () => {
+      mockD1.stmt.first.mockResolvedValue({ count: 5 });
+      const result = await db.count("users", { where: { active: 1 } });
+      expect(mockD1.mock.prepare).toHaveBeenCalledWith(
+        "SELECT COUNT(*) AS count FROM users WHERE active = ?",
+      );
+      expect(mockD1.stmt.bind).toHaveBeenCalledWith(1);
+      expect(result).toBe(5);
     });
   });
 
@@ -331,6 +381,76 @@ describe("type-level inference", () => {
 
       // @ts-expect-error - 'email' does not exist on posts
       void posts[0].email;
+    };
+    void _check;
+    expect(true).toBe(true);
+  });
+
+  it("type: select narrows return type on list", () => {
+    const _check = async () => {
+      const users = await typedDb.list("users", { select: ["name", "email"] });
+      // selected cols are accessible
+      void users[0].name.toUpperCase();
+      void users[0].email.toUpperCase();
+
+      // @ts-expect-error - 'id' was not selected
+      void users[0].id;
+
+      // @ts-expect-error - 'created_at' was not selected
+      void users[0].created_at;
+    };
+    void _check;
+    expect(true).toBe(true);
+  });
+
+  it("type: select narrows return type on get", () => {
+    const _check = async () => {
+      const user = await typedDb.get("users", { select: ["name"] });
+      if (user) {
+        void user.name.toUpperCase();
+
+        // @ts-expect-error - 'email' was not selected
+        void user.email;
+      }
+    };
+    void _check;
+    expect(true).toBe(true);
+  });
+
+  it("type: where clause accepts array values (IN)", () => {
+    const _check = async () => {
+      // array of correct type compiles
+      await typedDb.list("users", { where: { id: [1, 2, 3] } });
+      await typedDb.list("users", { where: { name: ["Alice", "Bob"] } });
+
+      // @ts-expect-error - id is number, not string[]
+      await typedDb.list("users", { where: { id: ["wrong"] } });
+    };
+    void _check;
+    expect(true).toBe(true);
+  });
+
+  it("type: orderBy accepts array", () => {
+    const _check = async () => {
+      await typedDb.list("users", { orderBy: ["name", "id DESC"] });
+      await typedDb.list("users", { orderBy: ["name ASC", "created_at DESC"] });
+
+      // @ts-expect-error - 'missing' is not a column on users
+      await typedDb.list("users", { orderBy: ["missing"] });
+    };
+    void _check;
+    expect(true).toBe(true);
+  });
+
+  it("type: count returns Promise<number>", () => {
+    const _check = async () => {
+      const n: number = await typedDb.count("users");
+      void n.toFixed();
+
+      await typedDb.count("users", { where: { id: 1 } });
+
+      // @ts-expect-error - "nonexistent" is not a valid table
+      await typedDb.count("nonexistent");
     };
     void _check;
     expect(true).toBe(true);
