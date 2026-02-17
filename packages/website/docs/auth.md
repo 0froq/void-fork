@@ -46,34 +46,26 @@ The following routes are generated based on your enabled providers:
 
 ### Email/password
 
-Register a new user:
+Use the `auth` helpers from `vite-cloud/client`:
 
 ```ts
-await fetch("/auth/register", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    email: "alice@example.com",
-    password: "s3cret",
-    name: "Alice", // optional
-  }),
+import { auth } from "vite-cloud/client";
+
+// Register a new user
+const user = await auth.register({
+  email: "alice@example.com",
+  password: "s3cret",
+  name: "Alice", // optional
+});
+
+// Sign in
+const user = await auth.login({
+  email: "alice@example.com",
+  password: "s3cret",
 });
 ```
 
-Sign in:
-
-```ts
-await fetch("/auth/login", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    email: "alice@example.com",
-    password: "s3cret",
-  }),
-});
-```
-
-Both endpoints set a `__vc_session` cookie on success and return the user object.
+Both methods set a `__vc_session` cookie on success and return the `AuthUser` object. They throw an `AuthError` on failure (wrong credentials, duplicate email, etc.).
 
 ### OAuth
 
@@ -137,14 +129,40 @@ interface AuthUser {
 }
 ```
 
+## Client Helpers
+
+`vite-cloud/client` exports an `auth` object with helpers for all auth operations:
+
+```ts
+import { auth, AuthError } from "vite-cloud/client";
+
+const user = await auth.register({ email, password, name }); // AuthUser
+const user = await auth.login({ email, password }); // AuthUser
+const user = await auth.me(); // AuthUser | null
+await auth.logout(); // void
+```
+
+`register` and `login` throw `AuthError` on failure. `me` returns `null` when not authenticated instead of throwing.
+
+```ts
+try {
+  await auth.login({ email, password });
+} catch (e) {
+  if (e instanceof AuthError) {
+    console.log(e.status); // 401
+    console.log(e.message); // "Invalid credentials"
+  }
+}
+```
+
 ## Sessions
 
 Sessions are stored in a KV namespace (`AUTH_KV`) with a 7-day TTL. The session ID is stored in an `HttpOnly`, `SameSite=Lax` cookie (`__vc_session`).
 
-To sign out, call the logout endpoint:
+To sign out:
 
 ```ts
-await fetch("/auth/logout", { method: "POST" });
+await auth.logout();
 ```
 
 This deletes the session from KV and clears the cookie.
