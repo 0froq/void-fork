@@ -8,39 +8,19 @@ import {
   inferProjectBindings,
   detectFramework,
   FRAMEWORK_SCAN_DIRS,
-  type InferenceOptions,
   type Framework,
 } from "./plugin-inference";
 import { scanJobsSync } from "./jobs/scan";
 import { validateSsrEntry } from "./ssr/entry";
+import { readConfig, normalizeAuth } from "./config";
 
-/** Supported authentication providers. */
-export type AuthProvider = "github" | "google" | "email";
+export type { AuthProvider } from "./config";
 
 /** Server entry module for each supported framework. */
 const FRAMEWORK_ENTRIES: Record<Framework, string> = {
   "tanstack-start": "@tanstack/react-start/server-entry",
   "react-router": "react-router/server-entry",
 };
-
-/** Options for the {@link viteCloud} plugin. */
-export interface ViteCloudOptions extends InferenceOptions {
-  /**
-   * Enable built-in auth routes and session management.
-   *
-   * - `true` enables email-only auth.
-   * - An array of {@link AuthProvider} names enables specific providers.
-   * - `false` / `undefined` disables auth entirely.
-   */
-  auth?: boolean | AuthProvider[];
-}
-
-function normalizeAuth(auth: boolean | AuthProvider[] | undefined): AuthProvider[] | null {
-  if (!auth) return null;
-  if (auth === true) return ["email"];
-  if (auth.length === 0) return null;
-  return auth;
-}
 
 /** Check whether a binding name already exists in a resolved bindings array. */
 function hasBinding(list: readonly { binding: string }[] | undefined, name: string): boolean {
@@ -65,19 +45,32 @@ function hasBinding(list: readonly { binding: string }[] | undefined, name: stri
  * that are missing. This allows `vite build && wrangler deploy` to work
  * for deploying directly to Cloudflare without the Vite Cloud platform.
  */
-export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
+export default function viteCloud(): Plugin[] {
   // Resolve root relative to CWD — this runs at config time
   const root = process.cwd();
+  const config = readConfig(root);
   const framework = detectFramework(root);
-  const authProviders = normalizeAuth(options.auth);
+  const authProviders = normalizeAuth(config.auth);
 
   // Infer bindings synchronously from source files
   const scanDirs = framework ? FRAMEWORK_SCAN_DIRS : undefined;
-  const bindings = inferProjectBindings(root, options, scanDirs);
+  const inferenceOptions = config.bindings ? { bindings: config.bindings } : undefined;
+  const bindings = inferProjectBindings(root, inferenceOptions, scanDirs);
 
   // Core worker config — always set by viteCloud (main, triggers, assets).
   // Bindings are handled separately in the config function below.
   const workerConfig: Record<string, unknown> = {};
+
+  // Merge curated wrangler fields from vite-cloud.json
+  if (config.wrangler?.compatibility_date) {
+    workerConfig.compatibility_date = config.wrangler.compatibility_date;
+  }
+  if (config.wrangler?.compatibility_flags) {
+    workerConfig.compatibility_flags = config.wrangler.compatibility_flags;
+  }
+  if (config.wrangler?.vars) {
+    workerConfig.vars = config.wrangler.vars;
+  }
 
   const inspectorPortEnv = process.env.VITE_CLOUD_INSPECTOR_PORT;
   const inspectorPort =
@@ -144,7 +137,11 @@ export default function viteCloud(options: ViteCloudOptions = {}): Plugin[] {
     // (without it, the worker is treated as "assets-only" and cloudflare:*
     // modules are not externalized during the SSR build).
     workerConfig.main = FRAMEWORK_ENTRIES[framework];
-    workerConfig.compatibility_flags = ["nodejs_compat"];
+    // Framework mode requires nodejs_compat — merge with any user-specified flags
+    const existingFlags = (workerConfig.compatibility_flags as string[] | undefined) ?? [];
+    if (!existingFlags.includes("nodejs_compat")) {
+      workerConfig.compatibility_flags = [...existingFlags, "nodejs_compat"];
+    }
 
     return [
       migrationPlugin(root),

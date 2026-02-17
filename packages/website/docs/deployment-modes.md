@@ -96,23 +96,21 @@ The detection logic runs in this order:
 | 4        | `vite` in dependencies, no backend files            | SPA, builds with `vite build`      |
 | 5        | `dist/index.html` or `./index.html` exists          | SSG (no build step)                |
 
-## Project Config
+## Configuring the mode
 
-The detected mode and output directory are stored in `.vite-cloud/project.json`:
+To lock the deployment mode (and skip auto-detection), set `mode` in [`vite-cloud.json`](./config.md):
 
 ```json
 {
-  "projectId": "proj_xxx",
-  "slug": "my-app",
   "mode": "ssg",
   "outputDir": ".vitepress/dist"
 }
 ```
 
 - `mode`: `"spa"`, `"ssg"`, or `"full"`
-- `outputDir`: only set for static modes
+- `outputDir`: output directory for static modes (relative to project root, defaults to `"dist"`)
 
-These values are written on first deploy and respected on subsequent deploys. Edit them manually to override auto-detection, or delete them to re-trigger detection.
+If `mode` is omitted, it is auto-detected on each deploy.
 
 ## Detection Presets
 

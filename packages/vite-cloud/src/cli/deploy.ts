@@ -1,10 +1,10 @@
 import { execSync } from "node:child_process";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { intro, outro, log, note, spinner } from "@clack/prompts";
 import { getToken } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
-import { computeAssetHashes, packageBuild, packageStaticBuild, readHeaderRules } from "./package";
+import { computeAssetHashes, packageBuild, packageStaticBuild } from "./package";
 import { PlatformClient, type ProjectResponse } from "./client";
 import { inferProjectBindings, FRAMEWORK_SCAN_DIRS, detectFramework } from "../plugin-inference";
 import { promptProjectSelection, promptProjectSlug } from "./prompt";
@@ -13,6 +13,7 @@ import { validateMigrations } from "../migrations/validate";
 import { scanJobsSync } from "../jobs/scan";
 import { validateSsrEntry } from "../ssr/entry";
 import { detectPreset, type StaticPreset } from "./preset";
+import { readConfig, convertHeadersConfig } from "../config";
 
 export interface RunDeployOptions {
   projectSlug?: string;
@@ -107,32 +108,36 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
     }
   }
 
-  // 3. Resolve deploy mode: project.json > CLI flags > auto-detection
+  // 3. Resolve deploy mode: vite-cloud.json > CLI flags > auto-detection
+  const vcConfig = readConfig(root);
+  const headers = convertHeadersConfig(vcConfig.headers);
   let preset: StaticPreset | null = null;
 
-  if (config.mode && config.mode !== "full") {
-    // project.json has a persisted static mode
+  if (vcConfig.mode && vcConfig.mode !== "full") {
+    // vite-cloud.json has an explicit static mode
     preset = {
       buildCommand: null,
-      outputDir: config.outputDir ?? join(root, "dist"),
-      mode: config.mode,
+      outputDir: vcConfig.outputDir ? resolve(root, vcConfig.outputDir) : join(root, "dist"),
+      mode: vcConfig.mode,
     };
-    // Re-detect build command (project.json stores mode, not command)
+    // Re-detect build command (config stores mode, not command)
     const detected = detectPreset(root, { dir: options?.dir, spa: options?.spa });
     if (detected) {
       preset.buildCommand = detected.buildCommand;
-      preset.outputDir = config.outputDir ?? detected.outputDir;
+      if (!vcConfig.outputDir) {
+        preset.outputDir = detected.outputDir;
+      }
     }
-  } else if (!config.mode) {
-    // No persisted mode — detect from CLI flags + project structure
+  } else if (!vcConfig.mode) {
+    // No configured mode — detect from CLI flags + project structure
     preset = detectPreset(root, { dir: options?.dir, spa: options?.spa });
   }
-  // config.mode === "full" → preset stays null → full deploy
+  // vcConfig.mode === "full" → preset stays null → full deploy
 
   if (preset) {
-    await runStaticDeploy(root, config, client, preset, options);
+    await runStaticDeploy(root, config, client, preset, headers);
   } else {
-    await runFullDeploy(root, config, client);
+    await runFullDeploy(root, config, client, headers);
   }
 }
 
@@ -141,7 +146,7 @@ async function runStaticDeploy(
   config: ProjectConfig,
   client: PlatformClient,
   preset: StaticPreset,
-  options?: RunDeployOptions,
+  headers?: import("./types").HeaderRule[],
 ): Promise<void> {
   const modeLabel = preset.mode === "spa" ? "Static SPA" : "Static SSG";
   log.info(`${modeLabel} deploy`);
@@ -167,7 +172,6 @@ async function runStaticDeploy(
   s.message(
     `Uploading ${needed.length}/${totalAssets} assets (${totalAssets - needed.length} cached)`,
   );
-  const headers = readHeaderRules(preset.outputDir);
   const formData = packageStaticBuild(
     preset.outputDir,
     preset.mode,
@@ -180,14 +184,6 @@ async function runStaticDeploy(
   const result = await client.deploy(config.projectId, formData);
   s.stop("Deployed!");
 
-  // Persist mode to project.json
-  config.mode = preset.mode;
-  if (!options?.dir) {
-    // Only persist outputDir if it was auto-detected (not --dir)
-    config.outputDir = preset.outputDir;
-  }
-  writeProjectConfig(root, config);
-
   const summary = [`${modeLabel} — ${result.assets} static asset(s)`];
   note(summary.join("\n"), result.url);
 
@@ -198,6 +194,7 @@ async function runFullDeploy(
   root: string,
   config: ProjectConfig,
   client: PlatformClient,
+  headers?: import("./types").HeaderRule[],
 ): Promise<void> {
   // 3. Build
   log.step("Building...");
@@ -259,7 +256,6 @@ async function runFullDeploy(
   }
 
   s.message("Packaging...");
-  const headers = readHeaderRules(clientDir);
   const formData = packageBuild(
     distDir,
     workerDirName,
@@ -275,11 +271,6 @@ async function runFullDeploy(
   s.message("Deploying...");
   const result = await client.deploy(config.projectId, formData);
   s.stop("Deployed!");
-
-  // Persist mode
-  config.mode = "full";
-  delete config.outputDir;
-  writeProjectConfig(root, config);
 
   const summary = [`${result.workers} worker module(s), ${result.assets} static asset(s)`];
   if (result.migrations) {

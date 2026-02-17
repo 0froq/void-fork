@@ -8,9 +8,9 @@ All public exports of the `vite-cloud` package.
 
 ## Plugin
 
-### `viteCloud(options?)`
+### `viteCloud()`
 
-The default export. Returns an array of Vite plugins that set up file-based routing, migration support, and the Cloudflare Workers runtime.
+The default export. Returns an array of Vite plugins that set up file-based routing, migration support, and the Cloudflare Workers runtime. Takes no arguments — all configuration is read from [`vite-cloud.json`](./config.md).
 
 ```ts
 import viteCloud from "vite-cloud";
@@ -18,19 +18,6 @@ import viteCloud from "vite-cloud";
 export default defineConfig({
   plugins: [viteCloud()],
 });
-```
-
-**Options:**
-
-| Option     | Type                                                | Description                                                                           |
-| ---------- | --------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `auth`     | `boolean \| AuthProvider[]`                         | Enable built-in auth. `true` enables email-only, an array enables specific providers. |
-| `bindings` | `{ db?: boolean; kv?: boolean; storage?: boolean }` | Explicit binding overrides — takes precedence over automatic inference.               |
-
-**Type: `AuthProvider`**
-
-```ts
-type AuthProvider = "github" | "google" | "email";
 ```
 
 ## Handlers
