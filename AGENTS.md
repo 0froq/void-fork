@@ -52,6 +52,7 @@ viteCloud() → [routingPlugin, migrationPlugin, cloudflare({...inferredBindings
 ```
 src/
   index.ts                  # Main export: viteCloud() → Plugin[]
+  config.ts                 # readConfig(), ViteCloudConfig, convertHeadersConfig(), normalizeAuth()
   plugin-routing.ts         # Virtual module resolution, file watching, HMR, type codegen
   plugin-inference.ts       # Binding inference orchestration (calls walk.ts)
   plugin-migration.ts       # Local migration runner on dev startup
@@ -75,10 +76,10 @@ src/
     runner.ts               # Applies .sql files to local SQLite via better-sqlite3
     collect.ts              # Reads .sql files from migrations/ dir, sorted by filename
     validate.ts             # Destructive-op detection + pragma enforcement
-  deploy/
+  cli/
     cli.ts                  # CLI entry: `vite-cloud deploy|link|login`
     deploy.ts               # Orchestrator: build → collect/validate migrations → package → upload
-    project.ts              # Reads/creates .vite-cloud/project.json
+    project.ts              # Reads/creates .vite-cloud/project.json (projectId + slug only)
     auth.ts                 # Token read/save + runLogin() (local server + browser OAuth)
     login.ts                # Login command UI (@clack/prompts)
     package.ts              # Packages dist/ into FormData (worker + assets + migrations + manifest)
@@ -97,7 +98,8 @@ src/
 - **Pre-resolved paths in codegen**: Generated virtual module code uses absolute paths for `hono` and `vite-cloud/response` (resolved via `import.meta.resolve()`). Virtual modules have no filesystem location, so bare specifiers can't resolve from them.
 - **CF plugin API**: Worker config (`main`, `d1_databases`, `kv_namespaces`, `r2_buckets`) goes inside the `config` option of `cloudflare()`, NOT as top-level properties. `persistState` takes `{ path: string }`, not a raw string. The `config` option uses a **function form** `(resolved: WorkerConfig) => Partial<WorkerConfig>` so that bindings from the user's `wrangler.json` (if present) take precedence over inferred placeholder bindings.
 - **Raw Cloudflare deployment**: Users can deploy directly to their own CF account (bypassing the Vite Cloud platform) by adding a `wrangler.json` with real binding IDs and running `vite build && wrangler deploy`. The `mergeBindings` config function in `index.ts` checks the resolved config from the user's wrangler file and only adds placeholder bindings for inferred bindings that are missing.
-- **Binding inference** runs synchronously in the `viteCloud()` body (before plugin init) using `readFileSync` + `parseSync`. Looks for `*.env.DB`, `*.env.KV`, `*.env.STORAGE` member expressions.
+- **`vite-cloud.json` config file**: All project-level configuration (auth, bindings, headers, mode, outputDir, wrangler passthrough) lives in `vite-cloud.json`. `viteCloud()` takes zero args — `readConfig()` reads the file synchronously. Missing file = all defaults.
+- **Binding inference** runs synchronously in the `viteCloud()` body (before plugin init) using `readFileSync` + `parseSync`. Looks for `*.env.DB`, `*.env.KV`, `*.env.STORAGE` member expressions. Explicit `bindings` in `vite-cloud.json` takes precedence.
 - **Env naming**: Uses standard CF uppercase convention. `c.env.DB`, `c.env.KV`, `c.env.STORAGE`. No mapping layer needed.
 - **Named method exports**: Route files export named HTTP methods (`export const GET`, `export const POST`, etc.). The scanner uses `detect-exports.ts` (via `parseSync`) to discover which methods each file exports. Each file maps to one URL pattern; multiple methods per file are supported.
 - **Route handlers** use lazy `import()` for code splitting. Middleware is eagerly imported.

@@ -83,15 +83,31 @@ This augments the `Cloudflare.Env` interface with `DB`, `KV`, and `STORAGE` and 
 | `KV`      | `KVNamespace` | `env.KV` or `c.env.KV` usage detected           |
 | `STORAGE` | `R2Bucket`    | `env.STORAGE` or `c.env.STORAGE` usage detected |
 
-Bindings are inferred automatically by scanning your source files for these access patterns. You can also set them explicitly in `vite.config.ts`:
+Bindings are inferred automatically by scanning your source files for these access patterns. You can also set them explicitly in `vite-cloud.json`:
 
-```ts
-viteCloud({
-  bindings: { db: true, kv: true, storage: false },
-});
+```json
+{
+  "bindings": { "db": true, "kv": true, "storage": false }
+}
 ```
 
 See [Configuration](./config.md) for details.
+
+### Wrangler passthrough
+
+You can set non-binding wrangler fields like `compatibility_date`, `compatibility_flags`, and `vars` in `vite-cloud.json`:
+
+```json
+{
+  "wrangler": {
+    "compatibility_date": "2025-12-01",
+    "compatibility_flags": ["nodejs_compat"],
+    "vars": { "API_URL": "https://api.example.com" }
+  }
+}
+```
+
+Binding arrays (`d1_databases`, `kv_namespaces`, `r2_buckets`) are not allowed in the `wrangler` field — bindings are fully managed by vite-cloud. Users wanting custom bindings should use a `wrangler.json` with real binding IDs and `wrangler deploy`.
 
 ## Wrangler config merging
 

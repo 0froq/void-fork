@@ -352,22 +352,7 @@ Following Nitro's approach, each route handler is compiled into a separate chunk
 
 ### 3.6 Route Rules
 
-For common cross-cutting concerns (caching, CORS, redirects, proxying), route rules can be declared in config without writing handler code:
-
-```ts
-// vite.config.ts
-export default defineConfig({
-  plugins: [
-    viteCloud({
-      routeRules: {
-        "/api/blog/**": { cache: { maxAge: 3600 } },
-        "/api/v1/**": { cors: true },
-        "/old-api/**": { redirect: "/api/v2/**" },
-      },
-    }),
-  ],
-});
-```
+For common cross-cutting concerns (caching, CORS, redirects, proxying), route rules can be declared in config without writing handler code. This is a future feature — TBD whether it belongs in `vite-cloud.json` or a separate mechanism.
 
 ### 3.7 Typed Route System
 
@@ -511,17 +496,12 @@ function createEnvProxy(localBindings: LocalBindings): Env {
 
 ### 5.3 Explicit Override
 
-The user can always declare bindings explicitly, which takes precedence over any inference:
+The user can always declare bindings explicitly in `vite-cloud.json`, which takes precedence over any inference:
 
-```ts
-// vite.config.ts
-export default defineConfig({
-  plugins: [
-    viteCloud({
-      bindings: { db: true, kv: true }, // override inference
-    }),
-  ],
-});
+```json
+{
+  "bindings": { "db": true, "kv": true }
+}
 ```
 
 ---
@@ -562,7 +542,7 @@ Vite Cloud's plugin wraps `@cloudflare/vite-plugin`:
 // Simplified internal architecture
 import { cloudflare } from "@cloudflare/vite-plugin";
 
-export default function viteCloud(options?: ViteCloudOptions): Plugin[] {
+export default function viteCloud(): Plugin[] {
   return [
     // Our plugin: file-based routing, defineHandler transform, inference
     viteCloudRoutingPlugin(options),
@@ -851,15 +831,7 @@ The framework should feel zero-config for simple cases but not trap advanced use
 
 ### 11.1 Multiple Bindings
 
-```ts
-// vite.config.ts
-viteCloud({
-  d1: {
-    DB: true, // default database
-    DB_ANALYTICS: true, // second database, accessed as ctx.env.DB_ANALYTICS
-  },
-});
-```
+Multiple bindings beyond the default set is a future feature. Users wanting custom bindings can use a `wrangler.json` with real binding IDs and `wrangler deploy`.
 
 ### 11.2 Scheduled Handlers (Cron)
 
@@ -874,16 +846,7 @@ export const cron = "0 * * * *"; // every hour
 
 ### 11.3 Raw Worker Access
 
-For users who outgrow the file-based routing:
-
-```ts
-// vite.config.ts
-viteCloud({
-  worker: "./src/worker.ts", // bypass file-based routing entirely
-});
-```
-
-This gives the user a raw Worker `fetch` handler with all bindings still auto-provisioned.
+For users who outgrow the file-based routing, they can use a `wrangler.json` with a custom `main` entry and deploy with `wrangler deploy`. Bindings are still auto-provisioned when using `vite-cloud.json`.
 
 ---
 

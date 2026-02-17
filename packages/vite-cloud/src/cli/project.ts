@@ -4,8 +4,6 @@ import { join, dirname } from "node:path";
 export interface ProjectConfig {
   projectId: string;
   slug: string;
-  mode?: "spa" | "ssg" | "full";
-  outputDir?: string;
 }
 
 const PROJECT_FILE = ".vite-cloud/project.json";

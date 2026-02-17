@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { InferredBindings } from "../inference/walk";
-import { parseHeaders } from "../headers/parse";
 import type { MigrationFile } from "../migrations/validate";
 import type { DeployManifest, HeaderRule, ScheduleMeta } from "./types";
 
@@ -13,22 +12,9 @@ export function computeAssetHashes(dir: string): Record<string, string> {
   const hashes: Record<string, string> = {};
   for (const filePath of collectFiles(dir)) {
     const rel = relative(dir, filePath);
-    if (rel === "_headers") continue;
     hashes[rel] = createHash("sha256").update(readFileSync(filePath)).digest("hex");
   }
   return hashes;
-}
-
-/**
- * Read and parse a `_headers` file from a directory.
- * Returns undefined if no `_headers` file exists.
- */
-export function readHeaderRules(dir: string): HeaderRule[] | undefined {
-  const headersPath = join(dir, "_headers");
-  if (!existsSync(headersPath)) return undefined;
-  const content = readFileSync(headersPath, "utf-8");
-  const rules = parseHeaders(content);
-  return rules.length > 0 ? rules : undefined;
 }
 
 /**
@@ -104,7 +90,6 @@ export function packageBuild(
     const clientFiles = collectFiles(clientDir);
     for (const filePath of clientFiles) {
       const relativePath = relative(clientDir, filePath);
-      if (relativePath === "_headers") continue;
       if (neededPaths && !neededPaths.has(relativePath)) continue;
       const content = readFileSync(filePath);
       formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
@@ -140,7 +125,6 @@ export function packageStaticBuild(
   const files = collectFiles(outputDir);
   for (const filePath of files) {
     const relativePath = relative(outputDir, filePath);
-    if (relativePath === "_headers") continue;
     if (neededPaths && !neededPaths.has(relativePath)) continue;
     const content = readFileSync(filePath);
     formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
