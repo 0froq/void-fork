@@ -52,7 +52,7 @@ Implementation Progress
 
 ### Phase 4: GitHub & Production Readiness
 
-- [ ] Custom domains
+- [x] Custom domains
 - [ ] Dashboard (web UI for managing projects, viewing logs)
 - [ ] Usage tiers, metering and limits enforcement
 - [ ] Rate limiting and abuse protection on free tier
