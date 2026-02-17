@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   getPrerenderConfig,
+  getRevalidateConfig,
   getSsrPrerenderPaths,
   getSsrServerEntryPath,
   hasSsrEntry,
@@ -239,5 +240,76 @@ describe("getPrerenderConfig", () => {
       `,
     );
     expect(() => getPrerenderConfig(root)).toThrow("must not be dynamic");
+  });
+});
+
+describe("getRevalidateConfig", () => {
+  afterEach(() => {
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop()!;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns none when no SSR entry exists", () => {
+    const root = createTempRoot();
+    expect(getRevalidateConfig(root)).toEqual({ type: "none" });
+  });
+
+  it("returns none when no revalidate export exists", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "src", "main.ssr.ts"),
+      "export async function render(c, assetTags) { return new Response('ok'); }",
+    );
+    expect(getRevalidateConfig(root)).toEqual({ type: "none" });
+  });
+
+  it("returns static with ttl for numeric export", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "src", "main.ssr.ts"),
+      `
+      export const revalidate = 60;
+      export async function render(c, assetTags) { return new Response("ok"); }
+      `,
+    );
+    expect(getRevalidateConfig(root)).toEqual({ type: "static", ttl: 60 });
+  });
+
+  it("returns static with ttl 0 for zero value (opt-out)", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "src", "main.ssr.ts"),
+      `
+      export const revalidate = 0;
+      export async function render(c, assetTags) { return new Response("ok"); }
+      `,
+    );
+    expect(getRevalidateConfig(root)).toEqual({ type: "static", ttl: 0 });
+  });
+
+  it("rejects negative values", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "src", "main.ssr.ts"),
+      `
+      export const revalidate = -10;
+      export async function render(c, assetTags) { return new Response("ok"); }
+      `,
+    );
+    expect(() => getRevalidateConfig(root)).toThrow("non-negative number");
+  });
+
+  it("rejects non-numeric values", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "src", "main.ssr.ts"),
+      `
+      export const revalidate = "60";
+      export async function render(c, assetTags) { return new Response("ok"); }
+      `,
+    );
+    expect(() => getRevalidateConfig(root)).toThrow("expected a numeric literal");
   });
 });

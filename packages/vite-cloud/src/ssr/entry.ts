@@ -23,6 +23,8 @@ export type PrerenderConfig =
   | { type: "static"; paths: string[] }
   | { type: "function" };
 
+export type RevalidateConfig = { type: "none" } | { type: "static"; ttl: number };
+
 function resolveSingleEntry(
   root: string,
   entries: readonly string[],
@@ -200,6 +202,67 @@ export function getPrerenderConfig(root: string): PrerenderConfig {
 
       throw new Error(
         `Invalid SSR prerender export at ${entry.relativePath}: expected string array literal or function.`,
+      );
+    }
+  }
+
+  return { type: "none" };
+}
+
+/**
+ * Detect revalidate configuration from the SSR server entry.
+ * Looks for `export const revalidate = <number>`.
+ */
+export function getRevalidateConfig(root: string): RevalidateConfig {
+  const entry = resolveSingleEntry(root, SSR_SERVER_ENTRY_RELATIVE_PATHS, "SSR");
+  if (!entry) return { type: "none" };
+
+  const source = readFileSync(entry.absolutePath, "utf-8");
+  if (!source.includes("revalidate")) return { type: "none" };
+
+  let parsed: ReturnType<typeof parseSync>;
+  try {
+    parsed = parseSync(entry.relativePath, source);
+  } catch (err) {
+    throw new Error(
+      `Invalid SSR entry at ${entry.relativePath}: could not parse source (${err instanceof Error ? err.message : String(err)}).`,
+    );
+  }
+
+  const program = parsed.program as { body?: any[] };
+  const body = program.body ?? [];
+
+  for (const node of body) {
+    if (node.type !== "ExportNamedDeclaration") continue;
+
+    const declaration = node.declaration;
+    if (declaration?.type !== "VariableDeclaration") continue;
+
+    for (const decl of declaration.declarations ?? []) {
+      if (decl.id?.type !== "Identifier" || decl.id.name !== "revalidate") continue;
+      const init = decl.init;
+      if (!init) continue;
+
+      // Positive numeric literal: `export const revalidate = 60`
+      if (init.type === "Literal" && typeof init.value === "number") {
+        return { type: "static", ttl: init.value };
+      }
+
+      // Negative numeric literal: `export const revalidate = -10`
+      // Parsed as UnaryExpression { operator: "-", argument: Literal }
+      if (
+        init.type === "UnaryExpression" &&
+        init.operator === "-" &&
+        init.argument?.type === "Literal" &&
+        typeof init.argument.value === "number"
+      ) {
+        throw new Error(
+          `Invalid SSR revalidate export at ${entry.relativePath}: value must be a non-negative number.`,
+        );
+      }
+
+      throw new Error(
+        `Invalid SSR revalidate export at ${entry.relativePath}: expected a numeric literal (e.g. \`export const revalidate = 60\`).`,
       );
     }
   }
