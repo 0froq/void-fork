@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # CLI
 
 `vite-cloud` ships a CLI with two binaries:
@@ -9,58 +13,62 @@ Examples below use `vcd`.
 
 ## Auth
 
-```bash
-vcd login
-vcd logout
-vcd whoami
-vcd token
-```
+### `vcd login`
 
-- `login`: OAuth login (GitHub or Google — you choose at the prompt), saves token to `~/.vite-cloud/credentials.json`
-- `logout`: removes saved credentials
-- `whoami`: prints your current login
-- `token`: copies your auth token to the system clipboard (useful for setting up CI secrets)
+OAuth login (GitHub or Google — you choose at the prompt). Saves token to `~/.vite-cloud/credentials.json`.
+
+### `vcd logout`
+
+Removes saved credentials.
+
+### `vcd whoami`
+
+Prints your current login.
+
+### `vcd token`
+
+Copies your auth token to the system clipboard. Useful for setting up CI secrets.
 
 ## Project commands
 
-```bash
-vcd list
-vcd link [name]
-vcd delete [name]
-```
+### `vcd projects`
 
-- `list` (alias `ls`): list your projects (slug, id, URL)
-- `link [name]`: link current directory to an existing project by slug, or select interactively if omitted
-- `delete [name]`: permanently delete a project and all its resources (databases, KV namespaces, R2 buckets, deployments). Requires typing the project slug to confirm.
+List all your projects (slug, mode, URL).
 
-Linked project state is stored in `.vite-cloud/project.json`.
+### `vcd link [name]`
+
+Link current directory to an existing project by slug, or select interactively if omitted. State is stored in `.vite-cloud/project.json`.
+
+### `vcd delete [name]`
+
+Permanently delete a project and all its resources (databases, KV namespaces, R2 buckets, deployments). Requires typing the project slug to confirm.
+
+If `[name]` is omitted, uses the linked project.
+
+## Deployment history
+
+### `vcd list [name]`
+
+Show the last 5 deployments for a project. Alias: `vcd ls`.
+
+- If `[name]` is provided, looks up the project by slug
+- Otherwise uses the linked project from `.vite-cloud/project.json`
 
 ## Deploy
 
-```bash
+### `vcd deploy`
+
+```
 vcd deploy [--project <name>] [--dir <path>] [--spa]
 ```
 
-The deploy command auto-detects your project type and chooses the right pipeline. See [App Types](./app-types.md) and [Deployment](./deployment.md) for details.
+Auto-detects your project type and chooses the right pipeline. See [App Types](./app-types.md) and [Deployment](./deployment.md) for details.
 
 | Flag               | Purpose                                           |
 | ------------------ | ------------------------------------------------- |
 | `--project <name>` | Target a specific project by slug                 |
 | `--dir <path>`     | Deploy a pre-built static directory (skips build) |
 | `--spa`            | Use SPA mode instead of SSG for static deploys    |
-
-For full (worker) deploys, the pipeline is:
-
-1. Build app (`vite build`)
-2. Detect framework mode (TanStack Start, React Router) or default Hono routing
-3. Infer Cloudflare bindings from source (D1, KV, R2)
-4. Collect and validate migrations from `migrations/*.sql`
-5. Scan for scheduled jobs (cron triggers)
-6. Detect SSR entry (`src/main.ssr.ts`)
-7. Package worker + assets + manifest into a single upload
-8. Deploy to platform
-
-For static deploys (SPA or SSG), the pipeline is shorter: build (if needed) then upload assets.
 
 Project resolution precedence:
 
@@ -72,17 +80,24 @@ If no project is linked and no override is provided, CLI prompts to link or crea
 
 ## Secrets
 
-```bash
+### `vcd secret put`
+
+```
 vcd secret put <name> [--project <name>]
 vcd secret put <name=value> [--project <name>]
-vcd secret delete <name> [--project <name>]
 ```
 
-`secret put` value input modes:
+Value input modes:
 
 - inline: `vcd secret put API_KEY=abcd`
 - prompt (TTY): `vcd secret put API_KEY` (masked input)
 - stdin: `echo -n "abcd" | vcd secret put API_KEY`
+
+### `vcd secret delete`
+
+```
+vcd secret delete <name> [--project <name>]
+```
 
 Project resolution for secrets follows the same order as deploy (`--project`, env var, linked project).
 
