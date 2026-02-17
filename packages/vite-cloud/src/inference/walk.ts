@@ -30,9 +30,21 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
 
   walk(parsed.program as any, {
     enter(node: any) {
-      // import { db } from "vite-cloud/db" → needsD1
-      if (node.type === "ImportDeclaration" && node.source?.value === "vite-cloud/db") {
-        result.needsD1 = true;
+      // import from "vite-cloud/db" → needsD1
+      // import from "vite-cloud/kv" → needsKV
+      // import from "vite-cloud/storage" → needsR2
+      if (node.type === "ImportDeclaration") {
+        switch (node.source?.value) {
+          case "vite-cloud/db":
+            result.needsD1 = true;
+            break;
+          case "vite-cloud/kv":
+            result.needsKV = true;
+            break;
+          case "vite-cloud/storage":
+            result.needsR2 = true;
+            break;
+        }
         return;
       }
 

@@ -106,6 +106,32 @@ describe("inferBindingsFromSource", () => {
     expect(result.needsR2).toBe(false);
   });
 
+  it("detects import { kv } from 'vite-cloud/kv'", () => {
+    const code = `
+      import { kv } from "vite-cloud/kv";
+      export const GET = defineHandler(async () => {
+        return kv.get("key");
+      })
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsKV).toBe(true);
+    expect(result.needsD1).toBe(false);
+    expect(result.needsR2).toBe(false);
+  });
+
+  it("detects import { storage } from 'vite-cloud/storage'", () => {
+    const code = `
+      import { storage } from "vite-cloud/storage";
+      export const POST = defineHandler(async () => {
+        await storage.put("file.txt", "content");
+      })
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsR2).toBe(true);
+    expect(result.needsD1).toBe(false);
+    expect(result.needsKV).toBe(false);
+  });
+
   it("detects import { createDb } from 'vite-cloud/db'", () => {
     const code = `
       import { createDb } from "vite-cloud/db";

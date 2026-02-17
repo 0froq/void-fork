@@ -47,6 +47,8 @@ export default defineConfig({
     "src/auth/password.ts",
     "src/auth/schema.ts",
     "src/runtime/db.ts",
+    "src/runtime/kv.ts",
+    "src/runtime/storage.ts",
     "src/cli/cli.ts",
   ],
   format: "esm",

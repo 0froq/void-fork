@@ -56,6 +56,14 @@
       "types": "./dist/runtime/db.d.mts",
       "import": "./dist/runtime/db.mjs"
     },
+    "./kv": {
+      "types": "./dist/runtime/kv.d.mts",
+      "import": "./dist/runtime/kv.mjs"
+    },
+    "./storage": {
+      "types": "./dist/runtime/storage.d.mts",
+      "import": "./dist/runtime/storage.mjs"
+    },
     "./env": {
       "types": "./env.d.ts"
     }
