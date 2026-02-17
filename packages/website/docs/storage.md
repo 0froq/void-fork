@@ -1,6 +1,6 @@
 # Object Storage
 
-Vite Cloud provides a typed `storage` export for Cloudflare R2. Import it from `vite-cloud/storage` and use the full R2 API directly.
+Vite Cloud provides a typed `storage` export for [Cloudflare R2](https://developers.cloudflare.com/r2/). Import it from `vite-cloud/storage` and use the full R2 API directly.
 
 ## Basic Operations
 

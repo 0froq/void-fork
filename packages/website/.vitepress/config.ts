@@ -28,8 +28,8 @@ export default extendConfig(
           {
             text: "Features",
             items: [
-              { text: "Routing", link: "/docs/routing" },
-              { text: "Data Fetching", link: "/docs/data-fetching" },
+              { text: "File System Routing", link: "/docs/routing" },
+              { text: "Typed Fetch", link: "/docs/typed-fetch" },
               { text: "Database", link: "/docs/db" },
               { text: "Key-Value Storage", link: "/docs/kv" },
               { text: "Object Storage", link: "/docs/storage" },

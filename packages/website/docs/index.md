@@ -4,6 +4,10 @@ Vite Cloud is a deployment platform and fullstack Vite plugin that turns any Vit
 
 Add a single plugin to your `vite.config.ts` and you get file-based API routing with type-safety, a D1 database, KV storage, R2 object storage, and one-command deploys. Vite Cloud provisions everything automatically based on what your code actually uses.
 
+```sh
+npm install -D vite vite-cloud
+```
+
 ```ts
 import { defineConfig } from "vite";
 import viteCloud from "vite-cloud";
@@ -13,9 +17,14 @@ export default defineConfig({
 });
 ```
 
+```sh
+npx vite-cloud deploy
+# app live at <your-subdomain>.vitecloud.app!
+```
+
 ## Why Vite Cloud?
 
-Cloudflare's primitives are powerful but require significant manual setup: creating `wrangler.json` configs, manually provisioning D1 databases / KV namespaces / R2 buckets, writing a monolithic `fetch` handler, and managing bindings across environments.
+Cloudflare's primitives are powerful but require significant manual setup: creating `wrangler.json` configs, provisioning D1 databases / KV namespaces / R2 buckets, writing a monolithic `fetch` handler, and managing bindings across environments.
 
 Vite Cloud eliminates all of that:
 
