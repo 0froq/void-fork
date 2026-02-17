@@ -23,13 +23,14 @@ export default extendConfig(
               { text: "App Types", link: "/docs/app-types" },
               { text: "Routing", link: "/docs/routing" },
               { text: "Configuration", link: "/docs/config" },
-              { text: "Cloudflare Features", link: "/docs/cloudflare" },
               { text: "Deployment", link: "/docs/deployment" },
             ],
           },
           {
             text: "Features",
             items: [
+              { text: "Cloudflare", link: "/docs/cloudflare" },
+              { text: "Type Safety", link: "/docs/type-safety" },
               { text: "SSR", link: "/docs/ssr" },
               { text: "SSG", link: "/docs/ssg" },
               { text: "Jobs", link: "/docs/jobs" },
