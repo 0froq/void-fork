@@ -14,6 +14,7 @@ import { PlatformClient } from "./client";
 import { parseDeployArgs } from "./args";
 import { parseSecretArgs } from "./secret-args";
 import { parseDbArgs } from "./db-args";
+import { parseDomainArgs } from "./domain";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -130,6 +131,22 @@ if (command === "deploy") {
     log.error(err.message ?? err);
     process.exit(1);
   });
+} else if (command === "domain") {
+  const root = process.cwd();
+  let domainArgs;
+  try {
+    domainArgs = parseDomainArgs(args.slice(1));
+  } catch (err) {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+
+  import("./domain").then(({ runDomainCommand }) => {
+    runDomainCommand(root, domainArgs!).catch((err) => {
+      log.error(err.message ?? err);
+      process.exit(1);
+    });
+  });
 } else if (command === "db") {
   const root = process.cwd();
   let dbArgs;
@@ -181,6 +198,10 @@ if (command === "deploy") {
       "\x1b[0mvcd link [name]                    \x1b[2mLink to an existing project",
       "\x1b[0mvcd secret put <name> [--project]  \x1b[2mSet a project secret",
       "\x1b[0mvcd secret delete <name>           \x1b[2mDelete a project secret",
+      "\x1b[0mvcd domain add <hostname>          \x1b[2mAdd a custom domain",
+      "\x1b[0mvcd domain remove <hostname>       \x1b[2mRemove a custom domain",
+      "\x1b[0mvcd domain list                    \x1b[2mList custom domains + status",
+      "\x1b[0mvcd domain status <hostname>       \x1b[2mCheck domain verification status",
       "\x1b[0mvcd db status                      \x1b[2mShow migration status (local + remote)",
       "\x1b[0mvcd db reset                       \x1b[2mReset local DB and re-run migrations",
       "\x1b[0mvcd db seed [--file <path>]        \x1b[2mReset local DB, run migrations, and seed",
