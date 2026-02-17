@@ -173,7 +173,7 @@ interface RenderAssetTags {
 
 ## Auth
 
-Imported from `"vite-cloud"` or `"vite-cloud/auth"`.
+Imported from `"vite-cloud"` or `"vite-cloud/auth"`. Client-side helpers imported from `"vite-cloud/client"`.
 
 ### `requireAuth(c)`
 
@@ -207,7 +207,104 @@ interface AuthUser {
 }
 ```
 
-## Typed Client
+### `AuthClient`
+
+Client-side helpers for Vite Cloud's built-in [authentication](./auth.md). Imported from `"vite-cloud/client"`. Handles JSON serialization and cookie sessions automatically.
+
+```ts
+import { auth } from "vite-cloud/client";
+```
+
+#### `auth.register(input)`
+
+Create a new email/password account. Sets the session cookie on success.
+
+```ts
+const user = await auth.register({
+  email: "alice@example.com",
+  password: "s3cret",
+  name: "Alice",
+});
+```
+
+**Signature:**
+
+```ts
+register(input: { email: string; password: string; name?: string }): Promise<AuthUser>;
+```
+
+#### `auth.login(input)`
+
+Sign in with email and password. Sets the session cookie on success.
+
+```ts
+const user = await auth.login({
+  email: "alice@example.com",
+  password: "s3cret",
+});
+```
+
+**Signature:**
+
+```ts
+login(input: { email: string; password: string }): Promise<AuthUser>;
+```
+
+#### `auth.me()`
+
+Return the current user, or `null` if not authenticated.
+
+```ts
+const user = await auth.me();
+```
+
+**Signature:**
+
+```ts
+me(): Promise<AuthUser | null>;
+```
+
+#### `auth.logout()`
+
+Sign out and clear the session cookie.
+
+```ts
+await auth.logout();
+```
+
+**Signature:**
+
+```ts
+logout(): Promise<void>;
+```
+
+### `AuthError`
+
+Error class thrown by `auth` client helpers on non-2xx responses.
+
+```ts
+import { auth, AuthError } from "vite-cloud/client";
+
+try {
+  await auth.login({ email, password });
+} catch (e) {
+  if (e instanceof AuthError) {
+    console.log(e.status); // 401
+    console.log(e.message); // "Invalid credentials"
+    console.log(e.data); // raw response body
+  }
+}
+```
+
+**Properties:**
+
+| Property  | Type      | Description                                                       |
+| --------- | --------- | ----------------------------------------------------------------- |
+| `status`  | `number`  | HTTP status code                                                  |
+| `message` | `string`  | Extracted from `error` field in response body, or generic message |
+| `data`    | `unknown` | Full parsed response body                                         |
+
+## Fetch Client
 
 Imported from `"vite-cloud/client"`.
 
@@ -291,51 +388,170 @@ The typed client is built on [ofetch](https://github.com/unjs/ofetch) with a typ
 
 `headers` and `signal` are passed through to the underlying fetch unchanged.
 
-### `auth`
+## Database
 
-Client-side helpers for Vite Cloud's built-in [authentication](./auth.md). Handles JSON serialization and cookie sessions automatically.
+Imported from `"vite-cloud/db"`. See [Database](./db.md) for usage guide.
 
-```ts
-import { auth } from "vite-cloud/client";
+### `db`
 
-const user = await auth.register({ email: "a@b.com", password: "pw", name: "Alice" });
-const user = await auth.login({ email: "a@b.com", password: "pw" });
-const user = await auth.me(); // AuthUser | null
-await auth.logout();
-```
-
-| Method     | Returns                     | Throws      | Description                                        |
-| ---------- | --------------------------- | ----------- | -------------------------------------------------- |
-| `register` | `Promise<AuthUser>`         | `AuthError` | Create email/password account, set session cookie  |
-| `login`    | `Promise<AuthUser>`         | `AuthError` | Sign in with email/password, set session cookie    |
-| `me`       | `Promise<AuthUser \| null>` | —           | Return current user or `null` if not authenticated |
-| `logout`   | `Promise<void>`             | `AuthError` | Clear session cookie                               |
-
-### `AuthError`
-
-Error class thrown by `auth` helpers on non-2xx responses.
+Default query client instance. Uses `env.DB` from `cloudflare:workers` automatically.
 
 ```ts
-import { auth, AuthError } from "vite-cloud/client";
+import { db } from "vite-cloud/db";
 
-try {
-  await auth.login({ email, password });
-} catch (e) {
-  if (e instanceof AuthError) {
-    console.log(e.status); // 401
-    console.log(e.message); // "Invalid credentials"
-    console.log(e.data); // raw response body
-  }
-}
+const users = await db.list("users");
 ```
 
-**Properties:**
+### `createDb(database)`
 
-| Property  | Type      | Description                                                       |
-| --------- | --------- | ----------------------------------------------------------------- |
-| `status`  | `number`  | HTTP status code                                                  |
-| `message` | `string`  | Extracted from `error` field in response body, or generic message |
-| `data`    | `unknown` | Full parsed response body                                         |
+Creates a query client for a specific D1 instance. Use this when you need to pass the binding explicitly (e.g. in framework mode).
+
+```ts
+import { createDb } from "vite-cloud/db";
+import { env } from "cloudflare:workers";
+
+const db = createDb(env.DB);
+```
+
+**Signature:**
+
+```ts
+function createDb(database: D1Database): QueryClient;
+```
+
+### `QueryClient`
+
+The query client interface. All table names, column names, and value types are checked at compile time via the generated `DbTables` and `DbInsertTables` interfaces.
+
+#### `db.list(table, options?)`
+
+Fetch multiple rows.
+
+```ts
+const users = await db.list("users", {
+  select: ["name", "email"],
+  where: { role: "admin", id: [1, 2, 3] },
+  orderBy: ["name ASC", "created_at DESC"],
+  limit: 10,
+  offset: 20,
+});
+```
+
+**Signature:**
+
+```ts
+// With select — return type narrowed to selected columns
+list<T, K>(table: T, options: ListOptions<T> & { select: K[] }): Promise<Pick<Row<T>, K>[]>;
+// Without select — returns full row
+list<T>(table: T, options?: ListOptions<T>): Promise<Row<T>[]>;
+```
+
+**Options:**
+
+| Option    | Type                               | Description                                          |
+| --------- | ---------------------------------- | ---------------------------------------------------- |
+| `select`  | `string[]`                         | Columns to return. Omit for all columns (`SELECT *`) |
+| `where`   | `Record<string, value \| value[]>` | Filter conditions. Arrays produce `IN (...)` clauses |
+| `orderBy` | `string \| string[]`               | Column with optional `ASC`/`DESC` direction          |
+| `limit`   | `number`                           | Maximum rows to return                               |
+| `offset`  | `number`                           | Number of rows to skip                               |
+
+#### `db.get(table, options?)`
+
+Fetch a single row. Returns `null` if no match.
+
+```ts
+const user = await db.get("users", {
+  select: ["name"],
+  where: { id: 1 },
+});
+// { name: string } | null
+```
+
+**Signature:**
+
+```ts
+get<T, K>(table: T, options: GetOptions<T> & { select: K[] }): Promise<Pick<Row<T>, K> | null>;
+get<T>(table: T, options?: GetOptions<T>): Promise<Row<T> | null>;
+```
+
+**Options:** `select` and `where`, same as `list`.
+
+#### `db.insert(table, data)`
+
+Insert a row. Columns with `DEFAULT` or `PRIMARY KEY AUTOINCREMENT` are optional.
+
+```ts
+await db.insert("users", { name: "Alice", email: "alice@example.com" });
+```
+
+**Signature:**
+
+```ts
+insert<T>(table: T, data: DbInsertTables[T]): Promise<D1Result>;
+```
+
+#### `db.update(table, options)`
+
+Update rows. Throws if `set` is empty.
+
+```ts
+await db.update("users", {
+  set: { role: "admin" },
+  where: { id: 1 },
+});
+```
+
+**Signature:**
+
+```ts
+update<T>(table: T, options: { set: Partial<Row<T>>; where?: WhereClause<T> }): Promise<D1Result>;
+```
+
+#### `db.delete(table, options?)`
+
+Delete rows. Omitting `where` deletes all rows.
+
+```ts
+await db.delete("users", { where: { id: 1 } });
+```
+
+**Signature:**
+
+```ts
+delete<T>(table: T, options?: { where?: WhereClause<T> }): Promise<D1Result>;
+```
+
+#### `db.count(table, options?)`
+
+Count rows matching an optional filter.
+
+```ts
+const total = await db.count("users");
+const admins = await db.count("users", { where: { role: "admin" } });
+```
+
+**Signature:**
+
+```ts
+count<T>(table: T, options?: { where?: WhereClause<T> }): Promise<number>;
+```
+
+#### `db.raw(sql, bindings?)`
+
+Execute arbitrary SQL. Provide a type parameter for the result shape.
+
+```ts
+const results = await db.raw<{ name: string; total: number }>(
+  "SELECT name, COUNT(*) as total FROM users GROUP BY name",
+);
+```
+
+**Signature:**
+
+```ts
+raw<R = Record<string, unknown>>(sql: string, bindings?: unknown[]): Promise<R[]>;
+```
 
 ## Types
 
@@ -406,5 +622,6 @@ Declares the `Cloudflare.Env` namespace with `DB: D1Database`, `KV: KVNamespace`
 | `vite-cloud/client`    | `fetch`, `FetchError`, `auth`, `AuthError`, `AuthUser`                  |
 | `vite-cloud/response`  | `convertReturnValue`                                                    |
 | `vite-cloud/validator` | `runValidation`, `ValidatorSlots`, `HandlerInput`                       |
+| `vite-cloud/db`        | `db`, `createDb`, `QueryClient`, `DbTables`, `DbInsertTables`           |
 | `vite-cloud/routes`    | `RouteMap` stub (types only)                                            |
 | `vite-cloud/env`       | Global Cloudflare env types (types only)                                |
