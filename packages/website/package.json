@@ -9,6 +9,7 @@
   },
   "devDependencies": {
     "@voidzero-dev/vitepress-theme": "^4.5.0",
+    "oxc-minify": "^0.114.0",
     "vite-cloud": "workspace:*",
     "vitepress": "2.0.0-alpha.16"
   }

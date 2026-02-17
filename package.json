@@ -28,6 +28,9 @@
       "better-sqlite3",
       "esbuild",
       "workerd"
-    ]
+    ],
+    "overrides": {
+      "vite": "catalog:"
+    }
   }
 }
