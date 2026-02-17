@@ -8,6 +8,28 @@ export default extendConfig(
     cleanUrls: true,
 
     themeConfig: {
+      nav: [
+        { text: "Documentation", link: "/docs/", activeMatch: "/docs/" },
+        {
+          text: "Resources",
+          items: [
+            { text: "Guides", link: "/guides/", activeMatch: "/guides/" },
+            { text: "Templates", link: "/templates/", activeMatch: "/templates/" },
+            { text: "Blog", link: "/blog/", activeMatch: "/blog/" },
+            {
+              text: "Reference",
+              items: [
+                { text: "Configuration", link: "/docs/config" },
+                { text: "API", link: "/docs/api" },
+                { text: "CLI", link: "/docs/cli" },
+              ],
+            },
+          ],
+        },
+
+        { text: "Pricing", link: "/pricing" },
+      ],
+
       sidebar: {
         "/docs/": [
           {
