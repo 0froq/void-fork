@@ -4,6 +4,7 @@ import type { Plugin } from "vite";
 import { cloudflare, type WorkerConfig } from "@cloudflare/vite-plugin";
 import { routingPlugin } from "./plugin-routing";
 import { migrationPlugin } from "./plugin-migration";
+import { dbTypesPlugin } from "./plugin-db-types";
 import {
   inferProjectBindings,
   detectFramework,
@@ -144,6 +145,7 @@ export default function viteCloud(): Plugin[] {
     }
 
     return [
+      dbTypesPlugin(root, false),
       migrationPlugin(root),
       ...cloudflare({
         ...inspectorPortOption,
@@ -177,6 +179,7 @@ export default function viteCloud(): Plugin[] {
 
   return [
     routingPlugin(root, { auth: authProviders }),
+    dbTypesPlugin(root, true),
     migrationPlugin(root),
     ...cloudflare({
       ...inspectorPortOption,
