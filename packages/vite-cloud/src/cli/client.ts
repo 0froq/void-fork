@@ -30,6 +30,15 @@ export interface DeleteProjectResponse {
   warnings?: string[];
 }
 
+export interface DeploymentResponse {
+  id: string;
+  status: string;
+  source: string | null;
+  manifest: string | null;
+  created_at: string;
+  deployed_at: string | null;
+}
+
 export interface SecretResponse {
   ok: boolean;
   name: string;
@@ -72,6 +81,21 @@ export class PlatformClient {
     if (!res.ok) {
       const body = await res.text();
       throw new Error(`Failed to list projects: ${res.status} ${body}`);
+    }
+
+    return res.json();
+  }
+
+  async listDeployments(projectId: string): Promise<DeploymentResponse[]> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}/deployments`, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Failed to list deployments: ${res.status} ${body}`);
     }
 
     return res.json();

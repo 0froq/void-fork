@@ -104,16 +104,18 @@ export async function createDeployment(
   db: D1Database,
   projectId: string,
   manifest: string | null,
+  source?: string | null,
 ): Promise<Deployment> {
   const id = generateId("dpl");
   await db
-    .prepare("INSERT INTO deployments (id, project_id, manifest) VALUES (?, ?, ?)")
-    .bind(id, projectId, manifest)
+    .prepare("INSERT INTO deployments (id, project_id, manifest, source) VALUES (?, ?, ?, ?)")
+    .bind(id, projectId, manifest, source ?? null)
     .run();
   return {
     id,
     project_id: projectId,
     status: "pending",
+    source: source ?? null,
     manifest,
     created_at: new Date().toISOString(),
     deployed_at: null,
@@ -136,6 +138,18 @@ export async function updateDeploymentStatus(
 
 export async function getDeployment(db: D1Database, id: string): Promise<Deployment | null> {
   return db.prepare("SELECT * FROM deployments WHERE id = ?").bind(id).first<Deployment>();
+}
+
+export async function getProjectDeployments(
+  db: D1Database,
+  projectId: string,
+  limit = 5,
+): Promise<Deployment[]> {
+  const result = await db
+    .prepare("SELECT * FROM deployments WHERE project_id = ? ORDER BY created_at DESC LIMIT ?")
+    .bind(projectId, limit)
+    .all<Deployment>();
+  return result.results;
 }
 
 // --- Resources ---

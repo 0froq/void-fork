@@ -20,6 +20,7 @@ export interface Deployment {
   id: string;
   project_id: string;
   status: "pending" | "uploading" | "migrating" | "live" | "failed";
+  source: string | null;
   manifest: string | null;
   created_at: string;
   deployed_at: string | null;

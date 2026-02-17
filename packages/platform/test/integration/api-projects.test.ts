@@ -8,6 +8,7 @@ import {
   createTestProject,
   type TestEnv,
 } from "./helpers";
+import { createDeployment, updateDeploymentStatus } from "../../src/db";
 
 let env: TestEnv;
 
@@ -144,5 +145,84 @@ describe("POST /projects", () => {
     );
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "slug already taken" });
+  });
+});
+
+describe("GET /projects/:id/deployments", () => {
+  it("returns 401 without auth", async () => {
+    const res = await app.fetch(
+      new Request("http://localhost/projects/proj_test1/deployments"),
+      env,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 404 for nonexistent project", async () => {
+    const user = await createTestUser(env.DB);
+
+    const res = await app.fetch(
+      new Request("http://localhost/projects/proj_nonexistent/deployments", {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 403 when not the project owner", async () => {
+    const alice = await createTestUser(env.DB, "alice");
+    const bob = await createTestUser(env.DB, "bob");
+    const project = await createTestProject(env.DB, alice.id, "alice-project");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deployments`, {
+        headers: { Authorization: `Bearer ${bob.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("returns empty array when no deployments", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deployments`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it("returns deployments with source field", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id);
+
+    const d1 = await createDeployment(env.DB, project.id, null, "manual");
+    await updateDeploymentStatus(env.DB, d1.id, "live");
+    const d2 = await createDeployment(env.DB, project.id, null, "ci");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deployments`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const deployments = (await res.json()) as {
+      id: string;
+      source: string | null;
+      status: string;
+    }[];
+    expect(deployments).toHaveLength(2);
+
+    const byId = Object.fromEntries(deployments.map((d) => [d.id, d]));
+    expect(byId[d1.id].source).toBe("manual");
+    expect(byId[d1.id].status).toBe("live");
+    expect(byId[d2.id].source).toBe("ci");
+    expect(byId[d2.id].status).toBe("pending");
   });
 });

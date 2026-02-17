@@ -1,6 +1,12 @@
 import { Hono } from "hono";
 import type { PlatformEnv } from "../env";
-import { createProject, getProject, getProjectBySlug, getProjectsByUserId } from "../db";
+import {
+  createProject,
+  getProject,
+  getProjectBySlug,
+  getProjectsByUserId,
+  getProjectDeployments,
+} from "../db";
 
 const app = new Hono<PlatformEnv>();
 
@@ -42,6 +48,21 @@ app.get("/:id", async (c) => {
     return c.json({ error: "project not found" }, 404);
   }
   return c.json(project);
+});
+
+// List deployments for a project
+app.get("/:id/deployments", async (c) => {
+  const project = await getProject(c.env.DB, c.req.param("id"));
+  if (!project) {
+    return c.json({ error: "project not found" }, 404);
+  }
+
+  if (project.user_id !== c.get("userId")) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+
+  const deployments = await getProjectDeployments(c.env.DB, project.id);
+  return c.json(deployments);
 });
 
 export default app;
