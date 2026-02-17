@@ -8,25 +8,29 @@ export default extendConfig(
     cleanUrls: true,
 
     themeConfig: {
+      search: {
+        provider: "local",
+      },
+
       nav: [
-        { text: "Documentation", link: "/docs/", activeMatch: "/docs/" },
+        { text: "Docs", link: "/docs/", activeMatch: "/docs/" },
+        {
+          text: "Reference",
+          items: [
+            { text: "Configuration", link: "/docs/config" },
+            { text: "API", link: "/docs/api" },
+            { text: "CLI", link: "/docs/cli" },
+          ],
+        },
         {
           text: "Resources",
           items: [
             { text: "Guides", link: "/guides/", activeMatch: "/guides/" },
             { text: "Templates", link: "/templates/", activeMatch: "/templates/" },
             { text: "Blog", link: "/blog/", activeMatch: "/blog/" },
-            {
-              text: "Reference",
-              items: [
-                { text: "Configuration", link: "/docs/config" },
-                { text: "API", link: "/docs/api" },
-                { text: "CLI", link: "/docs/cli" },
-              ],
-            },
+            { text: "MCP Server", link: "/docs/mcp" },
           ],
         },
-
         { text: "Pricing", link: "/pricing" },
       ],
 
@@ -34,6 +38,7 @@ export default extendConfig(
         "/docs/": [
           {
             text: "Getting Started",
+            collapsed: false,
             items: [
               { text: "Introduction", link: "/docs/" },
               { text: "Quickstart", link: "/docs/quickstart" },
@@ -41,6 +46,7 @@ export default extendConfig(
           },
           {
             text: "Core Concepts",
+            collapsed: false,
             items: [
               { text: "App Types", link: "/docs/app-types" },
               { text: "Type Safety", link: "/docs/type-safety" },
@@ -49,6 +55,7 @@ export default extendConfig(
           },
           {
             text: "Features",
+            collapsed: false,
             items: [
               { text: "File System Routing", link: "/docs/routing" },
               { text: "Typed Fetch", link: "/docs/typed-fetch" },
@@ -65,13 +72,16 @@ export default extendConfig(
           },
           {
             text: "Integrations",
+            collapsed: false,
             items: [
               { text: "Hono", link: "/docs/hono" },
               { text: "Cloudflare", link: "/docs/cloudflare" },
+              { text: "MCP", link: "/docs/mcp" },
             ],
           },
           {
             text: "Reference",
+            collapsed: false,
             items: [
               { text: "Configuration", link: "/docs/config" },
               { text: "API", link: "/docs/api" },
