@@ -68,7 +68,7 @@ jobs:
           VITE_CLOUD_PROJECT: my-app
 ```
 
-To get a deploy token, run `vcd login` locally and copy the token from `~/.vite-cloud/credentials.json`, then add it as a GitHub Actions secret.
+To get a deploy token, run `vcd token` to copy it to your clipboard, then add it as a GitHub Actions secret.
 
 ## Deploy Pipeline
 
