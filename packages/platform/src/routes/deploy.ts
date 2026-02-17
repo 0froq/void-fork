@@ -262,7 +262,7 @@ app.post("/:id/deploy", async (c) => {
 
     // 6. Mark deployment as live + update project mode
     await updateDeploymentStatus(c.env.DB, deployment.id, "live");
-    await updateProjectMode(c.env.DB, projectId, "worker");
+    await updateProjectMode(c.env.DB, projectId, manifest.framework ? "framework" : "fullstack");
 
     return c.json({
       deployment: deployment.id,

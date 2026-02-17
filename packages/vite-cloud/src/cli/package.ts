@@ -32,6 +32,7 @@ export function packageBuild(
   migrations?: MigrationFile[],
   schedules?: ScheduleMeta[],
   ssr?: boolean,
+  framework?: boolean,
   neededPaths?: Set<string>,
   assetHashes?: Record<string, string>,
   headers?: HeaderRule[],
@@ -61,6 +62,10 @@ export function packageBuild(
 
   if (ssr) {
     manifest.ssr = true;
+  }
+
+  if (framework) {
+    manifest.framework = true;
   }
 
   if (assetHashes) {

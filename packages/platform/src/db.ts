@@ -68,7 +68,14 @@ export async function createProject(
     .prepare("INSERT INTO projects (id, user_id, slug, name) VALUES (?, ?, ?, ?)")
     .bind(id, userId, slug, name)
     .run();
-  return { id, user_id: userId, slug, name, mode: "worker", created_at: new Date().toISOString() };
+  return {
+    id,
+    user_id: userId,
+    slug,
+    name,
+    mode: "fullstack",
+    created_at: new Date().toISOString(),
+  };
 }
 
 export async function getProject(db: D1Database, id: string): Promise<Project | null> {

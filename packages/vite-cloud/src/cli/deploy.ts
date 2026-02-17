@@ -113,7 +113,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   const headers = convertHeadersConfig(vcConfig.headers);
   let preset: StaticPreset | null = null;
 
-  if (vcConfig.mode && vcConfig.mode !== "full") {
+  if (vcConfig.mode && vcConfig.mode !== "fullstack" && vcConfig.mode !== "framework") {
     // vite-cloud.json has an explicit static mode
     preset = {
       buildCommand: null,
@@ -132,7 +132,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
     // No configured mode — detect from CLI flags + project structure
     preset = detectPreset(root, { dir: options?.dir, spa: options?.spa });
   }
-  // vcConfig.mode === "full" → preset stays null → full deploy
+  // vcConfig.mode === "fullstack" or "framework" → preset stays null → full deploy
 
   if (preset) {
     await runStaticDeploy(root, config, client, preset, headers);
@@ -263,6 +263,7 @@ async function runFullDeploy(
     validatedMigrations,
     schedules,
     isSsr,
+    isFrameworkMode,
     neededPaths,
     assetHashes,
     headers,

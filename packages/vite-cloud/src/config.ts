@@ -22,7 +22,7 @@ export interface ViteCloudConfig {
     storage?: boolean;
   };
   headers?: Record<string, string[]>;
-  mode?: "spa" | "ssg" | "full";
+  mode?: "spa" | "ssg" | "fullstack" | "framework";
   outputDir?: string;
   wrangler?: WranglerConfig;
 }
@@ -30,7 +30,7 @@ export interface ViteCloudConfig {
 const CONFIG_FILE = "vite-cloud.json";
 
 const VALID_AUTH_PROVIDERS = new Set(["github", "google", "email"]);
-const VALID_MODES = new Set(["spa", "ssg", "full"]);
+const VALID_MODES = new Set(["spa", "ssg", "fullstack", "framework"]);
 
 /**
  * Read and validate the `vite-cloud.json` config file from the project root.
@@ -108,7 +108,7 @@ export function readConfig(root: string): ViteCloudConfig {
   // Validate mode
   if (obj.mode !== undefined) {
     if (typeof obj.mode !== "string" || !VALID_MODES.has(obj.mode)) {
-      throw new Error(`"mode" in ${CONFIG_FILE} must be one of: spa, ssg, full`);
+      throw new Error(`"mode" in ${CONFIG_FILE} must be one of: spa, ssg, fullstack, framework`);
     }
   }
 

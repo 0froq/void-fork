@@ -55,7 +55,7 @@
     },
     "mode": {
       "type": "string",
-      "enum": ["spa", "ssg", "full"],
+      "enum": ["spa", "ssg", "fullstack", "framework"],
       "description": "Deployment mode. If omitted, auto-detected on first deploy."
     },
     "outputDir": {

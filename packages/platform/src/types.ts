@@ -58,6 +58,7 @@ export interface DeployManifest {
   migrations?: MigrationMeta[];
   schedules?: ScheduleMeta[];
   ssr?: boolean;
+  framework?: boolean;
   static?: "spa" | "ssg";
   assetHashes?: Record<string, string>;
   headers?: HeaderRule[];
