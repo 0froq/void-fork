@@ -1,4 +1,4 @@
-# Data Fetching
+# Typed Fetch
 
 Vite Cloud ships a typed `fetch` client that knows every route in your app. Import it from `vite-cloud/client` and get autocomplete for paths, type-checked request bodies, and fully inferred response types.
 
