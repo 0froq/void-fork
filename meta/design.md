@@ -227,16 +227,16 @@ Export multiple named handlers from the same file. The scanner detects which met
 ```ts
 // routes/api/users/index.ts
 import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
 
-export const GET = defineHandler(async (c) => {
-  const result = await c.env.DB.prepare("SELECT * FROM users").all();
-  return result.results;
+export const GET = defineHandler(async () => {
+  return db.list("users");
 });
 
 export const POST = defineHandler.withValidator({
   body: mySchema,
-})((c, { body }) => {
-  c.env.DB.prepare("INSERT INTO users (name) VALUES (?)").bind(body.name).run();
+})(async (c, { body }) => {
+  await db.insert("users", { name: body.name });
   return { created: true };
 });
 ```
@@ -323,6 +323,7 @@ The handler receives a Hono `Context` with pre-typed bindings:
 ```ts
 import * as v from "valibot";
 import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
 
 export const POST = defineHandler.withValidator({
   body: v.object({
@@ -331,9 +332,7 @@ export const POST = defineHandler.withValidator({
   }),
 })(async (c, { body }) => {
   // body is typed as { name: string; email: string }
-  await c.env.DB.prepare("INSERT INTO users (name, email) VALUES (?, ?)")
-    .bind(body.name, body.email)
-    .run();
+  await db.insert("users", { name: body.name, email: body.email });
   return { created: true };
 });
 ```
@@ -380,7 +379,9 @@ await fetch("/api/users", {
 });
 ```
 
-**4. Seamless tsconfig** — The plugin generates `.vite-cloud/tsconfig.json` with a `files` entry pointing to `routes.d.ts`. Users extend it from their root tsconfig (`"extends": "./.vite-cloud/tsconfig.json"`) — no manual `include` entry needed. The `files` field is inherited because TypeScript only overrides `files` when the child also specifies it.
+**4. Seamless tsconfig** — The plugin generates `.vite-cloud/tsconfig.json` with a `files` entry pointing to `routes.d.ts` and `db.d.ts`. Users extend it from their root tsconfig (`"extends": "./.vite-cloud/tsconfig.json"`) — no manual `include` entry needed. The `files` field is inherited because TypeScript only overrides `files` when the child also specifies it.
+
+**5. Schema-derived DB types** — The plugin replays migration SQL files through a DDL parser to generate `.vite-cloud/db.d.ts`. This augments the `vite-cloud/db` module with `DbTables` (read types) and `DbInsertTables` (insert types with optional columns for PK/DEFAULT). The typed query helper (`db.list("users")`, `db.get("users")`, `db.insert("users", {...})`) provides compile-time table name, column, and value type checking.
 
 The Standard Schema V1 types are inlined both in the vite-cloud source (`src/standard-schema.ts`) and in the generated `routes.d.ts`, so neither the framework nor the user needs `@standard-schema/spec` as a dependency.
 
@@ -410,7 +411,7 @@ Under the hood, `ctx.env.kv` is an `unstorage` instance configured with the appr
 
 Benefits: the user gets a consistent API across environments, and we inherit unstorage's ecosystem (TTL support, typed getters, prefix scoping) without building it ourselves.
 
-**However, `ctx.env.db` (D1) should remain the raw D1 API.** unstorage doesn't have a D1 driver and key-value semantics don't map to SQL. D1's `prepare().bind().all()` API is already clean and well-documented.
+**D1 has its own typed query helper** (`vite-cloud/db`) rather than using unstorage. unstorage doesn't have a D1 driver and key-value semantics don't map to SQL. The query helper (`db.list()`, `db.get()`, `db.insert()`, `db.update()`, `db.delete()`) provides compile-time type safety derived from migration SQL files. For complex queries, `db.raw()` passes SQL through directly, and users can always access `c.env.DB` for the raw D1 API.
 
 **And `ctx.env.storage` (R2) is a design decision.** We can either expose R2's native API (richer: multipart uploads, HTTP metadata, conditional gets) or wrap it with unstorage (simpler but lossy). Recommendation: expose the native R2 API by default, but provide `ctx.env.kv` as the unstorage-backed simple key-value abstraction for users who don't need R2's full power. This means:
 
@@ -1002,8 +1003,9 @@ my-app/
 ├── package.json
 └── .vite-cloud/              (gitignored, auto-generated)
     ├── entry.ts              (worker entrypoint — re-exports virtual module)
-    ├── tsconfig.json         (includes routes.d.ts — user extends this)
+    ├── tsconfig.json         (includes routes.d.ts + db.d.ts — user extends this)
     ├── routes.d.ts           (RouteMap declaration — typed routes)
+    ├── db.d.ts               (DbTables + DbInsertTables — typed DB queries)
     ├── project.json          (project identity — created on first deploy)
     └── v3/                   (Miniflare persistence — D1, KV, R2)
 ```
@@ -1021,16 +1023,16 @@ export const GET = defineHandler((c) => {
 });
 ```
 
-**Database CRUD with validation:**
+**Database CRUD with typed query helper:**
 
 ```ts
 // routes/api/users/index.ts
 import * as v from "valibot";
 import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
 
-export const GET = defineHandler(async (c) => {
-  const result = await c.env.DB.prepare("SELECT * FROM users").all();
-  return result.results;
+export const GET = defineHandler(async () => {
+  return db.list("users"); // typed as User[] via generated db.d.ts
 });
 
 export const POST = defineHandler.withValidator({
@@ -1039,9 +1041,7 @@ export const POST = defineHandler.withValidator({
     email: v.pipe(v.string(), v.email()),
   }),
 })(async (c, { body }) => {
-  await c.env.DB.prepare("INSERT INTO users (name, email) VALUES (?, ?)")
-    .bind(body.name, body.email)
-    .run();
+  await db.insert("users", { name: body.name, email: body.email }); // type-checked against DbInsertTables
   return { created: true };
 });
 ```
@@ -1050,11 +1050,12 @@ export const POST = defineHandler.withValidator({
 // routes/api/users/[id].ts
 import * as v from "valibot";
 import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
 
 export const GET = defineHandler.withValidator({
   params: v.object({ id: v.string() }),
 })(async (c, { params }) => {
-  const user = await c.env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(params.id).first();
+  const user = await db.get("users", { where: { id: Number(params.id) } });
   if (!user) return new Response("Not found", { status: 404 });
   return user;
 });
@@ -1062,9 +1063,20 @@ export const GET = defineHandler.withValidator({
 export const DELETE = defineHandler.withValidator({
   params: v.object({ id: v.string() }),
 })(async (c, { params }) => {
-  await c.env.DB.prepare("DELETE FROM users WHERE id = ?").bind(params.id).run();
+  await db.delete("users", { where: { id: Number(params.id) } });
   return null; // 204 No Content
 });
+```
+
+**Raw SQL escape hatch:**
+
+```ts
+// For complex queries beyond the query helper
+import { db } from "vite-cloud/db";
+
+const results = await db.raw(
+  "SELECT u.*, COUNT(p.id) as post_count FROM users u LEFT JOIN posts p ON p.user_id = u.id GROUP BY u.id",
+);
 ```
 
 **File upload to R2:**

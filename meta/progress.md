@@ -45,8 +45,10 @@ Implementation Progress
 - [x] Seamless tsconfig (`.vite-cloud/tsconfig.json` generated, user extends it — no manual `include`)
 - [x] Raw Cloudflare deployment (`vite build && wrangler deploy`) — `mergeBindings` config function preserves user's `wrangler.json` bindings, only adds placeholders for missing inferred bindings
 - [x] Static deployment (`--dir`, `--spa`, VitePress/Vite auto-detection, SSG 404.html fallback)
+- [x] Schema-derived DB types (SQL DDL parser → `.vite-cloud/db.d.ts` codegen with `DbTables`/`DbInsertTables`)
+- [x] Typed query helper (`vite-cloud/db`) — `db.list/get/insert/update/delete/raw` with compile-time table/column safety
 
-**Milestone:** Fully typed API routes end-to-end. Route handlers with validators produce typed `RouteMap` via codegen. Client `fetch()` infers path, method, input, and output types automatically. Users can deploy to their own Cloudflare account without the Vite Cloud platform.
+**Milestone:** Fully typed API routes end-to-end. Route handlers with validators produce typed `RouteMap` via codegen. Client `fetch()` infers path, method, input, and output types automatically. Typed DB query helper with schema-derived types from migration SQL files. Users can deploy to their own Cloudflare account without the Vite Cloud platform.
 
 ### Phase 4: GitHub & Production Readiness
 
