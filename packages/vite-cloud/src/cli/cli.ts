@@ -13,6 +13,7 @@ import { getToken, removeToken } from "./auth";
 import { PlatformClient } from "./client";
 import { parseDeployArgs } from "./args";
 import { parseSecretArgs } from "./secret-args";
+import { parseDbArgs } from "./db-args";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -129,6 +130,22 @@ if (command === "deploy") {
     log.error(err.message ?? err);
     process.exit(1);
   });
+} else if (command === "db") {
+  const root = process.cwd();
+  let dbArgs;
+  try {
+    dbArgs = parseDbArgs(args.slice(1));
+  } catch (err) {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+
+  import("./db").then(({ runDbCommand }) => {
+    runDbCommand(root, dbArgs!).catch((err) => {
+      log.error(err.message ?? err);
+      process.exit(1);
+    });
+  });
 } else {
   const BLUE = "\x1b[34m";
   const RESET = "\x1b[0m";
@@ -164,6 +181,9 @@ if (command === "deploy") {
       "\x1b[0mvcd link [name]                    \x1b[2mLink to an existing project",
       "\x1b[0mvcd secret put <name> [--project]  \x1b[2mSet a project secret",
       "\x1b[0mvcd secret delete <name>           \x1b[2mDelete a project secret",
+      "\x1b[0mvcd db status                      \x1b[2mShow migration status (local + remote)",
+      "\x1b[0mvcd db reset                       \x1b[2mReset local DB and re-run migrations",
+      "\x1b[0mvcd db seed [--file <path>]        \x1b[2mReset local DB, run migrations, and seed",
     ].join("\n"),
     "\x1b[34mCommands\x1b[0m",
   );

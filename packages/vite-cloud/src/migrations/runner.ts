@@ -2,6 +2,41 @@ import { createHash, createHmac } from "node:crypto";
 import { readFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
+export interface AppliedMigration {
+  name: string;
+  applied_at: string;
+}
+
+/**
+ * Read the list of applied migrations from the local SQLite database.
+ * Returns [] if the DB file or _migrations table doesn't exist.
+ */
+export async function getAppliedMigrations(dbPath: string): Promise<AppliedMigration[]> {
+  if (!existsSync(dbPath)) {
+    return [];
+  }
+
+  const Database = (await import("better-sqlite3")).default;
+  const db = new Database(dbPath, { readonly: true });
+
+  try {
+    // Check if _migrations table exists
+    const tableExists = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_migrations'")
+      .get();
+
+    if (!tableExists) {
+      return [];
+    }
+
+    return db
+      .prepare("SELECT name, applied_at FROM _migrations ORDER BY name")
+      .all() as AppliedMigration[];
+  } finally {
+    db.close();
+  }
+}
+
 /**
  * Compute the miniflare D1 SQLite database path.
  * Miniflare uses a deterministic hash based on the database_id

@@ -11,7 +11,7 @@ export function collectMigrations(migrationsDir: string): { name: string; sql: s
   }
 
   return readdirSync(migrationsDir)
-    .filter((f) => f.endsWith(".sql"))
+    .filter((f) => f.endsWith(".sql") && f !== "seed.sql")
     .sort()
     .map((name) => ({
       name,

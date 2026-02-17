@@ -21,6 +21,16 @@ Migrations run automatically when the dev server starts. On deploy, they run aga
 
 > **Naming:** Files are sorted by filename, so prefix with numbers (`001_`, `002_`, etc.) to control execution order.
 
+## CLI Commands
+
+The CLI provides commands to inspect, reset, and seed your local database. Place dev data in `migrations/seed.sql` — it's automatically excluded from migration collection and will never be deployed.
+
+- `vcd db status` — show which migrations are applied locally (and remotely if linked)
+- `vcd db reset` — drop the local DB and re-apply all migrations
+- `vcd db seed` — reset + run `migrations/seed.sql` (or `--file <path>`)
+
+See the [CLI reference](./cli.md#database) for details.
+
 ## Querying
 
 The `db` object provides typed methods for common operations. Types are derived from your migration files — no manual type definitions needed.

@@ -6,7 +6,9 @@ import {
   getProjectBySlug,
   getProjectsByUserId,
   getProjectDeployments,
+  getProjectResources,
 } from "../db";
+import { queryD1 } from "../migrations/remote-runner";
 
 const app = new Hono<PlatformEnv>();
 
@@ -63,6 +65,38 @@ app.get("/:id/deployments", async (c) => {
 
   const deployments = await getProjectDeployments(c.env.DB, project.id);
   return c.json(deployments);
+});
+
+// Get migration status for a project
+app.get("/:id/migrations", async (c) => {
+  const project = await getProject(c.env.DB, c.req.param("id"));
+  if (!project) {
+    return c.json({ error: "project not found" }, 404);
+  }
+
+  if (project.user_id !== c.get("userId")) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+
+  const resources = await getProjectResources(c.env.DB, project.id);
+  const d1Resource = resources.find((r) => r.type === "d1");
+  if (!d1Resource) {
+    return c.json({ applied: [] });
+  }
+
+  try {
+    const result = await queryD1(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, d1Resource.cf_id, {
+      sql: "SELECT name, applied_at FROM _migrations ORDER BY name",
+    });
+    return c.json({
+      applied: result.results.map((r) => ({
+        name: r.name as string,
+        applied_at: r.applied_at as string,
+      })),
+    });
+  } catch {
+    return c.json({ applied: [] });
+  }
 });
 
 export default app;

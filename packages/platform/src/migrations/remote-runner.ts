@@ -71,7 +71,7 @@ interface D1QueryResponse {
   results: Record<string, unknown>[];
 }
 
-async function queryD1(
+export async function queryD1(
   accountId: string,
   apiToken: string,
   databaseId: string,

@@ -191,6 +191,23 @@ export class PlatformClient {
     return res.json();
   }
 
+  async getMigrationStatus(
+    projectId: string,
+  ): Promise<{ applied: { name: string; applied_at: string }[] }> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}/migrations`, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Failed to get migration status: ${res.status} ${body}`);
+    }
+
+    return res.json();
+  }
+
   async deleteSecret(projectId: string, name: string): Promise<SecretResponse> {
     const res = await fetch(
       `${this.baseUrl}/projects/${projectId}/secrets/${encodeURIComponent(name)}`,
