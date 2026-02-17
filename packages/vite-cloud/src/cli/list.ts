@@ -57,7 +57,7 @@ async function showDeployments(
   const sourceWidth = Math.max("source".length, ...rows.map((r) => r.source.length));
   const isrWidth = Math.max("isr".length, ...rows.map((r) => r.isr.length));
 
-  const prefix = "\x1b[90m|\x1b[0m  ";
+  const prefix = "\x1b[90m│\x1b[0m  ";
   const header = `${prefix}\x1b[2m${"id".padEnd(idWidth)}  ${"mode".padEnd(modeWidth)}  ${"status".padEnd(statusWidth)}  ${"source".padEnd(sourceWidth)}  ${"isr".padEnd(isrWidth)}  deployed\x1b[0m`;
 
   const lines = rows.map(

@@ -29,7 +29,7 @@ export async function runProjectsCommand(): Promise<void> {
   const slugWidth = Math.max("name".length, ...rows.map((r) => r.slug.length));
   const modeWidth = Math.max("mode".length, ...rows.map((r) => r.mode.length));
 
-  const prefix = "\x1b[90m|\x1b[0m  ";
+  const prefix = "\x1b[90m│\x1b[0m  ";
   const header = `${prefix}\x1b[2m${"name".padEnd(slugWidth)}  ${"mode".padEnd(modeWidth)}  url\x1b[0m`;
   const lines = rows.map(
     (row) =>
