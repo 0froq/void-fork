@@ -30,6 +30,7 @@ export default extendConfig(
             text: "Features",
             items: [
               { text: "Cloudflare", link: "/docs/cloudflare" },
+              { text: "Authentication", link: "/docs/auth" },
               { text: "SSR", link: "/docs/ssr" },
               { text: "SSG", link: "/docs/ssg" },
               { text: "Jobs", link: "/docs/jobs" },

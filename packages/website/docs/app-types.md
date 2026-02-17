@@ -12,7 +12,7 @@ The type is auto-detected from your project structure, or you can set it explici
 
 A Vite app with backend code that runs on Cloudflare Workers. This is the default when your project has API routes, SSR, jobs, or any server-side logic.
 
-Features like [Routing](./routing.md), [SSR](./ssr.md) and [SSG](./ssg.md) are only available in this mode.
+All Vite Cloud features that involve backend logic, such as [Routing](./routing.md) and [Authentication](./auth.md), are only available in this mode.
 
 ```
 my-app/
@@ -72,7 +72,7 @@ Vite Cloud detects that `vite` is a dependency and no backend files exist, runs 
 - `vite` is in your dependencies
 - No backend files exist (`routes/`, `jobs/`, SSR entry)
 
-## SSG
+## Static Site
 
 A statically generated site where each page has its own HTML file. This is the default for VitePress sites and `--dir` deploys.
 
