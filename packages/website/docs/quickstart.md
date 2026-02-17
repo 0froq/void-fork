@@ -17,7 +17,7 @@ npm install
 ## 2. Install Vite Cloud
 
 ```bash
-npm install vite-cloud
+npm install -D vite-cloud
 ```
 
 ## 3. Enable the plugin in `vite.config.ts`
@@ -107,13 +107,13 @@ Precedence is:
 2. `VITE_CLOUD_PROJECT`
 3. `.vite-cloud/project.json` (linked project in repo)
 
-## Next steps
-
-- [Cloudflare](./cloudflare.md) -- bindings, wrangler config, and self-hosted deployment
-- [Routing](./routing.md) -- file-based routing, middleware, and the Hono ecosystem
-- [Configuration](./config.md) -- explicit binding overrides and plugin options
-
 ## Notes
 
-- Commit `.vite-cloud/project.json` for deterministic CI deploys.
 - If you need non-interactive auth in CI, provide `VITE_CLOUD_TOKEN`.
+
+## Next steps
+
+- [Routing](./routing.md) — dynamic params, middleware, and validation
+- [App Types](./app-types.md) — SPA, SSR, SSG, ISR, and meta-framework modes
+- [Database](./db.md) — queries, migrations, and generated types
+- [Type Safety](./type-safety.md) — end-to-end typed fetch client
