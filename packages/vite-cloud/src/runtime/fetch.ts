@@ -1,4 +1,7 @@
+import { ofetch, FetchError } from "ofetch";
 import type { RouteMap } from "vite-cloud/routes";
+
+export { FetchError };
 
 type MethodsOf<P extends keyof RouteMap> = keyof RouteMap[P] & string;
 type DefaultMethod<P extends keyof RouteMap> = "GET" extends MethodsOf<P> ? "GET" : never;
@@ -14,27 +17,21 @@ type OutputOf<P extends keyof RouteMap, M extends MethodsOf<P>> = RouteEntry<P, 
 
 interface FetchOptionsBase<P extends keyof RouteMap, M extends MethodsOf<P>> {
   method?: M;
-  body?: unknown;
+  body?: Record<string, any> | BodyInit | null;
   query?: Record<string, string>;
   params?: Record<string, string>;
   headers?: HeadersInit;
   signal?: AbortSignal;
-}
-
-export class FetchError extends Error {
-  response: Response;
-  status: number;
-
-  constructor(response: Response) {
-    super(`Fetch failed with status ${response.status}`);
-    this.name = "FetchError";
-    this.response = response;
-    this.status = response.status;
-  }
+  baseURL?: string;
+  retry?: number;
+  timeout?: number;
 }
 
 /**
  * Typed fetch client for Vite Cloud API routes.
+ *
+ * Built on top of ofetch. Supports baseURL, retry, timeout, and all
+ * ofetch features while providing full route type safety.
  *
  * ```ts
  * import { fetch } from "vite-cloud/client";
@@ -47,8 +44,6 @@ export async function fetch<
   P extends keyof RouteMap & string,
   M extends MethodsOf<P> = DefaultMethod<P>,
 >(path: P, options?: FetchOptionsBase<P, M>): Promise<OutputOf<P, M>> {
-  const method = (options?.method ?? "GET") as string;
-
   // Interpolate :param segments
   let url = path as string;
   if (options?.params) {
@@ -57,41 +52,14 @@ export async function fetch<
     }
   }
 
-  // Build query string
-  if (options?.query) {
-    const searchParams = new URLSearchParams();
-    for (const [key, value] of Object.entries(options.query)) {
-      searchParams.set(key, value);
-    }
-    const qs = searchParams.toString();
-    if (qs) {
-      url += `?${qs}`;
-    }
-  }
-
-  const init: RequestInit = {
-    method,
+  return ofetch(url, {
+    method: (options?.method ?? "GET") as string,
+    body: options?.body,
+    query: options?.query,
     headers: options?.headers,
     signal: options?.signal,
-  };
-
-  // Serialize body as JSON
-  if (options?.body !== undefined && options?.body !== null) {
-    init.body = JSON.stringify(options.body);
-    init.headers = new Headers(init.headers);
-    (init.headers as Headers).set("Content-Type", "application/json");
-  }
-
-  const response = await globalThis.fetch(url, init);
-
-  if (!response.ok) {
-    throw new FetchError(response);
-  }
-
-  // 204 No Content
-  if (response.status === 204) {
-    return undefined as OutputOf<P, M>;
-  }
-
-  return (await response.json()) as OutputOf<P, M>;
+    baseURL: options?.baseURL,
+    retry: options?.retry,
+    timeout: options?.timeout,
+  });
 }

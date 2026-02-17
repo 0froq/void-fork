@@ -65,7 +65,8 @@
     "@cloudflare/vite-plugin": "^1.25.0",
     "@cloudflare/workers-types": "catalog:",
     "@hono/oauth-providers": "^0.8.5",
-    "better-sqlite3": "^12.6.2"
+    "better-sqlite3": "^12.6.2",
+    "ofetch": "^1.5.1"
   },
   "devDependencies": {
     "@clack/prompts": "catalog:",

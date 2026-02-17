@@ -213,7 +213,7 @@ Imported from `"vite-cloud/client"`.
 
 ### `fetch(path, options?)`
 
-Type-safe fetch client for calling your API routes from client code. Route paths and return types are inferred from the generated `RouteMap`.
+Type-safe fetch client for calling your API routes from client code, built on top of [ofetch](https://github.com/unjs/ofetch). Route paths and return types are inferred from the generated `RouteMap`.
 
 ```ts
 import { fetch } from "vite-cloud/client";
@@ -236,14 +236,17 @@ function fetch<P extends keyof RouteMap, M extends MethodsOf<P>>(
 
 **Options:**
 
-| Option    | Type                     | Description                             |
-| --------- | ------------------------ | --------------------------------------- |
-| `method`  | `string`                 | HTTP method. Defaults to `"GET"`.       |
-| `body`    | `unknown`                | Request body (auto-serialized as JSON). |
-| `query`   | `Record<string, string>` | Query string parameters.                |
-| `params`  | `Record<string, string>` | URL path parameters (`:id` segments).   |
-| `headers` | `HeadersInit`            | Additional request headers.             |
-| `signal`  | `AbortSignal`            | Abort signal.                           |
+| Option    | Type                     | Description                                                |
+| --------- | ------------------------ | ---------------------------------------------------------- |
+| `method`  | `string`                 | HTTP method. Defaults to `"GET"`.                          |
+| `body`    | `unknown`                | Request body (auto-serialized as JSON).                    |
+| `query`   | `Record<string, string>` | Query string parameters.                                   |
+| `params`  | `Record<string, string>` | URL path parameters (`:id` segments).                      |
+| `headers` | `HeadersInit`            | Additional request headers.                                |
+| `signal`  | `AbortSignal`            | Abort signal.                                              |
+| `baseURL` | `string`                 | Base URL prepended to the path. Useful for external calls. |
+| `retry`   | `number`                 | Number of retry attempts (ofetch default: 1 for GET).      |
+| `timeout` | `number`                 | Request timeout in milliseconds.                           |
 
 Returns the parsed JSON response body, or `undefined` for 204 responses. Throws `FetchError` on non-2xx responses.
 
@@ -266,10 +269,27 @@ try {
 
 **Properties:**
 
-| Property   | Type       | Description                |
-| ---------- | ---------- | -------------------------- |
-| `status`   | `number`   | HTTP status code.          |
-| `response` | `Response` | The raw `Response` object. |
+| Property   | Type       | Description                          |
+| ---------- | ---------- | ------------------------------------ |
+| `status`   | `number`   | HTTP status code.                    |
+| `response` | `Response` | The raw `Response` object.           |
+| `data`     | `unknown`  | Parsed response body (if available). |
+
+### Differences from Native `fetch`
+
+The typed client is built on [ofetch](https://github.com/unjs/ofetch) with a typed route layer on top. Key differences from native `fetch`:
+
+| Behavior               | Native `fetch`                                       | `vite-cloud/client` `fetch`                                                                                               |
+| ---------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **Return type**        | `Promise<Response>` — you call `.json()` yourself    | `Promise<T>` — auto-parses JSON, returns the typed result directly (`undefined` for 204)                                  |
+| **Error handling**     | Resolves on any HTTP status; you check `response.ok` | Throws `FetchError` on non-2xx responses                                                                                  |
+| **URL construction**   | Raw URL string                                       | Route path with `:param` interpolation from `options.params` + query string from `options.query`                          |
+| **Body serialization** | Manual `JSON.stringify()` + `Content-Type` header    | Auto-serializes `options.body` as JSON and sets `Content-Type: application/json`                                          |
+| **Type safety**        | Accepts any URL/method                               | Constrains paths to `RouteMap` keys and methods to those defined per route — invalid combinations are compile-time errors |
+| **Retry**              | None                                                 | Auto-retries on 408, 429, and 5xx (configurable via `retry` option)                                                       |
+| **Timeout**            | None                                                 | Configurable via `timeout` option                                                                                         |
+
+`headers` and `signal` are passed through to the underlying fetch unchanged.
 
 ## Types
 
