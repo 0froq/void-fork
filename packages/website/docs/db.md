@@ -155,20 +155,6 @@ Single-column ordering still works as a plain string:
 const sorted = await db.list("users", { orderBy: "name DESC" });
 ```
 
-## Using with Frameworks
-
-When using a framework like TanStack Start that owns routing, import `createDb` and pass the D1 binding directly:
-
-```ts
-import { createDb } from "vite-cloud/db";
-import { env } from "cloudflare:workers";
-
-const db = createDb(env.DB);
-const users = await db.list("users");
-```
-
-The default `db` export uses `env.DB` from `cloudflare:workers` automatically, so in Vite Cloud's built-in routing mode you can just import and use it.
-
 ## How It Works
 
 The query helper is powered by three pieces working together:

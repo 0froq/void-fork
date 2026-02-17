@@ -31,6 +31,8 @@ export default extendConfig(
               { text: "Routing", link: "/docs/routing" },
               { text: "Data Fetching", link: "/docs/data-fetching" },
               { text: "Database", link: "/docs/db" },
+              { text: "Key-Value Storage", link: "/docs/kv" },
+              { text: "Object Storage", link: "/docs/storage" },
               { text: "Authentication", link: "/docs/auth" },
               { text: "SSR", link: "/docs/ssr" },
               { text: "SSG", link: "/docs/ssg" },
