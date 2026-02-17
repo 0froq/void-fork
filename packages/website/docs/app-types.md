@@ -1,16 +1,16 @@
 # App Types
 
-Vite Cloud supports three types of apps:
+Vite Cloud supports four types of apps:
 
-1. Full-stack Vite apps with Cloudflare Workers backend, optionally with SSR or SSG
-2. Vite single-page application (frontend only)
+1. Vite apps with optional Cloudflare Workers backend
+2. Vite-based meta frameworks that can run on Cloudflare, e.g. [Tanstack Start](https://tanstack.com/start/latest)
 3. Any Static site generator that output static assets, e.g. [Vitepress](https://vitepress.dev/)
 
 The type is auto-detected from your project structure, or you can set it explicitly in [`vite-cloud.json`](./config.md).
 
 ## Vite Full-Stack
 
-A Vite app with backend code that runs on Cloudflare Workers. This is the default when your project has API routes, SSR, jobs, or any server-side logic.
+A Vite app with backend code that runs on Cloudflare Workers. This is the default when your project has API routes, SSR, SSG, jobs, or any server-side logic. In this mode, **Vite Cloud is both the framework and the platform**. This opinionated setup unlocks some developer experience perks that are unique to Vite Cloud, while still staying frontend-framework-agnostic. You can use it with any frontend framework that works with Vite: React, Vue, Svelte, or Solid.
 
 All Vite Cloud features that involve backend logic, such as [Routing](./routing.md) and [Authentication](./auth.md), are only available in this mode.
 
@@ -31,10 +31,6 @@ my-app/
   vite.config.ts         ← plugins: [viteCloud()]
 ```
 
-```bash
-vcd deploy
-```
-
 Your worker handles API routes and (optionally) SSR. Static assets are served from the edge via R2. Cloudflare bindings (D1, KV, R2) are inferred from your source code and provisioned automatically.
 
 **Detected when any of these exist:**
@@ -42,10 +38,6 @@ Your worker handles API routes and (optionally) SSR. Static assets are served fr
 - `routes/` directory
 - `jobs/` directory
 - SSR entry (`src/main.ssr.ts` or `src/main.ssr.tsx`)
-
-## Meta Frameworks
-
-Vite cloud also supports Vite-based full-stack meta frameworks that have first-class Cloudflare integration, e.g. [Tanstack Start](https://tanstack.com/start/latest).
 
 ## Vite SPA
 
@@ -61,16 +53,43 @@ my-react-app/
   package.json           ← vite in dependencies, no routes/
 ```
 
-```bash
-vcd deploy
-```
-
 Vite Cloud detects that `vite` is a dependency and no backend files exist, runs `vite build`, and deploys `dist/` as a SPA.
 
 **Detected when:**
 
 - `vite` is in your dependencies
 - No backend files exist (`routes/`, `jobs/`, SSR entry)
+
+## Meta Frameworks
+
+Vite Cloud supports [TanStack Start](https://tanstack.com/start/latest) and [React Router v7](https://reactrouter.com/), auto-detected from `package.json`. The framework owns routing and SSR — Vite Cloud handles binding inference, [typed DB queries](./db.md), migrations, and deployment.
+
+```ts
+// vite.config.ts
+export default defineConfig({
+  plugins: [
+    viteCloud(), // must come before the framework plugin
+    tanstackStart(),
+    react(),
+  ],
+});
+```
+
+Access bindings via the `cloudflare:workers` module in server functions. The [typed query helper](./db.md) works the same as in full-stack mode — types are generated from your migrations:
+
+```tsx
+// src/routes/users.tsx
+import { createServerFn } from "@tanstack/react-start";
+import { db } from "vite-cloud/db";
+
+const getUsers = createServerFn().handler(async () => {
+  return db.list("users"); // fully typed from migrations
+});
+```
+
+Features like `defineHandler`, file-based routing, auth, and the [typed fetch client](./data-fetching.md) are not active in framework mode — the framework provides its own equivalents.
+
+**Detected when** `@tanstack/react-start` or `@react-router/dev` is in your dependencies.
 
 ## Static Site
 
@@ -85,10 +104,6 @@ my-docs/
     .vitepress/
       config.ts
   package.json           ← vitepress in dependencies
-```
-
-```bash
-vcd deploy
 ```
 
 At the edge, the resolution order is:
@@ -106,15 +121,16 @@ At the edge, the resolution order is:
 
 ## Auto-Detection
 
-When no `mode` is set in `vite-cloud.json`, the detection logic runs in this order:
+When running `vcd deploy` and no `mode` is set in `vite-cloud.json`, the detection logic runs in this order:
 
-| Priority | Condition                                           | Type                               |
-| -------- | --------------------------------------------------- | ---------------------------------- |
-| 1        | `--dir` flag                                        | SSG (or SPA with `--spa`)          |
-| 2        | `vitepress` in dependencies                         | SSG, builds with `vitepress build` |
-| 3        | Backend files exist (`routes/`, `jobs/`, SSR entry) | Full-stack                         |
-| 4        | `vite` in dependencies, no backend files            | SPA, builds with `vite build`      |
-| 5        | `dist/index.html` or `./index.html` exists          | SSG (no build step)                |
+| Priority | Condition                                              | Type                               |
+| -------- | ------------------------------------------------------ | ---------------------------------- |
+| 1        | `--dir` flag                                           | SSG (or SPA with `--spa`)          |
+| 2        | `vitepress` in dependencies                            | SSG, builds with `vitepress build` |
+| 3        | `@tanstack/react-start` or `@react-router/dev` in deps | Framework                          |
+| 4        | Backend files exist (`routes/`, `jobs/`, SSR entry)    | Full-stack                         |
+| 5        | `vite` in dependencies, no backend files               | SPA, builds with `vite build`      |
+| 6        | `dist/index.html` or `./index.html` exists             | SSG (no build step)                |
 
 ## Explicit Configuration
 
@@ -127,5 +143,5 @@ To lock the app type and skip auto-detection, set `mode` in [`vite-cloud.json`](
 }
 ```
 
-- `mode`: `"spa"`, `"ssg"`, or `"full"`
+- `mode`: `"spa"`, `"ssg"`, `"full"`, or `"framework"`
 - `outputDir`: output directory for static modes (relative to project root, defaults to `"dist"`)
