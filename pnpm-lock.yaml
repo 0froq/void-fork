@@ -12,6 +12,9 @@ catalogs:
     '@cloudflare/workers-types':
       specifier: ^4.20260214.0
       version: 4.20260214.0
+    '@types/node':
+      specifier: ^24.10.0
+      version: 24.10.13
     tsdown:
       specifier: ^0.20.3
       version: 0.20.3
@@ -88,6 +91,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 4.20260214.0
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.10.13
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -142,7 +148,7 @@ importers:
         specifier: ^7.6.13
         version: 7.6.13
       '@types/node':
-        specifier: ^24.10.0
+        specifier: 'catalog:'
         version: 24.10.13
       arktype:
         specifier: ^2.1.29
@@ -4987,7 +4993,7 @@ snapshots:
 
   '@types/better-sqlite3@7.6.13':
     dependencies:
-      '@types/node': 24.10.13
+      '@types/node': 25.2.3
 
   '@types/chai@5.2.3':
     dependencies:
@@ -5028,7 +5034,6 @@ snapshots:
   '@types/node@25.2.3':
     dependencies:
       undici-types: 7.16.0
-    optional: true
 
   '@types/react-dom@19.2.3(@types/react@19.2.14)':
     dependencies:
