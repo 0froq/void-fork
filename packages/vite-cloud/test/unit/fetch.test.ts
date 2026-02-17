@@ -11,10 +11,10 @@ declare module "vite-cloud/routes" {
       POST: { input: { body: { name: string } }; output: { created: boolean } };
     };
     "/api/users/:id": {
-      GET: { input: {}; output: { id: string; name: string } };
+      GET: { input: { params: { id: string } }; output: { id: string; name: string } };
     };
     "/api/files/:name": {
-      GET: { input: {}; output: Record<string, never> };
+      GET: { input: { params: { name: string } }; output: Record<string, never> };
     };
     "/api/items/:id": {
       GET: { input: {}; output: { id: string } };
@@ -129,7 +129,7 @@ describe("typed fetch client", () => {
       // @ts-expect-error - toFixed does not exist on array
       void users.toFixed();
 
-      const user = await typedFetch("/api/users/:id");
+      const user = await typedFetch("/api/users/:id", { params: { id: "1" } });
       // @ts-expect-error - 'email' does not exist on { id: string; name: string }
       void user.email;
     };
@@ -147,6 +147,40 @@ describe("typed fetch client", () => {
     // @ts-expect-error - PATCH is not a valid method for /api/users (only GET, POST)
     void typedFetch("/api/users", { method: "PATCH" }).catch(() => {});
 
+    expect(true).toBe(true); // compile-time type test
+  });
+
+  it("type: enforces input types for body and params", () => {
+    const _check = async () => {
+      // POST with correct body — compiles
+      await typedFetch("/api/users", { method: "POST", body: { name: "Alice" } });
+
+      // GET with correct params — compiles
+      await typedFetch("/api/users/:id", { params: { id: "42" } });
+
+      // DELETE with no required input — compiles
+      await typedFetch("/api/items/:id", { method: "DELETE" });
+
+      // Extra options alongside typed input — compiles
+      await typedFetch("/api/users", {
+        method: "POST",
+        body: { name: "Bob" },
+        headers: { "X-Test": "1" },
+      });
+
+      // @ts-expect-error - wrong body type (name should be string)
+      await typedFetch("/api/users", { method: "POST", body: { name: 123 } });
+
+      // @ts-expect-error - missing body entirely on POST
+      await typedFetch("/api/users", { method: "POST" });
+
+      // @ts-expect-error - missing required params (options required)
+      await typedFetch("/api/users/:id");
+
+      // @ts-expect-error - wrong params type (id should be string)
+      await typedFetch("/api/users/:id", { params: { id: 123 } });
+    };
+    void _check;
     expect(true).toBe(true); // compile-time type test
   });
 });
