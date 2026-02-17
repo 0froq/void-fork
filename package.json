@@ -9,6 +9,7 @@
     "check": "pnpm -r --parallel typecheck",
     "migrate": "cd packages/platform && wrangler d1 migrations apply vite-cloud-platform",
     "deploy:dispatch": "cd packages/dispatch && wrangler deploy",
+    "deploy:mcp": "cd packages/mcp && pnpm deploy",
     "deploy:platform": "cd packages/platform && wrangler deploy",
     "deploy": "pnpm migrate --remote && pnpm deploy:dispatch && pnpm deploy:platform",
     "prepare": "husky"
