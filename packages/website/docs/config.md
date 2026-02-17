@@ -76,7 +76,8 @@ Deployment mode. If omitted, auto-detected on first deploy. See [App Types](./ap
 
 - `"spa"` — static single-page app
 - `"ssg"` — static site generation
-- `"full"` — worker + assets (API routes, SSR, jobs)
+- `"fullstack"` — worker + assets (API routes, SSR, jobs)
+- `"framework"` — meta framework (TanStack Start, React Router)
 
 ### `outputDir`
 

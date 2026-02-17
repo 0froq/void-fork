@@ -143,5 +143,5 @@ To lock the app type and skip auto-detection, set `mode` in [`vite-cloud.json`](
 }
 ```
 
-- `mode`: `"spa"`, `"ssg"`, `"full"`, or `"framework"`
+- `mode`: `"spa"`, `"ssg"`, `"fullstack"`, or `"framework"`
 - `outputDir`: output directory for static modes (relative to project root, defaults to `"dist"`)
