@@ -163,6 +163,14 @@ if (command === "deploy") {
       process.exit(1);
     });
   });
+} else if (command === "init") {
+  const root = process.cwd();
+  import("./init").then(({ runInitCommand }) => {
+    runInitCommand(root).catch((err) => {
+      log.error(err.message ?? err);
+      process.exit(1);
+    });
+  });
 } else {
   const BLUE = "\x1b[34m";
   const RESET = "\x1b[0m";
@@ -185,6 +193,7 @@ if (command === "deploy") {
 
   note(
     [
+      "\x1b[0mvcd init                           \x1b[2mSet up vite-cloud in an existing project",
       "\x1b[0mvcd login                          \x1b[2mLog in with GitHub or Google",
       "\x1b[0mvcd logout                         \x1b[2mLog out and remove credentials",
       "\x1b[0mvcd whoami                         \x1b[2mShow the logged-in username",
