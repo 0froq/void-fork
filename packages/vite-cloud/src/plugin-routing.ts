@@ -10,6 +10,9 @@ import {
   type SsrCompileOptions,
 } from "./router/compile";
 import { generateRouteTypes } from "./codegen/route-types";
+import { generateDbTypes } from "./codegen/db-types";
+import { collectMigrations } from "./migrations/collect";
+import { parseMigrationSchema } from "./migrations/schema";
 import type { AuthProvider } from "./index";
 import {
   getPrerenderConfig,
@@ -44,6 +47,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   const middlewareDir = join(root, "middleware");
   const jobsDir = join(root, "jobs");
   const srcDir = join(root, "src");
+  const migrationsDir = join(root, "migrations");
   const ssrEntryAbsPaths = new Set(
     [...SSR_SERVER_ENTRY_RELATIVE_PATHS, ...SSR_CLIENT_ENTRY_RELATIVE_PATHS].map((path) =>
       join(root, path),
@@ -54,6 +58,13 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     if (!scan) return;
     const dts = generateRouteTypes(scan, routesDir, outDir);
     writeFileSync(join(outDir, "routes.d.ts"), dts);
+  }
+
+  function writeDbTypes() {
+    const migrations = collectMigrations(migrationsDir);
+    const schema = parseMigrationSchema(migrations);
+    const dts = generateDbTypes(schema);
+    writeFileSync(join(outDir, "db.d.ts"), dts);
   }
 
   async function rescan() {
@@ -117,7 +128,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     join(outDir, "tsconfig.json"),
     JSON.stringify(
       {
-        files: ["routes.d.ts"],
+        files: ["routes.d.ts", "db.d.ts"],
       },
       null,
       2,
@@ -153,6 +164,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     async buildStart() {
       await rescan();
       writeRouteTypes();
+      writeDbTypes();
     },
 
     resolveId: {
@@ -183,6 +195,12 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       const watcher = devServer.watcher;
 
       const handleFileChange = async (path: string) => {
+        // Migrations changes only need db type regeneration — no route rescan
+        if (path.startsWith(migrationsDir)) {
+          writeDbTypes();
+          return;
+        }
+
         if (
           !path.startsWith(routesDir) &&
           !path.startsWith(middlewareDir) &&

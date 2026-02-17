@@ -1,16 +1,9 @@
 import * as v from "valibot";
 import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
 
-interface User {
-  id: number;
-  name: string;
-  email: string;
-  created_at: string;
-}
-
-export const GET = defineHandler(async (c) => {
-  const result = await c.env.DB.prepare("SELECT * FROM users").all<User>();
-  return result.results;
+export const GET = defineHandler(async () => {
+  return db.list("users");
 });
 
 export const POST = defineHandler.withValidator({
@@ -19,8 +12,6 @@ export const POST = defineHandler.withValidator({
     email: v.pipe(v.string(), v.email()),
   }),
 })(async (c, { body }) => {
-  await c.env.DB.prepare("INSERT INTO users (name, email) VALUES (?, ?)")
-    .bind(body.name, body.email)
-    .run();
+  await db.insert("users", { name: body.name, email: body.email });
   return { created: true };
 });

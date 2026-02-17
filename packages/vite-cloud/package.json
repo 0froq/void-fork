@@ -52,6 +52,10 @@
       "types": "./dist/runtime/client.d.mts",
       "import": "./dist/runtime/client.mjs"
     },
+    "./db": {
+      "types": "./dist/runtime/db.d.mts",
+      "import": "./dist/runtime/db.mjs"
+    },
     "./env": {
       "types": "./env.d.ts"
     }
