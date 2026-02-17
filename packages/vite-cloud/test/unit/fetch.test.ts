@@ -23,6 +23,13 @@ declare module "vite-cloud/routes" {
   }
 }
 
+function jsonResponse(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 const originalFetch = globalThis.fetch;
 
 describe("typed fetch client", () => {
@@ -35,9 +42,7 @@ describe("typed fetch client", () => {
   });
 
   it("makes a GET request by default", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), { status: 200 }),
-    );
+    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({ ok: true }));
 
     const result = await typedFetch("/api/hello");
 
@@ -49,32 +54,29 @@ describe("typed fetch client", () => {
   });
 
   it("interpolates path params", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      new Response(JSON.stringify({ id: "42", name: "Alice" }), { status: 200 }),
-    );
+    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({ id: "42", name: "Alice" }));
 
     await typedFetch("/api/users/:id", { params: { id: "42" } });
 
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/users/42", expect.anything());
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/users/42"),
+      expect.anything(),
+    );
   });
 
   it("encodes path params", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      new Response(JSON.stringify({}), { status: 200 }),
-    );
+    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({}));
 
     await typedFetch("/api/files/:name", { params: { name: "hello world.txt" } });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "/api/files/hello%20world.txt",
+      expect.stringContaining("/api/files/hello%20world.txt"),
       expect.anything(),
     );
   });
 
   it("builds query string", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      new Response(JSON.stringify([]), { status: 200 }),
-    );
+    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse([]));
 
     await typedFetch("/api/users", { query: { page: "1", limit: "10" } });
 
@@ -84,9 +86,7 @@ describe("typed fetch client", () => {
   });
 
   it("serializes body as JSON", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      new Response(JSON.stringify({ created: true }), { status: 201 }),
-    );
+    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({ created: true }, 201));
 
     await typedFetch("/api/users", { method: "POST", body: { name: "Alice" } });
 
@@ -98,9 +98,11 @@ describe("typed fetch client", () => {
   });
 
   it("throws FetchError on non-OK response", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(new Response("Not Found", { status: 404 }));
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response("Not Found", { status: 404, statusText: "Not Found" }),
+    );
 
-    const err = await typedFetch("/api/hello").catch((e: Error) => e);
+    const err = await typedFetch("/api/hello", { retry: 0 }).catch((e: Error) => e);
 
     expect(err).toBeInstanceOf(FetchError);
     expect((err as FetchError).status).toBe(404);
@@ -109,7 +111,7 @@ describe("typed fetch client", () => {
   it("returns undefined for 204 No Content", async () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(new Response(null, { status: 204 }));
 
-    const result = await typedFetch("/api/items/:id", { method: "DELETE" });
+    const result = await typedFetch("/api/items/:id", { method: "DELETE", params: { id: "1" } });
     expect(result).toBeUndefined();
   });
 
