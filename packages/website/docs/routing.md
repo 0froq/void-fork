@@ -125,7 +125,7 @@ When validation fails, a `400` response is returned with structured error detail
 
 No extra dependencies are required — Vite Cloud inlines the Standard Schema types. You only need your chosen schema library.
 
-Validator schemas also power the [typed fetch client](./data-fetching.md) — `body`, `query`, and `params` types are enforced at the call site.
+Validator schemas also power the [typed fetch client](./typed-fetch.md) — `body`, `query`, and `params` types are enforced at the call site.
 
 ## Middleware
 
