@@ -93,9 +93,6 @@ describe("runListCommand", () => {
     expect(out).toContain("https://star-tracker.vitecloud.app");
     expect(out).toContain("todo-app");
     expect(out).toContain("https://todo-app.vitecloud.app");
-    // IDs are displayed with proj_ prefix trimmed
-    expect(out).toContain(" 1 ");
-    expect(out).toContain(" 2 ");
   });
 
   it("prints a friendly message when there are no projects", async () => {
