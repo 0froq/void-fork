@@ -86,6 +86,10 @@ The `assetTags` values are computed by Vite Cloud:
 
 See [SSG](./ssg.md) for pre-rendering static HTML at build time.
 
+## ISR (Incremental Static Regeneration)
+
+See [ISR](./isr.md) for stale-while-revalidate caching of SSR pages.
+
 ## Request flow
 
 With SSR enabled:

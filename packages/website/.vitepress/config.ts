@@ -36,6 +36,7 @@ export default extendConfig(
               { text: "Authentication", link: "/docs/auth" },
               { text: "SSR", link: "/docs/ssr" },
               { text: "SSG", link: "/docs/ssg" },
+              { text: "ISR", link: "/docs/isr" },
               { text: "Jobs", link: "/docs/jobs" },
               { text: "Caching and Headers", link: "/docs/cache" },
             ],
