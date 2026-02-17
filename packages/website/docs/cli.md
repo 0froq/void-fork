@@ -11,6 +11,17 @@ outline: deep
 
 Examples below use `vcd`.
 
+## Setup
+
+### `vcd init`
+
+Interactive setup wizard for adding vite-cloud to an existing project. Walks through:
+
+1. **TypeScript** — creates or updates `tsconfig.json` (adds `extends .vite-cloud/tsconfig.json` and `vite-cloud/env` types)
+2. **Authentication** — configures auth providers (GitHub, Google, Email) in `vite-cloud.json`
+3. **Demo code** — optionally scaffolds a migration, API route, and typed fetch example
+4. **GitHub Actions** — optionally creates `.github/workflows/deploy.yml` with the correct package manager commands
+
 ## Auth
 
 ### `vcd login`
@@ -118,6 +129,42 @@ vcd secret delete <name> [--project <name>]
 ```
 
 Project resolution for secrets follows the same order as deploy (`--project`, env var, linked project).
+
+## Custom Domains
+
+### `vcd domain add`
+
+```
+vcd domain add <hostname> [--project <name>]
+```
+
+Add a custom domain to a project. Prints the CNAME target you need to add in your DNS provider.
+
+### `vcd domain remove`
+
+```
+vcd domain remove <hostname> [--project <name>]
+```
+
+Remove a custom domain from a project.
+
+### `vcd domain list`
+
+```
+vcd domain list [--project <name>]
+```
+
+List all custom domains and their status (active/pending).
+
+### `vcd domain status`
+
+```
+vcd domain status <hostname> [--project <name>]
+```
+
+Check verification and SSL status for a specific domain. Shows hostname, status, SSL status, and any verification errors.
+
+Project resolution for domain commands follows the same order as deploy (`--project`, `VITE_CLOUD_PROJECT`, linked project).
 
 ## Environment variables
 
