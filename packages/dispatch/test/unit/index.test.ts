@@ -595,6 +595,92 @@ describe("edge cache versioning", () => {
   });
 });
 
+describe("custom domain routing", () => {
+  it("routes custom domain via domain: KV key", async () => {
+    const workerFetch = vi.fn(async () => new Response("custom-domain-api"));
+    const routing: RoutingEntry = { workerName: "user-app", projectId: "proj_1" };
+
+    const env = {
+      ROUTING: {
+        get: async (key: string) => {
+          if (key === "domain:app.example.com") return JSON.stringify(routing);
+          return null;
+        },
+      },
+      DISPATCH: {
+        get: () => ({ fetch: workerFetch }),
+      },
+      ASSETS: {
+        get: async () => null,
+      },
+    } as unknown as Env;
+
+    const response = await app.fetch(
+      new Request("https://app.example.com/api/hello"),
+      env,
+      createCtx(),
+    );
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(await response.text()).toBe("custom-domain-api");
+  });
+
+  it("serves static assets via custom domain", async () => {
+    const routing: RoutingEntry = { projectId: "proj_1", mode: "spa" };
+
+    const env = {
+      ROUTING: {
+        get: async (key: string) => {
+          if (key === "domain:app.example.com") return JSON.stringify(routing);
+          return null;
+        },
+      },
+      DISPATCH: {
+        get: () => ({ fetch: vi.fn() }),
+      },
+      ASSETS: {
+        get: async (key: string) => {
+          if (key === "proj_1/current/index.html") {
+            return {
+              body: "<html>Custom Domain SPA</html>",
+              httpMetadata: { contentType: "text/html" },
+              httpEtag: '"custom"',
+            } as unknown as R2ObjectBody;
+          }
+          return null;
+        },
+      },
+    } as unknown as Env;
+
+    const response = await app.fetch(
+      new Request("https://app.example.com/dashboard"),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<html>Custom Domain SPA</html>");
+  });
+
+  it("returns 404 for unknown hostname", async () => {
+    const env = {
+      ROUTING: {
+        get: async () => null,
+      },
+      DISPATCH: {
+        get: () => ({ fetch: vi.fn() }),
+      },
+      ASSETS: {
+        get: async () => null,
+      },
+    } as unknown as Env;
+
+    const response = await app.fetch(new Request("https://unknown.example.com/"), env, createCtx());
+
+    expect(response.status).toBe(404);
+  });
+});
+
 describe("ISR (stale-while-revalidate)", () => {
   it("caches worker response in R2 on first ISR request", async () => {
     const { env, workerFetch, r2Store } = createEnv({

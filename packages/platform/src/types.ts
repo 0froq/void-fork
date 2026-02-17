@@ -50,6 +50,15 @@ export interface HeaderRule {
   headers: [string, string][];
 }
 
+export interface Domain {
+  id: string;
+  project_id: string;
+  hostname: string;
+  cf_hostname_id: string;
+  status: string;
+  created_at: string;
+}
+
 export interface DeployManifest {
   bindings: {
     d1?: string[];

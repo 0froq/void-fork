@@ -3,14 +3,17 @@ import type { PlatformEnv } from "../env";
 import {
   getProject,
   getProjectResources,
+  getDomainsByProjectId,
   deleteProjectResources,
   deleteProjectDeployments,
+  deleteProjectDomains,
   deleteProject,
 } from "../db";
 import {
   deleteD1Database,
   deleteKVNamespace,
   deleteR2Bucket,
+  deleteCustomHostname,
 } from "../provisioning/cloudflare-api";
 
 const DISPATCH_NAMESPACE = "vite-cloud-users";
@@ -97,6 +100,26 @@ app.delete("/:id", async (c) => {
       `Failed to delete routing entry: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
+
+  // Clean up custom hostnames from CF + KV
+  const projectDomains = await getDomainsByProjectId(c.env.DB, projectId);
+  for (const domain of projectDomains) {
+    try {
+      await deleteCustomHostname(c.env.CF_ZONE_ID, c.env.CF_API_TOKEN, domain.cf_hostname_id);
+    } catch (err) {
+      warnings.push(
+        `Failed to delete custom hostname ${domain.hostname}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    try {
+      await c.env.ROUTING.delete(`domain:${domain.hostname}`);
+    } catch (err) {
+      warnings.push(
+        `Failed to delete domain routing entry: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  await deleteProjectDomains(c.env.DB, projectId);
 
   // Delete DB records in FK order: resources -> deployments -> project
   await deleteProjectResources(c.env.DB, projectId);

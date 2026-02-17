@@ -14,10 +14,12 @@ const MIGRATION_0003 = fileURLToPath(
 const MIGRATION_0004 = fileURLToPath(
   new URL("../../migrations/0004_deployment_source.sql", import.meta.url),
 );
+const MIGRATION_0005 = fileURLToPath(new URL("../../migrations/0005_domains.sql", import.meta.url));
 
 export const JWT_SECRET = "test-jwt-secret";
 export const CF_API_TOKEN = "test-cf-token";
 export const CF_ACCOUNT_ID = "test-account-id";
+export const CF_ZONE_ID = "test-zone-id";
 
 export type TestEnv = {
   DB: D1Database;
@@ -26,6 +28,7 @@ export type TestEnv = {
   DISPATCH: DispatchNamespace;
   CF_API_TOKEN: string;
   CF_ACCOUNT_ID: string;
+  CF_ZONE_ID: string;
   JWT_SECRET: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
@@ -74,6 +77,11 @@ export async function setupEnv(): Promise<TestEnv> {
     await db.prepare(stmt).run();
   }
 
+  const schema5 = readFileSync(MIGRATION_0005, "utf-8");
+  for (const stmt of splitStatements(schema5)) {
+    await db.prepare(stmt).run();
+  }
+
   return {
     DB: db,
     ASSETS: r2 as unknown as R2Bucket,
@@ -81,6 +89,7 @@ export async function setupEnv(): Promise<TestEnv> {
     DISPATCH: {} as DispatchNamespace,
     CF_API_TOKEN,
     CF_ACCOUNT_ID,
+    CF_ZONE_ID,
     JWT_SECRET,
     GITHUB_CLIENT_ID: "test-github-client-id",
     GITHUB_CLIENT_SECRET: "test-github-client-secret",
@@ -95,6 +104,7 @@ export async function teardownEnv(): Promise<void> {
 
 export async function clearTables(db: D1Database): Promise<void> {
   await db.batch([
+    db.prepare("DELETE FROM domains"),
     db.prepare("DELETE FROM resources"),
     db.prepare("DELETE FROM deployments"),
     db.prepare("DELETE FROM projects"),
@@ -162,6 +172,9 @@ export interface CfApiMocks {
   uploadWorker: (url: string, init?: RequestInit) => Response | Promise<Response>;
   setWorkerSecret: (url: string, init?: RequestInit) => Response | Promise<Response>;
   deleteWorkerSecret: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  createCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  getCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  deleteCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
 }
 
 const defaultMocks: CfApiMocks = {
@@ -176,6 +189,21 @@ const defaultMocks: CfApiMocks = {
   uploadWorker: () => new Response("ok", { status: 200 }),
   setWorkerSecret: () => cfSuccess({}),
   deleteWorkerSecret: () => cfSuccess({}),
+  createCustomHostname: () =>
+    cfSuccess({
+      id: "ch-test-id",
+      hostname: "test.example.com",
+      status: "pending",
+      ssl: { status: "pending" },
+    }),
+  getCustomHostname: () =>
+    cfSuccess({
+      id: "ch-test-id",
+      hostname: "test.example.com",
+      status: "pending",
+      ssl: { status: "pending" },
+    }),
+  deleteCustomHostname: () => cfSuccess(null),
 };
 
 export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeof vi.fn> {
@@ -187,6 +215,15 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
     const method = init?.method ?? "GET";
 
     // Order matters: more specific patterns first
+    if (method === "POST" && url.includes("/custom_hostnames")) {
+      return mocks.createCustomHostname(url, init);
+    }
+    if (method === "GET" && url.includes("/custom_hostnames/")) {
+      return mocks.getCustomHostname(url, init);
+    }
+    if (method === "DELETE" && url.includes("/custom_hostnames/")) {
+      return mocks.deleteCustomHostname(url, init);
+    }
     if (method === "PUT" && url.includes("/workers/dispatch/") && url.includes("/secrets")) {
       return mocks.setWorkerSecret(url, init);
     }

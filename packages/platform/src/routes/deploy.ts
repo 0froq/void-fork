@@ -1,7 +1,13 @@
 import { Hono } from "hono";
 import type { PlatformEnv } from "../env";
 import type { DeployManifest } from "../types";
-import { getProject, createDeployment, updateDeploymentStatus, updateProjectMode } from "../db";
+import {
+  getProject,
+  createDeployment,
+  updateDeploymentStatus,
+  updateProjectMode,
+  getDomainsByProjectId,
+} from "../db";
 import { provisionBindings } from "../provisioning/provision";
 import { runRemoteMigrations, type RemoteMigration } from "../migrations/remote-runner";
 import { validateMigrationSQL } from "../migrations/validate";
@@ -83,23 +89,39 @@ app.post("/:id/deploy", async (c) => {
       }
 
       // Update KV routing (no workerName for static deploys)
-      await c.env.ROUTING.put(
-        project.slug,
-        JSON.stringify({
-          projectId,
-          mode: manifest.static,
-          version: deployment.id,
-          ...(manifest.headers ? { headers: manifest.headers } : {}),
-        }),
-      );
+      const staticRoutingJson = JSON.stringify({
+        projectId,
+        mode: manifest.static,
+        version: deployment.id,
+        ...(manifest.headers ? { headers: manifest.headers } : {}),
+      });
+      await c.env.ROUTING.put(project.slug, staticRoutingJson);
+
+      // Update KV routing for active custom domains
+      const staticDomains = await getDomainsByProjectId(c.env.DB, projectId);
+      for (const domain of staticDomains) {
+        if (domain.status === "active") {
+          await c.env.ROUTING.put(`domain:${domain.hostname}`, staticRoutingJson);
+        }
+      }
 
       // Mark deployment as live + update project mode
       await updateDeploymentStatus(c.env.DB, deployment.id, "live");
       await updateProjectMode(c.env.DB, projectId, manifest.static);
 
+      const staticActiveDomains = staticDomains.filter((d) => d.status === "active");
+      const staticUrl =
+        staticActiveDomains.length > 0
+          ? `https://${staticActiveDomains[0].hostname}`
+          : `https://${project.slug}.vitecloud.app`;
+
       return c.json({
         deployment: deployment.id,
-        url: `https://${project.slug}.vitecloud.app`,
+        url: staticUrl,
+        urls: [
+          ...staticActiveDomains.map((d) => `https://${d.hostname}`),
+          `https://${project.slug}.vitecloud.app`,
+        ],
         assets: assetKeys.length,
         workers: 0,
       });
@@ -289,25 +311,41 @@ app.post("/:id/deploy", async (c) => {
     }
 
     // 6. Update KV routing table
-    await c.env.ROUTING.put(
-      project.slug,
-      JSON.stringify({
-        workerName,
-        projectId,
-        ...(manifest.ssr ? { ssr: true } : {}),
-        ...(manifest.revalidate ? { revalidate: manifest.revalidate } : {}),
-        version: deployment.id,
-        ...(manifest.headers ? { headers: manifest.headers } : {}),
-      }),
-    );
+    const routingJson = JSON.stringify({
+      workerName,
+      projectId,
+      ...(manifest.ssr ? { ssr: true } : {}),
+      ...(manifest.revalidate ? { revalidate: manifest.revalidate } : {}),
+      version: deployment.id,
+      ...(manifest.headers ? { headers: manifest.headers } : {}),
+    });
+    await c.env.ROUTING.put(project.slug, routingJson);
+
+    // Update KV routing for active custom domains
+    const fullDomains = await getDomainsByProjectId(c.env.DB, projectId);
+    for (const domain of fullDomains) {
+      if (domain.status === "active") {
+        await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
+      }
+    }
 
     // 7. Mark deployment as live + update project mode
     await updateDeploymentStatus(c.env.DB, deployment.id, "live");
     await updateProjectMode(c.env.DB, projectId, manifest.framework ? "framework" : "fullstack");
 
+    const fullActiveDomains = fullDomains.filter((d) => d.status === "active");
+    const fullUrl =
+      fullActiveDomains.length > 0
+        ? `https://${fullActiveDomains[0].hostname}`
+        : `https://${project.slug}.vitecloud.app`;
+
     return c.json({
       deployment: deployment.id,
-      url: `https://${project.slug}.vitecloud.app`,
+      url: fullUrl,
+      urls: [
+        ...fullActiveDomains.map((d) => `https://${d.hostname}`),
+        `https://${project.slug}.vitecloud.app`,
+      ],
       assets: assetKeys.length,
       workers: workerFiles.length,
       ...(migrationsApplied > 0 && { migrations: migrationsApplied }),

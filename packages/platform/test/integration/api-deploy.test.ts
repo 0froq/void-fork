@@ -443,6 +443,52 @@ describe("POST /projects/:id/deploy", () => {
     expect(dpl?.status).toBe("failed");
   });
 
+  it("updates KV routing for active custom domains on deploy", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "domain-deploy");
+    mockCfApi();
+
+    // Insert an active domain
+    await env.DB.prepare(
+      "INSERT INTO domains (id, project_id, hostname, cf_hostname_id, status) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind("dom_deploy", project.id, "deploy.example.com", "ch-deploy", "active")
+      .run();
+
+    // Insert a pending domain (should NOT get KV routing)
+    await env.DB.prepare(
+      "INSERT INTO domains (id, project_id, hostname, cf_hostname_id, status) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind("dom_pending", project.id, "pending.example.com", "ch-pending", "pending")
+      .run();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm(),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { url: string; urls: string[] };
+    expect(body.url).toBe("https://deploy.example.com");
+    expect(body.urls).toContain("https://deploy.example.com");
+    expect(body.urls).toContain("https://domain-deploy.vitecloud.app");
+
+    // Verify domain KV routing was written
+    const domainRouting = await env.ROUTING.get("domain:deploy.example.com", "json");
+    expect(domainRouting).toEqual({
+      workerName: "user-domain-deploy",
+      projectId: project.id,
+      version: expect.stringMatching(/^dpl_/),
+    });
+
+    // Verify pending domain was NOT written
+    const pendingRouting = await env.ROUTING.get("domain:pending.example.com");
+    expect(pendingRouting).toBeNull();
+  });
+
   it("marks deployment failed when worker upload fails", async () => {
     const user = await createTestUser(env.DB);
     const project = await createTestProject(env.DB, user.id, "fail-app");

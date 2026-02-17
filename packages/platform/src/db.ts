@@ -1,4 +1,4 @@
-import type { User, Project, Deployment, Resource } from "./types";
+import type { User, Project, Deployment, Resource, Domain } from "./types";
 import { generateId } from "./id";
 
 // --- Users ---
@@ -184,6 +184,64 @@ export async function getProjectResources(db: D1Database, projectId: string): Pr
     .bind(projectId)
     .all<Resource>();
   return result.results;
+}
+
+// --- Domains ---
+
+export async function createDomain(
+  db: D1Database,
+  projectId: string,
+  hostname: string,
+  cfHostnameId: string,
+): Promise<Domain> {
+  const id = generateId("dom");
+  await db
+    .prepare("INSERT INTO domains (id, project_id, hostname, cf_hostname_id) VALUES (?, ?, ?, ?)")
+    .bind(id, projectId, hostname, cfHostnameId)
+    .run();
+  return {
+    id,
+    project_id: projectId,
+    hostname,
+    cf_hostname_id: cfHostnameId,
+    status: "pending",
+    created_at: new Date().toISOString(),
+  };
+}
+
+export async function getDomainsByProjectId(db: D1Database, projectId: string): Promise<Domain[]> {
+  const result = await db
+    .prepare("SELECT * FROM domains WHERE project_id = ? ORDER BY created_at ASC")
+    .bind(projectId)
+    .all<Domain>();
+  return result.results;
+}
+
+export async function getDomainByHostname(
+  db: D1Database,
+  hostname: string,
+): Promise<Domain | null> {
+  return db.prepare("SELECT * FROM domains WHERE hostname = ?").bind(hostname).first<Domain>();
+}
+
+export async function getDomain(db: D1Database, id: string): Promise<Domain | null> {
+  return db.prepare("SELECT * FROM domains WHERE id = ?").bind(id).first<Domain>();
+}
+
+export async function updateDomainStatus(
+  db: D1Database,
+  id: string,
+  status: string,
+): Promise<void> {
+  await db.prepare("UPDATE domains SET status = ? WHERE id = ?").bind(status, id).run();
+}
+
+export async function deleteDomain(db: D1Database, id: string): Promise<void> {
+  await db.prepare("DELETE FROM domains WHERE id = ?").bind(id).run();
+}
+
+export async function deleteProjectDomains(db: D1Database, projectId: string): Promise<void> {
+  await db.prepare("DELETE FROM domains WHERE project_id = ?").bind(projectId).run();
 }
 
 // --- Deletion ---

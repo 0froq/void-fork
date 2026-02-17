@@ -25,15 +25,12 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const slug = extractSlug(url.hostname);
-
-    if (!slug) {
-      return new Response("Not Found", { status: 404 });
-    }
+    const routingKey = slug ?? `domain:${url.hostname}`;
 
     // Look up routing info from KV (needed for cache version)
-    const routingRaw = await env.ROUTING.get(slug);
+    const routingRaw = await env.ROUTING.get(routingKey);
     if (!routingRaw) {
-      return new Response("Project not found", { status: 404 });
+      return new Response("Not Found", { status: 404 });
     }
 
     const routing: RoutingEntry = JSON.parse(routingRaw);

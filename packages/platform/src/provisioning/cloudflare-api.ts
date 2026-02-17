@@ -1,4 +1,5 @@
 const CF_API_BASE = "https://api.cloudflare.com/client/v4/accounts";
+const CF_ZONE_API_BASE = "https://api.cloudflare.com/client/v4/zones";
 
 interface CfApiResult<T> {
   success: boolean;
@@ -96,6 +97,48 @@ export async function deleteR2Bucket(
   bucketName: string,
 ): Promise<void> {
   await cfFetch(`${CF_API_BASE}/${accountId}/r2/buckets/${bucketName}`, apiToken, {
+    method: "DELETE",
+  });
+}
+
+// --- Custom Hostnames (CF for SaaS) ---
+
+export interface CustomHostnameInfo {
+  id: string;
+  hostname: string;
+  status: string;
+  ssl: { status: string };
+  verification_errors?: string[];
+}
+
+export async function createCustomHostname(
+  zoneId: string,
+  apiToken: string,
+  hostname: string,
+): Promise<CustomHostnameInfo> {
+  return cfFetch<CustomHostnameInfo>(`${CF_ZONE_API_BASE}/${zoneId}/custom_hostnames`, apiToken, {
+    method: "POST",
+    body: JSON.stringify({ hostname, ssl: { method: "http", type: "dv" } }),
+  });
+}
+
+export async function getCustomHostname(
+  zoneId: string,
+  apiToken: string,
+  hostnameId: string,
+): Promise<CustomHostnameInfo> {
+  return cfFetch<CustomHostnameInfo>(
+    `${CF_ZONE_API_BASE}/${zoneId}/custom_hostnames/${hostnameId}`,
+    apiToken,
+  );
+}
+
+export async function deleteCustomHostname(
+  zoneId: string,
+  apiToken: string,
+  hostnameId: string,
+): Promise<void> {
+  await cfFetch(`${CF_ZONE_API_BASE}/${zoneId}/custom_hostnames/${hostnameId}`, apiToken, {
     method: "DELETE",
   });
 }

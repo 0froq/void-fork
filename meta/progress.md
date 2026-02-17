@@ -52,6 +52,7 @@ Implementation Progress
 
 ### Phase 4: GitHub & Production Readiness
 
+- [ ] Custom domains
 - [ ] Dashboard (web UI for managing projects, viewing logs)
 - [ ] Usage tiers, metering and limits enforcement
 - [ ] Rate limiting and abuse protection on free tier
@@ -60,7 +61,6 @@ Implementation Progress
 - [ ] GitHub App for webhook-based deploys
 - [ ] Build infrastructure (CF containers)
 - [ ] Preview deployments per PR (paid)
-- [ ] Custom domains (paid)
 
 **Milestone:** Ready for public beta.
 

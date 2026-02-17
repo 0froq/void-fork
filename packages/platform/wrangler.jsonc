@@ -32,7 +32,7 @@
       "namespace": "vite-cloud-users",
     },
   ],
-  // Secrets (via `wrangler secret put`): CF_API_TOKEN, CF_ACCOUNT_ID, JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
+  // Secrets (via `wrangler secret put`): CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID, JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
   // Optional env var: AUTH_REDIRECT_URI (defaults to https://api.vite.cloud/auth/callback)
   // For local dev, set AUTH_REDIRECT_URI=http://localhost:8787/auth/callback in .dev.vars
 }

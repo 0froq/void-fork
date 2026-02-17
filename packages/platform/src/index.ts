@@ -6,6 +6,7 @@ import deploy from "./routes/deploy";
 import deleteRoute from "./routes/delete";
 import revalidate from "./routes/revalidate";
 import secrets from "./routes/secrets";
+import domains from "./routes/domains";
 import { authMiddleware } from "./middleware/auth";
 
 const app = new Hono<PlatformEnv>();
@@ -20,5 +21,6 @@ app.route("/projects", deploy);
 app.route("/projects", deleteRoute);
 app.route("/projects", revalidate);
 app.route("/projects", secrets);
+app.route("/projects", domains);
 
 export default app;

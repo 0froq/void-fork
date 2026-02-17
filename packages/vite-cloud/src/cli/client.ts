@@ -44,6 +44,21 @@ export interface SecretResponse {
   name: string;
 }
 
+export interface DomainResponse {
+  id: string;
+  project_id: string;
+  hostname: string;
+  cf_hostname_id: string;
+  status: string;
+  created_at: string;
+  cname_target?: string;
+}
+
+export interface DomainStatusResponse extends DomainResponse {
+  ssl_status: string;
+  verification_errors?: string[];
+}
+
 /**
  * HTTP client for the Vite Cloud platform API.
  */
@@ -203,6 +218,70 @@ export class PlatformClient {
     if (!res.ok) {
       const body = await res.text();
       throw new Error(`Failed to get migration status: ${res.status} ${body}`);
+    }
+
+    return res.json();
+  }
+
+  async addDomain(projectId: string, hostname: string): Promise<DomainResponse> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}/domains`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.token}`,
+      },
+      body: JSON.stringify({ hostname }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Failed to add domain: ${res.status} ${body}`);
+    }
+
+    return res.json();
+  }
+
+  async listDomains(projectId: string): Promise<DomainResponse[]> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}/domains`, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Failed to list domains: ${res.status} ${body}`);
+    }
+
+    return res.json();
+  }
+
+  async getDomainStatus(projectId: string, domainId: string): Promise<DomainStatusResponse> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}/domains/${domainId}`, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Failed to get domain status: ${res.status} ${body}`);
+    }
+
+    return res.json();
+  }
+
+  async removeDomain(projectId: string, domainId: string): Promise<{ ok: boolean }> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}/domains/${domainId}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Failed to remove domain: ${res.status} ${body}`);
     }
 
     return res.json();
