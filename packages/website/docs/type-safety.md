@@ -87,15 +87,26 @@ const data = await fetch("/api/search", {
 
 Routes without validators have an empty input type — no `body`, `query`, or `params` are required.
 
-## Serialization
+## Typed Database Queries
 
-The type system models JSON serialization. The `Serialize<T>` type transform is applied to handler return types:
+When your project has SQL migrations in `migrations/`, the plugin generates `.vite-cloud/db.d.ts` alongside the route types. This augments the `DbTables` and `DbInsertTables` interfaces so every query through `vite-cloud/db` is fully typed:
 
-| Source type                       | Serialized type                                           |
-| --------------------------------- | --------------------------------------------------------- |
-| `string`, `number`, `boolean`     | unchanged                                                 |
-| `Date`                            | `string`                                                  |
-| `Response`                        | excluded (passed through at runtime, not in typed output) |
-| `bigint`, `Function`, `undefined` | excluded                                                  |
-| `Array<T>`                        | `Array<Serialize<T>>`                                     |
-| `{ key: T }`                      | `{ key: Serialize<T> }` (function-valued keys stripped)   |
+```ts
+import { db } from "vite-cloud/db";
+
+// Return type inferred from your migration schema
+const users = await db.list("users");
+users[0].name; // ✓ string
+users[0].missing; // ✗ TypeScript error
+
+// Column selection narrows the return type
+const names = await db.list("users", { select: ["name", "email"] });
+names[0].name; // ✓ string
+names[0].id; // ✗ TypeScript error — not selected
+
+// Insert types enforce required fields and allow optional ones
+await db.insert("users", { name: "Alice", email: "a@b.com" }); // ✓
+await db.insert("users", { name: "Alice" }); // ✗ missing 'email'
+```
+
+Table names, column names in `where`/`orderBy`/`select`, and value types are all checked at compile time. See [Database](./db.md) for the full query API.

@@ -29,13 +29,17 @@ export default extendConfig(
           {
             text: "Features",
             items: [
-              { text: "Cloudflare", link: "/docs/cloudflare" },
+              { text: "Database", link: "/docs/db" },
               { text: "Authentication", link: "/docs/auth" },
               { text: "SSR", link: "/docs/ssr" },
               { text: "SSG", link: "/docs/ssg" },
               { text: "Jobs", link: "/docs/jobs" },
               { text: "Caching and Headers", link: "/docs/cache" },
             ],
+          },
+          {
+            text: "Integrations",
+            items: [{ text: "Cloudflare", link: "/docs/cloudflare" }],
           },
           {
             text: "Reference",
