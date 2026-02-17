@@ -78,6 +78,24 @@ Project resolution precedence:
 
 If no project is linked and no override is provided, CLI prompts to link or create one.
 
+## Database
+
+### `vcd db status`
+
+Show migration status. Displays which migrations are applied or pending locally. When logged in and linked to a project, also shows remote status.
+
+### `vcd db reset`
+
+Drop the local D1 database and re-apply all migrations. Does not affect the remote database.
+
+### `vcd db seed`
+
+```
+vcd db seed [--file <path>]
+```
+
+Reset the local database, re-apply all migrations, then execute a seed file. Defaults to `migrations/seed.sql`. The seed file is excluded from migration collection — it's never deployed or applied as a migration.
+
 ## Secrets
 
 ### `vcd secret put`

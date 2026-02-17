@@ -60,4 +60,17 @@ describe("collectMigrations", () => {
     expect(result).toEqual([]);
     cleanup();
   });
+
+  it("excludes seed.sql", () => {
+    setup({
+      "001_create.sql": "CREATE TABLE a;",
+      "seed.sql": "INSERT INTO a VALUES (1);",
+    });
+
+    const result = collectMigrations(TMP_DIR);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("001_create.sql");
+
+    cleanup();
+  });
 });
