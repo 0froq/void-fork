@@ -1,12 +1,21 @@
 import type { Env } from "./env";
 import { applyHeaderRules, type HeaderRule } from "./headers";
 import { extractSlug } from "./hostname";
+import {
+  readIsrCache,
+  writeIsrCache,
+  isStale,
+  isrCacheResponse,
+  resolveRevalidateTtl,
+  shouldBypassIsr,
+} from "./isr";
 import { serveStaticAsset, serveStaticAssetWithFallback, serveSSGAsset } from "./static";
 
 interface RoutingEntry {
   workerName?: string;
   projectId: string;
   ssr?: boolean;
+  revalidate?: number;
   mode?: "spa" | "ssg";
   version?: string;
   headers?: HeaderRule[];
@@ -92,7 +101,31 @@ export default {
           applyHeaderRules(staticResponse, pathname, routing.headers),
         );
       }
-      const worker = env.DISPATCH.get(routing.workerName);
+
+      // ISR: stale-while-revalidate for SSR pages
+      const isrTtl = routing.revalidate;
+      if (isrTtl && isrTtl > 0 && request.method === "GET" && !shouldBypassIsr(request)) {
+        const cached = await readIsrCache(env, routing.projectId, pathname);
+        if (cached) {
+          const stale = isStale(cached);
+          if (stale) {
+            // Serve stale, revalidate in background
+            ctx.waitUntil(revalidateInBackground(env, routing, request, pathname, isrTtl));
+          }
+          return isrCacheResponse(cached, stale);
+        }
+
+        // Cache miss: render via worker, cache in background
+        const worker = env.DISPATCH.get(routing.workerName!);
+        const workerResponse = await worker.fetch(request);
+        const ttl = resolveRevalidateTtl(workerResponse, isrTtl);
+        if (ttl > 0 && workerResponse.ok) {
+          ctx.waitUntil(writeIsrCache(env, routing.projectId, pathname, workerResponse, ttl));
+        }
+        return workerResponse;
+      }
+
+      const worker = env.DISPATCH.get(routing.workerName!);
       return worker.fetch(request);
     }
 
@@ -129,6 +162,30 @@ function cacheResponse(
     ctx.waitUntil(cache.put(cacheKey, response.clone()));
   }
   return conditionalResponse(request, response);
+}
+
+/**
+ * Revalidate an ISR page in the background.
+ * Dispatches to the user worker, writes the result to R2.
+ * Errors are caught and logged — serve stale, don't retry.
+ */
+async function revalidateInBackground(
+  env: Env,
+  routing: RoutingEntry,
+  request: Request,
+  pathname: string,
+  defaultTtl: number,
+): Promise<void> {
+  try {
+    const worker = env.DISPATCH.get(routing.workerName!);
+    const response = await worker.fetch(request);
+    const ttl = resolveRevalidateTtl(response, defaultTtl);
+    if (ttl > 0 && response.ok) {
+      await writeIsrCache(env, routing.projectId, pathname, response, ttl);
+    }
+  } catch (err) {
+    console.error("ISR revalidation failed:", err);
+  }
 }
 
 /**

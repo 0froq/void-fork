@@ -1,0 +1,146 @@
+import type { Env } from "./env";
+
+export interface IsrCacheEntry {
+  body: ReadableStream;
+  status: number;
+  headers: Record<string, string>;
+  createdAt: number;
+  ttl: number;
+}
+
+/**
+ * Build the R2 key for an ISR-cached page.
+ * Root path `/` maps to `__index__` to avoid trailing-slash ambiguity.
+ */
+export function isrR2Key(projectId: string, pathname: string): string {
+  let normalized = pathname;
+  if (normalized === "/") {
+    normalized = "__index__";
+  } else {
+    // Strip leading slash
+    normalized = normalized.startsWith("/") ? normalized.slice(1) : normalized;
+    // Strip trailing slash
+    if (normalized.endsWith("/")) {
+      normalized = normalized.slice(0, -1);
+    }
+  }
+  return `${projectId}/isr/${normalized}`;
+}
+
+/**
+ * Read an ISR cache entry from R2.
+ * Returns null on cache miss or if metadata is malformed.
+ */
+export async function readIsrCache(
+  env: Env,
+  projectId: string,
+  pathname: string,
+): Promise<IsrCacheEntry | null> {
+  const key = isrR2Key(projectId, pathname);
+  const object = await env.ASSETS.get(key);
+  if (!object) return null;
+
+  const meta = object.customMetadata ?? {};
+  const status = parseInt(meta.status ?? "200", 10);
+  const createdAt = parseInt(meta.createdAt ?? "0", 10);
+  const ttl = parseInt(meta.ttl ?? "0", 10);
+
+  if (!createdAt || !ttl) return null;
+
+  let headers: Record<string, string> = {};
+  try {
+    headers = meta.headers ? JSON.parse(meta.headers) : {};
+  } catch {
+    // Malformed headers metadata — treat as empty
+  }
+
+  return {
+    body: object.body,
+    status,
+    headers,
+    createdAt,
+    ttl,
+  };
+}
+
+/**
+ * Write an ISR cache entry to R2.
+ */
+export async function writeIsrCache(
+  env: Env,
+  projectId: string,
+  pathname: string,
+  response: Response,
+  ttl: number,
+): Promise<void> {
+  const key = isrR2Key(projectId, pathname);
+  const headers = serializeHeaders(response);
+
+  await env.ASSETS.put(key, response.clone().body!, {
+    customMetadata: {
+      status: String(response.status),
+      createdAt: String(Date.now()),
+      ttl: String(ttl),
+      headers: JSON.stringify(headers),
+    },
+  });
+}
+
+/**
+ * Check if a cached entry is stale.
+ */
+export function isStale(entry: IsrCacheEntry): boolean {
+  return Date.now() - entry.createdAt > entry.ttl * 1000;
+}
+
+/**
+ * Build a Response from an ISR cache entry.
+ */
+export function isrCacheResponse(entry: IsrCacheEntry, stale: boolean): Response {
+  const headers = new Headers(entry.headers);
+  headers.set("x-isr-cache", stale ? "STALE" : "HIT");
+  // Prevent edge cache from caching ISR responses
+  headers.set("Cache-Control", "private, no-store");
+
+  return new Response(entry.body, {
+    status: entry.status,
+    headers,
+  });
+}
+
+/**
+ * Read the `x-revalidate` header from a worker response.
+ * Returns the override TTL, or null to use the default.
+ * A value of 0 means "do not cache this response".
+ */
+export function resolveRevalidateTtl(response: Response, defaultTtl: number): number {
+  const header = response.headers.get("x-revalidate");
+  if (header === null) return defaultTtl;
+
+  const value = parseInt(header, 10);
+  if (isNaN(value) || value < 0) return defaultTtl;
+  return value;
+}
+
+/**
+ * ISR should be bypassed for requests with credentials.
+ */
+export function shouldBypassIsr(request: Request): boolean {
+  return request.headers.has("Cookie") || request.headers.has("Authorization");
+}
+
+/**
+ * Extract response headers as a plain object, skipping ISR-managed headers.
+ */
+function serializeHeaders(response: Response): Record<string, string> {
+  const result: Record<string, string> = {};
+  const skip = new Set(["cache-control", "x-isr-cache"]);
+
+  response.headers.forEach((value, key) => {
+    if (!skip.has(key.toLowerCase())) {
+      result[key] = value;
+    }
+  });
+
+  return result;
+}

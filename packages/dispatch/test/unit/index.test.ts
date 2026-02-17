@@ -7,6 +7,7 @@ interface RoutingEntry {
   workerName?: string;
   projectId: string;
   ssr?: boolean;
+  revalidate?: number;
   mode?: "spa" | "ssg";
   version?: string;
   headers?: HeaderRule[];
@@ -36,12 +37,27 @@ function createCtx(): ExecutionContext {
   return { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 }
 
+interface MockAsset {
+  body: string;
+  contentType?: string;
+  etag?: string;
+  customMetadata?: Record<string, string>;
+}
+
 function createEnv(options: {
   routing: RoutingEntry;
-  assets?: Record<string, { body: string; contentType?: string; etag?: string }>;
+  assets?: Record<string, MockAsset>;
   workerResponse?: Response;
-}): { env: Env; workerFetch: ReturnType<typeof vi.fn> } {
+}): { env: Env; workerFetch: ReturnType<typeof vi.fn>; r2Store: Map<string, MockAsset> } {
   const workerFetch = vi.fn(async () => options.workerResponse ?? new Response("worker"));
+  const r2Store = new Map<string, MockAsset>();
+
+  // Seed initial assets
+  if (options.assets) {
+    for (const [key, value] of Object.entries(options.assets)) {
+      r2Store.set(key, value);
+    }
+  }
 
   const env = {
     ROUTING: {
@@ -52,18 +68,27 @@ function createEnv(options: {
     },
     ASSETS: {
       get: async (key: string) => {
-        const object = options.assets?.[key];
+        const object = r2Store.get(key);
         if (!object) return null;
         return {
           body: object.body,
           httpMetadata: { contentType: object.contentType ?? "text/plain" },
           httpEtag: object.etag ?? `"${key}"`,
+          customMetadata: object.customMetadata,
         } as unknown as R2ObjectBody;
+      },
+      put: async (key: string, body: any, opts?: any) => {
+        const text = typeof body === "string" ? body : await new Response(body).text();
+        r2Store.set(key, {
+          body: text,
+          contentType: opts?.httpMetadata?.contentType,
+          customMetadata: opts?.customMetadata,
+        });
       },
     },
   } as unknown as Env;
 
-  return { env, workerFetch };
+  return { env, workerFetch, r2Store };
 }
 
 describe("dispatch fetch handler", () => {
@@ -567,5 +592,195 @@ describe("edge cache versioning", () => {
     const res3 = await app.fetch(new Request("https://my-app.vitecloud.app/"), env3, createCtx());
     expect(res3.status).toBe(200);
     expect(await res3.text()).toBe("<html>v2</html>");
+  });
+});
+
+describe("ISR (stale-while-revalidate)", () => {
+  it("caches worker response in R2 on first ISR request", async () => {
+    const { env, workerFetch, r2Store } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+        revalidate: 60,
+      },
+      workerResponse: new Response("<html>rendered</html>", {
+        headers: { "Content-Type": "text/html" },
+      }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/dashboard"),
+      env,
+      ctx,
+    );
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<html>rendered</html>");
+
+    // Wait for background write
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(r2Store.has("proj_1/isr/dashboard")).toBe(true);
+  });
+
+  it("serves from ISR cache on second request (no worker call)", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+        revalidate: 60,
+      },
+      assets: {
+        "proj_1/isr/dashboard": {
+          body: "<html>cached</html>",
+          customMetadata: {
+            status: "200",
+            createdAt: String(Date.now()),
+            ttl: "60",
+            headers: JSON.stringify({ "Content-Type": "text/html" }),
+          },
+        },
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/dashboard"),
+      env,
+      createCtx(),
+    );
+
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-isr-cache")).toBe("HIT");
+    expect(await response.text()).toBe("<html>cached</html>");
+  });
+
+  it("bypasses ISR cache when Cookie header is present", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+        revalidate: 60,
+      },
+      assets: {
+        "proj_1/isr/dashboard": {
+          body: "<html>cached</html>",
+          customMetadata: {
+            status: "200",
+            createdAt: String(Date.now()),
+            ttl: "60",
+            headers: JSON.stringify({ "Content-Type": "text/html" }),
+          },
+        },
+      },
+      workerResponse: new Response("<html>personalized</html>"),
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/dashboard", {
+        headers: { Cookie: "session=abc" },
+      }),
+      env,
+      createCtx(),
+    );
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(response.headers.get("x-isr-cache")).toBeNull();
+    expect(await response.text()).toBe("<html>personalized</html>");
+  });
+
+  it("does not cache when x-revalidate: 0 opt-out", async () => {
+    const { env, workerFetch, r2Store } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+        revalidate: 60,
+      },
+      workerResponse: new Response("<html>no-cache</html>", {
+        headers: { "x-revalidate": "0" },
+      }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/dashboard"),
+      env,
+      ctx,
+    );
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(await response.text()).toBe("<html>no-cache</html>");
+    // No background write should happen
+    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+    expect(r2Store.has("proj_1/isr/dashboard")).toBe(false);
+  });
+
+  it("SSR without revalidate works unchanged", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+      },
+      workerResponse: new Response("<html>ssr</html>"),
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/dashboard"),
+      env,
+      createCtx(),
+    );
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(response.headers.get("x-isr-cache")).toBeNull();
+    expect(await response.text()).toBe("<html>ssr</html>");
+  });
+
+  it("revalidates stale entry in background and returns stale content", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+        revalidate: 60,
+      },
+      assets: {
+        "proj_1/isr/dashboard": {
+          body: "<html>stale</html>",
+          customMetadata: {
+            status: "200",
+            createdAt: String(Date.now() - 120 * 1000), // 2 minutes ago, TTL is 60s
+            ttl: "60",
+            headers: JSON.stringify({ "Content-Type": "text/html" }),
+          },
+        },
+      },
+      workerResponse: new Response("<html>fresh</html>", {
+        headers: { "Content-Type": "text/html" },
+      }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/dashboard"),
+      env,
+      ctx,
+    );
+
+    // Should return stale content immediately
+    expect(response.headers.get("x-isr-cache")).toBe("STALE");
+    expect(await response.text()).toBe("<html>stale</html>");
+
+    // Background revalidation should have been scheduled
+    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+
+    // Wait for background write
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalledOnce();
   });
 });

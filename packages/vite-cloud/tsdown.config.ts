@@ -49,6 +49,7 @@ export default defineConfig({
     "src/runtime/db.ts",
     "src/runtime/kv.ts",
     "src/runtime/storage.ts",
+    "src/runtime/isr.ts",
     "src/cli/cli.ts",
   ],
   format: "esm",

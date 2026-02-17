@@ -11,7 +11,7 @@ import { promptProjectSelection, promptProjectSlug } from "./prompt";
 import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
 import { scanJobsSync } from "../jobs/scan";
-import { validateSsrEntry } from "../ssr/entry";
+import { validateSsrEntry, getRevalidateConfig } from "../ssr/entry";
 import { detectPreset, type StaticPreset } from "./preset";
 import { readConfig, convertHeadersConfig } from "../config";
 
@@ -235,6 +235,11 @@ async function runFullDeploy(
         cron: job.cron,
       }));
   const isSsr = isFrameworkMode ? true : Boolean(validateSsrEntry(root));
+  const revalidateConfig = isSsr ? getRevalidateConfig(root) : { type: "none" as const };
+  const revalidateTtl =
+    revalidateConfig.type === "static" && revalidateConfig.ttl > 0
+      ? revalidateConfig.ttl
+      : undefined;
 
   // 7. Check assets & Package & Upload
   const s = spinner();
@@ -267,6 +272,7 @@ async function runFullDeploy(
     neededPaths,
     assetHashes,
     headers,
+    revalidateTtl,
   );
 
   s.message("Deploying...");
@@ -282,6 +288,9 @@ async function runFullDeploy(
   }
   if (isSsr) {
     summary.push("SSR enabled");
+  }
+  if (revalidateTtl) {
+    summary.push(`ISR revalidate: ${revalidateTtl}s`);
   }
   if (isFrameworkMode) {
     summary.push("Framework mode");

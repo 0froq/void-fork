@@ -64,6 +64,10 @@
       "types": "./dist/runtime/storage.d.mts",
       "import": "./dist/runtime/storage.mjs"
     },
+    "./isr": {
+      "types": "./dist/runtime/isr.d.mts",
+      "import": "./dist/runtime/isr.mjs"
+    },
     "./env": {
       "types": "./env.d.ts"
     }

@@ -4,6 +4,7 @@ import auth from "./routes/auth";
 import projects from "./routes/projects";
 import deploy from "./routes/deploy";
 import deleteRoute from "./routes/delete";
+import revalidate from "./routes/revalidate";
 import secrets from "./routes/secrets";
 import { authMiddleware } from "./middleware/auth";
 
@@ -17,6 +18,7 @@ app.use("/projects/*", authMiddleware);
 app.route("/projects", projects);
 app.route("/projects", deploy);
 app.route("/projects", deleteRoute);
+app.route("/projects", revalidate);
 app.route("/projects", secrets);
 
 export default app;

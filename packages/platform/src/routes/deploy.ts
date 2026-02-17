@@ -248,19 +248,59 @@ app.post("/:id/deploy", async (c) => {
       );
     }
 
-    // 5. Update KV routing table
+    // 5. Clear previous ISR cache on deploy
+    if (manifest.revalidate && manifest.revalidate > 0) {
+      await clearIsrCache(c.env.ASSETS, projectId);
+
+      // Seed ISR cache from prerendered HTML pages
+      if (manifest.ssr) {
+        const isrSeeds: { path: string; blob: Blob }[] = [];
+        for (const { path, blob } of assetUploads) {
+          if (path.endsWith(".html") || path.endsWith("/index.html")) {
+            isrSeeds.push({ path, blob });
+          }
+        }
+        if (isrSeeds.length > 0) {
+          await uploadPool(isrSeeds, R2_CONCURRENCY, async ({ path, blob }) => {
+            // Convert asset path to ISR key: "about/index.html" → "about", "index.html" → "__index__"
+            let isrPath = path;
+            if (isrPath.endsWith("/index.html")) {
+              isrPath = isrPath.slice(0, -"/index.html".length);
+            } else if (isrPath === "index.html") {
+              isrPath = "__index__";
+            } else if (isrPath.endsWith(".html")) {
+              isrPath = isrPath.slice(0, -".html".length);
+            }
+            if (!isrPath) isrPath = "__index__";
+
+            await c.env.ASSETS.put(`${projectId}/isr/${isrPath}`, blob, {
+              httpMetadata: { contentType: "text/html" },
+              customMetadata: {
+                status: "200",
+                createdAt: String(Date.now()),
+                ttl: String(manifest.revalidate!),
+                headers: JSON.stringify({ "Content-Type": "text/html; charset=utf-8" }),
+              },
+            });
+          });
+        }
+      }
+    }
+
+    // 6. Update KV routing table
     await c.env.ROUTING.put(
       project.slug,
       JSON.stringify({
         workerName,
         projectId,
         ...(manifest.ssr ? { ssr: true } : {}),
+        ...(manifest.revalidate ? { revalidate: manifest.revalidate } : {}),
         version: deployment.id,
         ...(manifest.headers ? { headers: manifest.headers } : {}),
       }),
     );
 
-    // 6. Mark deployment as live + update project mode
+    // 7. Mark deployment as live + update project mode
     await updateDeploymentStatus(c.env.DB, deployment.id, "live");
     await updateProjectMode(c.env.DB, projectId, manifest.framework ? "framework" : "fullstack");
 
@@ -300,6 +340,19 @@ async function uploadPool<T>(
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+}
+
+async function clearIsrCache(assets: R2Bucket, projectId: string): Promise<void> {
+  const prefix = `${projectId}/isr/`;
+  let cursor: string | undefined;
+
+  do {
+    const listed = await assets.list({ prefix, cursor });
+    if (listed.objects.length > 0) {
+      await uploadPool(listed.objects, R2_CONCURRENCY, (obj) => assets.delete(obj.key));
+    }
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor);
 }
 
 function guessContentType(path: string): string {
