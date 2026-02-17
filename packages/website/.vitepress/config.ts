@@ -22,7 +22,7 @@ export default extendConfig(
             items: [
               { text: "App Types", link: "/docs/app-types" },
               { text: "Routing", link: "/docs/routing" },
-              { text: "Configuration", link: "/docs/config" },
+              { text: "Type Safety", link: "/docs/type-safety" },
               { text: "Deployment", link: "/docs/deployment" },
             ],
           },
@@ -30,7 +30,6 @@ export default extendConfig(
             text: "Features",
             items: [
               { text: "Cloudflare", link: "/docs/cloudflare" },
-              { text: "Type Safety", link: "/docs/type-safety" },
               { text: "SSR", link: "/docs/ssr" },
               { text: "SSG", link: "/docs/ssg" },
               { text: "Jobs", link: "/docs/jobs" },
@@ -40,6 +39,7 @@ export default extendConfig(
           {
             text: "Reference",
             items: [
+              { text: "Configuration", link: "/docs/config" },
               { text: "API", link: "/docs/api" },
               { text: "CLI", link: "/docs/cli" },
             ],

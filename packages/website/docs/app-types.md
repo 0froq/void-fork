@@ -1,8 +1,14 @@
 # App Types
 
-Vite Cloud supports three types of apps. The type is auto-detected from your project structure, or you can set it explicitly in [`vite-cloud.json`](./config.md).
+Vite Cloud supports three types of apps:
 
-## Full-Stack (Worker + Assets)
+1. Full-stack Vite apps with Cloudflare Workers backend, optionally with SSR or SSG
+2. Vite single-page application (frontend only)
+3. Any Static site generator that output static assets, e.g. [Vitepress](https://vitepress.dev/)
+
+The type is auto-detected from your project structure, or you can set it explicitly in [`vite-cloud.json`](./config.md).
+
+## Vite Full-Stack
 
 A Vite app with backend code that runs on Cloudflare Workers. This is the default when your project has API routes, SSR, jobs, or any server-side logic.
 
@@ -37,7 +43,11 @@ Your worker handles API routes and (optionally) SSR. Static assets are served fr
 - `jobs/` directory
 - SSR entry (`src/main.ssr.ts` or `src/main.ssr.tsx`)
 
-## Static SPA
+## Meta Frameworks
+
+Vite cloud also supports Vite-based full-stack meta frameworks that have first-class Cloudflare integration, e.g. [Tanstack Start](https://tanstack.com/start/latest).
+
+## Vite SPA
 
 A client-side single-page app without backend code. All paths that don't match a static file fall back to `index.html` with a 200 status, so client-side routing (React Router, Vue Router, etc.) works out of the box.
 
@@ -62,7 +72,7 @@ Vite Cloud detects that `vite` is a dependency and no backend files exist, runs 
 - `vite` is in your dependencies
 - No backend files exist (`routes/`, `jobs/`, SSR entry)
 
-## Static SSG
+## SSG
 
 A statically generated site where each page has its own HTML file. This is the default for VitePress sites and `--dir` deploys.
 
