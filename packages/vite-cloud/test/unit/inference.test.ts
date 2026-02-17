@@ -93,6 +93,31 @@ describe("inferBindingsFromSource", () => {
     expect(result.needsR2).toBe(false);
   });
 
+  it("detects import { db } from 'vite-cloud/db'", () => {
+    const code = `
+      import { db } from "vite-cloud/db";
+      export const GET = defineHandler(async () => {
+        return db.list("users");
+      })
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsD1).toBe(true);
+    expect(result.needsKV).toBe(false);
+    expect(result.needsR2).toBe(false);
+  });
+
+  it("detects import { createDb } from 'vite-cloud/db'", () => {
+    const code = `
+      import { createDb } from "vite-cloud/db";
+      export const GET = defineHandler(async (c) => {
+        const myDb = createDb(c.env.OTHER_DB);
+        return myDb.list("users");
+      })
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsD1).toBe(true);
+  });
+
   it("handles invalid code gracefully", () => {
     const result = inferBindingsFromSource("not { valid {{{ code", "bad.ts");
     expect(result.needsD1).toBe(false);
