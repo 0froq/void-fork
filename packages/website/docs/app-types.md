@@ -87,7 +87,7 @@ const getUsers = createServerFn().handler(async () => {
 });
 ```
 
-Features like `defineHandler`, file-based routing, auth, and the [typed fetch client](./data-fetching.md) are not active in framework mode — the framework provides its own equivalents.
+Features like `defineHandler`, file-based routing, auth, and the [typed fetch client](./typed-fetch.md) are not active in framework mode — the framework provides its own equivalents.
 
 **Detected when** `@tanstack/react-start` or `@react-router/dev` is in your dependencies.
 
