@@ -13,11 +13,13 @@ Examples below use `vcd`.
 vcd login
 vcd logout
 vcd whoami
+vcd token
 ```
 
 - `login`: OAuth login (GitHub or Google — you choose at the prompt), saves token to `~/.vite-cloud/credentials.json`
 - `logout`: removes saved credentials
 - `whoami`: prints your current login
+- `token`: copies your auth token to the system clipboard (useful for setting up CI secrets)
 
 ## Project commands
 

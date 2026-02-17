@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { execSync } from "node:child_process";
 import { log, outro, note } from "@clack/prompts";
 import { runDeploy } from "./deploy";
 import { runLink } from "./link";
@@ -86,6 +87,35 @@ if (command === "deploy") {
     log.error(err.message ?? err);
     process.exit(1);
   });
+} else if (command === "token") {
+  (async () => {
+    if (!getToken()) {
+      await runLoginCommand();
+    }
+    const token = getToken();
+    if (!token) {
+      log.error("Login failed. Run `vcd login` to try again.");
+      process.exit(1);
+    }
+    const platform = process.platform;
+    const cmd =
+      platform === "darwin"
+        ? "pbcopy"
+        : platform === "win32"
+          ? "clip"
+          : "xclip -selection clipboard";
+    try {
+      execSync(cmd, { input: token });
+      log.success("Token copied to clipboard.");
+    } catch {
+      log.warn(
+        "Could not copy to clipboard. Copy the token manually from ~/.vite-cloud/credentials.json",
+      );
+    }
+  })().catch((err) => {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
 } else if (command === "delete") {
   const root = process.cwd();
   runDeleteCommand(root, args[1]).catch((err) => {
@@ -117,6 +147,7 @@ if (command === "deploy") {
       "\x1b[0mvcd login                          \x1b[2mLog in with GitHub or Google",
       "\x1b[0mvcd logout                         \x1b[2mLog out and remove credentials",
       "\x1b[0mvcd whoami                         \x1b[2mShow the logged-in username",
+      "\x1b[0mvcd token                          \x1b[2mCopy auth token to clipboard",
       "\x1b[0mvcd list, ls                       \x1b[2mList your projects",
       "\x1b[0mvcd deploy [--project <name>]      \x1b[2mBuild and deploy to Vite Cloud",
       "\x1b[0m  --dir <path>                    \x1b[2mDeploy a static directory (skip build)",
