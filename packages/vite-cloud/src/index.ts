@@ -191,4 +191,3 @@ export { defineHandler, defineMiddleware, defineJob, defineRender } from "./runt
 export type { CloudContext, CloudEnv, RenderAssetTags, TypedHandler } from "./runtime/handler";
 export type { ValidatorSlots, HandlerInput } from "./runtime/validator";
 export type { AuthUser } from "./runtime/auth";
-export { fetch, FetchError } from "./runtime/fetch";

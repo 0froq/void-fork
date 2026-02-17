@@ -1,12 +1,6 @@
 import { useState, useEffect } from "react";
-
-interface AuthUser {
-  id: string;
-  provider: string;
-  email: string | null;
-  name: string | null;
-  avatar_url: string | null;
-}
+import { auth, AuthError } from "vite-cloud/client";
+import type { AuthUser } from "vite-cloud/client";
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -24,10 +18,10 @@ export default function App() {
 
   const fetchUser = () => {
     setLoading(true);
-    fetch("/auth/me")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        setUser(data);
+    auth
+      .me()
+      .then((u) => {
+        setUser(u);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -41,34 +35,36 @@ export default function App() {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch("/auth/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    try {
+      const u = await auth.register({
         email: regEmail,
         password: regPassword,
         name: regName || undefined,
-      }),
-    });
-    const data = await res.json();
-    showResponse(`POST /auth/register (${res.status})`, data);
-    if (res.ok) fetchUser();
+      });
+      showResponse("POST /auth/register (200)", u);
+      setUser(u);
+    } catch (err) {
+      if (err instanceof AuthError) {
+        showResponse(`POST /auth/register (${err.status})`, err.data);
+      }
+    }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch("/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: loginEmail, password: loginPassword }),
-    });
-    const data = await res.json();
-    showResponse(`POST /auth/login (${res.status})`, data);
-    if (res.ok) fetchUser();
+    try {
+      const u = await auth.login({ email: loginEmail, password: loginPassword });
+      showResponse("POST /auth/login (200)", u);
+      setUser(u);
+    } catch (err) {
+      if (err instanceof AuthError) {
+        showResponse(`POST /auth/login (${err.status})`, err.data);
+      }
+    }
   };
 
   const handleLogout = async () => {
-    await fetch("/auth/logout", { method: "POST" });
+    await auth.logout();
     setUser(null);
     setResponse("Logged out");
   };

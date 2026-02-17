@@ -291,6 +291,52 @@ The typed client is built on [ofetch](https://github.com/unjs/ofetch) with a typ
 
 `headers` and `signal` are passed through to the underlying fetch unchanged.
 
+### `auth`
+
+Client-side helpers for Vite Cloud's built-in [authentication](./auth.md). Handles JSON serialization and cookie sessions automatically.
+
+```ts
+import { auth } from "vite-cloud/client";
+
+const user = await auth.register({ email: "a@b.com", password: "pw", name: "Alice" });
+const user = await auth.login({ email: "a@b.com", password: "pw" });
+const user = await auth.me(); // AuthUser | null
+await auth.logout();
+```
+
+| Method     | Returns                     | Throws      | Description                                        |
+| ---------- | --------------------------- | ----------- | -------------------------------------------------- |
+| `register` | `Promise<AuthUser>`         | `AuthError` | Create email/password account, set session cookie  |
+| `login`    | `Promise<AuthUser>`         | `AuthError` | Sign in with email/password, set session cookie    |
+| `me`       | `Promise<AuthUser \| null>` | —           | Return current user or `null` if not authenticated |
+| `logout`   | `Promise<void>`             | `AuthError` | Clear session cookie                               |
+
+### `AuthError`
+
+Error class thrown by `auth` helpers on non-2xx responses.
+
+```ts
+import { auth, AuthError } from "vite-cloud/client";
+
+try {
+  await auth.login({ email, password });
+} catch (e) {
+  if (e instanceof AuthError) {
+    console.log(e.status); // 401
+    console.log(e.message); // "Invalid credentials"
+    console.log(e.data); // raw response body
+  }
+}
+```
+
+**Properties:**
+
+| Property  | Type      | Description                                                       |
+| --------- | --------- | ----------------------------------------------------------------- |
+| `status`  | `number`  | HTTP status code                                                  |
+| `message` | `string`  | Extracted from `error` field in response body, or generic message |
+| `data`    | `unknown` | Full parsed response body                                         |
+
 ## Types
 
 ### `CloudContext`
@@ -357,7 +403,7 @@ Declares the `Cloudflare.Env` namespace with `DB: D1Database`, `KV: KVNamespace`
 | `vite-cloud`           | Plugin default export + all handler/type re-exports                     |
 | `vite-cloud/handler`   | `defineHandler`, `defineMiddleware`, `defineJob`, `defineRender`, types |
 | `vite-cloud/auth`      | `requireAuth`, `AuthUser`                                               |
-| `vite-cloud/client`    | `fetch`, `FetchError`                                                   |
+| `vite-cloud/client`    | `fetch`, `FetchError`, `auth`, `AuthError`, `AuthUser`                  |
 | `vite-cloud/response`  | `convertReturnValue`                                                    |
 | `vite-cloud/validator` | `runValidation`, `ValidatorSlots`, `HandlerInput`                       |
 | `vite-cloud/routes`    | `RouteMap` stub (types only)                                            |

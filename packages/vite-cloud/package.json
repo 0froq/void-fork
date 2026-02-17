@@ -49,8 +49,8 @@
       "types": "./dist/routes-stub.d.mts"
     },
     "./client": {
-      "types": "./dist/runtime/fetch.d.mts",
-      "import": "./dist/runtime/fetch.mjs"
+      "types": "./dist/runtime/client.d.mts",
+      "import": "./dist/runtime/client.mjs"
     },
     "./env": {
       "types": "./env.d.ts"
