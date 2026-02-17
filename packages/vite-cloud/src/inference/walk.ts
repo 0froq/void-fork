@@ -30,6 +30,12 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
 
   walk(parsed.program as any, {
     enter(node: any) {
+      // import { db } from "vite-cloud/db" → needsD1
+      if (node.type === "ImportDeclaration" && node.source?.value === "vite-cloud/db") {
+        result.needsD1 = true;
+        return;
+      }
+
       if (node.type !== "MemberExpression") return;
       if (node.computed) return;
 
