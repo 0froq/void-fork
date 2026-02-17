@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { intro, outro, log, note, spinner } from "@clack/prompts";
-import { getToken } from "./auth";
+import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
 import { computeAssetHashes, packageBuild, packageStaticBuild } from "./package";
 import { PlatformClient, type ProjectResponse } from "./client";
@@ -179,6 +179,7 @@ async function runStaticDeploy(
     hashes,
     headers,
   );
+  formData.append("source", getTokenSource());
 
   s.message("Deploying...");
   const result = await client.deploy(config.projectId, formData);
@@ -274,6 +275,7 @@ async function runFullDeploy(
     headers,
     revalidateTtl,
   );
+  formData.append("source", getTokenSource());
 
   s.message("Deploying...");
   const result = await client.deploy(config.projectId, formData);

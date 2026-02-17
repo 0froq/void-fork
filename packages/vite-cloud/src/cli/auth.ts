@@ -30,6 +30,10 @@ export function getToken(): string | null {
   return null;
 }
 
+export function getTokenSource(): "ci" | "manual" {
+  return process.env.VITE_CLOUD_TOKEN ? "ci" : "manual";
+}
+
 export function saveToken(token: string): void {
   mkdirSync(CREDENTIALS_DIR, { recursive: true });
   writeFileSync(CREDENTIALS_PATH, JSON.stringify({ token }, null, 2) + "\n", { mode: 0o600 });

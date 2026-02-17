@@ -6,6 +6,7 @@ import { runDeploy } from "./deploy";
 import { runLink } from "./link";
 import { runLoginCommand } from "./login";
 import { runListCommand } from "./list";
+import { runProjectsCommand } from "./projects";
 import { runSecretCommand } from "./secret";
 import { runDeleteCommand } from "./delete";
 import { getToken, removeToken } from "./auth";
@@ -69,7 +70,13 @@ if (command === "deploy") {
       process.exit(1);
     });
 } else if (command === "list" || command === "ls") {
-  runListCommand().catch((err) => {
+  const root = process.cwd();
+  runListCommand(root, args[1]).catch((err) => {
+    log.error(err.message ?? err);
+    process.exit(1);
+  });
+} else if (command === "projects") {
+  runProjectsCommand().catch((err) => {
     log.error(err.message ?? err);
     process.exit(1);
   });
@@ -148,7 +155,8 @@ if (command === "deploy") {
       "\x1b[0mvcd logout                         \x1b[2mLog out and remove credentials",
       "\x1b[0mvcd whoami                         \x1b[2mShow the logged-in username",
       "\x1b[0mvcd token                          \x1b[2mCopy auth token to clipboard",
-      "\x1b[0mvcd list, ls                       \x1b[2mList your projects",
+      "\x1b[0mvcd projects                       \x1b[2mList your projects",
+      "\x1b[0mvcd list, ls [name]                \x1b[2mList deployments for a project",
       "\x1b[0mvcd deploy [--project <name>]      \x1b[2mBuild and deploy to Vite Cloud",
       "\x1b[0m  --dir <path>                    \x1b[2mDeploy a static directory (skip build)",
       "\x1b[0m  --spa                           \x1b[2mUse SPA mode (default: SSG)",

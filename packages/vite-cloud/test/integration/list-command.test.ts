@@ -55,65 +55,6 @@ describe("runListCommand", () => {
     }
   });
 
-  it("prints projects for the authenticated user", async () => {
-    setIsolatedHome();
-    process.env.VITE_CLOUD_TOKEN = "test-token";
-    process.env.VITE_CLOUD_API_URL = "https://api.example.test";
-
-    const fetchMock = vi.fn(async () =>
-      Response.json([
-        {
-          id: "proj_1",
-          user_id: "user_1",
-          slug: "star-tracker",
-          name: "Star Tracker",
-          created_at: "2026-02-15T00:00:00.000Z",
-        },
-        {
-          id: "proj_2",
-          user_id: "user_1",
-          slug: "todo-app",
-          name: "Todo App",
-          created_at: "2026-02-15T00:00:00.000Z",
-        },
-      ]),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const capture = captureOutput();
-    const runListCommand = await importRunListCommand();
-    await runListCommand();
-    const out = capture.output();
-    capture.restore();
-
-    expect(fetchMock).toHaveBeenCalledWith("https://api.example.test/projects", {
-      headers: { Authorization: "Bearer test-token" },
-    });
-    expect(out).toContain("star-tracker");
-    expect(out).toContain("https://star-tracker.vitecloud.app");
-    expect(out).toContain("todo-app");
-    expect(out).toContain("https://todo-app.vitecloud.app");
-  });
-
-  it("prints a friendly message when there are no projects", async () => {
-    setIsolatedHome();
-    process.env.VITE_CLOUD_TOKEN = "test-token";
-    process.env.VITE_CLOUD_API_URL = "https://api.example.test";
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json([])),
-    );
-
-    const capture = captureOutput();
-    const runListCommand = await importRunListCommand();
-    await runListCommand();
-    const out = capture.output();
-    capture.restore();
-
-    expect(out).toContain("No projects found.");
-  });
-
   it("exits with error when not logged in", async () => {
     setIsolatedHome();
 
@@ -123,11 +64,33 @@ describe("runListCommand", () => {
     }) as never);
 
     const runListCommand = await importRunListCommand();
-    await expect(runListCommand()).rejects.toThrow("process.exit:1");
+    const root = mkdtempSync(join(tmpdir(), "vite-cloud-list-"));
+    tempHomes.push(root);
+    await expect(runListCommand(root)).rejects.toThrow("process.exit:1");
     const out = capture.output();
     capture.restore();
 
     expect(out).toContain("Not logged in");
+    expect(exitSpy).toHaveBeenCalled();
+  });
+
+  it("exits with error when no linked project and no slug", async () => {
+    setIsolatedHome();
+    process.env.VITE_CLOUD_TOKEN = "test-token";
+
+    const capture = captureOutput();
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as never);
+
+    const runListCommand = await importRunListCommand();
+    const root = mkdtempSync(join(tmpdir(), "vite-cloud-list-"));
+    tempHomes.push(root);
+    await expect(runListCommand(root)).rejects.toThrow("process.exit:1");
+    const out = capture.output();
+    capture.restore();
+
+    expect(out).toContain("No linked project found");
     expect(exitSpy).toHaveBeenCalled();
   });
 });
