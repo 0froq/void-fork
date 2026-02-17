@@ -10,9 +10,6 @@ import {
   type SsrCompileOptions,
 } from "./router/compile";
 import { generateRouteTypes } from "./codegen/route-types";
-import { generateDbTypes } from "./codegen/db-types";
-import { collectMigrations } from "./migrations/collect";
-import { parseMigrationSchema } from "./migrations/schema";
 import type { AuthProvider } from "./index";
 import {
   getPrerenderConfig,
@@ -47,7 +44,6 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   const middlewareDir = join(root, "middleware");
   const jobsDir = join(root, "jobs");
   const srcDir = join(root, "src");
-  const migrationsDir = join(root, "migrations");
   const ssrEntryAbsPaths = new Set(
     [...SSR_SERVER_ENTRY_RELATIVE_PATHS, ...SSR_CLIENT_ENTRY_RELATIVE_PATHS].map((path) =>
       join(root, path),
@@ -58,13 +54,6 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     if (!scan) return;
     const dts = generateRouteTypes(scan, routesDir, outDir);
     writeFileSync(join(outDir, "routes.d.ts"), dts);
-  }
-
-  function writeDbTypes() {
-    const migrations = collectMigrations(migrationsDir);
-    const schema = parseMigrationSchema(migrations);
-    const dts = generateDbTypes(schema);
-    writeFileSync(join(outDir, "db.d.ts"), dts);
   }
 
   async function rescan() {
@@ -119,21 +108,6 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   const outDir = join(root, ".vite-cloud");
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry());
-  // Use "files" (not "include") so the user's tsconfig can extend this one
-  // and still define its own "include" without overriding the generated types.
-  // TypeScript inherits "files" from a base config when the child doesn't
-  // specify "files", even if the child specifies "include".
-  // Paths resolve relative to this tsconfig's directory (.vite-cloud/).
-  writeFileSync(
-    join(outDir, "tsconfig.json"),
-    JSON.stringify(
-      {
-        files: ["routes.d.ts", "db.d.ts"],
-      },
-      null,
-      2,
-    ) + "\n",
-  );
 
   return {
     name: "vite-cloud:routing",
@@ -164,7 +138,6 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     async buildStart() {
       await rescan();
       writeRouteTypes();
-      writeDbTypes();
     },
 
     resolveId: {
@@ -195,12 +168,6 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       const watcher = devServer.watcher;
 
       const handleFileChange = async (path: string) => {
-        // Migrations changes only need db type regeneration — no route rescan
-        if (path.startsWith(migrationsDir)) {
-          writeDbTypes();
-          return;
-        }
-
         if (
           !path.startsWith(routesDir) &&
           !path.startsWith(middlewareDir) &&
