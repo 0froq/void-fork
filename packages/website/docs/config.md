@@ -72,7 +72,7 @@ Custom response headers for static assets. Keys are URL patterns, values are arr
 
 ### `mode`
 
-Deployment mode. If omitted, auto-detected on first deploy. See [Deployment Modes](./deployment-modes.md).
+Deployment mode. If omitted, auto-detected on first deploy. See [App Types](./app-types.md).
 
 - `"spa"` — static single-page app
 - `"ssg"` — static site generation
