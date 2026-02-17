@@ -20,10 +20,11 @@ export default extendConfig(
           {
             text: "Core",
             items: [
-              { text: "Deployment Modes", link: "/docs/deployment-modes" },
+              { text: "App Types", link: "/docs/app-types" },
               { text: "Routing", link: "/docs/routing" },
               { text: "Configuration", link: "/docs/config" },
-              { text: "Cloudflare", link: "/docs/cloudflare" },
+              { text: "Cloudflare Features", link: "/docs/cloudflare" },
+              { text: "Deployment", link: "/docs/deployment" },
             ],
           },
           {

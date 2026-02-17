@@ -39,7 +39,7 @@ Linked project state is stored in `.vite-cloud/project.json`.
 vcd deploy [--project <name>] [--dir <path>] [--spa]
 ```
 
-The deploy command auto-detects your project type and chooses the right pipeline. See [Deployment Modes](./deployment-modes.md) for full details.
+The deploy command auto-detects your project type and chooses the right pipeline. See [App Types](./app-types.md) and [Deployment](./deployment.md) for details.
 
 | Flag               | Purpose                                           |
 | ------------------ | ------------------------------------------------- |
