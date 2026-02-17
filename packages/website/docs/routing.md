@@ -125,7 +125,7 @@ When validation fails, a `400` response is returned with structured error detail
 
 No extra dependencies are required — Vite Cloud inlines the Standard Schema types. You only need your chosen schema library.
 
-Validator schemas also power the [typed fetch client](./type-safety.md#typed-fetch-client) — `body`, `query`, and `params` types are enforced at the call site.
+Validator schemas also power the [typed fetch client](./data-fetching.md) — `body`, `query`, and `params` types are enforced at the call site.
 
 ## Middleware
 
@@ -180,90 +180,4 @@ export const GET = defineHandler(bearerAuth({ token: "secret" }), requireAdmin, 
 
 Up to 5 middleware can be passed before the handler, with full type inference for each position.
 
-## Using the Hono Ecosystem
-
-Vite Cloud handlers run on Hono, and `hono` is a direct dependency of your project. You can import from any `hono/*` subpath — built-in middleware, helpers, and third-party Hono packages all work out of the box.
-
-### Built-in middleware
-
-Use Hono's built-in middleware in your global middleware files or per-route:
-
-```ts
-// middleware/01.cors.ts
-import { defineMiddleware } from "vite-cloud";
-import { cors } from "hono/cors";
-
-export default defineMiddleware(cors({ origin: "https://example.com" }));
-```
-
-```ts
-// middleware/02.cache.ts
-import { defineMiddleware } from "vite-cloud";
-import { cache } from "hono/cache";
-
-export default defineMiddleware(cache({ cacheName: "my-app", cacheControl: "max-age=3600" }));
-```
-
-```ts
-// routes/api/webhooks/stripe.ts — per-route usage
-import { defineHandler } from "vite-cloud";
-import { bearerAuth } from "hono/bearer-auth";
-
-export const POST = defineHandler(bearerAuth({ token: "webhook-secret" }), async (c) => {
-  const body = await c.req.json();
-  return { received: true };
-});
-```
-
-### Response helpers
-
-Hono's context helpers are available on `c` in every handler:
-
-```ts
-// routes/api/download.ts
-import { defineHandler } from "vite-cloud";
-import { stream } from "hono/streaming";
-
-export const GET = defineHandler((c) => {
-  return stream(c, async (stream) => {
-    await stream.write("chunk 1");
-    await stream.write("chunk 2");
-  });
-});
-```
-
-```ts
-// routes/api/data.ts
-import { defineHandler } from "vite-cloud";
-
-export const GET = defineHandler((c) => {
-  c.header("X-Custom", "value");
-  c.status(201);
-  return c.json({ created: true });
-});
-```
-
-### Third-party middleware
-
-Any `hono/*` or `@hono/*` package works. Install and use directly:
-
-```ts
-// middleware/01.rate-limit.ts
-import { defineMiddleware } from "vite-cloud";
-import { rateLimiter } from "hono-rate-limiter";
-
-export default defineMiddleware(rateLimiter({ windowMs: 60_000, limit: 100 }));
-```
-
-### Utilities
-
-Hono's standalone helpers work anywhere:
-
-```ts
-import { HTTPException } from "hono/http-exception";
-
-// Throw typed HTTP errors
-throw new HTTPException(404, { message: "User not found" });
-```
-
-For the full list of built-in middleware, see the [Hono documentation](https://hono.dev/docs/middleware/builtin).
+Since Vite Cloud runs on Hono, you can use any `hono/*` built-in middleware, response helpers, and third-party packages directly. See [Hono](./hono.md) for details.

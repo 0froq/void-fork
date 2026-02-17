@@ -18,10 +18,9 @@ export default extendConfig(
             ],
           },
           {
-            text: "Core",
+            text: "Core Concepts",
             items: [
               { text: "App Types", link: "/docs/app-types" },
-              { text: "Routing", link: "/docs/routing" },
               { text: "Type Safety", link: "/docs/type-safety" },
               { text: "Deployment", link: "/docs/deployment" },
             ],
@@ -29,6 +28,8 @@ export default extendConfig(
           {
             text: "Features",
             items: [
+              { text: "Routing", link: "/docs/routing" },
+              { text: "Data Fetching", link: "/docs/data-fetching" },
               { text: "Database", link: "/docs/db" },
               { text: "Authentication", link: "/docs/auth" },
               { text: "SSR", link: "/docs/ssr" },
@@ -39,7 +40,10 @@ export default extendConfig(
           },
           {
             text: "Integrations",
-            items: [{ text: "Cloudflare", link: "/docs/cloudflare" }],
+            items: [
+              { text: "Hono", link: "/docs/hono" },
+              { text: "Cloudflare", link: "/docs/cloudflare" },
+            ],
           },
           {
             text: "Reference",

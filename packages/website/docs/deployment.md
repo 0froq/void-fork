@@ -1,4 +1,10 @@
+---
+outline: deep
+---
+
 # Deployment
+
+Vite Cloud apps run on Cloudflare's infrastructure but you don't need to use your own Cloudflare account. Vite Cloud aims to provide a simpler app-centric deployment experience similar to that of Vercel and Netlify.
 
 ## CLI
 
@@ -176,11 +182,3 @@ vcd deploy --dir build --spa    # SPA mode
 ```
 
 The CLI uploads all files from the directory directly — no build command runs.
-
-## Asset Deduplication
-
-On every deploy, the CLI computes SHA-256 hashes for all assets and sends them to the platform. The platform responds with which files are already cached. Only new or changed files are uploaded. This makes re-deploys with few changes very fast.
-
-## Edge Invalidation
-
-Each deploy creates a new version identifier. Edge-cached responses use versioned cache keys, so new deploys are instantly visible without cache purge APIs. See [Caching and Headers](./cache.md) for details on cache behavior.
