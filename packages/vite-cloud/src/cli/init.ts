@@ -214,7 +214,15 @@ async function promptAuth(root: string, state: ProjectState): Promise<void> {
   }
 }
 
-function getWorkflowYaml(pm: ProjectState["packageManager"]): string {
+function getNodeVersionLine(root: string): string {
+  if (existsSync(join(root, ".node-version"))) {
+    return "node-version-file: .node-version";
+  }
+  return "node-version: lts/*";
+}
+
+function getWorkflowYaml(root: string, pm: ProjectState["packageManager"]): string {
+  const nodeVersion = getNodeVersionLine(root);
   switch (pm) {
     case "pnpm":
       return `name: Deploy
@@ -230,7 +238,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          ${nodeVersion}
           cache: pnpm
       - run: pnpm install
       - run: pnpm vcd deploy
@@ -250,7 +258,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          ${nodeVersion}
           cache: yarn
       - run: yarn install --immutable
       - run: yarn vcd deploy
@@ -287,7 +295,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          ${nodeVersion}
           cache: npm
       - run: npm ci
       - run: npx vcd deploy
@@ -306,7 +314,7 @@ function setupGithubActions(root: string, state: ProjectState): void {
   }
 
   mkdirSync(join(root, ".github", "workflows"), { recursive: true });
-  writeFileSync(workflowPath, getWorkflowYaml(state.packageManager));
+  writeFileSync(workflowPath, getWorkflowYaml(root, state.packageManager));
   log.success("Created .github/workflows/deploy.yml");
 
   note(
