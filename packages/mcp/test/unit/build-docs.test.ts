@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { buildDocs } from "../../scripts/build-docs";
 
 const docsDir = path.resolve(import.meta.dirname, "../../../website/docs");
 
@@ -9,6 +10,8 @@ describe("build-docs", () => {
     .readdirSync(docsDir)
     .filter((f) => f.endsWith(".md"))
     .sort();
+
+  const docs = buildDocs();
 
   it("finds markdown files in docs directory", () => {
     expect(files.length).toBeGreaterThan(0);
@@ -27,38 +30,29 @@ describe("build-docs", () => {
     expect(stripped).toMatch(/^#\s+.+/m);
   });
 
-  it("generated docs.ts exists and exports all pages", async () => {
-    const generated = path.resolve(import.meta.dirname, "../../src/docs.ts");
-    // The generated file should exist (build:docs must have been run)
-    expect(fs.existsSync(generated)).toBe(true);
-
-    const { docs } = await import("../../src/docs");
+  it("builds all pages", () => {
     expect(docs.length).toBe(files.length);
   });
 
-  it("generated docs have correct slugs", async () => {
-    const { docs } = await import("../../src/docs");
+  it("has correct slugs", () => {
     const expectedSlugs = files.map((f) => f.replace(/\.md$/, ""));
-    const actualSlugs = docs.map((d: { slug: string }) => d.slug);
+    const actualSlugs = docs.map((d) => d.slug);
     expect(actualSlugs).toEqual(expectedSlugs);
   });
 
-  it("generated docs have non-empty titles", async () => {
-    const { docs } = await import("../../src/docs");
+  it("has non-empty titles", () => {
     for (const page of docs) {
       expect(page.title.length).toBeGreaterThan(0);
     }
   });
 
-  it("generated docs have non-empty content", async () => {
-    const { docs } = await import("../../src/docs");
+  it("has non-empty content", () => {
     for (const page of docs) {
       expect(page.content.length).toBeGreaterThan(0);
     }
   });
 
-  it("strips YAML frontmatter from content", async () => {
-    const { docs } = await import("../../src/docs");
+  it("strips YAML frontmatter from content", () => {
     for (const page of docs) {
       expect(page.content).not.toMatch(/^---\n/);
     }
