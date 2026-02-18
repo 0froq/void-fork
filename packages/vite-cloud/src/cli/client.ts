@@ -1,4 +1,4 @@
-const DEFAULT_API_URL = "https://api.vite.cloud";
+import { getApiUrl } from "./auth";
 
 export interface ProjectResponse {
   id: string;
@@ -68,7 +68,7 @@ export class PlatformClient {
 
   constructor(token: string, apiUrl?: string) {
     this.token = token;
-    this.baseUrl = apiUrl ?? process.env.VITE_CLOUD_API_URL ?? DEFAULT_API_URL;
+    this.baseUrl = apiUrl ?? getApiUrl();
   }
 
   async whoami(): Promise<{ login: string }> {

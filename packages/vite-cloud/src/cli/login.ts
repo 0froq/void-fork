@@ -8,7 +8,7 @@ export async function runLoginCommand(): Promise<void> {
   const existing = getToken();
   if (existing) {
     log.warn("Already logged in.");
-    outro("To re-login, delete ~/.vite-cloud/credentials.json and run again.");
+    outro("To re-login, run `vcd logout` first.");
     return;
   }
 
@@ -33,7 +33,7 @@ export async function runLoginCommand(): Promise<void> {
     const token = await runLogin(provider);
     saveToken(token);
     s.stop("Logged in!");
-    outro("Token saved to ~/.vite-cloud/credentials.json");
+    outro("Token saved to ~/.vite-cloud/config.json");
   } catch (err) {
     s.stop("Login failed");
     throw err;

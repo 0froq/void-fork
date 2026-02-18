@@ -40,7 +40,7 @@ Flags can be combined. When any flag is provided, only the specified steps run a
 
 ### `vcd login`
 
-OAuth login (GitHub or Google — you choose at the prompt). Saves token to `~/.vite-cloud/credentials.json`.
+OAuth login (GitHub or Google — you choose at the prompt). Saves token to `~/.vite-cloud/config.json`.
 
 ### `vcd logout`
 
@@ -182,8 +182,7 @@ Project resolution for domain commands follows the same order as deploy (`--proj
 
 ## Environment variables
 
-| Variable             | Purpose                                                | Default                  |
-| -------------------- | ------------------------------------------------------ | ------------------------ |
-| `VITE_CLOUD_TOKEN`   | Auth token override (instead of saved credentials)     | —                        |
-| `VITE_CLOUD_PROJECT` | Default project slug for deploy/secret/delete commands | —                        |
-| `VITE_CLOUD_API_URL` | Platform API endpoint                                  | `https://api.vite.cloud` |
+| Variable             | Purpose                                                | Default |
+| -------------------- | ------------------------------------------------------ | ------- |
+| `VITE_CLOUD_TOKEN`   | Auth token override (instead of saved config)          | —       |
+| `VITE_CLOUD_PROJECT` | Default project slug for deploy/secret/delete commands | —       |

@@ -248,7 +248,7 @@ SSR is supported via `src/main.ssr.ts` render entry. ISR (Incremental Static Reg
 
 ### Authentication
 
-Users sign in via GitHub or Google OAuth. Provider-agnostic user model (`provider`, `provider_id`, `login`, `plan`). JWT tokens, cached at `~/.config/vite-cloud/credentials.json`.
+Users sign in via GitHub or Google OAuth. Provider-agnostic user model (`provider`, `provider_id`, `login`, `plan`). JWT tokens, cached at `~/.vite-cloud/config.json`.
 
 ### Usage Metering & Tiers
 
