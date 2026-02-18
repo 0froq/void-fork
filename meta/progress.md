@@ -53,11 +53,10 @@ Implementation Progress
 ### Phase 4: GitHub & Production Readiness
 
 - [x] Custom domains
-- [ ] Dashboard (web UI for managing projects, viewing logs)
 - [ ] Usage tiers, metering and limits enforcement
-- [ ] Rate limiting and abuse protection on free tier
+- [ ] Dashboard (web UI for managing projects, viewing logs)
 - [ ] Billing integration (Stripe)
-- [ ] Email notifications (e.g. for failed project builds or billing issues)
+- [ ] Email & webhooks notifications (e.g. for failed project builds or billing issues)
 - [ ] GitHub App for webhook-based deploys
 - [ ] Build infrastructure (CF containers)
 - [ ] Preview deployments per PR (paid)
