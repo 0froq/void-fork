@@ -7,6 +7,7 @@ import {
   isStale,
   isrCacheResponse,
   resolveRevalidateTtl,
+  resolvePathTtl,
   shouldBypassIsr,
 } from "./isr";
 import { recordRequest, type RequestType } from "./metering";
@@ -16,7 +17,7 @@ interface RoutingEntry {
   workerName?: string;
   projectId: string;
   ssr?: boolean;
-  revalidate?: number;
+  revalidate?: number | Record<string, number>;
   mode?: "spa" | "ssg";
   version?: string;
   headers?: HeaderRule[];
@@ -144,8 +145,8 @@ export default {
       }
 
       // ISR: stale-while-revalidate for SSR pages
-      const isrTtl = routing.revalidate;
-      if (isrTtl && isrTtl > 0 && request.method === "GET" && !shouldBypassIsr(request)) {
+      const isrTtl = resolvePathTtl(routing.revalidate, pathname);
+      if (isrTtl > 0 && request.method === "GET" && !shouldBypassIsr(request)) {
         const cached = await readIsrCache(env, routing.projectId, pathname);
         if (cached) {
           const stale = isStale(cached);

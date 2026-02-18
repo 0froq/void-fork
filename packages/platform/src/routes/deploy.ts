@@ -289,7 +289,11 @@ app.post("/:id/deploy", async (c) => {
     }
 
     // 5. Clear previous ISR cache on deploy
-    if (manifest.revalidate && manifest.revalidate > 0) {
+    const hasIsr =
+      typeof manifest.revalidate === "object"
+        ? Object.keys(manifest.revalidate).length > 0
+        : Boolean(manifest.revalidate && manifest.revalidate > 0);
+    if (hasIsr) {
       await clearIsrCache(c.env.ASSETS, projectId);
     }
 

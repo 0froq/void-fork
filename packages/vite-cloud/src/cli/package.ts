@@ -36,7 +36,7 @@ export function packageBuild(
   neededPaths?: Set<string>,
   assetHashes?: Record<string, string>,
   headers?: HeaderRule[],
-  revalidate?: number,
+  revalidate?: number | Record<string, number>,
 ): FormData {
   const formData = new FormData();
 
@@ -73,7 +73,7 @@ export function packageBuild(
     manifest.assetHashes = assetHashes;
   }
 
-  if (revalidate && revalidate > 0) {
+  if (revalidate != null && revalidate !== 0) {
     manifest.revalidate = revalidate;
   }
 

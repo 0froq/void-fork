@@ -18,6 +18,26 @@ export default defineRender(async (c, assetTags) => {
 
 Setting `revalidate` to `0` disables ISR (equivalent to plain SSR).
 
+## Per-path revalidation
+
+You can set different TTLs for different URL patterns by exporting an object:
+
+```ts
+export const revalidate = {
+  "/": 60, // homepage: 60 seconds
+  "/docs/*": Infinity, // docs: cached until next deploy
+  "/user/*": 0, // user pages: never cached (always SSR)
+  "*": 30, // everything else: 30 seconds
+};
+```
+
+Rules are matched in order — first match wins. The `*` glob matches any characters including `/`.
+
+Special values:
+
+- `Infinity` — cached until the next deploy (mapped to 1 year internally; deploys clear the ISR cache)
+- `0` — never cached, always rendered by the worker (equivalent to plain SSR for that path)
+
 ## How it works
 
 1. **First request** — no cache entry. The worker renders the page (blocking), the response is returned, and the result is written to R2 in the background.

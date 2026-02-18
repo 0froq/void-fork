@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { matchPattern } from "./headers";
 
 export interface IsrCacheEntry {
   body: ReadableStream;
@@ -127,6 +128,23 @@ export function resolveRevalidateTtl(response: Response, defaultTtl: number): nu
  */
 export function shouldBypassIsr(request: Request): boolean {
   return request.headers.has("Cookie") || request.headers.has("Authorization");
+}
+
+/**
+ * Resolve the ISR TTL for a given pathname.
+ * Accepts the `revalidate` config from the routing entry (number, object, or undefined).
+ * For object form, first matching pattern wins.
+ */
+export function resolvePathTtl(
+  revalidate: number | Record<string, number> | undefined,
+  pathname: string,
+): number {
+  if (revalidate == null) return 0;
+  if (typeof revalidate === "number") return revalidate;
+  for (const [pattern, ttl] of Object.entries(revalidate)) {
+    if (matchPattern(pattern, pathname)) return ttl;
+  }
+  return 0;
 }
 
 /**

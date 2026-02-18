@@ -3,6 +3,7 @@ import {
   isrR2Key,
   isStale,
   resolveRevalidateTtl,
+  resolvePathTtl,
   shouldBypassIsr,
   isrCacheResponse,
   type IsrCacheEntry,
@@ -108,6 +109,37 @@ describe("resolveRevalidateTtl", () => {
       headers: { "x-revalidate": "-5" },
     });
     expect(resolveRevalidateTtl(response, 60)).toBe(60);
+  });
+});
+
+describe("resolvePathTtl", () => {
+  it("returns 0 for undefined", () => {
+    expect(resolvePathTtl(undefined, "/")).toBe(0);
+  });
+
+  it("returns the number for numeric revalidate", () => {
+    expect(resolvePathTtl(60, "/anything")).toBe(60);
+  });
+
+  it("matches exact path in object", () => {
+    expect(resolvePathTtl({ "/": 60, "*": 30 }, "/")).toBe(60);
+  });
+
+  it("matches glob pattern", () => {
+    expect(resolvePathTtl({ "/docs/*": 120, "*": 30 }, "/docs/intro")).toBe(120);
+  });
+
+  it("returns 0 when no pattern matches", () => {
+    expect(resolvePathTtl({ "/docs/*": 120 }, "/about")).toBe(0);
+  });
+
+  it("uses first-match-wins ordering", () => {
+    expect(resolvePathTtl({ "/docs/*": 120, "*": 30 }, "/docs/intro")).toBe(120);
+    expect(resolvePathTtl({ "*": 30, "/docs/*": 120 }, "/docs/intro")).toBe(30);
+  });
+
+  it("supports zero TTL for specific paths", () => {
+    expect(resolvePathTtl({ "/user/*": 0, "*": 60 }, "/user/profile")).toBe(0);
   });
 });
 
