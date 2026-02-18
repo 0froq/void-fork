@@ -83,15 +83,51 @@ function setupTsconfig(root: string, state: ProjectState): void {
     }
     const types: string[] = tsconfig.compilerOptions.types ?? [];
     if (!types.includes("vite-cloud/env")) {
-      tsconfig.compilerOptions.types = [...types, "vite-cloud/env"];
+      types.push("vite-cloud/env");
       updated = true;
       log.success("Updated tsconfig.json — added vite-cloud/env to types");
     }
+
+    // Remove @cloudflare/workers-types — vite-cloud/env includes it
+    const cfIdx = types.indexOf("@cloudflare/workers-types");
+    if (cfIdx !== -1) {
+      types.splice(cfIdx, 1);
+      updated = true;
+      log.success(
+        "Removed @cloudflare/workers-types from tsconfig types (included in vite-cloud/env)",
+      );
+    }
+
+    tsconfig.compilerOptions.types = types;
 
     if (updated) {
       writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2) + "\n");
     } else {
       log.success("tsconfig.json looks good");
+    }
+
+    // Remove @cloudflare/workers-types from package.json — vite-cloud/env includes it
+    try {
+      const pkgPath = join(root, "package.json");
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+      let pkgUpdated = false;
+      if (pkg.dependencies?.["@cloudflare/workers-types"]) {
+        delete pkg.dependencies["@cloudflare/workers-types"];
+        pkgUpdated = true;
+      }
+      if (pkg.devDependencies?.["@cloudflare/workers-types"]) {
+        delete pkg.devDependencies["@cloudflare/workers-types"];
+        pkgUpdated = true;
+      }
+      if (pkgUpdated) {
+        writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+        log.success(
+          "Removed @cloudflare/workers-types from package.json (included in vite-cloud/env)",
+        );
+        log.info(`Re-run ${state.packageManager} install to update your lockfile`);
+      }
+    } catch {
+      // no package.json or parse error — skip
     }
   } else {
     // Case B: no tsconfig — create recommended one
