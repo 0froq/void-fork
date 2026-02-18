@@ -7,6 +7,7 @@ export interface ProjectResponse {
   name: string;
   mode: string;
   created_at: string;
+  custom_domain: string | null;
 }
 
 export interface CreateProjectResponse {

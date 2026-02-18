@@ -42,6 +42,7 @@ describe("resolveProjectBySlug", () => {
           name: "My App",
           mode: "worker",
           created_at: "2026-02-15T00:00:00.000Z",
+          custom_domain: null,
         },
       ],
       "my-app",

@@ -23,7 +23,7 @@ export async function runProjectsCommand(): Promise<void> {
   const rows = projects.map((p) => ({
     slug: p.slug,
     mode: p.mode ?? "worker",
-    url: `https://${p.slug}.vitecloud.app`,
+    url: p.custom_domain ? `https://${p.custom_domain}` : `https://${p.slug}.vitecloud.app`,
   }));
 
   const slugWidth = Math.max("name".length, ...rows.map((r) => r.slug.length));
