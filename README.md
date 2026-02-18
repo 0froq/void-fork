@@ -378,7 +378,7 @@ Authenticates via `~/.vite-cloud/credentials.json` (same file as `vcd login`).
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). 734 tests across 63 files.
+Tests run from root with `pnpm test` (vitest). 741 tests across 63 files.
 
 ### Unit Tests
 
@@ -412,14 +412,14 @@ Tests run from root with `pnpm test` (vitest). 734 tests across 63 files.
 
 Platform integration tests call the Hono app via `app.fetch(request, env)` with **real** Miniflare D1/KV/R2 bindings and **mocked** external fetch calls (GitHub API, CF API). This tests the full request→middleware→route→DB→response chain.
 
-| Test file                                                 | Covers                                                                              |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `packages/platform/test/integration/api-health.test.ts`   | Health endpoint smoke test (1 test)                                                 |
-| `packages/platform/test/integration/api-me.test.ts`       | Auth middleware: missing/invalid/expired JWT, valid (4)                             |
-| `packages/platform/test/integration/api-projects.test.ts` | Projects CRUD: auth, list, create, validation, dupes (12)                           |
-| `packages/platform/test/integration/api-deploy.test.ts`   | Deploy pipeline: auth, provisioning, migrations, R2, KV, limits, failure modes (33) |
-| `packages/platform/test/integration/api-admin.test.ts`    | Admin API: middleware, users CRUD, plan change, suspend/unsuspend, stats (14)       |
-| `packages/admin/test/integration/dashboard.test.ts`       | Admin dashboard: auth, pages, forms, search, login/logout (14)                      |
+| Test file                                                 | Covers                                                                                  |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `packages/platform/test/integration/api-health.test.ts`   | Health endpoint smoke test (1 test)                                                     |
+| `packages/platform/test/integration/api-me.test.ts`       | Auth middleware: missing/invalid/expired JWT, valid (4)                                 |
+| `packages/platform/test/integration/api-projects.test.ts` | Projects CRUD: auth, list, create, validation, dupes (12)                               |
+| `packages/platform/test/integration/api-deploy.test.ts`   | Deploy pipeline: auth, provisioning, migrations, R2, KV, limits, failure modes (33)     |
+| `packages/platform/test/integration/api-admin.test.ts`    | Admin API: middleware, users CRUD, plan change, suspend/unsuspend, stats (14)           |
+| `packages/admin/test/integration/dashboard.test.ts`       | Admin dashboard: auth, pages, forms, search, pagination, deployments, login/logout (21) |
 
 Shared helpers in `packages/platform/test/integration/helpers.ts`:
 
