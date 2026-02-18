@@ -286,7 +286,7 @@ CF Worker serving the Admin Dashboard (Hono JSX, server-rendered) and Admin CLI 
 
 ### Auth
 
-Cookie-based JWT auth. Login flow redirects through platform OAuth (GitHub/Google), then verifies `role === "admin"` from D1. Non-admins get 403.
+Cookie-based JWT auth. Login flow handles Google OAuth directly (using shared helper functions from `@vite-cloud/platform`), then verifies `role === "admin"` from D1. Non-admins get 403.
 
 ### Source Layout
 
