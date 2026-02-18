@@ -228,6 +228,52 @@ The platform default export is `{ fetch: app.fetch, scheduled }` — `app` (the 
 
 `AUTH_REDIRECT_URI` is set as a `vars` entry in wrangler config for staging (`https://api.staging.vite.cloud/auth/callback`). For local dev, set `AUTH_REDIRECT_URI=http://localhost:8787/auth/callback` in `.dev.vars`.
 
+### Cloudflare API Token Permissions
+
+Two tokens are needed: a **deploy token** (used by wrangler / CI) and a **runtime token** (used by the platform worker to provision user resources). A single token can serve both roles if it has the union of all permissions.
+
+**Account-wide features** (enabled on the account, not configurable per-token): Workers for Platforms, Cloudflare for SaaS.
+
+#### Deploy Token (`CLOUDFLARE_API_TOKEN`)
+
+Used by `pnpm run deploy` and GitHub Actions to deploy all three workers.
+
+**Account permissions:**
+
+| Permission         | Access | Reason                                       |
+| ------------------ | ------ | -------------------------------------------- |
+| Workers Scripts    | Edit   | Deploy platform, dispatch, and admin workers |
+| Workers KV Storage | Edit   | KV namespace bindings (ROUTING)              |
+| D1                 | Edit   | D1 database bindings (DB)                    |
+| Workers R2 Storage | Edit   | R2 bucket bindings (ASSETS)                  |
+
+**Zone permissions** (on `vitecloud.app`):
+
+| Permission     | Access | Reason                                               |
+| -------------- | ------ | ---------------------------------------------------- |
+| Workers Routes | Edit   | Dispatch worker route patterns (`*.vitecloud.app/*`) |
+| DNS            | Read   | Zone lookup for route binding                        |
+
+#### Runtime Token (`CF_API_TOKEN` secret)
+
+Used by the platform worker at runtime to provision and manage user resources via the CF REST API.
+
+**Account permissions:**
+
+| Permission         | Access | Reason                                                 |
+| ------------------ | ------ | ------------------------------------------------------ |
+| Workers Scripts    | Edit   | Upload/delete user workers in dispatch namespace       |
+| D1                 | Edit   | Create databases, execute migrations, delete databases |
+| Workers KV Storage | Edit   | Create/delete KV namespaces                            |
+| Workers R2 Storage | Edit   | Create/delete R2 buckets                               |
+| Account Analytics  | Read   | Query Analytics Engine SQL API for usage metering      |
+
+**Zone permissions** (on `vitecloud.app`):
+
+| Permission           | Access | Reason                                      |
+| -------------------- | ------ | ------------------------------------------- |
+| SSL and Certificates | Edit   | Custom hostname DV certificate provisioning |
+
 ## `dispatch` Architecture
 
 CF Worker routing `*.vitecloud.app` traffic to user workers and static assets. No framework — plain `fetch` handler.
