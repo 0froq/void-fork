@@ -55,7 +55,7 @@ Implementation Progress
 - [x] Custom domains
 - [x] Usage tiers, metering and limits enforcement
 - [x] Admin dashboard (`packages/admin/` — Hono JSX dashboard, admin API endpoints)
-- [ ] Staging environment
+- [x] Staging environment
 - [ ] Billing integration (Stripe)
 - [ ] Email & webhooks notifications (e.g. for failed project builds or billing issues)
 - [ ] AI code generation (`vite generate route` scaffolding)

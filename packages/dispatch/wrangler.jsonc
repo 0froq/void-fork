@@ -4,7 +4,7 @@
   "compatibility_date": "2026-02-12",
   "routes": [
     { "pattern": "*.vitecloud.app/*", "zone_name": "vitecloud.app" },
-    { "pattern": "*/*", "zone_name": "vitecloud.app" },
+    { "pattern": "*.vitecloud.app", "zone_name": "vitecloud.app" },
   ],
   "observability": {
     "enabled": true,
@@ -34,4 +34,40 @@
       "dataset": "vite_cloud_requests",
     },
   ],
+  "env": {
+    "staging": {
+      "name": "vite-cloud-dispatch-staging",
+      "routes": [
+        { "pattern": "*.staging.vitecloud.app/*", "zone_name": "vitecloud.app" },
+        { "pattern": "*.staging.vitecloud.app", "zone_name": "vitecloud.app" },
+      ],
+      "vars": {
+        "BASE_HOSTNAME": "staging.vitecloud.app",
+      },
+      "dispatch_namespaces": [
+        {
+          "binding": "DISPATCH",
+          "namespace": "vite-cloud-users-staging",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "ASSETS",
+          "bucket_name": "vite-cloud-assets-staging",
+        },
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "ROUTING",
+          "id": "PLACEHOLDER_STAGING_KV_ID",
+        },
+      ],
+      "analytics_engine_datasets": [
+        {
+          "binding": "ANALYTICS",
+          "dataset": "vite_cloud_requests_staging",
+        },
+      ],
+    },
+  },
 }

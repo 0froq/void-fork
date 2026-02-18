@@ -1,5 +1,3 @@
-const DOMAIN_SUFFIX = ".vitecloud.app";
-
 /**
  * Extract the project slug from a hostname.
  * Returns null if the hostname doesn't match the expected pattern.
@@ -10,12 +8,16 @@ const DOMAIN_SUFFIX = ".vitecloud.app";
  *   "foo.bar.vitecloud.app" → null (no subdomains)
  *   "example.com" → null
  */
-export function extractSlug(hostname: string): string | null {
-  if (!hostname.endsWith(DOMAIN_SUFFIX)) {
+export function extractSlug(
+  hostname: string,
+  baseHostname: string = "vitecloud.app",
+): string | null {
+  const suffix = `.${baseHostname}`;
+  if (!hostname.endsWith(suffix)) {
     return null;
   }
 
-  const slug = hostname.slice(0, -DOMAIN_SUFFIX.length);
+  const slug = hostname.slice(0, -suffix.length);
 
   // Must be non-empty and contain no dots (no nested subdomains)
   if (!slug || slug.includes(".")) {

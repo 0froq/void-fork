@@ -57,10 +57,11 @@ app.get("/login", async (c) => {
   }
 
   // Security: only allow localhost and admin redirects
+  const adminOrigin = c.env.ADMIN_ORIGIN ?? "https://admin.vite.cloud";
   if (
     !redirect.startsWith("http://localhost:") &&
     !redirect.startsWith("http://127.0.0.1:") &&
-    !redirect.startsWith("https://admin.vite.cloud/")
+    !redirect.startsWith(adminOrigin + "/")
   ) {
     return c.json({ error: "redirect must be a localhost or admin URL" }, 400);
   }
@@ -117,10 +118,11 @@ app.get("/callback", async (c) => {
   };
 
   // Re-validate redirect after decoding
+  const callbackAdminOrigin = c.env.ADMIN_ORIGIN ?? "https://admin.vite.cloud";
   if (
     !redirect.startsWith("http://localhost:") &&
     !redirect.startsWith("http://127.0.0.1:") &&
-    !redirect.startsWith("https://admin.vite.cloud/")
+    !redirect.startsWith(callbackAdminOrigin + "/")
   ) {
     return c.json({ error: "invalid redirect" }, 400);
   }

@@ -29,7 +29,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const startTime = Date.now();
     const url = new URL(request.url);
-    const slug = extractSlug(url.hostname);
+    const slug = extractSlug(url.hostname, env.BASE_HOSTNAME);
     const routingKey = slug ?? `domain:${url.hostname}`;
 
     // Look up routing info from KV (needed for cache version)

@@ -16,7 +16,7 @@ import {
   deleteCustomHostname,
 } from "../provisioning/cloudflare-api";
 
-const DISPATCH_NAMESPACE = "vite-cloud-users";
+const DEFAULT_DISPATCH_NAMESPACE = "vite-cloud-users";
 
 const app = new Hono<PlatformEnv>();
 
@@ -52,10 +52,11 @@ app.delete("/:id", async (c) => {
   }
 
   // Delete worker from dispatch namespace
+  const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
   const workerName = `user-${project.slug}`;
   try {
     const cfRes = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${DISPATCH_NAMESPACE}/scripts/${workerName}`,
+      `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`,
       {
         method: "DELETE",
         headers: {

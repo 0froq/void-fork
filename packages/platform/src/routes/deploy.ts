@@ -15,7 +15,8 @@ import { runRemoteMigrations, type RemoteMigration } from "../migrations/remote-
 import { validateMigrationSQL } from "../migrations/validate";
 import { getPlanLimits, isWithinLimit } from "../tiers";
 
-const DISPATCH_NAMESPACE = "vite-cloud-users";
+const DEFAULT_DISPATCH_NAMESPACE = "vite-cloud-users";
+const DEFAULT_SITE_DOMAIN = "vitecloud.app";
 const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
 
 const app = new Hono<PlatformEnv>();
@@ -126,18 +127,19 @@ app.post("/:id/deploy", async (c) => {
       await updateDeploymentStatus(c.env.DB, deployment.id, "live");
       await updateProjectMode(c.env.DB, projectId, manifest.static);
 
+      const siteDomain = c.env.SITE_DOMAIN ?? DEFAULT_SITE_DOMAIN;
       const staticActiveDomains = staticDomains.filter((d) => d.status === "active");
       const staticUrl =
         staticActiveDomains.length > 0
           ? `https://${staticActiveDomains[0].hostname}`
-          : `https://${project.slug}.vitecloud.app`;
+          : `https://${project.slug}.${siteDomain}`;
 
       return c.json({
         deployment: deployment.id,
         url: staticUrl,
         urls: [
           ...staticActiveDomains.map((d) => `https://${d.hostname}`),
-          `https://${project.slug}.vitecloud.app`,
+          `https://${project.slug}.${siteDomain}`,
         ],
         assets: assetKeys.length,
         workers: 0,
@@ -255,8 +257,9 @@ app.post("/:id/deploy", async (c) => {
     }
 
     // Upload to CF Workers for Platforms API
+    const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
     const cfResponse = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${DISPATCH_NAMESPACE}/scripts/${workerName}`,
+      `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`,
       {
         method: "PUT",
         headers: {
@@ -337,18 +340,19 @@ app.post("/:id/deploy", async (c) => {
     await updateDeploymentStatus(c.env.DB, deployment.id, "live");
     await updateProjectMode(c.env.DB, projectId, manifest.framework ? "framework" : "fullstack");
 
+    const siteDomain = c.env.SITE_DOMAIN ?? DEFAULT_SITE_DOMAIN;
     const fullActiveDomains = fullDomains.filter((d) => d.status === "active");
     const fullUrl =
       fullActiveDomains.length > 0
         ? `https://${fullActiveDomains[0].hostname}`
-        : `https://${project.slug}.vitecloud.app`;
+        : `https://${project.slug}.${siteDomain}`;
 
     return c.json({
       deployment: deployment.id,
       url: fullUrl,
       urls: [
         ...fullActiveDomains.map((d) => `https://${d.hostname}`),
-        `https://${project.slug}.vitecloud.app`,
+        `https://${project.slug}.${siteDomain}`,
       ],
       assets: assetKeys.length,
       workers: workerFiles.length,

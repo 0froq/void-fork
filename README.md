@@ -25,7 +25,8 @@ pnpm test            # Run vitest (unit + integration tests)
 pnpm lint            # oxlint
 pnpm fmt             # oxfmt --write .
 pnpm check           # Typecheck all packages (tsc --noEmit)
-pnpm run deploy      # Build all + deploy platform, dispatch & admin workers
+pnpm run deploy      # Build all + deploy platform, dispatch & admin workers (production)
+pnpm run deploy:staging  # Deploy all workers to staging environment
 ```
 
 ## Monorepo Structure
@@ -251,7 +252,7 @@ CF Worker routing `*.vitecloud.app` traffic to user workers and static assets. N
 ```
 src/
   index.ts                  # Main fetch handler + suspension check + custom limits
-  env.ts                    # Env interface (DISPATCH, ASSETS, ROUTING, ANALYTICS)
+  env.ts                    # Env interface (DISPATCH, ASSETS, ROUTING, ANALYTICS, BASE_HOSTNAME?)
   hostname.ts               # extractSlug() — pure function
   static.ts                 # serveStaticAsset() — R2 lookup, SPA fallback, cache headers
   metering.ts               # recordRequest() — Analytics Engine writeDataPoint wrapper
@@ -357,7 +358,7 @@ The platform package exposes `.ts` source files via subpath exports for consumpt
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). 741 tests across 63 files.
+Tests run from root with `pnpm test` (vitest). 747 tests across 63 files.
 
 ### Unit Tests
 
@@ -380,7 +381,7 @@ Tests run from root with `pnpm test` (vitest). 741 tests across 63 files.
 | `packages/vite-cloud/test/unit/schema.test.ts`                 | SQL DDL parser (41 tests)                                      |
 | `packages/vite-cloud/test/unit/db-types.test.ts`               | DB type codegen output (8 tests)                               |
 | `packages/vite-cloud/test/unit/db.test.ts`                     | Typed query client + type-level inference (25 tests)           |
-| `packages/dispatch/test/unit/hostname.test.ts`                 | Slug extraction from hostname (12 tests)                       |
+| `packages/dispatch/test/unit/hostname.test.ts`                 | Slug extraction from hostname (18 tests)                       |
 | `packages/dispatch/test/unit/metering.test.ts`                 | Analytics Engine data point shape (5 tests)                    |
 | `packages/platform/test/unit/provision.test.ts`                | Binding provisioning engine (7 tests)                          |
 | `packages/platform/test/unit/jwt.test.ts`                      | JWT sign/verify round-trip (5 tests)                           |
@@ -426,6 +427,44 @@ Verified working:
 - `cd playground/spa && pnpm dev`
 - `cd playground/ssr && pnpm dev`
 - `cd playground/spa && pnpm typecheck` (includes typed routes via generated `.vite-cloud/routes.d.ts`)
+
+## Environments
+
+Two deployment environments: **production** and **staging**. Each has fully isolated CF resources (D1, KV, R2, dispatch namespace, analytics engine).
+
+| Environment | Platform API             | User Sites                | Admin Dashboard            |
+| ----------- | ------------------------ | ------------------------- | -------------------------- |
+| Production  | `api.vite.cloud`         | `*.vitecloud.app`         | `admin.vite.cloud`         |
+| Staging     | `api.staging.vite.cloud` | `*.staging.vitecloud.app` | `admin.staging.vite.cloud` |
+
+### Configurable Environment Variables
+
+Previously hardcoded values are now configurable via `vars` in wrangler config (defaulting to production values):
+
+| Worker   | Variable             | Default                    | Purpose                                  |
+| -------- | -------------------- | -------------------------- | ---------------------------------------- |
+| platform | `ADMIN_ORIGIN`       | `https://admin.vite.cloud` | Allowed OAuth redirect origin for admin  |
+| platform | `DISPATCH_NAMESPACE` | `vite-cloud-users`         | CF dispatch namespace name for API calls |
+| platform | `SITE_DOMAIN`        | `vitecloud.app`            | Base domain for deploy URL output        |
+| dispatch | `BASE_HOSTNAME`      | `vitecloud.app`            | Base hostname for slug extraction        |
+
+### Deploying
+
+```
+pnpm run deploy           # Production (manual)
+pnpm run deploy:staging   # Staging (auto on push to main via GitHub Actions)
+```
+
+Staging auto-deploys on push to `main` via `.github/workflows/deploy-staging.yml`. Production deploys remain manual.
+
+### One-Time Setup (Staging)
+
+1. Create CF resources: D1 database, KV namespace, R2 bucket, dispatch namespace, analytics engine dataset (all with `-staging` suffix)
+2. Replace `PLACEHOLDER_*` IDs in wrangler configs (`packages/{platform,dispatch,admin}/wrangler.jsonc` → `env.staging`)
+3. Set worker secrets: `wrangler secret put <NAME> --env staging` for each worker (use a different `JWT_SECRET` from production; OAuth creds can be shared)
+4. DNS: `*.staging` CNAME on `vitecloud.app` zone; `api.staging` + `admin.staging` CNAMEs on `vite.cloud` zone
+5. Add staging callback URLs to GitHub/Google OAuth apps
+6. Set GitHub repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
 
 ## Pitfalls / Things That Broke
 

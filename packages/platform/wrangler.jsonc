@@ -38,4 +38,40 @@
   // Secrets (via `wrangler secret put`): CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID, JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
   // Optional env var: AUTH_REDIRECT_URI (defaults to https://api.vite.cloud/auth/callback)
   // For local dev, set AUTH_REDIRECT_URI=http://localhost:8787/auth/callback in .dev.vars
+  "env": {
+    "staging": {
+      "name": "vite-cloud-platform-staging",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "vite-cloud-platform-staging",
+          "database_id": "PLACEHOLDER_STAGING_D1_ID",
+          "migrations_dir": "migrations",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "ASSETS",
+          "bucket_name": "vite-cloud-assets-staging",
+        },
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "ROUTING",
+          "id": "PLACEHOLDER_STAGING_KV_ID",
+        },
+      ],
+      "dispatch_namespaces": [
+        {
+          "binding": "DISPATCH",
+          "namespace": "vite-cloud-users-staging",
+        },
+      ],
+      "vars": {
+        "ADMIN_ORIGIN": "https://admin.staging.vite.cloud",
+        "DISPATCH_NAMESPACE": "vite-cloud-users-staging",
+        "SITE_DOMAIN": "staging.vitecloud.app",
+      },
+    },
+  },
 }

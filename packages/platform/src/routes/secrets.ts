@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { PlatformEnv } from "../env";
 import { getProject } from "../db";
 
-const DISPATCH_NAMESPACE = "vite-cloud-users";
+const DEFAULT_DISPATCH_NAMESPACE = "vite-cloud-users";
 
 const app = new Hono<PlatformEnv>();
 
@@ -35,9 +35,10 @@ app.put("/:id/secrets/:name", async (c) => {
     return c.json({ error: "value is required" }, 400);
   }
 
+  const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
   const workerName = `user-${project.slug}`;
   const cfRes = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${DISPATCH_NAMESPACE}/scripts/${workerName}/secrets`,
+    `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}/secrets`,
     {
       method: "PUT",
       headers: {
@@ -75,9 +76,10 @@ app.delete("/:id/secrets/:name", async (c) => {
     return c.json({ error: "forbidden" }, 403);
   }
 
+  const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
   const workerName = `user-${project.slug}`;
   const cfRes = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${DISPATCH_NAMESPACE}/scripts/${workerName}/secrets/${encodeURIComponent(secretName)}`,
+    `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}/secrets/${encodeURIComponent(secretName)}`,
     {
       method: "DELETE",
       headers: {

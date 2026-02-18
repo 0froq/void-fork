@@ -18,4 +18,23 @@
     },
   ],
   // Secrets (via `wrangler secret put`): JWT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+  "env": {
+    "staging": {
+      "name": "vite-cloud-admin-staging",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "vite-cloud-platform-staging",
+          "database_id": "PLACEHOLDER_STAGING_D1_ID",
+          "migrations_dir": "../platform/migrations",
+        },
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "ROUTING",
+          "id": "PLACEHOLDER_STAGING_KV_ID",
+        },
+      ],
+    },
+  },
 }

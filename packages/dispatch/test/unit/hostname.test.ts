@@ -49,4 +49,30 @@ describe("extractSlug", () => {
   it("returns null for slug with underscores", () => {
     expect(extractSlug("my_app.vitecloud.app")).toBeNull();
   });
+
+  describe("custom baseHostname", () => {
+    it("extracts slug from staging hostname", () => {
+      expect(extractSlug("my-app.staging.vitecloud.app", "staging.vitecloud.app")).toBe("my-app");
+    });
+
+    it("returns null for production hostname when expecting staging", () => {
+      expect(extractSlug("my-app.vitecloud.app", "staging.vitecloud.app")).toBeNull();
+    });
+
+    it("returns null for staging hostname when expecting production", () => {
+      expect(extractSlug("my-app.staging.vitecloud.app", "vitecloud.app")).toBeNull();
+    });
+
+    it("returns null for bare staging domain", () => {
+      expect(extractSlug("staging.vitecloud.app", "staging.vitecloud.app")).toBeNull();
+    });
+
+    it("rejects nested subdomains on staging", () => {
+      expect(extractSlug("foo.bar.staging.vitecloud.app", "staging.vitecloud.app")).toBeNull();
+    });
+
+    it("uses default baseHostname when omitted", () => {
+      expect(extractSlug("my-app.vitecloud.app")).toBe("my-app");
+    });
+  });
 });
