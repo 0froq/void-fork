@@ -1,10 +1,11 @@
 # Vite Cloud — Feature Roadmap
 
-**Date:** February 2026
+**Date:** 2026-02-15
 **Status:** Post-v1.0 planning
-**Context:** Core platform (local dev, file-based routing, auto-provisioning, basic deployment) is implemented. This document captures additional features discussed during design, ordered by recommended implementation priority.
 
 ---
+
+Core platform (local dev, file-based routing, auto-provisioning, basic deployment) is implemented. This document captures additional features discussed during design, ordered by recommended implementation priority.
 
 ## Prioritization Framework
 

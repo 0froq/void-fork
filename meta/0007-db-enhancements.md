@@ -1,3 +1,10 @@
+# DB Query Enhancements
+
+**Date:** 2026-02-17
+**Status:** Completed
+
+---
+
 Possible enhancements to the current query builder API:
 
 ## 1. Column selection

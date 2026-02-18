@@ -1,7 +1,7 @@
 # Design Document: Typed File-Based API Routes for Hono
 
+**Date:** 2026-02-16
 **Status:** Completed
-**Date:** February 2026
 
 ---
 

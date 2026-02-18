@@ -1,5 +1,10 @@
 # Deploy to Raw Cloudflare — Research & Plan
 
+**Date:** 2026-02-16
+**Status:** Completed
+
+---
+
 ## Current State
 
 The vite-cloud framework generates a **platform-agnostic** Cloudflare Worker:

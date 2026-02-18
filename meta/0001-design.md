@@ -1,7 +1,6 @@
 # Vite Cloud — Design Document
 
-**Version:** 0.2 (Draft)
-**Date:** February 2026
+**Date:** 2026-02-15
 **Status:** RFC
 
 ---
