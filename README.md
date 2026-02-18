@@ -1,5 +1,6 @@
 This is the development repo of Vite Cloud.
 
+- **Important**: The source of truth of this file on disk is `README.md`. Both `AGENTS.md` and `CLAUDE.md` are symlinks to this file. When asked to update any of these, always update `README.md` (the actual file).
 - This file describes the current state of the codebase. To understand Vite Cloud as a product, read the [Introduction](./docs/index.md).
 - Refer to the [Design Doc](./meta/design.md) for the high-level vision and architecture.
 - Refer to the [Progress Doc](./meta/progress.md) for tracking progress.
@@ -150,11 +151,12 @@ CF Worker serving the Control Plane API. Uses Hono, D1, R2, KV, and Workers for 
 
 ```
 src/
-  index.ts                  # Hono app mounting route groups + auth middleware
+  index.ts                  # Hono app + scheduled handler (cron), mounts route groups + auth middleware
   env.ts                    # PlatformEnv type (D1, R2, KV, DISPATCH, secrets, Variables)
   types.ts                  # User, Project, Deployment, Resource, DeployManifest
   id.ts                     # generateId(prefix) → "proj_a1b2c3d4e5f6"
   db.ts                     # Typed D1 query wrappers (CRUD for all tables)
+  tiers.ts                  # PlanId, PlanLimits, PLAN_LIMITS constants, getPlanLimits(), isWithinLimit()
   auth/
     jwt.ts                  # HS256 JWT sign/verify via Web Crypto API
     github.ts               # GitHub OAuth helpers (authorize URL, code→token, user profile)
@@ -168,9 +170,12 @@ src/
     auth.ts                 # GET /auth/login + GET /auth/callback (GitHub/Google OAuth flow)
     projects.ts             # POST /projects, GET /projects/:id
     deploy.ts               # POST /projects/:id/deploy (migrations → assets → worker)
+    usage.ts                # GET /projects/:id/usage, GET /usage (Analytics Engine queries)
 migrations/
   0001_initial.sql          # users, projects, deployments, resources tables
   0002_provider_auth.sql    # Migrate users to provider-agnostic schema
+  ...
+  0006_usage_tiers.sql      # Add plan column to users table
 ```
 
 ### Auth Flow
@@ -179,7 +184,7 @@ migrations/
 
 The CLI's `vcd login` prompts user to choose GitHub or Google, then passes `provider` in the query string. On email conflict (same email registered under different provider), the callback redirects with `?error=email_conflict&existing_provider=...`.
 
-The `User` type uses provider-agnostic columns: `provider` (`"github"` | `"google"`), `provider_id` (TEXT — GitHub numeric ID cast to string, Google opaque sub), `login` (GitHub username or Google email).
+The `User` type uses provider-agnostic columns: `provider` (`"github"` | `"google"`), `provider_id` (TEXT — GitHub numeric ID cast to string, Google opaque sub), `login` (GitHub username or Google email), `plan` (defaults to `"free"`).
 
 Auth middleware on `/projects/*` extracts Bearer token, verifies JWT, sets `c.get("userId")` and `c.get("userLogin")`. Deploy endpoint checks `project.user_id === c.get("userId")` for ownership.
 
@@ -188,14 +193,28 @@ Auth middleware on `/projects/*` extracts Bearer token, verifies JWT, sets `c.ge
 `POST /projects/:id/deploy` receives multipart form data:
 
 1. Ownership check: `project.user_id` must match authenticated user
-2. Provision bindings (D1, KV, R2) — creates CF resources if needed
-3. `migration:<name>` fields → validated, then executed on D1 via CF REST API (status: `"migrating"`)
-4. `asset:<path>` fields → stored in R2 at `{projectId}/current/{path}`
-5. `worker:<path>` fields → uploaded to CF dispatch namespace via API
-6. KV routing updated: `slug → { workerName, projectId, version: deploymentId }`
-7. Deployment marked as `live`
+2. **Deploy count enforcement**: Look up user plan, check `countUserDeploymentsToday()` against `planLimits.deploysPerDay` → 429 if exceeded
+3. Provision bindings (D1, KV, R2) — creates CF resources if needed
+4. `migration:<name>` fields → validated, then executed on D1 via CF REST API (status: `"migrating"`)
+5. `asset:<path>` fields → stored in R2 at `{projectId}/current/{path}`
+6. `worker:<path>` fields → uploaded to CF dispatch namespace via API
+7. KV routing updated: `slug → { workerName, projectId, version, limits?, suspended? }`
+   - `limits` includes `cpuMs` and `subRequests` from user's plan (omitted when all unlimited)
+   - `suspended` is carried forward from the existing KV entry to avoid race conditions with cron
+8. Deployment marked as `live`
 
 **Key invariant:** Worker is never deployed unless all migrations succeed. On migration failure, deployment is marked `"failed"` and the existing worker keeps running.
+
+### Usage Metering & Tiers
+
+Five plan tiers: `free`, `solo`, `pro`, `sponsored`, `custom`. Defined in `src/tiers.ts` with `PLAN_LIMITS` constant. `0` = unlimited for any field. The `isWithinLimit(limit, current)` helper centralizes the unlimited-check logic.
+
+- **Immediate enforcement**: Deploy count per day (checked at deploy time via D1 query)
+- **Per-request enforcement**: CPU time and sub-requests via CF Custom Limits (passed in KV routing `limits` field, applied by dispatch worker)
+- **Async enforcement**: Request count per month via Cron Trigger (`*/5 * * * *`) — queries Analytics Engine, sets/clears `suspended` flag in KV routing entries
+- **Usage queries**: `GET /projects/:id/usage` (per-project) and `GET /usage` (aggregate) query Analytics Engine SQL API with `_sample_interval` multiplier
+
+The platform default export is `{ fetch: app.fetch, scheduled }` — `app` (the Hono instance) is also exported as a named export for integration tests.
 
 ### Secrets (via `wrangler secret put`)
 
@@ -210,20 +229,37 @@ CF Worker routing `*.vitecloud.app` traffic to user workers and static assets. N
 ### Request Flow
 
 1. Extract slug from hostname (`{slug}.vitecloud.app`)
-2. KV lookup: `slug → { workerName, projectId, version }`
-3. Edge cache check via `caches.default` with versioned cache key (`?_v={version}`)
-4. `/api/*` → `env.DISPATCH.get(workerName).fetch(request)` (Workers for Platforms, not cached)
-5. Everything else → serve static assets from R2 (SPA fallback to `index.html`), cache response at edge
+2. KV lookup: `slug → { workerName, projectId, version, limits?, suspended? }`
+3. **Suspension check**: If `routing.suspended` is set → return 429 `{ error: "usage limit exceeded", reason }`
+4. Edge cache check via `caches.default` with versioned cache key (`?_v={version}`)
+5. `/api/*` → `getWorker(env, routing).fetch(request)` with custom limits (Workers for Platforms, not cached). CPU limit errors caught → 429
+6. Everything else → serve static assets from R2 (SPA fallback to `index.html`), cache response at edge
+7. **Metering**: Every request (except 404/suspended) records an Analytics Engine data point via `ctx.waitUntil` (fire-and-forget, zero latency impact)
 
 ### Source Layout
 
 ```
 src/
-  index.ts                  # Main fetch handler
-  env.ts                    # Env interface (DISPATCH, ASSETS, ROUTING)
+  index.ts                  # Main fetch handler + suspension check + custom limits
+  env.ts                    # Env interface (DISPATCH, ASSETS, ROUTING, ANALYTICS)
   hostname.ts               # extractSlug() — pure function
   static.ts                 # serveStaticAsset() — R2 lookup, SPA fallback, cache headers
+  metering.ts               # recordRequest() — Analytics Engine writeDataPoint wrapper
 ```
+
+### Metering (Analytics Engine)
+
+Every request is recorded via `recordRequest()` using `ctx.waitUntil` (non-blocking). Data point schema:
+
+| Field   | Value                                 |
+| ------- | ------------------------------------- |
+| index   | projectId (sampling key)              |
+| blob1-5 | projectId, type, method, status, slug |
+| double1 | 1 (for SUM counting)                  |
+| double2 | responseBytes                         |
+| double3 | durationMs                            |
+
+Request types: `"api"`, `"static"`, `"ssr"`, `"isr"`. Usage queries multiply by `_sample_interval` for accuracy at high traffic.
 
 ### Edge Caching
 
@@ -248,7 +284,7 @@ Static asset responses are cached at the CF edge via `caches.default`. Cache key
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). 498 tests across 47 files.
+Tests run from root with `pnpm test` (vitest). 675 tests across 60 files.
 
 ### Unit Tests
 
@@ -272,20 +308,22 @@ Tests run from root with `pnpm test` (vitest). 498 tests across 47 files.
 | `packages/vite-cloud/test/unit/db-types.test.ts`               | DB type codegen output (8 tests)                               |
 | `packages/vite-cloud/test/unit/db.test.ts`                     | Typed query client + type-level inference (25 tests)           |
 | `packages/dispatch/test/unit/hostname.test.ts`                 | Slug extraction from hostname (12 tests)                       |
+| `packages/dispatch/test/unit/metering.test.ts`                 | Analytics Engine data point shape (5 tests)                    |
 | `packages/platform/test/unit/provision.test.ts`                | Binding provisioning engine (7 tests)                          |
 | `packages/platform/test/unit/jwt.test.ts`                      | JWT sign/verify round-trip (5 tests)                           |
 | `packages/platform/test/unit/remote-runner.test.ts`            | Remote D1 migration execution (7 tests)                        |
+| `packages/platform/test/unit/tiers.test.ts`                    | Plan limits, getPlanLimits(), isWithinLimit() (11 tests)       |
 
 ### Integration Tests
 
 Platform integration tests call the Hono app via `app.fetch(request, env)` with **real** Miniflare D1/KV/R2 bindings and **mocked** external fetch calls (GitHub API, CF API). This tests the full request→middleware→route→DB→response chain.
 
-| Test file                                                 | Covers                                                                      |
-| --------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `packages/platform/test/integration/api-health.test.ts`   | Health endpoint smoke test (1 test)                                         |
-| `packages/platform/test/integration/api-me.test.ts`       | Auth middleware: missing/invalid/expired JWT, valid (4)                     |
-| `packages/platform/test/integration/api-projects.test.ts` | Projects CRUD: auth, list, create, validation, dupes (7)                    |
-| `packages/platform/test/integration/api-deploy.test.ts`   | Deploy pipeline: auth, provisioning, migrations, R2, KV, failure modes (12) |
+| Test file                                                 | Covers                                                                              |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `packages/platform/test/integration/api-health.test.ts`   | Health endpoint smoke test (1 test)                                                 |
+| `packages/platform/test/integration/api-me.test.ts`       | Auth middleware: missing/invalid/expired JWT, valid (4)                             |
+| `packages/platform/test/integration/api-projects.test.ts` | Projects CRUD: auth, list, create, validation, dupes (12)                           |
+| `packages/platform/test/integration/api-deploy.test.ts`   | Deploy pipeline: auth, provisioning, migrations, R2, KV, limits, failure modes (33) |
 
 Shared helpers in `packages/platform/test/integration/helpers.ts`:
 
