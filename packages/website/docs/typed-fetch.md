@@ -84,6 +84,30 @@ try {
 | `retry`   | `number`                 | Number of retry attempts (default: 1 for GET).             |
 | `timeout` | `number`                 | Request timeout in milliseconds.                           |
 
+## Isomorphic Fetch During SSR
+
+`fetch()` from `vite-cloud/client` works seamlessly during server-side rendering and inside route handlers — no HTTP round-trip is needed. In the worker environment, `fetch()` calls your Hono app directly via `app.fetch()`, skipping the network entirely.
+
+```ts
+// src/main.ssr.tsx
+import { fetch } from "vite-cloud/client";
+import { defineRender } from "vite-cloud";
+
+export default defineRender(async (c, assetTags) => {
+  // This calls your API route directly — no HTTP request
+  const data = await fetch("/api/users");
+
+  const html = renderToString(<App users={data} />);
+  return new Response(html, {
+    headers: { "content-type": "text/html" },
+  });
+});
+```
+
+**Automatic header forwarding**: `cookie` and `authorization` headers from the incoming request are automatically forwarded to subrequests, so authentication context is preserved. If you pass these headers explicitly, your values take precedence.
+
+**How it works**: In the browser, `fetch()` uses the normal HTTP client. In the worker, Vite Cloud redirects the import to a virtual module that calls `app.fetch()` directly using the Hono app instance. AsyncLocalStorage threads the outer request context so headers and `waitUntil()` work correctly.
+
 ## Using Your Own ORM
 
 The built-in [database helper](./db.md) covers simple CRUD, but you're not locked into it. Any ORM or query builder that works with D1 works with Vite Cloud — just pass the D1 binding.

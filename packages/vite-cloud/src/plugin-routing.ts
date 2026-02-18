@@ -6,6 +6,7 @@ import { scanRoutes, type ScanResult } from "./router/scan";
 import {
   compileRouteTable,
   compileWorkerEntry,
+  compileWorkerClient,
   type CompileOptions,
   type SsrCompileOptions,
 } from "./router/compile";
@@ -20,9 +21,10 @@ import {
 } from "./ssr/entry";
 
 const VIRTUAL_ROUTES_ID = "virtual:vite-cloud-routes";
+const VIRTUAL_CLIENT_WORKER_ID = "virtual:vite-cloud-client-worker";
 // Rolldown resolveId hook filters currently require RegExp for `id`.
-const RESOLVE_ID_FILTER = /^(virtual:vite-cloud-routes|vite-cloud)$/;
-const LOAD_ID_FILTER = /^virtual:vite-cloud-routes$/;
+const RESOLVE_ID_FILTER = /^(virtual:vite-cloud-(routes|client-worker)|vite-cloud(\/client)?)$/;
+const LOAD_ID_FILTER = /^virtual:vite-cloud-(routes|client-worker)$/;
 
 /**
  * Vite plugin that provides file-based routing.
@@ -78,6 +80,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   const resolveFile = (specifier: string) => fileURLToPath(import.meta.resolve(specifier));
 
   const handlerFile = resolveFile("vite-cloud/handler");
+  const authClientPath = join(dirname(resolveFile("vite-cloud/client")), "auth-client.mjs");
   const compileOptions: CompileOptions = {
     honoPath: resolveFile("hono"),
     responsePath: resolveFile("vite-cloud/response"),
@@ -146,10 +149,18 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         if (id === VIRTUAL_ROUTES_ID) {
           return VIRTUAL_ROUTES_ID;
         }
+        if (id === VIRTUAL_CLIENT_WORKER_ID) {
+          return VIRTUAL_CLIENT_WORKER_ID;
+        }
         // Redirect bare "vite-cloud" imports to the lightweight handler
         // subpath to avoid pulling the entire plugin into the Worker bundle.
         if (id === "vite-cloud") {
           return handlerFile;
+        }
+        // In worker environments, redirect vite-cloud/client to the worker
+        // virtual module that calls app.fetch() directly (no HTTP round-trip).
+        if (id === "vite-cloud/client" && this.environment?.name !== "client") {
+          return VIRTUAL_CLIENT_WORKER_ID;
         }
       },
     },
@@ -157,6 +168,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     load: {
       filter: { id: LOAD_ID_FILTER },
       async handler(id) {
+        if (id === VIRTUAL_CLIENT_WORKER_ID) {
+          return compileWorkerClient(authClientPath);
+        }
         if (id !== VIRTUAL_ROUTES_ID) return;
         if (!scan) await rescan();
         return compileRouteTable(scan!, routesDir, middlewareDir, jobsDir, ssr, compileOptions);

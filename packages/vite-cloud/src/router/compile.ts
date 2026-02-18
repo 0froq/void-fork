@@ -46,6 +46,7 @@ export function compileRouteTable(
   const lines: string[] = [];
   const auth = options.auth;
 
+  lines.push(`import { AsyncLocalStorage } from "node:async_hooks";`);
   lines.push(`import { Hono } from ${JSON.stringify(options.honoPath)};`);
   lines.push(`import { convertReturnValue } from ${JSON.stringify(options.responsePath)};`);
 
@@ -79,6 +80,15 @@ export function compileRouteTable(
   lines.push("");
 
   lines.push(`const app = new Hono();`);
+  lines.push(`export const requestContext = new AsyncLocalStorage();`);
+  lines.push("");
+
+  // Request context middleware — threads outer request into ALS for isomorphic fetch
+  lines.push("app.use(async (c, next) => {");
+  lines.push(
+    "  await requestContext.run({ request: c.req.raw, executionCtx: c.executionCtx }, next);",
+  );
+  lines.push("});");
   lines.push("");
 
   // Auth: ensure tables exist + session middleware
@@ -541,4 +551,87 @@ export function compileWorkerEntry(): string {
 
 export default { fetch: app.fetch, scheduled };
 export { __resolvePrerenderPaths };`;
+}
+
+/**
+ * Generate the worker-side fetch client module (virtual:vite-cloud-client-worker).
+ *
+ * In the worker environment, `vite-cloud/client` is redirected here instead of
+ * the ofetch-based client. This calls `app.fetch()` directly (no HTTP round-trip),
+ * enabling isomorphic fetch during SSR and in route handlers.
+ *
+ * Cookie and authorization headers from the outer request are auto-forwarded
+ * via AsyncLocalStorage context. User-specified headers take precedence.
+ */
+export function compileWorkerClient(authClientPath: string): string {
+  return `import app, { requestContext } from "virtual:vite-cloud-routes";
+import { env } from "cloudflare:workers";
+export { auth, AuthError } from ${JSON.stringify(authClientPath)};
+
+export class FetchError extends Error {
+  constructor(status, statusText, data) {
+    super(\`Request failed with status \${status}\`);
+    this.name = "FetchError";
+    this.status = status;
+    this.statusText = statusText;
+    this.data = data;
+  }
+}
+
+export async function fetch(path, options) {
+  let url = path;
+  if (options?.params) {
+    for (const [key, value] of Object.entries(options.params)) {
+      url = url.replace(":" + key, encodeURIComponent(value));
+    }
+  }
+
+  if (options?.query) {
+    const qs = new URLSearchParams(options.query).toString();
+    if (qs) url += "?" + qs;
+  }
+
+  const method = options?.method ?? "GET";
+  const headers = new Headers(options?.headers);
+
+  // Auto-forward cookie and authorization from the outer request via ALS
+  const store = requestContext.getStore();
+  if (store?.request) {
+    const outerReq = store.request;
+    if (!headers.has("cookie")) {
+      const cookie = outerReq.headers.get("cookie");
+      if (cookie) headers.set("cookie", cookie);
+    }
+    if (!headers.has("authorization")) {
+      const auth = outerReq.headers.get("authorization");
+      if (auth) headers.set("authorization", auth);
+    }
+  }
+
+  if (options?.body != null && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+
+  const request = new Request("http://worker.local" + url, {
+    method,
+    headers,
+    body: options?.body != null ? JSON.stringify(options.body) : undefined,
+  });
+
+  // Use real executionCtx from ALS if available, otherwise provide a no-op fallback
+  const executionCtx = store?.executionCtx ?? { waitUntil() {}, passThroughOnException() {} };
+  const response = await app.fetch(request, env, executionCtx);
+
+  if (response.status === 204) return undefined;
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const data = contentType.includes("application/json") ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    throw new FetchError(response.status, response.statusText, data);
+  }
+
+  return data;
+}
+`;
 }
