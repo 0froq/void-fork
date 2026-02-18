@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -35,19 +35,7 @@ function d1ExecuteFile(cwd: string, statements: string[]): void {
 async function main(): Promise<void> {
   p.intro("Admin local dev setup");
 
-  // 1. Prompt for Google email
-  const email = await p.text({
-    message: "Enter your Google email (used for admin login)",
-    validate: (v) => {
-      if (!v || !v.includes("@")) return "Must be a valid email address";
-    },
-  });
-  if (p.isCancel(email)) {
-    p.cancel("Setup cancelled");
-    process.exit(0);
-  }
-
-  // 2. Reset local D1 state
+  // 1. Reset local D1 state
   const s = p.spinner();
 
   s.start("Resetting local D1 state");
@@ -315,7 +303,7 @@ async function main(): Promise<void> {
 
   // -- Admin user -------------------------------------------------------------
   stmts.push(
-    `INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login, plan, billing_cycle_start, role, created_at) VALUES ('user_admin', 'google', '${email}', '${email}', '${email}', 0, '', 'free', '${now}', 'admin', '${now}')`,
+    `INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login, plan, billing_cycle_start, role, created_at) VALUES ('user_admin', 'google', 'local-admin', 'local-admin', 'admin@localhost', 0, '', 'free', '${now}', 'admin', '${now}')`,
   );
 
   // -- Execute all statements in one batch ------------------------------------
@@ -323,39 +311,21 @@ async function main(): Promise<void> {
 
   s.stop("Seeded 5 users, 6 projects, 13 deployments, 7 resources");
 
-  p.log.success(
-    `Created admin user: ${email} (google — provider_id will be updated on first login)`,
-  );
+  p.log.success("Created admin user: admin@localhost");
 
-  // 5. Check .dev.vars
+  // 5. Next steps
   const devVarsPath = resolve(adminDir, ".dev.vars");
-  const requiredKeys = [
-    "JWT_SECRET",
-    "GOOGLE_CLIENT_ID",
-    "GOOGLE_CLIENT_SECRET",
-    "AUTH_REDIRECT_URI",
-  ];
-
-  if (existsSync(devVarsPath)) {
-    const content = readFileSync(devVarsPath, "utf-8");
-    const missing = requiredKeys.filter((k) => !content.includes(k));
-    if (missing.length > 0) {
-      p.log.warn(`Missing keys in .dev.vars:\n${missing.map((k) => `  ${k}=<value>`).join("\n")}`);
-    } else {
-      p.log.success("Checked .dev.vars — all required keys present");
-    }
-  } else {
-    p.log.warn(
-      `No .dev.vars found. Create ${devVarsPath} with:\n${requiredKeys.map((k) => `  ${k}=<value>`).join("\n")}`,
-    );
-  }
-
-  // 6. Next steps
   p.note(
     [
-      "1. Start the platform:  cd ../platform && pnpm dev",
-      "2. Start the admin:     pnpm dev",
-      "3. Open:                http://localhost:8788",
+      "Ensure .dev.vars has:",
+      "  DEV_AUTH_BYPASS=true",
+      "  JWT_SECRET=dev",
+      "",
+      `  ${devVarsPath}`,
+      "",
+      "Then:",
+      "  1. pnpm dev",
+      "  2. Open http://localhost:8788",
     ].join("\n"),
     "Next steps",
   );

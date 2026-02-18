@@ -5,6 +5,17 @@ import { verifyJwt } from "@vite-cloud/platform/auth/jwt";
 import { getUser } from "@vite-cloud/platform/db";
 
 export const adminAuthMiddleware: MiddlewareHandler<AdminEnv> = async (c, next) => {
+  if (c.env.DEV_AUTH_BYPASS) {
+    const admin = await c.env.DB.prepare(
+      "SELECT id, login FROM users WHERE role = 'admin' LIMIT 1",
+    ).first<{ id: string; login: string }>();
+    if (admin) {
+      c.set("userId", admin.id);
+      c.set("userLogin", admin.login);
+      return next();
+    }
+  }
+
   const token = getCookie(c, "admin_token");
   if (!token) {
     return c.redirect("/login");
