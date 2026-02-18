@@ -10,14 +10,12 @@ Create `packages/admin/.dev.vars` with the required secrets:
 
 ```
 JWT_SECRET=<same value as platform>
-GITHUB_CLIENT_ID=<your GitHub OAuth app client ID>
-GITHUB_CLIENT_SECRET=<your GitHub OAuth app client secret>
+GOOGLE_CLIENT_ID=<your Google OAuth client ID>
+GOOGLE_CLIENT_SECRET=<your Google OAuth client secret>
 AUTH_REDIRECT_URI=http://localhost:8788/callback
 ```
 
 Use the same `JWT_SECRET` as the platform so tokens are interchangeable. You can copy it from `packages/platform/.dev.vars`.
-
-For Google OAuth, also add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
 
 ### 2. Run the setup script
 
@@ -25,15 +23,15 @@ The setup script resets local D1, applies migrations, seeds fake data, and creat
 
 ```sh
 cd packages/admin
-pnpm setup -- --github <your-github-username>
+pnpm setup
 ```
 
-This will:
+The script will prompt for your Google email, then:
 
 - Reset `.wrangler/state/` in both platform and admin packages
 - Apply D1 migrations for both workers
 - Seed 5 fake users (varied plans), 6 projects, and 8 deployments
-- Fetch your GitHub numeric ID and create an admin user
+- Create an admin user with your Google email (provider_id is backfilled on first login)
 - Verify your `.dev.vars` has the required keys
 
 ### 3. Start the dev server
@@ -53,7 +51,7 @@ pnpm dev --port 8788
 
 ### 4. Open the dashboard
 
-Visit http://localhost:8788. You'll be redirected to `/login` where you can sign in with GitHub or Google. After OAuth, the callback sets an `admin_token` cookie and redirects to the dashboard.
+Visit http://localhost:8788. You'll be redirected to `/login` where you can sign in with Google. After OAuth, the callback sets an `admin_token` cookie and redirects to the dashboard.
 
 > **Note:** The OAuth callback redirects to `AUTH_REDIRECT_URI` which must be `http://localhost:8788/callback` for local dev. Make sure this matches your `.dev.vars`.
 
@@ -85,8 +83,38 @@ The admin CLI calls the platform's `/admin/*` API endpoints. It reuses the same 
 
 ```sh
 # Point at local platform API
-npx tsx src/cli.ts --api-url http://localhost:8787 stats
-npx tsx src/cli.ts --api-url http://localhost:8787 users list
-npx tsx src/cli.ts --api-url http://localhost:8787 users get <user-id>
-npx tsx src/cli.ts --api-url http://localhost:8787 users plan <user-id> pro
+node src/cli.ts --api-url http://localhost:8787 stats
+node src/cli.ts --api-url http://localhost:8787 users list
+node src/cli.ts --api-url http://localhost:8787 users get <user-id>
+node src/cli.ts --api-url http://localhost:8787 users plan <user-id> pro
 ```
+
+## Production Deployment
+
+Deploy all workers (dispatch, platform with migrations, admin) from the repo root:
+
+```sh
+pnpm run deploy
+```
+
+Or deploy the admin worker individually:
+
+```sh
+cd packages/admin
+pnpm run deploy
+```
+
+### Secrets
+
+Set the following secrets via `wrangler secret put` before the first deploy:
+
+```sh
+cd packages/admin
+wrangler secret put JWT_SECRET
+wrangler secret put GOOGLE_CLIENT_ID
+wrangler secret put GOOGLE_CLIENT_SECRET
+```
+
+Use the same `JWT_SECRET` as the platform worker.
+
+`AUTH_REDIRECT_URI` does not need to be set in production — it defaults to `https://admin.vite.cloud/callback` (hardcoded in `login.ts`). The Google OAuth app must have this URL registered as an authorized redirect URI.

@@ -11,8 +11,6 @@ export type TestEnv = {
   DB: D1Database;
   ROUTING: KVNamespace;
   JWT_SECRET: string;
-  GITHUB_CLIENT_ID: string;
-  GITHUB_CLIENT_SECRET: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
 };
@@ -50,8 +48,6 @@ export async function setupEnv(): Promise<TestEnv> {
     DB: db,
     ROUTING: kv as unknown as KVNamespace,
     JWT_SECRET,
-    GITHUB_CLIENT_ID: "test-github-client-id",
-    GITHUB_CLIENT_SECRET: "test-github-client-secret",
     GOOGLE_CLIENT_ID: "test-google-client-id",
     GOOGLE_CLIENT_SECRET: "test-google-client-secret",
   };
@@ -101,6 +97,23 @@ export async function createTestUser(
     .run();
   const jwt = await signJwt({ sub: id, login }, JWT_SECRET);
   return { id, login, jwt };
+}
+
+let deploymentCounter = 0;
+
+export async function createTestDeployment(
+  db: D1Database,
+  projectId: string,
+  status: "pending" | "live" | "failed" = "live",
+  source?: string,
+): Promise<{ id: string }> {
+  const n = ++deploymentCounter;
+  const id = `dpl_test${n}`;
+  await db
+    .prepare("INSERT INTO deployments (id, project_id, status, source) VALUES (?, ?, ?, ?)")
+    .bind(id, projectId, status, source ?? null)
+    .run();
+  return { id };
 }
 
 let projectCounter = 0;

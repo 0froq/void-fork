@@ -5,6 +5,7 @@ import login from "./routes/login";
 import system from "./routes/system";
 import users from "./routes/users";
 import projects from "./routes/projects";
+import deployments from "./routes/deployments";
 
 const app = new Hono<AdminEnv>();
 
@@ -16,6 +17,7 @@ app.use("/*", adminAuthMiddleware);
 app.route("/", system);
 app.route("/users", users);
 app.route("/projects", projects);
+app.route("/deployments", deployments);
 
 export { app };
 

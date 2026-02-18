@@ -9,21 +9,6 @@ const adminDir = resolve(__dirname, "..");
 const platformDir = resolve(__dirname, "../../platform");
 
 // ---------------------------------------------------------------------------
-// Parse flags
-// ---------------------------------------------------------------------------
-
-function parseArgs(argv: string[]): { github: string } {
-  const idx = argv.indexOf("--github");
-  if (idx === -1 || !argv[idx + 1]) {
-    p.log.error("Missing required flag: --github <username>");
-    process.exit(1);
-  }
-  return { github: argv[idx + 1] };
-}
-
-const args = parseArgs(process.argv.slice(2));
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -44,7 +29,19 @@ function d1Execute(cwd: string, sql: string): void {
 async function main(): Promise<void> {
   p.intro("Admin local dev setup");
 
-  // 1. Reset local D1 state
+  // 1. Prompt for Google email
+  const email = await p.text({
+    message: "Enter your Google email (used for admin login)",
+    validate: (v) => {
+      if (!v || !v.includes("@")) return "Must be a valid email address";
+    },
+  });
+  if (p.isCancel(email)) {
+    p.cancel("Setup cancelled");
+    process.exit(0);
+  }
+
+  // 2. Reset local D1 state
   const s = p.spinner();
 
   s.start("Resetting local D1 state");
@@ -56,7 +53,7 @@ async function main(): Promise<void> {
   }
   s.stop("Reset local D1 state");
 
-  // 2. Apply migrations
+  // 3. Apply migrations
   s.start("Applying migrations (platform)");
   run("npx wrangler d1 migrations apply vite-cloud-platform --local", platformDir);
   s.stop("Applied migrations (platform)");
@@ -65,7 +62,7 @@ async function main(): Promise<void> {
   run("npx wrangler d1 migrations apply vite-cloud-platform --local", adminDir);
   s.stop("Applied migrations (admin)");
 
-  // 3. Seed fake data
+  // 4. Seed fake data
   s.start("Seeding fake data");
 
   const now = new Date().toISOString().replace("T", " ").slice(0, 19);
@@ -192,33 +189,22 @@ async function main(): Promise<void> {
 
   s.stop("Seeded 5 users, 6 projects, 8 deployments");
 
-  // 4. Seed admin user from GitHub
-  s.start(`Fetching GitHub user: ${args.github}`);
-
-  const res = await fetch(`https://api.github.com/users/${args.github}`, {
-    headers: { "User-Agent": "vite-cloud-admin-setup" },
-  });
-  if (!res.ok) {
-    s.stop(`Failed to fetch GitHub user (${res.status})`);
-    p.log.error(`Could not fetch https://api.github.com/users/${args.github}`);
-    process.exit(1);
-  }
-
-  const gh = (await res.json()) as { id: number; login: string; email: string | null };
-
+  // 5. Seed admin user from Google email
   d1Execute(
     adminDir,
-    `INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login, plan, billing_cycle_start, role, created_at) VALUES ('user_admin', 'github', '${gh.id}', '${gh.login}', ${gh.email ? `'${gh.email}'` : "NULL"}, ${gh.id}, '${gh.login}', 'free', '${now}', 'admin', '${now}')`,
+    `INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login, plan, billing_cycle_start, role, created_at) VALUES ('user_admin', 'google', '${email}', '${email}', '${email}', 0, '', 'free', '${now}', 'admin', '${now}')`,
   );
 
-  s.stop(`Created admin user: ${gh.login} (github:${gh.id})`);
+  p.log.success(
+    `Created admin user: ${email} (google — provider_id will be updated on first login)`,
+  );
 
-  // 5. Check .dev.vars
+  // 6. Check .dev.vars
   const devVarsPath = resolve(adminDir, ".dev.vars");
   const requiredKeys = [
     "JWT_SECRET",
-    "GITHUB_CLIENT_ID",
-    "GITHUB_CLIENT_SECRET",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
     "AUTH_REDIRECT_URI",
   ];
 
@@ -236,7 +222,7 @@ async function main(): Promise<void> {
     );
   }
 
-  // 6. Next steps
+  // 7. Next steps
   p.note(
     [
       "1. Start the platform:  cd ../platform && pnpm dev",

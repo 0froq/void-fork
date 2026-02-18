@@ -6,10 +6,10 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --port 8788",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "setup": "node --experimental-strip-types scripts/setup-local.ts"
+    "setup": "node scripts/setup-local.ts"
   },
   "dependencies": {
     "@clack/prompts": "catalog:",

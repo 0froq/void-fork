@@ -2,17 +2,12 @@ import { Hono } from "hono";
 import { setCookie, deleteCookie } from "hono/cookie";
 import type { AdminEnv } from "../env";
 import {
-  getGitHubAuthorizeUrl,
-  exchangeCodeForToken,
-  getGitHubUser,
-} from "@vite-cloud/platform/auth/github";
-import {
   getGoogleAuthorizeUrl,
-  exchangeCodeForToken as exchangeGoogleCode,
+  exchangeCodeForToken,
   getGoogleUser,
 } from "@vite-cloud/platform/auth/google";
 import { signJwt } from "@vite-cloud/platform/auth/jwt";
-import { getUserByProvider } from "@vite-cloud/platform/db";
+import { getUserByProvider, getUserByEmail } from "@vite-cloud/platform/db";
 
 const app = new Hono<AdminEnv>();
 
@@ -62,38 +57,24 @@ app.get("/login", (c) => {
 <style>
 body { font-family: system-ui; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f5f5f5; }
 .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); text-align: center; }
-a { display: inline-block; margin: 0.5rem; padding: 0.75rem 1.5rem; background: #24292e; color: white; text-decoration: none; border-radius: 6px; }
-a.google { background: #4285f4; }
+a { display: inline-block; margin: 0.5rem; padding: 0.75rem 1.5rem; background: #4285f4; color: white; text-decoration: none; border-radius: 6px; }
 </style>
 </head>
 <body>
 <div class="card">
 <h1>Vite Cloud Admin</h1>
 <p>Sign in with your admin account</p>
-<a href="/login/github">GitHub</a>
-<a href="/login/google" class="google">Google</a>
+<a href="/login/google">Google</a>
 </div>
 </body>
 </html>`);
-});
-
-// GET /login/github
-app.get("/login/github", async (c) => {
-  const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
-  const nonce = crypto.randomUUID();
-  const stateData = JSON.stringify({ nonce, provider: "github" });
-  const stateEncoded = btoa(stateData);
-  const signature = await hmacSignState(stateEncoded, c.env.JWT_SECRET);
-  const state = `${stateEncoded}.${signature}`;
-  const url = getGitHubAuthorizeUrl(c.env.GITHUB_CLIENT_ID, redirectUri, state);
-  return c.redirect(url);
 });
 
 // GET /login/google
 app.get("/login/google", async (c) => {
   const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
   const nonce = crypto.randomUUID();
-  const stateData = JSON.stringify({ nonce, provider: "google" });
+  const stateData = JSON.stringify({ nonce });
   const stateEncoded = btoa(stateData);
   const signature = await hmacSignState(stateEncoded, c.env.JWT_SECRET);
   const state = `${stateEncoded}.${signature}`;
@@ -123,37 +104,31 @@ app.get("/callback", async (c) => {
     return c.html("<h1>Login failed</h1><p>Invalid state signature.</p>", 400);
   }
 
-  const { provider } = JSON.parse(atob(stateEncoded)) as {
-    nonce: string;
-    provider: string;
-  };
+  const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
+  const googleToken = await exchangeCodeForToken(
+    c.env.GOOGLE_CLIENT_ID,
+    c.env.GOOGLE_CLIENT_SECRET,
+    code,
+    redirectUri,
+  );
+  const googleUser = await getGoogleUser(googleToken);
+  const providerId = googleUser.id;
+  const login = googleUser.email;
 
-  let providerId: string;
-  let login: string;
+  let user = await getUserByProvider(c.env.DB, "google", providerId);
 
-  if (provider === "google") {
-    const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
-    const googleToken = await exchangeGoogleCode(
-      c.env.GOOGLE_CLIENT_ID,
-      c.env.GOOGLE_CLIENT_SECRET,
-      code,
-      redirectUri,
-    );
-    const googleUser = await getGoogleUser(googleToken);
-    providerId = googleUser.id;
-    login = googleUser.email;
-  } else {
-    const ghToken = await exchangeCodeForToken(
-      c.env.GITHUB_CLIENT_ID,
-      c.env.GITHUB_CLIENT_SECRET,
-      code,
-    );
-    const ghUser = await getGitHubUser(ghToken);
-    providerId = String(ghUser.id);
-    login = ghUser.login;
+  // Fall back to email lookup — handles first login after seeding by email
+  if (!user) {
+    const byEmail = await getUserByEmail(c.env.DB, login);
+    if (byEmail && byEmail.provider === "google") {
+      // Backfill the real provider_id so future logins match directly
+      await c.env.DB.prepare("UPDATE users SET provider_id = ? WHERE id = ?")
+        .bind(providerId, byEmail.id)
+        .run();
+      user = byEmail;
+    }
   }
 
-  const user = await getUserByProvider(c.env.DB, provider, providerId);
   if (!user || user.role !== "admin") {
     return c.html(
       "<h1>403 Forbidden</h1><p>Admin access required. You must have an admin account to sign in.</p>",

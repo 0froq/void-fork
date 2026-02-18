@@ -6,6 +6,7 @@ import {
   clearTables,
   createTestUser,
   createTestProject,
+  createTestDeployment,
   type TestEnv,
 } from "./helpers";
 
@@ -61,10 +62,10 @@ describe("auth middleware", () => {
 });
 
 describe("GET / (dashboard)", () => {
-  test("renders dashboard with stats", async () => {
+  test("renders dashboard with stats and projects", async () => {
     const admin = await createTestUser(env.DB, "admin1", "admin");
     await createTestUser(env.DB, "user1");
-    await createTestProject(env.DB, admin.id);
+    await createTestProject(env.DB, admin.id, "dash-proj");
 
     const res = await req("/", admin.jwt);
     expect(res.status).toBe(200);
@@ -72,6 +73,16 @@ describe("GET / (dashboard)", () => {
     expect(html).toContain("Dashboard");
     expect(html).toContain("Users");
     expect(html).toContain("Projects");
+    expect(html).toContain("dash-proj");
+  });
+
+  test("stat cards link to views", async () => {
+    const admin = await createTestUser(env.DB, "admin1b", "admin");
+    const res = await req("/", admin.jwt);
+    const html = await res.text();
+    expect(html).toContain('href="/users"');
+    expect(html).toContain('href="/projects"');
+    expect(html).toContain('href="/deployments"');
   });
 });
 
@@ -84,6 +95,25 @@ describe("GET /users", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("user2");
+  });
+
+  test("paginates users", async () => {
+    const admin = await createTestUser(env.DB, "admin2b", "admin");
+    // Create 20 more users to span 2 pages (PAGE_SIZE=20, +1 admin = 21)
+    for (let i = 0; i < 20; i++) {
+      await createTestUser(env.DB, `paguser-${String(i).padStart(2, "0")}`);
+    }
+
+    const res1 = await req("/users", admin.jwt);
+    expect(res1.status).toBe(200);
+    const html1 = await res1.text();
+    expect(html1).toContain("1 / 2");
+    expect(html1).toContain("?page=2");
+
+    const res2 = await req("/users?page=2", admin.jwt);
+    expect(res2.status).toBe(200);
+    const html2 = await res2.text();
+    expect(html2).toContain("2 / 2");
   });
 
   test("searches users", async () => {
@@ -172,6 +202,28 @@ describe("GET /projects", () => {
     const html = await res.text();
     expect(html).toContain("my-proj");
   });
+
+  test("paginates projects", async () => {
+    const admin = await createTestUser(env.DB, "admin7b", "admin");
+    // Create 21 projects to span 2 pages (PAGE_SIZE=20)
+    for (let i = 0; i < 21; i++) {
+      await createTestProject(env.DB, admin.id, `pagproj-${String(i).padStart(2, "0")}`);
+    }
+
+    // Page 1: should have 20 projects and a Next link
+    const res1 = await req("/projects?page=1", admin.jwt);
+    expect(res1.status).toBe(200);
+    const html1 = await res1.text();
+    expect(html1).toContain("1 / 2");
+    expect(html1).toContain("?page=2");
+
+    // Page 2: should have 1 project and no Next link
+    const res2 = await req("/projects?page=2", admin.jwt);
+    expect(res2.status).toBe(200);
+    const html2 = await res2.text();
+    expect(html2).toContain("2 / 2");
+    expect(html2).toContain("?page=1");
+  });
 });
 
 describe("GET /projects/:id", () => {
@@ -189,13 +241,71 @@ describe("GET /projects/:id", () => {
   });
 });
 
+describe("GET /deployments", () => {
+  test("renders deployments list", async () => {
+    const admin = await createTestUser(env.DB, "admin10", "admin");
+    const user = await createTestUser(env.DB, "deplowner");
+    const project = await createTestProject(env.DB, user.id, "depl-proj");
+    await createTestDeployment(env.DB, project.id, "live", "cli");
+
+    const res = await req("/deployments", admin.jwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Deployments");
+    expect(html).toContain(`/projects/${project.id}`);
+    expect(html).toContain("live");
+    expect(html).toContain("cli");
+  });
+
+  test("paginates deployments", async () => {
+    const admin = await createTestUser(env.DB, "admin11", "admin");
+    const project = await createTestProject(env.DB, admin.id, "pagdepl-proj");
+    for (let i = 0; i < 21; i++) {
+      await createTestDeployment(env.DB, project.id, "live");
+    }
+
+    const res1 = await req("/deployments?page=1", admin.jwt);
+    expect(res1.status).toBe(200);
+    const html1 = await res1.text();
+    expect(html1).toContain("1 / 2");
+    expect(html1).toContain("?page=2");
+
+    const res2 = await req("/deployments?page=2", admin.jwt);
+    expect(res2.status).toBe(200);
+    const html2 = await res2.text();
+    expect(html2).toContain("2 / 2");
+    expect(html2).toContain("?page=1");
+  });
+});
+
+describe("GET /deployments/:id", () => {
+  test("renders deployment detail", async () => {
+    const admin = await createTestUser(env.DB, "admin12", "admin");
+    const project = await createTestProject(env.DB, admin.id, "depldetail-proj");
+    const deployment = await createTestDeployment(env.DB, project.id, "live", "cli");
+
+    const res = await req(`/deployments/${deployment.id}`, admin.jwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain(deployment.id);
+    expect(html).toContain("depldetail-proj");
+    expect(html).toContain("live");
+    expect(html).toContain("cli");
+  });
+
+  test("returns 404 for unknown deployment", async () => {
+    const admin = await createTestUser(env.DB, "admin13", "admin");
+    const res = await req("/deployments/dpl_nonexistent", admin.jwt);
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("GET /login", () => {
   test("renders login page without auth", async () => {
     const res = await app.fetch(new Request("http://localhost/login"), env);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Vite Cloud Admin");
-    expect(html).toContain("GitHub");
     expect(html).toContain("Google");
   });
 });

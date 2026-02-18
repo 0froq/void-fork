@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import type { AdminEnv } from "../env";
 import {
-  getAllProjects,
+  getAllProjectsWithOwner,
+  countProjects,
   getProject,
   getProjectDeployments,
   getProjectResources,
@@ -10,12 +11,19 @@ import {
 import { ProjectsListPage } from "../views/projects-list";
 import { Layout } from "../views/layout";
 
+const PAGE_SIZE = 20;
 const app = new Hono<AdminEnv>();
 
 // GET /projects
 app.get("/", async (c) => {
-  const projects = await getAllProjects(c.env.DB, 50, 0);
-  return c.html(<ProjectsListPage projects={projects} />);
+  const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10) || 1);
+  const offset = (page - 1) * PAGE_SIZE;
+  const [projects, total] = await Promise.all([
+    getAllProjectsWithOwner(c.env.DB, PAGE_SIZE, offset),
+    countProjects(c.env.DB),
+  ]);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  return c.html(<ProjectsListPage projects={projects} page={page} totalPages={totalPages} />);
 });
 
 // GET /projects/:id

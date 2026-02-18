@@ -1,5 +1,6 @@
 import type { User } from "@vite-cloud/platform/types";
 import { Layout } from "./layout";
+import { Pagination } from "./pagination";
 
 function planBadge(plan: string) {
   const cls =
@@ -21,7 +22,17 @@ function roleBadge(role: string) {
   );
 }
 
-export function UsersListPage({ users, search }: { users: User[]; search?: string }) {
+export function UsersListPage({
+  users,
+  search,
+  page,
+  totalPages,
+}: {
+  users: User[];
+  search?: string;
+  page?: number;
+  totalPages?: number;
+}) {
   return (
     <Layout title="Users">
       <h1>Users</h1>
@@ -72,6 +83,9 @@ export function UsersListPage({ users, search }: { users: User[]; search?: strin
           </tbody>
         </table>
         {users.length === 0 && <p style="padding: 1rem; color: #6b7280">No users found.</p>}
+        {page != null && totalPages != null && (
+          <Pagination page={page} totalPages={totalPages} baseUrl="/users" />
+        )}
       </div>
     </Layout>
   );

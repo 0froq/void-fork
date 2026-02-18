@@ -42,6 +42,11 @@ export function Layout({ title, children }: { title: string; children: Child }) 
           input[type="text"], select { padding: 0.375rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.875rem; }
           .search-form { margin-bottom: 1.5rem; display: flex; gap: 0.5rem; }
           .mb-1 { margin-bottom: 1rem; }
+          .pagination { display: flex; align-items: center; gap: 0.5rem; margin-top: 1rem; justify-content: center; }
+          .pagination a, .pagination span { padding: 0.375rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.875rem; }
+          .pagination a:hover { background: #f9fafb; text-decoration: none; }
+          .pagination .disabled { color: #9ca3af; pointer-events: none; }
+          .pagination .current { background: #2563eb; color: white; border-color: #2563eb; }
         `}</style>
       </head>
       <body>
@@ -50,6 +55,7 @@ export function Layout({ title, children }: { title: string; children: Child }) 
           <a href="/">Dashboard</a>
           <a href="/users">Users</a>
           <a href="/projects">Projects</a>
+          <a href="/deployments">Deployments</a>
           <a href="/logout" style="margin-left: auto">
             Logout
           </a>

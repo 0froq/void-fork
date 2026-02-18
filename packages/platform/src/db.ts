@@ -176,6 +176,27 @@ export async function getProjectDeployments(
   return result.results;
 }
 
+export async function getAllDeploymentsWithProject(
+  db: D1Database,
+  limit: number,
+  offset: number,
+): Promise<(Deployment & { project_slug: string | null; project_name: string | null })[]> {
+  const result = await db
+    .prepare(
+      "SELECT d.*, p.slug as project_slug, p.name as project_name FROM deployments d LEFT JOIN projects p ON d.project_id = p.id ORDER BY d.created_at DESC LIMIT ? OFFSET ?",
+    )
+    .bind(limit, offset)
+    .all<Deployment & { project_slug: string | null; project_name: string | null }>();
+  return result.results;
+}
+
+export async function countDeployments(db: D1Database): Promise<number> {
+  const result = await db
+    .prepare("SELECT COUNT(*) as count FROM deployments")
+    .first<{ count: number }>();
+  return result?.count ?? 0;
+}
+
 // --- Resources ---
 
 export async function createResource(
@@ -282,6 +303,20 @@ export async function deleteProject(db: D1Database, id: string): Promise<void> {
   await db.prepare("DELETE FROM projects WHERE id = ?").bind(id).run();
 }
 
+// --- Counts ---
+
+export async function countUsers(db: D1Database): Promise<number> {
+  const result = await db.prepare("SELECT COUNT(*) as count FROM users").first<{ count: number }>();
+  return result?.count ?? 0;
+}
+
+export async function countProjects(db: D1Database): Promise<number> {
+  const result = await db
+    .prepare("SELECT COUNT(*) as count FROM projects")
+    .first<{ count: number }>();
+  return result?.count ?? 0;
+}
+
 // --- Admin ---
 
 export async function getAllUsers(db: D1Database, limit: number, offset: number): Promise<User[]> {
@@ -343,5 +378,19 @@ export async function getAllProjects(
     .prepare("SELECT * FROM projects ORDER BY created_at DESC LIMIT ? OFFSET ?")
     .bind(limit, offset)
     .all<Project>();
+  return result.results;
+}
+
+export async function getAllProjectsWithOwner(
+  db: D1Database,
+  limit: number,
+  offset: number,
+): Promise<(Project & { owner_login: string | null })[]> {
+  const result = await db
+    .prepare(
+      "SELECT p.*, u.login as owner_login FROM projects p LEFT JOIN users u ON p.user_id = u.id ORDER BY p.created_at DESC LIMIT ? OFFSET ?",
+    )
+    .bind(limit, offset)
+    .all<Project & { owner_login: string | null }>();
   return result.results;
 }

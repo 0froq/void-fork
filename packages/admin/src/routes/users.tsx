@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AdminEnv } from "../env";
 import {
   getAllUsers,
+  countUsers,
   searchUsers,
   getUser,
   getProjectsByUserId,
@@ -13,13 +14,24 @@ import { PLAN_LIMITS } from "@vite-cloud/platform/tiers";
 import { UsersListPage } from "../views/users-list";
 import { UserDetailPage } from "../views/user-detail";
 
+const PAGE_SIZE = 20;
 const app = new Hono<AdminEnv>();
 
 // GET /users
 app.get("/", async (c) => {
   const search = c.req.query("search");
-  const users = search ? await searchUsers(c.env.DB, search) : await getAllUsers(c.env.DB, 50, 0);
-  return c.html(<UsersListPage users={users} search={search} />);
+  if (search) {
+    const users = await searchUsers(c.env.DB, search);
+    return c.html(<UsersListPage users={users} search={search} />);
+  }
+  const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10) || 1);
+  const offset = (page - 1) * PAGE_SIZE;
+  const [users, total] = await Promise.all([
+    getAllUsers(c.env.DB, PAGE_SIZE, offset),
+    countUsers(c.env.DB),
+  ]);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  return c.html(<UsersListPage users={users} page={page} totalPages={totalPages} />);
 });
 
 // GET /users/:id
