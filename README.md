@@ -365,15 +365,16 @@ Authenticates via `~/.vite-cloud/credentials.json` (same file as `vcd login`).
 
 ## Tooling
 
-| Tool     | Version       | Purpose                                   |
-| -------- | ------------- | ----------------------------------------- |
-| pnpm     | 10.x          | Package manager with workspaces + catalog |
-| tsdown   | 0.20.3        | Build (rolldown-based, ESM, DTS)          |
-| wrangler | 4.x           | CF Worker dev/deploy (platform, dispatch) |
-| vitest   | 4.x           | Unit + integration tests                  |
-| oxlint   | 1.47.x        | Linting                                   |
-| oxfmt    | 0.32.x        | Formatting (double quotes, semis)         |
-| vite     | 8.0.0-beta.14 | Dev server + build                        |
+| Tool     | Version       | Purpose                                                                                        |
+| -------- | ------------- | ---------------------------------------------------------------------------------------------- |
+| Node.js  | 24.13.1       | Runtime (TS type stripping enabled natively — no `tsx` or `--experimental-strip-types` needed) |
+| pnpm     | 10.x          | Package manager with workspaces + catalog                                                      |
+| tsdown   | 0.20.3        | Build (rolldown-based, ESM, DTS)                                                               |
+| wrangler | 4.x           | CF Worker dev/deploy (platform, dispatch)                                                      |
+| vitest   | 4.x           | Unit + integration tests                                                                       |
+| oxlint   | 1.47.x        | Linting                                                                                        |
+| oxfmt    | 0.32.x        | Formatting (double quotes, semis)                                                              |
+| vite     | 8.0.0-beta.14 | Dev server + build                                                                             |
 
 ## Testing
 
