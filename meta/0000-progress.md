@@ -47,6 +47,7 @@ Implementation Progress
 - [x] Static deployment (`--dir`, `--spa`, VitePress/Vite auto-detection, SSG 404.html fallback)
 - [x] Schema-derived DB types (SQL DDL parser → `.vite-cloud/db.d.ts` codegen with `DbTables`/`DbInsertTables`)
 - [x] Typed query helper (`vite-cloud/db`) — `db.list/get/insert/update/delete/raw` with compile-time table/column safety
+- [ ] More `vcd db` commands to match wrangler and backend frameworks, e.g. CRUD resource generation
 
 **Milestone:** Fully typed API routes end-to-end. Route handlers with validators produce typed `RouteMap` via codegen. Client `fetch()` infers path, method, input, and output types automatically. Typed DB query helper with schema-derived types from migration SQL files. Users can deploy to their own Cloudflare account without the Vite Cloud platform.
 
@@ -56,6 +57,7 @@ Implementation Progress
 - [x] Usage tiers, metering and limits enforcement
 - [x] Admin dashboard (`packages/admin/` — Hono JSX dashboard, admin API endpoints)
 - [x] Staging environment
+- [ ] User dashboard
 - [ ] Billing integration (Stripe)
 - [ ] Email & webhooks notifications (e.g. for failed project builds or billing issues)
 - [ ] AI code generation (`vite generate route` scaffolding)
