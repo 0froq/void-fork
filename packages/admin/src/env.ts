@@ -11,6 +11,7 @@ export interface AdminEnv extends Env {
     DEV_AUTH_BYPASS?: string;
     CF_API_TOKEN: string;
     CF_ACCOUNT_ID: string;
+    SITE_DOMAIN?: string;
   };
   Variables: {
     userId: string;

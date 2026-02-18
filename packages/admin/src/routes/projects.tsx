@@ -23,7 +23,15 @@ app.get("/", async (c) => {
     countProjects(c.env.DB),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  return c.html(<ProjectsListPage projects={projects} page={page} totalPages={totalPages} />);
+  const siteDomain = c.env.SITE_DOMAIN ?? "vitecloud.app";
+  return c.html(
+    <ProjectsListPage
+      projects={projects}
+      page={page}
+      totalPages={totalPages}
+      siteDomain={siteDomain}
+    />,
+  );
 });
 
 // GET /projects/:id
@@ -39,6 +47,8 @@ app.get("/:id", async (c) => {
   ]);
 
   const cfAccountId = c.env.CF_ACCOUNT_ID;
+  const siteDomain = c.env.SITE_DOMAIN ?? "vitecloud.app";
+  const deployUrl = `https://${project.slug}.${siteDomain}`;
 
   return c.html(
     <Layout title={project.name}>
@@ -54,6 +64,26 @@ app.get("/:id", async (c) => {
             <tr>
               <th>Slug</th>
               <td>{project.slug}</td>
+            </tr>
+            <tr>
+              <th>URL</th>
+              <td>
+                <a href={deployUrl} target="_blank" rel="noopener noreferrer">
+                  {deployUrl}
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <th>Assets</th>
+              <td>
+                <a
+                  href={`https://dash.cloudflare.com/${cfAccountId}/r2/default/buckets/vite-cloud-assets?prefix=${encodeURIComponent(project.id + "/")}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  R2: vite-cloud-assets/{project.id}/
+                </a>
+              </td>
             </tr>
             <tr>
               <th>Owner</th>
@@ -90,9 +120,15 @@ app.get("/:id", async (c) => {
                   </td>
                   <td>{r.binding_name}</td>
                   <td style="font-family: monospace; font-size: 0.8rem">
-                    {r.type === "d1" && cfAccountId ? (
+                    {cfAccountId && (r.type === "d1" || r.type === "kv" || r.type === "r2") ? (
                       <a
-                        href={`https://dash.cloudflare.com/${cfAccountId}/workers/d1/databases/${r.cf_id}/metrics`}
+                        href={
+                          r.type === "d1"
+                            ? `https://dash.cloudflare.com/${cfAccountId}/workers/d1/databases/${r.cf_id}/metrics`
+                            : r.type === "kv"
+                              ? `https://dash.cloudflare.com/${cfAccountId}/workers/kv/namespaces/${r.cf_id}/metrics`
+                              : `https://dash.cloudflare.com/${cfAccountId}/r2/default/buckets/${r.cf_id}`
+                        }
                         target="_blank"
                         rel="noopener noreferrer"
                       >

@@ -6,10 +6,12 @@ export function ProjectsListPage({
   projects,
   page,
   totalPages,
+  siteDomain,
 }: {
   projects: (Project & { owner_login: string | null })[];
   page: number;
   totalPages: number;
+  siteDomain: string;
 }) {
   return (
     <Layout title="Projects">
@@ -19,9 +21,8 @@ export function ProjectsListPage({
           <thead>
             <tr>
               <th>Name</th>
-              <th>Slug</th>
+              <th>URL</th>
               <th>Owner</th>
-              <th>Owner ID</th>
               <th>Mode</th>
               <th>Created</th>
             </tr>
@@ -32,9 +33,16 @@ export function ProjectsListPage({
                 <td>
                   <a href={`/projects/${p.id}`}>{p.name}</a>
                 </td>
-                <td>{p.slug}</td>
+                <td>
+                  <a
+                    href={`https://${p.slug}.${siteDomain}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {p.slug}.{siteDomain}
+                  </a>
+                </td>
                 <td>{p.owner_login ? <a href={`/users/${p.user_id}`}>{p.owner_login}</a> : "-"}</td>
-                <td style="font-family: monospace; font-size: 0.8rem">{p.user_id}</td>
                 <td>{p.mode}</td>
                 <td>{new Date(p.created_at).toLocaleDateString()}</td>
               </tr>

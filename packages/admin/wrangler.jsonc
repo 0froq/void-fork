@@ -37,6 +37,7 @@
       ],
       "vars": {
         "AUTH_REDIRECT_URI": "https://admin.staging.vite.cloud/callback",
+        "SITE_DOMAIN": "staging.vitecloud.app",
       },
     },
   },
