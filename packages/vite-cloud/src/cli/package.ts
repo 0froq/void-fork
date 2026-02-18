@@ -90,6 +90,8 @@ export function packageBuild(
     const relativePath = relative(workerDir, filePath);
     // Skip wrangler.json — platform manages worker config
     if (relativePath === "wrangler.json") continue;
+    // Skip .vite/ build metadata (manifest.json etc.) — not runtime code
+    if (relativePath.startsWith(".vite/") || relativePath.startsWith(".vite\\")) continue;
     const content = readFileSync(filePath);
     formData.append(`worker:${relativePath}`, new Blob([content]), relativePath);
   }
