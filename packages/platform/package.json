@@ -14,7 +14,9 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "migrate": "wrangler d1 migrations apply vite-cloud-platform",
+    "migrate:staging": "wrangler d1 migrations apply vite-cloud-platform-staging --env staging"
   },
   "dependencies": {
     "hono": "^4.11.9"
