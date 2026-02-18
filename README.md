@@ -37,7 +37,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | `packages/vite-cloud`        | `vite-cloud`                     | Core Vite plugin — routing, inference, migrations, CLI |
 | `packages/platform`          | `@vite-cloud/platform` (private) | Control Plane API — projects, deploys, CF API proxy    |
 | `packages/dispatch`          | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets   |
-| `packages/admin`             | `@vite-cloud/admin` (private)    | Admin dashboard (Hono JSX) + CLI (`vca`)               |
+| `packages/admin`             | `@vite-cloud/admin` (private)    | Admin dashboard (Hono JSX, server-rendered)            |
 | `packages/create-vite-cloud` | `create-vite-cloud`              | `npm create vite-cloud` scaffolding CLI                |
 | `playground/*`               | (private)                        | local apps for testing                                 |
 
@@ -282,7 +282,7 @@ Static asset responses are cached at the CF edge via `caches.default`. Cache key
 
 ## `admin` Architecture
 
-CF Worker serving the Admin Dashboard (Hono JSX, server-rendered) and Admin CLI (`vca`). Shares the same D1 database as the platform worker.
+CF Worker serving the Admin Dashboard (Hono JSX, server-rendered). Shares the same D1 database as the platform worker.
 
 ### Auth
 
@@ -292,7 +292,7 @@ Cookie-based JWT auth. Login flow handles Google OAuth directly (using shared he
 
 ```
 packages/admin/
-  package.json              # hono, @clack/prompts, @vite-cloud/platform (workspace dep)
+  package.json              # hono, @vite-cloud/platform (workspace dep)
   wrangler.jsonc
   tsconfig.json
   src/
@@ -311,12 +311,6 @@ packages/admin/
       user-detail.tsx       # User profile, projects, plan controls, suspend button
       projects-list.tsx     # All projects table
       dashboard.tsx         # System stats overview
-    cli.ts                  # CLI entry point (bin: "vca")
-    cli/
-      client.ts             # HTTP client for platform /admin/* endpoints
-      commands/
-        users.ts            # vca users list|get|plan|suspend|unsuspend
-        stats.ts            # vca stats
 ```
 
 ### Platform Admin API
@@ -347,21 +341,6 @@ The platform package exposes `.ts` source files via subpath exports for consumpt
 | `@vite-cloud/platform/auth/jwt`    | `src/auth/jwt.ts`    |
 | `@vite-cloud/platform/auth/github` | `src/auth/github.ts` |
 | `@vite-cloud/platform/auth/google` | `src/auth/google.ts` |
-
-### Admin CLI (`vca`)
-
-Runs in Node.js, calls platform admin API over HTTP (same JWT auth, checked for admin role):
-
-```
-vca users list [--plan <plan>] [--limit <n>]
-vca users get <id>
-vca users plan <id> <plan>
-vca users suspend <id>
-vca users unsuspend <id>
-vca stats
-```
-
-Authenticates via `~/.vite-cloud/credentials.json` (same file as `vcd login`).
 
 ## Tooling
 

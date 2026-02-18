@@ -53,9 +53,6 @@ importers:
 
   packages/admin:
     dependencies:
-      '@clack/prompts':
-        specifier: 'catalog:'
-        version: 1.0.1
       '@vite-cloud/platform':
         specifier: workspace:*
         version: link:../platform
@@ -63,6 +60,9 @@ importers:
         specifier: ^4.11.9
         version: 4.11.9
     devDependencies:
+      '@clack/prompts':
+        specifier: 'catalog:'
+        version: 1.0.1
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 4.20260214.0
