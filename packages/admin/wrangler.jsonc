@@ -25,14 +25,14 @@
         {
           "binding": "DB",
           "database_name": "vite-cloud-platform-staging",
-          "database_id": "PLACEHOLDER_STAGING_D1_ID",
+          "database_id": "e78b32c1-497a-40ad-8f83-7049e139983e",
           "migrations_dir": "../platform/migrations",
         },
       ],
       "kv_namespaces": [
         {
           "binding": "ROUTING",
-          "id": "PLACEHOLDER_STAGING_KV_ID",
+          "id": "60240eecea804f39bf8b7395cd6c6b08",
         },
       ],
     },
