@@ -11,7 +11,7 @@ jobs:
   deploy:
     needs: ci
     runs-on: ubuntu-latest
-    environment: Prod
+    environment: Staging
     steps:
       - uses: actions/checkout@v4
 
