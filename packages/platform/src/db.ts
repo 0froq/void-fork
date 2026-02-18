@@ -24,6 +24,7 @@ export async function createUser(
     provider_id: providerId,
     login,
     email,
+    plan: "free",
     created_at: new Date().toISOString(),
   };
 }
@@ -43,6 +44,10 @@ export async function getUserByEmail(db: D1Database, email: string): Promise<Use
   return db.prepare("SELECT * FROM users WHERE email = ?").bind(email).first<User>();
 }
 
+export async function getUser(db: D1Database, id: string): Promise<User | null> {
+  return db.prepare("SELECT * FROM users WHERE id = ?").bind(id).first<User>();
+}
+
 export async function updateUser(
   db: D1Database,
   id: string,
@@ -53,6 +58,22 @@ export async function updateUser(
     .prepare("UPDATE users SET login = ?, github_login = ?, email = ? WHERE id = ?")
     .bind(login, login, email, id)
     .run();
+}
+
+export async function updateUserPlan(db: D1Database, id: string, plan: string): Promise<void> {
+  await db.prepare("UPDATE users SET plan = ? WHERE id = ?").bind(plan, id).run();
+}
+
+export async function countUserDeploymentsToday(db: D1Database, userId: string): Promise<number> {
+  const result = await db
+    .prepare(
+      `SELECT COUNT(*) as count FROM deployments d
+       JOIN projects p ON d.project_id = p.id
+       WHERE p.user_id = ? AND d.created_at >= date('now')`,
+    )
+    .bind(userId)
+    .first<{ count: number }>();
+  return result?.count ?? 0;
 }
 
 // --- Projects ---

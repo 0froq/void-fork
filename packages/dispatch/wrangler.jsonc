@@ -28,4 +28,10 @@
       "id": "9250c33f3db6494ebe8ad6272812c8c0",
     },
   ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "ANALYTICS",
+      "dataset": "vite_cloud_requests",
+    },
+  ],
 }

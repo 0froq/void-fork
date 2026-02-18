@@ -184,6 +184,7 @@ describe("POST /projects/:id/deploy", () => {
       workerName: "user-routed-app",
       projectId: project.id,
       version: expect.stringMatching(/^dpl_/),
+      limits: { cpuMs: 10, subRequests: 50 },
     });
   });
 
@@ -214,6 +215,7 @@ describe("POST /projects/:id/deploy", () => {
       projectId: project.id,
       version: expect.stringMatching(/^dpl_/),
       headers,
+      limits: { cpuMs: 10, subRequests: 50 },
     });
   });
 
@@ -240,6 +242,7 @@ describe("POST /projects/:id/deploy", () => {
       projectId: project.id,
       ssr: true,
       version: expect.stringMatching(/^dpl_/),
+      limits: { cpuMs: 10, subRequests: 50 },
     });
   });
 
@@ -482,11 +485,105 @@ describe("POST /projects/:id/deploy", () => {
       workerName: "user-domain-deploy",
       projectId: project.id,
       version: expect.stringMatching(/^dpl_/),
+      limits: { cpuMs: 10, subRequests: 50 },
     });
 
     // Verify pending domain was NOT written
     const pendingRouting = await env.ROUTING.get("domain:pending.example.com");
     expect(pendingRouting).toBeNull();
+  });
+
+  it("returns 429 when deploy count exceeds plan limit", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "limit-app");
+    mockCfApi();
+
+    // Insert 100 deployments created today (free tier limit)
+    for (let i = 0; i < 100; i++) {
+      await env.DB.prepare(
+        "INSERT INTO deployments (id, project_id, status, created_at) VALUES (?, ?, 'live', datetime('now'))",
+      )
+        .bind(`dpl_limit_${i}`, project.id)
+        .run();
+    }
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm(),
+      }),
+      env,
+    );
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { error: string; limit: number };
+    expect(body.error).toBe("deploy limit exceeded");
+    expect(body.limit).toBe(100);
+  });
+
+  it("allows deploy when under plan limit", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "under-limit-app");
+    mockCfApi();
+
+    // Insert 99 deployments (under free tier limit of 100)
+    for (let i = 0; i < 99; i++) {
+      await env.DB.prepare(
+        "INSERT INTO deployments (id, project_id, status, created_at) VALUES (?, ?, 'live', datetime('now'))",
+      )
+        .bind(`dpl_under_${i}`, project.id)
+        .run();
+    }
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm(),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("includes limits in KV routing entry matching user plan", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "limits-kv-app");
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm(),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const routing = (await env.ROUTING.get("limits-kv-app", "json")) as {
+      limits: { cpuMs: number; subRequests: number };
+    };
+    expect(routing.limits).toEqual({ cpuMs: 10, subRequests: 50 });
+  });
+
+  it("omits limits for custom plan (all unlimited)", async () => {
+    const user = await createTestUser(env.DB, "customuser", "github", undefined, "custom");
+    const project = await createTestProject(env.DB, user.id, "custom-plan-app");
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm(),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const routing = (await env.ROUTING.get("custom-plan-app", "json")) as Record<string, unknown>;
+    expect(routing.limits).toBeUndefined();
   });
 
   it("marks deployment failed when worker upload fails", async () => {

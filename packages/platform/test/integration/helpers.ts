@@ -15,6 +15,9 @@ const MIGRATION_0004 = fileURLToPath(
   new URL("../../migrations/0004_deployment_source.sql", import.meta.url),
 );
 const MIGRATION_0005 = fileURLToPath(new URL("../../migrations/0005_domains.sql", import.meta.url));
+const MIGRATION_0006 = fileURLToPath(
+  new URL("../../migrations/0006_usage_tiers.sql", import.meta.url),
+);
 
 export const JWT_SECRET = "test-jwt-secret";
 export const CF_API_TOKEN = "test-cf-token";
@@ -82,6 +85,11 @@ export async function setupEnv(): Promise<TestEnv> {
     await db.prepare(stmt).run();
   }
 
+  const schema6 = readFileSync(MIGRATION_0006, "utf-8");
+  for (const stmt of splitStatements(schema6)) {
+    await db.prepare(stmt).run();
+  }
+
   return {
     DB: db,
     ASSETS: r2 as unknown as R2Bucket,
@@ -119,14 +127,15 @@ export async function createTestUser(
   login = "testuser",
   provider = "github",
   providerId?: string,
+  plan = "free",
 ): Promise<{ id: string; login: string; jwt: string }> {
   const id = `user_test${++userCounter}`;
   const pid = providerId ?? String(10000 + userCounter);
   await db
     .prepare(
-      "INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login) VALUES (?, ?, ?, ?, ?, ABS(RANDOM()), ?)",
+      "INSERT INTO users (id, provider, provider_id, login, email, plan, github_id, github_login) VALUES (?, ?, ?, ?, ?, ?, ABS(RANDOM()), ?)",
     )
-    .bind(id, provider, pid, login, null, login)
+    .bind(id, provider, pid, login, null, plan, login)
     .run();
   const jwt = await signJwt({ sub: id, login }, JWT_SECRET);
   return { id, login, jwt };

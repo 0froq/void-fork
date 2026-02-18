@@ -11,6 +11,8 @@ interface RoutingEntry {
   mode?: "spa" | "ssg";
   version?: string;
   headers?: HeaderRule[];
+  limits?: Record<string, number>;
+  suspended?: string;
 }
 
 // Mock the CF Cache API global
@@ -48,9 +50,19 @@ function createEnv(options: {
   routing: RoutingEntry;
   assets?: Record<string, MockAsset>;
   workerResponse?: Response;
-}): { env: Env; workerFetch: ReturnType<typeof vi.fn>; r2Store: Map<string, MockAsset> } {
-  const workerFetch = vi.fn(async () => options.workerResponse ?? new Response("worker"));
+  workerFetchImpl?: () => Promise<Response>;
+}): {
+  env: Env;
+  workerFetch: ReturnType<typeof vi.fn>;
+  dispatchGet: ReturnType<typeof vi.fn>;
+  r2Store: Map<string, MockAsset>;
+  analyticsWrites: unknown[];
+} {
+  const workerFetch = vi.fn(
+    async () => options.workerFetchImpl?.() ?? options.workerResponse ?? new Response("worker"),
+  );
   const r2Store = new Map<string, MockAsset>();
+  const analyticsWrites: unknown[] = [];
 
   // Seed initial assets
   if (options.assets) {
@@ -59,12 +71,14 @@ function createEnv(options: {
     }
   }
 
+  const dispatchGet = vi.fn(() => ({ fetch: workerFetch }));
+
   const env = {
     ROUTING: {
       get: async () => JSON.stringify(options.routing),
     },
     DISPATCH: {
-      get: () => ({ fetch: workerFetch }),
+      get: dispatchGet,
     },
     ASSETS: {
       get: async (key: string) => {
@@ -86,9 +100,12 @@ function createEnv(options: {
         });
       },
     },
+    ANALYTICS: {
+      writeDataPoint: (data: unknown) => analyticsWrites.push(data),
+    },
   } as unknown as Env;
 
-  return { env, workerFetch, r2Store };
+  return { env, workerFetch, dispatchGet, r2Store, analyticsWrites };
 }
 
 describe("dispatch fetch handler", () => {
@@ -576,6 +593,7 @@ describe("edge cache versioning", () => {
       },
       DISPATCH: { get: () => ({ fetch: vi.fn() }) },
       ASSETS: { get: r2Get },
+      ANALYTICS: { writeDataPoint: () => {} },
     } as unknown as Env;
     const res2 = await app.fetch(new Request("https://my-app.vitecloud.app/"), env2, createCtx());
     expect(res2.status).toBe(200);
@@ -613,6 +631,7 @@ describe("custom domain routing", () => {
       ASSETS: {
         get: async () => null,
       },
+      ANALYTICS: { writeDataPoint: () => {} },
     } as unknown as Env;
 
     const response = await app.fetch(
@@ -650,6 +669,7 @@ describe("custom domain routing", () => {
           return null;
         },
       },
+      ANALYTICS: { writeDataPoint: () => {} },
     } as unknown as Env;
 
     const response = await app.fetch(
@@ -673,6 +693,7 @@ describe("custom domain routing", () => {
       ASSETS: {
         get: async () => null,
       },
+      ANALYTICS: { writeDataPoint: () => {} },
     } as unknown as Env;
 
     const response = await app.fetch(new Request("https://unknown.example.com/"), env, createCtx());
@@ -801,8 +822,8 @@ describe("ISR (stale-while-revalidate)", () => {
 
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(await response.text()).toBe("<html>no-cache</html>");
-    // No background write should happen
-    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+    // Only the metering waitUntil call, no ISR cache write
+    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
     expect(r2Store.has("proj_1/isr/dashboard")).toBe(false);
   });
 
@@ -862,11 +883,138 @@ describe("ISR (stale-while-revalidate)", () => {
     expect(response.headers.get("x-isr-cache")).toBe("STALE");
     expect(await response.text()).toBe("<html>stale</html>");
 
-    // Background revalidation should have been scheduled
-    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    // Background revalidation + metering should have been scheduled
+    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
 
     // Wait for background write
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
     expect(workerFetch).toHaveBeenCalledOnce();
+  });
+});
+
+describe("suspension check", () => {
+  it("returns 429 when project is suspended", async () => {
+    const { env } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        suspended: "requests_exceeded",
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/api/hello"),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(429);
+    const body = (await response.json()) as { error: string; reason: string };
+    expect(body.error).toBe("usage limit exceeded");
+    expect(body.reason).toBe("requests_exceeded");
+  });
+
+  it("returns 429 for static routes when suspended", async () => {
+    const { env } = createEnv({
+      routing: {
+        projectId: "proj_1",
+        mode: "spa",
+        suspended: "requests_exceeded",
+      },
+      assets: {
+        "proj_1/current/index.html": { body: "<html>SPA</html>" },
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/"),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(429);
+  });
+});
+
+describe("custom limits", () => {
+  it("passes limits to DISPATCH.get for API routes", async () => {
+    const { env, dispatchGet } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        limits: { cpuMs: 10, subRequests: 50 },
+      },
+      workerResponse: new Response("api"),
+    });
+
+    await app.fetch(new Request("https://my-app.vitecloud.app/api/hello"), env, createCtx());
+
+    expect(dispatchGet).toHaveBeenCalledWith(
+      "user-app",
+      {},
+      { limits: { cpuMs: 10, subRequests: 50 } },
+    );
+  });
+
+  it("does not pass limits when routing has no limits", async () => {
+    const { env, dispatchGet } = createEnv({
+      routing: { workerName: "user-app", projectId: "proj_1" },
+      workerResponse: new Response("api"),
+    });
+
+    await app.fetch(new Request("https://my-app.vitecloud.app/api/hello"), env, createCtx());
+
+    expect(dispatchGet).toHaveBeenCalledWith("user-app");
+  });
+
+  it("returns 429 when worker exceeds CPU limit", async () => {
+    const workerFetch = vi.fn(async () => {
+      throw new Error("Worker exceeded CPU time limit");
+    });
+    const dispatchGet = vi.fn(() => ({ fetch: workerFetch }));
+
+    const env = {
+      ROUTING: {
+        get: async () =>
+          JSON.stringify({
+            workerName: "user-app",
+            projectId: "proj_1",
+            limits: { cpuMs: 10 },
+          }),
+      },
+      DISPATCH: { get: dispatchGet },
+      ASSETS: { get: async () => null },
+      ANALYTICS: { writeDataPoint: () => {} },
+    } as unknown as Env;
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/api/hello"),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(429);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe("CPU limit exceeded");
+  });
+
+  it("passes limits to DISPATCH.get for SSR routes", async () => {
+    const { env, dispatchGet } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+        limits: { cpuMs: 30, subRequests: 50 },
+      },
+      workerResponse: new Response("<html>ssr</html>"),
+    });
+
+    await app.fetch(new Request("https://my-app.vitecloud.app/dashboard"), env, createCtx());
+
+    expect(dispatchGet).toHaveBeenCalledWith(
+      "user-app",
+      {},
+      { limits: { cpuMs: 30, subRequests: 50 } },
+    );
   });
 });

@@ -9,6 +9,7 @@ import {
   resolveRevalidateTtl,
   shouldBypassIsr,
 } from "./isr";
+import { recordRequest, type RequestType } from "./metering";
 import { serveStaticAsset, serveStaticAssetWithFallback, serveSSGAsset } from "./static";
 
 interface RoutingEntry {
@@ -19,10 +20,13 @@ interface RoutingEntry {
   mode?: "spa" | "ssg";
   version?: string;
   headers?: HeaderRule[];
+  limits?: Record<string, number>;
+  suspended?: string;
 }
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const startTime = Date.now();
     const url = new URL(request.url);
     const slug = extractSlug(url.hostname);
     const routingKey = slug ?? `domain:${url.hostname}`;
@@ -34,6 +38,14 @@ export default {
     }
 
     const routing: RoutingEntry = JSON.parse(routingRaw);
+
+    // Check if project is suspended
+    if (routing.suspended) {
+      return Response.json(
+        { error: "usage limit exceeded", reason: routing.suspended },
+        { status: 429 },
+      );
+    }
 
     // Versioned cache key: each deploy writes a new version to KV,
     // so old cache entries are instantly bypassed without purging.
@@ -48,39 +60,69 @@ export default {
     }
 
     const pathname = url.pathname;
+    let requestType: RequestType = "static";
+
+    const meter = (response: Response) => {
+      ctx.waitUntil(
+        Promise.resolve().then(() =>
+          recordRequest(env, {
+            projectId: routing.projectId,
+            type: requestType,
+            method: request.method,
+            status: response.status,
+            responseBytes: Number(response.headers.get("content-length") ?? 0),
+            durationMs: Date.now() - startTime,
+            slug: slug ?? url.hostname,
+          }),
+        ),
+      );
+      return response;
+    };
 
     // Static-only deploys (no worker)
     if (!routing.workerName) {
       if (routing.mode === "ssg") {
-        return cacheResponse(
+        return meter(
+          cacheResponse(
+            request,
+            ctx,
+            cache,
+            cacheKey,
+            applyHeaderRules(
+              await serveSSGAsset(env, routing.projectId, pathname),
+              pathname,
+              routing.headers,
+            ),
+          ),
+        );
+      }
+      return meter(
+        cacheResponse(
           request,
           ctx,
           cache,
           cacheKey,
           applyHeaderRules(
-            await serveSSGAsset(env, routing.projectId, pathname),
+            await serveStaticAssetWithFallback(env, routing.projectId, pathname),
             pathname,
             routing.headers,
           ),
-        );
-      }
-      return cacheResponse(
-        request,
-        ctx,
-        cache,
-        cacheKey,
-        applyHeaderRules(
-          await serveStaticAssetWithFallback(env, routing.projectId, pathname),
-          pathname,
-          routing.headers,
         ),
       );
     }
 
     // API routes → dispatch to user worker (not cached here)
     if (pathname.startsWith("/api/") || pathname === "/api") {
-      const worker = env.DISPATCH.get(routing.workerName);
-      return worker.fetch(request);
+      requestType = "api";
+      const worker = getWorker(env, routing);
+      try {
+        return meter(await worker.fetch(request));
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("Worker exceeded")) {
+          return meter(Response.json({ error: "CPU limit exceeded" }, { status: 429 }));
+        }
+        throw err;
+      }
     }
 
     // Everything else → static assets first.
@@ -90,12 +132,14 @@ export default {
         spaFallback: false,
       });
       if (staticResponse) {
-        return cacheResponse(
-          request,
-          ctx,
-          cache,
-          cacheKey,
-          applyHeaderRules(staticResponse, pathname, routing.headers),
+        return meter(
+          cacheResponse(
+            request,
+            ctx,
+            cache,
+            cacheKey,
+            applyHeaderRules(staticResponse, pathname, routing.headers),
+          ),
         );
       }
 
@@ -109,36 +153,49 @@ export default {
             // Serve stale, revalidate in background
             ctx.waitUntil(revalidateInBackground(env, routing, request, pathname, isrTtl));
           }
-          return isrCacheResponse(cached, stale);
+          requestType = "isr";
+          return meter(isrCacheResponse(cached, stale));
         }
 
         // Cache miss: render via worker, cache in background
-        const worker = env.DISPATCH.get(routing.workerName!);
+        requestType = "isr";
+        const worker = getWorker(env, routing);
         const workerResponse = await worker.fetch(request);
         const ttl = resolveRevalidateTtl(workerResponse, isrTtl);
         if (ttl > 0 && workerResponse.ok) {
           ctx.waitUntil(writeIsrCache(env, routing.projectId, pathname, workerResponse, ttl));
         }
-        return workerResponse;
+        return meter(workerResponse);
       }
 
-      const worker = env.DISPATCH.get(routing.workerName!);
-      return worker.fetch(request);
+      requestType = "ssr";
+      const ssrWorker = getWorker(env, routing);
+      return meter(await ssrWorker.fetch(request));
     }
 
-    return cacheResponse(
-      request,
-      ctx,
-      cache,
-      cacheKey,
-      applyHeaderRules(
-        await serveStaticAssetWithFallback(env, routing.projectId, pathname),
-        pathname,
-        routing.headers,
+    return meter(
+      cacheResponse(
+        request,
+        ctx,
+        cache,
+        cacheKey,
+        applyHeaderRules(
+          await serveStaticAssetWithFallback(env, routing.projectId, pathname),
+          pathname,
+          routing.headers,
+        ),
       ),
     );
   },
 } satisfies ExportedHandler<Env>;
+
+/** Get a dispatch worker, applying custom limits if configured. */
+function getWorker(env: Env, routing: RoutingEntry): Fetcher {
+  if (routing.limits) {
+    return env.DISPATCH.get(routing.workerName!, {}, { limits: routing.limits });
+  }
+  return env.DISPATCH.get(routing.workerName!);
+}
 
 /**
  * Store successful static responses in the edge cache.
@@ -174,7 +231,7 @@ async function revalidateInBackground(
   defaultTtl: number,
 ): Promise<void> {
   try {
-    const worker = env.DISPATCH.get(routing.workerName!);
+    const worker = getWorker(env, routing);
     const response = await worker.fetch(request);
     const ttl = resolveRevalidateTtl(response, defaultTtl);
     if (ttl > 0 && response.ok) {

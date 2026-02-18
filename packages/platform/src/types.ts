@@ -4,6 +4,7 @@ export interface User {
   provider_id: string;
   login: string;
   email: string | null;
+  plan: string;
   created_at: string;
 }
 

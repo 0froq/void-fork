@@ -3,14 +3,17 @@ import type { PlatformEnv } from "../env";
 import type { DeployManifest } from "../types";
 import {
   getProject,
+  getUser,
   createDeployment,
   updateDeploymentStatus,
   updateProjectMode,
   getDomainsByProjectId,
+  countUserDeploymentsToday,
 } from "../db";
 import { provisionBindings } from "../provisioning/provision";
 import { runRemoteMigrations, type RemoteMigration } from "../migrations/remote-runner";
 import { validateMigrationSQL } from "../migrations/validate";
+import { getPlanLimits, isWithinLimit } from "../tiers";
 
 const DISPATCH_NAMESPACE = "vite-cloud-users";
 const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
@@ -46,6 +49,16 @@ app.post("/:id/deploy", async (c) => {
 
   if (project.user_id !== c.get("userId")) {
     return c.json({ error: "forbidden" }, 403);
+  }
+
+  // Enforce deploy count limit
+  const user = await getUser(c.env.DB, c.get("userId"));
+  const planLimits = getPlanLimits(user?.plan ?? "free");
+  if (planLimits.deploysPerDay > 0) {
+    const todayCount = await countUserDeploymentsToday(c.env.DB, c.get("userId"));
+    if (!isWithinLimit(planLimits.deploysPerDay, todayCount)) {
+      return c.json({ error: "deploy limit exceeded", limit: planLimits.deploysPerDay }, 429);
+    }
   }
 
   const formData = await c.req.formData();
@@ -89,11 +102,15 @@ app.post("/:id/deploy", async (c) => {
       }
 
       // Update KV routing (no workerName for static deploys)
+      // Carry forward suspended flag from current KV entry
+      const existingStaticRouting = await c.env.ROUTING.get(project.slug);
+      const existingStaticEntry = existingStaticRouting ? JSON.parse(existingStaticRouting) : null;
       const staticRoutingJson = JSON.stringify({
         projectId,
         mode: manifest.static,
         version: deployment.id,
         ...(manifest.headers ? { headers: manifest.headers } : {}),
+        ...(existingStaticEntry?.suspended ? { suspended: existingStaticEntry.suspended } : {}),
       });
       await c.env.ROUTING.put(project.slug, staticRoutingJson);
 
@@ -311,6 +328,21 @@ app.post("/:id/deploy", async (c) => {
     }
 
     // 6. Update KV routing table
+    // Carry forward suspended flag from current KV entry
+    const existingRouting = await c.env.ROUTING.get(project.slug);
+    const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
+    // Include per-request limits for dispatch enforcement
+    const dispatchLimits =
+      planLimits.cpuMsPerRequest > 0 || planLimits.subRequestsPerInvocation > 0
+        ? {
+            limits: {
+              ...(planLimits.cpuMsPerRequest > 0 ? { cpuMs: planLimits.cpuMsPerRequest } : {}),
+              ...(planLimits.subRequestsPerInvocation > 0
+                ? { subRequests: planLimits.subRequestsPerInvocation }
+                : {}),
+            },
+          }
+        : {};
     const routingJson = JSON.stringify({
       workerName,
       projectId,
@@ -318,6 +350,8 @@ app.post("/:id/deploy", async (c) => {
       ...(manifest.revalidate ? { revalidate: manifest.revalidate } : {}),
       version: deployment.id,
       ...(manifest.headers ? { headers: manifest.headers } : {}),
+      ...dispatchLimits,
+      ...(existingEntry?.suspended ? { suspended: existingEntry.suspended } : {}),
     });
     await c.env.ROUTING.put(project.slug, routingJson);
 
