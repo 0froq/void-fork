@@ -11,7 +11,8 @@ import {
   unsuspendUser,
   countUserDeploymentsToday,
 } from "@vite-cloud/platform/db";
-import { PLAN_LIMITS } from "@vite-cloud/platform/tiers";
+import { PLAN_LIMITS, getCurrentBillingPeriodStart } from "@vite-cloud/platform/tiers";
+import { queryProjectUsage } from "@vite-cloud/platform/usage";
 import { UsersListPage } from "../views/users-list";
 import { UserDetailPage } from "../views/user-detail";
 
@@ -45,7 +46,32 @@ app.get("/:id", async (c) => {
     getProjectsByUserId(c.env.DB, user.id),
     countUserDeploymentsToday(c.env.DB, user.id),
   ]);
-  return c.html(<UserDetailPage user={user} projects={projects} deploysToday={deploysToday} />);
+
+  const since = user.billing_cycle_start
+    ? getCurrentBillingPeriodStart(user.billing_cycle_start)
+    : new Date();
+  const projectUsages = await Promise.all(
+    projects.map(async (p) => {
+      const usage = await queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since);
+      return { projectId: p.id, slug: p.slug, ...usage };
+    }),
+  );
+  const totalRequests = projectUsages.reduce((sum, u) => sum + u.requests, 0);
+  const totalBandwidth = projectUsages.reduce((sum, u) => sum + u.bandwidthBytes, 0);
+
+  return c.html(
+    <UserDetailPage
+      user={user}
+      projects={projects}
+      deploysToday={deploysToday}
+      usage={{
+        billingPeriodStart: since.toISOString(),
+        totalRequests,
+        totalBandwidth,
+        projects: projectUsages,
+      }}
+    />,
+  );
 });
 
 // POST /users/:id/plan

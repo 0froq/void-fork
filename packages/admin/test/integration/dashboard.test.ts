@@ -150,7 +150,7 @@ describe("GET /users/:id", () => {
     const res = await req(`/users/${user.id}`, admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("Plan Limits");
+    expect(html).toContain(">Plan<");
     expect(html).toContain("Requests / month");
     expect(html).toContain("3,000,000");
     expect(html).toContain("CPU ms / request");
