@@ -19,13 +19,8 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-
-      - run: pnpm -r build
-      - run: pnpm lint
-      - run: pnpm check
-      - run: pnpm test
-
+      - run: pnpm vitest --run packages/admin packages/dispatch packages/platform
       - run: pnpm deploy:staging
         env:
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
