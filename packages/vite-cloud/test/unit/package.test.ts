@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { computeAssetHashes, packageStaticBuild } from "../../src/cli/package";
+import { computeAssetHashes, packageBuild, packageStaticBuild } from "../../src/cli/package";
 
 const TMP = join(import.meta.dirname, ".tmp-package-test");
 
@@ -98,5 +98,33 @@ describe("packageStaticBuild with filtering", () => {
     const manifestRaw = form.get("manifest") as string;
     const manifest = JSON.parse(manifestRaw);
     expect(manifest.assetHashes).toBeUndefined();
+  });
+});
+
+describe("packageBuild", () => {
+  it("excludes .vite/ directory from worker files", () => {
+    // Set up dist/worker/ with worker files and .vite/manifest.json
+    const workerDir = join(TMP, "worker");
+    mkdirSync(join(workerDir, ".vite"), { recursive: true });
+    mkdirSync(join(workerDir, "assets"), { recursive: true });
+    writeFileSync(join(workerDir, "index.js"), "export default {}");
+    writeFileSync(join(workerDir, "assets", "chunk.js"), "var x = 1");
+    writeFileSync(join(workerDir, ".vite", "manifest.json"), '{"key":"value"}');
+
+    const form = packageBuild(TMP, "worker", {
+      needsD1: false,
+      needsKV: false,
+      needsR2: false,
+    });
+
+    const workerKeys: string[] = [];
+    for (const [key] of form.entries()) {
+      if (key.startsWith("worker:")) {
+        workerKeys.push(key.slice("worker:".length));
+      }
+    }
+
+    expect(workerKeys.sort()).toEqual(["assets/chunk.js", "index.js"]);
+    expect(workerKeys).not.toContain(".vite/manifest.json");
   });
 });
