@@ -1,10 +1,21 @@
 This is the development repo of Vite Cloud.
 
+## Context Overview
+
 - **Important**: The source of truth of this file on disk is `README.md`. Both `AGENTS.md` and `CLAUDE.md` are symlinks to this file. When asked to update any of these, always update `README.md` (the actual file).
 - This file describes the current state of the codebase. To understand Vite Cloud as a product, read the [Introduction](./docs/index.md).
-- Refer to the [Design Doc](./meta/design.md) for the high-level vision and architecture.
-- Refer to the [Progress Doc](./meta/progress.md) for tracking progress.
+- Refer to the [Design Doc](./meta/0001-design.md) for the high-level vision and architecture.
+- Refer to the [Progress Doc](./meta/0000-progress.md) for tracking progress.
 - Documentation source lives in `packages/website/docs/`. A root-level `docs/` symlink points there for convenience.
+
+## Plan Mode Best Practices
+
+Every implementation plan should include the following:
+
+- Verification: run `pnpm lint`, `pnpm fmt`, and `pnpm check`. Run `pnpm test` on tests relevant to the current feature first, then run the full test suite.
+- Documentation: after verification, update `README.md` (this file) with relevant changes, and also update relevant docs md files in `packages/website/docs`.
+- Progress tracking: tick off relevant steps in `meta/0000-progress.md` when applicable.
+- Design decision log (optional): for particularly substantial changes, ask the user if they want to create a numbered design decision doc in `meta` following existing file format.
 
 ## Quick Reference
 
@@ -16,8 +27,6 @@ pnpm fmt             # oxfmt --write .
 pnpm check           # Typecheck all packages (tsc --noEmit)
 pnpm run deploy      # Build all + deploy platform & dispatch workers
 ```
-
-Make sure to run `lint`, `fmt`, and `check` after major changes. Tick off relevant steps in `meta/progress.md` when applicable.
 
 ## Monorepo Structure
 
