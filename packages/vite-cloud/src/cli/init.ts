@@ -1,6 +1,53 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { parseArgs } from "node:util";
 import { intro, outro, log, confirm, multiselect, isCancel, cancel, note } from "@clack/prompts";
+
+const VALID_AUTH_PROVIDERS = ["github", "google", "email"] as const;
+type AuthProvider = (typeof VALID_AUTH_PROVIDERS)[number];
+
+export interface InitArgs {
+  tsconfig: boolean;
+  github: boolean;
+  auth: AuthProvider[] | null;
+}
+
+export function parseInitArgs(args: string[]): InitArgs {
+  let parsed: ReturnType<typeof parseArgs>;
+  try {
+    parsed = parseArgs({
+      args,
+      options: {
+        tsconfig: { type: "boolean" },
+        github: { type: "boolean" },
+        auth: { type: "string" },
+      },
+      strict: true,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Error: ${message}`);
+  }
+
+  let auth: AuthProvider[] | null = null;
+  if (typeof parsed.values.auth === "string") {
+    const providers = parsed.values.auth.split(",").map((s) => s.trim());
+    for (const p of providers) {
+      if (!VALID_AUTH_PROVIDERS.includes(p as AuthProvider)) {
+        throw new Error(
+          `Error: Invalid auth provider "${p}". Allowed: ${VALID_AUTH_PROVIDERS.join(", ")}`,
+        );
+      }
+    }
+    auth = providers as AuthProvider[];
+  }
+
+  return {
+    tsconfig: parsed.values.tsconfig === true,
+    github: parsed.values.github === true,
+    auth,
+  };
+}
 
 interface ProjectState {
   hasTypescript: boolean;
@@ -101,7 +148,10 @@ function setupTsconfig(root: string, state: ProjectState): void {
     tsconfig.compilerOptions.types = types;
 
     if (updated) {
-      writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2) + "\n");
+      // Rebuild with extends first so it appears at the top of the file
+      const { extends: ext, ...rest } = tsconfig;
+      const ordered = { extends: ext, ...rest };
+      writeFileSync(tsconfigPath, JSON.stringify(ordered, null, 2) + "\n");
     } else {
       log.success("tsconfig.json looks good");
     }
@@ -153,40 +203,52 @@ function setupTsconfig(root: string, state: ProjectState): void {
   }
 }
 
-async function promptAuth(root: string, state: ProjectState): Promise<void> {
+async function promptAuth(
+  root: string,
+  state: ProjectState,
+  presetProviders?: AuthProvider[],
+): Promise<void> {
   const configPath = join(root, "vite-cloud.json");
 
-  // Check if auth is already configured
-  if (state.hasViteCloudJson) {
-    try {
-      const existing = JSON.parse(readFileSync(configPath, "utf-8"));
-      if (existing.auth) {
-        log.info("Auth already configured in vite-cloud.json");
-        return;
+  let providers: string[];
+
+  if (presetProviders) {
+    providers = presetProviders;
+  } else {
+    // Check if auth is already configured
+    if (state.hasViteCloudJson) {
+      try {
+        const existing = JSON.parse(readFileSync(configPath, "utf-8"));
+        if (existing.auth) {
+          log.info("Auth already configured in vite-cloud.json");
+          return;
+        }
+      } catch {
+        // will be overwritten
       }
-    } catch {
-      // will be overwritten
     }
-  }
 
-  const providers = await multiselect({
-    message: "Enable authentication? \x1b[2m(space to select, enter to confirm)\x1b[0m",
-    options: [
-      { value: "github", label: "GitHub OAuth" },
-      { value: "google", label: "Google OAuth" },
-      { value: "email", label: "Email/Password" },
-    ],
-    required: false,
-  });
+    const selected = await multiselect({
+      message: "Enable authentication? \x1b[2m(space to select, enter to confirm)\x1b[0m",
+      options: [
+        { value: "github", label: "GitHub OAuth" },
+        { value: "google", label: "Google OAuth" },
+        { value: "email", label: "Email/Password" },
+      ],
+      required: false,
+    });
 
-  if (isCancel(providers)) {
-    cancel("Setup cancelled.");
-    process.exit(0);
-  }
+    if (isCancel(selected)) {
+      cancel("Setup cancelled.");
+      process.exit(0);
+    }
 
-  if (providers.length === 0) {
-    log.info("Skipping authentication setup");
-    return;
+    if (selected.length === 0) {
+      log.info("Skipping authentication setup");
+      return;
+    }
+
+    providers = selected;
   }
 
   let config: Record<string, unknown> = {
@@ -381,67 +443,82 @@ console.log(posts);
   );
 }
 
-export async function runInitCommand(root: string): Promise<void> {
+export async function runInitCommand(root: string, initArgs?: InitArgs): Promise<void> {
   console.log();
   intro("\x1b[34mvite-cloud init\x1b[0m");
 
   const state = detectProjectState(root);
+  const targeted = initArgs && (initArgs.tsconfig || initArgs.github || initArgs.auth !== null);
 
-  // Step 2: TypeScript / tsconfig
-  if (!state.hasTsconfig && !state.hasTypescript) {
-    const useTs = await confirm({ message: "Do you want to use TypeScript?" });
-    if (isCancel(useTs)) {
-      cancel("Setup cancelled.");
-      process.exit(0);
-    }
-    if (!useTs) {
-      log.info("Skipping TypeScript setup");
-      state.typescriptWanted = false;
+  // Step 1: TypeScript / tsconfig
+  if (!targeted || initArgs.tsconfig) {
+    if (targeted) {
+      // --tsconfig flag: run directly without prompting
+      state.typescriptWanted = true;
+      setupTsconfig(root, state);
+    } else if (!state.hasTsconfig && !state.hasTypescript) {
+      const useTs = await confirm({ message: "Do you want to use TypeScript?" });
+      if (isCancel(useTs)) {
+        cancel("Setup cancelled.");
+        process.exit(0);
+      }
+      if (!useTs) {
+        log.info("Skipping TypeScript setup");
+        state.typescriptWanted = false;
+      } else {
+        state.typescriptWanted = true;
+        setupTsconfig(root, state);
+      }
     } else {
       state.typescriptWanted = true;
       setupTsconfig(root, state);
     }
-  } else {
-    state.typescriptWanted = true;
-    setupTsconfig(root, state);
   }
 
-  // Step 3: Authentication
-  await promptAuth(root, state);
+  // Step 2: Authentication
+  if (!targeted || initArgs.auth !== null) {
+    await promptAuth(root, state, initArgs?.auth ?? undefined);
+  }
 
-  // Step 4: Demo code
-  if (state.hasRoutes || state.hasMigrations) {
-    log.info("Project already has routes or migrations, skipping demo");
-  } else if (!state.typescriptWanted) {
-    // Demo requires TypeScript for the type pipeline
-  } else {
-    const scaffold = await confirm({
-      message: "Scaffold demo code? (migration + API route + frontend fetch)",
-    });
-    if (isCancel(scaffold)) {
-      cancel("Setup cancelled.");
-      process.exit(0);
-    }
-    if (scaffold) {
-      scaffoldDemo(root);
+  // Step 3: Demo code (only in full interactive flow)
+  if (!targeted) {
+    if (state.hasRoutes || state.hasMigrations) {
+      log.info("Project already has routes or migrations, skipping demo");
+    } else if (!state.typescriptWanted) {
+      // Demo requires TypeScript for the type pipeline
+    } else {
+      const scaffold = await confirm({
+        message: "Scaffold demo code? (migration + API route + frontend fetch)",
+      });
+      if (isCancel(scaffold)) {
+        cancel("Setup cancelled.");
+        process.exit(0);
+      }
+      if (scaffold) {
+        scaffoldDemo(root);
+      }
     }
   }
 
-  // Step 5: GitHub Actions
-  const deployYmlPath = join(root, ".github", "workflows", "deploy.yml");
-  if (existsSync(deployYmlPath)) {
-    log.warn("deploy.yml already exists, skipping");
-  } else {
-    const setupGha = await confirm({ message: "Set up GitHub Actions deployment?" });
-    if (isCancel(setupGha)) {
-      cancel("Setup cancelled.");
-      process.exit(0);
-    }
-    if (setupGha) {
+  // Step 4: GitHub Actions
+  if (!targeted || initArgs.github) {
+    const deployYmlPath = join(root, ".github", "workflows", "deploy.yml");
+    if (existsSync(deployYmlPath)) {
+      log.warn("deploy.yml already exists, skipping");
+    } else if (targeted) {
+      // --github flag: run directly without prompting
       setupGithubActions(root, state);
+    } else {
+      const setupGha = await confirm({ message: "Set up GitHub Actions deployment?" });
+      if (isCancel(setupGha)) {
+        cancel("Setup cancelled.");
+        process.exit(0);
+      }
+      if (setupGha) {
+        setupGithubActions(root, state);
+      }
     }
   }
 
-  // Step 6: Summary
   outro("Run `vite dev` to start developing");
 }

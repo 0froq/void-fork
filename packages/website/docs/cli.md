@@ -15,12 +15,26 @@ Examples below use `vcd`.
 
 ### `vcd init`
 
+```
+vcd init [--tsconfig] [--auth <providers>] [--github]
+```
+
 Interactive setup wizard for adding vite-cloud to an existing project. Walks through:
 
 1. **TypeScript** — creates or updates `tsconfig.json` (adds `extends .vite-cloud/tsconfig.json` and `vite-cloud/env` types)
 2. **Authentication** — configures auth providers (GitHub, Google, Email) in `vite-cloud.json`
 3. **Demo code** — optionally scaffolds a migration, API route, and typed fetch example
 4. **GitHub Actions** — optionally creates `.github/workflows/deploy.yml` with the correct package manager commands
+
+Use flags to run individual steps without prompts:
+
+| Flag                 | Purpose                                                                          |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `--tsconfig`         | Only update `tsconfig.json`                                                      |
+| `--auth <providers>` | Only configure auth with comma-separated providers (`github`, `google`, `email`) |
+| `--github`           | Only create GitHub Actions workflow                                              |
+
+Flags can be combined. When any flag is provided, only the specified steps run and interactive prompts are skipped.
 
 ## Auth
 
