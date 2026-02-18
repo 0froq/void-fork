@@ -17,7 +17,7 @@
       "id": "9250c33f3db6494ebe8ad6272812c8c0",
     },
   ],
-  // Secrets (via `wrangler secret put`): JWT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+  // Secrets (via `wrangler secret put`): JWT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, CF_API_TOKEN, CF_ACCOUNT_ID
   "env": {
     "staging": {
       "name": "vite-cloud-admin-staging",
@@ -35,6 +35,9 @@
           "id": "60240eecea804f39bf8b7395cd6c6b08",
         },
       ],
+      "vars": {
+        "AUTH_REDIRECT_URI": "https://admin.staging.vite.cloud/callback",
+      },
     },
   },
 }
