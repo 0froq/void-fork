@@ -215,9 +215,18 @@ The platform default export is `{ fetch: app.fetch, scheduled }` — `app` (the 
 
 ### Secrets (via `wrangler secret put`)
 
-`CF_API_TOKEN`, `CF_ACCOUNT_ID`, `JWT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+| Secret                 | platform | admin | dispatch | Staging notes                                        |
+| ---------------------- | -------- | ----- | -------- | ---------------------------------------------------- |
+| `CF_API_TOKEN`         | yes      |       |          | Can share with production                            |
+| `CF_ACCOUNT_ID`        | yes      |       |          | Can share with production                            |
+| `CF_ZONE_ID`           | yes      |       |          | Can share with production                            |
+| `JWT_SECRET`           | yes      | yes   |          | Must differ from production; independent per worker  |
+| `GITHUB_CLIENT_ID`     | yes      |       |          | Can share with production (add staging callback URL) |
+| `GITHUB_CLIENT_SECRET` | yes      |       |          | Can share with production                            |
+| `GOOGLE_CLIENT_ID`     | yes      | yes   |          | Can share with production (add staging callback URL) |
+| `GOOGLE_CLIENT_SECRET` | yes      | yes   |          | Can share with production                            |
 
-Optional env var: `AUTH_REDIRECT_URI` (defaults to `https://api.vite.cloud/auth/callback`). For local dev, set in `.dev.vars`.
+`AUTH_REDIRECT_URI` is set as a `vars` entry in wrangler config for staging (`https://api.staging.vite.cloud/auth/callback`). For local dev, set `AUTH_REDIRECT_URI=http://localhost:8787/auth/callback` in `.dev.vars`.
 
 ## `dispatch` Architecture
 
