@@ -105,24 +105,10 @@ src/
 
 ### Key Design Decisions
 
-- **`parseSync` comes from `vite`** (not `oxc-parser` directly). Vite 8 re-exports it.
-- **Hono** is the runtime framework (~14KB, CF Workers native). Generated code creates a `new Hono()` app, registers middleware with `app.use()`, and registers routes with `app.get()` / `app.post()` / etc.
-- **Virtual modules**: `virtual:vite-cloud-routes` holds the Hono app. A real file `.vite-cloud/entry.ts` is generated as the CF plugin entrypoint (re-exports the virtual module's app).
-- **Generated `.vite-cloud/` files**: The routing plugin eagerly generates `entry.ts` and `tsconfig.json` at plugin creation time (before hooks fire). `routes.d.ts` and `db.d.ts` are generated at `buildStart` and on file changes. The generated `tsconfig.json` uses `"files": ["routes.d.ts", "db.d.ts"]` so users can extend it from their root tsconfig without manual `include` entries.
-- **Standard Schema types inlined**: `src/standard-schema.ts` contains the Standard Schema V1 types copied from the spec. The generated `routes.d.ts` also inlines a minimal subset. No `@standard-schema/spec` dependency is needed — users only need their chosen schema library (zod, valibot, arktype, etc.).
 - **Import redirection**: The routing plugin's `resolveId` hook redirects bare `"vite-cloud"` imports to `vite-cloud/handler` (the lightweight subpath). Without this, route files pull the entire plugin (vite, @cloudflare/vite-plugin, lightningcss) into the Worker bundle. Uses `import.meta.resolve()` to compute absolute paths at plugin init.
 - **Pre-resolved paths in codegen**: Generated virtual module code uses absolute paths for `hono` and `vite-cloud/response` (resolved via `import.meta.resolve()`). Virtual modules have no filesystem location, so bare specifiers can't resolve from them.
 - **CF plugin API**: Worker config (`main`, `d1_databases`, `kv_namespaces`, `r2_buckets`) goes inside the `config` option of `cloudflare()`, NOT as top-level properties. `persistState` takes `{ path: string }`, not a raw string. The `config` option uses a **function form** `(resolved: WorkerConfig) => Partial<WorkerConfig>` so that bindings from the user's `wrangler.json` (if present) take precedence over inferred placeholder bindings.
-- **Raw Cloudflare deployment**: Users can deploy directly to their own CF account (bypassing the Vite Cloud platform) by adding a `wrangler.json` with real binding IDs and running `vite build && wrangler deploy`. The `mergeBindings` config function in `index.ts` checks the resolved config from the user's wrangler file and only adds placeholder bindings for inferred bindings that are missing.
-- **`vite-cloud.json` config file**: All project-level configuration (auth, bindings, headers, mode, outputDir, wrangler passthrough) lives in `vite-cloud.json`. `viteCloud()` takes zero args — `readConfig()` reads the file synchronously. Missing file = all defaults.
-- **Binding inference** runs synchronously in the `viteCloud()` body (before plugin init) using `readFileSync` + `parseSync`. Looks for `*.env.DB`, `*.env.KV`, `*.env.STORAGE` member expressions. Explicit `bindings` in `vite-cloud.json` takes precedence.
-- **Env naming**: Uses standard CF uppercase convention. `c.env.DB`, `c.env.KV`, `c.env.STORAGE`. No mapping layer needed.
-- **Named method exports**: Route files export named HTTP methods (`export const GET`, `export const POST`, etc.). The scanner uses `detect-exports.ts` (via `parseSync`) to discover which methods each file exports. Each file maps to one URL pattern; multiple methods per file are supported.
-- **Route handlers** use lazy `import()` for code splitting. Middleware is eagerly imported.
 - **Migration DB path**: Miniflare stores D1 data at a deterministic path computed from the `database_id` using HMAC-SHA256. The `getMiniflareDatabasePath()` function in `migrations/runner.ts` replicates this algorithm so migrations target the correct SQLite file at `.vite-cloud/v3/d1/miniflare-D1DatabaseObject/<hash>.sqlite`.
-- **Schema-derived DB types**: The routing plugin replays migration SQL files through a DDL parser (`migrations/schema.ts`) to build a `SchemaMap`, then generates `.vite-cloud/db.d.ts` with `declare module "vite-cloud/db"` augmentation. The generated file must have a top-level `export {}` so TypeScript treats it as a module augmentation (merges with the resolved module) rather than an ambient declaration (which would replace the module and hide runtime exports like `db` and `createDb`).
-- **Typed DB query client**: `runtime/db.ts` exports both stub interfaces (`DbTables`, `DbInsertTables`) and the runtime query client (`db`, `createDb`, `QueryClient`). The `./db` package export points `types` and `import` to the same module's outputs. The default `db` export uses `import { env } from "cloudflare:workers"` (top-level ESM import, CF Workers are ESM-only) to access `env.DB` lazily at call time.
-- **CLI uses `@clack/prompts`** - the documentation is at https://bomb.sh/docs/clack/packages/prompts
 
 ### Package Exports
 
@@ -468,13 +454,11 @@ Staging auto-deploys on push to `main` via `.github/workflows/deploy-staging.yml
 
 ## Pitfalls / Things That Broke
 
-- **tsdown 0.20.3** outputs `.mjs`/`.d.mts` extensions — package.json exports must match.
 - **`import.meta.resolve()`** is the right way to resolve subpath exports from ESM plugin code. `createRequire().resolve()` fails for ESM-only exports (no `require` condition).
 - **Worker bundles are sensitive to transitive imports.** A single re-export of `defineHandler` from the main plugin entry drags in vite + lightningcss + wrangler. The `resolveId` redirect is critical.
 - **Miniflare D1 SQLite path** is NOT `<persist>/d1/<id>.db`. It's `<persist>/v3/d1/miniflare-D1DatabaseObject/<hmac-hash>.sqlite` where the hash is derived from `database_id`.
 - **Miniflare D1 `exec()` with multi-statement SQL** fails with `Cannot read properties of undefined (reading 'duration')`. Split into individual statements and use `db.batch(stmts.map(s => db.prepare(s)))` instead.
 - **ArkType `ArkErrors.map()` returns `ArkErrors`** (not a plain array), causing `Response.json()` serialization to crash via its custom `toJSON()`. Use `Array.from(issues, mapper)` instead of `issues.map(mapper)` when flattening Standard Schema issues.
-- **Standard Schema V1 types are inlined**, not imported from `@standard-schema/spec`. The spec explicitly allows this. Keeps the generated `routes.d.ts` self-contained and avoids requiring users to install the spec package.
 - **tsconfig `extends` does NOT merge `include`/`files`** — the child completely replaces the parent's. To make generated types discoverable, the `.vite-cloud/tsconfig.json` uses `"files"` (inherited when the child doesn't specify `files`) rather than `"include"` (overridden by the child's `include`).
 - **`declare module` augmentation requires `export {}`** at the top of the generated file. Without a top-level export/import, TypeScript treats it as an ambient module declaration (replaces the module entirely) rather than an augmentation (merges with existing exports). This hides runtime exports like `db` and `createDb`. Both `routes.d.ts` and `db.d.ts` use `export {}` to ensure augmentation semantics.
 - **tsconfig `lib` must be explicit** for CF Workers packages. Without `"lib": ["ES2022"]`, TS defaults to including `lib.dom.d.ts` which shadows `@cloudflare/workers-types` globals (e.g. `CacheStorage.default`). Applied to `dispatch`, `vite-cloud`, `create-vite-cloud`. Not applied to `platform` (its tests use Miniflare/Node which needs DOM-compatible `URL` types).
