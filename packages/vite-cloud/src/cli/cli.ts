@@ -165,8 +165,15 @@ if (command === "deploy") {
   });
 } else if (command === "init") {
   const root = process.cwd();
-  import("./init").then(({ runInitCommand }) => {
-    runInitCommand(root).catch((err) => {
+  import("./init").then(({ runInitCommand, parseInitArgs }) => {
+    let initArgs;
+    try {
+      initArgs = parseInitArgs(args.slice(1));
+    } catch (err) {
+      log.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    runInitCommand(root, initArgs).catch((err) => {
       log.error(err.message ?? err);
       process.exit(1);
     });
@@ -194,6 +201,9 @@ if (command === "deploy") {
   note(
     [
       "\x1b[0mvcd init                           \x1b[2mSet up vite-cloud in an existing project",
+      "\x1b[0m  --tsconfig                      \x1b[2mOnly update tsconfig.json",
+      "\x1b[0m  --auth <providers>               \x1b[2mOnly configure auth (github,google,email)",
+      "\x1b[0m  --github                         \x1b[2mOnly create GitHub Actions workflow",
       "\x1b[0mvcd login                          \x1b[2mLog in with GitHub or Google",
       "\x1b[0mvcd logout                         \x1b[2mLog out and remove credentials",
       "\x1b[0mvcd whoami                         \x1b[2mShow the logged-in username",
