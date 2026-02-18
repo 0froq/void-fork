@@ -478,6 +478,8 @@ Two deployment environments: **production** and **staging**. Each has fully isol
 | Production  | `api.vite.cloud`         | `*.vitecloud.app`         | `admin.vite.cloud`         |
 | Staging     | `api.staging.vite.cloud` | `*.staging.vitecloud.app` | `admin.staging.vite.cloud` |
 
+To use the CLI against staging, set `"api"` in `~/.vite-cloud/config.json` or the `VITE_CLOUD_API_URL` env var. These are internal-only — not documented in public-facing docs (`docs/cli.md`).
+
 ### Configurable Environment Variables
 
 Previously hardcoded values are now configurable via `vars` in wrangler config (defaulting to production values):

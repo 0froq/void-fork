@@ -1,33 +1,40 @@
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const CREDENTIALS_DIR = join(homedir(), ".vite-cloud");
-const CREDENTIALS_PATH = join(CREDENTIALS_DIR, "credentials.json");
+const CONFIG_DIR = join(homedir(), ".vite-cloud");
+const CONFIG_PATH = join(CONFIG_DIR, "config.json");
+
+interface Config {
+  token?: string;
+  api?: string;
+}
+
+function readConfig(): Config {
+  try {
+    return JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+function writeConfig(config: Config): void {
+  mkdirSync(CONFIG_DIR, { recursive: true });
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+}
 
 /**
- * Read the deploy token from environment or credentials file.
- * Priority: VITE_CLOUD_TOKEN env var > ~/.vite-cloud/credentials.json
+ * Read the deploy token from environment or config file.
+ * Priority: VITE_CLOUD_TOKEN env var > ~/.vite-cloud/config.json
  */
 export function getToken(): string | null {
-  // 1. Check environment variable
   const envToken = process.env.VITE_CLOUD_TOKEN;
   if (envToken) {
     return envToken;
   }
 
-  // 2. Check credentials file
-  try {
-    const raw = readFileSync(CREDENTIALS_PATH, "utf-8");
-    const credentials = JSON.parse(raw);
-    if (credentials.token) {
-      return credentials.token;
-    }
-  } catch {
-    // File doesn't exist or is invalid
-  }
-
-  return null;
+  const config = readConfig();
+  return config.token ?? null;
 }
 
 export function getTokenSource(): "ci" | "manual" {
@@ -35,13 +42,17 @@ export function getTokenSource(): "ci" | "manual" {
 }
 
 export function saveToken(token: string): void {
-  mkdirSync(CREDENTIALS_DIR, { recursive: true });
-  writeFileSync(CREDENTIALS_PATH, JSON.stringify({ token }, null, 2) + "\n", { mode: 0o600 });
+  const config = readConfig();
+  config.token = token;
+  writeConfig(config);
 }
 
 export function removeToken(): boolean {
   try {
-    rmSync(CREDENTIALS_PATH);
+    const config = readConfig();
+    if (!config.token) return false;
+    delete config.token;
+    writeConfig(config);
     return true;
   } catch {
     return false;
@@ -49,6 +60,14 @@ export function removeToken(): boolean {
 }
 
 const DEFAULT_API_URL = "https://api.vite.cloud";
+
+/**
+ * Read the API URL from environment or config file.
+ * Priority: VITE_CLOUD_API_URL env var > ~/.vite-cloud/config.json > default
+ */
+export function getApiUrl(): string {
+  return process.env.VITE_CLOUD_API_URL ?? readConfig().api ?? DEFAULT_API_URL;
+}
 
 function page(title: string, message: string): string {
   return `<!DOCTYPE html>
@@ -66,7 +85,7 @@ export async function runLogin(provider = "github"): Promise<string> {
   const http = await import("node:http");
   const { exec } = await import("node:child_process");
 
-  const apiUrl = process.env.VITE_CLOUD_API_URL ?? DEFAULT_API_URL;
+  const apiUrl = getApiUrl();
 
   return new Promise<string>((resolve, reject) => {
     const server = http.createServer((req, res) => {

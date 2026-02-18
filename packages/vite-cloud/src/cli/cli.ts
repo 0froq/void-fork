@@ -118,7 +118,7 @@ if (command === "deploy") {
       log.success("Token copied to clipboard.");
     } catch {
       log.warn(
-        "Could not copy to clipboard. Copy the token manually from ~/.vite-cloud/credentials.json",
+        "Could not copy to clipboard. Copy the token manually from ~/.vite-cloud/config.json",
       );
     }
   })().catch((err) => {
@@ -230,7 +230,7 @@ if (command === "deploy") {
 
   note(
     [
-      "\x1b[0mVITE_CLOUD_TOKEN     \x1b[2mAuth token (or use ~/.vite-cloud/credentials.json)",
+      "\x1b[0mVITE_CLOUD_TOKEN     \x1b[2mAuth token (or use ~/.vite-cloud/config.json)",
       "\x1b[0mVITE_CLOUD_PROJECT   \x1b[2mDeploy target project name override",
     ].join("\n"),
     "\x1b[34mEnvironment\x1b[0m",
