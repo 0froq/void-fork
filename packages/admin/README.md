@@ -1,6 +1,6 @@
 # @vite-cloud/admin
 
-Admin dashboard and CLI for Vite Cloud.
+Admin dashboard for Vite Cloud.
 
 ## Local Development
 
@@ -75,18 +75,6 @@ pnpm vitest --run packages/admin/
 
 # Run all tests
 pnpm vitest --run
-```
-
-## CLI (`vca`)
-
-The admin CLI calls the platform's `/admin/*` API endpoints. It reuses the same credentials file as `vcd login` (`~/.vite-cloud/credentials.json`).
-
-```sh
-# Point at local platform API
-node src/cli.ts --api-url http://localhost:8787 stats
-node src/cli.ts --api-url http://localhost:8787 users list
-node src/cli.ts --api-url http://localhost:8787 users get <user-id>
-node src/cli.ts --api-url http://localhost:8787 users plan <user-id> pro
 ```
 
 ## Production Deployment

@@ -54,7 +54,7 @@ Implementation Progress
 
 - [x] Custom domains
 - [x] Usage tiers, metering and limits enforcement
-- [x] Admin dashboard & CLI (`packages/admin/` — Hono JSX dashboard, `vca` CLI, admin API endpoints)
+- [x] Admin dashboard (`packages/admin/` — Hono JSX dashboard, admin API endpoints)
 - [ ] Staging environment
 - [ ] Billing integration (Stripe)
 - [ ] Email & webhooks notifications (e.g. for failed project builds or billing issues)

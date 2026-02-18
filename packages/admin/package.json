@@ -1,9 +1,6 @@
 {
   "name": "@vite-cloud/admin",
   "private": true,
-  "bin": {
-    "vca": "./src/cli.ts"
-  },
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --port 8788",
@@ -12,11 +9,11 @@
     "setup": "node scripts/setup-local.ts"
   },
   "dependencies": {
-    "@clack/prompts": "catalog:",
     "@vite-cloud/platform": "workspace:*",
     "hono": "^4.11.9"
   },
   "devDependencies": {
+    "@clack/prompts": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "@types/node": "catalog:",
     "miniflare": "^4",
