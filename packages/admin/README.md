@@ -9,13 +9,13 @@ Admin dashboard and CLI for Vite Cloud.
 Create `packages/admin/.dev.vars` with the required secrets:
 
 ```
-JWT_SECRET=<same value as platform>
+JWT_SECRET=<any secret value>
 GOOGLE_CLIENT_ID=<your Google OAuth client ID>
 GOOGLE_CLIENT_SECRET=<your Google OAuth client secret>
 AUTH_REDIRECT_URI=http://localhost:8788/callback
 ```
 
-Use the same `JWT_SECRET` as the platform so tokens are interchangeable. You can copy it from `packages/platform/.dev.vars`.
+The admin handles its own OAuth and JWT signing/verification — the `JWT_SECRET` does not need to match the platform's.
 
 ### 2. Run the setup script
 
@@ -115,6 +115,6 @@ wrangler secret put GOOGLE_CLIENT_ID
 wrangler secret put GOOGLE_CLIENT_SECRET
 ```
 
-Use the same `JWT_SECRET` as the platform worker.
+The `JWT_SECRET` does not need to match the platform's — the admin signs and verifies its own tokens.
 
 `AUTH_REDIRECT_URI` does not need to be set in production — it defaults to `https://admin.vite.cloud/callback` (hardcoded in `login.ts`). The Google OAuth app must have this URL registered as an authorized redirect URI.
