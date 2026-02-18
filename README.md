@@ -273,7 +273,7 @@ CF Worker serving the Admin Dashboard (Hono JSX, server-rendered). Shares the sa
 
 ### Auth
 
-Cookie-based JWT auth. Login flow handles Google OAuth directly (using shared helper functions from `@vite-cloud/platform`), then verifies `role === "admin"` from D1. Non-admins get 403.
+Cookie-based JWT auth with its own independent `JWT_SECRET` (does not need to match the platform's). Login flow handles Google OAuth directly (using shared helper functions from `@vite-cloud/platform`), then verifies `role === "admin"` from D1. Non-admins get 403.
 
 ### Source Layout
 
@@ -447,7 +447,7 @@ Staging auto-deploys on push to `main` via `.github/workflows/deploy-staging.yml
 
 1. Create CF resources: D1 database, KV namespace, R2 bucket, dispatch namespace, analytics engine dataset (all with `-staging` suffix)
 2. Replace `PLACEHOLDER_*` IDs in wrangler configs (`packages/{platform,dispatch,admin}/wrangler.jsonc` → `env.staging`)
-3. Set worker secrets: `wrangler secret put <NAME> --env staging` for each worker (use a different `JWT_SECRET` from production; OAuth creds can be shared)
+3. Set worker secrets: `wrangler secret put <NAME> --env staging` for each worker (platform and admin each have independent `JWT_SECRET`s — they don't need to match each other; use different values from production; OAuth creds can be shared)
 4. DNS: `*.staging` CNAME on `vitecloud.app` zone; `api.staging` + `admin.staging` CNAMEs on `vite.cloud` zone
 5. Add staging callback URLs to GitHub/Google OAuth apps
 6. Set GitHub repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
