@@ -6,7 +6,7 @@
     "build:docs": "node scripts/build-docs.ts --write",
     "dev": "pnpm build:docs && wrangler dev",
     "deploy": "pnpm build:docs && wrangler deploy",
-    "typecheck": "pnpm build:docs && tsc --noEmit"
+    "typecheck": "pnpm build:docs && tsgo --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
@@ -16,7 +16,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
     "@types/node": "catalog:",
-    "typescript": "catalog:",
+    "@typescript/native-preview": "catalog:",
     "wrangler": "catalog:"
   }
 }

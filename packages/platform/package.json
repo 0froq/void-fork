@@ -14,7 +14,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "migrate": "wrangler d1 migrations apply vite-cloud-platform",
     "migrate:staging": "wrangler d1 migrations apply vite-cloud-platform-staging --env staging"
   },
@@ -23,8 +23,8 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
+    "@typescript/native-preview": "catalog:",
     "miniflare": "^4",
-    "typescript": "catalog:",
     "wrangler": "catalog:"
   }
 }

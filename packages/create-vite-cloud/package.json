@@ -17,7 +17,7 @@
     "@clack/prompts": "catalog:"
   },
   "devDependencies": {
-    "tsdown": "catalog:",
-    "typescript": "catalog:"
+    "@typescript/native-preview": "catalog:",
+    "tsdown": "catalog:"
   }
 }

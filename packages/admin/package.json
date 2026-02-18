@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "wrangler dev --port 8788",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "setup": "node scripts/setup-local.ts"
   },
   "dependencies": {
@@ -16,8 +16,8 @@
     "@clack/prompts": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "@types/node": "catalog:",
+    "@typescript/native-preview": "catalog:",
     "miniflare": "^4",
-    "typescript": "catalog:",
     "wrangler": "catalog:"
   }
 }
