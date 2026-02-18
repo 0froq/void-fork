@@ -110,6 +110,7 @@ src/
 - **Migration DB path**: Miniflare stores D1 data at a deterministic path computed from the `database_id` using HMAC-SHA256. The `getMiniflareDatabasePath()` function in `migrations/runner.ts` replicates this algorithm so migrations target the correct SQLite file at `.vite-cloud/v3/d1/miniflare-D1DatabaseObject/<hash>.sqlite`.
 - **Schema-derived DB types**: The routing plugin replays migration SQL files through a DDL parser (`migrations/schema.ts`) to build a `SchemaMap`, then generates `.vite-cloud/db.d.ts` with `declare module "vite-cloud/db"` augmentation. The generated file must have a top-level `export {}` so TypeScript treats it as a module augmentation (merges with the resolved module) rather than an ambient declaration (which would replace the module and hide runtime exports like `db` and `createDb`).
 - **Typed DB query client**: `runtime/db.ts` exports both stub interfaces (`DbTables`, `DbInsertTables`) and the runtime query client (`db`, `createDb`, `QueryClient`). The `./db` package export points `types` and `import` to the same module's outputs. The default `db` export uses `import { env } from "cloudflare:workers"` (top-level ESM import, CF Workers are ESM-only) to access `env.DB` lazily at call time.
+- **CLI uses `@clack/prompts`** - the documentation is at https://bomb.sh/docs/clack/packages/prompts
 
 ### Package Exports
 
