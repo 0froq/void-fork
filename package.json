@@ -10,9 +10,10 @@
     "check": "pnpm -r --parallel typecheck",
     "docs": "cd packages/website && vitepress dev",
     "migrate": "cd packages/platform && wrangler d1 migrations apply vite-cloud-platform",
-    "deploy": "pnpm deploy:dispatch && pnpm deploy:platform",
+    "deploy": "pnpm deploy:dispatch && pnpm deploy:platform && pnpm deploy:admin",
     "deploy:dispatch": "cd packages/dispatch && wrangler deploy",
     "deploy:platform": "pnpm migrate --remote && cd packages/platform && wrangler deploy",
+    "deploy:admin": "cd packages/admin && wrangler deploy",
     "deploy:docs": "pnpm deploy:mcp && cd packages/website && pnpm run deploy",
     "deploy:mcp": "cd packages/mcp && pnpm run deploy",
     "prepare": "husky"

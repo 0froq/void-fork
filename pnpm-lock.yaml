@@ -51,6 +51,34 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)
 
+  packages/admin:
+    dependencies:
+      '@clack/prompts':
+        specifier: 'catalog:'
+        version: 1.0.1
+      '@vite-cloud/platform':
+        specifier: workspace:*
+        version: link:../platform
+      hono:
+        specifier: ^4.11.9
+        version: 4.11.9
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 4.20260214.0
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.10.13
+      miniflare:
+        specifier: ^4
+        version: 4.20260212.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      wrangler:
+        specifier: 'catalog:'
+        version: 4.65.0(@cloudflare/workers-types@4.20260214.0)
+
   packages/create-vite-cloud:
     dependencies:
       '@clack/prompts':
