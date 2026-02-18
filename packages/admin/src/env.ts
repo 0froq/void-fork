@@ -8,6 +8,8 @@ export interface AdminEnv extends Env {
     GOOGLE_CLIENT_ID: string;
     GOOGLE_CLIENT_SECRET: string;
     AUTH_REDIRECT_URI?: string;
+    CF_API_TOKEN: string;
+    CF_ACCOUNT_ID: string;
   };
   Variables: {
     userId: string;

@@ -22,6 +22,7 @@ export function DeploymentsListPage({
               <th>Project</th>
               <th>Status</th>
               <th>Source</th>
+              <th>Error</th>
               <th>Created</th>
             </tr>
           </thead>
@@ -49,6 +50,9 @@ export function DeploymentsListPage({
                     <span class={`badge ${statusCls}`}>{d.status}</span>
                   </td>
                   <td>{d.source ?? "-"}</td>
+                  <td style="color: #dc2626; font-size: 0.8rem; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
+                    {d.error_message ? d.error_message.slice(0, 60) : "-"}
+                  </td>
                   <td>{new Date(d.created_at).toLocaleString()}</td>
                 </tr>
               );

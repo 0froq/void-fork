@@ -9,6 +9,7 @@ import {
   updateUserPlan,
   suspendUser,
   unsuspendUser,
+  countUserDeploymentsToday,
 } from "@vite-cloud/platform/db";
 import { PLAN_LIMITS } from "@vite-cloud/platform/tiers";
 import { UsersListPage } from "../views/users-list";
@@ -40,8 +41,11 @@ app.get("/:id", async (c) => {
   if (!user) {
     return c.html("<h1>User not found</h1>", 404);
   }
-  const projects = await getProjectsByUserId(c.env.DB, user.id);
-  return c.html(<UserDetailPage user={user} projects={projects} />);
+  const [projects, deploysToday] = await Promise.all([
+    getProjectsByUserId(c.env.DB, user.id),
+    countUserDeploymentsToday(c.env.DB, user.id),
+  ]);
+  return c.html(<UserDetailPage user={user} projects={projects} deploysToday={deploysToday} />);
 });
 
 // POST /users/:id/plan

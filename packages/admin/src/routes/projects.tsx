@@ -38,6 +38,8 @@ app.get("/:id", async (c) => {
     getUser(c.env.DB, project.user_id),
   ]);
 
+  const cfAccountId = c.env.CF_ACCOUNT_ID;
+
   return c.html(
     <Layout title={project.name}>
       <h1>{project.name}</h1>
@@ -87,7 +89,19 @@ app.get("/:id", async (c) => {
                     <span class="badge badge-blue">{r.type}</span>
                   </td>
                   <td>{r.binding_name}</td>
-                  <td style="font-family: monospace; font-size: 0.8rem">{r.cf_id}</td>
+                  <td style="font-family: monospace; font-size: 0.8rem">
+                    {r.type === "d1" && cfAccountId ? (
+                      <a
+                        href={`https://dash.cloudflare.com/${cfAccountId}/workers/d1/databases/${r.cf_id}/metrics`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {r.cf_id}
+                      </a>
+                    ) : (
+                      r.cf_id
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -108,6 +122,7 @@ app.get("/:id", async (c) => {
                 <th>ID</th>
                 <th>Status</th>
                 <th>Source</th>
+                <th>Error</th>
                 <th>Created</th>
               </tr>
             </thead>
@@ -121,11 +136,16 @@ app.get("/:id", async (c) => {
                       : "badge-gray";
                 return (
                   <tr key={d.id}>
-                    <td style="font-family: monospace; font-size: 0.8rem">{d.id}</td>
+                    <td style="font-family: monospace; font-size: 0.8rem">
+                      <a href={`/deployments/${d.id}`}>{d.id}</a>
+                    </td>
                     <td>
                       <span class={`badge ${statusCls}`}>{d.status}</span>
                     </td>
                     <td>{d.source ?? "-"}</td>
+                    <td style="color: #dc2626; font-size: 0.8rem; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
+                      {d.error_message ? d.error_message.slice(0, 60) : "-"}
+                    </td>
                     <td>{new Date(d.created_at).toLocaleString()}</td>
                   </tr>
                 );

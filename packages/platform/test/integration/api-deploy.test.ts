@@ -439,11 +439,14 @@ describe("POST /projects/:id/deploy", () => {
     const body = (await res.json()) as { error: string };
     expect(body.error).toContain("destructive migration rejected");
 
-    // Verify deployment is marked failed
-    const dpl = await env.DB.prepare("SELECT status FROM deployments WHERE project_id = ?")
+    // Verify deployment is marked failed with error message
+    const dpl = await env.DB.prepare(
+      "SELECT status, error_message FROM deployments WHERE project_id = ?",
+    )
       .bind(project.id)
-      .first<{ status: string }>();
+      .first<{ status: string; error_message: string | null }>();
     expect(dpl?.status).toBe("failed");
+    expect(dpl?.error_message).toContain("destructive migration rejected: 002_drop.sql");
   });
 
   it("updates KV routing for active custom domains on deploy", async () => {
@@ -605,11 +608,14 @@ describe("POST /projects/:id/deploy", () => {
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("worker upload failed");
 
-    // Verify deployment is marked failed
-    const dpl = await env.DB.prepare("SELECT status FROM deployments WHERE project_id = ?")
+    // Verify deployment is marked failed with error message
+    const dpl = await env.DB.prepare(
+      "SELECT status, error_message FROM deployments WHERE project_id = ?",
+    )
       .bind(project.id)
-      .first<{ status: string }>();
+      .first<{ status: string; error_message: string | null }>();
     expect(dpl?.status).toBe("failed");
+    expect(dpl?.error_message).toContain("worker upload failed:");
   });
 });
 

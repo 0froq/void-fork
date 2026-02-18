@@ -1,10 +1,20 @@
 import type { User, Project } from "@vite-cloud/platform/types";
 import type { PlanId } from "@vite-cloud/platform/tiers";
-import { PLAN_LIMITS } from "@vite-cloud/platform/tiers";
+import { PLAN_LIMITS, getPlanLimits } from "@vite-cloud/platform/tiers";
 import { Layout } from "./layout";
+import { formatLimit } from "./format";
 
-export function UserDetailPage({ user, projects }: { user: User; projects: Project[] }) {
+export function UserDetailPage({
+  user,
+  projects,
+  deploysToday,
+}: {
+  user: User;
+  projects: Project[];
+  deploysToday: number;
+}) {
   const plans = Object.keys(PLAN_LIMITS) as PlanId[];
+  const limits = getPlanLimits(user.plan);
 
   return (
     <Layout title={user.login}>
@@ -65,6 +75,50 @@ export function UserDetailPage({ user, projects }: { user: User; projects: Proje
             Update Plan
           </button>
         </form>
+      </div>
+
+      <div class="card mb-1">
+        <h2 style="font-size: 1.125rem; margin-bottom: 1rem">Plan Limits</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Limit</th>
+              <th>Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Requests / month</td>
+              <td>{formatLimit(limits.requestsPerMonth)}</td>
+            </tr>
+            <tr>
+              <td>CPU ms / request</td>
+              <td>{formatLimit(limits.cpuMsPerRequest)}</td>
+            </tr>
+            <tr>
+              <td>Sub-requests / invocation</td>
+              <td>{formatLimit(limits.subRequestsPerInvocation)}</td>
+            </tr>
+            <tr>
+              <td>Deploys / day</td>
+              <td>
+                {deploysToday} / {formatLimit(limits.deploysPerDay)}
+              </td>
+            </tr>
+            <tr>
+              <td>D1 storage</td>
+              <td>{formatLimit(limits.d1StorageBytes, "bytes")}</td>
+            </tr>
+            <tr>
+              <td>R2 storage</td>
+              <td>{formatLimit(limits.r2StorageBytes, "bytes")}</td>
+            </tr>
+            <tr>
+              <td>KV storage</td>
+              <td>{formatLimit(limits.kvStorageBytes, "bytes")}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div class="card mb-1">

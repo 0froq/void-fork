@@ -6,6 +6,8 @@ import { signJwt } from "@vite-cloud/platform/auth/jwt";
 const MIGRATIONS_DIR = fileURLToPath(new URL("../../../platform/migrations/", import.meta.url));
 
 export const JWT_SECRET = "test-jwt-secret";
+export const CF_API_TOKEN = "test-cf-token";
+export const CF_ACCOUNT_ID = "test-account-id";
 
 export type TestEnv = {
   DB: D1Database;
@@ -13,6 +15,8 @@ export type TestEnv = {
   JWT_SECRET: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
+  CF_API_TOKEN: string;
+  CF_ACCOUNT_ID: string;
 };
 
 let mf: Miniflare;
@@ -36,7 +40,7 @@ export async function setupEnv(): Promise<TestEnv> {
   const kv = await mf.getKVNamespace("ROUTING");
 
   // Apply all migrations sequentially
-  for (let i = 1; i <= 8; i++) {
+  for (let i = 1; i <= 9; i++) {
     const file = `${MIGRATIONS_DIR}${String(i).padStart(4, "0")}_${getMigrationName(i)}.sql`;
     const sql = readFileSync(file, "utf-8");
     for (const stmt of splitStatements(sql)) {
@@ -50,6 +54,8 @@ export async function setupEnv(): Promise<TestEnv> {
     JWT_SECRET,
     GOOGLE_CLIENT_ID: "test-google-client-id",
     GOOGLE_CLIENT_SECRET: "test-google-client-secret",
+    CF_API_TOKEN,
+    CF_ACCOUNT_ID,
   };
 }
 
@@ -63,6 +69,7 @@ function getMigrationName(n: number): string {
     6: "usage_tiers",
     7: "billing_cycle",
     8: "user_roles",
+    9: "deployment_errors",
   };
   return names[n]!;
 }
@@ -106,12 +113,15 @@ export async function createTestDeployment(
   projectId: string,
   status: "pending" | "live" | "failed" = "live",
   source?: string,
+  errorMessage?: string,
 ): Promise<{ id: string }> {
   const n = ++deploymentCounter;
   const id = `dpl_test${n}`;
   await db
-    .prepare("INSERT INTO deployments (id, project_id, status, source) VALUES (?, ?, ?, ?)")
-    .bind(id, projectId, status, source ?? null)
+    .prepare(
+      "INSERT INTO deployments (id, project_id, status, source, error_message) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(id, projectId, status, source ?? null, errorMessage ?? null)
     .run();
   return { id };
 }

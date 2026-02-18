@@ -11,6 +11,7 @@ import {
 } from "./helpers";
 
 let env: TestEnv;
+let manifestCounter = 0;
 
 beforeAll(async () => {
   env = await setupEnv();
@@ -141,6 +142,36 @@ describe("GET /users/:id", () => {
     expect(html).toContain("Plan");
     expect(html).toContain("Suspension");
   });
+
+  test("renders plan limits card", async () => {
+    const admin = await createTestUser(env.DB, "admin4b", "admin");
+    const user = await createTestUser(env.DB, "limitsuser");
+
+    const res = await req(`/users/${user.id}`, admin.jwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Plan Limits");
+    expect(html).toContain("Requests / month");
+    expect(html).toContain("3,000,000");
+    expect(html).toContain("CPU ms / request");
+    expect(html).toContain("Deploys / day");
+    expect(html).toContain("D1 storage");
+    expect(html).toContain("1 GB");
+  });
+
+  test("shows deploy count today", async () => {
+    const admin = await createTestUser(env.DB, "admin4c", "admin");
+    const user = await createTestUser(env.DB, "deploycountuser");
+    const project = await createTestProject(env.DB, user.id, "dc-proj");
+    await createTestDeployment(env.DB, project.id, "live");
+    await createTestDeployment(env.DB, project.id, "live");
+
+    const res = await req(`/users/${user.id}`, admin.jwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    // Should show "2 / 100" (2 deploys today, free tier limit 100)
+    expect(html).toContain("2 / 100");
+  });
 });
 
 describe("POST /users/:id/plan", () => {
@@ -239,6 +270,28 @@ describe("GET /projects/:id", () => {
     expect(html).toContain("Resources");
     expect(html).toContain("Recent Deployments");
   });
+
+  test("shows deployment error in project detail table", async () => {
+    const admin = await createTestUser(env.DB, "admin8b", "admin");
+    const project = await createTestProject(env.DB, admin.id, "proj-err");
+    await createTestDeployment(env.DB, project.id, "failed", "cli", "worker upload failed: 500");
+
+    const res = await req(`/projects/${project.id}`, admin.jwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("worker upload failed: 500");
+  });
+
+  test("links deployment IDs to detail page", async () => {
+    const admin = await createTestUser(env.DB, "admin8c", "admin");
+    const project = await createTestProject(env.DB, admin.id, "proj-link");
+    const deployment = await createTestDeployment(env.DB, project.id, "live");
+
+    const res = await req(`/projects/${project.id}`, admin.jwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain(`/deployments/${deployment.id}`);
+  });
 });
 
 describe("GET /deployments", () => {
@@ -255,6 +308,17 @@ describe("GET /deployments", () => {
     expect(html).toContain(`/projects/${project.id}`);
     expect(html).toContain("live");
     expect(html).toContain("cli");
+  });
+
+  test("shows error preview for failed deployments", async () => {
+    const admin = await createTestUser(env.DB, "admin10b", "admin");
+    const project = await createTestProject(env.DB, admin.id, "errl-proj");
+    await createTestDeployment(env.DB, project.id, "failed", "cli", "migration failed: syntax");
+
+    const res = await req("/deployments", admin.jwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("migration failed: syntax");
   });
 
   test("paginates deployments", async () => {
@@ -291,6 +355,54 @@ describe("GET /deployments/:id", () => {
     expect(html).toContain("depldetail-proj");
     expect(html).toContain("live");
     expect(html).toContain("cli");
+  });
+
+  test("shows error banner for failed deployment", async () => {
+    const admin = await createTestUser(env.DB, "admin12b", "admin");
+    const project = await createTestProject(env.DB, admin.id, "errdetail-proj");
+    const deployment = await createTestDeployment(
+      env.DB,
+      project.id,
+      "failed",
+      "cli",
+      "worker upload failed: internal error",
+    );
+
+    const res = await req(`/deployments/${deployment.id}`, admin.jwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Error");
+    expect(html).toContain("worker upload failed: internal error");
+  });
+
+  test("renders parsed manifest card", async () => {
+    const admin = await createTestUser(env.DB, "admin12c", "admin");
+    const project = await createTestProject(env.DB, admin.id, "manifest-proj");
+    const n = ++manifestCounter;
+    const id = `dpl_manifest${n}`;
+    const manifest = JSON.stringify({
+      bindings: { d1: ["DB"], kv: ["CACHE"] },
+      migrations: [{ name: "001_init.sql", destructive: false }],
+      schedules: [{ name: "sync", cron: "0 * * * *" }],
+    });
+    await env.DB.prepare(
+      "INSERT INTO deployments (id, project_id, status, manifest) VALUES (?, ?, ?, ?)",
+    )
+      .bind(id, project.id, "live", manifest)
+      .run();
+
+    const res = await req(`/deployments/${id}`, admin.jwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Manifest");
+    expect(html).toContain("D1");
+    expect(html).toContain("DB");
+    expect(html).toContain("KV");
+    expect(html).toContain("CACHE");
+    expect(html).toContain("001_init.sql");
+    expect(html).toContain("sync");
+    expect(html).toContain("0 * * * *");
+    expect(html).toContain("Raw Manifest");
   });
 
   test("returns 404 for unknown deployment", async () => {

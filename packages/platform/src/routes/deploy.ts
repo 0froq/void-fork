@@ -169,8 +169,9 @@ app.post("/:id/deploy", async (c) => {
         // Server-side validation (defense in depth)
         const validation = validateMigrationSQL(sql);
         if (!validation.allowed) {
-          await updateDeploymentStatus(c.env.DB, deployment.id, "failed");
-          return c.json({ error: `destructive migration rejected: ${name}` }, 400);
+          const msg = `destructive migration rejected: ${name}`;
+          await updateDeploymentStatus(c.env.DB, deployment.id, "failed", msg);
+          return c.json({ error: msg }, 400);
         }
 
         migrationEntries.push({ name, sql });
@@ -181,8 +182,9 @@ app.post("/:id/deploy", async (c) => {
       // Find the D1 resource for this project
       const d1Resource = workerBindings.find((b) => b.type === "d1");
       if (!d1Resource || !d1Resource.id) {
-        await updateDeploymentStatus(c.env.DB, deployment.id, "failed");
-        return c.json({ error: "migrations require a D1 database but none is provisioned" }, 400);
+        const msg = "migrations require a D1 database but none is provisioned";
+        await updateDeploymentStatus(c.env.DB, deployment.id, "failed", msg);
+        return c.json({ error: msg }, 400);
       }
 
       await updateDeploymentStatus(c.env.DB, deployment.id, "migrating");
@@ -196,7 +198,8 @@ app.post("/:id/deploy", async (c) => {
         );
         migrationsApplied = result.applied.length;
       } catch (err) {
-        await updateDeploymentStatus(c.env.DB, deployment.id, "failed");
+        const msg = `migration failed: ${err instanceof Error ? err.message : String(err)}`;
+        await updateDeploymentStatus(c.env.DB, deployment.id, "failed", msg);
         return c.json(
           {
             error: "migration failed",
@@ -271,7 +274,8 @@ app.post("/:id/deploy", async (c) => {
 
     if (!cfResponse.ok) {
       const error = await cfResponse.text();
-      await updateDeploymentStatus(c.env.DB, deployment.id, "failed");
+      const msg = `worker upload failed: ${error}`;
+      await updateDeploymentStatus(c.env.DB, deployment.id, "failed", msg);
       return c.json({ error: "worker upload failed", details: error }, 502);
     }
 
@@ -359,7 +363,8 @@ app.post("/:id/deploy", async (c) => {
       ...(migrationsApplied > 0 && { migrations: migrationsApplied }),
     });
   } catch (err) {
-    await updateDeploymentStatus(c.env.DB, deployment.id, "failed");
+    const msg = err instanceof Error ? err.message : String(err);
+    await updateDeploymentStatus(c.env.DB, deployment.id, "failed", msg);
     throw err;
   }
 });

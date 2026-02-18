@@ -6,6 +6,7 @@ import {
   getDeployment,
   getProject,
 } from "@vite-cloud/platform/db";
+import type { DeployManifest } from "@vite-cloud/platform/types";
 import { DeploymentsListPage } from "../views/deployments-list";
 import { Layout } from "../views/layout";
 
@@ -41,9 +42,34 @@ app.get("/:id", async (c) => {
         ? "badge-red"
         : "badge-gray";
 
+  let manifest: DeployManifest | null = null;
+  try {
+    if (deployment.manifest) {
+      manifest = JSON.parse(deployment.manifest) as DeployManifest;
+    }
+  } catch {
+    // invalid JSON — skip manifest display
+  }
+
+  const mode = manifest
+    ? (manifest.static ?? (manifest.framework ? "framework" : manifest.ssr ? "ssr" : "fullstack"))
+    : null;
+
   return c.html(
     <Layout title={`Deployment ${deployment.id}`}>
       <h1>Deployment {deployment.id}</h1>
+
+      {deployment.status === "failed" && deployment.error_message && (
+        <div
+          class="card mb-1"
+          style="background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b"
+        >
+          <h2 style="font-size: 1.125rem; margin-bottom: 0.5rem">Error</h2>
+          <pre style="margin: 0; white-space: pre-wrap; font-size: 0.85rem">
+            {deployment.error_message}
+          </pre>
+        </div>
+      )}
 
       <div class="card mb-1">
         <table>
@@ -85,6 +111,79 @@ app.get("/:id", async (c) => {
           </tbody>
         </table>
       </div>
+
+      {manifest && (
+        <div class="card mb-1">
+          <h2 style="font-size: 1.125rem; margin-bottom: 1rem">Manifest</h2>
+          <table>
+            <tbody>
+              {mode && (
+                <tr>
+                  <th>Mode</th>
+                  <td>{mode}</td>
+                </tr>
+              )}
+              {manifest.bindings &&
+                Object.entries(manifest.bindings).map(([type, names]) =>
+                  names && names.length > 0 ? (
+                    <tr key={type}>
+                      <th>{type.toUpperCase()}</th>
+                      <td>
+                        {names.map((n) => (
+                          <span key={n} class="badge badge-blue" style="margin-right: 0.25rem">
+                            {n}
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  ) : null,
+                )}
+              {manifest.migrations && manifest.migrations.length > 0 && (
+                <tr>
+                  <th>Migrations</th>
+                  <td>
+                    {manifest.migrations.map((m) => (
+                      <span
+                        key={m.name}
+                        class={`badge ${m.destructive ? "badge-red" : "badge-gray"}`}
+                        style="margin-right: 0.25rem"
+                      >
+                        {m.name}
+                        {m.destructive ? " (destructive)" : ""}
+                      </span>
+                    ))}
+                  </td>
+                </tr>
+              )}
+              {manifest.schedules && manifest.schedules.length > 0 && (
+                <tr>
+                  <th>Schedules</th>
+                  <td>
+                    {manifest.schedules.map((s) => (
+                      <span key={s.name} class="badge badge-gray" style="margin-right: 0.25rem">
+                        {s.name}: {s.cron}
+                      </span>
+                    ))}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {deployment.manifest && (
+        <div class="card">
+          <details>
+            <summary style="cursor: pointer; font-weight: 600; font-size: 1.125rem">
+              Raw Manifest
+            </summary>
+            <pre style="margin-top: 0.5rem; font-size: 0.8rem; overflow-x: auto">
+              {JSON.stringify(JSON.parse(deployment.manifest), null, 2)}
+            </pre>
+          </details>
+        </div>
+      )}
     </Layout>,
   );
 });

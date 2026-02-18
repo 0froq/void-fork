@@ -141,6 +141,7 @@ export async function createDeployment(
     status: "pending",
     source: source ?? null,
     manifest,
+    error_message: null,
     created_at: new Date().toISOString(),
     deployed_at: null,
   };
@@ -150,13 +151,14 @@ export async function updateDeploymentStatus(
   db: D1Database,
   id: string,
   status: Deployment["status"],
+  errorMessage?: string,
 ): Promise<void> {
   const deployedAt = status === "live" ? new Date().toISOString() : null;
   await db
     .prepare(
-      "UPDATE deployments SET status = ?, deployed_at = COALESCE(?, deployed_at) WHERE id = ?",
+      "UPDATE deployments SET status = ?, deployed_at = COALESCE(?, deployed_at), error_message = COALESCE(?, error_message) WHERE id = ?",
     )
-    .bind(status, deployedAt, id)
+    .bind(status, deployedAt, errorMessage ?? null, id)
     .run();
 }
 

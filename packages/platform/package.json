@@ -9,7 +9,8 @@
     "./tiers": "./src/tiers.ts",
     "./auth/jwt": "./src/auth/jwt.ts",
     "./auth/github": "./src/auth/github.ts",
-    "./auth/google": "./src/auth/google.ts"
+    "./auth/google": "./src/auth/google.ts",
+    "./usage": "./src/routes/usage.ts"
   },
   "scripts": {
     "dev": "wrangler dev",
