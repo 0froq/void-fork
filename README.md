@@ -284,7 +284,7 @@ Static asset responses are cached at the CF edge via `caches.default`. Cache key
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). 675 tests across 60 files.
+Tests run from root with `pnpm test` (vitest). 692 tests across 61 files.
 
 ### Unit Tests
 
@@ -293,7 +293,7 @@ Tests run from root with `pnpm test` (vitest). 675 tests across 60 files.
 | `packages/vite-cloud/test/unit/parse-filename.test.ts`         | Route filename parsing (21 tests)                              |
 | `packages/vite-cloud/test/unit/scan.test.ts`                   | Filesystem scanning (8 tests)                                  |
 | `packages/vite-cloud/test/unit/detect-exports.test.ts`         | Named HTTP method export detection (8 tests)                   |
-| `packages/vite-cloud/test/unit/compile.test.ts`                | Code generation (7 tests)                                      |
+| `packages/vite-cloud/test/unit/compile.test.ts`                | Code generation (5 tests)                                      |
 | `packages/vite-cloud/test/unit/response.test.ts`               | Return value → Response (8 tests)                              |
 | `packages/vite-cloud/test/unit/inference.test.ts`              | AST-based binding inference (11 tests)                         |
 | `packages/vite-cloud/test/unit/validate-migrations.test.ts`    | Destructive-op detection + pragma (12 tests)                   |

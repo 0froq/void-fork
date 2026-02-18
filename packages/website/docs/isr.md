@@ -89,22 +89,9 @@ This requires two env bindings:
 - `VITE_CLOUD_PROJECT_ID` — automatically injected by the platform on deploy
 - `VITE_CLOUD_REVALIDATE_TOKEN` — set manually via `vcd secret set VITE_CLOUD_REVALIDATE_TOKEN <token>`
 
-## Interaction with prerender
-
-If you have both `prerender` and `revalidate` exports, prerendered pages are used to seed the ISR cache on deploy. This means the first visitor to a prerendered page gets an instant response from ISR cache (rather than triggering a blocking render).
-
-```ts
-export const prerender = ["/", "/about", "/pricing"];
-export const revalidate = 60;
-
-export default defineRender(async (c, assetTags) => {
-  // ...
-});
-```
-
 ## Deploy behavior
 
-Each deploy clears the ISR cache for the project, then seeds it from any prerendered pages. This ensures stale content from a previous deploy is never served.
+Each deploy clears the ISR cache for the project. This ensures stale content from a previous deploy is never served.
 
 ## Request flow
 

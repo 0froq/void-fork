@@ -82,10 +82,6 @@ The `assetTags` values are computed by Vite Cloud:
 - In production: from `dist/client/.vite/manifest.json` (entry script, CSS, modulepreload)
 - In dev: includes Vite HMR client and React refresh preamble (when React plugin is active), plus the client entry script
 
-## SSG (Prerender)
-
-See [SSG](./ssg.md) for pre-rendering static HTML at build time.
-
 ## ISR (Incremental Static Regeneration)
 
 See [ISR](./isr.md) for stale-while-revalidate caching of SSR pages.

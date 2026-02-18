@@ -3,9 +3,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  getPrerenderConfig,
   getRevalidateConfig,
-  getSsrPrerenderPaths,
   getSsrServerEntryPath,
   hasSsrEntry,
   validateSsrEntry,
@@ -120,126 +118,6 @@ describe("ssr entry helpers", () => {
     writeFileSync(join(root, "src", "main.client.ts"), "console.log('client entry');");
 
     expect(() => validateSsrEntry(root)).toThrow("SSR mode requires a server entry");
-  });
-
-  it("reads prerender paths and normalizes trailing slashes", () => {
-    const root = createTempRoot();
-    writeFileSync(join(root, "src", "main.client.ts"), "console.log('client entry');");
-    writeFileSync(
-      join(root, "src", "main.ssr.ts"),
-      `
-      export const prerender = ["/", "/about/", "/pricing"];
-      export async function render(c, assetTags) { return new Response("ok"); }
-      `,
-    );
-
-    expect(getSsrPrerenderPaths(root)).toEqual(["/", "/about", "/pricing"]);
-  });
-
-  it("rejects invalid prerender paths", () => {
-    const root = createTempRoot();
-    writeFileSync(join(root, "src", "main.client.ts"), "console.log('client entry');");
-    writeFileSync(
-      join(root, "src", "main.ssr.ts"),
-      `
-      export const prerender = ["about", "/blog/:slug", "/a", "/a"];
-      export async function render(c, assetTags) { return new Response("ok"); }
-      `,
-    );
-
-    expect(() => getSsrPrerenderPaths(root)).toThrow("Invalid SSR prerender export");
-  });
-});
-
-describe("getPrerenderConfig", () => {
-  afterEach(() => {
-    while (tempDirs.length > 0) {
-      const dir = tempDirs.pop()!;
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("returns none when no SSR entry exists", () => {
-    const root = createTempRoot();
-    expect(getPrerenderConfig(root)).toEqual({ type: "none" });
-  });
-
-  it("returns none when no prerender export exists", () => {
-    const root = createTempRoot();
-    writeFileSync(
-      join(root, "src", "main.ssr.ts"),
-      "export async function render(c, assetTags) { return new Response('ok'); }",
-    );
-    expect(getPrerenderConfig(root)).toEqual({ type: "none" });
-  });
-
-  it("returns static with paths for array export", () => {
-    const root = createTempRoot();
-    writeFileSync(
-      join(root, "src", "main.ssr.ts"),
-      `
-      export const prerender = ["/", "/about", "/pricing"];
-      export async function render(c, assetTags) { return new Response("ok"); }
-      `,
-    );
-    expect(getPrerenderConfig(root)).toEqual({
-      type: "static",
-      paths: ["/", "/about", "/pricing"],
-    });
-  });
-
-  it("returns function for arrow function export", () => {
-    const root = createTempRoot();
-    writeFileSync(
-      join(root, "src", "main.ssr.ts"),
-      `
-      export const prerender = async () => {
-        return ["/", "/about"];
-      };
-      export async function render(c, assetTags) { return new Response("ok"); }
-      `,
-    );
-    expect(getPrerenderConfig(root)).toEqual({ type: "function" });
-  });
-
-  it("returns function for function expression export", () => {
-    const root = createTempRoot();
-    writeFileSync(
-      join(root, "src", "main.ssr.ts"),
-      `
-      export const prerender = async function() {
-        return ["/", "/about"];
-      };
-      export async function render(c, assetTags) { return new Response("ok"); }
-      `,
-    );
-    expect(getPrerenderConfig(root)).toEqual({ type: "function" });
-  });
-
-  it("returns function for named function declaration export", () => {
-    const root = createTempRoot();
-    writeFileSync(
-      join(root, "src", "main.ssr.ts"),
-      `
-      export async function prerender() {
-        return ["/", "/about"];
-      }
-      export async function render(c, assetTags) { return new Response("ok"); }
-      `,
-    );
-    expect(getPrerenderConfig(root)).toEqual({ type: "function" });
-  });
-
-  it("rejects glob patterns in static array", () => {
-    const root = createTempRoot();
-    writeFileSync(
-      join(root, "src", "main.ssr.ts"),
-      `
-      export const prerender = ["/", "/blog/*"];
-      export async function render(c, assetTags) { return new Response("ok"); }
-      `,
-    );
-    expect(() => getPrerenderConfig(root)).toThrow("must not be dynamic");
   });
 });
 
