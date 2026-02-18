@@ -7,14 +7,16 @@ export function ProjectsListPage({
   page,
   totalPages,
   siteDomain,
+  username,
 }: {
   projects: (Project & { owner_login: string | null })[];
   page: number;
   totalPages: number;
   siteDomain: string;
+  username?: string;
 }) {
   return (
-    <Layout title="Projects">
+    <Layout title="Projects" username={username}>
       <h1>Projects</h1>
       <div class="card">
         <table>

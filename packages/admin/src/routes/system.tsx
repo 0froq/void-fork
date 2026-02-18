@@ -11,7 +11,7 @@ app.get("/", async (c) => {
     getSystemStats(c.env.DB),
     getAllProjectsWithOwner(c.env.DB, 10, 0),
   ]);
-  return c.html(<DashboardPage stats={stats} projects={projects} />);
+  return c.html(<DashboardPage stats={stats} projects={projects} username={c.get("userLogin")} />);
 });
 
 export default app;

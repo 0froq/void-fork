@@ -6,13 +6,15 @@ export function DeploymentsListPage({
   deployments,
   page,
   totalPages,
+  username,
 }: {
   deployments: (Deployment & { project_slug: string | null; project_name: string | null })[];
   page: number;
   totalPages: number;
+  username?: string;
 }) {
   return (
-    <Layout title="Deployments">
+    <Layout title="Deployments" username={username}>
       <h1>Deployments</h1>
       <div class="card">
         <table>

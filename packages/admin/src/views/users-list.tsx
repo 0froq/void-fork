@@ -27,14 +27,16 @@ export function UsersListPage({
   search,
   page,
   totalPages,
+  username,
 }: {
   users: User[];
   search?: string;
   page?: number;
   totalPages?: number;
+  username?: string;
 }) {
   return (
-    <Layout title="Users">
+    <Layout title="Users" username={username}>
       <h1>Users</h1>
       <form class="search-form" method="get" action="/users">
         <input type="text" name="search" placeholder="Search users..." value={search ?? ""} />

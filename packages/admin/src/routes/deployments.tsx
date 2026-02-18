@@ -23,7 +23,12 @@ app.get("/", async (c) => {
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   return c.html(
-    <DeploymentsListPage deployments={deployments} page={page} totalPages={totalPages} />,
+    <DeploymentsListPage
+      deployments={deployments}
+      page={page}
+      totalPages={totalPages}
+      username={c.get("userLogin")}
+    />,
   );
 });
 
@@ -56,7 +61,7 @@ app.get("/:id", async (c) => {
     : null;
 
   return c.html(
-    <Layout title={`Deployment ${deployment.id}`}>
+    <Layout title={`Deployment ${deployment.id}`} username={c.get("userLogin")}>
       <h1>Deployment {deployment.id}</h1>
 
       {deployment.status === "failed" && deployment.error_message && (

@@ -1,6 +1,14 @@
 import type { Child } from "hono/jsx";
 
-export function Layout({ title, children }: { title: string; children: Child }) {
+export function Layout({
+  title,
+  username,
+  children,
+}: {
+  title: string;
+  username?: string;
+  children: Child;
+}) {
   return (
     <html>
       <head>
@@ -56,9 +64,10 @@ export function Layout({ title, children }: { title: string; children: Child }) 
           <a href="/users">Users</a>
           <a href="/projects">Projects</a>
           <a href="/deployments">Deployments</a>
-          <a href="/logout" style="margin-left: auto">
-            Logout
-          </a>
+          <span style="margin-left: auto; display: flex; align-items: center; gap: 1rem">
+            {username && <span style="color: #a0a0a0; font-size: 0.875rem">{username}</span>}
+            <a href="/logout">Logout</a>
+          </span>
         </nav>
         <main>{children}</main>
       </body>

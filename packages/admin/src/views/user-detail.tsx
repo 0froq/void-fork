@@ -16,6 +16,7 @@ export function UserDetailPage({
   projects,
   deploysToday,
   usage,
+  username,
 }: {
   user: User;
   projects: Project[];
@@ -26,12 +27,13 @@ export function UserDetailPage({
     totalBandwidth: number;
     projects: ProjectUsage[];
   };
+  username?: string;
 }) {
   const plans = Object.keys(PLAN_LIMITS) as PlanId[];
   const limits = getPlanLimits(user.plan);
 
   return (
-    <Layout title={user.login}>
+    <Layout title={user.login} username={username}>
       <h1>{user.login}</h1>
 
       <div class="card mb-1">

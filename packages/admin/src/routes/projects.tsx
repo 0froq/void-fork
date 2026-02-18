@@ -31,6 +31,7 @@ app.get("/", async (c) => {
       page={page}
       totalPages={totalPages}
       siteDomain={siteDomain}
+      username={c.get("userLogin")}
     />,
   );
 });
@@ -53,7 +54,7 @@ app.get("/:id", async (c) => {
   const deployUrl = `https://${project.slug}.${siteDomain}`;
 
   return c.html(
-    <Layout title={project.name}>
+    <Layout title={project.name} username={c.get("userLogin")}>
       <h1>{project.name}</h1>
 
       <div class="card mb-1">

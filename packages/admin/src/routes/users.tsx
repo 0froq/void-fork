@@ -24,7 +24,7 @@ app.get("/", async (c) => {
   const search = c.req.query("search");
   if (search) {
     const users = await searchUsers(c.env.DB, search);
-    return c.html(<UsersListPage users={users} search={search} />);
+    return c.html(<UsersListPage users={users} search={search} username={c.get("userLogin")} />);
   }
   const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
@@ -33,7 +33,14 @@ app.get("/", async (c) => {
     countUsers(c.env.DB),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  return c.html(<UsersListPage users={users} page={page} totalPages={totalPages} />);
+  return c.html(
+    <UsersListPage
+      users={users}
+      page={page}
+      totalPages={totalPages}
+      username={c.get("userLogin")}
+    />,
+  );
 });
 
 // GET /users/:id
@@ -70,6 +77,7 @@ app.get("/:id", async (c) => {
         totalBandwidth,
         projects: projectUsages,
       }}
+      username={c.get("userLogin")}
     />,
   );
 });

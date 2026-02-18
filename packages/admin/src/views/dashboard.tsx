@@ -8,11 +8,12 @@ interface DashboardProps {
     deployments: number;
   };
   projects: (Project & { owner_login: string | null })[];
+  username?: string;
 }
 
-export function DashboardPage({ stats, projects }: DashboardProps) {
+export function DashboardPage({ stats, projects, username }: DashboardProps) {
   return (
-    <Layout title="Dashboard">
+    <Layout title="Dashboard" username={username}>
       <h1>Dashboard</h1>
       <div class="grid">
         <a href="/users" style="text-decoration: none; color: inherit">
