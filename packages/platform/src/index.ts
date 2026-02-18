@@ -11,7 +11,7 @@ import usage from "./routes/usage";
 import { authMiddleware } from "./middleware/auth";
 import { getProjectsByUserId } from "./db";
 import { queryProjectUsage } from "./routes/usage";
-import { getPlanLimits, isWithinLimit } from "./tiers";
+import { getCurrentBillingPeriodStart, getPlanLimits, isWithinLimit } from "./tiers";
 
 const app = new Hono<PlatformEnv>();
 
@@ -36,9 +36,10 @@ async function scheduled(
   _ctx: ExecutionContext,
 ): Promise<void> {
   // Query all users, check their usage against plan limits
-  const users = await env.DB.prepare("SELECT id, plan FROM users").all<{
+  const users = await env.DB.prepare("SELECT id, plan, billing_cycle_start FROM users").all<{
     id: string;
     plan: string;
+    billing_cycle_start: string;
   }>();
 
   for (const user of users.results) {
@@ -48,10 +49,12 @@ async function scheduled(
     const projects = await getProjectsByUserId(env.DB, user.id);
     if (projects.length === 0) continue;
 
+    const since = getCurrentBillingPeriodStart(user.billing_cycle_start);
+
     // Sum usage across all user's projects
     let totalRequests = 0;
     for (const project of projects) {
-      const usage = await queryProjectUsage(env.CF_ACCOUNT_ID, env.CF_API_TOKEN, project.id);
+      const usage = await queryProjectUsage(env.CF_ACCOUNT_ID, env.CF_API_TOKEN, project.id, since);
       totalRequests += usage.requests;
     }
 
@@ -68,9 +71,15 @@ async function scheduled(
       if (exceeded && !currentlySuspended) {
         routing.suspended = "requests_exceeded";
         await env.ROUTING.put(project.slug, JSON.stringify(routing));
+        await env.DB.prepare("UPDATE users SET suspended_reason = ? WHERE id = ?")
+          .bind("requests_exceeded", user.id)
+          .run();
       } else if (!exceeded && currentlySuspended) {
         delete routing.suspended;
         await env.ROUTING.put(project.slug, JSON.stringify(routing));
+        await env.DB.prepare("UPDATE users SET suspended_reason = NULL WHERE id = ?")
+          .bind(user.id)
+          .run();
       }
     }
   }

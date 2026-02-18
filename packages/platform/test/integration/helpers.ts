@@ -18,6 +18,9 @@ const MIGRATION_0005 = fileURLToPath(new URL("../../migrations/0005_domains.sql"
 const MIGRATION_0006 = fileURLToPath(
   new URL("../../migrations/0006_usage_tiers.sql", import.meta.url),
 );
+const MIGRATION_0007 = fileURLToPath(
+  new URL("../../migrations/0007_billing_cycle.sql", import.meta.url),
+);
 
 export const JWT_SECRET = "test-jwt-secret";
 export const CF_API_TOKEN = "test-cf-token";
@@ -87,6 +90,11 @@ export async function setupEnv(): Promise<TestEnv> {
 
   const schema6 = readFileSync(MIGRATION_0006, "utf-8");
   for (const stmt of splitStatements(schema6)) {
+    await db.prepare(stmt).run();
+  }
+
+  const schema7 = readFileSync(MIGRATION_0007, "utf-8");
+  for (const stmt of splitStatements(schema7)) {
     await db.prepare(stmt).run();
   }
 

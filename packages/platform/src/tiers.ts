@@ -76,3 +76,30 @@ export function getPlanLimits(plan: string): PlanLimits {
 export function isWithinLimit(limit: number, current: number): boolean {
   return limit === 0 || current < limit;
 }
+
+/**
+ * Returns the start of the user's current billing period based on their
+ * signup anniversary day. Clamps to the last day of the month for short
+ * months (e.g. signup Jan 31 → Feb 28 in non-leap years).
+ */
+export function getCurrentBillingPeriodStart(billingCycleStart: string): Date {
+  const signup = new Date(billingCycleStart);
+  const anchorDay = signup.getUTCDate();
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+
+  // Try current month first
+  const lastDayThisMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const dayThisMonth = Math.min(anchorDay, lastDayThisMonth);
+  const candidate = new Date(Date.UTC(year, month, dayThisMonth));
+
+  if (candidate <= now) {
+    return candidate;
+  }
+
+  // Fall back to previous month
+  const lastDayPrevMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const dayPrevMonth = Math.min(anchorDay, lastDayPrevMonth);
+  return new Date(Date.UTC(year, month - 1, dayPrevMonth));
+}

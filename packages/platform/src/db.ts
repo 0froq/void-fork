@@ -25,6 +25,8 @@ export async function createUser(
     login,
     email,
     plan: "free",
+    billing_cycle_start: new Date().toISOString(),
+    suspended_reason: null,
     created_at: new Date().toISOString(),
   };
 }

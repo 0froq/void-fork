@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { PlatformEnv } from "../env";
-import { getProject, getProjectsByUserId } from "../db";
+import { getProject, getProjectsByUserId, getUser } from "../db";
+import { getCurrentBillingPeriodStart } from "../tiers";
 
 const app = new Hono<PlatformEnv>();
 
@@ -15,9 +16,11 @@ app.get("/:id/usage", async (c) => {
     return c.json({ error: "forbidden" }, 403);
   }
 
-  const usage = await queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId);
+  const user = await getUser(c.env.DB, c.get("userId"));
+  const since = getCurrentBillingPeriodStart(user!.billing_cycle_start);
+  const usage = await queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since);
 
-  return c.json({ projectId, ...usage });
+  return c.json({ projectId, billingPeriodStart: since.toISOString(), ...usage });
 });
 
 // Aggregate usage across all user's projects
@@ -27,9 +30,12 @@ app.get("/", async (c) => {
     return c.json({ requests: 0, bandwidthBytes: 0, projects: [] });
   }
 
+  const user = await getUser(c.env.DB, c.get("userId"));
+  const since = getCurrentBillingPeriodStart(user!.billing_cycle_start);
+
   const projectUsages = await Promise.all(
     projects.map(async (p) => {
-      const usage = await queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id);
+      const usage = await queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since);
       return { projectId: p.id, slug: p.slug, ...usage };
     }),
   );
@@ -42,7 +48,7 @@ app.get("/", async (c) => {
     { requests: 0, bandwidthBytes: 0 },
   );
 
-  return c.json({ ...totals, projects: projectUsages });
+  return c.json({ billingPeriodStart: since.toISOString(), ...totals, projects: projectUsages });
 });
 
 interface AnalyticsRow {
@@ -54,15 +60,16 @@ async function queryProjectUsage(
   accountId: string,
   apiToken: string,
   projectId: string,
+  since: Date,
 ): Promise<{ requests: number; bandwidthBytes: number }> {
-  // Query Analytics Engine SQL API for the current billing period (last 30 days)
+  const sinceStr = since.toISOString().replace("T", " ").replace("Z", "");
   const query = `
     SELECT
       SUM(_sample_interval * double1) as requests,
       SUM(_sample_interval * double2) as bandwidth_bytes
     FROM vite_cloud_requests
     WHERE blob1 = '${projectId}'
-      AND timestamp >= NOW() - INTERVAL '30' DAY
+      AND timestamp >= '${sinceStr}'
   `;
 
   const response = await fetch(

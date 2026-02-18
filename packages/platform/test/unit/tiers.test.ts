@@ -1,5 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { PLAN_LIMITS, getPlanLimits, isWithinLimit, type PlanId } from "../../src/tiers";
+import { describe, it, expect, vi } from "vitest";
+import {
+  PLAN_LIMITS,
+  getPlanLimits,
+  isWithinLimit,
+  getCurrentBillingPeriodStart,
+  type PlanId,
+} from "../../src/tiers";
 
 describe("PLAN_LIMITS", () => {
   it("defines all five tiers", () => {
@@ -75,5 +81,73 @@ describe("isWithinLimit", () => {
 
   it("returns true when current is 0", () => {
     expect(isWithinLimit(100, 0)).toBe(true);
+  });
+});
+
+describe("getCurrentBillingPeriodStart", () => {
+  it("returns current month when today is past the anniversary day", () => {
+    // Signup on the 5th, today is the 18th → period starts on the 5th of this month
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-02-18T12:00:00Z"));
+
+    const result = getCurrentBillingPeriodStart("2025-10-05T14:30:00Z");
+    expect(result).toEqual(new Date("2026-02-05T00:00:00Z"));
+
+    vi.useRealTimers();
+  });
+
+  it("returns previous month when today is before the anniversary day", () => {
+    // Signup on the 25th, today is the 10th → period starts on the 25th of last month
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-10T12:00:00Z"));
+
+    const result = getCurrentBillingPeriodStart("2025-11-25T08:00:00Z");
+    expect(result).toEqual(new Date("2026-02-25T00:00:00Z"));
+
+    vi.useRealTimers();
+  });
+
+  it("clamps to last day of month for short months (31st → Feb 28)", () => {
+    // Signup on Jan 31, today is Feb 18 → Feb only has 28 days → period starts Feb 28
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2027-02-18T12:00:00Z"));
+
+    const result = getCurrentBillingPeriodStart("2026-01-31T10:00:00Z");
+    // Feb 2027 has 28 days, today (18th) < 28th → falls back to Jan 31
+    expect(result).toEqual(new Date("2027-01-31T00:00:00Z"));
+
+    vi.useRealTimers();
+  });
+
+  it("clamps to last day of month (31st → Apr 30)", () => {
+    // Signup on the 31st, today is May 5 → April has 30 days → period starts Apr 30
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-05T12:00:00Z"));
+
+    const result = getCurrentBillingPeriodStart("2025-12-31T10:00:00Z");
+    expect(result).toEqual(new Date("2026-04-30T00:00:00Z"));
+
+    vi.useRealTimers();
+  });
+
+  it("handles first billing period (signup was this month)", () => {
+    // Signup on Feb 3, today is Feb 18 → period starts on Feb 3
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-02-18T12:00:00Z"));
+
+    const result = getCurrentBillingPeriodStart("2026-02-03T09:00:00Z");
+    expect(result).toEqual(new Date("2026-02-03T00:00:00Z"));
+
+    vi.useRealTimers();
+  });
+
+  it("returns today's date when anniversary is today", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-02-15T18:00:00Z"));
+
+    const result = getCurrentBillingPeriodStart("2025-06-15T10:00:00Z");
+    expect(result).toEqual(new Date("2026-02-15T00:00:00Z"));
+
+    vi.useRealTimers();
   });
 });

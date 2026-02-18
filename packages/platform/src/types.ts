@@ -5,6 +5,8 @@ export interface User {
   login: string;
   email: string | null;
   plan: string;
+  billing_cycle_start: string;
+  suspended_reason: string | null;
   created_at: string;
 }
 
