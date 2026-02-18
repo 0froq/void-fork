@@ -18,7 +18,10 @@ export interface SsrEntries {
   client: ResolvedEntry;
 }
 
-export type RevalidateConfig = { type: "none" } | { type: "static"; ttl: number };
+export type RevalidateConfig =
+  | { type: "none" }
+  | { type: "static"; ttl: number }
+  | { type: "pathmap"; rules: [string, number][] };
 
 function resolveSingleEntry(
   root: string,
@@ -183,6 +186,11 @@ export function getRevalidateConfig(root: string): RevalidateConfig {
         return { type: "static", ttl: init.value };
       }
 
+      // Infinity identifier: `export const revalidate = Infinity`
+      if (init.type === "Identifier" && init.name === "Infinity") {
+        return { type: "static", ttl: 31536000 };
+      }
+
       // Negative numeric literal: `export const revalidate = -10`
       // Parsed as UnaryExpression { operator: "-", argument: Literal }
       if (
@@ -196,8 +204,53 @@ export function getRevalidateConfig(root: string): RevalidateConfig {
         );
       }
 
+      // Object literal: `export const revalidate = { '/': 60, '*': 30 }`
+      if (init.type === "ObjectExpression") {
+        const rules: [string, number][] = [];
+        for (const prop of init.properties ?? []) {
+          if (prop.type !== "Property") {
+            throw new Error(
+              `Invalid SSR revalidate export at ${entry.relativePath}: object must contain only simple key-value pairs.`,
+            );
+          }
+          // Key must be a string literal
+          const key = prop.key;
+          if (key.type !== "Literal" || typeof key.value !== "string") {
+            throw new Error(
+              `Invalid SSR revalidate export at ${entry.relativePath}: object keys must be string literals.`,
+            );
+          }
+          // Value must be a numeric literal or Infinity
+          const val = prop.value;
+          if (val.type === "Identifier" && val.name === "Infinity") {
+            rules.push([key.value as string, 31536000]);
+          } else if (val.type === "Literal" && typeof val.value === "number") {
+            if (val.value < 0) {
+              throw new Error(
+                `Invalid SSR revalidate export at ${entry.relativePath}: value for "${key.value}" must be a non-negative number.`,
+              );
+            }
+            rules.push([key.value as string, val.value as number]);
+          } else if (
+            val.type === "UnaryExpression" &&
+            val.operator === "-" &&
+            val.argument?.type === "Literal" &&
+            typeof val.argument.value === "number"
+          ) {
+            throw new Error(
+              `Invalid SSR revalidate export at ${entry.relativePath}: value for "${key.value}" must be a non-negative number.`,
+            );
+          } else {
+            throw new Error(
+              `Invalid SSR revalidate export at ${entry.relativePath}: value for "${key.value}" must be a numeric literal or Infinity.`,
+            );
+          }
+        }
+        return { type: "pathmap", rules };
+      }
+
       throw new Error(
-        `Invalid SSR revalidate export at ${entry.relativePath}: expected a numeric literal (e.g. \`export const revalidate = 60\`).`,
+        `Invalid SSR revalidate export at ${entry.relativePath}: expected a numeric literal or object (e.g. \`export const revalidate = 60\` or \`export const revalidate = { '/': 60, '*': 30 }\`).`,
       );
     }
   }

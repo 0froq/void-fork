@@ -188,6 +188,96 @@ describe("getRevalidateConfig", () => {
       export async function render(c, assetTags) { return new Response("ok"); }
       `,
     );
-    expect(() => getRevalidateConfig(root)).toThrow("expected a numeric literal");
+    expect(() => getRevalidateConfig(root)).toThrow("expected a numeric literal or object");
+  });
+
+  it("returns static with Infinity mapped to 31536000", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "src", "main.ssr.ts"),
+      `
+      export const revalidate = Infinity;
+      export async function render(c, assetTags) { return new Response("ok"); }
+      `,
+    );
+    expect(getRevalidateConfig(root)).toEqual({ type: "static", ttl: 31536000 });
+  });
+
+  it("returns pathmap for object literal", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "src", "main.ssr.ts"),
+      `
+      export const revalidate = { '/': 60, '*': 30 };
+      export async function render(c, assetTags) { return new Response("ok"); }
+      `,
+    );
+    expect(getRevalidateConfig(root)).toEqual({
+      type: "pathmap",
+      rules: [
+        ["/", 60],
+        ["*", 30],
+      ],
+    });
+  });
+
+  it("maps Infinity values in object to 31536000", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "src", "main.ssr.ts"),
+      `
+      export const revalidate = { '/docs/*': Infinity, '*': 60 };
+      export async function render(c, assetTags) { return new Response("ok"); }
+      `,
+    );
+    expect(getRevalidateConfig(root)).toEqual({
+      type: "pathmap",
+      rules: [
+        ["/docs/*", 31536000],
+        ["*", 60],
+      ],
+    });
+  });
+
+  it("rejects non-numeric values in object", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "src", "main.ssr.ts"),
+      `
+      export const revalidate = { '/': "60" };
+      export async function render(c, assetTags) { return new Response("ok"); }
+      `,
+    );
+    expect(() => getRevalidateConfig(root)).toThrow('value for "/" must be a numeric literal');
+  });
+
+  it("rejects negative values in object", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "src", "main.ssr.ts"),
+      `
+      export const revalidate = { '/': -10 };
+      export async function render(c, assetTags) { return new Response("ok"); }
+      `,
+    );
+    expect(() => getRevalidateConfig(root)).toThrow('value for "/" must be a non-negative number');
+  });
+
+  it("supports zero values in object (no-cache for path)", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "src", "main.ssr.ts"),
+      `
+      export const revalidate = { '/user/*': 0, '*': 60 };
+      export async function render(c, assetTags) { return new Response("ok"); }
+      `,
+    );
+    expect(getRevalidateConfig(root)).toEqual({
+      type: "pathmap",
+      rules: [
+        ["/user/*", 0],
+        ["*", 60],
+      ],
+    });
   });
 });

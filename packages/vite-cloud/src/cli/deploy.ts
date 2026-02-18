@@ -237,10 +237,12 @@ async function runFullDeploy(
       }));
   const isSsr = isFrameworkMode ? true : Boolean(validateSsrEntry(root));
   const revalidateConfig = isSsr ? getRevalidateConfig(root) : { type: "none" as const };
-  const revalidateTtl =
-    revalidateConfig.type === "static" && revalidateConfig.ttl > 0
-      ? revalidateConfig.ttl
-      : undefined;
+  let revalidate: number | Record<string, number> | undefined;
+  if (revalidateConfig.type === "static" && revalidateConfig.ttl > 0) {
+    revalidate = revalidateConfig.ttl;
+  } else if (revalidateConfig.type === "pathmap") {
+    revalidate = Object.fromEntries(revalidateConfig.rules);
+  }
 
   // 7. Check assets & Package & Upload
   const s = spinner();
@@ -273,7 +275,7 @@ async function runFullDeploy(
     neededPaths,
     assetHashes,
     headers,
-    revalidateTtl,
+    revalidate,
   );
   formData.append("source", getTokenSource());
 
@@ -291,8 +293,12 @@ async function runFullDeploy(
   if (isSsr) {
     summary.push("SSR enabled");
   }
-  if (revalidateTtl) {
-    summary.push(`ISR revalidate: ${revalidateTtl}s`);
+  if (revalidate) {
+    if (typeof revalidate === "number") {
+      summary.push(`ISR revalidate: ${revalidate}s`);
+    } else {
+      summary.push(`ISR revalidate: ${Object.keys(revalidate).length} path rule(s)`);
+    }
   }
   if (isFrameworkMode) {
     summary.push("Framework mode");
