@@ -200,7 +200,7 @@ Auth middleware on `/projects/*` extracts Bearer token, verifies JWT, sets `c.ge
    - `suspended` is carried forward from the existing KV entry to avoid race conditions with cron
 8. Deployment marked as `live`
 
-**Key invariant:** Worker is never deployed unless all migrations succeed. On migration failure, deployment is marked `"failed"` and the existing worker keeps running.
+**Key invariant:** Worker is never deployed unless all migrations succeed. On migration failure, deployment is marked `"failed"` with an `error_message` and the existing worker keeps running. All 5 failure points (destructive validation, missing D1, migration error, worker upload, catch-all) store a descriptive `error_message` in the deployment row.
 
 ### Usage Metering & Tiers
 
@@ -217,8 +217,8 @@ The platform default export is `{ fetch: app.fetch, scheduled }` — `app` (the 
 
 | Secret                 | platform | admin | dispatch | Staging notes                                        |
 | ---------------------- | -------- | ----- | -------- | ---------------------------------------------------- |
-| `CF_API_TOKEN`         | yes      |       |          | Can share with production                            |
-| `CF_ACCOUNT_ID`        | yes      |       |          | Can share with production                            |
+| `CF_API_TOKEN`         | yes      | yes   |          | Can share with production                            |
+| `CF_ACCOUNT_ID`        | yes      | yes   |          | Can share with production                            |
 | `CF_ZONE_ID`           | yes      |       |          | Can share with production                            |
 | `JWT_SECRET`           | yes      | yes   |          | Must differ from production; independent per worker  |
 | `GITHUB_CLIENT_ID`     | yes      |       |          | Can share with production (add staging callback URL) |
@@ -350,9 +350,11 @@ packages/admin/
     views/
       layout.tsx            # HTML shell (head, nav, body)
       users-list.tsx        # Users table with search/filter form
-      user-detail.tsx       # User profile, projects, plan controls, suspend button
+      user-detail.tsx       # User profile, projects, plan limits, deploy count, suspend button
       projects-list.tsx     # All projects table
+      deployments-list.tsx  # Deployments table with error preview column
       dashboard.tsx         # System stats overview
+      format.ts             # Shared formatting helpers (formatBytes, formatNumber, formatLimit)
 ```
 
 ### Platform Admin API
@@ -374,15 +376,16 @@ GET    /admin/stats                  # System-wide stats
 
 The platform package exposes `.ts` source files via subpath exports for consumption by the admin worker (wrangler handles TS bundling):
 
-| Subpath                            | File                 |
-| ---------------------------------- | -------------------- |
-| `@vite-cloud/platform/db`          | `src/db.ts`          |
-| `@vite-cloud/platform/types`       | `src/types.ts`       |
-| `@vite-cloud/platform/id`          | `src/id.ts`          |
-| `@vite-cloud/platform/tiers`       | `src/tiers.ts`       |
-| `@vite-cloud/platform/auth/jwt`    | `src/auth/jwt.ts`    |
-| `@vite-cloud/platform/auth/github` | `src/auth/github.ts` |
-| `@vite-cloud/platform/auth/google` | `src/auth/google.ts` |
+| Subpath                            | File                  |
+| ---------------------------------- | --------------------- |
+| `@vite-cloud/platform/db`          | `src/db.ts`           |
+| `@vite-cloud/platform/types`       | `src/types.ts`        |
+| `@vite-cloud/platform/id`          | `src/id.ts`           |
+| `@vite-cloud/platform/tiers`       | `src/tiers.ts`        |
+| `@vite-cloud/platform/auth/jwt`    | `src/auth/jwt.ts`     |
+| `@vite-cloud/platform/auth/github` | `src/auth/github.ts`  |
+| `@vite-cloud/platform/auth/google` | `src/auth/google.ts`  |
+| `@vite-cloud/platform/usage`       | `src/routes/usage.ts` |
 
 ## Tooling
 
@@ -399,7 +402,7 @@ The platform package exposes `.ts` source files via subpath exports for consumpt
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). 747 tests across 63 files.
+Tests run from root with `pnpm test` (vitest). 754 tests across 63 files.
 
 ### Unit Tests
 
@@ -433,14 +436,14 @@ Tests run from root with `pnpm test` (vitest). 747 tests across 63 files.
 
 Platform integration tests call the Hono app via `app.fetch(request, env)` with **real** Miniflare D1/KV/R2 bindings and **mocked** external fetch calls (GitHub API, CF API). This tests the full request→middleware→route→DB→response chain.
 
-| Test file                                                 | Covers                                                                                  |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `packages/platform/test/integration/api-health.test.ts`   | Health endpoint smoke test (1 test)                                                     |
-| `packages/platform/test/integration/api-me.test.ts`       | Auth middleware: missing/invalid/expired JWT, valid (4)                                 |
-| `packages/platform/test/integration/api-projects.test.ts` | Projects CRUD: auth, list, create, validation, dupes (12)                               |
-| `packages/platform/test/integration/api-deploy.test.ts`   | Deploy pipeline: auth, provisioning, migrations, R2, KV, limits, failure modes (33)     |
-| `packages/platform/test/integration/api-admin.test.ts`    | Admin API: middleware, users CRUD, plan change, suspend/unsuspend, stats (14)           |
-| `packages/admin/test/integration/dashboard.test.ts`       | Admin dashboard: auth, pages, forms, search, pagination, deployments, login/logout (21) |
+| Test file                                                 | Covers                                                                                                              |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `packages/platform/test/integration/api-health.test.ts`   | Health endpoint smoke test (1 test)                                                                                 |
+| `packages/platform/test/integration/api-me.test.ts`       | Auth middleware: missing/invalid/expired JWT, valid (4)                                                             |
+| `packages/platform/test/integration/api-projects.test.ts` | Projects CRUD: auth, list, create, validation, dupes (12)                                                           |
+| `packages/platform/test/integration/api-deploy.test.ts`   | Deploy pipeline: auth, provisioning, migrations, R2, KV, limits, failure modes (33)                                 |
+| `packages/platform/test/integration/api-admin.test.ts`    | Admin API: middleware, users CRUD, plan change, suspend/unsuspend, stats (14)                                       |
+| `packages/admin/test/integration/dashboard.test.ts`       | Admin dashboard: auth, pages, forms, search, pagination, deployments, error display, plan limits, login/logout (28) |
 
 Shared helpers in `packages/platform/test/integration/helpers.ts`:
 
