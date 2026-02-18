@@ -7,6 +7,7 @@ import {
   getProjectDeployments,
   getProjectResources,
   getUser,
+  getDomainsByProjectId,
 } from "@vite-cloud/platform/db";
 import { ProjectsListPage } from "../views/projects-list";
 import { Layout } from "../views/layout";
@@ -40,10 +41,11 @@ app.get("/:id", async (c) => {
   if (!project) {
     return c.html("<h1>Project not found</h1>", 404);
   }
-  const [deployments, resources, owner] = await Promise.all([
+  const [deployments, resources, owner, domains] = await Promise.all([
     getProjectDeployments(c.env.DB, project.id, 10),
     getProjectResources(c.env.DB, project.id),
     getUser(c.env.DB, project.user_id),
+    getDomainsByProjectId(c.env.DB, project.id),
   ]);
 
   const cfAccountId = c.env.CF_ACCOUNT_ID;
@@ -71,6 +73,25 @@ app.get("/:id", async (c) => {
                 <a href={deployUrl} target="_blank" rel="noopener noreferrer">
                   {deployUrl}
                 </a>
+              </td>
+            </tr>
+            <tr>
+              <th>Custom Domain</th>
+              <td>
+                {domains.length > 0 ? (
+                  domains.map((d) => (
+                    <span key={d.id}>
+                      <a href={`https://${d.hostname}`} target="_blank" rel="noopener noreferrer">
+                        {d.hostname}
+                      </a>{" "}
+                      <span class={`badge ${d.status === "active" ? "badge-green" : "badge-gray"}`}>
+                        {d.status}
+                      </span>
+                    </span>
+                  ))
+                ) : (
+                  <span style="color: #6b7280">None</span>
+                )}
               </td>
             </tr>
             <tr>
