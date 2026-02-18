@@ -56,9 +56,13 @@ app.get("/login", async (c) => {
     return c.json({ error: "redirect parameter is required" }, 400);
   }
 
-  // Security: only allow localhost redirects
-  if (!redirect.startsWith("http://localhost:") && !redirect.startsWith("http://127.0.0.1:")) {
-    return c.json({ error: "redirect must be a localhost URL" }, 400);
+  // Security: only allow localhost and admin redirects
+  if (
+    !redirect.startsWith("http://localhost:") &&
+    !redirect.startsWith("http://127.0.0.1:") &&
+    !redirect.startsWith("https://admin.vite.cloud/")
+  ) {
+    return c.json({ error: "redirect must be a localhost or admin URL" }, 400);
   }
 
   const provider = c.req.query("provider") ?? "github";
@@ -113,7 +117,11 @@ app.get("/callback", async (c) => {
   };
 
   // Re-validate redirect after decoding
-  if (!redirect.startsWith("http://localhost:") && !redirect.startsWith("http://127.0.0.1:")) {
+  if (
+    !redirect.startsWith("http://localhost:") &&
+    !redirect.startsWith("http://127.0.0.1:") &&
+    !redirect.startsWith("https://admin.vite.cloud/")
+  ) {
     return c.json({ error: "invalid redirect" }, 400);
   }
 

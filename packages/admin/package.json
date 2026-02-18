@@ -1,0 +1,25 @@
+{
+  "name": "@vite-cloud/admin",
+  "private": true,
+  "bin": {
+    "vca": "./src/cli.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clack/prompts": "catalog:",
+    "@vite-cloud/platform": "workspace:*",
+    "hono": "^4.11.9"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@types/node": "catalog:",
+    "miniflare": "^4",
+    "typescript": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

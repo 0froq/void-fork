@@ -50,20 +50,27 @@ Implementation Progress
 
 **Milestone:** Fully typed API routes end-to-end. Route handlers with validators produce typed `RouteMap` via codegen. Client `fetch()` infers path, method, input, and output types automatically. Typed DB query helper with schema-derived types from migration SQL files. Users can deploy to their own Cloudflare account without the Vite Cloud platform.
 
-### Phase 4: GitHub & Production Readiness
+### Phase 4: Production Readiness + Polish
 
 - [x] Custom domains
-- [ ] Usage tiers, metering and limits enforcement
-- [ ] Dashboard (web UI for managing projects, viewing logs)
+- [x] Usage tiers, metering and limits enforcement
+- [x] Admin dashboard & CLI (`packages/admin/` — Hono JSX dashboard, `vca` CLI, admin API endpoints)
+- [ ] Staging environment
 - [ ] Billing integration (Stripe)
 - [ ] Email & webhooks notifications (e.g. for failed project builds or billing issues)
+- [ ] AI code generation (`vite generate route` scaffolding)
+
+**Milestone:** Ready for public beta.
+
+### Phase 5: GitHub + Build Containers
+
 - [ ] GitHub App for webhook-based deploys
 - [ ] Build infrastructure (CF containers)
 - [ ] Preview deployments per PR (paid)
 
-**Milestone:** Ready for public beta.
+**Milestone:** Vercel / Netlify core DX parity.
 
-### Phase 5: Growth (Post-Launch)
+### Phase 6: Growth (Post-Launch)
 
 #### v1.1 — Full-Stack & Observability
 
@@ -83,7 +90,6 @@ Implementation Progress
 - [ ] Escape hatches — Tier 1: Workers AI, Vectorize, Hyperdrive (one-line config)
 - [ ] Escape hatches — Tier 2: Durable Objects (`src/objects/` convention)
 - [ ] D1 → Hyperdrive upgrade path
-- [ ] AI code generation (`vite generate route` scaffolding)
 - [ ] Edge WebSockets via `defineWebSocket` (if demand signals)
 
 #### v2.0 — Team & Enterprise

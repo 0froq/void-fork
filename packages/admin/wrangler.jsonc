@@ -1,0 +1,21 @@
+{
+  "name": "vite-cloud-admin",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-02-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vite-cloud-platform",
+      "database_id": "f85c1d7d-7b41-4f85-88e5-ad37966825e7",
+      "migrations_dir": "../platform/migrations",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "ROUTING",
+      "id": "9250c33f3db6494ebe8ad6272812c8c0",
+    },
+  ],
+  // Secrets (via `wrangler secret put`): JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+}

@@ -25,7 +25,7 @@ pnpm test            # Run vitest (unit + integration tests)
 pnpm lint            # oxlint
 pnpm fmt             # oxfmt --write .
 pnpm check           # Typecheck all packages (tsc --noEmit)
-pnpm run deploy      # Build all + deploy platform & dispatch workers
+pnpm run deploy      # Build all + deploy platform, dispatch & admin workers
 ```
 
 ## Monorepo Structure
@@ -37,6 +37,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | `packages/vite-cloud`        | `vite-cloud`                     | Core Vite plugin — routing, inference, migrations, CLI |
 | `packages/platform`          | `@vite-cloud/platform` (private) | Control Plane API — projects, deploys, CF API proxy    |
 | `packages/dispatch`          | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets   |
+| `packages/admin`             | `@vite-cloud/admin` (private)    | Admin dashboard (Hono JSX) + CLI (`vca`)               |
 | `packages/create-vite-cloud` | `create-vite-cloud`              | `npm create vite-cloud` scaffolding CLI                |
 | `playground/*`               | (private)                        | local apps for testing                                 |
 
@@ -279,6 +280,89 @@ Static asset responses are cached at the CF edge via `caches.default`. Cache key
 - API routes and SSR-rendered responses are **not** edge-cached
 - Non-file paths fall back to `index.html` (SPA routing)
 
+## `admin` Architecture
+
+CF Worker serving the Admin Dashboard (Hono JSX, server-rendered) and Admin CLI (`vca`). Shares the same D1 database as the platform worker.
+
+### Auth
+
+Cookie-based JWT auth. Login flow redirects through platform OAuth (GitHub/Google), then verifies `role === "admin"` from D1. Non-admins get 403.
+
+### Source Layout
+
+```
+packages/admin/
+  package.json              # hono, @clack/prompts, @vite-cloud/platform (workspace dep)
+  wrangler.jsonc
+  tsconfig.json
+  src/
+    index.ts                # Hono app default export
+    env.ts                  # AdminEnv type (DB, ROUTING, JWT_SECRET)
+    middleware/
+      auth.ts               # JWT verify (cookie) + role === "admin" check
+    routes/
+      login.ts              # GET /login, /login/github, /login/google, /callback, /logout
+      users.tsx             # GET /users, GET /users/:id, POST /users/:id/plan|suspend|unsuspend
+      projects.tsx          # GET /projects, GET /projects/:id
+      system.tsx            # GET / (dashboard home with stats)
+    views/
+      layout.tsx            # HTML shell (head, nav, body)
+      users-list.tsx        # Users table with search/filter form
+      user-detail.tsx       # User profile, projects, plan controls, suspend button
+      projects-list.tsx     # All projects table
+      dashboard.tsx         # System stats overview
+    cli.ts                  # CLI entry point (bin: "vca")
+    cli/
+      client.ts             # HTTP client for platform /admin/* endpoints
+      commands/
+        users.ts            # vca users list|get|plan|suspend|unsuspend
+        stats.ts            # vca stats
+```
+
+### Platform Admin API
+
+The platform exposes `/admin/*` endpoints (protected by auth + admin middleware):
+
+```
+GET    /admin/users                  # List users (paginated, searchable)
+GET    /admin/users/:id              # User detail with projects
+POST   /admin/users/:id/plan         # Change plan
+POST   /admin/users/:id/suspend      # Suspend user
+POST   /admin/users/:id/unsuspend    # Unsuspend user
+GET    /admin/projects               # List all projects
+GET    /admin/projects/:id           # Project detail with deployments/resources
+GET    /admin/stats                  # System-wide stats
+```
+
+### Platform Subpath Exports
+
+The platform package exposes `.ts` source files via subpath exports for consumption by the admin worker (wrangler handles TS bundling):
+
+| Subpath                            | File                 |
+| ---------------------------------- | -------------------- |
+| `@vite-cloud/platform/db`          | `src/db.ts`          |
+| `@vite-cloud/platform/types`       | `src/types.ts`       |
+| `@vite-cloud/platform/id`          | `src/id.ts`          |
+| `@vite-cloud/platform/tiers`       | `src/tiers.ts`       |
+| `@vite-cloud/platform/auth/jwt`    | `src/auth/jwt.ts`    |
+| `@vite-cloud/platform/auth/github` | `src/auth/github.ts` |
+| `@vite-cloud/platform/auth/google` | `src/auth/google.ts` |
+
+### Admin CLI (`vca`)
+
+Runs in Node.js, calls platform admin API over HTTP (same JWT auth, checked for admin role):
+
+```
+vca users list [--plan <plan>] [--limit <n>]
+vca users get <id>
+vca users plan <id> <plan>
+vca users suspend <id>
+vca users unsuspend <id>
+vca stats
+```
+
+Authenticates via `~/.vite-cloud/credentials.json` (same file as `vcd login`).
+
 ## Tooling
 
 | Tool     | Version       | Purpose                                   |
@@ -293,7 +377,7 @@ Static asset responses are cached at the CF edge via `caches.default`. Cache key
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). 692 tests across 61 files.
+Tests run from root with `pnpm test` (vitest). 734 tests across 63 files.
 
 ### Unit Tests
 
@@ -333,6 +417,8 @@ Platform integration tests call the Hono app via `app.fetch(request, env)` with 
 | `packages/platform/test/integration/api-me.test.ts`       | Auth middleware: missing/invalid/expired JWT, valid (4)                             |
 | `packages/platform/test/integration/api-projects.test.ts` | Projects CRUD: auth, list, create, validation, dupes (12)                           |
 | `packages/platform/test/integration/api-deploy.test.ts`   | Deploy pipeline: auth, provisioning, migrations, R2, KV, limits, failure modes (33) |
+| `packages/platform/test/integration/api-admin.test.ts`    | Admin API: middleware, users CRUD, plan change, suspend/unsuspend, stats (14)       |
+| `packages/admin/test/integration/dashboard.test.ts`       | Admin dashboard: auth, pages, forms, search, login/logout (14)                      |
 
 Shared helpers in `packages/platform/test/integration/helpers.ts`:
 

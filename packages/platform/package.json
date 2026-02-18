@@ -2,6 +2,15 @@
   "name": "@vite-cloud/platform",
   "private": true,
   "type": "module",
+  "exports": {
+    "./db": "./src/db.ts",
+    "./types": "./src/types.ts",
+    "./id": "./src/id.ts",
+    "./tiers": "./src/tiers.ts",
+    "./auth/jwt": "./src/auth/jwt.ts",
+    "./auth/github": "./src/auth/github.ts",
+    "./auth/google": "./src/auth/google.ts"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

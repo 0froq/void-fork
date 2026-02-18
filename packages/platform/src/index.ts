@@ -9,6 +9,8 @@ import secrets from "./routes/secrets";
 import domains from "./routes/domains";
 import usage from "./routes/usage";
 import { authMiddleware } from "./middleware/auth";
+import { adminMiddleware } from "./middleware/admin";
+import admin from "./routes/admin";
 import { getProjectsByUserId } from "./db";
 import { queryProjectUsage } from "./routes/usage";
 import { getCurrentBillingPeriodStart, getPlanLimits, isWithinLimit } from "./tiers";
@@ -29,6 +31,8 @@ app.route("/projects", domains);
 app.route("/projects", usage);
 app.use("/usage", authMiddleware);
 app.route("/usage", usage);
+app.use("/admin/*", authMiddleware, adminMiddleware);
+app.route("/admin", admin);
 
 async function scheduled(
   _controller: ScheduledController,

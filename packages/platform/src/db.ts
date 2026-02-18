@@ -25,6 +25,7 @@ export async function createUser(
     login,
     email,
     plan: "free",
+    role: "user",
     billing_cycle_start: new Date().toISOString(),
     suspended_reason: null,
     created_at: new Date().toISOString(),
@@ -279,4 +280,68 @@ export async function deleteProjectDeployments(db: D1Database, projectId: string
 
 export async function deleteProject(db: D1Database, id: string): Promise<void> {
   await db.prepare("DELETE FROM projects WHERE id = ?").bind(id).run();
+}
+
+// --- Admin ---
+
+export async function getAllUsers(db: D1Database, limit: number, offset: number): Promise<User[]> {
+  const result = await db
+    .prepare("SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?")
+    .bind(limit, offset)
+    .all<User>();
+  return result.results;
+}
+
+export async function searchUsers(db: D1Database, query: string): Promise<User[]> {
+  const pattern = `%${query}%`;
+  const result = await db
+    .prepare(
+      "SELECT * FROM users WHERE login LIKE ? OR email LIKE ? OR id LIKE ? ORDER BY created_at DESC LIMIT 50",
+    )
+    .bind(pattern, pattern, pattern)
+    .all<User>();
+  return result.results;
+}
+
+export async function getSystemStats(
+  db: D1Database,
+): Promise<{ users: number; projects: number; deployments: number }> {
+  const [users, projects, deployments] = await db.batch([
+    db.prepare("SELECT COUNT(*) as count FROM users"),
+    db.prepare("SELECT COUNT(*) as count FROM projects"),
+    db.prepare("SELECT COUNT(*) as count FROM deployments"),
+  ]);
+  return {
+    users: (users.results[0] as { count: number }).count,
+    projects: (projects.results[0] as { count: number }).count,
+    deployments: (deployments.results[0] as { count: number }).count,
+  };
+}
+
+export async function suspendUser(db: D1Database, id: string, reason: string): Promise<void> {
+  await db.prepare("UPDATE users SET suspended_reason = ? WHERE id = ?").bind(reason, id).run();
+}
+
+export async function unsuspendUser(db: D1Database, id: string): Promise<void> {
+  await db.prepare("UPDATE users SET suspended_reason = NULL WHERE id = ?").bind(id).run();
+}
+
+export async function updateUserRole(
+  db: D1Database,
+  id: string,
+  role: "user" | "admin",
+): Promise<void> {
+  await db.prepare("UPDATE users SET role = ? WHERE id = ?").bind(role, id).run();
+}
+
+export async function getAllProjects(
+  db: D1Database,
+  limit: number,
+  offset: number,
+): Promise<Project[]> {
+  const result = await db
+    .prepare("SELECT * FROM projects ORDER BY created_at DESC LIMIT ? OFFSET ?")
+    .bind(limit, offset)
+    .all<Project>();
+  return result.results;
 }
