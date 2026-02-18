@@ -2,13 +2,6 @@ import { renderToString } from "react-dom/server";
 import { defineRender } from "vite-cloud";
 import App from "./App";
 
-export const prerender = async () => {
-  const blogPaths = Object.keys(import.meta.glob("../blog/*.md")).map((f: string) => {
-    return `/blog/${f.split("/").pop()!.replace(".md", "")}`;
-  });
-  return ["/", "/about", ...blogPaths];
-};
-
 async function readBlogPost(slug: string): Promise<string | null> {
   return (await import(`../blog/${slug}.md?raw`)).default;
 }

@@ -279,27 +279,6 @@ window.__vite_plugin_react_preamble_installed__ = true;
     );
     lines.push(`}`);
     lines.push("");
-    lines.push(`async function fetchPrerenderedHtml(c) {`);
-    lines.push(`  const assets = c.env?.ASSETS;`);
-    lines.push(`  if (!assets || typeof assets.fetch !== "function") {`);
-    lines.push(`    return null;`);
-    lines.push(`  }`);
-    lines.push(`  const normalizedPath = c.req.path.replace(/\\/+$/, "") || "/";`);
-    lines.push(
-      `  const prerenderPath = normalizedPath === "/" ? "/index.html" : \`\${normalizedPath}/index.html\`;`,
-    );
-    lines.push(`  const url = new URL(prerenderPath, c.req.url);`);
-    lines.push(`  const response = await assets.fetch(new Request(url.toString()));`);
-    lines.push(`  if (!response.ok) {`);
-    lines.push(`    return null;`);
-    lines.push(`  }`);
-    lines.push(`  const contentType = response.headers.get("content-type") ?? "";`);
-    lines.push(`  if (!contentType.includes("text/html")) {`);
-    lines.push(`    return null;`);
-    lines.push(`  }`);
-    lines.push(`  return response;`);
-    lines.push(`}`);
-    lines.push("");
     lines.push(`async function renderSsrResponse(c, mod) {`);
     lines.push(`  const render = typeof mod.render === "function" ? mod.render : mod.default;`);
     lines.push(`  if (typeof render !== "function") {`);
@@ -314,10 +293,6 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`app.notFound(async (c) => {`);
     lines.push(`  if (!shouldHandleSsrRequest(c)) {`);
     lines.push(`    return fetchFromAssets(c);`);
-    lines.push(`  }`);
-    lines.push(`  const prerendered = await fetchPrerenderedHtml(c);`);
-    lines.push(`  if (prerendered) {`);
-    lines.push(`    return prerendered;`);
     lines.push(`  }`);
     lines.push(`  const mod = await import(${JSON.stringify(ssr.serverEntryPath)});`);
     lines.push(`  return renderSsrResponse(c, mod);`);
@@ -353,20 +328,6 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push("export async function scheduled() {}");
     lines.push("");
   }
-
-  // __resolvePrerenderPaths helper for build-time prerender resolution
-  if (ssr) {
-    lines.push(`export async function __resolvePrerenderPaths() {`);
-    lines.push(`  const mod = await import(${JSON.stringify(ssr.serverEntryPath)});`);
-    lines.push(`  const p = mod.prerender;`);
-    lines.push(`  if (typeof p === "function") return await p();`);
-    lines.push(`  if (Array.isArray(p)) return p;`);
-    lines.push(`  return null;`);
-    lines.push(`}`);
-  } else {
-    lines.push(`export async function __resolvePrerenderPaths() { return null; }`);
-  }
-  lines.push("");
 
   lines.push(`export default app;`);
 
@@ -547,10 +508,9 @@ function compileAuthRoutes(lines: string[], auth: AuthCompileOptions): void {
  * Simply re-exports the Hono app from the virtual module.
  */
 export function compileWorkerEntry(): string {
-  return `import app, { scheduled, __resolvePrerenderPaths } from 'virtual:vite-cloud-routes';
+  return `import app, { scheduled } from 'virtual:vite-cloud-routes';
 
-export default { fetch: app.fetch, scheduled };
-export { __resolvePrerenderPaths };`;
+export default { fetch: app.fetch, scheduled };`;
 }
 
 /**

@@ -291,40 +291,6 @@ app.post("/:id/deploy", async (c) => {
     // 5. Clear previous ISR cache on deploy
     if (manifest.revalidate && manifest.revalidate > 0) {
       await clearIsrCache(c.env.ASSETS, projectId);
-
-      // Seed ISR cache from prerendered HTML pages
-      if (manifest.ssr) {
-        const isrSeeds: { path: string; blob: Blob }[] = [];
-        for (const { path, blob } of assetUploads) {
-          if (path.endsWith(".html") || path.endsWith("/index.html")) {
-            isrSeeds.push({ path, blob });
-          }
-        }
-        if (isrSeeds.length > 0) {
-          await uploadPool(isrSeeds, R2_CONCURRENCY, async ({ path, blob }) => {
-            // Convert asset path to ISR key: "about/index.html" → "about", "index.html" → "__index__"
-            let isrPath = path;
-            if (isrPath.endsWith("/index.html")) {
-              isrPath = isrPath.slice(0, -"/index.html".length);
-            } else if (isrPath === "index.html") {
-              isrPath = "__index__";
-            } else if (isrPath.endsWith(".html")) {
-              isrPath = isrPath.slice(0, -".html".length);
-            }
-            if (!isrPath) isrPath = "__index__";
-
-            await c.env.ASSETS.put(`${projectId}/isr/${isrPath}`, blob, {
-              httpMetadata: { contentType: "text/html" },
-              customMetadata: {
-                status: "200",
-                createdAt: String(Date.now()),
-                ttl: String(manifest.revalidate!),
-                headers: JSON.stringify({ "Content-Type": "text/html; charset=utf-8" }),
-              },
-            });
-          });
-        }
-      }
     }
 
     // 6. Update KV routing table

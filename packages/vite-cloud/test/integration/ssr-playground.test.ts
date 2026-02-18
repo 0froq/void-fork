@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { execSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
@@ -91,49 +91,20 @@ describe("playground/ssr", () => {
     }
   }, 60_000);
 
-  it("build: emits prerendered HTML, and preview serves prerendered pages", async () => {
+  it("build: emits worker entry and client manifest, and preview serves SSR pages", async () => {
     rmSync(join(ROOT, "playground/ssr/dist"), { recursive: true, force: true });
     execSync("pnpm --dir playground/ssr build", { cwd: ROOT, stdio: "pipe" });
 
     const workerEntry = join(ROOT, "playground/ssr/dist/playground_ssr/index.js");
     const clientManifest = join(ROOT, "playground/ssr/dist/client/.vite/manifest.json");
-    const clientIndexHtml = join(ROOT, "playground/ssr/dist/client/index.html");
-    const clientAboutHtml = join(ROOT, "playground/ssr/dist/client/about/index.html");
-    const clientBlogHelloHtml = join(
-      ROOT,
-      "playground/ssr/dist/client/blog/hello-world/index.html",
-    );
-    const clientBlogGettingStartedHtml = join(
-      ROOT,
-      "playground/ssr/dist/client/blog/getting-started/index.html",
-    );
 
     expect(existsSync(workerEntry)).toBe(true);
     expect(existsSync(clientManifest)).toBe(true);
-    expect(existsSync(clientIndexHtml)).toBe(true);
-    expect(existsSync(clientAboutHtml)).toBe(true);
-    expect(existsSync(clientBlogHelloHtml)).toBe(true);
-    expect(existsSync(clientBlogGettingStartedHtml)).toBe(true);
-    expect(statSync(clientIndexHtml).isFile()).toBe(true);
-    expect(statSync(clientAboutHtml).isFile()).toBe(true);
 
     const code = readFileSync(workerEntry, "utf-8");
     expect(code).toContain("renderSsrResponse(c, mod)");
     expect(code).toContain('new URL("/.vite/manifest.json", request.url)');
     expect(code).toContain('SSR_CLIENT_ENTRY_ID = "src/main.client.tsx"');
-    expect(code).toContain("__resolvePrerenderPaths");
-
-    const aboutHtml = readFileSync(clientAboutHtml, "utf-8");
-    expect(readFileSync(clientIndexHtml, "utf-8")).toContain("Rendered URL: <!-- -->/");
-    expect(aboutHtml).toContain("Rendered URL: <!-- -->/about");
-
-    const blogHelloHtml = readFileSync(clientBlogHelloHtml, "utf-8");
-    expect(blogHelloHtml).toContain("Rendered URL: <!-- -->/blog/hello-world");
-    expect(blogHelloHtml).toContain("Hello World");
-
-    const blogGettingStartedHtml = readFileSync(clientBlogGettingStartedHtml, "utf-8");
-    expect(blogGettingStartedHtml).toContain("Rendered URL: <!-- -->/blog/getting-started");
-    expect(blogGettingStartedHtml).toContain("Getting Started with Vite Cloud");
 
     const wranglerConfig = JSON.parse(
       readFileSync(join(ROOT, "playground/ssr/dist/playground_ssr/wrangler.json"), "utf-8"),
@@ -182,12 +153,9 @@ describe("playground/ssr", () => {
       const rootSecond = await (await fetch(`${PREVIEW_BASE}/`)).text();
       expect(rootFirst).toContain("Rendered URL: <!-- -->/");
       expect(rootSecond).toContain("Rendered URL: <!-- -->/");
-      expect(rootFirst).toContain("KV visit count: <!-- -->1");
-      expect(rootSecond).toContain("KV visit count: <!-- -->1");
 
       const previewAboutHtml = await (await fetch(`${PREVIEW_BASE}/about`)).text();
       expect(previewAboutHtml).toContain("Rendered URL: <!-- -->/about");
-      expect(previewAboutHtml).toContain("KV visit count: <!-- -->2");
     } catch (err) {
       startupError = err instanceof Error ? err : new Error(String(err));
     } finally {
