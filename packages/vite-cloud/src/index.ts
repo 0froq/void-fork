@@ -157,6 +157,12 @@ export default function viteCloud(): Plugin[] {
   }
 
   // Default mode: full Hono routing + generated entry
+  // Add nodejs_als for AsyncLocalStorage (used by isomorphic fetch context threading)
+  const existingFlags = (workerConfig.compatibility_flags as string[] | undefined) ?? [];
+  if (!existingFlags.includes("nodejs_als") && !existingFlags.includes("nodejs_compat")) {
+    workerConfig.compatibility_flags = [...existingFlags, "nodejs_als"];
+  }
+
   const jobs = scanJobsSync(root);
   const ssrEntry = validateSsrEntry(root);
 
