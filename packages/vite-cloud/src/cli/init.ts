@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { intro, outro, log, confirm, multiselect, isCancel, cancel, note } from "@clack/prompts";
+import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
 
 const VALID_AUTH_PROVIDERS = ["github", "google", "email"] as const;
 type AuthProvider = (typeof VALID_AUTH_PROVIDERS)[number];
@@ -473,6 +474,11 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
       state.typescriptWanted = true;
       setupTsconfig(root, state);
     }
+  }
+
+  // Generate .vite-cloud/tsconfig.json so the root tsconfig can extend it
+  if (state.typescriptWanted) {
+    ensureProjectTsconfig(root);
   }
 
   // Step 2: Authentication

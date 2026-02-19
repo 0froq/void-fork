@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join, dirname } from "node:path";
 import { intro, outro, log } from "@clack/prompts";
 import type { GenArgs } from "./gen-args";
+import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
 
 export async function runGenCommand(root: string, args: GenArgs): Promise<void> {
   console.log();
@@ -211,6 +212,7 @@ export const GET = defineHandler.withValidator({
   const outDir = join(root, ".vite-cloud");
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "db.d.ts"), dts);
+  ensureProjectTsconfig(root);
   log.success("Regenerated .vite-cloud/db.d.ts");
 
   outro("Model scaffolding complete.");
