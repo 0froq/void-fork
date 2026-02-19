@@ -62,6 +62,7 @@ export default defineConfig({
     "picomatch",
     "tinyglobby",
     "estree-walker",
+    "es-module-lexer",
     "@clack/prompts",
     "@clack/core",
     "sisteransi",

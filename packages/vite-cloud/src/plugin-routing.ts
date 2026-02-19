@@ -31,7 +31,7 @@ const LOAD_ID_FILTER = /^virtual:vite-cloud-(routes|client-worker)$/;
  * - Watches for file changes and triggers HMR
  */
 interface RoutingPluginOptions {
-  auth: AuthProvider[] | null;
+  getAuth: () => AuthProvider[] | null;
 }
 
 export function routingPlugin(root: string, options: RoutingPluginOptions): Plugin {
@@ -80,8 +80,14 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     auth: null,
   };
 
-  if (options.auth) {
-    const providers = options.auth;
+  // Auth compile options are set up lazily in buildStart (after env plugin
+  // has run its config hook and authProviders is fully resolved).
+  function resolveAuthCompileOptions(): void {
+    const providers = options.getAuth();
+    if (!providers) {
+      compileOptions.auth = null;
+      return;
+    }
     const hasEmail = providers.includes("email");
     const hasGitHub = providers.includes("github");
     const hasGoogle = providers.includes("google");
@@ -130,6 +136,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     },
 
     async buildStart() {
+      resolveAuthCompileOptions();
       await rescan();
       writeRouteTypes();
     },

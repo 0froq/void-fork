@@ -91,6 +91,7 @@ describe("inferBindingsFromSource", () => {
     expect(result.needsD1).toBe(false);
     expect(result.needsKV).toBe(false);
     expect(result.needsR2).toBe(false);
+    expect(result.needsAuth).toBe(false);
   });
 
   it("detects import { db } from 'vite-cloud/db'", () => {
@@ -149,19 +150,70 @@ describe("inferBindingsFromSource", () => {
     expect(result.needsD1).toBe(false);
     expect(result.needsKV).toBe(false);
     expect(result.needsR2).toBe(false);
+    expect(result.needsAuth).toBe(false);
+  });
+
+  it("detects import { auth } from 'vite-cloud/client'", () => {
+    const code = `
+      import { auth } from "vite-cloud/client";
+      const user = await auth.me();
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsAuth).toBe(true);
+  });
+
+  it("detects import { auth, AuthError } from 'vite-cloud/client'", () => {
+    const code = `
+      import { auth, AuthError } from "vite-cloud/client";
+      const user = await auth.login({ email, password });
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsAuth).toBe(true);
+  });
+
+  it("does not detect auth from 'vite-cloud/client' when only fetch is imported", () => {
+    const code = `
+      import { fetch } from "vite-cloud/client";
+      const data = await fetch("/api/hello");
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsAuth).toBe(false);
+  });
+
+  it("detects import from 'vite-cloud/auth'", () => {
+    const code = `
+      import { requireAuth } from "vite-cloud/auth";
+      export const GET = defineHandler((c) => {
+        const user = requireAuth(c);
+        return { user };
+      })
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsAuth).toBe(true);
+  });
+
+  it("does not detect auth from unrelated imports", () => {
+    const code = `
+      import { db } from "vite-cloud/db";
+      import { fetch } from "vite-cloud/client";
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsAuth).toBe(false);
+    expect(result.needsD1).toBe(true);
   });
 });
 
 describe("mergeBindings", () => {
   it("merges multiple binding results (union)", () => {
     const result = mergeBindings([
-      { needsD1: true, needsKV: false, needsR2: false },
-      { needsD1: false, needsKV: true, needsR2: false },
-      { needsD1: false, needsKV: false, needsR2: true },
+      { needsD1: true, needsKV: false, needsR2: false, needsAuth: false },
+      { needsD1: false, needsKV: true, needsR2: false, needsAuth: false },
+      { needsD1: false, needsKV: false, needsR2: true, needsAuth: false },
     ]);
     expect(result.needsD1).toBe(true);
     expect(result.needsKV).toBe(true);
     expect(result.needsR2).toBe(true);
+    expect(result.needsAuth).toBe(false);
   });
 
   it("handles empty array", () => {
@@ -169,5 +221,14 @@ describe("mergeBindings", () => {
     expect(result.needsD1).toBe(false);
     expect(result.needsKV).toBe(false);
     expect(result.needsR2).toBe(false);
+    expect(result.needsAuth).toBe(false);
+  });
+
+  it("merges auth flag", () => {
+    const result = mergeBindings([
+      { needsD1: false, needsKV: false, needsR2: false, needsAuth: false },
+      { needsD1: false, needsKV: false, needsR2: false, needsAuth: true },
+    ]);
+    expect(result.needsAuth).toBe(true);
   });
 });

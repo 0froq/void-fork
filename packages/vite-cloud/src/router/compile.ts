@@ -406,7 +406,12 @@ function compileAuthRoutes(lines: string[], auth: AuthCompileOptions): void {
 
   if (hasGitHub) {
     lines.push('app.get("/auth/login/github",');
-    lines.push('  githubAuth({ scope: ["read:user", "user:email"], oauthApp: true }),');
+    lines.push("  (c, next) => githubAuth({");
+    lines.push("    client_id: c.env.GITHUB_OAUTH_ID,");
+    lines.push("    client_secret: c.env.GITHUB_OAUTH_SECRET,");
+    lines.push('    scope: ["read:user", "user:email"],');
+    lines.push("    oauthApp: true,");
+    lines.push("  })(c, next),");
     lines.push("  async (c) => {");
     lines.push('    const ghUser = c.get("user-github");');
     lines.push("    const providerId = String(ghUser.id);");
@@ -446,7 +451,11 @@ function compileAuthRoutes(lines: string[], auth: AuthCompileOptions): void {
 
   if (hasGoogle) {
     lines.push('app.get("/auth/login/google",');
-    lines.push('  googleAuth({ scope: ["openid", "email", "profile"] }),');
+    lines.push("  (c, next) => googleAuth({");
+    lines.push("    client_id: c.env.GOOGLE_OAUTH_ID,");
+    lines.push("    client_secret: c.env.GOOGLE_OAUTH_SECRET,");
+    lines.push('    scope: ["openid", "email", "profile"],');
+    lines.push("  })(c, next),");
     lines.push("  async (c) => {");
     lines.push('    const googleUser = c.get("user-google");');
     lines.push("    const providerId = String(googleUser.id);");
