@@ -46,6 +46,8 @@ export type TestEnv = {
   GITHUB_CLIENT_SECRET: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
+  DEV_AUTH_BYPASS?: string;
+  SITE_DOMAIN?: string;
 };
 
 let mf: Miniflare;
@@ -182,6 +184,26 @@ export async function createTestProject(
     .bind(id, userId, s, name ?? `Test Project ${n}`)
     .run();
   return { id, slug: s };
+}
+
+let deploymentCounter = 0;
+
+export async function createTestDeployment(
+  db: D1Database,
+  projectId: string,
+  status: "pending" | "live" | "failed" = "live",
+  source?: string,
+  errorMessage?: string,
+): Promise<{ id: string }> {
+  const n = ++deploymentCounter;
+  const id = `dpl_test${n}`;
+  await db
+    .prepare(
+      "INSERT INTO deployments (id, project_id, status, source, error_message) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(id, projectId, status, source ?? null, errorMessage ?? null)
+    .run();
+  return { id };
 }
 
 // --- Fetch mocking ---

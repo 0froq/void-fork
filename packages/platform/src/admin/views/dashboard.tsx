@@ -1,4 +1,4 @@
-import type { Project } from "@vite-cloud/platform/types";
+import type { Project } from "../../types";
 import { Layout } from "./layout";
 
 interface DashboardProps {
@@ -16,19 +16,19 @@ export function DashboardPage({ stats, projects, username }: DashboardProps) {
     <Layout title="Dashboard" username={username}>
       <h1>Dashboard</h1>
       <div class="grid">
-        <a href="/users" style="text-decoration: none; color: inherit">
+        <a href="/admin/users" style="text-decoration: none; color: inherit">
           <div class="card stat">
             <div class="stat-value">{stats.users}</div>
             <div class="stat-label">Users</div>
           </div>
         </a>
-        <a href="/projects" style="text-decoration: none; color: inherit">
+        <a href="/admin/projects" style="text-decoration: none; color: inherit">
           <div class="card stat">
             <div class="stat-value">{stats.projects}</div>
             <div class="stat-label">Projects</div>
           </div>
         </a>
-        <a href="/deployments" style="text-decoration: none; color: inherit">
+        <a href="/admin/deployments" style="text-decoration: none; color: inherit">
           <div class="card stat">
             <div class="stat-value">{stats.deployments}</div>
             <div class="stat-label">Deployments</div>
@@ -53,10 +53,12 @@ export function DashboardPage({ stats, projects, username }: DashboardProps) {
             {projects.map((p) => (
               <tr key={p.id}>
                 <td>
-                  <a href={`/projects/${p.id}`}>{p.name}</a>
+                  <a href={`/admin/projects/${p.id}`}>{p.name}</a>
                 </td>
                 <td>{p.slug}</td>
-                <td>{p.owner_login ? <a href={`/users/${p.user_id}`}>{p.owner_login}</a> : "-"}</td>
+                <td>
+                  {p.owner_login ? <a href={`/admin/users/${p.user_id}`}>{p.owner_login}</a> : "-"}
+                </td>
                 <td style="font-family: monospace; font-size: 0.8rem">{p.user_id}</td>
                 <td>{p.mode}</td>
                 <td>{new Date(p.created_at).toLocaleDateString()}</td>

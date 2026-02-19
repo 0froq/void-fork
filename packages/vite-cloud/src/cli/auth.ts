@@ -59,7 +59,7 @@ export function removeToken(): boolean {
   }
 }
 
-const DEFAULT_API_URL = "https://api.vite.cloud";
+const DEFAULT_API_URL = "https://platform.vite.cloud";
 
 /**
  * Read the API URL from environment or config file.

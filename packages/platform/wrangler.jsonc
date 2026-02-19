@@ -35,9 +35,9 @@
   "triggers": {
     "crons": ["*/5 * * * *"],
   },
-  // Secrets (via `wrangler secret put`): CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID, JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
-  // Optional env var: AUTH_REDIRECT_URI (defaults to https://api.vite.cloud/auth/callback)
-  // For local dev, set AUTH_REDIRECT_URI=http://localhost:8787/auth/callback in .dev.vars
+  // Secrets (via `wrangler secret put`): CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID, JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+  // Optional env var: AUTH_REDIRECT_URI (defaults to https://platform.vite.cloud/auth/callback)
+  // For local dev, set AUTH_REDIRECT_URI=http://localhost:8787/auth/callback and DEV_AUTH_BYPASS=true in .dev.vars
   "env": {
     "staging": {
       "name": "vite-cloud-platform-staging",
@@ -68,10 +68,9 @@
         },
       ],
       "vars": {
-        "ADMIN_ORIGIN": "https://admin.staging.vite.cloud",
         "DISPATCH_NAMESPACE": "vite-cloud-users-staging",
         "SITE_DOMAIN": "staging.vitecloud.app",
-        "AUTH_REDIRECT_URI": "https://api.staging.vite.cloud/auth/callback",
+        "AUTH_REDIRECT_URI": "https://platform.staging.vite.cloud/auth/callback",
       },
     },
   },

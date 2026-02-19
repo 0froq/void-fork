@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 
-const PLATFORM_URL = "https://api.vite.cloud";
+const PLATFORM_URL = "https://platform.vite.cloud";
 
 export interface RevalidateOptions {
   paths?: string[];

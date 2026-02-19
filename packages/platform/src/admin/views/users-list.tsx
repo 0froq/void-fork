@@ -1,4 +1,4 @@
-import type { User } from "@vite-cloud/platform/types";
+import type { User } from "../../types";
 import { Layout } from "./layout";
 import { Pagination } from "./pagination";
 
@@ -38,13 +38,13 @@ export function UsersListPage({
   return (
     <Layout title="Users" username={username}>
       <h1>Users</h1>
-      <form class="search-form" method="get" action="/users">
+      <form class="search-form" method="get" action="/admin/users">
         <input type="text" name="search" placeholder="Search users..." value={search ?? ""} />
         <button class="btn btn-primary" type="submit">
           Search
         </button>
         {search && (
-          <a href="/users" class="btn">
+          <a href="/admin/users" class="btn">
             Clear
           </a>
         )}
@@ -66,7 +66,7 @@ export function UsersListPage({
             {users.map((user) => (
               <tr key={user.id}>
                 <td>
-                  <a href={`/users/${user.id}`}>{user.login}</a>
+                  <a href={`/admin/users/${user.id}`}>{user.login}</a>
                 </td>
                 <td>{user.provider}</td>
                 <td>{user.email ?? "-"}</td>
@@ -86,7 +86,7 @@ export function UsersListPage({
         </table>
         {users.length === 0 && <p style="padding: 1rem; color: #6b7280">No users found.</p>}
         {page != null && totalPages != null && (
-          <Pagination page={page} totalPages={totalPages} baseUrl="/users" />
+          <Pagination page={page} totalPages={totalPages} baseUrl="/admin/users" />
         )}
       </div>
     </Layout>

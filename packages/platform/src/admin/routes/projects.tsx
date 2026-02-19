@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { AdminEnv } from "../env";
+import type { PlatformEnv } from "../../env";
 import {
   getAllProjectsWithOwner,
   countProjects,
@@ -8,12 +8,12 @@ import {
   getProjectResources,
   getUser,
   getDomainsByProjectId,
-} from "@vite-cloud/platform/db";
+} from "../../db";
 import { ProjectsListPage } from "../views/projects-list";
 import { Layout } from "../views/layout";
 
 const PAGE_SIZE = 20;
-const app = new Hono<AdminEnv>();
+const app = new Hono<PlatformEnv>();
 
 // GET /projects
 app.get("/", async (c) => {
@@ -109,7 +109,9 @@ app.get("/:id", async (c) => {
             </tr>
             <tr>
               <th>Owner</th>
-              <td>{owner ? <a href={`/users/${owner.id}`}>{owner.login}</a> : project.user_id}</td>
+              <td>
+                {owner ? <a href={`/admin/users/${owner.id}`}>{owner.login}</a> : project.user_id}
+              </td>
             </tr>
             <tr>
               <th>Mode</th>
@@ -195,7 +197,7 @@ app.get("/:id", async (c) => {
                 return (
                   <tr key={d.id}>
                     <td style="font-family: monospace; font-size: 0.8rem">
-                      <a href={`/deployments/${d.id}`}>{d.id}</a>
+                      <a href={`/admin/deployments/${d.id}`}>{d.id}</a>
                     </td>
                     <td>
                       <span class={`badge ${statusCls}`}>{d.status}</span>

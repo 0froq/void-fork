@@ -15,7 +15,7 @@ export interface PlatformEnv extends Env {
     GOOGLE_CLIENT_ID: string;
     GOOGLE_CLIENT_SECRET: string;
     AUTH_REDIRECT_URI?: string;
-    ADMIN_ORIGIN?: string;
+    DEV_AUTH_BYPASS?: string;
     DISPATCH_NAMESPACE?: string;
     SITE_DOMAIN?: string;
   };

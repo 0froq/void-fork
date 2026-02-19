@@ -37,38 +37,38 @@ function req(path: string, cookie?: string, init?: RequestInit): Response | Prom
 }
 
 describe("auth middleware", () => {
-  test("redirects to /login without cookie", async () => {
-    const res = await req("/");
+  test("redirects to /admin/login without cookie", async () => {
+    const res = await req("/admin/");
     expect(res.status).toBe(302);
-    expect(res.headers.get("Location")).toBe("/login");
+    expect(res.headers.get("Location")).toBe("/admin/login");
   });
 
-  test("redirects to /login with invalid cookie", async () => {
-    const res = await req("/", "invalid-token");
+  test("redirects to /admin/login with invalid cookie", async () => {
+    const res = await req("/admin/", "invalid-token");
     expect(res.status).toBe(302);
-    expect(res.headers.get("Location")).toBe("/login");
+    expect(res.headers.get("Location")).toBe("/admin/login");
   });
 
   test("returns 403 for non-admin user", async () => {
     const user = await createTestUser(env.DB, "regular");
-    const res = await req("/", user.jwt);
+    const res = await req("/admin/", user.jwt);
     expect(res.status).toBe(403);
   });
 
   test("allows admin user", async () => {
-    const admin = await createTestUser(env.DB, "admin", "admin");
-    const res = await req("/", admin.jwt);
+    const admin = await createTestUser(env.DB, "admin", "github", undefined, "free", "admin");
+    const res = await req("/admin/", admin.jwt);
     expect(res.status).toBe(200);
   });
 });
 
-describe("GET / (dashboard)", () => {
+describe("GET /admin/ (dashboard)", () => {
   test("renders dashboard with stats and projects", async () => {
-    const admin = await createTestUser(env.DB, "admin1", "admin");
+    const admin = await createTestUser(env.DB, "admin1", "github", undefined, "free", "admin");
     await createTestUser(env.DB, "user1");
     await createTestProject(env.DB, admin.id, "dash-proj");
 
-    const res = await req("/", admin.jwt);
+    const res = await req("/admin/", admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Dashboard");
@@ -78,51 +78,51 @@ describe("GET / (dashboard)", () => {
   });
 
   test("stat cards link to views", async () => {
-    const admin = await createTestUser(env.DB, "admin1b", "admin");
-    const res = await req("/", admin.jwt);
+    const admin = await createTestUser(env.DB, "admin1b", "github", undefined, "free", "admin");
+    const res = await req("/admin/", admin.jwt);
     const html = await res.text();
-    expect(html).toContain('href="/users"');
-    expect(html).toContain('href="/projects"');
-    expect(html).toContain('href="/deployments"');
+    expect(html).toContain('href="/admin/users"');
+    expect(html).toContain('href="/admin/projects"');
+    expect(html).toContain('href="/admin/deployments"');
   });
 });
 
-describe("GET /users", () => {
+describe("GET /admin/users", () => {
   test("renders users list", async () => {
-    const admin = await createTestUser(env.DB, "admin2", "admin");
+    const admin = await createTestUser(env.DB, "admin2", "github", undefined, "free", "admin");
     await createTestUser(env.DB, "user2");
 
-    const res = await req("/users", admin.jwt);
+    const res = await req("/admin/users", admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("user2");
   });
 
   test("paginates users", async () => {
-    const admin = await createTestUser(env.DB, "admin2b", "admin");
+    const admin = await createTestUser(env.DB, "admin2b", "github", undefined, "free", "admin");
     // Create 20 more users to span 2 pages (PAGE_SIZE=20, +1 admin = 21)
     for (let i = 0; i < 20; i++) {
       await createTestUser(env.DB, `paguser-${String(i).padStart(2, "0")}`);
     }
 
-    const res1 = await req("/users", admin.jwt);
+    const res1 = await req("/admin/users", admin.jwt);
     expect(res1.status).toBe(200);
     const html1 = await res1.text();
     expect(html1).toContain("1 / 2");
     expect(html1).toContain("?page=2");
 
-    const res2 = await req("/users?page=2", admin.jwt);
+    const res2 = await req("/admin/users?page=2", admin.jwt);
     expect(res2.status).toBe(200);
     const html2 = await res2.text();
     expect(html2).toContain("2 / 2");
   });
 
   test("searches users", async () => {
-    const admin = await createTestUser(env.DB, "admin3", "admin");
+    const admin = await createTestUser(env.DB, "admin3", "github", undefined, "free", "admin");
     await createTestUser(env.DB, "findable");
     await createTestUser(env.DB, "hidden");
 
-    const res = await req("/users?search=findable", admin.jwt);
+    const res = await req("/admin/users?search=findable", admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("findable");
@@ -130,12 +130,12 @@ describe("GET /users", () => {
   });
 });
 
-describe("GET /users/:id", () => {
+describe("GET /admin/users/:id", () => {
   test("renders user detail", async () => {
-    const admin = await createTestUser(env.DB, "admin4", "admin");
+    const admin = await createTestUser(env.DB, "admin4", "github", undefined, "free", "admin");
     const user = await createTestUser(env.DB, "detailuser");
 
-    const res = await req(`/users/${user.id}`, admin.jwt);
+    const res = await req(`/admin/users/${user.id}`, admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("detailuser");
@@ -144,10 +144,10 @@ describe("GET /users/:id", () => {
   });
 
   test("renders plan limits card", async () => {
-    const admin = await createTestUser(env.DB, "admin4b", "admin");
+    const admin = await createTestUser(env.DB, "admin4b", "github", undefined, "free", "admin");
     const user = await createTestUser(env.DB, "limitsuser");
 
-    const res = await req(`/users/${user.id}`, admin.jwt);
+    const res = await req(`/admin/users/${user.id}`, admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain(">Plan<");
@@ -160,13 +160,13 @@ describe("GET /users/:id", () => {
   });
 
   test("shows deploy count today", async () => {
-    const admin = await createTestUser(env.DB, "admin4c", "admin");
+    const admin = await createTestUser(env.DB, "admin4c", "github", undefined, "free", "admin");
     const user = await createTestUser(env.DB, "deploycountuser");
     const project = await createTestProject(env.DB, user.id, "dc-proj");
     await createTestDeployment(env.DB, project.id, "live");
     await createTestDeployment(env.DB, project.id, "live");
 
-    const res = await req(`/users/${user.id}`, admin.jwt);
+    const res = await req(`/admin/users/${user.id}`, admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     // Should show "2 / 100" (2 deploys today, free tier limit 100)
@@ -174,32 +174,32 @@ describe("GET /users/:id", () => {
   });
 });
 
-describe("POST /users/:id/plan", () => {
+describe("POST /admin/users/:id/plan", () => {
   test("updates plan and redirects", async () => {
-    const admin = await createTestUser(env.DB, "admin5", "admin");
+    const admin = await createTestUser(env.DB, "admin5", "github", undefined, "free", "admin");
     const user = await createTestUser(env.DB, "planuser");
 
     const body = new URLSearchParams({ plan: "pro" });
-    const res = await req(`/users/${user.id}/plan`, admin.jwt, {
+    const res = await req(`/admin/users/${user.id}/plan`, admin.jwt, {
       method: "POST",
       body: body.toString(),
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
     });
     expect(res.status).toBe(302);
-    expect(res.headers.get("Location")).toBe(`/users/${user.id}`);
+    expect(res.headers.get("Location")).toBe(`/admin/users/${user.id}`);
   });
 });
 
-describe("POST /users/:id/suspend + unsuspend", () => {
+describe("POST /admin/users/:id/suspend + unsuspend", () => {
   test("suspends and unsuspends via forms", async () => {
-    const admin = await createTestUser(env.DB, "admin6", "admin");
+    const admin = await createTestUser(env.DB, "admin6", "github", undefined, "free", "admin");
     const user = await createTestUser(env.DB, "suspuser");
     const project = await createTestProject(env.DB, user.id, "susp-slug");
     await env.ROUTING.put(project.slug, JSON.stringify({ workerName: "w", projectId: project.id }));
 
     // Suspend
     const suspBody = new URLSearchParams({ reason: "test_reason" });
-    const suspRes = await req(`/users/${user.id}/suspend`, admin.jwt, {
+    const suspRes = await req(`/admin/users/${user.id}/suspend`, admin.jwt, {
       method: "POST",
       body: suspBody.toString(),
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -210,7 +210,7 @@ describe("POST /users/:id/suspend + unsuspend", () => {
     expect(routingAfter.suspended).toBe("test_reason");
 
     // Unsuspend
-    const unsuspRes = await req(`/users/${user.id}/unsuspend`, admin.jwt, {
+    const unsuspRes = await req(`/admin/users/${user.id}/unsuspend`, admin.jwt, {
       method: "POST",
       body: "",
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -222,34 +222,34 @@ describe("POST /users/:id/suspend + unsuspend", () => {
   });
 });
 
-describe("GET /projects", () => {
+describe("GET /admin/projects", () => {
   test("renders projects list", async () => {
-    const admin = await createTestUser(env.DB, "admin7", "admin");
+    const admin = await createTestUser(env.DB, "admin7", "github", undefined, "free", "admin");
     const user = await createTestUser(env.DB, "projowner");
     await createTestProject(env.DB, user.id, "my-proj");
 
-    const res = await req("/projects", admin.jwt);
+    const res = await req("/admin/projects", admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("my-proj");
   });
 
   test("paginates projects", async () => {
-    const admin = await createTestUser(env.DB, "admin7b", "admin");
+    const admin = await createTestUser(env.DB, "admin7b", "github", undefined, "free", "admin");
     // Create 21 projects to span 2 pages (PAGE_SIZE=20)
     for (let i = 0; i < 21; i++) {
       await createTestProject(env.DB, admin.id, `pagproj-${String(i).padStart(2, "0")}`);
     }
 
     // Page 1: should have 20 projects and a Next link
-    const res1 = await req("/projects?page=1", admin.jwt);
+    const res1 = await req("/admin/projects?page=1", admin.jwt);
     expect(res1.status).toBe(200);
     const html1 = await res1.text();
     expect(html1).toContain("1 / 2");
     expect(html1).toContain("?page=2");
 
     // Page 2: should have 1 project and no Next link
-    const res2 = await req("/projects?page=2", admin.jwt);
+    const res2 = await req("/admin/projects?page=2", admin.jwt);
     expect(res2.status).toBe(200);
     const html2 = await res2.text();
     expect(html2).toContain("2 / 2");
@@ -257,13 +257,13 @@ describe("GET /projects", () => {
   });
 });
 
-describe("GET /projects/:id", () => {
+describe("GET /admin/projects/:id", () => {
   test("renders project detail", async () => {
-    const admin = await createTestUser(env.DB, "admin8", "admin");
+    const admin = await createTestUser(env.DB, "admin8", "github", undefined, "free", "admin");
     const user = await createTestUser(env.DB, "projowner2");
     const project = await createTestProject(env.DB, user.id, "detail-proj");
 
-    const res = await req(`/projects/${project.id}`, admin.jwt);
+    const res = await req(`/admin/projects/${project.id}`, admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("detail-proj");
@@ -272,69 +272,69 @@ describe("GET /projects/:id", () => {
   });
 
   test("shows deployment error in project detail table", async () => {
-    const admin = await createTestUser(env.DB, "admin8b", "admin");
+    const admin = await createTestUser(env.DB, "admin8b", "github", undefined, "free", "admin");
     const project = await createTestProject(env.DB, admin.id, "proj-err");
     await createTestDeployment(env.DB, project.id, "failed", "cli", "worker upload failed: 500");
 
-    const res = await req(`/projects/${project.id}`, admin.jwt);
+    const res = await req(`/admin/projects/${project.id}`, admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("worker upload failed: 500");
   });
 
   test("links deployment IDs to detail page", async () => {
-    const admin = await createTestUser(env.DB, "admin8c", "admin");
+    const admin = await createTestUser(env.DB, "admin8c", "github", undefined, "free", "admin");
     const project = await createTestProject(env.DB, admin.id, "proj-link");
     const deployment = await createTestDeployment(env.DB, project.id, "live");
 
-    const res = await req(`/projects/${project.id}`, admin.jwt);
+    const res = await req(`/admin/projects/${project.id}`, admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain(`/deployments/${deployment.id}`);
+    expect(html).toContain(`/admin/deployments/${deployment.id}`);
   });
 });
 
-describe("GET /deployments", () => {
+describe("GET /admin/deployments", () => {
   test("renders deployments list", async () => {
-    const admin = await createTestUser(env.DB, "admin10", "admin");
+    const admin = await createTestUser(env.DB, "admin10", "github", undefined, "free", "admin");
     const user = await createTestUser(env.DB, "deplowner");
     const project = await createTestProject(env.DB, user.id, "depl-proj");
     await createTestDeployment(env.DB, project.id, "live", "cli");
 
-    const res = await req("/deployments", admin.jwt);
+    const res = await req("/admin/deployments", admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Deployments");
-    expect(html).toContain(`/projects/${project.id}`);
+    expect(html).toContain(`/admin/projects/${project.id}`);
     expect(html).toContain("live");
     expect(html).toContain("cli");
   });
 
   test("shows error preview for failed deployments", async () => {
-    const admin = await createTestUser(env.DB, "admin10b", "admin");
+    const admin = await createTestUser(env.DB, "admin10b", "github", undefined, "free", "admin");
     const project = await createTestProject(env.DB, admin.id, "errl-proj");
     await createTestDeployment(env.DB, project.id, "failed", "cli", "migration failed: syntax");
 
-    const res = await req("/deployments", admin.jwt);
+    const res = await req("/admin/deployments", admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("migration failed: syntax");
   });
 
   test("paginates deployments", async () => {
-    const admin = await createTestUser(env.DB, "admin11", "admin");
+    const admin = await createTestUser(env.DB, "admin11", "github", undefined, "free", "admin");
     const project = await createTestProject(env.DB, admin.id, "pagdepl-proj");
     for (let i = 0; i < 21; i++) {
       await createTestDeployment(env.DB, project.id, "live");
     }
 
-    const res1 = await req("/deployments?page=1", admin.jwt);
+    const res1 = await req("/admin/deployments?page=1", admin.jwt);
     expect(res1.status).toBe(200);
     const html1 = await res1.text();
     expect(html1).toContain("1 / 2");
     expect(html1).toContain("?page=2");
 
-    const res2 = await req("/deployments?page=2", admin.jwt);
+    const res2 = await req("/admin/deployments?page=2", admin.jwt);
     expect(res2.status).toBe(200);
     const html2 = await res2.text();
     expect(html2).toContain("2 / 2");
@@ -342,13 +342,13 @@ describe("GET /deployments", () => {
   });
 });
 
-describe("GET /deployments/:id", () => {
+describe("GET /admin/deployments/:id", () => {
   test("renders deployment detail", async () => {
-    const admin = await createTestUser(env.DB, "admin12", "admin");
+    const admin = await createTestUser(env.DB, "admin12", "github", undefined, "free", "admin");
     const project = await createTestProject(env.DB, admin.id, "depldetail-proj");
     const deployment = await createTestDeployment(env.DB, project.id, "live", "cli");
 
-    const res = await req(`/deployments/${deployment.id}`, admin.jwt);
+    const res = await req(`/admin/deployments/${deployment.id}`, admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain(deployment.id);
@@ -358,7 +358,7 @@ describe("GET /deployments/:id", () => {
   });
 
   test("shows error banner for failed deployment", async () => {
-    const admin = await createTestUser(env.DB, "admin12b", "admin");
+    const admin = await createTestUser(env.DB, "admin12b", "github", undefined, "free", "admin");
     const project = await createTestProject(env.DB, admin.id, "errdetail-proj");
     const deployment = await createTestDeployment(
       env.DB,
@@ -368,7 +368,7 @@ describe("GET /deployments/:id", () => {
       "worker upload failed: internal error",
     );
 
-    const res = await req(`/deployments/${deployment.id}`, admin.jwt);
+    const res = await req(`/admin/deployments/${deployment.id}`, admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Error");
@@ -376,7 +376,7 @@ describe("GET /deployments/:id", () => {
   });
 
   test("renders parsed manifest card", async () => {
-    const admin = await createTestUser(env.DB, "admin12c", "admin");
+    const admin = await createTestUser(env.DB, "admin12c", "github", undefined, "free", "admin");
     const project = await createTestProject(env.DB, admin.id, "manifest-proj");
     const n = ++manifestCounter;
     const id = `dpl_manifest${n}`;
@@ -391,7 +391,7 @@ describe("GET /deployments/:id", () => {
       .bind(id, project.id, "live", manifest)
       .run();
 
-    const res = await req(`/deployments/${id}`, admin.jwt);
+    const res = await req(`/admin/deployments/${id}`, admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Manifest");
@@ -406,15 +406,15 @@ describe("GET /deployments/:id", () => {
   });
 
   test("returns 404 for unknown deployment", async () => {
-    const admin = await createTestUser(env.DB, "admin13", "admin");
-    const res = await req("/deployments/dpl_nonexistent", admin.jwt);
+    const admin = await createTestUser(env.DB, "admin13", "github", undefined, "free", "admin");
+    const res = await req("/admin/deployments/dpl_nonexistent", admin.jwt);
     expect(res.status).toBe(404);
   });
 });
 
-describe("GET /login", () => {
+describe("GET /admin/login", () => {
   test("renders login page without auth", async () => {
-    const res = await app.fetch(new Request("http://localhost/login"), env);
+    const res = await app.fetch(new Request("http://localhost/admin/login"), env);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Vite Cloud Admin");
@@ -422,12 +422,12 @@ describe("GET /login", () => {
   });
 });
 
-describe("GET /logout", () => {
+describe("GET /admin/logout", () => {
   test("clears cookie and redirects", async () => {
-    const admin = await createTestUser(env.DB, "admin9", "admin");
-    const res = await req("/logout", admin.jwt);
+    const admin = await createTestUser(env.DB, "admin9", "github", undefined, "free", "admin");
+    const res = await req("/admin/logout", admin.jwt);
     expect(res.status).toBe(302);
-    expect(res.headers.get("Location")).toBe("/login");
+    expect(res.headers.get("Location")).toBe("/admin/login");
     const setCookie = res.headers.get("Set-Cookie");
     expect(setCookie).toContain("admin_token=");
   });

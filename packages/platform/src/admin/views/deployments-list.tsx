@@ -1,4 +1,4 @@
-import type { Deployment } from "@vite-cloud/platform/types";
+import type { Deployment } from "../../types";
 import { Layout } from "./layout";
 import { Pagination } from "./pagination";
 
@@ -39,11 +39,13 @@ export function DeploymentsListPage({
               return (
                 <tr key={d.id}>
                   <td style="font-family: monospace; font-size: 0.8rem">
-                    <a href={`/deployments/${d.id}`}>{d.id}</a>
+                    <a href={`/admin/deployments/${d.id}`}>{d.id}</a>
                   </td>
                   <td>
                     {d.project_slug ? (
-                      <a href={`/projects/${d.project_id}`}>{d.project_name ?? d.project_slug}</a>
+                      <a href={`/admin/projects/${d.project_id}`}>
+                        {d.project_name ?? d.project_slug}
+                      </a>
                     ) : (
                       "-"
                     )}
@@ -64,7 +66,7 @@ export function DeploymentsListPage({
         {deployments.length === 0 && (
           <p style="padding: 1rem; color: #6b7280">No deployments found.</p>
         )}
-        <Pagination page={page} totalPages={totalPages} baseUrl="/deployments" />
+        <Pagination page={page} totalPages={totalPages} baseUrl="/admin/deployments" />
       </div>
     </Layout>
   );

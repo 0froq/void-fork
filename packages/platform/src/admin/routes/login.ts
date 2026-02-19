@@ -1,53 +1,12 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie } from "hono/cookie";
-import type { AdminEnv } from "../env";
-import {
-  getGoogleAuthorizeUrl,
-  exchangeCodeForToken,
-  getGoogleUser,
-} from "@vite-cloud/platform/auth/google";
-import { signJwt } from "@vite-cloud/platform/auth/jwt";
-import { getUserByProvider, getUserByEmail } from "@vite-cloud/platform/db";
+import type { PlatformEnv } from "../../env";
+import { getGoogleAuthorizeUrl, exchangeCodeForToken, getGoogleUser } from "../../auth/google";
+import { signJwt } from "../../auth/jwt";
+import { hmacSignState, hmacVerifyState } from "../../auth/hmac";
+import { getUserByProvider, getUserByEmail } from "../../db";
 
-const app = new Hono<AdminEnv>();
-
-const DEFAULT_REDIRECT_URI = "https://admin.vite.cloud/callback";
-
-async function hmacSignState(data: string, secret: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(data));
-  const bytes = new Uint8Array(sig);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-async function hmacVerifyState(data: string, signature: string, secret: string): Promise<boolean> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["verify"],
-  );
-  const padded = signature.replace(/-/g, "+").replace(/_/g, "/");
-  const binary = atob(padded);
-  const sigBytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    sigBytes[i] = binary.charCodeAt(i);
-  }
-  return crypto.subtle.verify("HMAC", key, sigBytes, encoder.encode(data));
-}
+const app = new Hono<PlatformEnv>();
 
 // GET /login
 app.get("/login", (c) => {
@@ -64,7 +23,7 @@ a { display: inline-block; margin: 0.5rem; padding: 0.75rem 1.5rem; background: 
 <div class="card">
 <h1>Vite Cloud Admin</h1>
 <p>Sign in with your admin account</p>
-<a href="/login/google">Google</a>
+<a href="/admin/login/google">Google</a>
 </div>
 </body>
 </html>`);
@@ -72,7 +31,7 @@ a { display: inline-block; margin: 0.5rem; padding: 0.75rem 1.5rem; background: 
 
 // GET /login/google
 app.get("/login/google", async (c) => {
-  const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
+  const redirectUri = new URL(c.req.url).origin + "/admin/callback";
   const nonce = crypto.randomUUID();
   const stateData = JSON.stringify({ nonce });
   const stateEncoded = btoa(stateData);
@@ -104,7 +63,7 @@ app.get("/callback", async (c) => {
     return c.html("<h1>Login failed</h1><p>Invalid state signature.</p>", 400);
   }
 
-  const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
+  const redirectUri = new URL(c.req.url).origin + "/admin/callback";
   const googleToken = await exchangeCodeForToken(
     c.env.GOOGLE_CLIENT_ID,
     c.env.GOOGLE_CLIENT_SECRET,
@@ -146,13 +105,13 @@ app.get("/callback", async (c) => {
     maxAge: 30 * 24 * 60 * 60,
   });
 
-  return c.redirect("/");
+  return c.redirect("/admin/");
 });
 
 // GET /logout
 app.get("/logout", (c) => {
   deleteCookie(c, "admin_token", { path: "/" });
-  return c.redirect("/login");
+  return c.redirect("/admin/login");
 });
 
 export default app;

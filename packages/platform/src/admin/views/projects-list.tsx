@@ -1,4 +1,4 @@
-import type { Project } from "@vite-cloud/platform/types";
+import type { Project } from "../../types";
 import { Layout } from "./layout";
 import { Pagination } from "./pagination";
 
@@ -33,7 +33,7 @@ export function ProjectsListPage({
             {projects.map((p) => (
               <tr key={p.id}>
                 <td>
-                  <a href={`/projects/${p.id}`}>{p.name}</a>
+                  <a href={`/admin/projects/${p.id}`}>{p.name}</a>
                 </td>
                 <td>
                   <a
@@ -44,7 +44,9 @@ export function ProjectsListPage({
                     {p.slug}.{siteDomain}
                   </a>
                 </td>
-                <td>{p.owner_login ? <a href={`/users/${p.user_id}`}>{p.owner_login}</a> : "-"}</td>
+                <td>
+                  {p.owner_login ? <a href={`/admin/users/${p.user_id}`}>{p.owner_login}</a> : "-"}
+                </td>
                 <td>{p.mode}</td>
                 <td>{new Date(p.created_at).toLocaleDateString()}</td>
               </tr>
@@ -52,7 +54,7 @@ export function ProjectsListPage({
           </tbody>
         </table>
         {projects.length === 0 && <p style="padding: 1rem; color: #6b7280">No projects found.</p>}
-        <Pagination page={page} totalPages={totalPages} baseUrl="/projects" />
+        <Pagination page={page} totalPages={totalPages} baseUrl="/admin/projects" />
       </div>
     </Layout>
   );

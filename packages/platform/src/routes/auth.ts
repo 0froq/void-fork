@@ -7,47 +7,12 @@ import {
   getGoogleUser,
 } from "../auth/google";
 import { signJwt } from "../auth/jwt";
+import { hmacSignState, hmacVerifyState } from "../auth/hmac";
 import { getUserByProvider, getUserByEmail, createUser, updateUser } from "../db";
 
-const DEFAULT_REDIRECT_URI = "https://api.vite.cloud/auth/callback";
+const DEFAULT_REDIRECT_URI = "https://platform.vite.cloud/auth/callback";
 
 const app = new Hono<PlatformEnv>();
-
-async function hmacSignState(data: string, secret: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(data));
-  const bytes = new Uint8Array(sig);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-async function hmacVerifyState(data: string, signature: string, secret: string): Promise<boolean> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["verify"],
-  );
-  const padded = signature.replace(/-/g, "+").replace(/_/g, "/");
-  const binary = atob(padded);
-  const sigBytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    sigBytes[i] = binary.charCodeAt(i);
-  }
-  return crypto.subtle.verify("HMAC", key, sigBytes, encoder.encode(data));
-}
 
 // GET /auth/login?redirect=http://localhost:PORT/callback&provider=github|google
 app.get("/login", async (c) => {
@@ -56,14 +21,9 @@ app.get("/login", async (c) => {
     return c.json({ error: "redirect parameter is required" }, 400);
   }
 
-  // Security: only allow localhost and admin redirects
-  const adminOrigin = c.env.ADMIN_ORIGIN ?? "https://admin.vite.cloud";
-  if (
-    !redirect.startsWith("http://localhost:") &&
-    !redirect.startsWith("http://127.0.0.1:") &&
-    !redirect.startsWith(adminOrigin + "/")
-  ) {
-    return c.json({ error: "redirect must be a localhost or admin URL" }, 400);
+  // Security: only allow localhost redirects (CLI use case)
+  if (!redirect.startsWith("http://localhost:") && !redirect.startsWith("http://127.0.0.1:")) {
+    return c.json({ error: "redirect must be a localhost URL" }, 400);
   }
 
   const provider = c.req.query("provider") ?? "github";
@@ -118,12 +78,7 @@ app.get("/callback", async (c) => {
   };
 
   // Re-validate redirect after decoding
-  const callbackAdminOrigin = c.env.ADMIN_ORIGIN ?? "https://admin.vite.cloud";
-  if (
-    !redirect.startsWith("http://localhost:") &&
-    !redirect.startsWith("http://127.0.0.1:") &&
-    !redirect.startsWith(callbackAdminOrigin + "/")
-  ) {
+  if (!redirect.startsWith("http://localhost:") && !redirect.startsWith("http://127.0.0.1:")) {
     return c.json({ error: "invalid redirect" }, 400);
   }
 

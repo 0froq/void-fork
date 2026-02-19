@@ -60,13 +60,13 @@ export function Layout({
       <body>
         <nav>
           <span class="brand">Vite Cloud Admin</span>
-          <a href="/">Dashboard</a>
-          <a href="/users">Users</a>
-          <a href="/projects">Projects</a>
-          <a href="/deployments">Deployments</a>
+          <a href="/admin/">Dashboard</a>
+          <a href="/admin/users">Users</a>
+          <a href="/admin/projects">Projects</a>
+          <a href="/admin/deployments">Deployments</a>
           <span style="margin-left: auto; display: flex; align-items: center; gap: 1rem">
             {username && <span style="color: #a0a0a0; font-size: 0.875rem">{username}</span>}
-            <a href="/logout">Logout</a>
+            <a href="/admin/logout">Logout</a>
           </span>
         </nav>
         <main>{children}</main>

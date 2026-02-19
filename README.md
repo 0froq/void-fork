@@ -25,7 +25,7 @@ pnpm test            # Run vitest (unit + integration tests)
 pnpm lint            # oxlint
 pnpm fmt             # oxfmt --write .
 pnpm check           # Typecheck all packages (tsc --noEmit)
-pnpm run deploy      # Build all + deploy platform, dispatch & admin workers (production)
+pnpm run deploy      # Build all + deploy platform & dispatch workers (production)
 pnpm run deploy:staging  # Deploy all workers to staging environment
 ```
 
@@ -36,9 +36,8 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | Package                      | npm name                         | Purpose                                                |
 | ---------------------------- | -------------------------------- | ------------------------------------------------------ |
 | `packages/vite-cloud`        | `vite-cloud`                     | Core Vite plugin — routing, inference, migrations, CLI |
-| `packages/platform`          | `@vite-cloud/platform` (private) | Control Plane API — projects, deploys, CF API proxy    |
+| `packages/platform`          | `@vite-cloud/platform` (private) | Control Plane API + Admin Dashboard                    |
 | `packages/dispatch`          | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets   |
-| `packages/admin`             | `@vite-cloud/admin` (private)    | Admin dashboard (Hono JSX, server-rendered)            |
 | `packages/create-vite-cloud` | `create-vite-cloud`              | `npm create vite-cloud` scaffolding CLI                |
 | `playground/*`               | (private)                        | local apps for testing                                 |
 
@@ -158,8 +157,24 @@ src/
     jwt.ts                  # HS256 JWT sign/verify via Web Crypto API
     github.ts               # GitHub OAuth helpers (authorize URL, code→token, user profile)
     google.ts               # Google OAuth helpers (authorize URL, code→token, user profile)
+    hmac.ts                 # HMAC state signing/verification for OAuth flows
   middleware/
     auth.ts                 # Bearer token verification, sets userId/userLogin on context
+  admin/
+    middleware/auth.ts      # Cookie-based JWT auth + role === "admin" check
+    routes/login.ts         # GET /admin/login, /admin/login/google, /admin/callback, /admin/logout
+    routes/system.tsx       # GET /admin/ (dashboard home with stats)
+    routes/users.tsx        # GET /admin/users, GET /admin/users/:id, POST plan/suspend/unsuspend
+    routes/projects.tsx     # GET /admin/projects, GET /admin/projects/:id
+    routes/deployments.tsx  # GET /admin/deployments, GET /admin/deployments/:id
+    views/layout.tsx        # HTML shell (head, nav, body)
+    views/dashboard.tsx     # System stats overview
+    views/users-list.tsx    # Users table with search/filter form
+    views/user-detail.tsx   # User profile, projects, plan limits, deploy count, suspend button
+    views/projects-list.tsx # All projects table
+    views/deployments-list.tsx # Deployments table with error preview column
+    views/pagination.tsx    # Reusable pagination component
+    views/format.ts         # Shared formatting helpers (formatBytes, formatNumber, formatLimit)
   migrations/
     remote-runner.ts        # Executes migrations on remote D1 via CF REST API
     validate.ts             # Server-side destructive-op validation (defense in depth)
@@ -172,7 +187,6 @@ src/
     secrets.ts              # Worker secret management (put/delete)
     domains.ts              # Custom domain CRUD + CF for SaaS
     usage.ts                # Usage queries (per-project + aggregate)
-    admin.ts                # Admin endpoints (users, projects, stats)
 migrations/
   0001_initial.sql          # users, projects, deployments, resources tables
   0002_provider_auth.sql    # Migrate users to provider-agnostic schema
@@ -182,7 +196,7 @@ migrations/
 
 ### Platform API
 
-All endpoints except `/health` and `/auth/*` require Bearer token authentication. Project endpoints verify ownership (`project.user_id === userId`). Admin endpoints require `role === "admin"`.
+All endpoints except `/health`, `/auth/*`, and `/admin/*` require Bearer token authentication. Project endpoints verify ownership (`project.user_id === userId`). Admin dashboard uses cookie-based auth with `role === "admin"` check.
 
 ```
 GET    /health                           # Health check
@@ -212,14 +226,21 @@ DELETE /projects/:id/domains/:domainId   # Remove custom domain
 GET    /projects/:id/usage               # Project usage (current billing period)
 GET    /usage                            # Aggregate usage across all projects
 
-GET    /admin/users                      # List users (paginated, searchable)
-GET    /admin/users/:id                  # User detail with projects
+# Admin dashboard (HTML, cookie-based auth)
+GET    /admin/login                      # Login page
+GET    /admin/login/google               # Google OAuth initiation
+GET    /admin/callback                   # OAuth callback → set cookie
+GET    /admin/logout                     # Clear cookie
+GET    /admin/                           # Dashboard (stats + recent projects)
+GET    /admin/users                      # Users list (paginated, searchable)
+GET    /admin/users/:id                  # User detail (plan, usage, suspension)
 POST   /admin/users/:id/plan             # Change plan
 POST   /admin/users/:id/suspend          # Suspend user
 POST   /admin/users/:id/unsuspend        # Unsuspend user
-GET    /admin/projects                   # List all projects
-GET    /admin/projects/:id               # Project detail with deployments/resources
-GET    /admin/stats                      # System-wide stats
+GET    /admin/projects                   # All projects list
+GET    /admin/projects/:id               # Project detail (resources, deployments, domains)
+GET    /admin/deployments                # All deployments list
+GET    /admin/deployments/:id            # Deployment detail (manifest, errors)
 ```
 
 ### Auth Flow
@@ -262,18 +283,18 @@ The platform default export is `{ fetch: app.fetch, scheduled }` — `app` (the 
 
 ### Secrets (via `wrangler secret put`)
 
-| Secret                 | platform | admin | dispatch | Staging notes                                        |
-| ---------------------- | -------- | ----- | -------- | ---------------------------------------------------- |
-| `CF_API_TOKEN`         | yes      | yes   |          | Can share with production                            |
-| `CF_ACCOUNT_ID`        | yes      | yes   |          | Can share with production                            |
-| `CF_ZONE_ID`           | yes      |       |          | Can share with production                            |
-| `JWT_SECRET`           | yes      | yes   |          | Must differ from production; independent per worker  |
-| `GITHUB_CLIENT_ID`     | yes      |       |          | Can share with production (add staging callback URL) |
-| `GITHUB_CLIENT_SECRET` | yes      |       |          | Can share with production                            |
-| `GOOGLE_CLIENT_ID`     | yes      | yes   |          | Can share with production (add staging callback URL) |
-| `GOOGLE_CLIENT_SECRET` | yes      | yes   |          | Can share with production                            |
+| Secret                 | platform | dispatch | Staging notes                                        |
+| ---------------------- | -------- | -------- | ---------------------------------------------------- |
+| `CF_API_TOKEN`         | yes      |          | Can share with production                            |
+| `CF_ACCOUNT_ID`        | yes      |          | Can share with production                            |
+| `CF_ZONE_ID`           | yes      |          | Can share with production                            |
+| `JWT_SECRET`           | yes      |          | Must differ from production                          |
+| `GITHUB_CLIENT_ID`     | yes      |          | Can share with production (add staging callback URL) |
+| `GITHUB_CLIENT_SECRET` | yes      |          | Can share with production                            |
+| `GOOGLE_CLIENT_ID`     | yes      |          | Can share with production (add staging callback URL) |
+| `GOOGLE_CLIENT_SECRET` | yes      |          | Can share with production                            |
 
-`AUTH_REDIRECT_URI` is set as a `vars` entry in wrangler config for staging (`https://api.staging.vite.cloud/auth/callback`). For local dev, set `AUTH_REDIRECT_URI=http://localhost:8787/auth/callback` in `.dev.vars`.
+`AUTH_REDIRECT_URI` is set as a `vars` entry in wrangler config for staging (`https://platform.staging.vite.cloud/auth/callback`). For local dev, set `AUTH_REDIRECT_URI=http://localhost:8787/auth/callback` and `DEV_AUTH_BYPASS=true` in `.dev.vars`.
 
 ### Cloudflare API Token Permissions
 
@@ -283,16 +304,16 @@ Two tokens are needed: a **deploy token** (used by wrangler / CI) and a **runtim
 
 #### Deploy Token (`CLOUDFLARE_API_TOKEN`)
 
-Used by `pnpm run deploy` and GitHub Actions to deploy all three workers.
+Used by `pnpm run deploy` and GitHub Actions to deploy platform and dispatch workers.
 
 **Account permissions:**
 
-| Permission         | Access | Reason                                       |
-| ------------------ | ------ | -------------------------------------------- |
-| Workers Scripts    | Edit   | Deploy platform, dispatch, and admin workers |
-| Workers KV Storage | Edit   | KV namespace bindings (ROUTING)              |
-| D1                 | Edit   | D1 database bindings (DB)                    |
-| Workers R2 Storage | Edit   | R2 bucket bindings (ASSETS)                  |
+| Permission         | Access | Reason                               |
+| ------------------ | ------ | ------------------------------------ |
+| Workers Scripts    | Edit   | Deploy platform and dispatch workers |
+| Workers KV Storage | Edit   | KV namespace bindings (ROUTING)      |
+| D1                 | Edit   | D1 database bindings (DB)            |
+| Workers R2 Storage | Edit   | R2 bucket bindings (ASSETS)          |
 
 **Zone permissions** (on `vitecloud.app`):
 
@@ -369,70 +390,11 @@ Static asset responses are cached at the CF edge via `caches.default`. Cache key
 - API routes and SSR-rendered responses are **not** edge-cached
 - Non-file paths fall back to `index.html` (SPA routing)
 
-## `admin` Architecture
+### Admin Dashboard
 
-CF Worker serving the Admin Dashboard (Hono JSX, server-rendered). Shares the same D1 database as the platform worker.
+The admin dashboard is integrated into the platform worker at `/admin/*`. It uses Hono JSX (server-rendered HTML) with cookie-based JWT auth, separate from the Bearer token auth used by API endpoints.
 
-### Auth
-
-Cookie-based JWT auth with its own independent `JWT_SECRET` (does not need to match the platform's). Login flow handles Google OAuth directly (using shared helper functions from `@vite-cloud/platform`), then verifies `role === "admin"` from D1. Non-admins get 403.
-
-### Source Layout
-
-```
-packages/admin/
-  package.json              # hono, @vite-cloud/platform (workspace dep)
-  wrangler.jsonc
-  tsconfig.json
-  src/
-    index.ts                # Hono app default export
-    env.ts                  # AdminEnv type (DB, ROUTING, JWT_SECRET)
-    middleware/
-      auth.ts               # JWT verify (cookie) + role === "admin" check
-    routes/
-      login.ts              # GET /login, /login/github, /login/google, /callback, /logout
-      users.tsx             # GET /users, GET /users/:id, POST /users/:id/plan|suspend|unsuspend
-      projects.tsx          # GET /projects, GET /projects/:id
-      system.tsx            # GET / (dashboard home with stats)
-    views/
-      layout.tsx            # HTML shell (head, nav, body)
-      users-list.tsx        # Users table with search/filter form
-      user-detail.tsx       # User profile, projects, plan limits, deploy count, suspend button
-      projects-list.tsx     # All projects table
-      deployments-list.tsx  # Deployments table with error preview column
-      dashboard.tsx         # System stats overview
-      format.ts             # Shared formatting helpers (formatBytes, formatNumber, formatLimit)
-```
-
-### Platform Admin API
-
-The platform exposes `/admin/*` endpoints (protected by auth + admin middleware):
-
-```
-GET    /admin/users                  # List users (paginated, searchable)
-GET    /admin/users/:id              # User detail with projects
-POST   /admin/users/:id/plan         # Change plan
-POST   /admin/users/:id/suspend      # Suspend user
-POST   /admin/users/:id/unsuspend    # Unsuspend user
-GET    /admin/projects               # List all projects
-GET    /admin/projects/:id           # Project detail with deployments/resources
-GET    /admin/stats                  # System-wide stats
-```
-
-### Platform Subpath Exports
-
-The platform package exposes `.ts` source files via subpath exports for consumption by the admin worker (wrangler handles TS bundling):
-
-| Subpath                            | File                  |
-| ---------------------------------- | --------------------- |
-| `@vite-cloud/platform/db`          | `src/db.ts`           |
-| `@vite-cloud/platform/types`       | `src/types.ts`        |
-| `@vite-cloud/platform/id`          | `src/id.ts`           |
-| `@vite-cloud/platform/tiers`       | `src/tiers.ts`        |
-| `@vite-cloud/platform/auth/jwt`    | `src/auth/jwt.ts`     |
-| `@vite-cloud/platform/auth/github` | `src/auth/github.ts`  |
-| `@vite-cloud/platform/auth/google` | `src/auth/google.ts`  |
-| `@vite-cloud/platform/usage`       | `src/routes/usage.ts` |
+**Auth**: Cookie-based — Google OAuth flow at `/admin/login/google` → set `admin_token` cookie → verify `role === "admin"`. The OAuth callback URL is derived from the request origin (`new URL(c.req.url).origin + "/admin/callback"`), so no separate env var is needed. `DEV_AUTH_BYPASS=true` in `.dev.vars` skips OAuth for local development.
 
 ## Tooling
 
@@ -449,7 +411,7 @@ The platform package exposes `.ts` source files via subpath exports for consumpt
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). 754 tests across 63 files.
+Tests run from root with `pnpm test` (vitest).
 
 ### Unit Tests
 
@@ -483,20 +445,19 @@ Tests run from root with `pnpm test` (vitest). 754 tests across 63 files.
 
 Platform integration tests call the Hono app via `app.fetch(request, env)` with **real** Miniflare D1/KV/R2 bindings and **mocked** external fetch calls (GitHub API, CF API). This tests the full request→middleware→route→DB→response chain.
 
-| Test file                                                 | Covers                                                                                                              |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `packages/platform/test/integration/api-health.test.ts`   | Health endpoint smoke test (1 test)                                                                                 |
-| `packages/platform/test/integration/api-me.test.ts`       | Auth middleware: missing/invalid/expired JWT, valid (4)                                                             |
-| `packages/platform/test/integration/api-projects.test.ts` | Projects CRUD: auth, list, create, validation, dupes (12)                                                           |
-| `packages/platform/test/integration/api-deploy.test.ts`   | Deploy pipeline: auth, provisioning, migrations, R2, KV, limits, failure modes (33)                                 |
-| `packages/platform/test/integration/api-admin.test.ts`    | Admin API: middleware, users CRUD, plan change, suspend/unsuspend, stats (14)                                       |
-| `packages/admin/test/integration/dashboard.test.ts`       | Admin dashboard: auth, pages, forms, search, pagination, deployments, error display, plan limits, login/logout (28) |
+| Test file                                                    | Covers                                                                                                              |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `packages/platform/test/integration/api-health.test.ts`      | Health endpoint smoke test (1 test)                                                                                 |
+| `packages/platform/test/integration/api-me.test.ts`          | Auth middleware: missing/invalid/expired JWT, valid (4)                                                             |
+| `packages/platform/test/integration/api-projects.test.ts`    | Projects CRUD: auth, list, create, validation, dupes (12)                                                           |
+| `packages/platform/test/integration/api-deploy.test.ts`      | Deploy pipeline: auth, provisioning, migrations, R2, KV, limits, failure modes (33)                                 |
+| `packages/platform/test/integration/admin-dashboard.test.ts` | Admin dashboard: auth, pages, forms, search, pagination, deployments, error display, plan limits, login/logout (28) |
 
 Shared helpers in `packages/platform/test/integration/helpers.ts`:
 
 - `setupEnv()` / `teardownEnv()` — Miniflare lifecycle (D1, KV, R2 bindings)
 - `clearTables()` — D1 cleanup between tests (FK order)
-- `createTestUser()` / `createTestProject()` — factories with JWT signing
+- `createTestUser()` / `createTestProject()` / `createTestDeployment()` — factories with JWT signing
 - `mockCfApi()` — URL-based fetch mock for CF API with configurable overrides
 
 ## Playground
@@ -523,10 +484,12 @@ Verified working:
 
 Two deployment environments: **production** and **staging**. Each has fully isolated CF resources (D1, KV, R2, dispatch namespace, analytics engine).
 
-| Environment | Platform API             | User Sites                | Admin Dashboard            |
-| ----------- | ------------------------ | ------------------------- | -------------------------- |
-| Production  | `api.vite.cloud`         | `*.vitecloud.app`         | `admin.vite.cloud`         |
-| Staging     | `api.staging.vite.cloud` | `*.staging.vitecloud.app` | `admin.staging.vite.cloud` |
+| Environment | Platform (API + Admin)        | User Sites                |
+| ----------- | ----------------------------- | ------------------------- |
+| Production  | `platform.vite.cloud`         | `*.vitecloud.app`         |
+| Staging     | `platform.staging.vite.cloud` | `*.staging.vitecloud.app` |
+
+`api.vite.cloud` is kept as a CNAME alias for backwards compatibility with older CLI versions.
 
 To use the CLI against staging, set `"api"` in `~/.vite-cloud/config.json` or the `VITE_CLOUD_API_URL` env var. These are internal-only — not documented in public-facing docs (`docs/cli.md`).
 
@@ -534,12 +497,12 @@ To use the CLI against staging, set `"api"` in `~/.vite-cloud/config.json` or th
 
 Previously hardcoded values are now configurable via `vars` in wrangler config (defaulting to production values):
 
-| Worker   | Variable             | Default                    | Purpose                                  |
-| -------- | -------------------- | -------------------------- | ---------------------------------------- |
-| platform | `ADMIN_ORIGIN`       | `https://admin.vite.cloud` | Allowed OAuth redirect origin for admin  |
-| platform | `DISPATCH_NAMESPACE` | `vite-cloud-users`         | CF dispatch namespace name for API calls |
-| platform | `SITE_DOMAIN`        | `vitecloud.app`            | Base domain for deploy URL output        |
-| dispatch | `BASE_HOSTNAME`      | `vitecloud.app`            | Base hostname for slug extraction        |
+| Worker   | Variable             | Default            | Purpose                                  |
+| -------- | -------------------- | ------------------ | ---------------------------------------- |
+| platform | `DISPATCH_NAMESPACE` | `vite-cloud-users` | CF dispatch namespace name for API calls |
+| platform | `SITE_DOMAIN`        | `vitecloud.app`    | Base domain for deploy URL output        |
+| platform | `DEV_AUTH_BYPASS`    | (unset)            | Skip admin OAuth for local dev           |
+| dispatch | `BASE_HOSTNAME`      | `vitecloud.app`    | Base hostname for slug extraction        |
 
 ### Deploying
 
@@ -553,10 +516,10 @@ Staging auto-deploys on push to `main` via `.github/workflows/deploy-staging.yml
 ### One-Time Setup (Staging)
 
 1. Create CF resources: D1 database, KV namespace, R2 bucket, dispatch namespace, analytics engine dataset (all with `-staging` suffix)
-2. Replace `PLACEHOLDER_*` IDs in wrangler configs (`packages/{platform,dispatch,admin}/wrangler.jsonc` → `env.staging`)
-3. Set worker secrets: `wrangler secret put <NAME> --env staging` for each worker (platform and admin each have independent `JWT_SECRET`s — they don't need to match each other; use different values from production; OAuth creds can be shared)
-4. DNS: `*.staging` CNAME on `vitecloud.app` zone; `api.staging` + `admin.staging` CNAMEs on `vite.cloud` zone
-5. Add staging callback URLs to GitHub/Google OAuth apps
+2. Replace `PLACEHOLDER_*` IDs in wrangler configs (`packages/{platform,dispatch}/wrangler.jsonc` → `env.staging`)
+3. Set worker secrets: `wrangler secret put <NAME> --env staging` for the platform worker (use different values from production; OAuth creds can be shared)
+4. DNS: `*.staging` CNAME on `vitecloud.app` zone; `platform.staging` CNAME on `vite.cloud` zone
+5. Add staging callback URLs to GitHub/Google OAuth apps (`https://platform.staging.vite.cloud/auth/callback`, `https://platform.staging.vite.cloud/admin/callback`)
 6. Set GitHub repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
 
 ## Pitfalls / Things That Broke

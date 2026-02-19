@@ -1,6 +1,6 @@
-import type { User, Project } from "@vite-cloud/platform/types";
-import type { PlanId } from "@vite-cloud/platform/tiers";
-import { PLAN_LIMITS, getPlanLimits } from "@vite-cloud/platform/tiers";
+import type { User, Project } from "../../types";
+import type { PlanId } from "../../tiers";
+import { PLAN_LIMITS, getPlanLimits } from "../../tiers";
 import { Layout } from "./layout";
 import { formatLimit, formatNumber, formatBytes } from "./format";
 
@@ -78,7 +78,7 @@ export function UserDetailPage({
           <h2 style="font-size: 1.125rem; margin: 0">Plan</h2>
           <form
             method="post"
-            action={`/users/${user.id}/plan`}
+            action={`/admin/users/${user.id}/plan`}
             style="display: flex; gap: 0.5rem; align-items: center"
           >
             <select name="plan">
@@ -175,7 +175,7 @@ export function UserDetailPage({
                 {usage.projects.map((p) => (
                   <tr key={p.projectId}>
                     <td>
-                      <a href={`/projects/${p.projectId}`}>{p.slug}</a>
+                      <a href={`/admin/projects/${p.projectId}`}>{p.slug}</a>
                     </td>
                     <td>{formatNumber(p.requests)}</td>
                     <td>{formatBytes(p.bandwidthBytes)}</td>
@@ -190,7 +190,7 @@ export function UserDetailPage({
       <div class="card mb-1">
         <h2 style="font-size: 1.125rem; margin-bottom: 1rem">Suspension</h2>
         {user.suspended_reason ? (
-          <form method="post" action={`/users/${user.id}/unsuspend`}>
+          <form method="post" action={`/admin/users/${user.id}/unsuspend`}>
             <button class="btn btn-primary" type="submit">
               Unsuspend
             </button>
@@ -198,7 +198,7 @@ export function UserDetailPage({
         ) : (
           <form
             method="post"
-            action={`/users/${user.id}/suspend`}
+            action={`/admin/users/${user.id}/suspend`}
             style="display: flex; gap: 0.5rem; align-items: center"
           >
             <input type="text" name="reason" placeholder="Reason..." value="admin_suspended" />
@@ -225,7 +225,7 @@ export function UserDetailPage({
               {projects.map((p) => (
                 <tr key={p.id}>
                   <td>
-                    <a href={`/projects/${p.id}`}>{p.name}</a>
+                    <a href={`/admin/projects/${p.id}`}>{p.name}</a>
                   </td>
                   <td>{p.slug}</td>
                   <td>{p.mode}</td>

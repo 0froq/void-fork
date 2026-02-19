@@ -1,10 +1,10 @@
 import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
-import type { AdminEnv } from "../env";
-import { verifyJwt } from "@vite-cloud/platform/auth/jwt";
-import { getUser } from "@vite-cloud/platform/db";
+import type { PlatformEnv } from "../../env";
+import { verifyJwt } from "../../auth/jwt";
+import { getUser } from "../../db";
 
-export const adminAuthMiddleware: MiddlewareHandler<AdminEnv> = async (c, next) => {
+export const adminAuthMiddleware: MiddlewareHandler<PlatformEnv> = async (c, next) => {
   if (c.env.DEV_AUTH_BYPASS) {
     const admin = await c.env.DB.prepare(
       "SELECT id, login FROM users WHERE role = 'admin' LIMIT 1",
@@ -18,12 +18,12 @@ export const adminAuthMiddleware: MiddlewareHandler<AdminEnv> = async (c, next) 
 
   const token = getCookie(c, "admin_token");
   if (!token) {
-    return c.redirect("/login");
+    return c.redirect("/admin/login");
   }
 
   const payload = await verifyJwt(token, c.env.JWT_SECRET);
   if (!payload) {
-    return c.redirect("/login");
+    return c.redirect("/admin/login");
   }
 
   const user = await getUser(c.env.DB, payload.sub);

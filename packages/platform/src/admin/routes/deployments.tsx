@@ -1,17 +1,17 @@
 import { Hono } from "hono";
-import type { AdminEnv } from "../env";
+import type { PlatformEnv } from "../../env";
 import {
   getAllDeploymentsWithProject,
   countDeployments,
   getDeployment,
   getProject,
-} from "@vite-cloud/platform/db";
-import type { DeployManifest } from "@vite-cloud/platform/types";
+} from "../../db";
+import type { DeployManifest } from "../../types";
 import { DeploymentsListPage } from "../views/deployments-list";
 import { Layout } from "../views/layout";
 
 const PAGE_SIZE = 20;
-const app = new Hono<AdminEnv>();
+const app = new Hono<PlatformEnv>();
 
 // GET /deployments
 app.get("/", async (c) => {
@@ -87,7 +87,7 @@ app.get("/:id", async (c) => {
               <th>Project</th>
               <td>
                 {project ? (
-                  <a href={`/projects/${project.id}`}>
+                  <a href={`/admin/projects/${project.id}`}>
                     {project.name} ({project.slug})
                   </a>
                 ) : (

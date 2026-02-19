@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { AdminEnv } from "../env";
+import type { PlatformEnv } from "../../env";
 import {
   getAllUsers,
   countUsers,
@@ -10,14 +10,14 @@ import {
   suspendUser,
   unsuspendUser,
   countUserDeploymentsToday,
-} from "@vite-cloud/platform/db";
-import { PLAN_LIMITS, getCurrentBillingPeriodStart } from "@vite-cloud/platform/tiers";
-import { queryProjectUsage } from "@vite-cloud/platform/usage";
+} from "../../db";
+import { PLAN_LIMITS, getCurrentBillingPeriodStart } from "../../tiers";
+import { queryProjectUsage } from "../../routes/usage";
 import { UsersListPage } from "../views/users-list";
 import { UserDetailPage } from "../views/user-detail";
 
 const PAGE_SIZE = 20;
-const app = new Hono<AdminEnv>();
+const app = new Hono<PlatformEnv>();
 
 // GET /users
 app.get("/", async (c) => {
@@ -94,7 +94,7 @@ app.post("/:id/plan", async (c) => {
     return c.html("<h1>Invalid plan</h1>", 400);
   }
   await updateUserPlan(c.env.DB, user.id, plan);
-  return c.redirect(`/users/${user.id}`);
+  return c.redirect(`/admin/users/${user.id}`);
 });
 
 // POST /users/:id/suspend
@@ -117,7 +117,7 @@ app.post("/:id/suspend", async (c) => {
     await c.env.ROUTING.put(project.slug, JSON.stringify(routing));
   }
 
-  return c.redirect(`/users/${user.id}`);
+  return c.redirect(`/admin/users/${user.id}`);
 });
 
 // POST /users/:id/unsuspend
@@ -138,7 +138,7 @@ app.post("/:id/unsuspend", async (c) => {
     await c.env.ROUTING.put(project.slug, JSON.stringify(routing));
   }
 
-  return c.redirect(`/users/${user.id}`);
+  return c.redirect(`/admin/users/${user.id}`);
 });
 
 export default app;

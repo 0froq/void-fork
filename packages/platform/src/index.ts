@@ -9,8 +9,12 @@ import secrets from "./routes/secrets";
 import domains from "./routes/domains";
 import usage from "./routes/usage";
 import { authMiddleware } from "./middleware/auth";
-import { adminMiddleware } from "./middleware/admin";
-import admin from "./routes/admin";
+import adminLogin from "./admin/routes/login";
+import { adminAuthMiddleware } from "./admin/middleware/auth";
+import { dashboardHandler } from "./admin/routes/system";
+import adminUsers from "./admin/routes/users";
+import adminProjects from "./admin/routes/projects";
+import adminDeployments from "./admin/routes/deployments";
 import { getProjectsByUserId } from "./db";
 import { queryProjectUsage } from "./routes/usage";
 import { getCurrentBillingPeriodStart, getPlanLimits, isWithinLimit } from "./tiers";
@@ -31,8 +35,13 @@ app.route("/projects", domains);
 app.route("/projects", usage);
 app.use("/usage", authMiddleware);
 app.route("/usage", usage);
-app.use("/admin/*", authMiddleware, adminMiddleware);
-app.route("/admin", admin);
+// Admin dashboard (HTML, cookie-based auth)
+app.route("/admin", adminLogin);
+app.use("/admin/*", adminAuthMiddleware);
+app.get("/admin/", adminAuthMiddleware, dashboardHandler);
+app.route("/admin/users", adminUsers);
+app.route("/admin/projects", adminProjects);
+app.route("/admin/deployments", adminDeployments);
 
 async function scheduled(
   _controller: ScheduledController,

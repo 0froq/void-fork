@@ -17,7 +17,8 @@
     "deploy": "wrangler deploy",
     "typecheck": "tsgo --noEmit",
     "migrate": "wrangler d1 migrations apply vite-cloud-platform",
-    "migrate:staging": "wrangler d1 migrations apply vite-cloud-platform-staging --env staging"
+    "migrate:staging": "wrangler d1 migrations apply vite-cloud-platform-staging --env staging",
+    "setup": "node scripts/setup-local.ts"
   },
   "dependencies": {
     "hono": "^4.11.9"
@@ -27,5 +28,8 @@
     "@typescript/native-preview": "catalog:",
     "miniflare": "^4",
     "wrangler": "catalog:"
+  },
+  "optionalDependencies": {
+    "@clack/prompts": "^0.10.0"
   }
 }
