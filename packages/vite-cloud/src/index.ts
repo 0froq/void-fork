@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadEnv, type Plugin } from "vite";
 import { cloudflare, type WorkerConfig } from "@cloudflare/vite-plugin";
@@ -157,6 +157,30 @@ export default function viteCloud(): Plugin[] {
         }
       }
     },
+    configureServer(server) {
+      if (config.auth !== undefined) return;
+      let envHintShown = false;
+      const check = (path: string) => {
+        if (envHintShown) return;
+        if (!path.split("/").pop()?.startsWith(".env")) return;
+        try {
+          const content = readFileSync(path, "utf-8");
+          const providers: string[] = [];
+          if (/^GITHUB_OAUTH_ID=/m.test(content) && !authProviders?.includes("github"))
+            providers.push("GitHub");
+          if (/^GOOGLE_OAUTH_ID=/m.test(content) && !authProviders?.includes("google"))
+            providers.push("Google");
+          if (providers.length > 0) {
+            envHintShown = true;
+            server.config.logger.warn(
+              `[vite-cloud] ${providers.join(" and ")} OAuth credentials detected — restart to enable.`,
+            );
+          }
+        } catch {}
+      };
+      server.watcher.on("change", check);
+      server.watcher.on("add", check);
+    },
   };
 
   if (framework) {
@@ -213,7 +237,7 @@ export default function viteCloud(): Plugin[] {
 
   return [
     envPlugin,
-    routingPlugin(root, { getAuth: () => authProviders }),
+    routingPlugin(root, { getAuth: () => authProviders, autoDetect: config.auth === undefined }),
     dbTypesPlugin(root, true),
     migrationPlugin(root),
     ...cloudflare({
