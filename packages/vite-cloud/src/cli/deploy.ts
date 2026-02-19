@@ -53,12 +53,11 @@ export function resolveProjectBySlug(projects: ProjectResponse[], slug: string):
   return { projectId: project.id, slug: project.slug };
 }
 
-export function inferDefaultProjectNameAndSlug(root: string): { name: string; slug: string } {
+export function inferDefaultSlug(root: string): string {
   const pkgPath = join(root, "package.json");
   const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-  const name = pkg.name ?? "my-app";
-  const slug = name.replace(/^@[^/]+\//, "").replace(/[^a-z0-9-]/g, "-");
-  return { name, slug };
+  const name: string = pkg.name ?? "my-app";
+  return name.replace(/^@[^/]+\//, "").replace(/[^a-z0-9-]/g, "-");
 }
 
 /**
@@ -106,13 +105,11 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
         writeProjectConfig(root, config);
         log.step(`Linked to ${config.slug}`);
       } else {
-        const inferred = inferDefaultProjectNameAndSlug(root);
-        const slug = await promptProjectSlug(inferred.slug);
+        const slug = await promptProjectSlug(inferDefaultSlug(root));
         config = await createNewProject(root, client, slug);
       }
     } else {
-      const inferred = inferDefaultProjectNameAndSlug(root);
-      const slug = await promptProjectSlug(inferred.slug);
+      const slug = await promptProjectSlug(inferDefaultSlug(root));
       config = await createNewProject(root, client, slug);
     }
   }
@@ -332,12 +329,10 @@ async function createNewProject(
   client: PlatformClient,
   slug?: string,
 ): Promise<ProjectConfig> {
-  const inferred = inferDefaultProjectNameAndSlug(root);
-  const projectSlug = slug ?? inferred.slug;
-  const name = inferred.name;
+  const projectSlug = slug ?? inferDefaultSlug(root);
 
   log.step(`Creating project "${projectSlug}"...`);
-  const project = await client.createProject(projectSlug, name);
+  const project = await client.createProject(projectSlug);
   const config = { projectId: project.id, slug: project.slug };
   writeProjectConfig(root, config);
   log.success(`Project created: ${config.slug}`);

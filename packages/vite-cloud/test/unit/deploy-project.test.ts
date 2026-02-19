@@ -5,9 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   detectWorkerDir,
   getRequestedProjectSlug,
-  inferDefaultProjectNameAndSlug,
+  inferDefaultSlug,
   resolveProjectBySlug,
 } from "../../src/cli/deploy";
+import type { ProjectResponse } from "../../src/cli/client";
 
 const tempDirs: string[] = [];
 
@@ -48,7 +49,6 @@ describe("resolveProjectBySlug", () => {
           id: "proj_1",
           user_id: "user_1",
           slug: "my-app",
-          name: "My App",
           mode: "worker",
           created_at: "2026-02-15T00:00:00.000Z",
           custom_domain: null,
@@ -71,8 +71,8 @@ describe("resolveProjectBySlug", () => {
 
   it("throws when slug is not found (lists available)", () => {
     const projects = [
-      { id: "proj_1", slug: "app-one", name: "App One" },
-      { id: "proj_2", slug: "app-two", name: "App Two" },
+      { id: "proj_1", slug: "app-one" },
+      { id: "proj_2", slug: "app-two" },
     ] as ProjectResponse[];
     const err = getError(() => resolveProjectBySlug(projects, "missing"));
     expect(err.message).toContain('No project found with slug "missing"');
@@ -82,7 +82,7 @@ describe("resolveProjectBySlug", () => {
   });
 });
 
-describe("inferDefaultProjectNameAndSlug", () => {
+describe("inferDefaultSlug", () => {
   afterEach(() => {
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop()!;
@@ -95,10 +95,7 @@ describe("inferDefaultProjectNameAndSlug", () => {
     tempDirs.push(root);
     writeFileSync(join(root, "package.json"), JSON.stringify({ name: "@acme/my-app" }));
 
-    expect(inferDefaultProjectNameAndSlug(root)).toEqual({
-      name: "@acme/my-app",
-      slug: "my-app",
-    });
+    expect(inferDefaultSlug(root)).toBe("my-app");
   });
 
   it("uses fallback values when package name is missing", () => {
@@ -106,10 +103,7 @@ describe("inferDefaultProjectNameAndSlug", () => {
     tempDirs.push(root);
     writeFileSync(join(root, "package.json"), JSON.stringify({}));
 
-    expect(inferDefaultProjectNameAndSlug(root)).toEqual({
-      name: "my-app",
-      slug: "my-app",
-    });
+    expect(inferDefaultSlug(root)).toBe("my-app");
   });
 });
 
