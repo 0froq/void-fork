@@ -3,10 +3,15 @@ import { join } from "node:path";
 import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { runGenCommand } from "../../src/cli/gen";
 
+const mockSelect = vi.fn();
+
 vi.mock("@clack/prompts", () => ({
   intro: vi.fn(),
   outro: vi.fn(),
   log: { success: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn(), step: vi.fn() },
+  select: (...args: unknown[]) => mockSelect(...args),
+  isCancel: (v: unknown) => v === Symbol.for("cancel"),
+  cancel: vi.fn(),
 }));
 
 const TMP = join(import.meta.dirname, ".tmp-gen-test");
@@ -15,8 +20,14 @@ function read(path: string): string {
   return readFileSync(join(TMP, path), "utf-8");
 }
 
+function writePkg(deps: Record<string, string>): void {
+  mkdirSync(TMP, { recursive: true });
+  writeFileSync(join(TMP, "package.json"), JSON.stringify({ dependencies: deps }));
+}
+
 afterEach(() => {
   rmSync(TMP, { recursive: true, force: true });
+  mockSelect.mockReset();
 });
 
 // ---------------------------------------------------------------------------
@@ -25,6 +36,7 @@ afterEach(() => {
 
 describe("gen model", () => {
   it("generates migration with correct SQL", async () => {
+    writePkg({ valibot: "^1.0.0" });
     await runGenCommand(TMP, {
       subcommand: "model",
       name: "posts",
@@ -49,6 +61,7 @@ describe("gen model", () => {
   });
 
   it("maps all column types correctly in migration", async () => {
+    writePkg({ valibot: "^1.0.0" });
     await runGenCommand(TMP, {
       subcommand: "model",
       name: "t",
@@ -74,6 +87,7 @@ describe("gen model", () => {
   });
 
   it("handles nullable columns in migration", async () => {
+    writePkg({ valibot: "^1.0.0" });
     await runGenCommand(TMP, {
       subcommand: "model",
       name: "posts",
@@ -86,6 +100,7 @@ describe("gen model", () => {
   });
 
   it("generates index route with GET and POST", async () => {
+    writePkg({ valibot: "^1.0.0" });
     await runGenCommand(TMP, {
       subcommand: "model",
       name: "posts",
@@ -108,6 +123,7 @@ describe("gen model", () => {
   });
 
   it("generates index route without validator when no columns", async () => {
+    writePkg({ valibot: "^1.0.0" });
     await runGenCommand(TMP, {
       subcommand: "model",
       name: "events",
@@ -132,6 +148,7 @@ describe("gen model", () => {
   });
 
   it("generates [id] route with 404 handling", async () => {
+    writePkg({ valibot: "^1.0.0" });
     await runGenCommand(TMP, {
       subcommand: "model",
       name: "posts",
@@ -146,6 +163,7 @@ describe("gen model", () => {
   });
 
   it("uses correct valibot types for each column type", async () => {
+    writePkg({ valibot: "^1.0.0" });
     await runGenCommand(TMP, {
       subcommand: "model",
       name: "t",
@@ -169,6 +187,7 @@ describe("gen model", () => {
   });
 
   it("regenerates db.d.ts with correct augmentation structure", async () => {
+    writePkg({ valibot: "^1.0.0" });
     await runGenCommand(TMP, {
       subcommand: "model",
       name: "posts",
@@ -190,6 +209,7 @@ describe("gen model", () => {
   });
 
   it("auto-numbers migration after existing ones", async () => {
+    writePkg({ valibot: "^1.0.0" });
     mkdirSync(join(TMP, "migrations"), { recursive: true });
     writeFileSync(join(TMP, "migrations/001_create_users.sql"), "CREATE TABLE users (id INTEGER);");
     writeFileSync(join(TMP, "migrations/002_add_email.sql"), "ALTER TABLE users ADD email TEXT;");
@@ -204,6 +224,7 @@ describe("gen model", () => {
   });
 
   it("skips existing files without overwriting", async () => {
+    writePkg({ valibot: "^1.0.0" });
     const routePath = join(TMP, "routes/api/posts/index.ts");
     mkdirSync(join(TMP, "routes/api/posts"), { recursive: true });
     writeFileSync(routePath, "existing content");
@@ -215,6 +236,126 @@ describe("gen model", () => {
     });
 
     expect(readFileSync(routePath, "utf-8")).toBe("existing content");
+  });
+
+  it("generates zod routes when zod is in package.json", async () => {
+    writePkg({ zod: "^3.0.0" });
+    await runGenCommand(TMP, {
+      subcommand: "model",
+      name: "posts",
+      columns: [
+        { name: "title", type: "string", nullable: false },
+        { name: "count", type: "integer", nullable: false },
+        { name: "published", type: "boolean", nullable: false },
+        { name: "data", type: "blob", nullable: false },
+        { name: "bio", type: "text", nullable: true },
+      ],
+    });
+
+    const index = read("routes/api/posts/index.ts");
+    expect(index).toContain('import { z } from "zod"');
+    expect(index).toContain("title: z.string()");
+    expect(index).toContain("count: z.number()");
+    expect(index).toContain("published: z.boolean()");
+    expect(index).toContain("data: z.instanceof(Blob)");
+    expect(index).toContain("bio: z.string().optional()");
+    expect(index).toContain("defineHandler.withValidator");
+    expect(index).toContain("z.object(");
+    expect(index).not.toContain("valibot");
+
+    const idRoute = read("routes/api/posts/[id].ts");
+    expect(idRoute).toContain('import { z } from "zod"');
+    expect(idRoute).toContain("z.object({ id: z.string() })");
+    expect(idRoute).not.toContain("valibot");
+  });
+
+  it("generates arktype routes when arktype is in package.json", async () => {
+    writePkg({ arktype: "^2.0.0" });
+    await runGenCommand(TMP, {
+      subcommand: "model",
+      name: "posts",
+      columns: [
+        { name: "title", type: "string", nullable: false },
+        { name: "count", type: "integer", nullable: false },
+        { name: "published", type: "boolean", nullable: false },
+        { name: "data", type: "blob", nullable: false },
+        { name: "bio", type: "text", nullable: true },
+      ],
+    });
+
+    const index = read("routes/api/posts/index.ts");
+    expect(index).toContain('import { type } from "arktype"');
+    expect(index).toContain('title: "string"');
+    expect(index).toContain('count: "number"');
+    expect(index).toContain('published: "boolean"');
+    expect(index).toContain('data: "instanceof Blob"');
+    expect(index).toContain('bio: "string | undefined"');
+    expect(index).toContain("defineHandler.withValidator");
+    expect(index).not.toContain("valibot");
+    expect(index).not.toContain("zod");
+
+    const idRoute = read("routes/api/posts/[id].ts");
+    expect(idRoute).toContain('import { type } from "arktype"');
+    expect(idRoute).toContain('type({ id: "string" })');
+  });
+
+  it("generates routes without validation when none selected", async () => {
+    mockSelect.mockResolvedValueOnce("none");
+    await runGenCommand(TMP, {
+      subcommand: "model",
+      name: "posts",
+      columns: [
+        { name: "title", type: "string", nullable: false },
+        { name: "body", type: "text", nullable: false },
+      ],
+    });
+
+    const index = read("routes/api/posts/index.ts");
+    expect(index).not.toContain("valibot");
+    expect(index).not.toContain("zod");
+    expect(index).not.toContain("arktype");
+    expect(index).not.toContain("withValidator");
+    expect(index).toContain("c.req.json()");
+    expect(index).toContain('db.insert("posts"');
+
+    const idRoute = read("routes/api/posts/[id].ts");
+    expect(idRoute).not.toContain("valibot");
+    expect(idRoute).not.toContain("withValidator");
+    expect(idRoute).toContain('c.req.param("id")');
+    expect(idRoute).toContain('db.get("posts"');
+    expect(idRoute).toContain("Number(id)");
+  });
+
+  it("prompts when no validator found in package.json", async () => {
+    writePkg({ react: "^19.0.0" });
+    mockSelect.mockResolvedValueOnce("zod");
+    await runGenCommand(TMP, {
+      subcommand: "model",
+      name: "posts",
+      columns: [{ name: "title", type: "string", nullable: false }],
+    });
+
+    expect(mockSelect).toHaveBeenCalledOnce();
+    const index = read("routes/api/posts/index.ts");
+    expect(index).toContain('import { z } from "zod"');
+  });
+
+  it("exits when user cancels validator prompt", async () => {
+    mockSelect.mockResolvedValueOnce(Symbol.for("cancel"));
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
+    });
+    try {
+      await expect(
+        runGenCommand(TMP, {
+          subcommand: "model",
+          name: "posts",
+          columns: [],
+        }),
+      ).rejects.toThrow("process.exit");
+    } finally {
+      exitSpy.mockRestore();
+    }
   });
 });
 

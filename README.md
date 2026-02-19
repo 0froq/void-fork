@@ -13,7 +13,7 @@ This is the development repo of Vite Cloud.
 Every implementation plan should include the following:
 
 - Verification: run `pnpm lint`, `pnpm fmt`, and `pnpm check`. Run `pnpm test` on tests relevant to the current feature first, then run the full test suite.
-- Documentation: after verification, update `README.md` (this file) with relevant changes, and also update relevant docs md files in `packages/website/docs`.
+- Documentation: after verification, update `README.md` (this file) with relevant changes, and also update: affected packages's `README.md` or `AGENTS.md`, and relevant docs md files in `packages/website/docs`.
 - Progress tracking: tick off relevant steps in `meta/0000-progress.md` when applicable.
 - Design decision log (optional): for particularly substantial changes, ask the user if they want to create a numbered design decision doc in `meta` following existing file format.
 
@@ -74,7 +74,7 @@ See [`packages/dispatch/README.md`](./packages/dispatch/README.md) for request f
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). 771 tests across 63 files. See each package README for detailed test listings.
+Tests run from root with `pnpm test` (vitest). 811 tests across 65 files. See each package README for detailed test listings.
 
 ## Playground
 
@@ -110,7 +110,9 @@ Rails/Laravel-style scaffolding commands for common boilerplate:
 
 Column types for `gen model`: `string`, `text`, `datetime` → TEXT; `integer`, `boolean` → INTEGER; `real` → REAL; `blob` → BLOB. Append `?` for nullable (e.g. `bio:text?`).
 
-Source: `src/cli/gen-args.ts` (arg parsing), `src/cli/gen.ts` (command runner). Tests: `test/unit/gen-args.test.ts`.
+`gen model` auto-detects your validation library (valibot, zod, or arktype) from `package.json`. If none is found, prompts to choose one or skip validation.
+
+Source: `src/cli/gen-args.ts` (arg parsing), `src/cli/gen.ts` (command runner). Tests: `test/unit/gen-args.test.ts`, `test/unit/gen.test.ts`.
 
 ## Environments
 

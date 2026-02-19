@@ -138,11 +138,13 @@ vcd gen model posts title:string body:text published:boolean
 Creates:
 
 - `migrations/NNN_create_posts.sql` — CREATE TABLE with `id` (autoincrement), your columns, and `created_at`
-- `routes/api/posts/index.ts` — GET (list all) + POST (insert with valibot validation)
+- `routes/api/posts/index.ts` — GET (list all) + POST (insert with validation)
 - `routes/api/posts/[id].ts` — GET by id with 404 handling
 - Regenerated `.vite-cloud/db.d.ts`
 
-Column format: `name:type` or `name:type?` (nullable). Types: `string`, `text`, `datetime`, `integer`, `boolean`, `real`, `blob`. See [Database — Scaffolding](./db.md#scaffolding) for the full type mapping.
+The generated routes automatically detect your validation library from `package.json` (valibot, zod, or arktype). If none is found, you'll be prompted to choose one or skip validation. See [Database — Scaffolding](./db.md#scaffolding) for the full type mapping.
+
+Column format: `name:type` or `name:type?` (nullable). Types: `string`, `text`, `datetime`, `integer`, `boolean`, `real`, `blob`.
 
 Model names must be lowercase alphanumeric with underscores (e.g. `posts`, `user_roles`). Existing files are never overwritten.
 
