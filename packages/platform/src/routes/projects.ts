@@ -22,8 +22,8 @@ app.get("/", async (c) => {
   const projectsWithDomains = await Promise.all(
     projects.map(async (p) => {
       const domains = await getDomainsByProjectId(c.env.DB, p.id);
-      const activeDomain = domains.find((d) => d.status === "active");
-      return { ...p, custom_domain: activeDomain?.hostname ?? null };
+      const domain = domains.find((d) => d.status === "active") ?? domains[0];
+      return { ...p, custom_domain: domain?.hostname ?? null };
     }),
   );
 
