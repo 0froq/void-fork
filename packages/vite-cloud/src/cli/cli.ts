@@ -47,6 +47,7 @@ if (command === "staging") {
     projectSlug: deployArgs.projectSlug,
     dir: deployArgs.dir,
     spa: deployArgs.spa,
+    skipBuild: deployArgs.skipBuild,
   }).catch((err) => {
     log.error(err.message ?? err);
     process.exit(1);
@@ -239,6 +240,7 @@ if (command === "staging") {
       "\x1b[0m  --project <name>                 \x1b[2mDeploy target project name",
       "\x1b[0m  --dir <path>                     \x1b[2mDeploy a static directory (skip build)",
       "\x1b[0m  --spa                            \x1b[2mUse SPA mode (default: SSG)",
+      "\x1b[0m  --skip-build                     \x1b[2mSkip the build step (use existing output)",
       "",
       "\x1b[0m\x1b[1m\x1b[36mauth\x1b[39m",
       "\x1b[0mvcd login                          \x1b[2mLog in with GitHub or Google",

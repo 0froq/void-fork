@@ -84,7 +84,7 @@ Show the last 5 deployments for a project. Alias: `vcd ls`.
 ### `vcd deploy`
 
 ```
-vcd deploy [--project <name>] [--dir <path>] [--spa]
+vcd deploy [--project <name>] [--dir <path>] [--spa] [--skip-build]
 ```
 
 Auto-detects your project type and chooses the right pipeline. See [App Types](./app-types.md) and [Deployment](./deployment.md) for details.
@@ -94,6 +94,7 @@ Auto-detects your project type and chooses the right pipeline. See [App Types](.
 | `--project <name>` | Target a specific project by slug                 |
 | `--dir <path>`     | Deploy a pre-built static directory (skips build) |
 | `--spa`            | Use SPA mode instead of SSG for static deploys    |
+| `--skip-build`     | Skip the build step (use existing build output)   |
 
 Project resolution precedence:
 

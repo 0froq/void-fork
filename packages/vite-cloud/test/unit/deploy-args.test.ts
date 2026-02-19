@@ -7,6 +7,7 @@ describe("parseDeployArgs", () => {
       projectSlug: "my-app",
       dir: undefined,
       spa: undefined,
+      skipBuild: undefined,
     });
   });
 
@@ -15,6 +16,7 @@ describe("parseDeployArgs", () => {
       projectSlug: undefined,
       dir: undefined,
       spa: undefined,
+      skipBuild: undefined,
     });
   });
 
@@ -34,11 +36,30 @@ describe("parseDeployArgs", () => {
     expect(result.spa).toBe(true);
   });
 
+  it("parses --skip-build flag", () => {
+    const result = parseDeployArgs(["--skip-build"]);
+    expect(result.skipBuild).toBe(true);
+  });
+
+  it("parses --skip-build with --project", () => {
+    const result = parseDeployArgs(["--project", "my-app", "--skip-build"]);
+    expect(result.projectSlug).toBe("my-app");
+    expect(result.skipBuild).toBe(true);
+  });
+
   it("parses all flags together", () => {
-    const result = parseDeployArgs(["--project", "my-app", "--dir", "dist", "--spa"]);
+    const result = parseDeployArgs([
+      "--project",
+      "my-app",
+      "--dir",
+      "dist",
+      "--spa",
+      "--skip-build",
+    ]);
     expect(result.projectSlug).toBe("my-app");
     expect(result.dir).toBe("dist");
     expect(result.spa).toBe(true);
+    expect(result.skipBuild).toBe(true);
   });
 
   it("throws when --project has no value", () => {
