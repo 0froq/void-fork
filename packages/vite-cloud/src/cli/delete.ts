@@ -23,6 +23,10 @@ export async function runDeleteCommand(root: string, slug?: string): Promise<voi
   if (slug) {
     const projects = await client.listProjects();
     const config = resolveProjectBySlug(projects, slug);
+    if (!config) {
+      log.error(`No project found with slug "${slug}".`);
+      process.exit(1);
+    }
     projectId = config.projectId;
     projectSlug = config.slug;
   } else {
