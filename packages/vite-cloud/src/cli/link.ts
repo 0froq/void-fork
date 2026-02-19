@@ -1,5 +1,5 @@
 import { intro, outro, log, cancel } from "@clack/prompts";
-import { getToken } from "./auth";
+import { getToken, getSiteDomain } from "./auth";
 import { PlatformClient } from "./client";
 import { readProjectConfig, writeProjectConfig } from "./project";
 import { promptProjectSelection } from "./prompt";
@@ -11,7 +11,7 @@ export async function runLink(root: string, slug?: string): Promise<void> {
   // Check if already linked
   const existing = readProjectConfig(root);
   if (existing) {
-    log.warn(`Already linked to ${existing.slug} (${existing.slug}.vitecloud.app)`);
+    log.warn(`Already linked to ${existing.slug} (${existing.slug}.${getSiteDomain()})`);
     outro("To re-link, delete .vite-cloud/project.json and run again.");
     return;
   }
@@ -34,7 +34,7 @@ export async function runLink(root: string, slug?: string): Promise<void> {
       process.exit(1);
     }
     writeProjectConfig(root, { projectId: project.id, slug: project.slug });
-    outro(`Linked to ${project.slug} (${project.slug}.vitecloud.app)`);
+    outro(`Linked to ${project.slug} (${project.slug}.${getSiteDomain()})`);
     return;
   }
 
@@ -52,5 +52,5 @@ export async function runLink(root: string, slug?: string): Promise<void> {
   }
 
   writeProjectConfig(root, { projectId: result.project.id, slug: result.project.slug });
-  outro(`Linked to ${result.project.slug} (${result.project.slug}.vitecloud.app)`);
+  outro(`Linked to ${result.project.slug} (${result.project.slug}.${getSiteDomain()})`);
 }

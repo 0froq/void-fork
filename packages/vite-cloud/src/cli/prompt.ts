@@ -1,4 +1,5 @@
 import { select, text, isCancel, cancel } from "@clack/prompts";
+import { getSiteDomain } from "./auth";
 import type { ProjectResponse } from "./client";
 
 interface SelectResult {
@@ -17,7 +18,7 @@ export async function promptProjectSelection(projects: ProjectResponse[]): Promi
     { value: "__create__", label: "Create new project" },
     ...projects.map((p) => ({
       value: p.id,
-      label: `${p.slug} (${p.slug}.vitecloud.app)`,
+      label: `${p.slug} (${p.slug}.${getSiteDomain()})`,
     })),
   ];
 

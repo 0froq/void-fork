@@ -1,5 +1,5 @@
 import { intro, outro, log, spinner, select, isCancel, cancel } from "@clack/prompts";
-import { getToken, runLogin, saveToken } from "./auth";
+import { getToken, runLogin, saveToken, isStagingMode } from "./auth";
 
 export async function runLoginCommand(): Promise<void> {
   console.log();
@@ -33,7 +33,11 @@ export async function runLoginCommand(): Promise<void> {
     const token = await runLogin(provider);
     saveToken(token);
     s.stop("Logged in!");
-    outro("Token saved to ~/.vite-cloud/config.json");
+    outro(
+      isStagingMode()
+        ? "Staging token saved to ~/.vite-cloud/config.json"
+        : "Token saved to ~/.vite-cloud/config.json",
+    );
   } catch (err) {
     s.stop("Login failed");
     throw err;

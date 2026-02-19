@@ -7,6 +7,8 @@ const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
 interface Config {
   token?: string;
+  stagingToken?: string;
+  staging?: boolean;
   api?: string;
 }
 
@@ -23,6 +25,30 @@ function writeConfig(config: Config): void {
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
 }
 
+export function isStagingMode(): boolean {
+  return readConfig().staging === true || !!process.env.STAGING;
+}
+
+export function setStagingMode(on: boolean): void {
+  const config = readConfig();
+  if (on) {
+    config.staging = true;
+  } else {
+    delete config.staging;
+  }
+  writeConfig(config);
+}
+
+export function getSiteDomain(): string {
+  return isStagingMode() ? "staging.vitecloud.app" : "vitecloud.app";
+}
+
+export function printStagingBanner(): void {
+  if (isStagingMode()) {
+    console.log("\x1b[43m\x1b[30m \u26a0 STAGING MODE \x1b[0m\n");
+  }
+}
+
 /**
  * Read the deploy token from environment or config file.
  * Priority: VITE_CLOUD_TOKEN env var > ~/.vite-cloud/config.json
@@ -34,7 +60,7 @@ export function getToken(): string | null {
   }
 
   const config = readConfig();
-  return config.token ?? null;
+  return (isStagingMode() ? config.stagingToken : config.token) ?? null;
 }
 
 export function getTokenSource(): "ci" | "manual" {
@@ -43,15 +69,20 @@ export function getTokenSource(): "ci" | "manual" {
 
 export function saveToken(token: string): void {
   const config = readConfig();
-  config.token = token;
+  if (isStagingMode()) {
+    config.stagingToken = token;
+  } else {
+    config.token = token;
+  }
   writeConfig(config);
 }
 
 export function removeToken(): boolean {
   try {
     const config = readConfig();
-    if (!config.token) return false;
-    delete config.token;
+    const key = isStagingMode() ? "stagingToken" : "token";
+    if (!config[key]) return false;
+    delete config[key];
     writeConfig(config);
     return true;
   } catch {
@@ -60,13 +91,18 @@ export function removeToken(): boolean {
 }
 
 const DEFAULT_API_URL = "https://platform.vite.cloud";
+const STAGING_API_URL = "https://platform.staging.vite.cloud";
 
 /**
  * Read the API URL from environment or config file.
  * Priority: VITE_CLOUD_API_URL env var > ~/.vite-cloud/config.json > default
  */
 export function getApiUrl(): string {
-  return process.env.VITE_CLOUD_API_URL ?? readConfig().api ?? DEFAULT_API_URL;
+  return (
+    process.env.VITE_CLOUD_API_URL ??
+    readConfig().api ??
+    (isStagingMode() ? STAGING_API_URL : DEFAULT_API_URL)
+  );
 }
 
 function page(title: string, message: string): string {

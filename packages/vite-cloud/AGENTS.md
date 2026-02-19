@@ -85,6 +85,18 @@ src/
 
 The CLI binary is at `dist/cli/cli.mjs` (declared in `bin` field of package.json).
 
+### CLI Staging Mode
+
+Internal-only staging toggle (`vcd staging on|off`) that switches the CLI to use the staging environment. Not listed in help text.
+
+When staging mode is active:
+
+- **Token**: reads/writes `stagingToken` in `~/.vite-cloud/config.json` instead of `token`
+- **API URL**: defaults to `https://platform.staging.vite.cloud` (unless overridden by `VITE_CLOUD_API_URL` or `api` config field)
+- **Banner**: prints a yellow `⚠ STAGING MODE` banner before every command
+
+Activation: `vcd staging on` sets `"staging": true` in config. `STAGING` env var also activates it. `vcd staging off` removes the field. `vcd staging` (no arg) prints current status.
+
 Build output uses `.mjs` / `.d.mts` extensions (tsdown 0.20.3 default).
 
 ### Route Filename Parsing Rules

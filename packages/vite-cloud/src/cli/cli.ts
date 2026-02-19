@@ -9,7 +9,7 @@ import { runListCommand } from "./list";
 import { runProjectsCommand } from "./projects";
 import { runSecretCommand } from "./secret";
 import { runDeleteCommand } from "./delete";
-import { getToken, removeToken } from "./auth";
+import { getToken, removeToken, isStagingMode, setStagingMode, printStagingBanner } from "./auth";
 import { PlatformClient } from "./client";
 import { parseDeployArgs } from "./args";
 import { parseSecretArgs } from "./secret-args";
@@ -19,7 +19,20 @@ import { parseDomainArgs } from "./domain";
 const args = process.argv.slice(2);
 const command = args[0];
 
-if (command === "deploy") {
+printStagingBanner();
+
+if (command === "staging") {
+  const sub = args[1];
+  if (sub === "on") {
+    setStagingMode(true);
+    log.success("Staging mode enabled.");
+  } else if (sub === "off") {
+    setStagingMode(false);
+    log.success("Staging mode disabled.");
+  } else {
+    log.info(`Staging mode is ${isStagingMode() ? "on" : "off"}.`);
+  }
+} else if (command === "deploy") {
   const root = process.cwd();
   let deployArgs;
   try {
