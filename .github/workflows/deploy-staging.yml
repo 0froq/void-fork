@@ -35,3 +35,5 @@ jobs:
       # build the CLI first and link it as the docs deploy relies on it
       - run: pnpm build:cli && pnpm i
       - run: pnpm deploy:staging:docs
+        env:
+          VITE_CLOUD_TOKEN: ${{ secrets.VITE_CLOUD_TOKEN }}
