@@ -80,7 +80,7 @@ The user is redirected to the provider, then back to your app with a session coo
 
 #### OAuth credentials
 
-OAuth providers require client credentials. Add them to `.env.local` for local development:
+OAuth providers require client credentials. Add them to [`.env.local`](./env-vars) for local development:
 
 ```
 GITHUB_ID=your-github-client-id
