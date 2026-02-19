@@ -32,6 +32,8 @@ jobs:
 
       # deploy docs (static vitepress hosted on the platform itself)
       # only do this after platform deploy succeeds
+      # build the CLI first as the docs deploy relies on it
+      - run: pnpm build:cli
       - run: pnpm deploy:docs
 
       # deploy MCP server

@@ -32,4 +32,6 @@ jobs:
 
       # deploy docs
       # note: staging docs are also hosted on prod
+      # build the CLI first as the docs deploy relies on it
+      - run: pnpm build:cli
       - run: pnpm deploy:staging:docs
