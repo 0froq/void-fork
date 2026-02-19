@@ -9,7 +9,7 @@ cd playground/auth
 pnpm dev
 ```
 
-Email/password auth works immediately with no setup.
+Email/password auth works immediately with no setup — auth is auto-detected from `vite-cloud/client` imports.
 
 ## OAuth Setup
 
@@ -21,8 +21,8 @@ Email/password auth works immediately with no setup.
    - **Authorization callback URL**: `http://localhost:5173/auth/login/github`
 3. Copy the Client ID and Client Secret into `.env.local`:
    ```
-   GITHUB_ID=your_client_id
-   GITHUB_SECRET=your_client_secret
+   GITHUB_OAUTH_ID=your_client_id
+   GITHUB_OAUTH_SECRET=your_client_secret
    ```
 
 ### Google
@@ -32,8 +32,8 @@ Email/password auth works immediately with no setup.
 3. Add authorized redirect URI: `http://localhost:5173/auth/login/google`
 4. Copy the Client ID and Client Secret into `.env.local`:
    ```
-   GOOGLE_ID=your_client_id
-   GOOGLE_SECRET=your_client_secret
+   GOOGLE_OAUTH_ID=your_client_id
+   GOOGLE_OAUTH_SECRET=your_client_secret
    ```
 
 ## Generated Routes

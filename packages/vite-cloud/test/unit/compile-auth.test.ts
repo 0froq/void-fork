@@ -179,4 +179,49 @@ describe("compileRouteTable with auth", () => {
     expect(userMiddlewareIdx).toBeLessThan(authRegisterIdx);
     expect(authRegisterIdx).toBeLessThan(userRouteIdx);
   });
+
+  it("uses GITHUB_OAUTH_ID/SECRET env vars for GitHub OAuth", () => {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/jobs", null, {
+      ...baseOptions,
+      auth: githubAuth,
+    });
+    expect(code).toContain("c.env.GITHUB_OAUTH_ID");
+    expect(code).toContain("c.env.GITHUB_OAUTH_SECRET");
+    // Old env var names should not appear
+    expect(code).not.toContain("GITHUB_ID");
+    expect(code).not.toContain("GITHUB_SECRET");
+  });
+
+  it("uses GOOGLE_OAUTH_ID/SECRET env vars for Google OAuth", () => {
+    const googleAuth: AuthCompileOptions = {
+      providers: ["google"],
+      sessionPath: "/resolved/auth/session.mjs",
+      passwordPath: null,
+      schemaPath: "/resolved/auth/schema.mjs",
+      githubProviderPath: null,
+      googleProviderPath: "/resolved/oauth/google.mjs",
+    };
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/jobs", null, {
+      ...baseOptions,
+      auth: googleAuth,
+    });
+    expect(code).toContain("c.env.GOOGLE_OAUTH_ID");
+    expect(code).toContain("c.env.GOOGLE_OAUTH_SECRET");
+    // Old env var names should not appear
+    expect(code).not.toContain("GOOGLE_ID");
+    expect(code).not.toContain("GOOGLE_SECRET");
+  });
+
+  it("passes OAuth credentials explicitly to provider middleware", () => {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/jobs", null, {
+      ...baseOptions,
+      auth: allAuth,
+    });
+    // GitHub: credentials passed as config, not relying on env defaults
+    expect(code).toContain("client_id: c.env.GITHUB_OAUTH_ID");
+    expect(code).toContain("client_secret: c.env.GITHUB_OAUTH_SECRET");
+    // Google: credentials passed as config
+    expect(code).toContain("client_id: c.env.GOOGLE_OAUTH_ID");
+    expect(code).toContain("client_secret: c.env.GOOGLE_OAUTH_SECRET");
+  });
 });

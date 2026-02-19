@@ -71,6 +71,7 @@ export function inferProjectBindings(
       needsD1: options.bindings.db ?? false,
       needsKV: options.bindings.kv ?? false,
       needsR2: options.bindings.storage ?? false,
+      needsAuth: false,
     };
   }
 
@@ -98,6 +99,23 @@ export function inferProjectBindings(
     const code = readFileSync(ssrEntry, "utf-8");
     const filename = ssrEntry.split("/").pop() ?? "main.ssr.ts";
     allBindings.push(inferBindingsFromSource(code, filename));
+  }
+
+  // Also scan src/ for auth imports (unless src/ is already in scanDirs)
+  const dirsSet = new Set(dirs);
+  if (!dirsSet.has("src")) {
+    const srcPath = join(root, "src");
+    let srcFiles: string[];
+    try {
+      srcFiles = globSync("**/*.{ts,tsx,mts,js,jsx,mjs}", { cwd: srcPath, absolute: true });
+    } catch {
+      srcFiles = [];
+    }
+    for (const file of srcFiles) {
+      const code = readFileSync(file, "utf-8");
+      const filename = file.split("/").pop()!;
+      allBindings.push(inferBindingsFromSource(code, filename));
+    }
   }
 
   return mergeBindings(allBindings);

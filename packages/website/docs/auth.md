@@ -1,35 +1,17 @@
 # Authentication
 
-Vite Cloud includes built-in authentication with cookie-based sessions, email/password login, and OAuth providers. Enable it in `vite-cloud.json` and auth routes, session middleware, and a user database are generated automatically.
+Vite Cloud includes built-in authentication with cookie-based sessions, email/password login, and OAuth providers. Auth is auto-detected from your code — when you import `auth` from `vite-cloud/client` or `requireAuth` from `vite-cloud/auth`, auth routes and session middleware are generated automatically.
 
-## Setup
+## Auto-Detection
 
-Add the `auth` field to `vite-cloud.json`:
+Auth is enabled automatically when Vite Cloud detects:
 
-```json
-{
-  "auth": ["github", "google", "email"]
-}
-```
+1. **Import detection**: Importing `auth` from `vite-cloud/client` or anything from `vite-cloud/auth` enables email auth
+2. **OAuth from env vars**: Setting `GITHUB_OAUTH_ID` or `GOOGLE_OAUTH_ID` in `.env.local` adds the corresponding OAuth provider
 
-This enables all three providers. You can also pick a subset:
+No configuration in `vite-cloud.json` is needed. Just use the auth APIs and set up your OAuth credentials — everything else is handled for you.
 
-```json
-{ "auth": ["github"] }
-```
-
-Or set `true` for email-only:
-
-```json
-{ "auth": true }
-```
-
-When auth is enabled, Vite Cloud automatically:
-
-- Provisions a D1 database (`c.env.DB`) and a KV namespace (`c.env.AUTH_KV`) for user and session storage
-- Creates an `auth_users` table in D1 on first request
-- Adds session middleware that parses the session cookie and sets `c.get("user")` on every request
-- Generates auth routes (login, register, logout, OAuth callbacks)
+You can also [configure auth explicitly](#explicit-configuration) in `vite-cloud.json` to override auto-detection.
 
 ## Auth Routes
 
@@ -83,13 +65,22 @@ The user is redirected to the provider, then back to your app with a session coo
 OAuth providers require client credentials. Add them to [`.env.local`](./env-vars) for local development:
 
 ```
-GITHUB_ID=your-github-client-id
-GITHUB_SECRET=your-github-client-secret
-GOOGLE_ID=your-google-client-id
-GOOGLE_SECRET=your-google-client-secret
+GITHUB_OAUTH_ID=your-github-client-id
+GITHUB_OAUTH_SECRET=your-github-client-secret
+GOOGLE_OAUTH_ID=your-google-client-id
+GOOGLE_OAUTH_SECRET=your-google-client-secret
 ```
 
 For production, set these as secrets via `vcd secret put` or `vcd secret sync .env.local`.
+
+#### OAuth callback URLs
+
+The OAuth callback URL is the same as the login URL. Configure these in your OAuth app settings:
+
+| Provider | Dev callback URL                          | Production callback URL                            |
+| -------- | ----------------------------------------- | -------------------------------------------------- |
+| GitHub   | `http://localhost:5173/auth/login/github` | `https://your-app.vitecloud.app/auth/login/github` |
+| Google   | `http://localhost:5173/auth/login/google` | `https://your-app.vitecloud.app/auth/login/google` |
 
 ## Protecting Routes
 
@@ -167,12 +158,35 @@ await auth.logout();
 
 This deletes the session from KV and clears the cookie.
 
+## Explicit Configuration
+
+You can configure auth explicitly in `vite-cloud.json` to override auto-detection:
+
+```json
+{
+  "auth": ["github", "google", "email"]
+}
+```
+
+This enables all three providers. You can also pick a subset:
+
+```json
+{ "auth": ["github"] }
+```
+
+Or set `true` for email-only:
+
+```json
+{ "auth": true }
+```
+
 ## How It Works
 
-Under the hood, auth is fully code-generated. When you enable auth, the routing plugin:
+Under the hood, auth is fully code-generated. When auth is enabled, the routing plugin:
 
-1. Adds session middleware to the generated Hono app that parses the cookie, looks up the session in KV, and sets `c.get("user")`
-2. Generates route handlers for `/auth/*` based on your enabled providers
-3. Auto-provisions the required `DB` and `AUTH_KV` bindings
+1. Provisions a D1 database (`c.env.DB`) and a KV namespace (`c.env.AUTH_KV`) for user and session storage
+2. Creates an `auth_users` table in D1 on first request
+3. Adds session middleware to the generated Hono app that parses the cookie, looks up the session in KV, and sets `c.get("user")`
+4. Generates route handlers for `/auth/*` based on your enabled providers
 
 Passwords are hashed with PBKDF2-SHA256 (310,000 iterations) using the Web Crypto API. OAuth uses [`@hono/oauth-providers`](https://github.com/honojs/middleware/tree/main/packages/oauth-providers) for GitHub and Google.

@@ -1,3 +1,4 @@
+import { parse } from "es-module-lexer/js";
 import { parseSync } from "vite";
 import { walk } from "estree-walker";
 
@@ -5,22 +6,72 @@ export interface InferredBindings {
   needsD1: boolean;
   needsKV: boolean;
   needsR2: boolean;
+  needsAuth: boolean;
 }
 
+const ENV_BINDING_RE = /\benv\s*\.\s*(DB|KV|STORAGE)\b/;
+
 /**
- * Infer which Cloudflare bindings a source file uses by walking its AST.
- * Looks for member expressions like:
- *   *.env.DB      → needsD1
- *   *.env.KV      → needsKV
- *   *.env.STORAGE  → needsR2
+ * Infer which Cloudflare bindings a source file uses.
+ *
+ * Uses a tiered approach for performance:
+ *   Tier 1: es-module-lexer to extract import sources (fast, asm.js, no init)
+ *   Tier 2: Regex check for env.DB/KV/STORAGE patterns
+ *   Tier 3: Full AST walk only when regex matches (to confirm member expressions)
  */
 export function inferBindingsFromSource(code: string, filename: string): InferredBindings {
   const result: InferredBindings = {
     needsD1: false,
     needsKV: false,
     needsR2: false,
+    needsAuth: false,
   };
 
+  // Tier 1: Fast import detection via es-module-lexer
+  try {
+    const [imports] = parse(code);
+    for (const imp of imports) {
+      const source = imp.n;
+      if (!source) continue;
+
+      switch (source) {
+        case "vite-cloud/db":
+          result.needsD1 = true;
+          break;
+        case "vite-cloud/kv":
+          result.needsKV = true;
+          break;
+        case "vite-cloud/storage":
+          result.needsR2 = true;
+          break;
+        case "vite-cloud/auth":
+          result.needsAuth = true;
+          break;
+        case "vite-cloud/client": {
+          // Check if the `auth` specifier is imported (not just `fetch`)
+          const stmt = code.slice(imp.ss, imp.se + 1);
+          if (/\bauth\b/.test(stmt)) {
+            result.needsAuth = true;
+          }
+          break;
+        }
+      }
+    }
+  } catch {
+    // es-module-lexer can't parse this file, fall through to AST
+  }
+
+  // If imports resolved all bindings, we're done
+  if (result.needsD1 && result.needsKV && result.needsR2) {
+    return result;
+  }
+
+  // Tier 2: Regex check for env.DB/KV/STORAGE
+  if (!ENV_BINDING_RE.test(code)) {
+    return result;
+  }
+
+  // Tier 3: Full AST walk to confirm member expressions
   let parsed: ReturnType<typeof parseSync>;
   try {
     parsed = parseSync(filename, code);
@@ -30,24 +81,6 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
 
   walk(parsed.program as any, {
     enter(node: any) {
-      // import from "vite-cloud/db" → needsD1
-      // import from "vite-cloud/kv" → needsKV
-      // import from "vite-cloud/storage" → needsR2
-      if (node.type === "ImportDeclaration") {
-        switch (node.source?.value) {
-          case "vite-cloud/db":
-            result.needsD1 = true;
-            break;
-          case "vite-cloud/kv":
-            result.needsKV = true;
-            break;
-          case "vite-cloud/storage":
-            result.needsR2 = true;
-            break;
-        }
-        return;
-      }
-
       if (node.type !== "MemberExpression") return;
       if (node.computed) return;
 
@@ -88,5 +121,6 @@ export function mergeBindings(bindings: InferredBindings[]): InferredBindings {
     needsD1: bindings.some((b) => b.needsD1),
     needsKV: bindings.some((b) => b.needsKV),
     needsR2: bindings.some((b) => b.needsR2),
+    needsAuth: bindings.some((b) => b.needsAuth),
   };
 }

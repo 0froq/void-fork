@@ -51,12 +51,20 @@ export default function viteCloud(): Plugin[] {
   const root = process.cwd();
   const config = readConfig(root);
   const framework = detectFramework(root);
-  const authProviders = normalizeAuth(config.auth);
 
   // Infer bindings synchronously from source files
   const scanDirs = framework ? FRAMEWORK_SCAN_DIRS : undefined;
   const inferenceOptions = config.bindings ? { bindings: config.bindings } : undefined;
   const bindings = inferProjectBindings(root, inferenceOptions, scanDirs);
+
+  // Phase 1: Determine auth providers from imports (sync, at plugin creation)
+  // Explicit config takes precedence over auto-detection.
+  let authProviders: AuthProvider[] | null;
+  if (config.auth !== undefined) {
+    authProviders = normalizeAuth(config.auth);
+  } else {
+    authProviders = bindings.needsAuth ? ["email"] : null;
+  }
 
   // Core worker config — always set by viteCloud (main, triggers, assets).
   // Bindings are handled separately in the config function below.
@@ -130,11 +138,24 @@ export default function viteCloud(): Plugin[] {
 
   // Plugin that loads .env files and merges them into workerConfig.vars.
   // Runs before the Cloudflare plugin so vars are available as worker bindings.
+  // Phase 2: Also auto-detects OAuth providers from env vars.
   const envPlugin: Plugin = {
     name: "vite-cloud:env",
     config(_, { mode }) {
       const env = loadEnv(mode, root, "");
       workerConfig.vars = { ...(workerConfig.vars as Record<string, string> | undefined), ...env };
+
+      // Auto-detect OAuth providers from env vars (only if not explicitly configured)
+      if (config.auth === undefined) {
+        if (env.GITHUB_OAUTH_ID) {
+          authProviders ??= [];
+          if (!authProviders.includes("github")) authProviders.push("github");
+        }
+        if (env.GOOGLE_OAUTH_ID) {
+          authProviders ??= [];
+          if (!authProviders.includes("google")) authProviders.push("google");
+        }
+      }
     },
   };
 
@@ -192,7 +213,7 @@ export default function viteCloud(): Plugin[] {
 
   return [
     envPlugin,
-    routingPlugin(root, { auth: authProviders }),
+    routingPlugin(root, { getAuth: () => authProviders }),
     dbTypesPlugin(root, true),
     migrationPlugin(root),
     ...cloudflare({
@@ -208,3 +229,5 @@ export { defineHandler, defineMiddleware, defineJob, defineRender } from "./runt
 export type { CloudContext, CloudEnv, RenderAssetTags, TypedHandler } from "./runtime/handler";
 export type { ValidatorSlots, HandlerInput } from "./runtime/validator";
 export type { AuthUser } from "./runtime/auth";
+
+type AuthProvider = import("./config").AuthProvider;

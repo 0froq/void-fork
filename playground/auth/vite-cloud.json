@@ -1,4 +1,3 @@
 {
-  "$schema": "https://unpkg.com/vite-cloud/schema.json",
-  "auth": ["github", "google", "email"]
+  "$schema": "https://unpkg.com/vite-cloud/schema.json"
 }
