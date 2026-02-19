@@ -1,9 +1,10 @@
+import { readFileSync } from "node:fs";
 import { getToken } from "./auth";
 import { PlatformClient } from "./client";
 import { readProjectConfig } from "./project";
 import { getRequestedProjectSlug, resolveProjectBySlug } from "./deploy";
 import type { SecretArgs } from "./secret-args";
-import { intro, outro, log, cancel, isCancel, password } from "@clack/prompts";
+import { intro, outro, log, cancel, isCancel, password, confirm } from "@clack/prompts";
 
 export async function runSecretCommand(root: string, args: SecretArgs): Promise<void> {
   console.log();
@@ -38,8 +39,74 @@ export async function runSecretCommand(root: string, args: SecretArgs): Promise<
     return;
   }
 
+  if (args.action === "sync") {
+    const secrets = parseDotenvFile(args.file);
+    if (secrets.length === 0) {
+      log.warn("No secrets found in file.");
+      outro("Nothing to sync.");
+      return;
+    }
+
+    log.info(`Found ${secrets.length} secret(s):`);
+    for (const s of secrets) {
+      log.message(`  ${s.name}`);
+    }
+
+    const proceed = await confirm({
+      message: `This will overwrite ${secrets.length} secret(s) in the remote environment. Continue?`,
+    });
+    if (isCancel(proceed) || !proceed) {
+      cancel("Secret sync cancelled.");
+      process.exit(0);
+    }
+
+    for (const s of secrets) {
+      await client.setSecret(projectId, s.name, s.value);
+      log.success(`Set ${s.name}`);
+    }
+    outro(`Synced ${secrets.length} secret(s).`);
+    return;
+  }
+
   await client.deleteSecret(projectId, args.name);
   outro(`Secret ${args.name} deleted.`);
+}
+
+const SECRET_KEY_RE = /^[A-Z][A-Z0-9_]*$/;
+
+export function parseDotenvFile(filePath: string): Array<{ name: string; value: string }> {
+  const content = readFileSync(filePath, "utf-8");
+  const secrets: Array<{ name: string; value: string }> = [];
+
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const eqIndex = trimmed.indexOf("=");
+    if (eqIndex === -1) {
+      throw new Error(`Invalid line (missing =): ${trimmed}`);
+    }
+
+    const key = trimmed.slice(0, eqIndex).trim();
+    let value = trimmed.slice(eqIndex + 1).trim();
+
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    if (!SECRET_KEY_RE.test(key)) {
+      throw new Error(
+        `Invalid secret name: ${key}. Names must match ${SECRET_KEY_RE} (uppercase letters, digits, underscores).`,
+      );
+    }
+
+    secrets.push({ name: key, value });
+  }
+
+  return secrets;
 }
 
 async function readSecretValue(): Promise<string> {

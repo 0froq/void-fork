@@ -53,12 +53,42 @@ describe("parseSecretArgs", () => {
   });
 
   it("errors on unknown action", () => {
-    expect(() => parseSecretArgs(["list"])).toThrow("Error: Usage: vcd secret <put|delete> ...");
+    expect(() => parseSecretArgs(["list"])).toThrow(
+      "Error: Usage: vcd secret <put|delete|sync> ...",
+    );
   });
 
   it("errors on unsupported set action", () => {
     expect(() => parseSecretArgs(["set", "API_KEY"])).toThrow(
-      "Error: Usage: vcd secret <put|delete> ...",
+      "Error: Usage: vcd secret <put|delete|sync> ...",
+    );
+  });
+
+  it("parses sync with file path", () => {
+    expect(parseSecretArgs(["sync", ".dev.vars"])).toEqual({
+      action: "sync",
+      file: ".dev.vars",
+      projectName: undefined,
+    });
+  });
+
+  it("parses sync with project", () => {
+    expect(parseSecretArgs(["sync", ".env", "--project", "my-app"])).toEqual({
+      action: "sync",
+      file: ".env",
+      projectName: "my-app",
+    });
+  });
+
+  it("errors on missing sync file path", () => {
+    expect(() => parseSecretArgs(["sync"])).toThrow(
+      "Error: Usage: vcd secret sync <file> [--project <name>]",
+    );
+  });
+
+  it("errors on extra sync positional", () => {
+    expect(() => parseSecretArgs(["sync", ".env", "extra"])).toThrow(
+      "Error: Usage: vcd secret sync <file> [--project <name>]",
     );
   });
 });

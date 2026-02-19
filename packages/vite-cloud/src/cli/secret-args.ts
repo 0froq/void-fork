@@ -2,7 +2,8 @@ import { parseArgs } from "node:util";
 
 export type SecretArgs =
   | { action: "put"; name: string; value?: string; projectName?: string }
-  | { action: "delete"; name: string; projectName?: string };
+  | { action: "delete"; name: string; projectName?: string }
+  | { action: "sync"; file: string; projectName?: string };
 
 export function parseSecretArgs(args: string[]): SecretArgs {
   const parsed = parseArgs({
@@ -62,5 +63,15 @@ export function parseSecretArgs(args: string[]): SecretArgs {
     return { action, name, projectName };
   }
 
-  throw new Error("Error: Usage: vcd secret <put|delete> ...");
+  if (action === "sync") {
+    if (!name) {
+      throw new Error("Error: Usage: vcd secret sync <file> [--project <name>]");
+    }
+    if (value) {
+      throw new Error("Error: Usage: vcd secret sync <file> [--project <name>]");
+    }
+    return { action, file: name, projectName };
+  }
+
+  throw new Error("Error: Usage: vcd secret <put|delete|sync> ...");
 }
