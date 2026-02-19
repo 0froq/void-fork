@@ -3,7 +3,8 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
-    "build:core": "pnpm --filter vite-cloud build",
+    "build:core": "pnpm -C packages/vite-cloud build",
+    "build:docs": "pnpm -C packages/website build",
     "test": "vitest --run",
     "lint": "oxlint",
     "fmt": "oxfmt --write .",
