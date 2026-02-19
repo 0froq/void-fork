@@ -14,6 +14,7 @@ import { PlatformClient } from "./client";
 import { parseDeployArgs } from "./args";
 import { parseSecretArgs } from "./secret-args";
 import { parseDbArgs } from "./db-args";
+import { parseGenArgs } from "./gen-args";
 import { parseDomainArgs } from "./domain";
 
 const args = process.argv.slice(2);
@@ -176,6 +177,22 @@ if (command === "staging") {
       process.exit(1);
     });
   });
+} else if (command === "gen") {
+  const root = process.cwd();
+  let genArgs;
+  try {
+    genArgs = parseGenArgs(args.slice(1));
+  } catch (err) {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+
+  import("./gen").then(({ runGenCommand }) => {
+    runGenCommand(root, genArgs!).catch((err) => {
+      log.error(err.message ?? err);
+      process.exit(1);
+    });
+  });
 } else if (command === "init") {
   const root = process.cwd();
   import("./init").then(({ runInitCommand, parseInitArgs }) => {
@@ -237,6 +254,11 @@ if (command === "staging") {
       "\x1b[0mvcd db status                      \x1b[2mShow migration status (local + remote)",
       "\x1b[0mvcd db reset                       \x1b[2mReset local DB and re-run migrations",
       "\x1b[0mvcd db seed [--file <path>]        \x1b[2mReset local DB, run migrations, and seed",
+      "\x1b[0mvcd gen model <name> [cols...]     \x1b[2mGenerate migration + CRUD routes + db types",
+      "\x1b[0mvcd gen migration <name>           \x1b[2mGenerate an empty migration file",
+      "\x1b[0mvcd gen route <path> [--methods]   \x1b[2mGenerate a route with handler exports",
+      "\x1b[0mvcd gen middleware <name>           \x1b[2mGenerate a numbered middleware file",
+      "\x1b[0mvcd gen ssr [--react|--vue|...]     \x1b[2mGenerate SSR entry + client + App component",
     ].join("\n"),
     "\x1b[34mCommands\x1b[0m",
   );

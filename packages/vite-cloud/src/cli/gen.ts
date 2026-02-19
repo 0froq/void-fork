@@ -1,0 +1,542 @@
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { intro, outro, log } from "@clack/prompts";
+import type { GenArgs } from "./gen-args";
+
+export async function runGenCommand(root: string, args: GenArgs): Promise<void> {
+  console.log();
+  intro("\x1b[34mvite-cloud gen\x1b[0m");
+
+  if (args.subcommand === "model") {
+    await runModel(root, args.name, args.columns);
+  } else if (args.subcommand === "migration") {
+    runMigration(root, args.name);
+  } else if (args.subcommand === "route") {
+    runRoute(root, args.path, args.methods);
+  } else if (args.subcommand === "middleware") {
+    runMiddleware(root, args.name);
+  } else {
+    runSsr(root, args.framework);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function writeIfNotExists(filePath: string, content: string): boolean {
+  if (existsSync(filePath)) {
+    log.warn(`Skipped (already exists): ${filePath}`);
+    return false;
+  }
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, content);
+  log.success(`Created ${filePath}`);
+  return true;
+}
+
+function getNextMigrationNumber(migrationsDir: string): string {
+  if (!existsSync(migrationsDir)) {
+    return "001";
+  }
+  const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql") && f !== "seed.sql");
+  let max = 0;
+  for (const file of files) {
+    const match = file.match(/^(\d+)/);
+    if (match) {
+      max = Math.max(max, Number(match[1]));
+    }
+  }
+  return String(max + 1).padStart(3, "0");
+}
+
+function getNextMiddlewareNumber(middlewareDir: string): string {
+  if (!existsSync(middlewareDir)) {
+    return "01";
+  }
+  const files = readdirSync(middlewareDir);
+  let max = 0;
+  for (const file of files) {
+    const match = file.match(/^(\d+)\./);
+    if (match) {
+      max = Math.max(max, Number(match[1]));
+    }
+  }
+  return String(max + 1).padStart(2, "0");
+}
+
+// ---------------------------------------------------------------------------
+// Column type mapping
+// ---------------------------------------------------------------------------
+
+interface ColumnSpec {
+  name: string;
+  type: string;
+  nullable: boolean;
+}
+
+function columnToSql(col: ColumnSpec): string {
+  const sqlType = sqlTypeFor(col.type);
+  const nullConstraint = col.nullable ? "" : " NOT NULL";
+  return `  ${col.name} ${sqlType}${nullConstraint}`;
+}
+
+function sqlTypeFor(type: string): string {
+  switch (type) {
+    case "string":
+    case "text":
+    case "datetime":
+      return "TEXT";
+    case "integer":
+    case "boolean":
+      return "INTEGER";
+    case "real":
+      return "REAL";
+    case "blob":
+      return "BLOB";
+    default:
+      return "TEXT";
+  }
+}
+
+function valibotTypeFor(col: ColumnSpec): string {
+  let base: string;
+  switch (col.type) {
+    case "string":
+    case "text":
+    case "datetime":
+      base = "v.string()";
+      break;
+    case "integer":
+    case "real":
+      base = "v.number()";
+      break;
+    case "boolean":
+      base = "v.boolean()";
+      break;
+    case "blob":
+      base = "v.instance(Blob)";
+      break;
+    default:
+      base = "v.string()";
+  }
+  return col.nullable ? `v.optional(${base})` : base;
+}
+
+// ---------------------------------------------------------------------------
+// Subcommands
+// ---------------------------------------------------------------------------
+
+async function runModel(root: string, name: string, columns: ColumnSpec[]): Promise<void> {
+  const migrationsDir = join(root, "migrations");
+  mkdirSync(migrationsDir, { recursive: true });
+
+  // 1. Migration
+  const num = getNextMigrationNumber(migrationsDir);
+  const migrationFile = join(migrationsDir, `${num}_create_${name}.sql`);
+  const colDefs = columns.map(columnToSql);
+  const allColDefs = [
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT",
+    ...colDefs,
+    "  created_at TEXT DEFAULT (datetime('now'))",
+  ];
+  const migrationSql = `CREATE TABLE IF NOT EXISTS ${name} (\n${allColDefs.join(",\n")}\n);\n`;
+  writeIfNotExists(migrationFile, migrationSql);
+
+  // 2. Route: routes/api/<name>/index.ts
+  const routeIndexPath = join(root, "routes", "api", name, "index.ts");
+  const bodyFields = columns.map((c) => `    ${c.name}: ${valibotTypeFor(c)},`).join("\n");
+  const insertFields = columns.map((c) => `${c.name}: body.${c.name}`).join(", ");
+
+  const routeIndex =
+    columns.length > 0
+      ? `import * as v from "valibot";
+import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
+
+export const GET = defineHandler(async () => {
+  return db.list("${name}");
+});
+
+export const POST = defineHandler.withValidator({
+  body: v.object({
+${bodyFields}
+  }),
+})(async (c, { body }) => {
+  await db.insert("${name}", { ${insertFields} });
+  return { created: true };
+});
+`
+      : `import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
+
+export const GET = defineHandler(async () => {
+  return db.list("${name}");
+});
+
+export const POST = defineHandler(async () => {
+  await db.insert("${name}", {});
+  return { created: true };
+});
+`;
+  writeIfNotExists(routeIndexPath, routeIndex);
+
+  // 3. Route: routes/api/<name>/[id].ts
+  const routeIdPath = join(root, "routes", "api", name, "[id].ts");
+  const routeId = `import * as v from "valibot";
+import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
+
+export const GET = defineHandler.withValidator({
+  params: v.object({ id: v.string() }),
+})(async (c, { params }) => {
+  const row = await db.get("${name}", { where: { id: Number(params.id) } });
+
+  if (!row) {
+    return new Response("Not found", { status: 404 });
+  }
+  return row;
+});
+`;
+  writeIfNotExists(routeIdPath, routeId);
+
+  // 4. Regenerate db.d.ts
+  const { collectMigrations } = await import("../migrations/collect");
+  const { parseMigrationSchema } = await import("../migrations/schema");
+  const { generateDbTypes } = await import("../codegen/db-types");
+
+  const migrations = collectMigrations(migrationsDir);
+  const schema = parseMigrationSchema(migrations);
+  const dts = generateDbTypes(schema);
+  const outDir = join(root, ".vite-cloud");
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, "db.d.ts"), dts);
+  log.success("Regenerated .vite-cloud/db.d.ts");
+
+  outro("Model scaffolding complete.");
+}
+
+function runMigration(root: string, name: string): void {
+  const migrationsDir = join(root, "migrations");
+  mkdirSync(migrationsDir, { recursive: true });
+
+  const num = getNextMigrationNumber(migrationsDir);
+  const filePath = join(migrationsDir, `${num}_${name}.sql`);
+  writeIfNotExists(filePath, `-- ${name}\n`);
+
+  outro("Migration created.");
+}
+
+function runRoute(root: string, routePath: string, methods: string[]): void {
+  const filePath = join(root, "routes", routePath + ".ts");
+  const exports = methods
+    .map((m) => {
+      const upper = m.toUpperCase();
+      return `export const ${upper} = defineHandler(async () => {
+  return { message: "${upper} ${routePath}" };
+});`;
+    })
+    .join("\n\n");
+
+  const content = `import { defineHandler } from "vite-cloud";
+
+${exports}
+`;
+  writeIfNotExists(filePath, content);
+
+  outro("Route created.");
+}
+
+function runMiddleware(root: string, name: string): void {
+  const middlewareDir = join(root, "middleware");
+  mkdirSync(middlewareDir, { recursive: true });
+
+  const num = getNextMiddlewareNumber(middlewareDir);
+  const filePath = join(middlewareDir, `${num}.${name}.ts`);
+  const content = `import { defineMiddleware } from "vite-cloud";
+
+export default defineMiddleware(async (c, next) => {
+  // TODO: implement ${name} middleware
+  await next();
+});
+`;
+  writeIfNotExists(filePath, content);
+
+  outro("Middleware created.");
+}
+
+function runSsr(root: string, framework?: "react" | "vue" | "svelte" | "solid"): void {
+  if (!framework) {
+    framework = detectFramework(root);
+  }
+
+  if (framework === "react") {
+    writeReactSsr(root);
+  } else if (framework === "vue") {
+    writeVueSsr(root);
+  } else if (framework === "svelte") {
+    writeSvelteSsr(root);
+  } else {
+    writeSolidSsr(root);
+  }
+
+  outro("SSR scaffolding complete.");
+}
+
+function detectFramework(root: string): "react" | "vue" | "svelte" | "solid" {
+  const pkgPath = join(root, "package.json");
+  if (!existsSync(pkgPath)) {
+    log.error(
+      "No package.json found. Use --react, --vue, --svelte, or --solid to specify a framework.",
+    );
+    process.exit(1);
+  }
+
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+  const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+  if ("react" in allDeps) return "react";
+  if ("vue" in allDeps) return "vue";
+  if ("svelte" in allDeps) return "svelte";
+  if ("solid-js" in allDeps) return "solid";
+
+  log.error(
+    "Could not detect framework from package.json. Use --react, --vue, --svelte, or --solid.",
+  );
+  process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// SSR templates
+// ---------------------------------------------------------------------------
+
+function writeReactSsr(root: string): void {
+  writeIfNotExists(
+    join(root, "src/main.ssr.tsx"),
+    `import { renderToString } from "react-dom/server";
+import { defineRender } from "vite-cloud";
+import App from "./App";
+
+export default defineRender(async (c, assetTags) => {
+  const appHtml = renderToString(<App />);
+  const html = \`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>App</title>
+    \${assetTags.head}
+  </head>
+  <body>
+    <div id="root">\${appHtml}</div>
+    \${assetTags.body}
+  </body>
+</html>\`;
+
+  return new Response(html, {
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+});
+`,
+  );
+
+  writeIfNotExists(
+    join(root, "src/main.client.tsx"),
+    `import { hydrateRoot } from "react-dom/client";
+import App from "./App";
+
+hydrateRoot(document.getElementById("root")!, <App />);
+`,
+  );
+
+  writeIfNotExists(
+    join(root, "src/App.tsx"),
+    `import { useState } from "react";
+
+export default function App() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <main>
+      <h1>Hello Vite Cloud</h1>
+      <button type="button" onClick={() => setCount((c) => c + 1)}>
+        Count: {count}
+      </button>
+    </main>
+  );
+}
+`,
+  );
+}
+
+function writeVueSsr(root: string): void {
+  writeIfNotExists(
+    join(root, "src/main.ssr.ts"),
+    `import { createSSRApp } from "vue";
+import { renderToString } from "vue/server-renderer";
+import { defineRender } from "vite-cloud";
+import App from "./App.vue";
+
+export default defineRender(async (c, assetTags) => {
+  const app = createSSRApp(App);
+  const appHtml = await renderToString(app);
+  const html = \`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>App</title>
+    \${assetTags.head}
+  </head>
+  <body>
+    <div id="app">\${appHtml}</div>
+    \${assetTags.body}
+  </body>
+</html>\`;
+
+  return new Response(html, {
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+});
+`,
+  );
+
+  writeIfNotExists(
+    join(root, "src/main.client.ts"),
+    `import { createSSRApp } from "vue";
+import App from "./App.vue";
+
+const app = createSSRApp(App);
+app.mount("#app");
+`,
+  );
+
+  writeIfNotExists(
+    join(root, "src/App.vue"),
+    `<script setup lang="ts">
+import { ref } from "vue";
+
+const count = ref(0);
+</script>
+
+<template>
+  <main>
+    <h1>Hello Vite Cloud</h1>
+    <button type="button" @click="count++">Count: {{ count }}</button>
+  </main>
+</template>
+`,
+  );
+}
+
+function writeSvelteSsr(root: string): void {
+  writeIfNotExists(
+    join(root, "src/main.ssr.ts"),
+    `import { render } from "svelte/server";
+import { defineRender } from "vite-cloud";
+import App from "./App.svelte";
+
+export default defineRender(async (c, assetTags) => {
+  const { html: appHtml } = render(App);
+  const html = \`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>App</title>
+    \${assetTags.head}
+  </head>
+  <body>
+    <div id="app">\${appHtml}</div>
+    \${assetTags.body}
+  </body>
+</html>\`;
+
+  return new Response(html, {
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+});
+`,
+  );
+
+  writeIfNotExists(
+    join(root, "src/main.client.ts"),
+    `import { hydrate } from "svelte";
+import App from "./App.svelte";
+
+hydrate(App, { target: document.getElementById("app")! });
+`,
+  );
+
+  writeIfNotExists(
+    join(root, "src/App.svelte"),
+    `<script>
+  let count = $state(0);
+</script>
+
+<main>
+  <h1>Hello Vite Cloud</h1>
+  <button type="button" onclick={() => count++}>Count: {count}</button>
+</main>
+`,
+  );
+}
+
+function writeSolidSsr(root: string): void {
+  writeIfNotExists(
+    join(root, "src/main.ssr.tsx"),
+    `import { renderToString } from "solid-js/web";
+import { defineRender } from "vite-cloud";
+import App from "./App";
+
+export default defineRender(async (c, assetTags) => {
+  const appHtml = renderToString(() => <App />);
+  const html = \`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>App</title>
+    \${assetTags.head}
+  </head>
+  <body>
+    <div id="app">\${appHtml}</div>
+    \${assetTags.body}
+  </body>
+</html>\`;
+
+  return new Response(html, {
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+});
+`,
+  );
+
+  writeIfNotExists(
+    join(root, "src/main.client.tsx"),
+    `import { hydrate } from "solid-js/web";
+import App from "./App";
+
+hydrate(() => <App />, document.getElementById("app")!);
+`,
+  );
+
+  writeIfNotExists(
+    join(root, "src/App.tsx"),
+    `import { createSignal } from "solid-js";
+
+export default function App() {
+  const [count, setCount] = createSignal(0);
+
+  return (
+    <main>
+      <h1>Hello Vite Cloud</h1>
+      <button type="button" onClick={() => setCount((c) => c + 1)}>
+        Count: {count()}
+      </button>
+    </main>
+  );
+}
+`,
+  );
+}
