@@ -589,6 +589,48 @@ describe("POST /projects/:id/deploy", () => {
     expect(routing.limits).toBeUndefined();
   });
 
+  it("includes manifest vars as plain_text bindings in worker upload", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "vars-app");
+    const fetchMock = mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            bindings: {},
+            vars: { API_URL: "https://api.example.com", NODE_ENV: "production" },
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
+      const url = typeof call[0] === "string" ? call[0] : String(call[0]);
+      return url.includes("/workers/dispatch/") && (call[1] as RequestInit)?.method === "PUT";
+    });
+    expect(uploadCall).toBeDefined();
+
+    const workerFormData = (uploadCall![1] as RequestInit).body as FormData;
+    const metadataBlob = workerFormData.get("metadata");
+    expect(metadataBlob).toBeInstanceOf(Blob);
+    const metadata = JSON.parse(await (metadataBlob as Blob).text()) as {
+      bindings?: { type: string; name: string; text?: string }[];
+    };
+
+    const plainTextBindings = (metadata.bindings ?? []).filter((b) => b.type === "plain_text");
+    expect(plainTextBindings).toEqual(
+      expect.arrayContaining([
+        { type: "plain_text", name: "API_URL", text: "https://api.example.com" },
+        { type: "plain_text", name: "NODE_ENV", text: "production" },
+      ]),
+    );
+  });
+
   it("marks deployment failed when worker upload fails", async () => {
     const user = await createTestUser(env.DB);
     const project = await createTestProject(env.DB, user.id, "fail-app");

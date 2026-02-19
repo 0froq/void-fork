@@ -39,7 +39,6 @@ describe("readConfig", () => {
         wrangler: {
           compatibility_date: "2025-12-01",
           compatibility_flags: ["nodejs_compat"],
-          vars: { MY_VAR: "value" },
         },
       }),
     );
@@ -55,7 +54,6 @@ describe("readConfig", () => {
     expect(config.wrangler).toEqual({
       compatibility_date: "2025-12-01",
       compatibility_flags: ["nodejs_compat"],
-      vars: { MY_VAR: "value" },
     });
     cleanup();
   });
@@ -157,12 +155,6 @@ describe("readConfig", () => {
   it("throws on invalid wrangler type", () => {
     setup(JSON.stringify({ wrangler: "yes" }));
     expect(() => readConfig(tmpDir)).toThrow('"wrangler"');
-    cleanup();
-  });
-
-  it("throws on invalid wrangler.vars value", () => {
-    setup(JSON.stringify({ wrangler: { vars: { KEY: 123 } } }));
-    expect(() => readConfig(tmpDir)).toThrow("must be a string");
     cleanup();
   });
 });

@@ -255,6 +255,19 @@ Value input modes:
 - prompt (TTY): `vcd secret put API_KEY` (masked input)
 - stdin: `echo -n "abcd" | vcd secret put API_KEY`
 
+### `vcd secret sync`
+
+```
+vcd secret sync <file> [--project <name>]
+```
+
+Bulk upload secrets from a dotenv file. Each `KEY=value` line in the file is uploaded as a secret.
+
+```sh
+vcd secret sync .env.local       # uploads secrets from .env.local
+vcd secret sync .env.production  # uploads a specific file
+```
+
 ### `vcd secret delete`
 
 ```

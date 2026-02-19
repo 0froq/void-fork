@@ -232,12 +232,20 @@ app.post("/:id/deploy", async (c) => {
       }
     }
 
+    // Build combined bindings: provisioned (d1/kv/r2) + plain_text vars from .env
+    const plainTextBindings = Object.entries(manifest.vars ?? {}).map(([name, text]) => ({
+      type: "plain_text" as const,
+      name,
+      text,
+    }));
+    const allBindings = [...workerBindings, ...plainTextBindings];
+
     // Add metadata part (include provisioned bindings)
     const metadata = {
       main_module: "index.js",
       compatibility_date: "2026-02-12",
       compatibility_flags: ["nodejs_compat"],
-      bindings: workerBindings.length > 0 ? workerBindings : undefined,
+      bindings: allBindings.length > 0 ? allBindings : undefined,
       triggers:
         manifest.schedules && manifest.schedules.length > 0
           ? { crons: manifest.schedules.map((schedule) => schedule.cron) }
