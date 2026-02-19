@@ -9,7 +9,8 @@
     "dist",
     "env.d.ts",
     "schema.json",
-    "skills"
+    "skills",
+    "README.md"
   ],
   "type": "module",
   "exports": {
