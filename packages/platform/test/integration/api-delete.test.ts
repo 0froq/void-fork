@@ -199,6 +199,28 @@ describe("DELETE /projects/:id", () => {
     expect(dbProject).toBeNull();
   });
 
+  it("does not warn when worker 404s (static project)", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "static-app");
+    // Set mode to spa (static project — no worker deployed)
+    await env.DB.prepare("UPDATE projects SET mode = ? WHERE id = ?").bind("spa", project.id).run();
+    mockCfApi({
+      deleteWorker: () => new Response("not found", { status: 404 }),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; warnings?: string[] };
+    expect(body).toEqual({ ok: true, id: project.id, slug: "static-app" });
+    expect(body.warnings).toBeUndefined();
+  });
+
   it("calls worker dispatch deletion", async () => {
     const user = await createTestUser(env.DB);
     const project = await createTestProject(env.DB, user.id, "worker-del");

@@ -64,7 +64,7 @@ app.delete("/:id", async (c) => {
         },
       },
     );
-    if (!cfRes.ok) {
+    if (!cfRes.ok && cfRes.status !== 404) {
       const details = await cfRes.text();
       warnings.push(`Failed to delete worker ${workerName}: ${details}`);
     }
