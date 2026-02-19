@@ -121,6 +121,90 @@ vcd db seed [--file <path>]
 
 Reset the local database, re-apply all migrations, then execute a seed file. Defaults to `migrations/seed.sql`. The seed file is excluded from migration collection — it's never deployed or applied as a migration.
 
+## Code Generation
+
+### `vcd gen model`
+
+```
+vcd gen model <name> [columns...]
+```
+
+Scaffold a complete model: migration file, CRUD API routes, and regenerated DB types in one command.
+
+```sh
+vcd gen model posts title:string body:text published:boolean
+```
+
+Creates:
+
+- `migrations/NNN_create_posts.sql` — CREATE TABLE with `id` (autoincrement), your columns, and `created_at`
+- `routes/api/posts/index.ts` — GET (list all) + POST (insert with valibot validation)
+- `routes/api/posts/[id].ts` — GET by id with 404 handling
+- Regenerated `.vite-cloud/db.d.ts`
+
+Column format: `name:type` or `name:type?` (nullable). Types: `string`, `text`, `datetime`, `integer`, `boolean`, `real`, `blob`. See [Database — Scaffolding](./db.md#scaffolding) for the full type mapping.
+
+Model names must be lowercase alphanumeric with underscores (e.g. `posts`, `user_roles`). Existing files are never overwritten.
+
+### `vcd gen migration`
+
+```
+vcd gen migration <name>
+```
+
+Create an empty migration file with auto-numbered prefix. The number is one greater than the highest existing migration.
+
+```sh
+vcd gen migration add_avatar_to_users
+# → migrations/002_add_avatar_to_users.sql
+```
+
+### `vcd gen route`
+
+```
+vcd gen route <path> [--methods get,post,...]
+```
+
+Create a route file with `defineHandler` exports. Defaults to GET.
+
+```sh
+vcd gen route api/health
+vcd gen route api/users --methods get,post,delete
+```
+
+Creates `routes/<path>.ts` with an exported handler for each method. Supported methods: `get`, `post`, `put`, `patch`, `delete`.
+
+### `vcd gen middleware`
+
+```
+vcd gen middleware <name>
+```
+
+Create a numbered middleware file with `defineMiddleware` default export.
+
+```sh
+vcd gen middleware auth
+# → middleware/01.auth.ts (or 02, 03, etc.)
+```
+
+The prefix is auto-detected from existing middleware files.
+
+### `vcd gen ssr`
+
+```
+vcd gen ssr [--react | --vue | --svelte | --solid]
+```
+
+Scaffold SSR entry points and a minimal App component for your framework.
+
+Creates three files:
+
+- `src/main.ssr.{tsx,ts}` — server entry with `defineRender`
+- `src/main.client.{tsx,ts}` — client entry with hydration
+- `src/App.{tsx,vue,svelte}` — minimal interactive component
+
+If no flag is provided, the framework is auto-detected from `package.json` dependencies.
+
 ## Secrets
 
 ### `vcd secret put`
