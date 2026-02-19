@@ -51,34 +51,6 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)
 
-  packages/admin:
-    dependencies:
-      '@vite-cloud/platform':
-        specifier: workspace:*
-        version: link:../platform
-      hono:
-        specifier: ^4.11.9
-        version: 4.11.9
-    devDependencies:
-      '@clack/prompts':
-        specifier: 'catalog:'
-        version: 1.0.1
-      '@cloudflare/workers-types':
-        specifier: 'catalog:'
-        version: 4.20260214.0
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.10.13
-      '@typescript/native-preview':
-        specifier: 'catalog:'
-        version: 7.0.0-dev.20260218.1
-      miniflare:
-        specifier: ^4
-        version: 4.20260212.0
-      wrangler:
-        specifier: 'catalog:'
-        version: 4.65.0(@cloudflare/workers-types@4.20260214.0)
-
   packages/create-vite-cloud:
     dependencies:
       '@clack/prompts':
@@ -147,6 +119,10 @@ importers:
       wrangler:
         specifier: 'catalog:'
         version: 4.65.0(@cloudflare/workers-types@4.20260214.0)
+    optionalDependencies:
+      '@clack/prompts':
+        specifier: ^0.10.0
+        version: 0.10.1
 
   packages/vite-cloud:
     dependencies:
@@ -507,8 +483,14 @@ packages:
   '@cfworker/json-schema@4.1.1':
     resolution: {integrity: sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==}
 
+  '@clack/core@0.4.2':
+    resolution: {integrity: sha512-NYQfcEy8MWIxrT5Fj8nIVchfRFA26yYKJcvBS7WlUIlw2OmQOY9DhGGXMovyI5J5PpxrCPGkgUi207EBrjpBvg==}
+
   '@clack/core@1.0.1':
     resolution: {integrity: sha512-WKeyK3NOBwDOzagPR5H08rFk9D/WuN705yEbuZvKqlkmoLM2woKtXb10OO2k1NoSU4SFG947i2/SCYh+2u5e4g==}
+
+  '@clack/prompts@0.10.1':
+    resolution: {integrity: sha512-Q0T02vx8ZM9XSv9/Yde0jTmmBQufZhPJfYAg2XrrrxWWaZgq1rr8nU8Hv710BQ1dhoP8rtY7YUdpGej2Qza/cw==}
 
   '@clack/prompts@1.0.1':
     resolution: {integrity: sha512-/42G73JkuYdyWZ6m8d/CJtBrGl1Hegyc7Fy78m5Ob+jF85TOUmLR5XLce/U3LxYAw0kJ8CT5aI99RIvPHcGp/Q==}
@@ -4066,10 +4048,23 @@ snapshots:
 
   '@cfworker/json-schema@4.1.1': {}
 
+  '@clack/core@0.4.2':
+    dependencies:
+      picocolors: 1.1.1
+      sisteransi: 1.0.5
+    optional: true
+
   '@clack/core@1.0.1':
     dependencies:
       picocolors: 1.1.1
       sisteransi: 1.0.5
+
+  '@clack/prompts@0.10.1':
+    dependencies:
+      '@clack/core': 0.4.2
+      picocolors: 1.1.1
+      sisteransi: 1.0.5
+    optional: true
 
   '@clack/prompts@1.0.1':
     dependencies:
