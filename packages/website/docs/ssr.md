@@ -1,4 +1,4 @@
-# SSR
+# Server-side Rendering (SSR)
 
 Vite Cloud supports framework-agnostic SSR via explicit server and client entries.
 
@@ -82,9 +82,9 @@ The `assetTags` values are computed by Vite Cloud:
 - In production: from `dist/client/.vite/manifest.json` (entry script, CSS, modulepreload)
 - In dev: includes Vite HMR client and React refresh preamble (when React plugin is active), plus the client entry script
 
-## ISR (Incremental Static Regeneration)
+## Edge Caching
 
-See [ISR](./isr.md) for stale-while-revalidate caching of SSR pages.
+See [Edge Caching](./edge-caching.md) for stale-while-revalidate caching of SSR pages.
 
 ## Request flow
 
