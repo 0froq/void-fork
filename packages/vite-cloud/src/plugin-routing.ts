@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
@@ -12,6 +12,7 @@ import {
 } from "./router/compile";
 import { generateRouteTypes } from "./codegen/route-types";
 import type { AuthProvider } from "./index";
+import { inferBindingsFromSource } from "./inference/walk";
 import {
   validateSsrEntries,
   SSR_SERVER_ENTRY_RELATIVE_PATHS,
@@ -32,6 +33,7 @@ const LOAD_ID_FILTER = /^virtual:vite-cloud-(routes|client-worker)$/;
  */
 interface RoutingPluginOptions {
   getAuth: () => AuthProvider[] | null;
+  autoDetect: boolean;
 }
 
 export function routingPlugin(root: string, options: RoutingPluginOptions): Plugin {
@@ -178,6 +180,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     configureServer(devServer) {
       // Watch routes/ and middleware/ for new/removed files
       const watcher = devServer.watcher;
+      let authHintShown = false;
 
       const handleFileChange = async (path: string) => {
         if (
@@ -187,6 +190,19 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
           !path.startsWith(srcDir)
         ) {
           return;
+        }
+
+        // Check for auth imports when auth is not currently enabled
+        if (options.autoDetect && !options.getAuth() && !authHintShown) {
+          try {
+            const code = readFileSync(path, "utf-8");
+            if (inferBindingsFromSource(code, path.split("/").pop()!).needsAuth) {
+              authHintShown = true;
+              devServer.config.logger.warn(
+                "[vite-cloud] auth import detected — restart to enable auth routes.",
+              );
+            }
+          } catch {}
         }
 
         if (path.startsWith(srcDir) && !ssrEntryAbsPaths.has(path)) return;
