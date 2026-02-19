@@ -74,7 +74,7 @@ See [`packages/dispatch/README.md`](./packages/dispatch/README.md) for request f
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). 740 tests across 62 files. See each package README for detailed test listings.
+Tests run from root with `pnpm test` (vitest). 771 tests across 63 files. See each package README for detailed test listings.
 
 ## Playground
 
@@ -96,6 +96,22 @@ Verified working:
 - `cd playground/ssr && pnpm dev`
 - `cd playground/spa && pnpm typecheck` (includes typed routes via generated `.vite-cloud/routes.d.ts`)
 
+## Code Generation (`vcd gen`)
+
+Rails/Laravel-style scaffolding commands for common boilerplate:
+
+| Command                                           | Creates                                          |
+| ------------------------------------------------- | ------------------------------------------------ |
+| `vcd gen model <name> [cols...]`                  | Migration + CRUD routes + regenerates `db.d.ts`  |
+| `vcd gen migration <name>`                        | Empty migration file with auto-numbered prefix   |
+| `vcd gen route <path> [--methods get,post,...]`   | Route file with `defineHandler` exports          |
+| `vcd gen middleware <name>`                       | Numbered middleware file with `defineMiddleware` |
+| `vcd gen ssr [--react\|--vue\|--svelte\|--solid]` | SSR entry + client entry + App component         |
+
+Column types for `gen model`: `string`, `text`, `datetime` → TEXT; `integer`, `boolean` → INTEGER; `real` → REAL; `blob` → BLOB. Append `?` for nullable (e.g. `bio:text?`).
+
+Source: `src/cli/gen-args.ts` (arg parsing), `src/cli/gen.ts` (command runner). Tests: `test/unit/gen-args.test.ts`.
+
 ## Environments
 
 Two deployment environments: **production** and **staging**. Each has fully isolated CF resources (D1, KV, R2, dispatch namespace, analytics engine).
@@ -113,12 +129,13 @@ To use the CLI against staging, set `"api"` in `~/.vite-cloud/config.json` or th
 
 Previously hardcoded values are now configurable via `vars` in wrangler config (defaulting to production values):
 
-| Worker   | Variable             | Default            | Purpose                                  |
-| -------- | -------------------- | ------------------ | ---------------------------------------- |
-| platform | `DISPATCH_NAMESPACE` | `vite-cloud-users` | CF dispatch namespace name for API calls |
-| platform | `SITE_DOMAIN`        | `vitecloud.app`    | Base domain for deploy URL output        |
-| platform | `DEV_AUTH_BYPASS`    | (unset)            | Skip admin OAuth for local dev           |
-| dispatch | `BASE_HOSTNAME`      | `vitecloud.app`    | Base hostname for slug extraction        |
+| Worker   | Variable             | Default            | Purpose                                               |
+| -------- | -------------------- | ------------------ | ----------------------------------------------------- |
+| platform | `DISPATCH_NAMESPACE` | `vite-cloud-users` | CF dispatch namespace name for API calls              |
+| platform | `SITE_DOMAIN`        | `vitecloud.app`    | Base domain for deploy URL output                     |
+| platform | `SIGNUP_ALLOWLIST`   | (unset)            | Comma-separated emails/domains for new Google signups |
+| platform | `DEV_AUTH_BYPASS`    | (unset)            | Skip admin OAuth for local dev                        |
+| dispatch | `BASE_HOSTNAME`      | `vitecloud.app`    | Base hostname for slug extraction                     |
 
 ### Deploying
 

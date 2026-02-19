@@ -18,6 +18,7 @@ export interface PlatformEnv extends Env {
     DEV_AUTH_BYPASS?: string;
     DISPATCH_NAMESPACE?: string;
     SITE_DOMAIN?: string;
+    SIGNUP_ALLOWLIST?: string;
   };
   Variables: {
     userId: string;

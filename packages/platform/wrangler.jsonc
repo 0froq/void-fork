@@ -71,6 +71,7 @@
         "DISPATCH_NAMESPACE": "vite-cloud-users-staging",
         "SITE_DOMAIN": "staging.vitecloud.app",
         "AUTH_REDIRECT_URI": "https://platform.staging.vite.cloud/auth/callback",
+        "SIGNUP_ALLOWLIST": "@voidzero.dev",
       },
     },
   },

@@ -48,6 +48,7 @@ export type TestEnv = {
   GOOGLE_CLIENT_SECRET: string;
   DEV_AUTH_BYPASS?: string;
   SITE_DOMAIN?: string;
+  SIGNUP_ALLOWLIST?: string;
 };
 
 let mf: Miniflare;

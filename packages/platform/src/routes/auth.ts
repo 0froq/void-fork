@@ -126,6 +126,14 @@ app.get("/callback", async (c) => {
         return c.redirect(redirectUrl.toString());
       }
     }
+    // Check signup allowlist (Google only, new users only)
+    if (resolvedProvider === "google" && c.env.SIGNUP_ALLOWLIST) {
+      if (!isEmailAllowed(email, c.env.SIGNUP_ALLOWLIST)) {
+        const redirectUrl = new URL(redirect);
+        redirectUrl.searchParams.set("error", "signup_restricted");
+        return c.redirect(redirectUrl.toString());
+      }
+    }
     user = await createUser(c.env.DB, resolvedProvider, providerId, login, email);
   }
 
@@ -137,5 +145,19 @@ app.get("/callback", async (c) => {
   redirectUrl.searchParams.set("token", jwt);
   return c.redirect(redirectUrl.toString());
 });
+
+export function isEmailAllowed(email: string | null, allowlist: string): boolean {
+  if (!email) return false;
+  const entries = allowlist
+    .split(",")
+    .map((e) => e.trim())
+    .filter(Boolean);
+  const domain = "@" + email.split("@")[1];
+  return entries.some((entry) =>
+    entry.startsWith("@")
+      ? entry.toLowerCase() === domain.toLowerCase()
+      : entry.toLowerCase() === email.toLowerCase(),
+  );
+}
 
 export default app;

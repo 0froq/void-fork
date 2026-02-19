@@ -151,6 +151,20 @@ export async function runLogin(provider = "github"): Promise<string> {
         return;
       }
 
+      if (error === "signup_restricted") {
+        res.writeHead(403, { "Content-Type": "text/html" });
+        res.end(
+          page("Signup restricted", "Your email is not on the approved list for this environment."),
+        );
+        server.close();
+        reject(
+          new Error(
+            "Signup restricted: your email is not on the approved list for this environment.",
+          ),
+        );
+        return;
+      }
+
       const token = url.searchParams.get("token");
       if (!token) {
         res.writeHead(400, { "Content-Type": "text/html" });
