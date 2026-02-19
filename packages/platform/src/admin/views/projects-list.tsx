@@ -22,7 +22,7 @@ export function ProjectsListPage({
         <table>
           <thead>
             <tr>
-              <th>Name</th>
+              <th>Slug</th>
               <th>URL</th>
               <th>Owner</th>
               <th>Mode</th>
@@ -33,7 +33,7 @@ export function ProjectsListPage({
             {projects.map((p) => (
               <tr key={p.id}>
                 <td>
-                  <a href={`/admin/projects/${p.id}`}>{p.name}</a>
+                  <a href={`/admin/projects/${p.id}`}>{p.slug}</a>
                 </td>
                 <td>
                   <a

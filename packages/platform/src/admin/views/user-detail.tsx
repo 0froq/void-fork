@@ -215,7 +215,6 @@ export function UserDetailPage({
           <table>
             <thead>
               <tr>
-                <th>Name</th>
                 <th>Slug</th>
                 <th>Mode</th>
                 <th>Created</th>
@@ -225,9 +224,8 @@ export function UserDetailPage({
               {projects.map((p) => (
                 <tr key={p.id}>
                   <td>
-                    <a href={`/admin/projects/${p.id}`}>{p.name}</a>
+                    <a href={`/admin/projects/${p.id}`}>{p.slug}</a>
                   </td>
-                  <td>{p.slug}</td>
                   <td>{p.mode}</td>
                   <td>{new Date(p.created_at).toLocaleDateString()}</td>
                 </tr>

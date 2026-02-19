@@ -4,7 +4,6 @@ export interface ProjectResponse {
   id: string;
   user_id: string;
   slug: string;
-  name: string;
   mode: string;
   created_at: string;
   custom_domain: string | null;
@@ -13,7 +12,6 @@ export interface ProjectResponse {
 export interface CreateProjectResponse {
   id: string;
   slug: string;
-  name: string;
 }
 
 export interface DeployResponse {
@@ -117,14 +115,14 @@ export class PlatformClient {
     return res.json();
   }
 
-  async createProject(slug: string, name: string): Promise<CreateProjectResponse> {
+  async createProject(slug: string): Promise<CreateProjectResponse> {
     const res = await fetch(`${this.baseUrl}/projects`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.token}`,
       },
-      body: JSON.stringify({ slug, name }),
+      body: JSON.stringify({ slug }),
     });
 
     if (!res.ok) {

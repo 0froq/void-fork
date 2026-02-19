@@ -15,7 +15,6 @@ export interface Project {
   id: string;
   user_id: string;
   slug: string;
-  name: string;
   mode: string;
   created_at: string;
 }

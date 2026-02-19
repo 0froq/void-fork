@@ -73,18 +73,16 @@ describe("POST /projects", () => {
           Authorization: `Bearer ${user.jwt}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ slug: "my-app", name: "My App" }),
+        body: JSON.stringify({ slug: "my-app" }),
       }),
       env,
     );
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
       slug: string;
-      name: string;
       user_id: string;
     };
     expect(body.slug).toBe("my-app");
-    expect(body.name).toBe("My App");
     expect(body.user_id).toBe(user.id);
   });
 
@@ -98,7 +96,7 @@ describe("POST /projects", () => {
           Authorization: `Bearer ${user.jwt}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ name: "No Slug" }),
+        body: JSON.stringify({}),
       }),
       env,
     );
@@ -115,10 +113,7 @@ describe("POST /projects", () => {
           Authorization: `Bearer ${user.jwt}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          slug: "UPPER-CASE",
-          name: "Bad Slug",
-        }),
+        body: JSON.stringify({ slug: "UPPER-CASE" }),
       }),
       env,
     );
@@ -139,7 +134,7 @@ describe("POST /projects", () => {
           Authorization: `Bearer ${user.jwt}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ slug: "taken-slug", name: "Dup" }),
+        body: JSON.stringify({ slug: "taken-slug" }),
       }),
       env,
     );

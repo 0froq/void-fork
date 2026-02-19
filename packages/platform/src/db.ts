@@ -85,18 +85,16 @@ export async function createProject(
   db: D1Database,
   userId: string,
   slug: string,
-  name: string,
 ): Promise<Project> {
   const id = generateId("proj");
   await db
-    .prepare("INSERT INTO projects (id, user_id, slug, name) VALUES (?, ?, ?, ?)")
-    .bind(id, userId, slug, name)
+    .prepare("INSERT INTO projects (id, user_id, slug) VALUES (?, ?, ?)")
+    .bind(id, userId, slug)
     .run();
   return {
     id,
     user_id: userId,
     slug,
-    name,
     mode: "fullstack",
     created_at: new Date().toISOString(),
   };
@@ -182,13 +180,13 @@ export async function getAllDeploymentsWithProject(
   db: D1Database,
   limit: number,
   offset: number,
-): Promise<(Deployment & { project_slug: string | null; project_name: string | null })[]> {
+): Promise<(Deployment & { project_slug: string | null })[]> {
   const result = await db
     .prepare(
-      "SELECT d.*, p.slug as project_slug, p.name as project_name FROM deployments d LEFT JOIN projects p ON d.project_id = p.id ORDER BY d.created_at DESC LIMIT ? OFFSET ?",
+      "SELECT d.*, p.slug as project_slug FROM deployments d LEFT JOIN projects p ON d.project_id = p.id ORDER BY d.created_at DESC LIMIT ? OFFSET ?",
     )
     .bind(limit, offset)
-    .all<Deployment & { project_slug: string | null; project_name: string | null }>();
+    .all<Deployment & { project_slug: string | null }>();
   return result.results;
 }
 

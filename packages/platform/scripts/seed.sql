@@ -10,12 +10,12 @@ INSERT INTO users (id, provider, provider_id, login, email, github_id, github_lo
 INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login, plan, billing_cycle_start, suspended_reason, role, created_at) VALUES ('user_seed5', 'google', '100005', 'eve', 'eve@example.com', 100005, 'eve', 'free', datetime('now', '-30 days'), 'usage_limit_exceeded', 'user', datetime('now', '-30 days'));
 
 -- Projects
-INSERT INTO projects (id, user_id, slug, name, mode, created_at) VALUES ('proj_seed1', 'user_seed1', 'my-app', 'my-app', 'fullstack', datetime('now', '-60 days'));
-INSERT INTO projects (id, user_id, slug, name, mode, created_at) VALUES ('proj_seed2', 'user_seed1', 'docs-site', 'docs-site', 'ssg', datetime('now', '-60 days'));
-INSERT INTO projects (id, user_id, slug, name, mode, created_at) VALUES ('proj_seed3', 'user_seed2', 'api-service', 'api-service', 'fullstack', datetime('now', '-60 days'));
-INSERT INTO projects (id, user_id, slug, name, mode, created_at) VALUES ('proj_seed4', 'user_seed2', 'landing-page', 'landing-page', 'spa', datetime('now', '-60 days'));
-INSERT INTO projects (id, user_id, slug, name, mode, created_at) VALUES ('proj_seed5', 'user_seed3', 'dashboard', 'dashboard', 'framework', datetime('now', '-60 days'));
-INSERT INTO projects (id, user_id, slug, name, mode, created_at) VALUES ('proj_seed6', 'user_seed4', 'blog', 'blog', 'ssg', datetime('now', '-60 days'));
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed1', 'user_seed1', 'my-app', 'fullstack', datetime('now', '-60 days'));
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed2', 'user_seed1', 'docs-site', 'ssg', datetime('now', '-60 days'));
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed3', 'user_seed2', 'api-service', 'fullstack', datetime('now', '-60 days'));
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed4', 'user_seed2', 'landing-page', 'spa', datetime('now', '-60 days'));
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed5', 'user_seed3', 'dashboard', 'framework', datetime('now', '-60 days'));
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed6', 'user_seed4', 'blog', 'ssg', datetime('now', '-60 days'));
 
 -- Deployments (live)
 INSERT INTO deployments (id, project_id, status, manifest, error_message, created_at, deployed_at) VALUES ('dpl_seed1', 'proj_seed1', 'live', '{"bindings":{"d1":["DB"],"kv":["CACHE"]},"migrations":[{"name":"001_create_users.sql","destructive":false}]}', NULL, datetime('now', '-30 days'), datetime('now', '-30 days'));

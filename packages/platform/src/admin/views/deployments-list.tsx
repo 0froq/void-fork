@@ -8,7 +8,7 @@ export function DeploymentsListPage({
   totalPages,
   username,
 }: {
-  deployments: (Deployment & { project_slug: string | null; project_name: string | null })[];
+  deployments: (Deployment & { project_slug: string | null })[];
   page: number;
   totalPages: number;
   username?: string;
@@ -43,9 +43,7 @@ export function DeploymentsListPage({
                   </td>
                   <td>
                     {d.project_slug ? (
-                      <a href={`/admin/projects/${d.project_id}`}>
-                        {d.project_name ?? d.project_slug}
-                      </a>
+                      <a href={`/admin/projects/${d.project_id}`}>{d.project_slug}</a>
                     ) : (
                       "-"
                     )}

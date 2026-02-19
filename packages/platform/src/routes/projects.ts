@@ -32,10 +32,10 @@ app.get("/", async (c) => {
 
 // Create a new project
 app.post("/", async (c) => {
-  const body = await c.req.json<{ slug: string; name: string }>();
+  const body = await c.req.json<{ slug: string }>();
 
-  if (!body.slug || !body.name) {
-    return c.json({ error: "slug and name are required" }, 400);
+  if (!body.slug) {
+    return c.json({ error: "slug is required" }, 400);
   }
 
   // Validate slug format: lowercase alphanumeric + dashes
@@ -50,7 +50,7 @@ app.post("/", async (c) => {
   }
 
   const userId = c.get("userId");
-  const project = await createProject(c.env.DB, userId, body.slug, body.name);
+  const project = await createProject(c.env.DB, userId, body.slug);
   return c.json(project, 201);
 });
 

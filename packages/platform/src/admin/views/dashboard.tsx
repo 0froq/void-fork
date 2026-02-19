@@ -41,7 +41,6 @@ export function DashboardPage({ stats, projects, username }: DashboardProps) {
         <table>
           <thead>
             <tr>
-              <th>Name</th>
               <th>Slug</th>
               <th>Owner</th>
               <th>Owner ID</th>
@@ -53,9 +52,8 @@ export function DashboardPage({ stats, projects, username }: DashboardProps) {
             {projects.map((p) => (
               <tr key={p.id}>
                 <td>
-                  <a href={`/admin/projects/${p.id}`}>{p.name}</a>
+                  <a href={`/admin/projects/${p.id}`}>{p.slug}</a>
                 </td>
-                <td>{p.slug}</td>
                 <td>
                   {p.owner_login ? <a href={`/admin/users/${p.user_id}`}>{p.owner_login}</a> : "-"}
                 </td>

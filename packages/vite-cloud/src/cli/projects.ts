@@ -26,11 +26,11 @@ export async function runProjectsCommand(): Promise<void> {
     url: p.custom_domain ? `https://${p.custom_domain}` : `https://${p.slug}.${getSiteDomain()}`,
   }));
 
-  const slugWidth = Math.max("name".length, ...rows.map((r) => r.slug.length));
+  const slugWidth = Math.max("slug".length, ...rows.map((r) => r.slug.length));
   const modeWidth = Math.max("mode".length, ...rows.map((r) => r.mode.length));
 
   const prefix = "\x1b[90m│\x1b[0m  ";
-  const header = `${prefix}\x1b[2m${"name".padEnd(slugWidth)}  ${"mode".padEnd(modeWidth)}  url\x1b[0m`;
+  const header = `${prefix}\x1b[2m${"slug".padEnd(slugWidth)}  ${"mode".padEnd(modeWidth)}  url\x1b[0m`;
   const lines = rows.map(
     (row) =>
       `${prefix}\x1b[32m${row.slug}\x1b[0m${"".padEnd(slugWidth - row.slug.length)}  ${row.mode.padEnd(modeWidth)}  ${row.url}`,

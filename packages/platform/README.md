@@ -64,7 +64,7 @@ GET    /auth/callback                    # OAuth callback → JWT
 GET    /me                               # Current user info
 
 GET    /projects                         # List user's projects
-POST   /projects                         # Create project (slug + name)
+POST   /projects                         # Create project (slug)
 GET    /projects/:id                     # Get project
 GET    /projects/:id/deployments         # List deployments
 GET    /projects/:id/migrations          # Get applied migrations

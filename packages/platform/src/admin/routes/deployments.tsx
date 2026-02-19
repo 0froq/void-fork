@@ -87,9 +87,7 @@ app.get("/:id", async (c) => {
               <th>Project</th>
               <td>
                 {project ? (
-                  <a href={`/admin/projects/${project.id}`}>
-                    {project.name} ({project.slug})
-                  </a>
+                  <a href={`/admin/projects/${project.id}`}>{project.slug}</a>
                 ) : (
                   deployment.project_id
                 )}

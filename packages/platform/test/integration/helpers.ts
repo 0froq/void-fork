@@ -27,6 +27,9 @@ const MIGRATION_0008 = fileURLToPath(
 const MIGRATION_0009 = fileURLToPath(
   new URL("../../migrations/0009_deployment_errors.sql", import.meta.url),
 );
+const MIGRATION_0010 = fileURLToPath(
+  new URL("../../migrations/0010_drop_project_name.sql", import.meta.url),
+);
 
 export const JWT_SECRET = "test-jwt-secret";
 export const CF_API_TOKEN = "test-cf-token";
@@ -117,6 +120,11 @@ export async function setupEnv(): Promise<TestEnv> {
     await db.prepare(stmt).run();
   }
 
+  const schema10 = readFileSync(MIGRATION_0010, "utf-8");
+  for (const stmt of splitStatements(schema10)) {
+    await db.prepare(stmt).run();
+  }
+
   return {
     DB: db,
     ASSETS: r2 as unknown as R2Bucket,
@@ -175,14 +183,13 @@ export async function createTestProject(
   db: D1Database,
   userId: string,
   slug?: string,
-  name?: string,
 ): Promise<{ id: string; slug: string }> {
   const n = ++projectCounter;
   const s = slug ?? `test-project-${n}`;
   const id = `proj_test${n}`;
   await db
-    .prepare("INSERT INTO projects (id, user_id, slug, name) VALUES (?, ?, ?, ?)")
-    .bind(id, userId, s, name ?? `Test Project ${n}`)
+    .prepare("INSERT INTO projects (id, user_id, slug) VALUES (?, ?, ?)")
+    .bind(id, userId, s)
     .run();
   return { id, slug: s };
 }
