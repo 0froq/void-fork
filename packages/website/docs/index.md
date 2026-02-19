@@ -36,7 +36,7 @@ Vite Cloud makes it dead simple:
 
 ### Flexible by design
 
-Vite Cloud auto-detects your app type — SPA, [SSR](./ssr.md), or [ISR](./isr.md) — and adapts accordingly. Use any UI library, add [Hono](https://hono.dev)-based API routes, or deploy a meta-framework like TanStack Start or React Router v7. Every build produces a standard Cloudflare Worker, so you can always [self-host](./cloudflare.md) with your own `wrangler.json`.
+Vite Cloud auto-detects your app type — SPA, [SSR](./ssr.md), or [Edge Caching](./edge-caching.md) — and adapts accordingly. Use any UI library, add [Hono](https://hono.dev)-based API routes, or deploy a meta-framework like TanStack Start or React Router v7. Every build produces a standard Cloudflare Worker, so you can always [self-host](./cloudflare.md) with your own `wrangler.json`.
 
 ### End-to-end type safety
 
