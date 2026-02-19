@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { intro, outro, log } from "@clack/prompts";
+import { intro, outro, log, select, isCancel, cancel } from "@clack/prompts";
 import type { GenArgs } from "./gen-args";
 import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
 
@@ -100,7 +100,62 @@ function sqlTypeFor(type: string): string {
   }
 }
 
-function valibotTypeFor(col: ColumnSpec): string {
+// ---------------------------------------------------------------------------
+// Validator detection + templates
+// ---------------------------------------------------------------------------
+
+type Validator = "valibot" | "zod" | "arktype" | "none";
+
+export function detectValidator(root: string): Validator | null {
+  const pkgPath = join(root, "package.json");
+  if (!existsSync(pkgPath)) return null;
+
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+  const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+  if ("valibot" in allDeps) return "valibot";
+  if ("zod" in allDeps) return "zod";
+  if ("arktype" in allDeps) return "arktype";
+  return null;
+}
+
+async function resolveValidator(root: string): Promise<Validator> {
+  const detected = detectValidator(root);
+  if (detected) {
+    log.info(`Detected validator: ${detected}`);
+    return detected;
+  }
+
+  const choice = await select({
+    message: "No validation library detected. Which would you like to use?",
+    options: [
+      { value: "valibot", label: "Valibot" },
+      { value: "zod", label: "Zod" },
+      { value: "arktype", label: "ArkType" },
+      { value: "none", label: "No validation" },
+    ],
+  });
+
+  if (isCancel(choice)) {
+    cancel("Cancelled.");
+    process.exit(0);
+  }
+
+  if (choice !== "none") {
+    log.warn(`Remember to install ${choice}: npm install ${choice}`);
+  }
+
+  return choice as Validator;
+}
+
+function validatorTypeFor(validator: Validator, col: ColumnSpec): string {
+  if (validator === "valibot") return valibotType(col);
+  if (validator === "zod") return zodType(col);
+  // arktype handled separately via string syntax
+  return arktypeType(col);
+}
+
+function valibotType(col: ColumnSpec): string {
   let base: string;
   switch (col.type) {
     case "string":
@@ -124,11 +179,197 @@ function valibotTypeFor(col: ColumnSpec): string {
   return col.nullable ? `v.optional(${base})` : base;
 }
 
+function zodType(col: ColumnSpec): string {
+  let base: string;
+  switch (col.type) {
+    case "string":
+    case "text":
+    case "datetime":
+      base = "z.string()";
+      break;
+    case "integer":
+    case "real":
+      base = "z.number()";
+      break;
+    case "boolean":
+      base = "z.boolean()";
+      break;
+    case "blob":
+      base = "z.instanceof(Blob)";
+      break;
+    default:
+      base = "z.string()";
+  }
+  return col.nullable ? `${base}.optional()` : base;
+}
+
+function arktypeType(col: ColumnSpec): string {
+  let base: string;
+  switch (col.type) {
+    case "string":
+    case "text":
+    case "datetime":
+      base = "string";
+      break;
+    case "integer":
+    case "real":
+      base = "number";
+      break;
+    case "boolean":
+      base = "boolean";
+      break;
+    case "blob":
+      base = "instanceof Blob";
+      break;
+    default:
+      base = "string";
+  }
+  return col.nullable ? `${base} | undefined` : base;
+}
+
+function getImportLine(validator: Validator): string | null {
+  switch (validator) {
+    case "valibot":
+      return 'import * as v from "valibot";';
+    case "zod":
+      return 'import { z } from "zod";';
+    case "arktype":
+      return 'import { type } from "arktype";';
+    case "none":
+      return null;
+  }
+}
+
+function getBodySchema(validator: Validator, columns: ColumnSpec[]): string {
+  if (validator === "arktype") {
+    const fields = columns.map((c) => `    ${c.name}: "${arktypeType(c)}",`).join("\n");
+    return `type({\n${fields}\n  })`;
+  }
+  const fields = columns.map((c) => `    ${c.name}: ${validatorTypeFor(validator, c)},`).join("\n");
+  const prefix = validator === "valibot" ? "v" : "z";
+  return `${prefix}.object({\n${fields}\n  })`;
+}
+
+function getParamsSchema(validator: Validator): string {
+  switch (validator) {
+    case "valibot":
+      return "v.object({ id: v.string() })";
+    case "zod":
+      return "z.object({ id: z.string() })";
+    case "arktype":
+      return 'type({ id: "string" })';
+    case "none":
+      return "";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Route templates
+// ---------------------------------------------------------------------------
+
+function generateIndexRoute(name: string, columns: ColumnSpec[], validator: Validator): string {
+  const importLine = getImportLine(validator);
+  const imports = [
+    importLine,
+    'import { defineHandler } from "vite-cloud";',
+    'import { db } from "vite-cloud/db";',
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const insertFields = columns.map((c) => `${c.name}: body.${c.name}`).join(", ");
+
+  if (columns.length === 0 || validator === "none") {
+    // No validator — plain handler
+    if (columns.length > 0) {
+      return `import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
+
+export const GET = defineHandler(async () => {
+  return db.list("${name}");
+});
+
+export const POST = defineHandler(async (c) => {
+  const body = await c.req.json();
+  await db.insert("${name}", { ${insertFields} });
+  return { created: true };
+});
+`;
+    }
+    return `import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
+
+export const GET = defineHandler(async () => {
+  return db.list("${name}");
+});
+
+export const POST = defineHandler(async () => {
+  await db.insert("${name}", {});
+  return { created: true };
+});
+`;
+  }
+
+  const bodySchema = getBodySchema(validator, columns);
+  return `${imports}
+
+export const GET = defineHandler(async () => {
+  return db.list("${name}");
+});
+
+export const POST = defineHandler.withValidator({
+  body: ${bodySchema},
+})(async (c, { body }) => {
+  await db.insert("${name}", { ${insertFields} });
+  return { created: true };
+});
+`;
+}
+
+function generateIdRoute(name: string, validator: Validator): string {
+  if (validator === "none") {
+    return `import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
+
+export const GET = defineHandler(async (c) => {
+  const id = c.req.param("id");
+  const row = await db.get("${name}", { where: { id: Number(id) } });
+
+  if (!row) {
+    return new Response("Not found", { status: 404 });
+  }
+  return row;
+});
+`;
+  }
+
+  const importLine = getImportLine(validator)!;
+  const paramsSchema = getParamsSchema(validator);
+
+  return `${importLine}
+import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
+
+export const GET = defineHandler.withValidator({
+  params: ${paramsSchema},
+})(async (c, { params }) => {
+  const row = await db.get("${name}", { where: { id: Number(params.id) } });
+
+  if (!row) {
+    return new Response("Not found", { status: 404 });
+  }
+  return row;
+});
+`;
+}
+
 // ---------------------------------------------------------------------------
 // Subcommands
 // ---------------------------------------------------------------------------
 
 async function runModel(root: string, name: string, columns: ColumnSpec[]): Promise<void> {
+  const validator = await resolveValidator(root);
+
   const migrationsDir = join(root, "migrations");
   mkdirSync(migrationsDir, { recursive: true });
 
@@ -146,60 +387,11 @@ async function runModel(root: string, name: string, columns: ColumnSpec[]): Prom
 
   // 2. Route: routes/api/<name>/index.ts
   const routeIndexPath = join(root, "routes", "api", name, "index.ts");
-  const bodyFields = columns.map((c) => `    ${c.name}: ${valibotTypeFor(c)},`).join("\n");
-  const insertFields = columns.map((c) => `${c.name}: body.${c.name}`).join(", ");
-
-  const routeIndex =
-    columns.length > 0
-      ? `import * as v from "valibot";
-import { defineHandler } from "vite-cloud";
-import { db } from "vite-cloud/db";
-
-export const GET = defineHandler(async () => {
-  return db.list("${name}");
-});
-
-export const POST = defineHandler.withValidator({
-  body: v.object({
-${bodyFields}
-  }),
-})(async (c, { body }) => {
-  await db.insert("${name}", { ${insertFields} });
-  return { created: true };
-});
-`
-      : `import { defineHandler } from "vite-cloud";
-import { db } from "vite-cloud/db";
-
-export const GET = defineHandler(async () => {
-  return db.list("${name}");
-});
-
-export const POST = defineHandler(async () => {
-  await db.insert("${name}", {});
-  return { created: true };
-});
-`;
-  writeIfNotExists(routeIndexPath, routeIndex);
+  writeIfNotExists(routeIndexPath, generateIndexRoute(name, columns, validator));
 
   // 3. Route: routes/api/<name>/[id].ts
   const routeIdPath = join(root, "routes", "api", name, "[id].ts");
-  const routeId = `import * as v from "valibot";
-import { defineHandler } from "vite-cloud";
-import { db } from "vite-cloud/db";
-
-export const GET = defineHandler.withValidator({
-  params: v.object({ id: v.string() }),
-})(async (c, { params }) => {
-  const row = await db.get("${name}", { where: { id: Number(params.id) } });
-
-  if (!row) {
-    return new Response("Not found", { status: 404 });
-  }
-  return row;
-});
-`;
-  writeIfNotExists(routeIdPath, routeId);
+  writeIfNotExists(routeIdPath, generateIdRoute(name, validator));
 
   // 4. Regenerate db.d.ts
   const { collectMigrations } = await import("../migrations/collect");

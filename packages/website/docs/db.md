@@ -46,20 +46,22 @@ vcd gen migration add_avatar_to_users
 `vcd gen model <name> [columns...]` creates:
 
 1. `migrations/NNN_create_<name>.sql` — CREATE TABLE with `id` (autoincrement), your columns, and `created_at`
-2. `routes/api/<name>/index.ts` — GET (list) + POST (insert with [valibot](https://valibot.dev/) validation)
+2. `routes/api/<name>/index.ts` — GET (list) + POST (insert with validation)
 3. `routes/api/<name>/[id].ts` — GET by id with 404 handling
 4. Regenerated `.vite-cloud/db.d.ts` — types updated to include the new table
 
+**Validator detection:** The generated routes use whichever validation library your project already has installed. The CLI checks `package.json` for [valibot](https://valibot.dev/), [zod](https://zod.dev/), or [arktype](https://arktype.io/) (in that order). If none is found, you'll be prompted to choose one or skip validation entirely.
+
 Column format is `name:type`, with an optional `?` suffix for nullable:
 
-| Type                         | SQL              | Valibot            |
-| ---------------------------- | ---------------- | ------------------ |
-| `string`, `text`, `datetime` | TEXT NOT NULL    | `v.string()`       |
-| `integer`                    | INTEGER NOT NULL | `v.number()`       |
-| `boolean`                    | INTEGER NOT NULL | `v.boolean()`      |
-| `real`                       | REAL NOT NULL    | `v.number()`       |
-| `blob`                       | BLOB NOT NULL    | `v.instance(Blob)` |
-| any type with `?`            | (no NOT NULL)    | `v.optional(...)`  |
+| Type                         | SQL              | Valibot            | Zod                  | ArkType              |
+| ---------------------------- | ---------------- | ------------------ | -------------------- | -------------------- |
+| `string`, `text`, `datetime` | TEXT NOT NULL    | `v.string()`       | `z.string()`         | `"string"`           |
+| `integer`                    | INTEGER NOT NULL | `v.number()`       | `z.number()`         | `"number"`           |
+| `boolean`                    | INTEGER NOT NULL | `v.boolean()`      | `z.boolean()`        | `"boolean"`          |
+| `real`                       | REAL NOT NULL    | `v.number()`       | `z.number()`         | `"number"`           |
+| `blob`                       | BLOB NOT NULL    | `v.instance(Blob)` | `z.instanceof(Blob)` | `"instanceof Blob"`  |
+| any type with `?`            | (no NOT NULL)    | `v.optional(...)`  | `....optional()`     | `"... \| undefined"` |
 
 `vcd gen migration <name>` creates an empty `migrations/NNN_<name>.sql` with a comment placeholder. The number is auto-detected from the highest existing migration prefix.
 
