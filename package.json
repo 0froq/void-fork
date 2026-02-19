@@ -18,7 +18,8 @@
     "deploy:staging": "pnpm deploy:staging:dispatch && pnpm deploy:staging:platform",
     "deploy:staging:dispatch": "pnpm -C packages/dispatch run deploy --env staging",
     "deploy:staging:platform": "pnpm migrate:staging --remote && pnpm -C packages/platform run deploy --env staging",
-    "deploy:docs": "pnpm deploy:mcp && pnpm -C packages/website run deploy",
+    "deploy:docs": "pnpm -C packages/website run deploy",
+    "deploy:staging:docs": "pnpm -C packages/website run deploy --project vite-cloud-staging",
     "deploy:mcp": "pnpm -C packages/mcp run deploy",
     "prepare": "husky"
   },
