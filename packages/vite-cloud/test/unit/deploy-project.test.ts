@@ -11,6 +11,15 @@ import {
 
 const tempDirs: string[] = [];
 
+function getError(fn: () => void): Error {
+  try {
+    fn();
+  } catch (e) {
+    return e as Error;
+  }
+  throw new Error("Expected function to throw");
+}
+
 describe("getRequestedProjectSlug", () => {
   afterEach(() => {
     delete process.env.VITE_CLOUD_PROJECT;
@@ -54,10 +63,22 @@ describe("resolveProjectBySlug", () => {
     });
   });
 
-  it("throws when slug is not found", () => {
+  it("throws when slug is not found (no projects)", () => {
     expect(() => resolveProjectBySlug([], "missing")).toThrow(
-      'No project found with slug "missing".',
+      /No project found with slug "missing"[\s\S]*You have no projects yet/,
     );
+  });
+
+  it("throws when slug is not found (lists available)", () => {
+    const projects = [
+      { id: "proj_1", slug: "app-one", name: "App One" },
+      { id: "proj_2", slug: "app-two", name: "App Two" },
+    ] as ProjectResponse[];
+    const err = getError(() => resolveProjectBySlug(projects, "missing"));
+    expect(err.message).toContain('No project found with slug "missing"');
+    expect(err.message).toContain("Available projects:");
+    expect(err.message).toContain("  - app-one");
+    expect(err.message).toContain("  - app-two");
   });
 });
 

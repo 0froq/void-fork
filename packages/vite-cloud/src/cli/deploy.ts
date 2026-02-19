@@ -40,7 +40,14 @@ export function getRequestedProjectSlug(options?: RunDeployOptions): string | nu
 export function resolveProjectBySlug(projects: ProjectResponse[], slug: string): ProjectConfig {
   const project = projects.find((candidate) => candidate.slug === slug);
   if (!project) {
-    throw new Error(`No project found with slug "${slug}".`);
+    const lines = [`No project found with slug "${slug}".`, ""];
+    if (projects.length > 0) {
+      lines.push("Available projects:");
+      for (const p of projects) lines.push(`  - ${p.slug}`);
+    } else {
+      lines.push("You have no projects yet.");
+    }
+    throw new Error(lines.join("\n"));
   }
 
   return { projectId: project.id, slug: project.slug };
