@@ -31,6 +31,40 @@ The CLI provides commands to inspect, reset, and seed your local database. Place
 
 See the [CLI reference](./cli.md#database) for details.
 
+## Scaffolding
+
+The `vcd gen` command can scaffold a complete model (migration + CRUD routes + types) or a standalone migration:
+
+```sh
+# Generate a full model: migration, API routes, and regenerated db types
+vcd gen model posts title:string body:text published:boolean
+
+# Generate just a migration file
+vcd gen migration add_avatar_to_users
+```
+
+`vcd gen model <name> [columns...]` creates:
+
+1. `migrations/NNN_create_<name>.sql` — CREATE TABLE with `id` (autoincrement), your columns, and `created_at`
+2. `routes/api/<name>/index.ts` — GET (list) + POST (insert with [valibot](https://valibot.dev/) validation)
+3. `routes/api/<name>/[id].ts` — GET by id with 404 handling
+4. Regenerated `.vite-cloud/db.d.ts` — types updated to include the new table
+
+Column format is `name:type`, with an optional `?` suffix for nullable:
+
+| Type                         | SQL              | Valibot            |
+| ---------------------------- | ---------------- | ------------------ |
+| `string`, `text`, `datetime` | TEXT NOT NULL    | `v.string()`       |
+| `integer`                    | INTEGER NOT NULL | `v.number()`       |
+| `boolean`                    | INTEGER NOT NULL | `v.boolean()`      |
+| `real`                       | REAL NOT NULL    | `v.number()`       |
+| `blob`                       | BLOB NOT NULL    | `v.instance(Blob)` |
+| any type with `?`            | (no NOT NULL)    | `v.optional(...)`  |
+
+`vcd gen migration <name>` creates an empty `migrations/NNN_<name>.sql` with a comment placeholder. The number is auto-detected from the highest existing migration prefix.
+
+See the [CLI reference](./cli.md#code-generation) for the full list of generators.
+
 ## Querying
 
 The `db` object provides typed methods for common operations. Types are derived from your migration files — no manual type definitions needed.
