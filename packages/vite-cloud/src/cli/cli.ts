@@ -257,6 +257,7 @@ if (command === "staging") {
       "\x1b[0m\x1b[1m\x1b[36msecrets\x1b[39m",
       "\x1b[0mvcd secret put <name> [--project]  \x1b[2mSet a project secret",
       "\x1b[0mvcd secret delete <name>           \x1b[2mDelete a project secret",
+      "\x1b[0mvcd secret sync <file>             \x1b[2mSync secrets from a dotenv file",
       "",
       "\x1b[0m\x1b[1m\x1b[36mdomains\x1b[39m",
       "\x1b[0mvcd domain add <hostname>          \x1b[2mAdd a custom domain",
