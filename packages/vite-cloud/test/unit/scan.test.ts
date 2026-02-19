@@ -107,4 +107,67 @@ describe("scanRoutes", () => {
 
     await expect(scanRoutes(TMP)).rejects.toThrow("missing `export const cron");
   });
+
+  it("discovers queue consumers from queues directory", async () => {
+    createFile("routes/api/hello.ts");
+    createFile("queues/emails.ts", "export default async () => {}");
+
+    const result = await scanRoutes(TMP);
+    expect(result.queues).toEqual([
+      {
+        filePath: "emails.ts",
+        name: "emails",
+        bindingName: "QUEUE_EMAILS",
+      },
+    ]);
+  });
+
+  it("derives binding name from filename", async () => {
+    createFile("routes/api/hello.ts");
+    createFile("queues/order-notifications.ts", "export default async () => {}");
+
+    const result = await scanRoutes(TMP);
+    expect(result.queues).toHaveLength(1);
+    expect(result.queues[0].name).toBe("order-notifications");
+    expect(result.queues[0].bindingName).toBe("QUEUE_ORDER_NOTIFICATIONS");
+  });
+
+  it("handles nested queue files", async () => {
+    createFile("routes/api/hello.ts");
+    createFile("queues/order/notifications.ts", "export default async () => {}");
+
+    const result = await scanRoutes(TMP);
+    expect(result.queues).toHaveLength(1);
+    expect(result.queues[0].name).toBe("order/notifications");
+    expect(result.queues[0].bindingName).toBe("QUEUE_ORDER_NOTIFICATIONS");
+  });
+
+  it("extracts maxBatchSize and maxBatchTimeout", async () => {
+    createFile("routes/api/hello.ts");
+    createFile(
+      "queues/emails.ts",
+      "export const maxBatchSize = 50\nexport const maxBatchTimeout = 10\nexport default async () => {}",
+    );
+
+    const result = await scanRoutes(TMP);
+    expect(result.queues).toHaveLength(1);
+    expect(result.queues[0].maxBatchSize).toBe(50);
+    expect(result.queues[0].maxBatchTimeout).toBe(10);
+  });
+
+  it("ignores _-prefixed queue files", async () => {
+    createFile("routes/api/hello.ts");
+    createFile("queues/_helpers.ts", "export const x = 1");
+    createFile("queues/_private/test.ts", "export const x = 1");
+
+    const result = await scanRoutes(TMP);
+    expect(result.queues).toEqual([]);
+  });
+
+  it("handles missing queues directory", async () => {
+    createFile("routes/api/hello.ts");
+
+    const result = await scanRoutes(TMP);
+    expect(result.queues).toEqual([]);
+  });
 });

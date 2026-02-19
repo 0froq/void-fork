@@ -3,11 +3,13 @@ import { glob } from "tinyglobby";
 import { parseRouteFilename, type RouteDefinition } from "./parse-filename";
 import { detectHttpExports } from "./detect-exports";
 import { scanJobs, type JobDefinition } from "../jobs/scan";
+import { scanQueues, type QueueDefinition } from "../queues/scan";
 
 export interface ScanResult {
   routes: RouteDefinition[];
   middleware: MiddlewareDefinition[];
   jobs: JobDefinition[];
+  queues: QueueDefinition[];
 }
 
 export interface MiddlewareDefinition {
@@ -26,10 +28,11 @@ const HANDLER_EXTENSIONS = ["ts", "mts", "js", "mjs"];
 export async function scanRoutes(root: string): Promise<ScanResult> {
   const pattern = `**/*.{${HANDLER_EXTENSIONS.join(",")}}`;
 
-  const [routeFiles, middlewareFiles, jobs] = await Promise.all([
+  const [routeFiles, middlewareFiles, jobs, queues] = await Promise.all([
     glob(pattern, { cwd: `${root}/routes`, absolute: false }),
     glob(pattern, { cwd: `${root}/middleware`, absolute: false }).catch(() => [] as string[]),
     scanJobs(root),
+    scanQueues(root),
   ]);
 
   const routesDir = `${root}/routes`;
@@ -61,5 +64,5 @@ export async function scanRoutes(root: string): Promise<ScanResult> {
     })
     .sort((a, b) => a.order - b.order);
 
-  return { routes, middleware, jobs };
+  return { routes, middleware, jobs, queues };
 }

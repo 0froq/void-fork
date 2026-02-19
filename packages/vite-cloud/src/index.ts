@@ -12,6 +12,7 @@ import {
   type Framework,
 } from "./plugin-inference";
 import { scanJobsSync } from "./jobs/scan";
+import { scanQueuesSync } from "./queues/scan";
 import { validateSsrEntry } from "./ssr/entry";
 import { readConfig, normalizeAuth } from "./config";
 
@@ -95,6 +96,10 @@ export default function viteCloud(): Plugin[] {
   const outDir = join(root, ".vite-cloud");
   mkdirSync(outDir, { recursive: true });
 
+  // Scan queues early so mergeBindings can reference them in both branches.
+  // Framework mode skips queue scanning (empty array).
+  const queues = framework ? [] : scanQueuesSync(root);
+
   // Config function that merges inferred bindings with the resolved config.
   // When the user has a wrangler.json with real binding IDs (for raw CF
   // deployment), those take precedence. We only add placeholder bindings
@@ -131,6 +136,18 @@ export default function viteCloud(): Plugin[] {
         ...(resolved.r2_buckets ?? []),
         { binding: "STORAGE", bucket_name: "default" },
       ];
+    }
+
+    // Queues — add producer + consumer bindings for local dev
+    if (queues.length > 0) {
+      (result as Record<string, unknown>).queues = {
+        producers: queues.map((q) => ({ queue: q.name, binding: q.bindingName })),
+        consumers: queues.map((q) => ({
+          queue: q.name,
+          ...(q.maxBatchSize != null && { max_batch_size: q.maxBatchSize }),
+          ...(q.maxBatchTimeout != null && { max_batch_timeout: q.maxBatchTimeout }),
+        })),
+      };
     }
 
     return result as Partial<WorkerConfig>;
@@ -249,9 +266,24 @@ export default function viteCloud(): Plugin[] {
 }
 
 // Re-export runtime types and functions
-export { defineHandler, defineMiddleware, defineJob, defineRender } from "./runtime/handler";
-export type { CloudContext, CloudEnv, RenderAssetTags, TypedHandler } from "./runtime/handler";
+export {
+  defineHandler,
+  defineMiddleware,
+  defineJob,
+  defineRender,
+  defineQueue,
+} from "./runtime/handler";
+export type {
+  CloudContext,
+  CloudEnv,
+  RenderAssetTags,
+  TypedHandler,
+  TypedQueueHandler,
+  QueueBatch,
+  QueueMessage,
+} from "./runtime/handler";
 export type { ValidatorSlots, HandlerInput } from "./runtime/validator";
 export type { AuthUser } from "./runtime/auth";
+export type { QueueMap } from "./runtime/queues";
 
 type AuthProvider = import("./config").AuthProvider;

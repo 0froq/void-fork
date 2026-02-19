@@ -66,6 +66,7 @@ export default extendConfig(
               { text: "Server-side Rendering (SSR)", link: "/docs/ssr" },
               { text: "Edge Caching", link: "/docs/edge-caching" },
               { text: "Cron Jobs", link: "/docs/jobs" },
+              { text: "Queues", link: "/docs/queues" },
               { text: "Environment Variables", link: "/docs/env-vars" },
               { text: "Caching and Headers", link: "/docs/cache" },
             ],

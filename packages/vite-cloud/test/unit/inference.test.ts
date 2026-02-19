@@ -201,14 +201,45 @@ describe("inferBindingsFromSource", () => {
     expect(result.needsAuth).toBe(false);
     expect(result.needsD1).toBe(true);
   });
+
+  it("detects needsQueues from vite-cloud/queue import", () => {
+    const code = `
+      import { defineQueue } from "vite-cloud/queue";
+      export const queue = "emails";
+      export default defineQueue(async (batch) => {});
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsQueues).toBe(true);
+  });
+
+  it("detects needsQueues from env.QUEUE_* access", () => {
+    const code = `
+      export const POST = defineHandler(async (c) => {
+        await c.env.QUEUE_EMAILS.send({ to: "test@example.com" });
+        return c.json({ ok: true });
+      })
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsQueues).toBe(true);
+  });
+
+  it("does not detect needsQueues from unrelated identifiers", () => {
+    const code = `
+      export const GET = defineHandler(() => {
+        return { status: 'ok' }
+      })
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsQueues).toBe(false);
+  });
 });
 
 describe("mergeBindings", () => {
   it("merges multiple binding results (union)", () => {
     const result = mergeBindings([
-      { needsD1: true, needsKV: false, needsR2: false, needsAuth: false },
-      { needsD1: false, needsKV: true, needsR2: false, needsAuth: false },
-      { needsD1: false, needsKV: false, needsR2: true, needsAuth: false },
+      { needsD1: true, needsKV: false, needsR2: false, needsAuth: false, needsQueues: false },
+      { needsD1: false, needsKV: true, needsR2: false, needsAuth: false, needsQueues: false },
+      { needsD1: false, needsKV: false, needsR2: true, needsAuth: false, needsQueues: false },
     ]);
     expect(result.needsD1).toBe(true);
     expect(result.needsKV).toBe(true);
@@ -226,9 +257,17 @@ describe("mergeBindings", () => {
 
   it("merges auth flag", () => {
     const result = mergeBindings([
-      { needsD1: false, needsKV: false, needsR2: false, needsAuth: false },
-      { needsD1: false, needsKV: false, needsR2: false, needsAuth: true },
+      { needsD1: false, needsKV: false, needsR2: false, needsAuth: false, needsQueues: false },
+      { needsD1: false, needsKV: false, needsR2: false, needsAuth: true, needsQueues: false },
     ]);
     expect(result.needsAuth).toBe(true);
+  });
+
+  it("merges queues flag", () => {
+    const result = mergeBindings([
+      { needsD1: false, needsKV: false, needsR2: false, needsAuth: false, needsQueues: false },
+      { needsD1: false, needsKV: false, needsR2: false, needsAuth: false, needsQueues: true },
+    ]);
+    expect(result.needsQueues).toBe(true);
   });
 });

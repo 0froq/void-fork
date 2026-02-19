@@ -48,6 +48,7 @@ export default defineConfig({
     "src/auth/schema.ts",
     "src/runtime/db.ts",
     "src/runtime/kv.ts",
+    "src/runtime/queues.ts",
     "src/runtime/storage.ts",
     "src/runtime/isr.ts",
     "src/cli/cli.ts",

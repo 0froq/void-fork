@@ -12,6 +12,7 @@ import { promptProjectSelection, promptProjectSlug } from "./prompt";
 import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
 import { scanJobsSync } from "../jobs/scan";
+import { scanQueuesSync } from "../queues/scan";
 import { validateSsrEntry, getRevalidateConfig } from "../ssr/entry";
 import { detectPreset, type StaticPreset } from "./preset";
 import { readConfig, convertHeadersConfig } from "../config";
@@ -249,12 +250,20 @@ async function runFullDeploy(
   }
   const workerDirName = detectWorkerDir(root, distDir);
 
-  // In framework mode: skip job scanning, SSR is always true
+  // In framework mode: skip job/queue scanning, SSR is always true
   const schedules = isFrameworkMode
     ? []
     : scanJobsSync(root).map((job) => ({
         name: job.name,
         cron: job.cron,
+      }));
+  const queues = isFrameworkMode
+    ? []
+    : scanQueuesSync(root).map((q) => ({
+        name: q.name,
+        bindingName: q.bindingName,
+        ...(q.maxBatchSize != null && { maxBatchSize: q.maxBatchSize }),
+        ...(q.maxBatchTimeout != null && { maxBatchTimeout: q.maxBatchTimeout }),
       }));
   const isSsr = isFrameworkMode ? true : Boolean(validateSsrEntry(root));
   const revalidateConfig = isSsr ? getRevalidateConfig(root) : { type: "none" as const };
@@ -301,6 +310,7 @@ async function runFullDeploy(
     headers,
     revalidate,
     envVars,
+    queues,
   );
   formData.append("source", getTokenSource());
 
@@ -314,6 +324,9 @@ async function runFullDeploy(
   }
   if (schedules.length > 0) {
     summary.push(`${schedules.length} cron job(s) scheduled`);
+  }
+  if (queues.length > 0) {
+    summary.push(`${queues.length} queue(s) configured`);
   }
   if (isSsr) {
     summary.push("SSR enabled");

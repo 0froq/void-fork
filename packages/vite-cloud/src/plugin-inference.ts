@@ -72,10 +72,11 @@ export function inferProjectBindings(
       needsKV: options.bindings.kv ?? false,
       needsR2: options.bindings.storage ?? false,
       needsAuth: false,
+      needsQueues: false,
     };
   }
 
-  const dirs = scanDirs ?? ["routes", "middleware"];
+  const dirs = scanDirs ?? ["routes", "middleware", "queues"];
   const allBindings: InferredBindings[] = [];
 
   for (const dir of dirs) {

@@ -11,6 +11,7 @@ import {
   type SsrCompileOptions,
 } from "./router/compile";
 import { generateRouteTypes } from "./codegen/route-types";
+import { generateQueueTypes } from "./codegen/queue-types";
 import type { AuthProvider } from "./index";
 import { inferBindingsFromSource } from "./inference/walk";
 import {
@@ -22,7 +23,8 @@ import {
 const VIRTUAL_ROUTES_ID = "virtual:vite-cloud-routes";
 const VIRTUAL_CLIENT_WORKER_ID = "virtual:vite-cloud-client-worker";
 // Rolldown resolveId hook filters currently require RegExp for `id`.
-const RESOLVE_ID_FILTER = /^(virtual:vite-cloud-(routes|client-worker)|vite-cloud(\/client)?)$/;
+const RESOLVE_ID_FILTER =
+  /^(virtual:vite-cloud-(routes|client-worker)|vite-cloud(\/client|\/queues)?)$/;
 const LOAD_ID_FILTER = /^virtual:vite-cloud-(routes|client-worker)$/;
 
 /**
@@ -42,6 +44,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   const routesDir = join(root, "routes");
   const middlewareDir = join(root, "middleware");
   const jobsDir = join(root, "jobs");
+  const queuesDir = join(root, "queues");
   const srcDir = join(root, "src");
   const ssrEntryAbsPaths = new Set(
     [...SSR_SERVER_ENTRY_RELATIVE_PATHS, ...SSR_CLIENT_ENTRY_RELATIVE_PATHS].map((path) =>
@@ -53,6 +56,12 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     if (!scan) return;
     const dts = generateRouteTypes(scan, routesDir, outDir);
     writeFileSync(join(outDir, "routes.d.ts"), dts);
+  }
+
+  function writeQueueTypes() {
+    if (!scan) return;
+    const dts = generateQueueTypes(scan.queues, queuesDir, outDir);
+    writeFileSync(join(outDir, "queues.d.ts"), dts);
   }
 
   async function rescan() {
@@ -110,6 +119,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   // so generated types (.vite-cloud/routes.d.ts) are discovered automatically.
   const outDir = join(root, ".vite-cloud");
   mkdirSync(outDir, { recursive: true });
+  // Write initial entry — will be re-written with hasQueues once scan completes
   writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry());
 
   return {
@@ -141,6 +151,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       resolveAuthCompileOptions();
       await rescan();
       writeRouteTypes();
+      writeQueueTypes();
+      // Re-write entry with queue handler if needed
+      writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(scan!.queues.length > 0));
     },
 
     resolveId: {
@@ -156,6 +169,10 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         // subpath to avoid pulling the entire plugin into the Worker bundle.
         if (id === "vite-cloud") {
           return handlerFile;
+        }
+        // Redirect vite-cloud/queues to the built runtime module
+        if (id === "vite-cloud/queues") {
+          return resolveFile("vite-cloud/queues");
         }
         // In worker environments, redirect vite-cloud/client to the worker
         // virtual module that calls app.fetch() directly (no HTTP round-trip).
@@ -173,7 +190,15 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         }
         if (id !== VIRTUAL_ROUTES_ID) return;
         if (!scan) await rescan();
-        return compileRouteTable(scan!, routesDir, middlewareDir, jobsDir, ssr, compileOptions);
+        return compileRouteTable(
+          scan!,
+          routesDir,
+          middlewareDir,
+          jobsDir,
+          queuesDir,
+          ssr,
+          compileOptions,
+        );
       },
     },
 
@@ -187,6 +212,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
           !path.startsWith(routesDir) &&
           !path.startsWith(middlewareDir) &&
           !path.startsWith(jobsDir) &&
+          !path.startsWith(queuesDir) &&
           !path.startsWith(srcDir)
         ) {
           return;
@@ -212,6 +238,8 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         // not the client — so we must iterate all environments.
         await rescan();
         writeRouteTypes();
+        writeQueueTypes();
+        writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(scan!.queues.length > 0));
 
         for (const env of Object.values(devServer.environments)) {
           const mod = env.moduleGraph.getModuleById(VIRTUAL_ROUTES_ID);

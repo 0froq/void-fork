@@ -40,6 +40,7 @@ export function compileRouteTable(
   routesDir: string,
   middlewareDir: string,
   jobsDir: string,
+  queuesDir: string,
   ssr: SsrCompileOptions | null,
   options: CompileOptions,
 ): string {
@@ -329,6 +330,29 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push("");
   }
 
+  if (scan.queues.length > 0) {
+    for (let i = 0; i < scan.queues.length; i++) {
+      lines.push(`const queue${i}Name = ${JSON.stringify(scan.queues[i].name)};`);
+    }
+    lines.push("");
+    lines.push('app.post("/__queue", async (c) => {');
+    lines.push("  const payload = await c.req.json();");
+    lines.push("  const queueSuffix = payload.queue;");
+    for (let i = 0; i < scan.queues.length; i++) {
+      const q = scan.queues[i];
+      const cond = i === 0 ? "if" : "} else if";
+      lines.push(
+        `  ${cond} (queueSuffix === queue${i}Name || queueSuffix.endsWith("-" + queue${i}Name)) {`,
+      );
+      lines.push(`    const mod = await import(${JSON.stringify(`${queuesDir}/${q.filePath}`)});`);
+      lines.push("    if (typeof mod.default === 'function') await mod.default(payload, c.env);");
+    }
+    lines.push("  }");
+    lines.push("  return c.json({ ok: true });");
+    lines.push("});");
+    lines.push("");
+  }
+
   lines.push(`export default app;`);
 
   return lines.join("\n");
@@ -515,8 +539,31 @@ function compileAuthRoutes(lines: string[], auth: AuthCompileOptions): void {
 /**
  * Generate the Worker entry module code.
  * Simply re-exports the Hono app from the virtual module.
+ *
+ * When `hasQueues` is true, also exports a `queue()` handler that
+ * serializes the native MessageBatch and dispatches it to the
+ * `/__queue` Hono route. In local dev Miniflare delivers batches
+ * natively to this export; in production the relay worker does it.
  */
-export function compileWorkerEntry(): string {
+export function compileWorkerEntry(hasQueues = false): string {
+  if (hasQueues) {
+    return `import app, { scheduled } from 'virtual:vite-cloud-routes';
+
+async function queue(batch, env, ctx) {
+  const messages = [...batch.messages].map(m => ({
+    id: m.id, timestamp: m.timestamp.toISOString(),
+    body: m.body, attempts: m.attempts,
+  }));
+  const req = new Request("https://localhost/__queue", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ queue: batch.queue, messages }),
+  });
+  await app.fetch(req, env, ctx);
+}
+
+export default { fetch: app.fetch, scheduled, queue };`;
+  }
   return `import app, { scheduled } from 'virtual:vite-cloud-routes';
 
 export default { fetch: app.fetch, scheduled };`;

@@ -8,6 +8,13 @@ export interface ScheduleMeta {
   cron: string;
 }
 
+export interface QueueMeta {
+  name: string;
+  bindingName: string;
+  maxBatchSize?: number;
+  maxBatchTimeout?: number;
+}
+
 export interface HeaderRule {
   pattern: string;
   headers: [string, string][];
@@ -21,6 +28,7 @@ export interface DeployManifest {
   };
   migrations?: MigrationMeta[];
   schedules?: ScheduleMeta[];
+  queues?: QueueMeta[];
   ssr?: boolean;
   framework?: boolean;
   revalidate?: number | Record<string, number>;

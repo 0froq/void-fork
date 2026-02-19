@@ -43,7 +43,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 
 ## `vite-cloud` Overview
 
-Core Vite plugin. `viteCloud()` returns `[routingPlugin, migrationPlugin, cloudflare({...inferredBindings})]`. Provides file-based routing on Hono, Standard Schema validation, typed fetch client, typed DB queries, built-in auth (auto-detected from imports + env vars), and a deploy CLI (`vcd`).
+Core Vite plugin. `viteCloud()` returns `[routingPlugin, migrationPlugin, cloudflare({...inferredBindings})]`. Provides file-based routing on Hono, Standard Schema validation, typed fetch client, typed DB queries, built-in auth (auto-detected from imports + env vars), cron jobs, queues (typed via `vite-cloud/queues`), and a deploy CLI (`vcd`).
 
 See [`packages/vite-cloud/AGENTS.md`](./packages/vite-cloud/AGENTS.md) for architecture, source layout, design decisions, package exports, and route parsing rules.
 
@@ -55,7 +55,7 @@ See [`packages/platform/README.md`](./packages/platform/README.md) for API endpo
 
 ## `dispatch` Overview
 
-CF Worker routing `*.vitecloud.app` traffic. Extracts slug from hostname → KV lookup → serves API routes via Workers for Platforms (with custom CPU/subrequest limits) or static assets from R2 (with edge caching). Records every request to Analytics Engine for usage metering.
+CF Worker routing `*.vitecloud.app` traffic. Extracts slug from hostname → KV lookup → serves API routes via Workers for Platforms (with custom CPU/subrequest limits) or static assets from R2 (with edge caching). Records every request to Analytics Engine for usage metering. Also relays Cloudflare Queue batches to user workers via KV-based routing.
 
 See [`packages/dispatch/README.md`](./packages/dispatch/README.md) for request flow, metering schema, and edge caching strategy.
 
@@ -74,7 +74,7 @@ See [`packages/dispatch/README.md`](./packages/dispatch/README.md) for request f
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). 858 tests across 66 files. See each package README for detailed test listings.
+Tests run from root with `pnpm test` (vitest). 882 tests across 68 files. See each package README for detailed test listings.
 
 ## Playground
 
@@ -89,6 +89,8 @@ Tests run from root with `pnpm test` (vitest). 858 tests across 66 files. See ea
 - Seamless tsconfig: `tsconfig.json` extends `.vite-cloud/tsconfig.json` for auto type discovery
 
 `playground/ssr` is a minimal React SSR app demonstrating `src/main.ssr.ts` render fallback plus API routes.
+
+`playground/queues` is a minimal API-only app demonstrating typed queues: a `queues/test-queue.ts` consumer writes to KV, `routes/api/send.ts` produces messages via `queues["test-queue"].send()`, and `routes/api/result.ts` reads the result back. Integration-tested end-to-end (send → consumer → KV round-trip).
 
 Verified working:
 

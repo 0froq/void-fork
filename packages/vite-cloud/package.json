@@ -61,6 +61,10 @@
       "types": "./dist/runtime/kv.d.mts",
       "import": "./dist/runtime/kv.mjs"
     },
+    "./queues": {
+      "types": "./dist/runtime/queues.d.mts",
+      "import": "./dist/runtime/queues.mjs"
+    },
     "./storage": {
       "types": "./dist/runtime/storage.d.mts",
       "import": "./dist/runtime/storage.mjs"
