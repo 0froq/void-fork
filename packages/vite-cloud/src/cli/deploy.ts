@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { intro, outro, log, note, spinner } from "@clack/prompts";
-import { build, resolveConfig } from "vite";
+import { build, loadEnv, resolveConfig } from "vite";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
 import { computeAssetHashes, packageBuild, packageStaticBuild } from "./package";
@@ -252,7 +252,10 @@ async function runFullDeploy(
     revalidate = Object.fromEntries(revalidateConfig.rules);
   }
 
-  // 8. Check assets & Package & Upload
+  // 8. Load .env vars for production
+  const envVars = loadEnv("production", root, "");
+
+  // 9. Check assets & Package & Upload
   const s = spinner();
 
   s.start("Checking assets...");
@@ -284,6 +287,7 @@ async function runFullDeploy(
     assetHashes,
     headers,
     revalidate,
+    envVars,
   );
   formData.append("source", getTokenSource());
 

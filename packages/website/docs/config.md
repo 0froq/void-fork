@@ -21,8 +21,7 @@ All project-level configuration lives in a `vite-cloud.json` file at the project
   "outputDir": "dist",
   "wrangler": {
     "compatibility_date": "2025-12-01",
-    "compatibility_flags": ["nodejs_compat"],
-    "vars": { "MY_VAR": "value" }
+    "compatibility_flags": ["nodejs_compat"]
   }
 }
 ```
@@ -87,18 +86,55 @@ Output directory for static deploys, relative to the project root. Only relevant
 
 Curated Cloudflare Workers configuration. Binding arrays (`d1_databases`, `kv_namespaces`, `r2_buckets`) are not allowed here — bindings are fully managed by vite-cloud via inference and the `bindings` field. Users wanting custom bindings should use a `wrangler.json` with real binding IDs and `wrangler deploy`.
 
-| Field                 | Type                     | Description                            |
-| --------------------- | ------------------------ | -------------------------------------- |
-| `compatibility_date`  | `string`                 | Cloudflare Workers compatibility date  |
-| `compatibility_flags` | `string[]`               | Cloudflare Workers compatibility flags |
-| `vars`                | `Record<string, string>` | Environment variables (plain text)     |
+| Field                 | Type       | Description                            |
+| --------------------- | ---------- | -------------------------------------- |
+| `compatibility_date`  | `string`   | Cloudflare Workers compatibility date  |
+| `compatibility_flags` | `string[]` | Cloudflare Workers compatibility flags |
 
 ```json
 {
   "wrangler": {
     "compatibility_date": "2025-12-01",
-    "compatibility_flags": ["nodejs_compat"],
-    "vars": { "API_URL": "https://api.example.com" }
+    "compatibility_flags": ["nodejs_compat"]
   }
 }
 ```
+
+## Environment Variables
+
+Vite Cloud uses Vite's standard `.env` convention for environment variables.
+
+### `.env` (committed)
+
+Non-secret configuration. All variables are injected into the worker `env` object. Variables prefixed with `VITE_` are also available on `import.meta.env` in client code.
+
+```
+API_URL=https://api.example.com
+VITE_APP_TITLE=My App
+```
+
+Access in route handlers via `c.env`:
+
+```ts
+export const GET = defineHandler((c) => {
+  const apiUrl = c.env.API_URL;
+  return { apiUrl };
+});
+```
+
+### `.env.local` (gitignored)
+
+Secrets for local development. This file should be added to `.gitignore` and never committed.
+
+```
+GITHUB_SECRET=your-github-client-secret
+STRIPE_KEY=sk_test_...
+```
+
+To push local secrets to production, use [`vcd secret sync`](/cli#vcd-secret-sync).
+
+### How it works
+
+During `vite dev`, the `vite-cloud:env` plugin calls Vite's `loadEnv()` and merges all variables into the worker's `vars` bindings. During `vcd deploy`, `.env` variables (but not `.env.local`) are included in the deploy manifest as `plain_text` bindings on the deployed worker.
+
+Secrets should never go in `.env` — use `.env.local` for local dev and `vcd secret put` or `vcd secret sync` for production.

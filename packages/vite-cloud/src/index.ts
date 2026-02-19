@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Plugin } from "vite";
+import { loadEnv, type Plugin } from "vite";
 import { cloudflare, type WorkerConfig } from "@cloudflare/vite-plugin";
 import { routingPlugin } from "./plugin-routing";
 import { migrationPlugin } from "./plugin-migration";
@@ -69,10 +69,6 @@ export default function viteCloud(): Plugin[] {
   if (config.wrangler?.compatibility_flags) {
     workerConfig.compatibility_flags = config.wrangler.compatibility_flags;
   }
-  if (config.wrangler?.vars) {
-    workerConfig.vars = config.wrangler.vars;
-  }
-
   const inspectorPortEnv = process.env.VITE_CLOUD_INSPECTOR_PORT;
   const inspectorPort =
     inspectorPortEnv === "false"
@@ -132,6 +128,16 @@ export default function viteCloud(): Plugin[] {
     return result as Partial<WorkerConfig>;
   }
 
+  // Plugin that loads .env files and merges them into workerConfig.vars.
+  // Runs before the Cloudflare plugin so vars are available as worker bindings.
+  const envPlugin: Plugin = {
+    name: "vite-cloud:env",
+    config(_, { mode }) {
+      const env = loadEnv(mode, root, "");
+      workerConfig.vars = { ...(workerConfig.vars as Record<string, string> | undefined), ...env };
+    },
+  };
+
   if (framework) {
     // Framework mode: no routing plugin, CF plugin uses viteEnvironment.
     // The CF plugin needs `main` to create a proper worker environment
@@ -145,6 +151,7 @@ export default function viteCloud(): Plugin[] {
     }
 
     return [
+      envPlugin,
       dbTypesPlugin(root, false),
       migrationPlugin(root),
       ...cloudflare({
@@ -184,6 +191,7 @@ export default function viteCloud(): Plugin[] {
   }
 
   return [
+    envPlugin,
     routingPlugin(root, { auth: authProviders }),
     dbTypesPlugin(root, true),
     migrationPlugin(root),

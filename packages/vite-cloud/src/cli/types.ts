@@ -27,4 +27,5 @@ export interface DeployManifest {
   static?: "spa" | "ssg";
   assetHashes?: Record<string, string>;
   headers?: HeaderRule[];
+  vars?: Record<string, string>;
 }

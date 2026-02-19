@@ -9,7 +9,6 @@ export type AuthProvider = "github" | "google" | "email";
 export interface WranglerConfig {
   compatibility_date?: string;
   compatibility_flags?: string[];
-  vars?: Record<string, string>;
 }
 
 /** Shape of the `vite-cloud.json` config file. All fields optional. */
@@ -134,16 +133,6 @@ export function readConfig(root: string): ViteCloudConfig {
         throw new Error(
           `"wrangler.compatibility_flags" in ${CONFIG_FILE} must be an array of strings`,
         );
-      }
-    }
-    if (w.vars !== undefined) {
-      if (typeof w.vars !== "object" || w.vars === null || Array.isArray(w.vars)) {
-        throw new Error(`"wrangler.vars" in ${CONFIG_FILE} must be an object`);
-      }
-      for (const [k, v] of Object.entries(w.vars as Record<string, unknown>)) {
-        if (typeof v !== "string") {
-          throw new Error(`"wrangler.vars.${k}" in ${CONFIG_FILE} must be a string`);
-        }
       }
     }
   }

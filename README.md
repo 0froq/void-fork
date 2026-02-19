@@ -74,7 +74,7 @@ See [`packages/dispatch/README.md`](./packages/dispatch/README.md) for request f
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). 826 tests across 65 files. See each package README for detailed test listings.
+Tests run from root with `pnpm test` (vitest). 843 tests across 66 files. See each package README for detailed test listings.
 
 ## Playground
 

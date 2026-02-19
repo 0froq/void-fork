@@ -37,6 +37,7 @@ export function packageBuild(
   assetHashes?: Record<string, string>,
   headers?: HeaderRule[],
   revalidate?: number | Record<string, number>,
+  vars?: Record<string, string>,
 ): FormData {
   const formData = new FormData();
 
@@ -79,6 +80,10 @@ export function packageBuild(
 
   if (headers) {
     manifest.headers = headers;
+  }
+
+  if (vars && Object.keys(vars).length > 0) {
+    manifest.vars = vars;
   }
 
   formData.append("manifest", JSON.stringify(manifest));

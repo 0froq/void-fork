@@ -19,7 +19,7 @@ Email/password auth works immediately with no setup.
 2. Create a new OAuth App:
    - **Homepage URL**: `http://localhost:5173`
    - **Authorization callback URL**: `http://localhost:5173/auth/login/github`
-3. Copy the Client ID and Client Secret into `.dev.vars`:
+3. Copy the Client ID and Client Secret into `.env.local`:
    ```
    GITHUB_ID=your_client_id
    GITHUB_SECRET=your_client_secret
@@ -30,7 +30,7 @@ Email/password auth works immediately with no setup.
 1. Go to **Google Cloud Console > APIs & Services > Credentials**
 2. Create an **OAuth 2.0 Client ID** (Web application)
 3. Add authorized redirect URI: `http://localhost:5173/auth/login/google`
-4. Copy the Client ID and Client Secret into `.dev.vars`:
+4. Copy the Client ID and Client Secret into `.env.local`:
    ```
    GOOGLE_ID=your_client_id
    GOOGLE_SECRET=your_client_secret
