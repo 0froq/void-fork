@@ -164,15 +164,62 @@ src/
     remote-runner.ts        # Executes migrations on remote D1 via CF REST API
     validate.ts             # Server-side destructive-op validation (defense in depth)
   routes/
-    auth.ts                 # GET /auth/login + GET /auth/callback (GitHub/Google OAuth flow)
-    projects.ts             # POST /projects, GET /projects/:id
-    deploy.ts               # POST /projects/:id/deploy (migrations → assets → worker)
-    usage.ts                # GET /projects/:id/usage, GET /usage (Analytics Engine queries)
+    auth.ts                 # OAuth login + callback (GitHub/Google)
+    projects.ts             # Projects CRUD + deployments + migrations list
+    deploy.ts               # Asset check + full deploy pipeline
+    delete.ts               # Project deletion + CF resource cleanup
+    revalidate.ts           # ISR cache purge (paths or all)
+    secrets.ts              # Worker secret management (put/delete)
+    domains.ts              # Custom domain CRUD + CF for SaaS
+    usage.ts                # Usage queries (per-project + aggregate)
+    admin.ts                # Admin endpoints (users, projects, stats)
 migrations/
   0001_initial.sql          # users, projects, deployments, resources tables
   0002_provider_auth.sql    # Migrate users to provider-agnostic schema
   ...
   0006_usage_tiers.sql      # Add plan column to users table
+```
+
+### Platform API
+
+All endpoints except `/health` and `/auth/*` require Bearer token authentication. Project endpoints verify ownership (`project.user_id === userId`). Admin endpoints require `role === "admin"`.
+
+```
+GET    /health                           # Health check
+GET    /auth/login                       # OAuth initiation (GitHub/Google)
+GET    /auth/callback                    # OAuth callback → JWT
+GET    /me                               # Current user info
+
+GET    /projects                         # List user's projects
+POST   /projects                         # Create project (slug + name)
+GET    /projects/:id                     # Get project
+GET    /projects/:id/deployments         # List deployments
+GET    /projects/:id/migrations          # Get applied migrations
+DELETE /projects/:id                     # Delete project + all CF resources
+
+POST   /projects/:id/assets/check        # Check which assets need uploading
+POST   /projects/:id/deploy              # Full deploy (migrations → assets → worker)
+POST   /projects/:id/revalidate          # Purge ISR cache (specific paths or all)
+
+PUT    /projects/:id/secrets/:name       # Set/update a worker secret
+DELETE /projects/:id/secrets/:name       # Delete a worker secret
+
+POST   /projects/:id/domains             # Add custom domain
+GET    /projects/:id/domains             # List custom domains
+GET    /projects/:id/domains/:domainId   # Get domain status (polls CF API)
+DELETE /projects/:id/domains/:domainId   # Remove custom domain
+
+GET    /projects/:id/usage               # Project usage (current billing period)
+GET    /usage                            # Aggregate usage across all projects
+
+GET    /admin/users                      # List users (paginated, searchable)
+GET    /admin/users/:id                  # User detail with projects
+POST   /admin/users/:id/plan             # Change plan
+POST   /admin/users/:id/suspend          # Suspend user
+POST   /admin/users/:id/unsuspend        # Unsuspend user
+GET    /admin/projects                   # List all projects
+GET    /admin/projects/:id               # Project detail with deployments/resources
+GET    /admin/stats                      # System-wide stats
 ```
 
 ### Auth Flow
