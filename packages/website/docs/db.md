@@ -28,6 +28,9 @@ The CLI provides commands to inspect, reset, and seed your local database. Place
 - `vcd db status` — show which migrations are applied locally (and remotely if linked)
 - `vcd db reset` — drop the local DB and re-apply all migrations
 - `vcd db seed` — reset + run `migrations/seed.sql` (or `--file <path>`)
+- `vcd db execute <sql>` — run ad-hoc SQL against the local DB (or `--file <path>`)
+- `vcd db migrate` — apply pending migrations without resetting
+- `vcd db export` — dump local DB as SQL (supports `--output`, `--no-data`, `--no-schema`, `--table`)
 
 See the [CLI reference](./cli.md#database) for details.
 

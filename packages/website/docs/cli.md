@@ -122,6 +122,38 @@ vcd db seed [--file <path>]
 
 Reset the local database, re-apply all migrations, then execute a seed file. Defaults to `migrations/seed.sql`. The seed file is excluded from migration collection — it's never deployed or applied as a migration.
 
+### `vcd db execute`
+
+```
+vcd db execute <sql>
+vcd db execute --file <path>
+```
+
+Run ad-hoc SQL against the local D1 database. Provide SQL inline or from a file. SELECT queries display results as a formatted table; other statements execute silently.
+
+### `vcd db migrate`
+
+```
+vcd db migrate
+```
+
+Apply pending migrations to the local database without resetting. Unlike `vcd db reset`, this preserves existing data and only runs migrations that haven't been applied yet.
+
+### `vcd db export`
+
+```
+vcd db export [--output <path>] [--no-data] [--no-schema] [--table <name>]
+```
+
+Dump the local database as SQL. Outputs to stdout by default (pipeable), or to a file with `--output`.
+
+| Flag              | Purpose                            |
+| ----------------- | ---------------------------------- |
+| `--output <path>` | Write to a file instead of stdout  |
+| `--no-data`       | Schema only (no INSERT statements) |
+| `--no-schema`     | Data only (no CREATE TABLE)        |
+| `--table <name>`  | Export a single table              |
+
 ## Code Generation
 
 ### `vcd gen model`
