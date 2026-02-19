@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { intro, outro, log, note, spinner } from "@clack/prompts";
+import { intro, outro, log, note, spinner, confirm, isCancel } from "@clack/prompts";
 import { build, loadEnv, resolveConfig } from "vite";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
@@ -37,20 +37,12 @@ export function getRequestedProjectSlug(options?: RunDeployOptions): string | nu
   return null;
 }
 
-export function resolveProjectBySlug(projects: ProjectResponse[], slug: string): ProjectConfig {
+export function resolveProjectBySlug(
+  projects: ProjectResponse[],
+  slug: string,
+): ProjectConfig | null {
   const project = projects.find((candidate) => candidate.slug === slug);
-  if (!project) {
-    const lines = [`No project found with slug "${slug}".`, ""];
-    if (projects.length > 0) {
-      lines.push("Available projects:");
-      for (const p of projects) lines.push(`  - ${p.slug}`);
-    } else {
-      lines.push("You have no projects yet.");
-    }
-    throw new Error(lines.join("\n"));
-  }
-
-  return { projectId: project.id, slug: project.slug };
+  return project ? { projectId: project.id, slug: project.slug } : null;
 }
 
 export function inferDefaultSlug(root: string): string {
@@ -89,6 +81,23 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   if (requestedProjectSlug) {
     const projects = await client.listProjects();
     config = resolveProjectBySlug(projects, requestedProjectSlug);
+
+    if (!config) {
+      if (!process.stdin.isTTY) {
+        log.error(`No project found with slug "${requestedProjectSlug}".`);
+        process.exit(1);
+      }
+
+      const shouldCreate = await confirm({
+        message: `Project "${requestedProjectSlug}" does not exist. Create it?`,
+      });
+      if (isCancel(shouldCreate) || !shouldCreate) {
+        log.info("Deploy cancelled.");
+        process.exit(0);
+      }
+
+      config = await createNewProject(root, client, requestedProjectSlug);
+    }
   } else {
     config = readProjectConfig(root);
   }

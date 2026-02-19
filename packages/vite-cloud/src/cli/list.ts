@@ -22,6 +22,10 @@ export async function runListCommand(root: string, slug?: string): Promise<void>
   if (slug) {
     const projects = await client.listProjects();
     const config = resolveProjectBySlug(projects, slug);
+    if (!config) {
+      log.error(`No project found with slug "${slug}".`);
+      process.exit(1);
+    }
     projectId = config.projectId;
     projectSlug = slug;
   } else {

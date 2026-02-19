@@ -21,7 +21,11 @@ export async function runSecretCommand(root: string, args: SecretArgs): Promise<
   let projectId: string;
   if (requestedProjectName) {
     const projects = await client.listProjects();
-    projectId = resolveProjectBySlug(projects, requestedProjectName).projectId;
+    const config = resolveProjectBySlug(projects, requestedProjectName);
+    if (!config) {
+      throw new Error(`No project found with slug "${requestedProjectName}".`);
+    }
+    projectId = config.projectId;
   } else {
     const config = readProjectConfig(root);
     if (!config) {
