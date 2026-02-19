@@ -13,6 +13,11 @@ export function ensureProjectTsconfig(root: string, hasRouteTypes?: boolean): vo
   const outDir = join(root, ".vite-cloud");
   mkdirSync(outDir, { recursive: true });
   const includeRoutes = hasRouteTypes ?? existsSync(join(root, "routes"));
-  const files = includeRoutes ? ["routes.d.ts", "db.d.ts"] : ["db.d.ts"];
+  const includeQueues = existsSync(join(root, "queues"));
+  const files = [
+    ...(includeRoutes ? ["routes.d.ts"] : []),
+    "db.d.ts",
+    ...(includeQueues ? ["queues.d.ts"] : []),
+  ];
   writeFileSync(join(outDir, "tsconfig.json"), JSON.stringify({ files }, null, 2) + "\n");
 }

@@ -101,6 +101,51 @@ export async function deleteR2Bucket(
   });
 }
 
+// --- Queues ---
+
+export interface QueueInfo {
+  queue_id: string;
+  queue_name: string;
+}
+
+export async function createQueue(
+  accountId: string,
+  apiToken: string,
+  name: string,
+): Promise<QueueInfo> {
+  return cfFetch<QueueInfo>(`${CF_API_BASE}/${accountId}/queues`, apiToken, {
+    method: "POST",
+    body: JSON.stringify({ queue_name: name }),
+  });
+}
+
+export async function addQueueConsumer(
+  accountId: string,
+  apiToken: string,
+  queueId: string,
+  scriptName: string,
+  settings?: { max_batch_size?: number; max_batch_timeout?: number },
+): Promise<void> {
+  await cfFetch(`${CF_API_BASE}/${accountId}/queues/${queueId}/consumers`, apiToken, {
+    method: "POST",
+    body: JSON.stringify({
+      script_name: scriptName,
+      type: "worker",
+      ...(settings && { settings }),
+    }),
+  });
+}
+
+export async function deleteQueue(
+  accountId: string,
+  apiToken: string,
+  queueId: string,
+): Promise<void> {
+  await cfFetch(`${CF_API_BASE}/${accountId}/queues/${queueId}`, apiToken, {
+    method: "DELETE",
+  });
+}
+
 // --- Custom Hostnames (CF for SaaS) ---
 
 export interface CustomHostnameInfo {

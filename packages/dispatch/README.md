@@ -12,6 +12,16 @@ Routes `*.vitecloud.app` traffic to user workers and static assets. CF Worker us
 6. Everything else → serve static assets from R2 (SPA fallback to `index.html`), cache response at edge
 7. **Metering**: Every request (except 404/suspended) records an Analytics Engine data point via `ctx.waitUntil` (fire-and-forget, zero latency impact)
 
+## Queue Relay
+
+The dispatch worker also exports a `queue()` handler for Cloudflare Queue batch relay:
+
+1. CF delivers `MessageBatch` to dispatch worker's `queue()` export
+2. KV lookup: `queue:<queueId>` → `{ workerName, projectId, queueName }`
+3. Serialize batch to JSON (`{ queue, messages: [{id, timestamp, body, attempts}] }`)
+4. Forward to user worker: `env.DISPATCH.get(workerName).fetch("/__queue", serializedBatch)`
+5. Ack all on success, retry all on failure
+
 ## Source Layout
 
 ```

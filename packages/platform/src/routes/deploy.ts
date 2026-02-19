@@ -11,6 +11,7 @@ import {
   countUserDeploymentsToday,
 } from "../db";
 import { provisionBindings } from "../provisioning/provision";
+import { addQueueConsumer } from "../provisioning/cloudflare-api";
 import { runRemoteMigrations, type RemoteMigration } from "../migrations/remote-runner";
 import { validateMigrationSQL } from "../migrations/validate";
 import { getPlanLimits, isWithinLimit } from "../tiers";
@@ -285,6 +286,39 @@ app.post("/:id/deploy", async (c) => {
       const msg = `worker upload failed: ${error}`;
       await updateDeploymentStatus(c.env.DB, deployment.id, "failed", msg);
       return c.json({ error: "worker upload failed", details: error }, 502);
+    }
+
+    // 3b. Configure queue consumers (dispatch worker relays to user workers)
+    const dispatchWorkerName = c.env.DISPATCH_WORKER_NAME ?? "vite-cloud-dispatch";
+    for (const q of manifest.queues ?? []) {
+      const queueBinding = workerBindings.find(
+        (b) => b.type === "queue" && b.name === q.bindingName,
+      );
+      if (queueBinding?.queue_name) {
+        try {
+          await addQueueConsumer(
+            c.env.CF_ACCOUNT_ID,
+            c.env.CF_API_TOKEN,
+            queueBinding.queue_name,
+            dispatchWorkerName,
+            {
+              ...(q.maxBatchSize != null && { max_batch_size: q.maxBatchSize }),
+              ...(q.maxBatchTimeout != null && { max_batch_timeout: q.maxBatchTimeout }),
+            },
+          );
+        } catch {
+          // Consumer may already exist — idempotent
+        }
+        // Store queue→worker mapping for relay routing
+        await c.env.ROUTING.put(
+          `queue:${queueBinding.queue_name}`,
+          JSON.stringify({
+            workerName,
+            projectId,
+            queueName: q.name,
+          }),
+        );
+      }
     }
 
     // 4. Write updated asset manifest + delete stale assets

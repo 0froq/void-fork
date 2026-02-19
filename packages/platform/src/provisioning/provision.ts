@@ -1,13 +1,14 @@
 import type { DeployManifest, Resource } from "../types";
 import { getProjectResources, createResource } from "../db";
-import { createD1Database, createKVNamespace, createR2Bucket } from "./cloudflare-api";
+import { createD1Database, createKVNamespace, createR2Bucket, createQueue } from "./cloudflare-api";
 
 export interface WorkerBinding {
-  type: "d1" | "kv_namespace" | "r2_bucket";
+  type: "d1" | "kv_namespace" | "r2_bucket" | "queue";
   name: string;
   id?: string;
   namespace_id?: string;
   bucket_name?: string;
+  queue_name?: string;
 }
 
 export async function provisionBindings(
@@ -36,6 +37,20 @@ export async function provisionBindings(
   for (const name of manifest.bindings.r2 ?? []) {
     const binding = await ensureResource(db, accountId, apiToken, projectId, "r2", name, existing);
     bindings.push({ type: "r2_bucket", name, bucket_name: binding.cf_id });
+  }
+
+  // Queues — provision CF queues and add producer bindings
+  for (const q of manifest.queues ?? []) {
+    const binding = await ensureResource(
+      db,
+      accountId,
+      apiToken,
+      projectId,
+      "queue",
+      q.name,
+      existing,
+    );
+    bindings.push({ type: "queue", name: q.bindingName, queue_name: binding.cf_id });
   }
 
   return bindings;
@@ -70,6 +85,11 @@ async function ensureResource(
     case "r2": {
       const result = await createR2Bucket(accountId, apiToken, resourceName);
       cfId = result.name;
+      break;
+    }
+    case "queue": {
+      const result = await createQueue(accountId, apiToken, resourceName);
+      cfId = result.queue_id;
       break;
     }
   }

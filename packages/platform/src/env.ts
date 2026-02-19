@@ -17,6 +17,7 @@ export interface PlatformEnv extends Env {
     AUTH_REDIRECT_URI?: string;
     DEV_AUTH_BYPASS?: string;
     DISPATCH_NAMESPACE?: string;
+    DISPATCH_WORKER_NAME?: string;
     SITE_DOMAIN?: string;
     SIGNUP_ALLOWLIST?: string;
   };

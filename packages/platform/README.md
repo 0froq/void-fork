@@ -8,7 +8,7 @@ Control Plane API + Admin Dashboard. CF Worker using Hono, D1, R2, KV, and Worke
 src/
   index.ts                  # Hono app + scheduled handler (cron), mounts route groups + auth middleware
   env.ts                    # PlatformEnv type (D1, R2, KV, DISPATCH, secrets, Variables)
-  types.ts                  # User, Project, Deployment, Resource, DeployManifest
+  types.ts                  # User, Project, Deployment, Resource, DeployManifest, QueueMeta
   id.ts                     # generateId(prefix) → "proj_a1b2c3d4e5f6"
   db.ts                     # Typed D1 query wrappers (CRUD for all tables)
   tiers.ts                  # PlanId, PlanLimits, PLAN_LIMITS constants, getPlanLimits(), isWithinLimit()
@@ -122,10 +122,11 @@ Auth middleware on `/projects/*` extracts Bearer token, verifies JWT, sets `c.ge
 4. `migration:<name>` fields → validated, then executed on D1 via CF REST API (status: `"migrating"`)
 5. `asset:<path>` fields → stored in R2 at `{projectId}/current/{path}`
 6. `worker:<path>` fields → uploaded to CF dispatch namespace via API
-7. KV routing updated: `slug → { workerName, projectId, version, limits?, suspended? }`
+7. Queue provisioning: creates CF Queues, adds producer bindings, registers dispatch worker as consumer, writes `queue:<queueId>` routing entries to KV
+8. KV routing updated: `slug → { workerName, projectId, version, limits?, suspended? }`
    - `limits` includes `cpuMs` and `subRequests` from user's plan (omitted when all unlimited)
    - `suspended` is carried forward from the existing KV entry to avoid race conditions with cron
-8. Deployment marked as `live`
+9. Deployment marked as `live`
 
 **Key invariant:** Worker is never deployed unless all migrations succeed. On migration failure, deployment is marked `"failed"` with an `error_message` and the existing worker keeps running. All 5 failure points (destructive validation, missing D1, migration error, worker upload, catch-all) store a descriptive `error_message` in the deployment row.
 
@@ -199,6 +200,7 @@ Used by the platform worker at runtime to provision and manage user resources vi
 | D1                 | Edit   | Create databases, execute migrations, delete databases |
 | Workers KV Storage | Edit   | Create/delete KV namespaces                            |
 | Workers R2 Storage | Edit   | Create/delete R2 buckets                               |
+| Queues             | Edit   | Create/delete queues, manage consumers                 |
 | Account Analytics  | Read   | Query Analytics Engine SQL API for usage metering      |
 
 **Zone permissions** (on `vitecloud.app`):
@@ -227,7 +229,7 @@ Integration tests call the Hono app via `app.fetch(request, env)` with **real** 
 | `test/integration/api-health.test.ts`      | Health endpoint smoke test (1 test)                                                                                 |
 | `test/integration/api-me.test.ts`          | Auth middleware: missing/invalid/expired JWT, valid (4)                                                             |
 | `test/integration/api-projects.test.ts`    | Projects CRUD: auth, list, create, validation, dupes (12)                                                           |
-| `test/integration/api-deploy.test.ts`      | Deploy pipeline: auth, provisioning, migrations, R2, KV, limits, failure modes (33)                                 |
+| `test/integration/api-deploy.test.ts`      | Deploy pipeline: auth, provisioning, migrations, R2, KV, limits, queues, failure modes (36)                         |
 | `test/integration/admin-dashboard.test.ts` | Admin dashboard: auth, pages, forms, search, pagination, deployments, error display, plan limits, login/logout (28) |
 
 Shared helpers in `test/integration/helpers.ts`:

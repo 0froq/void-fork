@@ -25,6 +25,12 @@ interface RoutingEntry {
   suspended?: string;
 }
 
+interface QueueRoutingEntry {
+  workerName: string;
+  projectId: string;
+  queueName: string;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const startTime = Date.now();
@@ -187,6 +193,43 @@ export default {
         ),
       ),
     );
+  },
+
+  async queue(batch: MessageBatch, env: Env): Promise<void> {
+    // Look up which user worker handles this queue
+    const routingRaw = await env.ROUTING.get(`queue:${batch.queue}`);
+    if (!routingRaw) {
+      batch.ackAll();
+      return;
+    }
+    const { workerName, queueName } = JSON.parse(routingRaw) as QueueRoutingEntry;
+
+    // Serialize batch for relay
+    const messages = [...batch.messages].map((m) => ({
+      id: m.id,
+      timestamp: m.timestamp.toISOString(),
+      body: m.body,
+      attempts: m.attempts,
+    }));
+
+    const worker = env.DISPATCH.get(workerName);
+    try {
+      const res = await worker.fetch(
+        new Request("https://internal/__queue", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ queue: queueName, messages }),
+        }),
+      );
+
+      if (res.ok) {
+        batch.ackAll();
+      } else {
+        batch.retryAll();
+      }
+    } catch {
+      batch.retryAll();
+    }
   },
 } satisfies ExportedHandler<Env>;
 

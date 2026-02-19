@@ -228,9 +228,12 @@ export interface CfApiMocks {
   createD1: (url: string, init?: RequestInit) => Response;
   createKV: (url: string, init?: RequestInit) => Response;
   createR2: (url: string, init?: RequestInit) => Response;
+  createQueue: (url: string, init?: RequestInit) => Response;
+  addQueueConsumer: (url: string, init?: RequestInit) => Response;
   deleteD1: (url: string, init?: RequestInit) => Response;
   deleteKV: (url: string, init?: RequestInit) => Response;
   deleteR2: (url: string, init?: RequestInit) => Response;
+  deleteQueue: (url: string, init?: RequestInit) => Response;
   deleteWorker: (url: string, init?: RequestInit) => Response;
   queryD1: (url: string, init?: RequestInit) => Response | Promise<Response>;
   uploadWorker: (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -245,9 +248,12 @@ const defaultMocks: CfApiMocks = {
   createD1: () => cfSuccess({ uuid: "d1-test-uuid", name: "test-db" }),
   createKV: () => cfSuccess({ id: "kv-test-id", title: "test-kv" }),
   createR2: () => cfSuccess({ name: "test-bucket" }),
+  createQueue: () => cfSuccess({ queue_id: "queue-test-id", queue_name: "test-queue" }),
+  addQueueConsumer: () => cfSuccess({}),
   deleteD1: () => cfSuccess(null),
   deleteKV: () => cfSuccess(null),
   deleteR2: () => cfSuccess(null),
+  deleteQueue: () => cfSuccess(null),
   deleteWorker: () => new Response("ok", { status: 200 }),
   queryD1: () => cfSuccess([{ results: [] }]),
   uploadWorker: () => new Response("ok", { status: 200 }),
@@ -320,6 +326,15 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
     }
     if (method === "POST" && url.includes("/r2/buckets")) {
       return mocks.createR2(url, init);
+    }
+    if (method === "POST" && url.includes("/queues/") && url.includes("/consumers")) {
+      return mocks.addQueueConsumer(url, init);
+    }
+    if (method === "POST" && url.includes("/queues")) {
+      return mocks.createQueue(url, init);
+    }
+    if (method === "DELETE" && url.includes("/queues/")) {
+      return mocks.deleteQueue(url, init);
     }
 
     throw new Error(`Unmocked fetch: ${method} ${url}`);

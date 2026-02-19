@@ -33,7 +33,7 @@ export interface Deployment {
 export interface Resource {
   id: string;
   project_id: string;
-  type: "d1" | "kv" | "r2";
+  type: "d1" | "kv" | "r2" | "queue";
   cf_id: string;
   binding_name: string;
   created_at: string;
@@ -47,6 +47,13 @@ export interface MigrationMeta {
 export interface ScheduleMeta {
   name: string;
   cron: string;
+}
+
+export interface QueueMeta {
+  name: string;
+  bindingName: string;
+  maxBatchSize?: number;
+  maxBatchTimeout?: number;
 }
 
 export interface HeaderRule {
@@ -71,6 +78,7 @@ export interface DeployManifest {
   };
   migrations?: MigrationMeta[];
   schedules?: ScheduleMeta[];
+  queues?: QueueMeta[];
   ssr?: boolean;
   framework?: boolean;
   revalidate?: number | Record<string, number>;

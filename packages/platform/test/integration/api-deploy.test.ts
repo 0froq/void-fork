@@ -659,6 +659,112 @@ describe("POST /projects/:id/deploy", () => {
     expect(dpl?.status).toBe("failed");
     expect(dpl?.error_message).toContain("worker upload failed:");
   });
+
+  it("provisions queue and adds consumer on deploy with queues manifest", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "queue-app");
+    const fetchMock = mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            bindings: {},
+            queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    // Verify queue resource was created in D1
+    const resource = await env.DB.prepare(
+      "SELECT * FROM resources WHERE project_id = ? AND type = 'queue'",
+    )
+      .bind(project.id)
+      .first<{ cf_id: string; binding_name: string }>();
+    expect(resource).not.toBeNull();
+    expect(resource!.cf_id).toBe("queue-test-id");
+    expect(resource!.binding_name).toBe("emails");
+
+    // Verify addQueueConsumer was called
+    const consumerCall = fetchMock.mock.calls.find((call: unknown[]) => {
+      const url = typeof call[0] === "string" ? call[0] : String(call[0]);
+      return url.includes("/queues/") && url.includes("/consumers");
+    });
+    expect(consumerCall).toBeDefined();
+  });
+
+  it("includes queue producer binding in worker upload metadata", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "queue-binding-app");
+    const fetchMock = mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            bindings: {},
+            queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
+      const url = typeof call[0] === "string" ? call[0] : String(call[0]);
+      return url.includes("/workers/dispatch/") && (call[1] as RequestInit)?.method === "PUT";
+    });
+    expect(uploadCall).toBeDefined();
+
+    const workerFormData = (uploadCall![1] as RequestInit).body as FormData;
+    const metadataBlob = workerFormData.get("metadata");
+    expect(metadataBlob).toBeInstanceOf(Blob);
+    const metadata = JSON.parse(await (metadataBlob as Blob).text()) as {
+      bindings?: { type: string; name: string; queue_name?: string }[];
+    };
+
+    const queueBindings = (metadata.bindings ?? []).filter((b) => b.type === "queue");
+    expect(queueBindings).toEqual([
+      { type: "queue", name: "QUEUE_EMAILS", queue_name: "queue-test-id" },
+    ]);
+  });
+
+  it("writes queue routing entry to KV", async () => {
+    const user = await createTestUser(env.DB);
+    const project = await createTestProject(env.DB, user.id, "queue-kv-app");
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            bindings: {},
+            queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    // Verify queue routing KV entry
+    const queueRouting = await env.ROUTING.get("queue:queue-test-id", "json");
+    expect(queueRouting).toEqual({
+      workerName: "user-queue-kv-app",
+      projectId: project.id,
+      queueName: "emails",
+    });
+  });
 });
 
 function buildStaticDeployForm(opts: {

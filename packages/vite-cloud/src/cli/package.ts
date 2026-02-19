@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { InferredBindings } from "../inference/walk";
 import type { MigrationFile } from "../migrations/validate";
-import type { DeployManifest, HeaderRule, ScheduleMeta } from "./types";
+import type { DeployManifest, HeaderRule, QueueMeta, ScheduleMeta } from "./types";
 
 /**
  * Compute SHA-256 hex digests for all files in a directory.
@@ -38,6 +38,7 @@ export function packageBuild(
   headers?: HeaderRule[],
   revalidate?: number | Record<string, number>,
   vars?: Record<string, string>,
+  queues?: QueueMeta[],
 ): FormData {
   const formData = new FormData();
 
@@ -60,6 +61,10 @@ export function packageBuild(
 
   if (schedules && schedules.length > 0) {
     manifest.schedules = schedules;
+  }
+
+  if (queues && queues.length > 0) {
+    manifest.queues = queues;
   }
 
   if (ssr) {

@@ -50,6 +50,35 @@ type JobFn = (
   ctx: JobExecutionContext,
 ) => unknown | Promise<unknown>;
 
+/** A single message in a queue batch (serialized form, not the raw CF MessageBatch). */
+export type QueueMessage<T = unknown> = {
+  id: string;
+  timestamp: string;
+  body: T;
+  attempts: number;
+};
+
+/** A batch of queue messages delivered to a consumer handler. */
+export type QueueBatch<T = unknown> = {
+  queue: string;
+  messages: QueueMessage<T>[];
+};
+
+type QueueFn<T = unknown> = (
+  batch: QueueBatch<T>,
+  env: CloudEnv["Bindings"],
+) => void | Promise<void>;
+
+/**
+ * A typed queue handler with a phantom type carrier for the payload type.
+ * `__payload` exists at the type level only —
+ * TypeScript's `typeof import(...)` reads it for codegen.
+ */
+export interface TypedQueueHandler<T = unknown> {
+  (batch: QueueBatch<T>, env: CloudEnv["Bindings"]): void | Promise<void>;
+  readonly __payload: T;
+}
+
 /**
  * A typed handler with phantom type carriers for validators and return type.
  * `__validators` and `__output` exist at the type level only —
@@ -165,6 +194,14 @@ export function defineJob(handler: JobFn): JobFn {
  */
 export function defineRender(handler: RenderFn): RenderFn {
   return handler;
+}
+
+/**
+ * Identity function that provides type inference for queue consumers.
+ * At runtime it simply returns the function passed to it.
+ */
+export function defineQueue<T = unknown>(handler: QueueFn<T>): TypedQueueHandler<T> {
+  return handler as TypedQueueHandler<T>;
 }
 
 export type { ValidatorSlots, HandlerInput } from "./validator";

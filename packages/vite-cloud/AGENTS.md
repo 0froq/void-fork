@@ -39,8 +39,12 @@ src/
   codegen/
     route-types.ts          # Generates .vite-cloud/routes.d.ts (RouteMap with Serialize + ExtractInput)
     db-types.ts             # Generates .vite-cloud/db.d.ts (DbTables + DbInsertTables from migrations)
+    queue-types.ts          # Generates .vite-cloud/queues.d.ts (QueueMap with payload types)
+  queues/
+    scan.ts                 # Queue file scanner (queues/ dir, name from filename + consumer options)
   runtime/
-    handler.ts              # defineHandler(), defineHandler.withValidator(), defineMiddleware()
+    handler.ts              # defineHandler(), defineHandler.withValidator(), defineMiddleware(), defineQueue()
+    queues.ts               # QueueMap stub interface + typed `queues` proxy using env.QUEUE_*
     validator.ts            # runValidation() — Standard Schema body/query/params validation
     response.ts             # convertReturnValue() — return → Response
     fetch.ts                # Typed fetch client for vite-cloud/client
@@ -72,16 +76,17 @@ src/
 
 ### Package Exports
 
-| Subpath                | What                                                                                                    |
-| ---------------------- | ------------------------------------------------------------------------------------------------------- |
-| `vite-cloud`           | `viteCloud()` default export + `defineHandler` + `defineMiddleware` + `CloudContext` type               |
-| `vite-cloud/handler`   | `defineHandler()`, `defineHandler.withValidator()`, `defineMiddleware()`, types                         |
-| `vite-cloud/response`  | `convertReturnValue()`                                                                                  |
-| `vite-cloud/validator` | `runValidation()`, `ValidatorSlots`, `HandlerInput` types                                               |
-| `vite-cloud/routes`    | Empty `RouteMap` stub interface (augmented by generated `routes.d.ts`)                                  |
-| `vite-cloud/client`    | Typed `fetch()` client + `FetchError`                                                                   |
-| `vite-cloud/db`        | `db` query client + `createDb()` + `DbTables`/`DbInsertTables` stubs (augmented by generated `db.d.ts`) |
-| `vite-cloud/env`       | Global Cloudflare env types (`D1Database`, `KVNamespace`, `R2Bucket`)                                   |
+| Subpath                | What                                                                                                      |
+| ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| `vite-cloud`           | `viteCloud()` default export + `defineHandler` + `defineMiddleware` + `defineQueue` + `CloudContext` type |
+| `vite-cloud/handler`   | `defineHandler()`, `defineHandler.withValidator()`, `defineMiddleware()`, types                           |
+| `vite-cloud/response`  | `convertReturnValue()`                                                                                    |
+| `vite-cloud/validator` | `runValidation()`, `ValidatorSlots`, `HandlerInput` types                                                 |
+| `vite-cloud/routes`    | Empty `RouteMap` stub interface (augmented by generated `routes.d.ts`)                                    |
+| `vite-cloud/client`    | Typed `fetch()` client + `FetchError`                                                                     |
+| `vite-cloud/db`        | `db` query client + `createDb()` + `DbTables`/`DbInsertTables` stubs (augmented by generated `db.d.ts`)   |
+| `vite-cloud/queues`    | `queues` typed proxy + `QueueMap` stub interface (augmented by generated `queues.d.ts`)                   |
+| `vite-cloud/env`       | Global Cloudflare env types (`D1Database`, `KVNamespace`, `R2Bucket`)                                     |
 
 The CLI binary is at `dist/cli/cli.mjs` (declared in `bin` field of package.json).
 
@@ -114,22 +119,24 @@ HTTP methods are determined by **named exports** in each file (detected by `dete
 
 ## Tests
 
-| Test file                                  | Covers                                                         |
-| ------------------------------------------ | -------------------------------------------------------------- |
-| `test/unit/parse-filename.test.ts`         | Route filename parsing (21 tests)                              |
-| `test/unit/scan.test.ts`                   | Filesystem scanning (8 tests)                                  |
-| `test/unit/detect-exports.test.ts`         | Named HTTP method export detection (8 tests)                   |
-| `test/unit/compile.test.ts`                | Code generation (5 tests)                                      |
-| `test/unit/response.test.ts`               | Return value → Response (8 tests)                              |
-| `test/unit/inference.test.ts`              | AST-based binding inference (11 tests)                         |
-| `test/unit/validate-migrations.test.ts`    | Destructive-op detection + pragma (12 tests)                   |
-| `test/unit/collect-migrations.test.ts`     | Migration file collection (4 tests)                            |
-| `test/unit/validator.test.ts`              | Standard Schema validation runtime (8 tests)                   |
-| `test/unit/validator-real-schemas.test.ts` | Real schema validation (zod/valibot/arktype) (16 tests)        |
-| `test/unit/define-handler.test.ts`         | defineHandler + middleware composition (18 tests)              |
-| `test/unit/fetch.test.ts`                  | Typed fetch client (9 tests)                                   |
-| `test/unit/route-types.test.ts`            | Route type codegen output (6 tests)                            |
-| `test/unit/route-type-extraction.test.ts`  | Type extraction pipeline (Serialize + ExtractInput) (14 tests) |
-| `test/unit/schema.test.ts`                 | SQL DDL parser (41 tests)                                      |
-| `test/unit/db-types.test.ts`               | DB type codegen output (8 tests)                               |
-| `test/unit/db.test.ts`                     | Typed query client + type-level inference (25 tests)           |
+| Test file                                   | Covers                                                         |
+| ------------------------------------------- | -------------------------------------------------------------- |
+| `test/unit/parse-filename.test.ts`          | Route filename parsing (21 tests)                              |
+| `test/unit/scan.test.ts`                    | Filesystem scanning + queue consumers (13 tests)               |
+| `test/unit/detect-exports.test.ts`          | Named HTTP method export detection (8 tests)                   |
+| `test/unit/compile.test.ts`                 | Code generation + queue routes (10 tests)                      |
+| `test/unit/response.test.ts`                | Return value → Response (8 tests)                              |
+| `test/unit/inference.test.ts`               | AST-based binding inference + queues (15 tests)                |
+| `test/unit/validate-migrations.test.ts`     | Destructive-op detection + pragma (12 tests)                   |
+| `test/unit/collect-migrations.test.ts`      | Migration file collection (4 tests)                            |
+| `test/unit/validator.test.ts`               | Standard Schema validation runtime (8 tests)                   |
+| `test/unit/validator-real-schemas.test.ts`  | Real schema validation (zod/valibot/arktype) (16 tests)        |
+| `test/unit/define-handler.test.ts`          | defineHandler + middleware composition (18 tests)              |
+| `test/unit/fetch.test.ts`                   | Typed fetch client (9 tests)                                   |
+| `test/unit/route-types.test.ts`             | Route type codegen output (6 tests)                            |
+| `test/unit/route-type-extraction.test.ts`   | Type extraction pipeline (Serialize + ExtractInput) (14 tests) |
+| `test/unit/schema.test.ts`                  | SQL DDL parser (41 tests)                                      |
+| `test/unit/db-types.test.ts`                | DB type codegen output (8 tests)                               |
+| `test/unit/db.test.ts`                      | Typed query client + type-level inference (25 tests)           |
+| `test/unit/queue-types.test.ts`             | Queue type codegen output (3 tests)                            |
+| `test/integration/queue-playground.test.ts` | Queue send → consumer → KV round-trip (1 test)                 |

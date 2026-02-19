@@ -32,9 +32,18 @@ describe("compileRouteTable", () => {
       ],
       middleware: [{ order: 1, filePath: "01.logger.ts" }],
       jobs: [{ filePath: "sync.ts", name: "sync", cron: "0 * * * *" }],
+      queues: [],
     };
 
-    const code = compileRouteTable(scan, "/routes", "/middleware", "/jobs", null, testOptions);
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/jobs",
+      "/queues",
+      null,
+      testOptions,
+    );
 
     // Should import Hono from resolved path
     expect(code).toContain(`import { Hono } from "/resolved/hono/index.mjs"`);
@@ -80,17 +89,34 @@ describe("compileRouteTable", () => {
       ],
       middleware: [],
       jobs: [],
+      queues: [],
     };
 
-    const code = compileRouteTable(scan, "/routes", "/middleware", "/jobs", null, testOptions);
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/jobs",
+      "/queues",
+      null,
+      testOptions,
+    );
 
     expect(code).toContain('app.all("/api/legacy"');
     expect(code).toContain("mod.default(c)");
   });
 
   it("handles empty scan result", () => {
-    const scan: ScanResult = { routes: [], middleware: [], jobs: [] };
-    const code = compileRouteTable(scan, "/routes", "/middleware", "/jobs", null, testOptions);
+    const scan: ScanResult = { routes: [], middleware: [], jobs: [], queues: [] };
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/jobs",
+      "/queues",
+      null,
+      testOptions,
+    );
 
     expect(code).toContain("const app = new Hono()");
     expect(code).toContain("export async function scheduled() {}");
@@ -98,12 +124,13 @@ describe("compileRouteTable", () => {
   });
 
   it("adds SSR fallback handler when ssr entry is provided", () => {
-    const scan: ScanResult = { routes: [], middleware: [], jobs: [] };
+    const scan: ScanResult = { routes: [], middleware: [], jobs: [], queues: [] };
     const code = compileRouteTable(
       scan,
       "/routes",
       "/middleware",
       "/jobs",
+      "/queues",
       {
         serverEntryPath: "/src/main.ssr.ts",
         clientEntryRelativePath: "src/main.client.tsx",
@@ -124,13 +151,102 @@ describe("compileRouteTable", () => {
     expect(code).toContain('from "/@react-refresh"');
     expect(code).toContain("__vite_plugin_react_preamble_installed__ = true");
   });
+
+  it("generates /__queue route for queue consumers", () => {
+    const scan: ScanResult = {
+      routes: [],
+      middleware: [],
+      jobs: [],
+      queues: [
+        {
+          filePath: "emails.ts",
+          name: "emails",
+          bindingName: "QUEUE_EMAILS",
+        },
+      ],
+    };
+
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/jobs",
+      "/queues",
+      null,
+      testOptions,
+    );
+
+    expect(code).toContain('app.post("/__queue"');
+    expect(code).toContain('const queue0Name = "emails"');
+    expect(code).toContain('import("/queues/emails.ts")');
+    expect(code).toContain("mod.default(payload, c.env)");
+  });
+
+  it("matches queue name with endsWith for prefixed names", () => {
+    const scan: ScanResult = {
+      routes: [],
+      middleware: [],
+      jobs: [],
+      queues: [
+        {
+          filePath: "emails.ts",
+          name: "emails",
+          bindingName: "QUEUE_EMAILS",
+        },
+      ],
+    };
+
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/jobs",
+      "/queues",
+      null,
+      testOptions,
+    );
+
+    expect(code).toContain('queueSuffix.endsWith("-" + queue0Name)');
+  });
+
+  it("omits /__queue route when no queues defined", () => {
+    const scan: ScanResult = { routes: [], middleware: [], jobs: [], queues: [] };
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/jobs",
+      "/queues",
+      null,
+      testOptions,
+    );
+
+    expect(code).not.toContain("/__queue");
+  });
 });
 
 describe("compileWorkerEntry", () => {
-  it("generates valid worker entry code", () => {
+  it("generates valid worker entry code without queues", () => {
     const code = compileWorkerEntry();
 
     expect(code).toContain("import app, { scheduled } from 'virtual:vite-cloud-routes'");
     expect(code).toContain("export default { fetch: app.fetch, scheduled }");
+    expect(code).not.toContain("queue");
+  });
+
+  it("generates queue() export in worker entry when hasQueues=true", () => {
+    const code = compileWorkerEntry(true);
+
+    expect(code).toContain("async function queue(batch, env, ctx)");
+    expect(code).toContain("export default { fetch: app.fetch, scheduled, queue }");
+    expect(code).toContain("/__queue");
+    expect(code).toContain("batch.queue");
+    expect(code).toContain("m.timestamp.toISOString()");
+  });
+
+  it("omits queue() export when hasQueues=false", () => {
+    const code = compileWorkerEntry(false);
+
+    expect(code).not.toContain("queue");
   });
 });

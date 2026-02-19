@@ -35,6 +35,7 @@ Implementation Progress
 
 - [x] Secrets management
 - [x] Cron & background jobs (file convention)
+- [x] Queues (file-based consumers in `queues/`, relay via dispatch worker)
 - [x] SSR support (minimal `src/main.ssr.ts` convention)
 - [x] Zero config auth (via `hono/basic-auth` and `@hono/oauth-providers`)
 - [x] Named method exports (`export const GET/POST/...` per file, replaces method-in-filename)

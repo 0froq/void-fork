@@ -7,9 +7,10 @@ export interface InferredBindings {
   needsKV: boolean;
   needsR2: boolean;
   needsAuth: boolean;
+  needsQueues: boolean;
 }
 
-const ENV_BINDING_RE = /\benv\s*\.\s*(DB|KV|STORAGE)\b/;
+const ENV_BINDING_RE = /\benv\s*\.\s*(DB|KV|STORAGE|QUEUE_\w+)\b/;
 
 /**
  * Infer which Cloudflare bindings a source file uses.
@@ -25,6 +26,7 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
     needsKV: false,
     needsR2: false,
     needsAuth: false,
+    needsQueues: false,
   };
 
   // Tier 1: Fast import detection via es-module-lexer
@@ -46,6 +48,9 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
           break;
         case "vite-cloud/auth":
           result.needsAuth = true;
+          break;
+        case "vite-cloud/queue":
+          result.needsQueues = true;
           break;
         case "vite-cloud/client": {
           // Check if the `auth` specifier is imported (not just `fetch`)
@@ -106,6 +111,11 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
         case "STORAGE":
           result.needsR2 = true;
           break;
+        default:
+          if (property.name.startsWith("QUEUE_")) {
+            result.needsQueues = true;
+          }
+          break;
       }
     },
   });
@@ -122,5 +132,6 @@ export function mergeBindings(bindings: InferredBindings[]): InferredBindings {
     needsKV: bindings.some((b) => b.needsKV),
     needsR2: bindings.some((b) => b.needsR2),
     needsAuth: bindings.some((b) => b.needsAuth),
+    needsQueues: bindings.some((b) => b.needsQueues),
   };
 }
