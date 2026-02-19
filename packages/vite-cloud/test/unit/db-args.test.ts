@@ -21,12 +21,118 @@ describe("parseDbArgs", () => {
     });
   });
 
+  it("parses execute with inline SQL", () => {
+    expect(parseDbArgs(["execute", "SELECT * FROM users"])).toEqual({
+      action: "execute",
+      command: "SELECT * FROM users",
+      file: undefined,
+    });
+  });
+
+  it("parses execute with --file", () => {
+    expect(parseDbArgs(["execute", "--file", "query.sql"])).toEqual({
+      action: "execute",
+      command: undefined,
+      file: "query.sql",
+    });
+  });
+
+  it("errors on execute with no SQL and no --file", () => {
+    expect(() => parseDbArgs(["execute"])).toThrow(
+      "Error: Usage: vcd db execute <sql> or vcd db execute --file <path>",
+    );
+  });
+
+  it("errors on execute with both SQL and --file", () => {
+    expect(() => parseDbArgs(["execute", "SELECT 1", "--file", "query.sql"])).toThrow(
+      "Error: Provide either SQL inline or --file, not both",
+    );
+  });
+
+  it("parses migrate", () => {
+    expect(parseDbArgs(["migrate"])).toEqual({ action: "migrate" });
+  });
+
+  it("errors on migrate with extra positional", () => {
+    expect(() => parseDbArgs(["migrate", "extra"])).toThrow("Error: Unexpected argument: extra");
+  });
+
+  it("parses export with no flags", () => {
+    expect(parseDbArgs(["export"])).toEqual({
+      action: "export",
+      output: undefined,
+      noData: undefined,
+      noSchema: undefined,
+      table: undefined,
+    });
+  });
+
+  it("parses export with --output", () => {
+    expect(parseDbArgs(["export", "--output", "backup.sql"])).toEqual({
+      action: "export",
+      output: "backup.sql",
+      noData: undefined,
+      noSchema: undefined,
+      table: undefined,
+    });
+  });
+
+  it("parses export with --no-data", () => {
+    expect(parseDbArgs(["export", "--no-data"])).toEqual({
+      action: "export",
+      output: undefined,
+      noData: true,
+      noSchema: undefined,
+      table: undefined,
+    });
+  });
+
+  it("parses export with --no-schema", () => {
+    expect(parseDbArgs(["export", "--no-schema"])).toEqual({
+      action: "export",
+      output: undefined,
+      noData: undefined,
+      noSchema: true,
+      table: undefined,
+    });
+  });
+
+  it("parses export with --table", () => {
+    expect(parseDbArgs(["export", "--table", "users"])).toEqual({
+      action: "export",
+      output: undefined,
+      noData: undefined,
+      noSchema: undefined,
+      table: "users",
+    });
+  });
+
+  it("parses export with all flags", () => {
+    expect(
+      parseDbArgs(["export", "--output", "dump.sql", "--no-data", "--table", "users"]),
+    ).toEqual({
+      action: "export",
+      output: "dump.sql",
+      noData: true,
+      noSchema: undefined,
+      table: "users",
+    });
+  });
+
+  it("errors on export with extra positional", () => {
+    expect(() => parseDbArgs(["export", "extra"])).toThrow("Error: Unexpected argument: extra");
+  });
+
   it("errors on unknown subcommand", () => {
-    expect(() => parseDbArgs(["migrate"])).toThrow("Error: Usage: vcd db <status|reset|seed>");
+    expect(() => parseDbArgs(["unknown"])).toThrow(
+      "Error: Usage: vcd db <status|reset|seed|execute|migrate|export>",
+    );
   });
 
   it("errors on no subcommand", () => {
-    expect(() => parseDbArgs([])).toThrow("Error: Usage: vcd db <status|reset|seed>");
+    expect(() => parseDbArgs([])).toThrow(
+      "Error: Usage: vcd db <status|reset|seed|execute|migrate|export>",
+    );
   });
 
   it("errors on extra positional", () => {
