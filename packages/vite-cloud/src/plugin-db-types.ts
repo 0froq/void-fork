@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { generateDbTypes } from "./codegen/db-types";
+import { ensureProjectTsconfig } from "./codegen/project-tsconfig";
 import { collectMigrations } from "./migrations/collect";
 import { parseMigrationSchema } from "./migrations/schema";
 
@@ -26,9 +27,7 @@ export function dbTypesPlugin(root: string, hasRouteTypes: boolean): Plugin {
   }
 
   // Write tsconfig.json eagerly so users can extend it immediately.
-  mkdirSync(outDir, { recursive: true });
-  const files = hasRouteTypes ? ["routes.d.ts", "db.d.ts"] : ["db.d.ts"];
-  writeFileSync(join(outDir, "tsconfig.json"), JSON.stringify({ files }, null, 2) + "\n");
+  ensureProjectTsconfig(root, hasRouteTypes);
 
   return {
     name: "vite-cloud:db-types",
