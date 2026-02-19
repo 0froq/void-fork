@@ -94,6 +94,13 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   }
 
   if (!config) {
+    if (!process.stdin.isTTY) {
+      log.error(
+        "No linked project. Run `vcd deploy --project <slug>` or link interactively with `vcd deploy`.",
+      );
+      process.exit(1);
+    }
+
     const projects = await client.listProjects();
 
     if (projects.length > 0) {
