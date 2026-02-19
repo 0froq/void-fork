@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { intro, outro, log, note, spinner } from "@clack/prompts";
+import { build, resolveConfig } from "vite";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
 import { computeAssetHashes, packageBuild, packageStaticBuild } from "./package";
@@ -19,6 +20,7 @@ export interface RunDeployOptions {
   projectSlug?: string;
   dir?: string;
   spa?: boolean;
+  skipBuild?: boolean;
 }
 
 export function getRequestedProjectSlug(options?: RunDeployOptions): string | null {
@@ -135,9 +137,9 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   // vcConfig.mode === "fullstack" or "framework" → preset stays null → full deploy
 
   if (preset) {
-    await runStaticDeploy(root, config, client, preset, headers);
+    await runStaticDeploy(root, config, client, preset, headers, options?.skipBuild);
   } else {
-    await runFullDeploy(root, config, client, headers);
+    await runFullDeploy(root, config, client, headers, options?.skipBuild);
   }
 }
 
@@ -147,12 +149,13 @@ async function runStaticDeploy(
   client: PlatformClient,
   preset: StaticPreset,
   headers?: import("./types").HeaderRule[],
+  skipBuild?: boolean,
 ): Promise<void> {
   const modeLabel = preset.mode === "spa" ? "Static SPA" : "Static SSG";
   log.info(`${modeLabel} deploy`);
 
   // Build (if needed)
-  if (preset.buildCommand) {
+  if (preset.buildCommand && !skipBuild) {
     log.step("Building...");
     execSync(preset.buildCommand, { cwd: root, stdio: "inherit" });
   }
@@ -196,22 +199,29 @@ async function runFullDeploy(
   config: ProjectConfig,
   client: PlatformClient,
   headers?: import("./types").HeaderRule[],
+  skipBuild?: boolean,
 ): Promise<void> {
-  // 3. Build
-  log.step("Building...");
-  execSync("npx vite build", { cwd: root, stdio: "inherit" });
+  // 3. Resolve Vite config for outDir
+  const resolved = await resolveConfig({ root }, "build");
+  const distDir = resolve(resolved.root, resolved.build.outDir);
 
-  // 4. Detect framework mode
+  // 4. Build
+  if (!skipBuild) {
+    log.step("Building...");
+    await build({ root });
+  }
+
+  // 5. Detect framework mode
   const isFrameworkMode = detectFramework(root) !== undefined;
 
-  // 5. Infer bindings (expanded scan dirs in framework mode)
+  // 6. Infer bindings (expanded scan dirs in framework mode)
   const bindings = inferProjectBindings(
     root,
     undefined,
     isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined,
   );
 
-  // 6. Collect and validate migrations
+  // 7. Collect and validate migrations
   const migrationsDir = join(root, "migrations");
   const rawMigrations = collectMigrations(migrationsDir);
   let validatedMigrations;
@@ -224,8 +234,6 @@ async function runFullDeploy(
       process.exit(1);
     }
   }
-
-  const distDir = join(root, "dist");
   const workerDirName = detectWorkerDir(root, distDir);
 
   // In framework mode: skip job scanning, SSR is always true
@@ -244,7 +252,7 @@ async function runFullDeploy(
     revalidate = Object.fromEntries(revalidateConfig.rules);
   }
 
-  // 7. Check assets & Package & Upload
+  // 8. Check assets & Package & Upload
   const s = spinner();
 
   s.start("Checking assets...");
