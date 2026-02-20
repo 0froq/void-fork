@@ -14,3 +14,4 @@ TODOs.md
 .vitepress/cache
 playground/*/.node-version
 .tanstack
+.worktrees
