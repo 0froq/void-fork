@@ -104,7 +104,7 @@ export async function renderPage(pageObj, assetTags) {
 
 function generateClientEntry(scan: PageScanResult, pagesDir: string): string {
   return `
-import { createSSRApp, h, ref, reactive, provide, shallowRef, watch } from "vue";
+import { createSSRApp, h, reactive, provide, shallowRef, nextTick } from "vue";
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -112,7 +112,6 @@ const initialPageData = JSON.parse(
   document.getElementById("app").getAttribute("data-page")
 );
 
-const page = ref(initialPageData);
 const shared = reactive(initialPageData.shared || {});
 const errors = reactive(initialPageData.errors || {});
 
@@ -125,6 +124,24 @@ async function resolveComponent(id) {
 async function resolveLayouts(componentId) {
   const ids = layoutTree[componentId] || [];
   return Promise.all(ids.map(async (id) => (await components[id]()).default));
+}
+
+const currentComponent = shallowRef(null);
+const currentLayouts = shallowRef([]);
+const currentProps = shallowRef(initialPageData.props);
+
+// Resolve all async work first, then update refs synchronously so Vue
+// never renders with a new component but stale props.
+async function updatePage(pageData) {
+  const [comp, layouts] = await Promise.all([
+    resolveComponent(pageData.component),
+    resolveLayouts(pageData.component),
+  ]);
+  // Set props BEFORE component — if the component changes, the first render
+  // will already see the new props.
+  currentProps.value = pageData.props;
+  currentLayouts.value = layouts;
+  currentComponent.value = comp;
 }
 
 export const router = {
@@ -146,12 +163,13 @@ export const router = {
 
     const pageData = await response.json();
 
-    page.value = pageData;
+    // Update shared/errors reactively
     Object.assign(shared, pageData.shared || {});
-
-    // Clear old errors, assign new ones
     for (const key of Object.keys(errors)) delete errors[key];
     Object.assign(errors, pageData.errors || {});
+
+    // Resolve component + layouts, then update refs atomically
+    await updatePage(pageData);
 
     if (!options.preserveState) {
       window.history.pushState({}, "", pageData.url);
@@ -178,21 +196,8 @@ export const router = {
   },
 };
 
-const currentComponent = shallowRef(null);
-const currentLayouts = shallowRef([]);
-const currentProps = ref(initialPageData.props);
-
-async function updatePage(pageData) {
-  currentComponent.value = await resolveComponent(pageData.component);
-  currentLayouts.value = await resolveLayouts(pageData.component);
-  currentProps.value = pageData.props;
-}
-
+// Resolve initial page components before mounting
 await updatePage(initialPageData);
-
-watch(page, (newPage) => {
-  updatePage(newPage);
-});
 
 const app = createSSRApp({
   setup() {
@@ -213,26 +218,6 @@ const app = createSSRApp({
 });
 
 app.mount("#app");
-
-// Intercept same-origin <a> clicks for SPA navigation
-document.addEventListener("click", (e) => {
-  const link = e.target.closest("a[href]");
-  if (!link) return;
-  // Skip if modifier keys or non-left click
-  if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
-  // Skip external links
-  const url = new URL(link.href, window.location.origin);
-  if (url.origin !== window.location.origin) return;
-  // Skip links with target attribute
-  if (link.target && link.target !== "_self") return;
-  // Skip download links
-  if (link.hasAttribute("download")) return;
-  // Skip links that opt out
-  if (link.dataset.noRouter !== undefined) return;
-
-  e.preventDefault();
-  router.visit(url.pathname + url.search);
-});
 
 window.addEventListener("popstate", () => {
   router.visit(window.location.pathname + window.location.search, { preserveState: true });

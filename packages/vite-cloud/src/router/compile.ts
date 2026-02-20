@@ -576,11 +576,11 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`}`);
   lines.push("");
   lines.push(`function getPagesDevClientTags() {`);
-  lines.push(`  const headTags = [\`<script type="module" src="/@vite/client"></script>\`];`);
+  lines.push(`  const headTag = \`<script type="module" src="/@vite/client"></script>\`;`);
   lines.push(
     `  const bodyTag = \`<script type="module" src="\${escapeHtmlAttr(PAGES_CLIENT_ENTRY_URL)}"></script>\`;`,
   );
-  lines.push(`  return { head: headTags.join("\\n"), body: bodyTag };`);
+  lines.push(`  return { head: headTag, body: bodyTag };`);
   lines.push(`}`);
   lines.push("");
   lines.push(`function collectPagesManifestFiles(manifest, entryId) {`);
@@ -703,6 +703,16 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   }
   lines.push("");
 
+  // Asset fallback — delegates to env.ASSETS binding (static files from dist/client)
+  lines.push(`async function fetchPagesAsset(c) {`);
+  lines.push(`  const assets = c.env?.ASSETS;`);
+  lines.push(`  if (!assets || typeof assets.fetch !== "function") {`);
+  lines.push(`    return new Response("Not Found", { status: 404 });`);
+  lines.push(`  }`);
+  lines.push(`  return assets.fetch(c.req.raw);`);
+  lines.push(`}`);
+  lines.push("");
+
   // Page fallback — renders index page for unmatched non-API, non-asset paths.
   // Uses notFound (not get("*")) so Vite's module pipeline can serve .vue/.ts files in dev.
   lines.push(`app.notFound(async (c) => {`);
@@ -711,7 +721,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`    return c.text("Not Found", 404);`);
   lines.push(`  }`);
   lines.push(`  if (/\\/[^/]+\\.[^/]+$/.test(path)) {`);
-  lines.push(`    return c.text("Not Found", 404);`);
+  lines.push(`    return fetchPagesAsset(c);`);
   lines.push(`  }`);
   lines.push(`  return handlePageGet(undefined, c, "index", renderPage, getPagesAssetTags);`);
   lines.push(`});`);
