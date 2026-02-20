@@ -20,34 +20,6 @@ yarn create vite-cloud
 bun create vite-cloud
 ```
 
-:::
-
-## Global CLI Installation
-
-Install `vite-cloud` globally to use the `vcc` CLI anywhere:
-
-::: code-group
-
-```sh [npm]
-npm install -g vite-cloud
-```
-
-```sh [pnpm]
-pnpm add -g vite-cloud
-```
-
-```sh [yarn]
-yarn global add vite-cloud
-```
-
-```sh [bun]
-bun add -g vite-cloud
-```
-
-:::
-
-This is optional. If you skip this, you can always use `npx vcc` instead.
-
 ## Using with Coding Agents
 
 The fastest way to get started is to copy the prompt below and paste it into your coding agent (Claude Code, Cursor, Codex, etc.):
@@ -99,12 +71,35 @@ export default defineConfig({
 });
 ```
 
-Then run the interactive setup guide:
+Then run the interactive setup guide via `vcc` (Vite Cloud CLI):
 
-```sh
-# tsconfig, github actions & agent setup
-vcc init
+::: code-group
+
+```sh [npm]
+npx vcc init
 ```
+
+```sh [pnpm]
+pnpm vcc init
+```
+
+```sh [yarn]
+yarn vcc init
+```
+
+```sh [bun]
+bunx vcc init
+```
+
+:::
+
+::: tip Tip: `vcc` binary invocation
+`vcc` is a local binary from the installed `vite-cloud` package, so outside of npm scripts, you will have to invoke it with `npx`, `pnpm`, `yarn`, or `bunx`.
+
+Alternatively, you can add `./node_modules/.bin` to your `PATH` so that you can invoke `vcc` directly when you are in the root directory of your app.
+
+**For brevity, we will used unprefixed `vcc` throughout the docs.**
+:::
 
 ## Once You Have a Working App
 
