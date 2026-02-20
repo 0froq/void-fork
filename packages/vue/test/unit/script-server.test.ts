@@ -6,9 +6,9 @@ const PAGES_DIR = "/project/pages";
 function createPlugin() {
   const plugin = scriptServerPlugin(PAGES_DIR);
   return {
-    transform: (plugin as any).transform.bind(plugin),
-    resolveId: (plugin as any).resolveId.bind(plugin),
-    load: (plugin as any).load.bind(plugin),
+    transform: (plugin as any).transform.handler.bind(plugin),
+    resolveId: (plugin as any).resolveId.handler.bind(plugin),
+    load: (plugin as any).load.handler.bind(plugin),
   };
 }
 
