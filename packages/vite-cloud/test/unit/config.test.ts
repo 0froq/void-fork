@@ -157,6 +157,57 @@ describe("readConfig", () => {
     expect(() => readConfig(tmpDir)).toThrow('"wrangler"');
     cleanup();
   });
+
+  it("accepts revalidate as a number", () => {
+    setup(JSON.stringify({ revalidate: 60 }));
+    const config = readConfig(tmpDir);
+    expect(config.revalidate).toBe(60);
+    cleanup();
+  });
+
+  it("accepts revalidate as zero", () => {
+    setup(JSON.stringify({ revalidate: 0 }));
+    const config = readConfig(tmpDir);
+    expect(config.revalidate).toBe(0);
+    cleanup();
+  });
+
+  it("accepts revalidate as a path map", () => {
+    setup(JSON.stringify({ revalidate: { "/": 60, "/docs/*": 31536000, "*": 30 } }));
+    const config = readConfig(tmpDir);
+    expect(config.revalidate).toEqual({ "/": 60, "/docs/*": 31536000, "*": 30 });
+    cleanup();
+  });
+
+  it("throws on negative revalidate number", () => {
+    setup(JSON.stringify({ revalidate: -1 }));
+    expect(() => readConfig(tmpDir)).toThrow('"revalidate"');
+    cleanup();
+  });
+
+  it("throws on string revalidate", () => {
+    setup(JSON.stringify({ revalidate: "60" }));
+    expect(() => readConfig(tmpDir)).toThrow('"revalidate"');
+    cleanup();
+  });
+
+  it("throws on non-numeric path map value", () => {
+    setup(JSON.stringify({ revalidate: { "/": "60" } }));
+    expect(() => readConfig(tmpDir)).toThrow('"revalidate"');
+    cleanup();
+  });
+
+  it("throws on negative path map value", () => {
+    setup(JSON.stringify({ revalidate: { "/": -10 } }));
+    expect(() => readConfig(tmpDir)).toThrow('"revalidate"');
+    cleanup();
+  });
+
+  it("throws on path map key not starting with / or *", () => {
+    setup(JSON.stringify({ revalidate: { docs: 60 } }));
+    expect(() => readConfig(tmpDir)).toThrow('"revalidate"');
+    cleanup();
+  });
 });
 
 describe("normalizeAuth", () => {

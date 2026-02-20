@@ -2,41 +2,65 @@
 
 Edge caching adds stale-while-revalidate caching for SSR pages. Cached pages are served instantly from R2 while the worker re-renders in the background when the cache is stale. This is the equivalent of [Incremental Static Regeneration (ISR)](https://vercel.com/docs/incremental-static-regeneration) in other frameworks.
 
-This requires [SSR](./ssr.md) to be configured.
+This requires [SSR](./ssr.md) or [Pages mode](./pages-routing.md) to be configured.
 
 ## Enabling edge caching
 
-Export a `revalidate` number (in seconds) from `src/main.ssr.ts(x)`:
+Add a `revalidate` field to `vite-cloud.json` with a TTL in seconds:
 
-```ts
-export const revalidate = 60; // cache pages for 60 seconds
-
-export default defineRender(async (c, assetTags) => {
-  // ...
-});
+```json
+{
+  "revalidate": 60
+}
 ```
 
 Setting `revalidate` to `0` disables edge caching (equivalent to plain SSR).
 
 ## Per-path revalidation
 
-You can set different TTLs for different URL patterns by exporting an object:
+You can set different TTLs for different URL patterns using an object:
 
-```ts
-export const revalidate = {
-  "/": 60, // homepage: 60 seconds
-  "/docs/*": Infinity, // docs: cached until next deploy
-  "/user/*": 0, // user pages: never cached (always SSR)
-  "*": 30, // everything else: 30 seconds
-};
+```json
+{
+  "revalidate": {
+    "/": 60,
+    "/docs/*": 31536000,
+    "/user/*": 0,
+    "*": 30
+  }
+}
 ```
 
 Rules are matched in order — first match wins. The `*` glob matches any characters including `/`.
 
 Special values:
 
-- `Infinity` — cached until the next deploy (mapped to 1 year internally; deploys clear the edge cache)
+- `31536000` (1 year) — effectively cached until the next deploy (deploys clear the edge cache)
 - `0` — never cached, always rendered by the worker (equivalent to plain SSR for that path)
+
+## Per-page revalidation (Pages mode)
+
+In [Pages mode](./pages-routing.md), you can export a `revalidate` value from a `.server.ts` file to override the global config for that page:
+
+```ts
+// pages/products/index.server.ts
+export const revalidate = 120; // cache for 2 minutes
+
+export const loader = defineHandler(async (c) => {
+  // ...
+});
+```
+
+Per-page values take precedence over `vite-cloud.json` patterns.
+
+## Precedence
+
+When multiple sources set a revalidate TTL, the most specific wins:
+
+1. `x-revalidate` response header (per-response)
+2. `.server.ts` export (per-page, Pages mode only)
+3. `vite-cloud.json` path pattern match
+4. `vite-cloud.json` global number or `"*"` fallback
 
 ## How it works
 
@@ -50,33 +74,19 @@ This means users never wait for a stale page to re-render — they always get an
 
 ## Per-response TTL override
 
-The `defineRender` callback can set the `x-revalidate` response header to override the default TTL for specific pages:
+Route handlers can set the `x-revalidate` response header to override the TTL for a specific response:
 
 ```ts
-export const revalidate = 60;
+export const GET = defineHandler(async (c) => {
+  // Don't cache this particular response
+  c.header("x-revalidate", "0");
 
-export default defineRender(async (c, assetTags) => {
-  const url = new URL(c.req.raw.url);
-
-  // Don't cache the user profile page (always SSR)
-  if (url.pathname.startsWith("/profile")) {
-    c.header("x-revalidate", "0");
-  }
-
-  // Cache the homepage longer
-  if (url.pathname === "/") {
-    c.header("x-revalidate", "300");
-  }
-
-  const html = renderToString(<App url={url.pathname} />);
-  return new Response(`<!doctype html><html>...</html>`, {
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
+  return c.html("...");
 });
 ```
 
 - `x-revalidate: 0` — skip caching for this response
-- `x-revalidate: 300` — cache for 5 minutes instead of the default 60s
+- `x-revalidate: 300` — cache for 5 minutes instead of the default
 
 Only successful responses (2xx) are cached.
 

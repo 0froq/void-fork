@@ -62,6 +62,25 @@
       "type": "string",
       "description": "Output directory for static deploys. Relative to project root."
     },
+    "revalidate": {
+      "description": "Edge caching TTL in seconds. A number sets a global TTL for all SSR pages. An object maps URL patterns to TTLs (first match wins). Set to 0 to disable caching for a path.",
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "object",
+          "patternProperties": {
+            "^(/|\\*)": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "wrangler": {
       "type": "object",
       "description": "Curated wrangler config passthrough. Binding arrays (d1_databases, kv_namespaces, r2_buckets) are not allowed here — bindings are fully managed by vite-cloud.",

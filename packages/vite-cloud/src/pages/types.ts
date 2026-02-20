@@ -15,6 +15,8 @@ export interface PageDefinition {
   methods: string[];
   /** Component ID used in page object, e.g. "users/[id]" */
   componentId: string;
+  /** Edge caching revalidate TTL in seconds, from .server.ts export */
+  revalidate?: number;
 }
 
 export interface LayoutDefinition {

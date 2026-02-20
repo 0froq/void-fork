@@ -13,7 +13,8 @@ import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
 import { scanJobsSync } from "../crons/scan";
 import { scanQueuesSync } from "../queues/scan";
-import { validateSsrEntry, getRevalidateConfig } from "../ssr/entry";
+import { validateSsrEntry } from "../ssr/entry";
+import { scanPages } from "../pages/scan";
 import { detectPreset, type StaticPreset } from "./preset";
 import { readConfig, convertHeadersConfig } from "../config";
 import { getRequestedProjectSlug, resolveProjectBySlug, inferDefaultSlug } from "./resolve-project";
@@ -246,12 +247,36 @@ async function runFullDeploy(
         ...(q.maxBatchTimeout != null && { maxBatchTimeout: q.maxBatchTimeout }),
       }));
   const isSsr = isFrameworkMode ? true : Boolean(validateSsrEntry(root));
-  const revalidateConfig = isSsr ? getRevalidateConfig(root) : { type: "none" as const };
+
+  // Resolve revalidate config from vite-cloud.json + per-page .server.ts exports
+  const vcRevalidate = readConfig(root).revalidate;
   let revalidate: number | Record<string, number> | undefined;
-  if (revalidateConfig.type === "static" && revalidateConfig.ttl > 0) {
-    revalidate = revalidateConfig.ttl;
-  } else if (revalidateConfig.type === "pathmap") {
-    revalidate = Object.fromEntries(revalidateConfig.rules);
+  if (vcRevalidate != null) {
+    revalidate = vcRevalidate;
+  }
+  // Merge per-page revalidate exports (pages mode)
+  const pageScan = existsSync(join(root, "pages")) ? await scanPages(root) : null;
+  if (pageScan) {
+    const perPageRules: Record<string, number> = {};
+    for (const page of pageScan.pages) {
+      if (page.revalidate != null) {
+        perPageRules[page.pattern] = page.revalidate;
+      }
+    }
+    if (Object.keys(perPageRules).length > 0) {
+      if (typeof revalidate === "number") {
+        // Global number → pathmap with "*" fallback, per-page entries first
+        revalidate = Object.fromEntries([...Object.entries(perPageRules), ["*", revalidate]]);
+      } else if (typeof revalidate === "object") {
+        // Per-page entries first (higher precedence in first-match)
+        revalidate = Object.fromEntries([
+          ...Object.entries(perPageRules),
+          ...Object.entries(revalidate),
+        ]);
+      } else {
+        revalidate = perPageRules;
+      }
+    }
   }
 
   // 8. Load .env vars for production
