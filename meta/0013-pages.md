@@ -80,7 +80,7 @@ export const POST = defineHandler.withValidator({ body: createUserSchema })(asyn
 </script>
 
 <script setup lang="ts">
-import { useForm, useShared, Link } from "@vite-cloud/vue";
+import { useForm, useShared, Link } from "@vite-cloud/vue/runtime";
 
 interface User {
   id: number;
@@ -240,7 +240,7 @@ pages/
 ```vue
 <!-- pages/layout.vue -->
 <script setup>
-import { useShared, Link } from "@vite-cloud/vue";
+import { useShared, Link } from "@vite-cloud/vue/runtime";
 const { auth } = useShared();
 </script>
 
@@ -285,7 +285,7 @@ Client-side access via `useShared()`:
 
 ```vue
 <script setup>
-import { useShared } from "@vite-cloud/vue";
+import { useShared } from "@vite-cloud/vue/runtime";
 const { auth, flash } = useShared();
 </script>
 ```
@@ -377,41 +377,142 @@ export function viteCloudVue(options?) {
 
 ```ts
 // vite.config.ts
-import { viteCloud } from "vite-cloud";
+import { defineConfig } from "vite";
+import viteCloud from "vite-cloud";
 import { viteCloudVue } from "@vite-cloud/vue";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudVue()],
+  plugins: [viteCloud(), ...viteCloudVue()],
 });
 ```
 
-### Adapter Interface
+`viteCloudVue()` returns an array of three plugins (scriptServer, vue, pages) — spread it into the plugins array.
 
-Each framework adapter implements:
+### Adapter Interface (As Implemented)
 
-```ts
-interface PagesAdapter {
-  // Build-time
-  vitePlugins(options?: any): Plugin[];
+Each framework adapter provides:
 
-  // SSR
-  renderToHTML(
-    component: ResolvedComponent,
-    props: object,
-    shared: object,
-    layouts: ResolvedLayout[],
-  ): Promise<string>;
+1. **Vite plugins** via a factory function (e.g. `viteCloudVue()`) returning an array of plugins
+2. **SSR renderer** via `virtual:vite-cloud-pages-renderer` — exports `renderPage(pageObj, assetTags)` that SSR-renders the page with layout wrapping and returns full HTML
+3. **Client hydration entry** via `virtual:vite-cloud-pages-client` — hydrates the SSR HTML, sets up the client router, and handles SPA navigation
+4. **Runtime exports** via the `/runtime` subpath — `Link`, `useForm`, `useShared` composables/components
 
-  // Client (provided as runtime exports)
-  // Link component
-  // useForm(defaults) composable/hook
-  // useShared() composable/hook
-  // router object
-  // createApp(rootElement, initialPage) hydration entry
-}
+The SSR renderer and client entry are generated as virtual modules by the adapter's `pagesPlugin`. They use a component manifest (mapping component IDs to dynamic imports) and a layout tree (mapping component IDs to their ancestor layout IDs) generated from the page scan results.
+
+## Implementation Details
+
+### Route Compilation: `notFound` vs `get("*")`
+
+The page catch-all route uses `app.notFound()` instead of `app.get("*")`. In dev mode, `get("*")` intercepts ALL GET requests including Vite's module pipeline requests (e.g. `/pages/index.vue`, `/@vite/client`), breaking HMR and component loading. `notFound()` only fires when no other handler matches, allowing Vite's middleware to serve source files.
+
+### `run_worker_first` Exclusions for Dev
+
+When pages mode is active, `run_worker_first` must exclude `/pages/*` in addition to the standard `!/@*`, `!/src/*`, `!/node_modules/*`. Without this, module requests for `.vue` files go to the worker first, which returns 404 instead of letting Vite serve them.
+
+### Production Asset Serving
+
+Static assets (`/assets/*`) are excluded from `run_worker_first` so Cloudflare serves them directly from the edge/CDN without invoking the worker. The `notFound` handler also has a fallback to `env.ASSETS.fetch(c.req.raw)` for any other file-extension paths that slip through (e.g. `/favicon.ico`), mirroring the existing SSR codepath's `fetchFromAssets()` pattern.
+
+### Client Entry: Virtual Module URL in `<script>` Tags
+
+Browser-facing `<script src>` tags cannot use Vite's `\0`-prefixed virtual module IDs directly. The client entry script tag uses `/@id/__x00__virtual:vite-cloud-pages-client` — Vite's URL-based virtual module resolution format.
+
+### Client-Side Page Updates Must Be Atomic
+
+The `updatePage()` function resolves component + layouts via `Promise.all` before setting any Vue refs. Setting refs across multiple `await` boundaries (e.g. setting `currentComponent` after one await, then `currentLayouts` after another) allows Vue to flush a render between the awaits, causing the new component to render with stale props. The fix: resolve all async work first, then update props → layouts → component synchronously in a single microtask.
+
+### No Global Click Interceptor — Use `Link` Component
+
+The client entry does NOT include a global `document.addEventListener("click")` interceptor for `<a>` tags. Instead, SPA navigation is handled exclusively by the `Link` component. A global interceptor conflicts with `Link` — both fire `router.visit()` on the same click event, causing double navigation. The `Link` component already handles modifier keys, external URLs, and non-GET methods correctly.
+
+### SSR `provide`/`inject` Must Be Complete
+
+During SSR rendering, the app must `provide()` all keys that components may `inject()`, even if the value is `null`. The SSR renderer provides `__vc_shared`, `__vc_errors`, AND `__vc_router` (as `null`). Runtime composables (`useForm`, `Link`) use `inject("key", null)` with a default to avoid Vue warnings when the injection is missing during SSR.
+
+## Pitfalls
+
+### Vue Ref Update Atomicity
+
+**Problem:** Multiple `await`s between `ref.value =` assignments in the same function:
+
+```js
+// BAD — Vue flushes renders between the two awaits
+currentComponent.value = await resolveComponent(data.component);
+currentLayouts.value = await resolveLayouts(data.component); // Vue renders here!
+currentProps.value = data.props; // Too late — component already rendered with old props
 ```
 
-The exact interface will be refined during implementation.
+**Fix:** Resolve all async work first, then batch-update refs:
+
+```js
+// GOOD — all refs updated synchronously after async work completes
+const [comp, layouts] = await Promise.all([
+  resolveComponent(data.component),
+  resolveLayouts(data.component),
+]);
+currentProps.value = data.props;
+currentLayouts.value = layouts;
+currentComponent.value = comp;
+```
+
+**Rule:** Set props BEFORE component. If the component ref changes, Vue's next render sees the new component. If props haven't been updated yet, the new component renders with stale props from the previous page.
+
+### `app.get("*")` Blocks Vite Dev Server
+
+**Problem:** Hono's `app.get("*", handler)` matches ALL GET requests, not just user-facing navigation. This intercepts Vite's module requests (`/pages/index.vue`, `/@vite/client`, `/node_modules/.vite/deps/vue.js`), returning HTML or 404 instead of JavaScript modules.
+
+**Fix:** Use `app.notFound(handler)` which only fires when no other Hono route or Vite middleware handles the request.
+
+### Worker Catches Static Asset Requests in Production
+
+**Problem:** With `run_worker_first: ["/**"]` and no exclusions, ALL requests go to the worker, including requests for JS/CSS bundles in `/assets/`. This is both slow (unnecessary worker invocation) and broken if the `notFound` handler returns a plain 404.
+
+**Fix:** Exclude `/assets/*` from `run_worker_first` so Cloudflare serves hashed assets directly from the edge. Additionally, the `notFound` handler calls `env.ASSETS.fetch(c.req.raw)` for any remaining file-extension paths as a fallback.
+
+### Bare Module Specifiers in Inline `<script>` Tags
+
+**Problem:** Inline `<script type="module">import "virtual:foo";</script>` in SSR-generated HTML doesn't work — browsers don't resolve bare module specifiers, and Vite's import rewriting only processes files served through its module pipeline.
+
+**Fix:** Either use `<script type="module" src="/@id/__x00__virtual:foo">` (served through Vite) or don't inject inline module scripts in SSR HTML.
+
+## Debugging Techniques
+
+### Browser Console Forwarding
+
+For debugging client-side issues during development, [vite-console-forward-plugin](https://github.com/mitsuhiko/vite-console-forward-plugin) forwards browser console output to the terminal. Note: its `transformIndexHtml` hook does NOT fire for SSR-generated HTML — you must manually inject `<script type="module" src="/@id/__x00__virtual:console-forward">` into the SSR head tags. The plugin's endpoint must also use a `/@`-prefixed path (e.g. `/@console-forward`) to bypass `run_worker_first` routing.
+
+### Headless Playwright for Client-Side Bug Reproduction
+
+For systematic client-side debugging (hydration crashes, stale props, navigation bugs), use Playwright in headless mode:
+
+```js
+import { chromium } from "playwright";
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage();
+
+page.on("console", (msg) => console.log(`[${msg.type()}] ${msg.text()}`));
+page.on("pageerror", (err) => console.log(`[ERROR] ${err.message}`));
+
+await page.goto("http://localhost:5173/");
+await page.click('a[href="/users"]');
+// Check URL, content, and console for warnings
+```
+
+This captures Vue warnings, hydration errors, and JavaScript exceptions that only appear in the browser — not in server logs. Run the script from the monorepo root (where `playwright` is installed).
+
+### Isolating Dev vs Production Bugs
+
+If something works in `vite dev` but breaks in `vite preview`:
+
+1. Check `run_worker_first` patterns — dev exclusions like `!/pages/*` are irrelevant in production since those paths don't exist
+2. Check the `notFound` handler — it must fall through to `env.ASSETS.fetch()` for static files
+3. Check virtual module URLs — dev uses `/@id/__x00__` prefix, production uses hashed filenames from the manifest
+
+If something works in `vite preview` but breaks in `vite dev`:
+
+1. Check that `run_worker_first` excludes source directories (`!/pages/*`, `!/src/*`)
+2. Check that Hono routes don't intercept Vite middleware requests (use `notFound` instead of `get("*")`)
+3. Check that virtual module script tags use `/@id/__x00__` prefix for browser-facing URLs
 
 ## What This Does NOT Include
 

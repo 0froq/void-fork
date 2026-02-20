@@ -247,10 +247,12 @@ export default function viteCloud(): Plugin[] {
   if (ssrEntry || hasPages) {
     workerConfig.assets = {
       binding: "ASSETS",
-      // Route HTML/document requests to the worker first for SSR/Pages, but let Vite dev
-      // internals and source module requests bypass to the asset worker.
+      // Route document/API requests to the worker for SSR/Pages. Static assets
+      // (hashed files in /assets/) bypass the worker and are served directly
+      // from the edge. Dev-only exclusions let Vite serve source modules.
       run_worker_first: [
         "/**",
+        "!/assets/*",
         "!/@*",
         "!/src/*",
         "!/node_modules/*",
