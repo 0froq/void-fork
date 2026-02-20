@@ -31,7 +31,7 @@ The fastest way to get started is to copy the prompt below and paste it into you
 You can also pipe it directly into Claude Code:
 
 ```sh
-vcc agent-prompt | claude
+vcc init --prompt | claude
 ```
 
 For existing projects, run `vcc init --agent` to add a `CLAUDE.md` (or `AGENTS.md`) with framework instructions.

@@ -1,9 +1,6 @@
 #!/usr/bin/env node
 
 import { execSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { log, outro, note } from "@clack/prompts";
 import { runLink } from "./link";
 import { runLoginCommand } from "./login";
@@ -220,16 +217,6 @@ if (command === "staging") {
   import("./mcp").then(({ runMcp }) => {
     runMcp();
   });
-} else if (command === "agent-prompt") {
-  let dir = join(fileURLToPath(import.meta.url), "..");
-  for (let i = 0; i < 5; i++) {
-    const promptPath = join(dir, "getting-started-prompt.txt");
-    if (existsSync(promptPath)) {
-      process.stdout.write(readFileSync(promptPath, "utf-8"));
-      break;
-    }
-    dir = join(dir, "..");
-  }
 } else {
   const BLUE = "\x1b[34m";
   const RESET = "\x1b[0m";
@@ -310,7 +297,7 @@ if (command === "staging") {
       "\x1b[0m\x1b[1m\x1b[36magent\x1b[39m",
       "\x1b[0mvcc init --agent                   \x1b[2mInject agent instructions into CLAUDE.md/AGENTS.md",
       "\x1b[0mvcc init --skills                  \x1b[2mLink vite-cloud skills to your agent",
-      "\x1b[0mvcc agent-prompt                   \x1b[2mPrint the coding agent reference prompt",
+      "\x1b[0mvcc init --prompt                  \x1b[2mPrint the coding agent reference prompt",
       "\x1b[0mvcc mcp                            \x1b[2mStart MCP server (stdio, for AI agents)",
     ].join("\n"),
     "\x1b[34mCommands\x1b[0m",

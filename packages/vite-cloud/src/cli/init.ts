@@ -10,6 +10,7 @@ export interface InitArgs {
   github: boolean;
   agent: boolean;
   skills: boolean;
+  prompt: boolean;
 }
 
 export function parseInitArgs(args: string[]): InitArgs {
@@ -22,6 +23,7 @@ export function parseInitArgs(args: string[]): InitArgs {
         github: { type: "boolean" },
         agent: { type: "boolean" },
         skills: { type: "boolean" },
+        prompt: { type: "boolean" },
       },
       strict: true,
     });
@@ -35,6 +37,7 @@ export function parseInitArgs(args: string[]): InitArgs {
     github: parsed.values.github === true,
     agent: parsed.values.agent === true,
     skills: parsed.values.skills === true,
+    prompt: parsed.values.prompt === true,
   };
 }
 
@@ -434,6 +437,20 @@ function injectAgentBlock(root: string, filePath: string): void {
 export async function runInitCommand(root: string, initArgs?: InitArgs): Promise<void> {
   console.log();
   intro("\x1b[34mvite-cloud init\x1b[0m");
+
+  // --prompt: print agent reference prompt to stdout and exit
+  if (initArgs?.prompt) {
+    let dir = join(fileURLToPath(import.meta.url), "..");
+    for (let i = 0; i < 5; i++) {
+      const promptPath = join(dir, "getting-started-prompt.txt");
+      if (existsSync(promptPath)) {
+        process.stdout.write(readFileSync(promptPath, "utf-8"));
+        return;
+      }
+      dir = join(dir, "..");
+    }
+    return;
+  }
 
   const state = detectProjectState(root);
   const targeted =
