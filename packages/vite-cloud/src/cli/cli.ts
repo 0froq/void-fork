@@ -210,27 +210,17 @@ if (command === "staging") {
     });
   });
 } else if (command === "agent-prompt") {
-  import("node:path").then(({ join }) => {
-    import("node:url").then(({ fileURLToPath }) => {
-      import("node:fs").then(({ readFileSync, existsSync }) => {
-        // Walk up from the current file to find the vite-cloud package root
-        let dir = join(fileURLToPath(import.meta.url), "..");
-        for (let i = 0; i < 5; i++) {
-          if (existsSync(join(dir, "package.json"))) {
-            const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8"));
-            if (pkg.name === "vite-cloud") {
-              const prompt = readFileSync(join(dir, "AGENT_PROMPT.md"), "utf-8");
-              process.stdout.write(prompt);
-              return;
-            }
-          }
-          dir = join(dir, "..");
-        }
-        log.error("Could not find vite-cloud package root");
-        process.exit(1);
-      });
-    });
-  });
+  process.stdout
+    .write(`Vite Cloud is a fullstack Vite framework and deployment platform for Cloudflare. Scaffold a new app with:
+
+npm create vite-cloud@latest my-app
+cd my-app
+npm install
+
+The scaffolded project includes a CLAUDE.md (or AGENTS.md) file with detailed framework instructions covering routing, database, auth, typed fetch, and more. Read it before building.
+
+Now ask me what I want to build.
+`);
 } else {
   const BLUE = "\x1b[34m";
   const RESET = "\x1b[0m";
