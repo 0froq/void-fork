@@ -1,0 +1,36 @@
+{
+  "name": "@vite-cloud/vue",
+  "version": "0.0.1",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/runtime/index.d.mts",
+      "import": "./dist/runtime/index.mjs"
+    },
+    "./plugin": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "^5.0.0"
+  },
+  "devDependencies": {
+    "tsdown": "catalog:",
+    "vite": "catalog:",
+    "vite-cloud": "workspace:*",
+    "vue": "^3.5.0"
+  },
+  "peerDependencies": {
+    "vite": "catalog:",
+    "vite-cloud": "workspace:*",
+    "vue": "^3.5.0"
+  }
+}

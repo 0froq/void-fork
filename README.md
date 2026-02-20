@@ -39,19 +39,30 @@ pnpm run deploy:staging  # Deploy all workers to staging environment
 
 pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-workspace.yaml` (typescript, tsdown, vite, @cloudflare/workers-types, wrangler).
 
-| Package                                                  | npm name                         | Purpose                                                |
-| -------------------------------------------------------- | -------------------------------- | ------------------------------------------------------ |
-| [`packages/vite-cloud`](./packages/vite-cloud/AGENTS.md) | `vite-cloud`                     | Core Vite plugin — routing, inference, migrations, CLI |
-| [`packages/platform`](./packages/platform/README.md)     | `@vite-cloud/platform` (private) | Control Plane API + Admin Dashboard                    |
-| [`packages/dispatch`](./packages/dispatch/README.md)     | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets   |
-| `packages/create-vite-cloud`                             | `create-vite-cloud`              | `npm create vite-cloud` scaffolding CLI                |
-| `playground/*`                                           | (private)                        | local apps for testing                                 |
+| Package                                                  | npm name                         | Purpose                                                   |
+| -------------------------------------------------------- | -------------------------------- | --------------------------------------------------------- |
+| [`packages/vite-cloud`](./packages/vite-cloud/AGENTS.md) | `vite-cloud`                     | Core Vite plugin — routing, inference, migrations, CLI    |
+| [`packages/vue`](./packages/vue/README.md)               | `@vite-cloud/vue`                | Vue framework adapter for Pages mode (SSR, Link, useForm) |
+| [`packages/platform`](./packages/platform/README.md)     | `@vite-cloud/platform` (private) | Control Plane API + Admin Dashboard                       |
+| [`packages/dispatch`](./packages/dispatch/README.md)     | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets      |
+| `packages/create-vite-cloud`                             | `create-vite-cloud`              | `npm create vite-cloud` scaffolding CLI                   |
+| `playground/*`                                           | (private)                        | local apps for testing                                    |
 
 ## `vite-cloud` Overview
 
 Core Vite plugin. `viteCloud()` returns `[routingPlugin, migrationPlugin, cloudflare({...inferredBindings})]`. Provides file-based routing on Hono, Standard Schema validation, typed fetch client, typed DB queries, built-in auth (auto-detected from imports + env vars), cron jobs, queues (typed via `vite-cloud/queues`), and a deploy CLI (`vcc`).
 
 See [`packages/vite-cloud/AGENTS.md`](./packages/vite-cloud/AGENTS.md) for architecture, source layout, design decisions, package exports, and route parsing rules.
+
+## `@vite-cloud/vue` Overview
+
+Vue framework adapter for Pages mode — Inertia-inspired full-stack DX with SSR.
+
+- **Plugin** (`@vite-cloud/vue/plugin`): `viteCloudVue()` — extracts `<script server>` blocks, compiles Vue SFCs, generates SSR + client hydration entries
+- **Runtime** (`@vite-cloud/vue`): `Link`, `useForm`, `useShared` composables
+- **Server handlers**: Remix-style `loader` (GET → props) and `action` (mutations) exports in `<script server>` or companion `.server.ts` files
+
+See [`packages/vue/README.md`](./packages/vue/README.md) for architecture and [`meta/0013-pages.md`](./meta/0013-pages.md) for the design doc.
 
 ## `platform` Overview
 
@@ -81,7 +92,7 @@ See [`packages/dispatch/README.md`](./packages/dispatch/README.md) for request f
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). 909 tests across 69 files. See each package README for detailed test listings.
+Tests run from root with `pnpm test` (vitest). 955 tests across 75 files. See each package README for detailed test listings.
 
 ## Playground
 
@@ -99,10 +110,25 @@ Tests run from root with `pnpm test` (vitest). 909 tests across 69 files. See ea
 
 `playground/queues` is a minimal API-only app demonstrating typed queues: a `queues/test-queue.ts` consumer writes to KV, `routes/api/send.ts` produces messages via `queues["test-queue"].send()`, and `routes/api/result.ts` reads the result back. Integration-tested end-to-end (send → consumer → KV round-trip).
 
+`playground/vue-pages` is a Vue full-stack app demonstrating Inertia-inspired Pages mode:
+
+- File-based page routing from `pages/` directory (`.vue` components with `<script server>` blocks)
+- SSR with client-side hydration via `@vite-cloud/vue`
+- Inertia protocol: initial load returns SSR HTML, subsequent navigations return JSON page objects via `X-Inertia` header
+- `<script server>` blocks for co-located server handlers (`loader` returns props, `action` handles mutations)
+- Layout nesting via `layout.vue` files
+- `useForm` composable with isDirty, wasSuccessful, recentlySuccessful, validation error display
+- `useShared` for middleware-set shared data (e.g. auth, app config)
+- `Link` component for SPA navigation (renders `<a>` for GET, `<button>` for non-GET)
+- `ValidationError` class for form validation with automatic error display
+- API route coexistence (`routes/api/` alongside `pages/`)
+- Integration-tested end-to-end (SSR, Inertia JSON, form submission, validation errors, shared data)
+
 Verified working:
 
 - `cd playground/spa && pnpm dev`
 - `cd playground/ssr && pnpm dev`
+- `cd playground/vue-pages && pnpm dev`
 - `cd playground/spa && pnpm typecheck` (includes typed routes via generated `.vite-cloud/routes.d.ts`)
 
 ## Coding Agent Integration
