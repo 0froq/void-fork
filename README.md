@@ -36,7 +36,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | Package                                                  | npm name                         | Purpose                                                   |
 | -------------------------------------------------------- | -------------------------------- | --------------------------------------------------------- |
 | [`packages/vite-cloud`](./packages/vite-cloud/AGENTS.md) | `vite-cloud`                     | Core Vite plugin — routing, inference, migrations, CLI    |
-| `packages/vue`                                           | `@vite-cloud/vue`                | Vue framework adapter for Pages mode (SSR, Link, useForm) |
+| [`packages/vue`](./packages/vue/README.md)               | `@vite-cloud/vue`                | Vue framework adapter for Pages mode (SSR, Link, useForm) |
 | [`packages/platform`](./packages/platform/README.md)     | `@vite-cloud/platform` (private) | Control Plane API + Admin Dashboard                       |
 | [`packages/dispatch`](./packages/dispatch/README.md)     | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets      |
 | `packages/create-vite-cloud`                             | `create-vite-cloud`              | `npm create vite-cloud` scaffolding CLI                   |
@@ -50,19 +50,13 @@ See [`packages/vite-cloud/AGENTS.md`](./packages/vite-cloud/AGENTS.md) for archi
 
 ## `@vite-cloud/vue` Overview
 
-Vue framework adapter for Pages mode. Provides Inertia-inspired full-stack DX: server-driven routing with SPA navigation, automatic prop passing, form helpers, and full SSR.
+Vue framework adapter for Pages mode — Inertia-inspired full-stack DX with SSR.
 
-**Vite plugins** (`@vite-cloud/vue/plugin`): `viteCloudVue()` returns three plugins — `scriptServerPlugin` (extracts `<script server>` blocks from `.vue` SFCs before `@vitejs/plugin-vue`), `@vitejs/plugin-vue`, and `pagesPlugin` (provides `virtual:vite-cloud-pages-renderer` and `virtual:vite-cloud-pages-client` virtual modules for SSR rendering and client hydration).
+- **Plugin** (`@vite-cloud/vue/plugin`): `viteCloudVue()` — extracts `<script server>` blocks, compiles Vue SFCs, generates SSR + client hydration entries
+- **Runtime** (`@vite-cloud/vue`): `Link`, `useForm`, `useShared` composables
+- **Server handlers**: Remix-style `loader` (GET → props) and `action` (mutations) exports in `<script server>` or companion `.server.ts` files
 
-**Runtime exports** (`@vite-cloud/vue`):
-
-- `Link` — Vue component for SPA navigation (renders `<a>` for GET, `<button>` for non-GET methods)
-- `useForm(defaults)` — Reactive form helper with `data`, `errors`, `isDirty`, `processing`, `wasSuccessful`, `recentlySuccessful`, `reset()`, `clearErrors()`, `post()`, `put()`, `patch()`, `delete()`
-- `useShared<T>()` — Access middleware-set shared data (from `c.set("shared", ...)`)
-
-**Page protocol:** Initial GET returns SSR HTML with `data-page` attribute containing the serialized page object. Subsequent navigations with `X-Inertia: true` header return JSON page objects `{ component, props, shared, url, errors }`. Mutations (POST/PUT/DELETE) that throw `ValidationError` re-render with errors; void returns re-run the `loader` for fresh props. Server handlers use Remix-style exports: `loader` (GET) and `action` (mutations).
-
-See [`meta/0013-pages.md`](./meta/0013-pages.md) for the design doc.
+See [`packages/vue/README.md`](./packages/vue/README.md) for architecture and [`meta/0013-pages.md`](./meta/0013-pages.md) for the design doc.
 
 ## `platform` Overview
 
