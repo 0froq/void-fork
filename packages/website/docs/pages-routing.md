@@ -193,13 +193,17 @@ Vue pages can optionally colocate server logic directly in the SFC using a <code
 import { defineHandler } from "vite-cloud";
 import { db } from "vite-cloud/db";
 
-export const loader = defineHandler(async (c) => {
+export interface Props {
+  users: Array<{ id: number; name: string; email: string }>;
+}
+
+export const loader = defineHandler<Props>(async (c) => {
   return { users: await db.list("users") };
 });
 </script>
 
 <script setup lang="ts">
-defineProps<{ users: Array<{ id: number; name: string; email: string }> }>();
+defineProps<Props>();
 </script>
 
 <template>
@@ -210,7 +214,7 @@ defineProps<{ users: Array<{ id: number; name: string; email: string }> }>();
 </template>
 ```
 
-The `<script server>` block is extracted at build time before the Vue SFC compiler runs — it never ships to the client. Since the block is stripped before compilation, types defined in `<script server>` are not available to `<script setup>`. If you want a single source of truth for the props type, use a companion `.server.ts` file instead (see [Type Safety](#type-safety) above).
+The `<script server>` block is extracted at build time — runtime code never ships to the client. Type declarations (`interface`, `type`, `import type`) defined in `<script server>` are preserved and available to `<script setup>`, so you can define your props type once and reference it in both blocks.
 
 If both `<script server>` and a `.server.ts` file exist, the `.server.ts` file takes precedence.
 

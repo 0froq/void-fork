@@ -1,7 +1,11 @@
 <script server lang="ts">
 import { defineHandler } from "vite-cloud";
 
-export const loader = defineHandler(() => {
+interface Props {
+  title: string;
+}
+
+export const loader = defineHandler<Props>(() => {
   return { title: "Home" };
 });
 </script>
@@ -9,7 +13,7 @@ export const loader = defineHandler(() => {
 <script setup lang="ts">
 import { Link } from "@vite-cloud/vue";
 
-const props = defineProps<{ title: string }>();
+defineProps<Props>();
 </script>
 
 <template>

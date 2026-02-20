@@ -115,7 +115,7 @@ Tests run from root with `pnpm test` (vitest). 955 tests across 75 files. See ea
 - File-based page routing from `pages/` directory (`.vue` components with `<script server>` blocks)
 - SSR with client-side hydration via `@vite-cloud/vue`
 - Inertia protocol: initial load returns SSR HTML, subsequent navigations return JSON page objects via `X-Inertia` header
-- `<script server>` blocks for co-located server handlers (`loader` returns props, `action` handles mutations)
+- `<script server>` blocks for co-located server handlers (`loader` returns props, `action` handles mutations) with type declarations (`interface`, `type`, `import type`) preserved for `<script setup>`
 - Layout nesting via `layout.vue` files
 - `useForm` composable with isDirty, wasSuccessful, recentlySuccessful, validation error display
 - `useShared` for middleware-set shared data (e.g. auth, app config)
