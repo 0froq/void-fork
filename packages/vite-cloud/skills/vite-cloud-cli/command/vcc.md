@@ -4,7 +4,7 @@
 
 ### Step 1: Load the skill
 
-Load the `vcc-cli` skill and read `SKILL.md` for the decision tree.
+Load the `vite-cloud-cli` skill and read `SKILL.md` for the decision tree.
 
 ### Step 2: Identify the task
 

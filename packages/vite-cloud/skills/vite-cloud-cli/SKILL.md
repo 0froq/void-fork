@@ -1,5 +1,5 @@
 ---
-name: vcc-cli
+name: vite-cloud-cli
 description: Use the Vite Cloud CLI (vcc) for deploying, managing databases, generating code, configuring secrets, custom domains, and project management. Use when users ask to "deploy", "generate a model", "run migrations", "add a secret", "set up a domain", or manage Vite Cloud infrastructure.
 ---
 
