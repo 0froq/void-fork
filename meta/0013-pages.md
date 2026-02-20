@@ -1,0 +1,422 @@
+# Pages: Inertia-Inspired Full-Stack DX for Vite Cloud
+
+## Overview
+
+Pages is a new rendering mode for Vite Cloud that provides an Inertia.js-inspired developer experience: server-driven routing with SPA-like navigation, automatic prop passing from server handlers to page components, form helpers with built-in validation error handling, and full SSR.
+
+The architecture separates a **framework-agnostic core** (protocol, server handling, page resolution) from **framework-specific adapters** (rendering, hydration, client components). Vue is the first adapter; React, Svelte, and Solid follow the same adapter interface.
+
+## Core Concepts
+
+### The Protocol
+
+Pages mode adds an Inertia-style protocol on top of Vite Cloud's existing Hono-based server:
+
+| Request type      | How detected                        | Server response                                           |
+| ----------------- | ----------------------------------- | --------------------------------------------------------- |
+| Initial page load | No `X-Inertia` header               | Full SSR HTML with embedded page object. Client hydrates. |
+| SPA navigation    | `X-Inertia: true` header            | JSON page object. Client swaps component.                 |
+| Form submission   | `X-Inertia: true` + POST/PUT/DELETE | Re-run GET (fresh props) or redirect.                     |
+
+**Page object shape:**
+
+```json
+{
+  "component": "users/index",
+  "props": { "users": [...] },
+  "shared": { "auth": { "user": {...} }, "flash": null },
+  "url": "/users",
+  "errors": null
+}
+```
+
+### Directory Structure
+
+Pages mode activates when a `pages/` directory exists. It coexists with the existing `routes/` directory for pure JSON API endpoints.
+
+```
+project/
+  pages/                  # Pages mode (Inertia-style UI)
+    layout.vue            # Root layout
+    index.vue             # GET /
+    users/
+      layout.vue          # Nested layout for /users/*
+      index.vue           # GET /users
+      [id].vue            # GET /users/:id
+      create.vue          # GET /users/create
+  routes/                 # Pure JSON API endpoints (unchanged)
+    api/
+      health.ts           # GET /api/health -> JSON
+      webhooks.ts         # POST /api/webhooks -> JSON
+  middleware/              # Shared across pages and routes
+    01.auth.ts
+```
+
+File-based routing rules match the existing `routes/` conventions: `[param]` for dynamic segments, `[...param]` for catch-all, `(group)/` for route groups.
+
+### No Manual SSR Entry
+
+When pages mode is active, the adapter auto-generates the SSR entry and client hydration entry. No `main.ssr.ts` or `main.client.ts` needed.
+
+## Page Anatomy (Vue Example)
+
+```vue
+<!-- pages/users/index.vue -->
+<script server lang="ts">
+import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
+
+// GET handler provides props for this page
+export const GET = defineHandler(async (c) => {
+  const users = await db.list("users");
+  return { users };
+});
+
+// POST handler: returns nothing = re-run GET with fresh props
+export const POST = defineHandler.withValidator({ body: createUserSchema })(async (c, { body }) => {
+  await db.insert("users", body);
+  // implicit: re-runs GET, page re-renders with updated user list
+});
+</script>
+
+<script setup lang="ts">
+import { useForm, useShared, Link } from "@vite-cloud/vue";
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+defineProps<{ users: User[] }>();
+
+const { auth, flash } = useShared();
+
+const form = useForm({ name: "", email: "" });
+function submit() {
+  form.post("/users");
+}
+</script>
+
+<template>
+  <h1>Users</h1>
+  <p v-if="flash?.message">{{ flash.message }}</p>
+
+  <ul>
+    <li v-for="u in users" :key="u.id">
+      <Link :href="`/users/${u.id}`">{{ u.name }}</Link>
+    </li>
+  </ul>
+
+  <form @submit.prevent="submit">
+    <input v-model="form.name" />
+    <span v-if="form.errors.name">{{ form.errors.name }}</span>
+    <input v-model="form.email" />
+    <span v-if="form.errors.email">{{ form.errors.email }}</span>
+    <button :disabled="form.processing">Create</button>
+  </form>
+</template>
+```
+
+### Server Handler Rules
+
+The `<script server lang="ts">` block is extracted by the adapter's Vite plugin before the framework's SFC compiler processes the file. It uses the existing `defineHandler` API with named method exports.
+
+**GET handler:** Returns props for the page. Required for any page that needs server data.
+
+**POST/PUT/DELETE handlers:** Mutation handlers. Two return behaviors:
+
+| Returns               | Behavior                                                                   |
+| --------------------- | -------------------------------------------------------------------------- |
+| Nothing (void)        | Re-run the page's GET handler, re-render with fresh props. One round-trip. |
+| `c.redirect('/path')` | Navigate to another page. Two round-trips (POST + redirect GET).           |
+
+**Validation errors:** Thrown via `ValidationError` or automatically by `withValidator`. The framework catches the error, re-runs GET for the current page, and attaches `errors` to the page object. `useForm().errors` picks them up automatically on the client.
+
+### Type Safety
+
+No type codegen needed for page props. The prop interface is defined in the same file:
+
+```vue
+<script server lang="ts">
+export const GET = defineHandler(async (c) => {
+  return { users: await db.list("users") }; // server return type
+});
+</script>
+
+<script setup lang="ts">
+defineProps<{ users: User[] }>(); // client prop type
+</script>
+```
+
+The type contract is explicit and colocated. The tradeoff is that server return type and client prop type are not statically linked across the two script blocks — but they live in the same file, making drift easy to spot.
+
+## Server Handler Files
+
+### Universal Convention: Companion `.server.ts`
+
+Every framework supports companion `.server.ts` files alongside page components:
+
+```
+pages/
+  users/
+    index.vue             # page component
+    index.server.ts       # server handler (optional if using <script server>)
+```
+
+```ts
+// pages/users/index.server.ts
+import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
+
+export const GET = defineHandler(async (c) => {
+  return { users: await db.list("users") };
+});
+
+export const POST = defineHandler(async (c) => {
+  await db.insert("users", await c.req.json());
+});
+```
+
+This is the **only** option for React, Svelte, and Solid pages (no SFC custom blocks). For Vue, both `<script server>` and companion `.server.ts` are supported — `<script server>` takes precedence if both exist.
+
+### React Example
+
+```
+pages/
+  users/
+    index.tsx             # page component
+    index.server.ts       # server handler
+```
+
+```tsx
+// pages/users/index.tsx
+import { useForm, useShared, Link } from "@vite-cloud/react";
+
+export default function UsersPage({ users }: { users: User[] }) {
+  const { auth } = useShared();
+  const form = useForm({ name: "", email: "" });
+
+  return (
+    <div>
+      <ul>
+        {users.map((u) => (
+          <li key={u.id}>
+            <Link href={`/users/${u.id}`}>{u.name}</Link>
+          </li>
+        ))}
+      </ul>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          form.post("/users");
+        }}
+      >
+        <input value={form.name} onChange={(e) => form.setData("name", e.target.value)} />
+        {form.errors.name && <span>{form.errors.name}</span>}
+        <button disabled={form.processing}>Create</button>
+      </form>
+    </div>
+  );
+}
+```
+
+## Layouts
+
+Layout files use the `layout.{vue,tsx,svelte}` naming convention in any `pages/` subdirectory.
+
+```
+pages/
+  layout.vue              # root layout (nav, footer)
+  index.vue
+  users/
+    layout.vue            # nested layout for /users/*
+    index.vue
+    [id].vue
+  admin/
+    layout.vue            # admin layout
+    index.vue
+```
+
+```vue
+<!-- pages/layout.vue -->
+<script setup>
+import { useShared, Link } from "@vite-cloud/vue";
+const { auth } = useShared();
+</script>
+
+<template>
+  <nav>
+    <Link href="/">Home</Link>
+    <Link href="/users">Users</Link>
+    <span v-if="auth.user">{{ auth.user.name }}</span>
+  </nav>
+  <main>
+    <slot />
+  </main>
+</template>
+```
+
+**Rules:**
+
+- Layouts **persist across navigations** within their subtree (component state preserved)
+- Nested layouts wrap: root `layout.vue` > `users/layout.vue` > page component
+- Layouts render client-side only — they access shared data via `useShared()`, not server handlers
+- Layouts do **not** have `<script server>` blocks
+
+## Shared Data
+
+Middleware injects shared data available on every page via `c.set('shared', {...})`:
+
+```ts
+// middleware/01.auth.ts
+import { defineMiddleware } from "vite-cloud";
+
+export default defineMiddleware(async (c, next) => {
+  const user = await getSessionUser(c);
+  c.set("shared", {
+    auth: { user },
+    flash: getFlash(c),
+  });
+  await next();
+});
+```
+
+Client-side access via `useShared()`:
+
+```vue
+<script setup>
+import { useShared } from "@vite-cloud/vue";
+const { auth, flash } = useShared();
+</script>
+```
+
+Shared data is merged into every page object response. It is separate from page props — `defineProps` receives page-specific data, `useShared()` receives global data.
+
+## Client-Side API
+
+Each framework adapter exports:
+
+| Export              | Purpose                                                                                                                      |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `Link`              | Component. Renders `<a>`, intercepts clicks for Inertia-style navigation. Props: `href`, `method`, `data`, `preserveScroll`. |
+| `useForm(defaults)` | Reactive form helper. Returns `{ data, post, put, patch, delete, processing, errors, isDirty, reset, clearErrors }`.         |
+| `useShared()`       | Returns shared data from middleware.                                                                                         |
+| `router`            | Programmatic navigation: `router.visit(url)`, `router.post(url, data)`, `router.reload()` (re-fetch current page props).     |
+
+## Server-Side Flow
+
+### Initial Request (GET /users, no X-Inertia header)
+
+1. Run middleware chain -> `c.set('shared', {...})`
+2. Resolve page: URL -> `pages/users/index.vue`
+3. Run page's GET handler -> props
+4. Resolve layout chain: `layout.vue` > `users/layout.vue`
+5. SSR render: layouts wrapping page component with props + shared data
+6. Return HTML with `<div id="app" data-page='{ component, props, shared, url }'>`
+7. Client hydrates
+
+### Inertia Navigation (GET /users, X-Inertia: true)
+
+1. Run middleware chain -> shared data
+2. Run page's GET handler -> props
+3. Return JSON: `{ component: "users/index", props, shared, url }`
+4. Client swaps page component, persists layouts if in same subtree
+
+### Form Submission (POST /users, X-Inertia: true)
+
+1. Run middleware chain
+2. Run page's POST handler
+3. If `ValidationError` thrown -> re-run GET, return page object with `errors` attached
+4. If handler returns nothing -> re-run GET, return page object with fresh props
+5. If handler returns redirect -> return redirect, client follows as Inertia GET
+
+## Architecture: Core vs Adapters
+
+### Core (`vite-cloud` package)
+
+Framework-agnostic. Handles:
+
+- Page object protocol (format, headers, request detection)
+- `pages/` directory scanning and file-based route resolution
+- Companion `.server.ts` file loading
+- Middleware execution and shared data collection
+- Handler execution (props / redirect / re-run GET)
+- Validation error catching and attachment
+- Layout tree resolution from directory structure
+- Page object serialization
+
+### Framework Adapter (separate package, e.g. `@vite-cloud/vue`)
+
+Each adapter is a Vite plugin + runtime library. The adapter:
+
+- Includes the framework's Vite plugin as a dependency (e.g. `@vitejs/plugin-vue`)
+- Provides framework-specific SFC compilation (e.g. `<script server>` extraction for Vue)
+- Generates SSR entry and client hydration entry
+- Handles SSR rendering (`renderToString`)
+- Handles client-side page mounting, swapping, and layout persistence
+- Exports `Link`, `useForm`, `useShared`, `router`
+
+### Plugin Ordering
+
+The adapter's Vite plugin must extract `<script server>` **before** the framework plugin compiles the SFC:
+
+```ts
+// @vite-cloud/vue internals
+import vue from "@vitejs/plugin-vue";
+
+export function viteCloudVue(options?) {
+  return [
+    scriptServerPlugin(), // extract <script server> first
+    vue(options?.vue), // then compile the remaining SFC
+    pagesPlugin(), // generate SSR + hydration entries
+  ];
+}
+```
+
+### User Setup
+
+```ts
+// vite.config.ts
+import { viteCloud } from "vite-cloud";
+import { viteCloudVue } from "@vite-cloud/vue";
+
+export default defineConfig({
+  plugins: [viteCloud(), viteCloudVue()],
+});
+```
+
+### Adapter Interface
+
+Each framework adapter implements:
+
+```ts
+interface PagesAdapter {
+  // Build-time
+  vitePlugins(options?: any): Plugin[];
+
+  // SSR
+  renderToHTML(
+    component: ResolvedComponent,
+    props: object,
+    shared: object,
+    layouts: ResolvedLayout[],
+  ): Promise<string>;
+
+  // Client (provided as runtime exports)
+  // Link component
+  // useForm(defaults) composable/hook
+  // useShared() composable/hook
+  // router object
+  // createApp(rootElement, initialPage) hydration entry
+}
+```
+
+The exact interface will be refined during implementation.
+
+## What This Does NOT Include
+
+- **Partial reloads** (Inertia's `only` / `except` for selective prop fetching) — can be added later
+- **Link prefetching** (prefetch on hover) — can be added later
+- **View transitions API** integration — can be added later
+- **Asset versioning** (409 + full reload on bundle changes) — can be added later
+- **Flash data helpers** — flash messages work via shared data, no special API needed initially
