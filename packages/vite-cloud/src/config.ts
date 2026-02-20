@@ -23,6 +23,7 @@ export interface ViteCloudConfig {
   headers?: Record<string, string[]>;
   mode?: "spa" | "ssg" | "fullstack" | "framework";
   outputDir?: string;
+  revalidate?: number | Record<string, number>;
   wrangler?: WranglerConfig;
 }
 
@@ -114,6 +115,37 @@ export function readConfig(root: string): ViteCloudConfig {
   // Validate outputDir
   if (obj.outputDir !== undefined && typeof obj.outputDir !== "string") {
     throw new Error(`"outputDir" in ${CONFIG_FILE} must be a string`);
+  }
+
+  // Validate revalidate
+  if (obj.revalidate !== undefined) {
+    if (typeof obj.revalidate === "number") {
+      if (!Number.isFinite(obj.revalidate) || obj.revalidate < 0) {
+        throw new Error(`"revalidate" in ${CONFIG_FILE} must be a non-negative finite number`);
+      }
+    } else if (
+      typeof obj.revalidate === "object" &&
+      obj.revalidate !== null &&
+      !Array.isArray(obj.revalidate)
+    ) {
+      const r = obj.revalidate as Record<string, unknown>;
+      for (const [pattern, value] of Object.entries(r)) {
+        if (pattern !== "*" && !pattern.startsWith("/")) {
+          throw new Error(
+            `"revalidate" key "${pattern}" in ${CONFIG_FILE} must start with "/" or be "*"`,
+          );
+        }
+        if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+          throw new Error(
+            `"revalidate" value for "${pattern}" in ${CONFIG_FILE} must be a non-negative finite number`,
+          );
+        }
+      }
+    } else {
+      throw new Error(
+        `"revalidate" in ${CONFIG_FILE} must be a number or an object of path patterns to numbers`,
+      );
+    }
   }
 
   // Validate wrangler

@@ -152,6 +152,39 @@ export const loader = () => [];
     expect(result.pages[0].componentId).toBe("dashboard");
     expect(result.pages[0].pattern).toBe("/dashboard");
   });
+
+  it("extracts revalidate from .server.ts", async () => {
+    writeFile("products/index.vue", "<template><div>Products</div></template>");
+    writeFile(
+      "products/index.server.ts",
+      "export const revalidate = 120;\nexport const loader = () => [];",
+    );
+
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "products");
+    expect(page).toBeDefined();
+    expect(page!.revalidate).toBe(120);
+  });
+
+  it("extracts revalidate zero from .server.ts", async () => {
+    writeFile("private.vue", "<template><div>Private</div></template>");
+    writeFile("private.server.ts", "export const revalidate = 0;\nexport const loader = () => [];");
+
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "private");
+    expect(page).toBeDefined();
+    expect(page!.revalidate).toBe(0);
+  });
+
+  it("returns undefined revalidate when not exported", async () => {
+    writeFile("about.vue", "<template><div>About</div></template>");
+    writeFile("about.server.ts", "export const loader = () => [];");
+
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "about");
+    expect(page).toBeDefined();
+    expect(page!.revalidate).toBeUndefined();
+  });
 });
 
 describe("resolveLayoutChain", () => {

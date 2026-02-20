@@ -8,6 +8,7 @@ const COMPONENT_EXTENSIONS = ["vue", "tsx", "jsx", "svelte"];
 const SERVER_EXTENSIONS = ["ts", "tsx", "js", "mjs", "mts"];
 const SCRIPT_SERVER_CONTENT_RE = /<script\s+server\b[^>]*>([\s\S]*?)<\/script>/;
 const PAGES_EXPORT_RE = /export\s+(?:const|function|async\s+function)\s+(loader|action)\b/g;
+const REVALIDATE_RE = /export\s+const\s+revalidate\s*=\s*(\d+)\s*;/;
 
 export async function scanPages(root: string): Promise<PageScanResult> {
   const pagesDir = join(root, "pages");
@@ -49,6 +50,7 @@ export async function scanPages(root: string): Promise<PageScanResult> {
     // Check for companion .server.ts
     let serverPath: string | null = null;
     let methods: string[] = [];
+    let revalidate: number | undefined;
     for (const serverExt of SERVER_EXTENSIONS) {
       const candidate = file.replace(ext, `.server.${serverExt}`);
       if (existsSync(join(pagesDir, candidate))) {
@@ -56,6 +58,10 @@ export async function scanPages(root: string): Promise<PageScanResult> {
         const content = readFileSync(join(pagesDir, candidate), "utf-8");
         for (const m of content.matchAll(PAGES_EXPORT_RE)) {
           methods.push(m[1]);
+        }
+        const revalidateMatch = content.match(REVALIDATE_RE);
+        if (revalidateMatch) {
+          revalidate = Number(revalidateMatch[1]);
         }
         break;
       }
@@ -84,6 +90,7 @@ export async function scanPages(root: string): Promise<PageScanResult> {
       hasInlineServer,
       methods,
       componentId,
+      revalidate,
     });
   }
 
