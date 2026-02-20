@@ -30,7 +30,7 @@ The client constrains every part of the request:
 
 - **Paths** — only routes defined in `routes/` are accepted. Typos are compile-time errors.
 - **Methods** — only methods exported from the route file are allowed. If a file only exports `GET`, passing `method: "POST"` is an error.
-- **Body, query, params** — when your handler uses [`defineHandler.withValidator()`](./routing.md#validation), the validator schemas become the input types. The client enforces them at the call site.
+- **Body, query, params** — when your handler uses [`defineHandler.withValidator()`](./server-routing.md#validation), the validator schemas become the input types. The client enforces them at the call site.
 - **Response type** — the return type matches what your handler returns, after [JSON serialization](./type-safety.md#serialization).
 
 ## Query Parameters

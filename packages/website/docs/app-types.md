@@ -12,7 +12,7 @@ The type is auto-detected from your project structure, or you can set it explici
 
 A Vite app with backend code that runs on Cloudflare Workers. This is the default when your project has API routes, SSR, SSG, jobs, or any server-side logic. In this mode, **Vite Cloud is both the framework and the platform**. This opinionated setup unlocks some developer experience perks that are unique to Vite Cloud, while still staying frontend-framework-agnostic. You can use it with any frontend framework that works with Vite: React, Vue, Svelte, or Solid.
 
-All Vite Cloud features that involve backend logic, such as [Routing](./routing.md) and [Authentication](./auth.md), are only available in this mode.
+All Vite Cloud features that involve backend logic, such as [Server Routing](./server-routing.md) and [Authentication](./auth.md), are only available in this mode.
 
 ```
 my-app/

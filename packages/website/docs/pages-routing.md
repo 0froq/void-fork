@@ -2,7 +2,7 @@
 
 Pages is an [Inertia.js](https://inertiajs.com/)-inspired rendering mode that gives you server-driven routing with SPA-like navigation. Think of it as the DX of Remix loaders and actions, but with automatic SSR, client-side page transitions, and no manual hydration setup.
 
-Pages mode activates when a `pages/` directory exists. It coexists with `routes/` — use `pages/` for UI pages and `routes/` for pure JSON [API endpoints](./api-routing.md).
+Pages mode activates when a `pages/` directory exists. It coexists with `routes/` — use `pages/` for UI pages and `routes/` for [server routes](./server-routing.md).
 
 ## Setup
 
@@ -104,11 +104,11 @@ project/
 
 :::
 
-File-based routing rules are the same as [API routing](./api-routing.md): `[param]` for dynamic segments, `[...param]` for catch-all, `(group)/` for route groups.
+File-based routing rules are the same as [server routing](./server-routing.md): `[param]` for dynamic segments, `[...param]` for catch-all, `(group)/` for route groups.
 
 ## Server Handlers
 
-Every page can have a companion `.server.ts` file that exports a `loader` and/or `action`. If you've used Remix, these concepts are familiar. Server handlers use the exact same `defineHandler` API as [API routes](./api-routing.md) — you get the same typed `c.env` bindings, `withValidator()` support, and Hono context methods.
+Every page can have a companion `.server.ts` file that exports a `loader` and/or `action`. If you've used Remix, these concepts are familiar. Server handlers use the exact same `defineHandler` API as [server routes](./server-routing.md) — you get the same typed `c.env` bindings, `withValidator()` support, and Hono context methods.
 
 **`loader`** runs on GET requests and returns an object that becomes the page's props:
 
@@ -143,7 +143,7 @@ export const action = defineHandler.withValidator({
 | Nothing (void)        | Re-runs the loader, page re-renders with fresh props. |
 | `c.redirect('/path')` | Navigates to another page.                            |
 
-Both use the same `defineHandler` API from [API routing](./api-routing.md), including `withValidator()` for input validation.
+Both use the same `defineHandler` API from [server routing](./server-routing.md), including `withValidator()` for input validation.
 
 ## Page Components
 

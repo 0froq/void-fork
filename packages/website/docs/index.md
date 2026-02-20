@@ -59,5 +59,6 @@ The plugin scans your source code at build time, detects which imports you use (
 ## Next steps
 
 - [Quickstart](./quickstart.md) — get a running app in minutes
-- [Routing](./routing.md) — dynamic params, middleware, and validation
+- [Server Routing](./server-routing.md) — dynamic params, middleware, and validation
+- [Pages Routing](./pages-routing.md) — full-stack pages with server loaders and actions
 - [App Types](./app-types.md) — SPA, SSR, SSG, ISR, and meta-framework modes
