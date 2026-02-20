@@ -1,39 +1,21 @@
-import { intro, outro, text, select, isCancel, cancel } from "@clack/prompts";
+import { intro, outro, text, select, isCancel, cancel, spinner, log } from "@clack/prompts";
+import { execSync, execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
-function detectRunningAgent(): "claude" | "generic" | null {
-  if (process.env.CLAUDE) return "claude";
-  if (process.env.CURSOR_SESSION_ID) return "generic";
-  if (process.env.CODEX) return "generic";
-  return null;
-}
-
-function isNonInteractive(): boolean {
-  return !process.stdin.isTTY;
-}
-
-function readAgentPrompt(): string {
-  return readFileSync(join(__dirname, "..", "prompt", "AGENT_PROMPT.md"), "utf-8");
-}
-
-function getViteCloudVersion(): string {
-  const templatePkg = JSON.parse(
-    readFileSync(join(__dirname, "..", "template", "package.json"), "utf-8"),
-  );
-  return templatePkg.devDependencies["vite-cloud"].replace(/^\^/, "");
-}
-
-function createAgentFile(targetDir: string, filePath: string): void {
-  const version = getViteCloudVersion();
-  const promptContent = readAgentPrompt();
-  const openMarker = `<!--injected-by-vite-cloud-v${version}-->`;
-  const closeMarker = "<!--/injected-by-vite-cloud-->";
-  const block = `${openMarker}\n${promptContent}\n${closeMarker}\n`;
-  writeFileSync(join(targetDir, filePath), block);
+function detectPackageManagers(): string[] {
+  const managers = ["pnpm", "yarn", "bun", "npm", "vp"];
+  return managers.filter((pm) => {
+    try {
+      execFileSync(pm, ["--version"], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 async function main() {
@@ -56,7 +38,7 @@ async function main() {
     process.exit(0);
   }
 
-  const targetDir = resolve(process.cwd(), projectName);
+  const targetDir = resolve(process.cwd(), projectName as string);
 
   // Copy template
   const templateDir = join(__dirname, "..", "template");
@@ -69,40 +51,50 @@ async function main() {
   pkg.name = projectName;
   writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 
-  // Agent scaffolding
-  const runningAgent = detectRunningAgent();
-  if (runningAgent) {
-    // Auto-create the right agent file
-    const filePath = runningAgent === "claude" ? "CLAUDE.md" : "AGENTS.md";
-    createAgentFile(targetDir, filePath);
-  } else if (isNonInteractive()) {
-    // Non-interactive but no known agent — default to CLAUDE.md
-    createAgentFile(targetDir, "CLAUDE.md");
-  } else {
-    const agentChoice = await select({
-      message: "Add coding agent instructions?",
-      options: [
-        { value: "claude", label: "Claude Code (CLAUDE.md)" },
-        { value: "generic", label: "Other agents (AGENTS.md)" },
-        { value: "skip", label: "Skip" },
-      ],
+  // Detect package managers and install
+  const availablePMs = detectPackageManagers();
+  let pm = "npm";
+
+  if (availablePMs.length > 1) {
+    const pmChoice = await select({
+      message: "Which package manager?",
+      options: availablePMs.map((name) => ({ value: name, label: name })),
     });
-    if (isCancel(agentChoice)) {
+    if (isCancel(pmChoice)) {
       cancel("Operation cancelled.");
       process.exit(0);
     }
-    if (agentChoice === "claude") {
-      createAgentFile(targetDir, "CLAUDE.md");
-    } else if (agentChoice === "generic") {
-      createAgentFile(targetDir, "AGENTS.md");
+    pm = pmChoice as string;
+  } else if (availablePMs.length === 1) {
+    pm = availablePMs[0];
+  }
+
+  const s = spinner();
+  s.start(`Installing dependencies with ${pm}...`);
+  let installOk = false;
+  try {
+    execSync(`${pm} install`, { cwd: targetDir, stdio: "ignore" });
+    installOk = true;
+    s.stop(`Dependencies installed with ${pm}.`);
+  } catch {
+    s.stop(`Failed to install dependencies.`);
+    log.warn(`Run \`${pm} install\` manually to install dependencies.`);
+  }
+
+  // Run vcc init interactively after successful install
+  if (installOk) {
+    try {
+      execSync("npx vcc init", { cwd: targetDir, stdio: "inherit" });
+    } catch {
+      // vcc init failure is non-fatal
     }
   }
 
+  const runCmd = pm === "yarn" ? `${pm} dev` : `${pm} run dev`;
   outro(`Done! Next steps:
 
   cd ${projectName}
-  npm install
-  npm run dev
+  ${runCmd}
 
   Your app will be running at http://localhost:5173`);
 }
