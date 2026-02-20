@@ -89,8 +89,16 @@ describe("playground/queues", () => {
     } catch (err) {
       startupError = err instanceof Error ? err : new Error(String(err));
     } finally {
-      child.kill("SIGTERM");
-      await once(child, "exit");
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGTERM");
+        await Promise.race([
+          once(child, "exit"),
+          new Promise((resolve) => setTimeout(resolve, 5_000)),
+        ]);
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
+        }
+      }
     }
 
     if (stderr.includes("error when starting dev server")) {

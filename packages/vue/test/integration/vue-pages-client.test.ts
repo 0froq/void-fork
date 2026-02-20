@@ -281,8 +281,20 @@ describe("vue-pages client (dev)", () => {
 
   afterAll(async () => {
     if (child) {
-      child.kill("SIGTERM");
-      await once(child, "exit");
+      // Process may have already exited (crash, port conflict, etc.)
+      // In that case once(child, "exit") would hang forever since the
+      // event already fired.
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGTERM");
+        await Promise.race([
+          once(child, "exit"),
+          new Promise((resolve) => setTimeout(resolve, 5_000)),
+        ]);
+        // Escalate to SIGKILL if still alive
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
+        }
+      }
     }
     if (stderr.includes("error when starting dev server")) {
       throw new Error(stderr);
@@ -331,8 +343,16 @@ describe("vue-pages client (preview)", () => {
 
   afterAll(async () => {
     if (child) {
-      child.kill("SIGTERM");
-      await once(child, "exit");
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGTERM");
+        await Promise.race([
+          once(child, "exit"),
+          new Promise((resolve) => setTimeout(resolve, 5_000)),
+        ]);
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
+        }
+      }
     }
     if (stderr.includes("error when starting preview server")) {
       throw new Error(stderr);
