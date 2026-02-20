@@ -8,7 +8,11 @@ import { generateComponentManifest } from "./pages-manifest";
 const RENDERER_ID = "virtual:vite-cloud-pages-renderer";
 const CLIENT_ENTRY_ID = "virtual:vite-cloud-pages-client";
 
-export function pagesPlugin(pagesDir: string): Plugin {
+interface PagesPluginOptions {
+  viewTransitions?: boolean;
+}
+
+export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plugin {
   let pageScan: PageScanResult | null = null;
   const root = dirname(pagesDir);
 
@@ -38,7 +42,7 @@ export function pagesPlugin(pagesDir: string): Plugin {
         }
         if (id === "\0" + CLIENT_ENTRY_ID) {
           if (!pageScan) return "";
-          return generateClientEntry(pageScan, pagesDir);
+          return generateClientEntry(pageScan, pagesDir, options?.viewTransitions);
         }
       },
     },
@@ -108,9 +112,15 @@ export async function renderPage(pageObj, assetTags) {
 `;
 }
 
-function generateClientEntry(scan: PageScanResult, pagesDir: string): string {
+function generateClientEntry(
+  scan: PageScanResult,
+  pagesDir: string,
+  viewTransitions?: boolean,
+): string {
   return `
 import { createSSRApp, h, reactive, provide, shallowRef, nextTick } from "vue";
+
+const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -169,13 +179,30 @@ export const router = {
 
     const pageData = await response.json();
 
-    // Update shared/errors reactively
-    Object.assign(shared, pageData.shared || {});
-    for (const key of Object.keys(errors)) delete errors[key];
-    Object.assign(errors, pageData.errors || {});
+    // Resolve async work before starting the transition
+    const [comp, layouts] = await Promise.all([
+      resolveComponent(pageData.component),
+      resolveLayouts(pageData.component),
+    ]);
 
-    // Resolve component + layouts, then update refs atomically
-    await updatePage(pageData);
+    const applyUpdate = () => {
+      Object.assign(shared, pageData.shared || {});
+      for (const key of Object.keys(errors)) delete errors[key];
+      Object.assign(errors, pageData.errors || {});
+      currentProps.value = pageData.props;
+      currentLayouts.value = layouts;
+      currentComponent.value = comp;
+    };
+
+    const useTransition = options.viewTransition ?? VIEW_TRANSITIONS_ENABLED;
+    if (useTransition && document.startViewTransition) {
+      document.startViewTransition(() => {
+        applyUpdate();
+        return nextTick();
+      });
+    } else {
+      applyUpdate();
+    }
 
     if (!options.preserveState) {
       window.history.pushState({}, "", pageData.url);

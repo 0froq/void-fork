@@ -7,6 +7,7 @@ export const Link = defineComponent({
     method: { type: String, default: "GET" },
     data: { type: Object, default: undefined },
     preserveScroll: { type: Boolean, default: false },
+    viewTransition: { type: Boolean, default: undefined },
   },
   setup(props, { slots, attrs }) {
     const router = inject<any>("__vc_router", null);
@@ -21,6 +22,7 @@ export const Link = defineComponent({
         method: props.method,
         data: props.data,
         preserveScroll: props.preserveScroll,
+        viewTransition: props.viewTransition,
       });
     }
 
