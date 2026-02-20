@@ -267,6 +267,78 @@ router.reload(); // re-fetch current page props
 router.post("/logout"); // non-GET navigation
 ```
 
+## View Transitions
+
+Pages mode supports the browser's native [View Transition API](https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API) for animated page transitions. When enabled, navigations are wrapped in `document.startViewTransition()`, giving you a smooth cross-fade between pages by default — customizable entirely via CSS.
+
+### Enabling View Transitions
+
+Pass `viewTransitions: true` to the adapter plugin:
+
+::: code-group
+
+```ts [Vue]
+// vite.config.ts
+export default defineConfig({
+  plugins: [viteCloud(), viteCloudVue({ viewTransitions: true })],
+});
+```
+
+:::
+
+This enables view transitions for all navigations — `Link` clicks, programmatic `router.visit()` calls, and browser back/forward.
+
+### Per-Link Override
+
+Override the global setting on individual links:
+
+```vue
+<!-- Disable transition for this link -->
+<Link href="/settings" :view-transition="false">Settings</Link>
+
+<!-- Enable for just this link (even if globally disabled) -->
+<Link href="/about" view-transition>About</Link>
+```
+
+Or programmatically:
+
+```ts
+router.visit("/about", { viewTransition: true });
+router.visit("/settings", { viewTransition: false });
+```
+
+### Customizing with CSS
+
+The default transition is a cross-fade. Customize it using the `::view-transition-old` and `::view-transition-new` pseudo-elements:
+
+```css
+/* Faster transition */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.2s;
+}
+
+/* Slide instead of fade */
+::view-transition-old(root) {
+  animation: slide-out 0.3s ease-in;
+}
+::view-transition-new(root) {
+  animation: slide-in 0.3s ease-out;
+}
+```
+
+Assign `view-transition-name` to elements that should animate independently (e.g., a hero image that morphs between pages):
+
+```css
+.hero-image {
+  view-transition-name: hero;
+}
+```
+
+::: tip
+View transitions are progressive enhancement — browsers that don't support the API fall back to instant navigation with no errors.
+:::
+
 ## Layouts
 
 Place a layout file in any `pages/` directory to wrap all pages in that subtree:
