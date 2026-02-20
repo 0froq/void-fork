@@ -11,6 +11,18 @@ outline: deep
 
 Examples below use `vcc`.
 
+## Binary invocation
+
+`vcc` is a local binary from the `vite-cloud` package installed in your app, so outside of npm scripts, you will have to invoke it with `npx`, `pnpm`, `yarn`, or `bunx`.
+
+Alternatively, you can add `./node_modules/.bin` to your `PATH` so that you can invoke `vcc` directly when you are in the root directory of your app.
+
+**For brevity, we will used unprefixed `vcc` throughout the docs.**
+
+:::warning ⚠️ Prefer local install
+We do not recommend installing `vite-cloud` globally, because the CLI needs to be in sync with same version of the runtime framework. Always install `vite-cloud` locally as a dev dependency of your project.
+:::
+
 ## Setup
 
 ### `vcc init`
