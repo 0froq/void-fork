@@ -1,4 +1,4 @@
-# Manual SSR
+# Custom SSR
 
 Vite Cloud supports framework-agnostic SSR via explicit server and client entries. This is for advanced use cases where you want full control over rendering and hydration.
 
@@ -88,7 +88,7 @@ The `assetTags` values are computed by Vite Cloud:
 
 ## Edge Caching
 
-See [Edge Caching](./edge-caching.md) for stale-while-revalidate caching of SSR pages.
+See [Edge Caching](./edge-caching.md#per-response-ttl-override) for stale-while-revalidate caching of SSR pages.
 
 ## Request flow
 
