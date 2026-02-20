@@ -17,7 +17,8 @@
   },
   "scripts": {
     "build": "tsdown",
-    "dev": "tsdown --watch"
+    "dev": "tsdown --watch",
+    "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
     "@vitejs/plugin-vue": "^5.0.0"

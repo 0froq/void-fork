@@ -339,11 +339,17 @@ Layouts nest automatically (e.g. root layout wraps `users/layout` wraps page com
 
 ## Shared Data
 
-Middleware can inject data available on every page via `c.set("shared", {...})`:
+Middleware can inject data available on every page via `c.set("shared", {...})`. Augment `CloudContextVariables` to type the shared data, and `useShared()` will infer the type automatically:
 
 ```ts
 // middleware/01.auth.ts
 import { defineMiddleware } from "vite-cloud";
+
+declare module "vite-cloud" {
+  interface CloudContextVariables {
+    shared: { auth: { user: { name: string } | null } };
+  }
+}
 
 export default defineMiddleware(async (c, next) => {
   const user = await getSessionUser(c);
@@ -352,7 +358,7 @@ export default defineMiddleware(async (c, next) => {
 });
 ```
 
-Access it on the client with `useShared()`:
+Access it on the client with `useShared()` — the return type is inferred from your augmentation:
 
 ::: code-group
 
@@ -360,7 +366,7 @@ Access it on the client with `useShared()`:
 import { useShared } from "@vite-cloud/react";
 
 export default function Page() {
-  const { auth } = useShared();
+  const { auth } = useShared(); // { auth: { user: { name: string } | null } }
   return <p>Hello, {auth?.user?.name}</p>;
 }
 ```
@@ -368,13 +374,13 @@ export default function Page() {
 ```vue [Vue]
 <script setup lang="ts">
 import { useShared } from "@vite-cloud/vue";
-const { auth } = useShared();
+const { auth } = useShared(); // { auth: { user: { name: string } | null } }
 </script>
 ```
 
 :::
 
-Shared data is separate from page props — props come from the loader, `useShared()` returns global data from middleware.
+Shared data is separate from page props — props come from the loader, `useShared()` returns global data from middleware. See [Type Safety](./type-safety.md#context-variables) for more on augmenting `CloudContextVariables`.
 
 ## Forms and Actions
 

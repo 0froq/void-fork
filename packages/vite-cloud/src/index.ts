@@ -284,6 +284,7 @@ export {
 } from "./runtime/handler";
 export type {
   CloudContext,
+  CloudContextVariables,
   CloudEnv,
   RenderAssetTags,
   TypedHandler,

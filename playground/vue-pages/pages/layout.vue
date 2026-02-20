@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Link, useShared } from "@vite-cloud/vue";
 
-const shared = useShared<{ appName: string }>();
+const shared = useShared();
 </script>
 
 <template>

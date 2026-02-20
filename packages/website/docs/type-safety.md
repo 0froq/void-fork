@@ -115,6 +115,30 @@ The type system models JSON serialization. A `Serialize<T>` transform is applied
 | `Array<T>`                        | `Array<Serialize<T>>`                                     |
 | `{ key: T }`                      | `{ key: Serialize<T> }` (function-valued keys stripped)   |
 
+## Context Variables
+
+Route handlers and middleware share data through Hono's context variables (`c.set()` / `c.get()`). Vite Cloud's `CloudContextVariables` interface defines the variable types, and you can augment it to add your own:
+
+```ts
+// middleware/01.auth.ts
+import { defineMiddleware } from "vite-cloud";
+
+declare module "vite-cloud" {
+  interface CloudContextVariables {
+    requestId: string;
+  }
+}
+
+export default defineMiddleware(async (c, next) => {
+  c.set("requestId", crypto.randomUUID());
+  await next();
+});
+```
+
+Now `c.get("requestId")` returns `string` in every handler and middleware — no type assertions needed.
+
+This is standard TypeScript [declaration merging](https://www.typescriptlang.org/docs/handbook/declaration-merging.html). Multiple augmentations across different files are merged together, so each middleware can declare what it provides.
+
 ## Setup
 
 Extend the generated tsconfig in your project's `tsconfig.json`:
