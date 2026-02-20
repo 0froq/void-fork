@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { searchDocs } from "../../src/search";
-import type { DocPage } from "../../src/types";
+import { searchDocs } from "../../src/cli/mcp";
+
+interface DocPage {
+  slug: string;
+  title: string;
+  content: string;
+}
 
 const pages: DocPage[] = [
   {
@@ -60,8 +65,6 @@ describe("searchDocs", () => {
   });
 
   it("weights title matches higher than content", () => {
-    // "routing" appears in title of routing page (3x weight)
-    // and in content of routing page (1x weight)
     const results = searchDocs(pages, "routing");
     expect(results[0].slug).toBe("routing");
   });
@@ -75,12 +78,10 @@ describe("searchDocs", () => {
   it("handles multi-word queries", () => {
     const results = searchDocs(pages, "vite cloud");
     expect(results.length).toBeGreaterThan(0);
-    // quickstart mentions both "Vite Cloud"
     expect(results.some((r) => r.slug === "quickstart")).toBe(true);
   });
 
   it("returns at most 5 results", () => {
-    // "the" or common words would match many pages — use a term in all pages
     const manyPages: DocPage[] = Array.from({ length: 10 }, (_, i) => ({
       slug: `page-${i}`,
       title: `Page ${i}`,

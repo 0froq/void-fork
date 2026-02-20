@@ -4,26 +4,24 @@ outline: deep
 
 # Vite Cloud MCP Server
 
-The Vite Cloud documentation is available as an [MCP](https://modelcontextprotocol.io/) server at:
+Vite Cloud ships with a built-in [MCP](https://modelcontextprotocol.io/) server that runs locally via stdio. It provides three tools — `list_pages`, `get_page`, and `search_docs` — giving your AI agent full access to the Vite Cloud documentation, version-matched and offline-capable.
 
+```sh
+npx vcc mcp
 ```
-https://mcp.vite.cloud/mcp
-```
-
-It provides three tools: `list_pages`, `get_page`, and `search_docs` — giving your AI agent full access to the Vite Cloud documentation.
 
 ## Setup
 
 ### Claude Code
 
 ```sh
-claude mcp add vite-cloud --transport http https://mcp.vite.cloud/mcp
+claude mcp add vite-cloud -- npx vcc mcp
 ```
 
 ### Codex CLI
 
 ```sh
-codex mcp add vite-cloud --url https://mcp.vite.cloud/mcp
+codex mcp add vite-cloud -- npx vcc mcp
 ```
 
 ### Cursor
@@ -34,7 +32,8 @@ In `.cursor/mcp.json`:
 {
   "mcpServers": {
     "vite-cloud": {
-      "url": "https://mcp.vite.cloud/mcp"
+      "command": "npx",
+      "args": ["vcc", "mcp"]
     }
   }
 }
@@ -47,9 +46,9 @@ In `~/.gemini/settings.json`:
 ```json
 {
   "mcpServers": {
-    "vercel": {
+    "vite-cloud": {
       "command": "npx",
-      "args": ["mcp-remote", "https://mcp.vite.cloud/mcp"]
+      "args": ["vcc", "mcp"]
     }
   }
 }
