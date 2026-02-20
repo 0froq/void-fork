@@ -54,6 +54,53 @@ That's it — no SSR entry, no client entry, no hydration boilerplate. The adapt
 
 Each adapter plugin includes the framework's Vite plugin (`@vitejs/plugin-react`, `@vitejs/plugin-vue`) so you don't need to install or configure it separately. Pass framework plugin options via `viteCloudReact({ react: { ... } })` or `viteCloudVue({ vue: { ... } })` if needed.
 
+## How Navigation Works
+
+Pages uses an Inertia-style protocol under the hood:
+
+| Request               | Response                                                              |
+| --------------------- | --------------------------------------------------------------------- |
+| Initial page load     | Full SSR HTML. Client hydrates automatically.                         |
+| Subsequent navigation | JSON with component name + props. Client component swap or re-render. |
+| Form submission       | Runs action, then returns fresh props or a redirect.                  |
+
+This means the first page load is server-rendered for SEO and performance, and all subsequent navigations feel instant — no full page reloads.
+
+Use the `Link` component for SPA navigation between pages. It renders an `<a>` tag that intercepts clicks and navigates without a full page reload:
+
+::: code-group
+
+```tsx [React]
+import { Link } from "@vite-cloud/react";
+
+<Link href="/users">Users</Link>
+<Link href={`/users/${id}`}>View</Link>
+```
+
+```vue [Vue]
+<script setup lang="ts">
+import { Link } from "@vite-cloud/vue";
+</script>
+
+<template>
+  <Link href="/users">Users</Link>
+  <Link :href="`/users/${id}`">View</Link>
+</template>
+```
+
+:::
+
+For programmatic navigation, use `useRouter()`:
+
+```ts
+import { useRouter } from "@vite-cloud/vue"; // or "@vite-cloud/react"
+
+const router = useRouter();
+router.visit("/users");
+router.reload(); // re-fetch current page props
+router.post("/logout"); // non-GET navigation
+```
+
 ## Directory Structure
 
 Each page is a component file paired with a `.server.ts` file that provides server-side data loading. Pages can be flat files (`about.vue`) or use directory-based routing (`about/index.vue`) — both map to the same route:
@@ -219,125 +266,6 @@ defineProps<Props>();
 The `<script server>` block is extracted at build time — runtime code never ships to the client. Type declarations (`interface`, `type`, `import type`) defined in `<script server>` are preserved and available to `<script setup>`, so you can define your props type once and reference it in both blocks.
 
 If both `<script server>` and a `.server.ts` file exist, the `.server.ts` file takes precedence.
-
-## How Navigation Works
-
-Pages uses an Inertia-style protocol under the hood:
-
-| Request               | Response                                                              |
-| --------------------- | --------------------------------------------------------------------- |
-| Initial page load     | Full SSR HTML. Client hydrates automatically.                         |
-| Subsequent navigation | JSON with component name + props. Client component swap or re-render. |
-| Form submission       | Runs action, then returns fresh props or a redirect.                  |
-
-This means the first page load is server-rendered for SEO and performance, and all subsequent navigations feel instant — no full page reloads.
-
-Use the `Link` component for SPA navigation between pages. It renders an `<a>` tag that intercepts clicks and navigates without a full page reload:
-
-::: code-group
-
-```tsx [React]
-import { Link } from "@vite-cloud/react";
-
-<Link href="/users">Users</Link>
-<Link href={`/users/${id}`}>View</Link>
-```
-
-```vue [Vue]
-<script setup lang="ts">
-import { Link } from "@vite-cloud/vue";
-</script>
-
-<template>
-  <Link href="/users">Users</Link>
-  <Link :href="`/users/${id}`">View</Link>
-</template>
-```
-
-:::
-
-For programmatic navigation, use `useRouter()`:
-
-```ts
-import { useRouter } from "@vite-cloud/vue"; // or "@vite-cloud/react"
-
-const router = useRouter();
-router.visit("/users");
-router.reload(); // re-fetch current page props
-router.post("/logout"); // non-GET navigation
-```
-
-## View Transitions
-
-Pages mode supports the browser's native [View Transition API](https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API) for animated page transitions. When enabled, navigations are wrapped in `document.startViewTransition()`, giving you a smooth cross-fade between pages by default — customizable entirely via CSS.
-
-### Enabling View Transitions
-
-Pass `viewTransitions: true` to the adapter plugin:
-
-::: code-group
-
-```ts [Vue]
-// vite.config.ts
-export default defineConfig({
-  plugins: [viteCloud(), viteCloudVue({ viewTransitions: true })],
-});
-```
-
-:::
-
-This enables view transitions for all navigations — `Link` clicks, programmatic `router.visit()` calls, and browser back/forward.
-
-### Per-Link Override
-
-Override the global setting on individual links:
-
-```vue
-<!-- Disable transition for this link -->
-<Link href="/settings" :view-transition="false">Settings</Link>
-
-<!-- Enable for just this link (even if globally disabled) -->
-<Link href="/about" view-transition>About</Link>
-```
-
-Or programmatically:
-
-```ts
-router.visit("/about", { viewTransition: true });
-router.visit("/settings", { viewTransition: false });
-```
-
-### Customizing with CSS
-
-The default transition is a cross-fade. Customize it using the `::view-transition-old` and `::view-transition-new` pseudo-elements:
-
-```css
-/* Faster transition */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 0.2s;
-}
-
-/* Slide instead of fade */
-::view-transition-old(root) {
-  animation: slide-out 0.3s ease-in;
-}
-::view-transition-new(root) {
-  animation: slide-in 0.3s ease-out;
-}
-```
-
-Assign `view-transition-name` to elements that should animate independently (e.g., a hero image that morphs between pages):
-
-```css
-.hero-image {
-  view-transition-name: hero;
-}
-```
-
-::: tip
-View transitions are progressive enhancement — browsers that don't support the API fall back to instant navigation with no errors.
-:::
 
 ## Layouts
 
@@ -568,3 +496,75 @@ export const action = defineHandler(async (c) => {
 ```
 
 Or use `withValidator()` for automatic schema-based validation — errors are returned in the same format.
+
+## View Transitions
+
+Pages mode supports the browser's native [View Transition API](https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API) for animated page transitions. When enabled, navigations are wrapped in `document.startViewTransition()`, giving you a smooth cross-fade between pages by default — customizable entirely via CSS.
+
+### Enabling View Transitions
+
+Pass `viewTransitions: true` to the adapter plugin:
+
+::: code-group
+
+```ts [Vue]
+// vite.config.ts
+export default defineConfig({
+  plugins: [viteCloud(), viteCloudVue({ viewTransitions: true })],
+});
+```
+
+:::
+
+This enables view transitions for all navigations — `Link` clicks, programmatic `router.visit()` calls, and browser back/forward.
+
+### Per-Link Override
+
+Override the global setting on individual links:
+
+```vue
+<!-- Disable transition for this link -->
+<Link href="/settings" :view-transition="false">Settings</Link>
+
+<!-- Enable for just this link (even if globally disabled) -->
+<Link href="/about" view-transition>About</Link>
+```
+
+Or programmatically:
+
+```ts
+router.visit("/about", { viewTransition: true });
+router.visit("/settings", { viewTransition: false });
+```
+
+### Customizing with CSS
+
+The default transition is a cross-fade. Customize it using the `::view-transition-old` and `::view-transition-new` pseudo-elements:
+
+```css
+/* Faster transition */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.2s;
+}
+
+/* Slide instead of fade */
+::view-transition-old(root) {
+  animation: slide-out 0.3s ease-in;
+}
+::view-transition-new(root) {
+  animation: slide-in 0.3s ease-out;
+}
+```
+
+Assign `view-transition-name` to elements that should animate independently (e.g., a hero image that morphs between pages):
+
+```css
+.hero-image {
+  view-transition-name: hero;
+}
+```
+
+::: tip
+View transitions are progressive enhancement — browsers that don't support the API fall back to instant navigation with no errors.
+:::
