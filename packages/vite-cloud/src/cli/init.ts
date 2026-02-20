@@ -1,16 +1,12 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { intro, outro, log, confirm, multiselect, isCancel, cancel, note } from "@clack/prompts";
+import { intro, outro, log, confirm, isCancel, cancel, note } from "@clack/prompts";
 import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
-
-const VALID_AUTH_PROVIDERS = ["github", "google", "email"] as const;
-type AuthProvider = (typeof VALID_AUTH_PROVIDERS)[number];
 
 export interface InitArgs {
   tsconfig: boolean;
   github: boolean;
-  auth: AuthProvider[] | null;
 }
 
 export function parseInitArgs(args: string[]): InitArgs {
@@ -21,7 +17,6 @@ export function parseInitArgs(args: string[]): InitArgs {
       options: {
         tsconfig: { type: "boolean" },
         github: { type: "boolean" },
-        auth: { type: "string" },
       },
       strict: true,
     });
@@ -30,30 +25,15 @@ export function parseInitArgs(args: string[]): InitArgs {
     throw new Error(`Error: ${message}`);
   }
 
-  let auth: AuthProvider[] | null = null;
-  if (typeof parsed.values.auth === "string") {
-    const providers = parsed.values.auth.split(",").map((s) => s.trim());
-    for (const p of providers) {
-      if (!VALID_AUTH_PROVIDERS.includes(p as AuthProvider)) {
-        throw new Error(
-          `Error: Invalid auth provider "${p}". Allowed: ${VALID_AUTH_PROVIDERS.join(", ")}`,
-        );
-      }
-    }
-    auth = providers as AuthProvider[];
-  }
-
   return {
     tsconfig: parsed.values.tsconfig === true,
     github: parsed.values.github === true,
-    auth,
   };
 }
 
 interface ProjectState {
   hasTypescript: boolean;
   hasTsconfig: boolean;
-  hasViteCloudJson: boolean;
   hasGithubWorkflows: boolean;
   hasRoutes: boolean;
   hasMigrations: boolean;
@@ -83,7 +63,6 @@ function detectProjectState(root: string): ProjectState {
   return {
     hasTypescript,
     hasTsconfig: existsSync(join(root, "tsconfig.json")),
-    hasViteCloudJson: existsSync(join(root, "vite-cloud.json")),
     hasGithubWorkflows: existsSync(join(root, ".github", "workflows")),
     hasRoutes: existsSync(join(root, "routes")),
     hasMigrations: existsSync(join(root, "migrations")),
@@ -201,79 +180,6 @@ function setupTsconfig(root: string, state: ProjectState): void {
     if (!state.hasTypescript) {
       log.info("Don't forget to install typescript");
     }
-  }
-}
-
-async function promptAuth(
-  root: string,
-  state: ProjectState,
-  presetProviders?: AuthProvider[],
-): Promise<void> {
-  const configPath = join(root, "vite-cloud.json");
-
-  let providers: string[];
-
-  if (presetProviders) {
-    providers = presetProviders;
-  } else {
-    // Check if auth is already configured
-    if (state.hasViteCloudJson) {
-      try {
-        const existing = JSON.parse(readFileSync(configPath, "utf-8"));
-        if (existing.auth) {
-          log.info("Auth already configured in vite-cloud.json");
-          return;
-        }
-      } catch {
-        // will be overwritten
-      }
-    }
-
-    const selected = await multiselect({
-      message: "Enable authentication? \x1b[2m(space to select, enter to confirm)\x1b[0m",
-      options: [
-        { value: "github", label: "GitHub OAuth" },
-        { value: "google", label: "Google OAuth" },
-        { value: "email", label: "Email/Password" },
-      ],
-      required: false,
-    });
-
-    if (isCancel(selected)) {
-      cancel("Setup cancelled.");
-      process.exit(0);
-    }
-
-    if (selected.length === 0) {
-      log.info("Skipping authentication setup");
-      return;
-    }
-
-    providers = selected;
-  }
-
-  let config: Record<string, unknown> = {
-    $schema: "https://unpkg.com/vite-cloud/schema.json",
-  };
-
-  if (state.hasViteCloudJson) {
-    try {
-      config = JSON.parse(readFileSync(configPath, "utf-8"));
-    } catch {
-      // start fresh
-    }
-  }
-
-  config.auth = providers;
-  if (!config.$schema) {
-    config.$schema = "https://unpkg.com/vite-cloud/schema.json";
-  }
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
-
-  if (state.hasViteCloudJson) {
-    log.success("Updated vite-cloud.json — added auth config");
-  } else {
-    log.success("Created vite-cloud.json");
   }
 }
 
@@ -449,7 +355,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   intro("\x1b[34mvite-cloud init\x1b[0m");
 
   const state = detectProjectState(root);
-  const targeted = initArgs && (initArgs.tsconfig || initArgs.github || initArgs.auth !== null);
+  const targeted = initArgs && (initArgs.tsconfig || initArgs.github);
 
   // Step 1: TypeScript / tsconfig
   if (!targeted || initArgs.tsconfig) {
@@ -481,12 +387,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     ensureProjectTsconfig(root);
   }
 
-  // Step 2: Authentication
-  if (!targeted || initArgs.auth !== null) {
-    await promptAuth(root, state, initArgs?.auth ?? undefined);
-  }
-
-  // Step 3: Demo code (only in full interactive flow)
+  // Step 2: Demo code (only in full interactive flow)
   if (!targeted) {
     if (state.hasRoutes || state.hasMigrations) {
       log.info("Project already has routes or migrations, skipping demo");
@@ -506,7 +407,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     }
   }
 
-  // Step 4: GitHub Actions
+  // Step 3: GitHub Actions
   if (!targeted || initArgs.github) {
     const deployYmlPath = join(root, ".github", "workflows", "deploy.yml");
     if (existsSync(deployYmlPath)) {
