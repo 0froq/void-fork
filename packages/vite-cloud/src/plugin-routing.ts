@@ -56,7 +56,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
 
   function writeRouteTypes() {
     if (!scan) return;
-    const dts = generateRouteTypes(scan, routesDir, outDir);
+    const dts = generateRouteTypes(scan, routesDir, outDir, pagesDir);
     writeFileSync(join(outDir, "routes.d.ts"), dts);
   }
 

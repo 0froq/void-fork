@@ -695,12 +695,12 @@ interface ViteCloudVueOptions {
 
 Imported from `"@vite-cloud/vue"`.
 
-| Export              | Description                                                                                                                                 |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Link`              | Vue component for SPA navigation. Renders `<a>` for GET, `<button>` for non-GET methods. Props: `href`, `method`, `data`, `preserveScroll`. |
-| `useRouter()`       | Returns the page router for programmatic navigation: `visit`, `reload`, `post`, `put`, `patch`, `delete`.                                   |
-| `useForm(defaults)` | Reactive form helper. Returns `{ data, post, put, patch, delete, processing, errors, isDirty, reset, clearErrors }`.                        |
-| `useShared()`       | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                    |
+| Export                             | Description                                                                                                                                           |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Link`                             | Vue component for SPA navigation. Renders `<a>` for GET, `<button>` for non-GET methods. Props: `href`, `method`, `data`, `preserveScroll`.           |
+| `useRouter()`                      | Returns the page router for programmatic navigation: `visit`, `reload`, `post`, `put`, `patch`, `delete`.                                             |
+| `useForm(url, defaults, options?)` | Typed reactive form helper bound to a page action URL. Returns `{ data, post, put, patch, delete, processing, errors, isDirty, reset, clearErrors }`. |
+| `useShared()`                      | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                              |
 
 ### `@vite-cloud/react`
 

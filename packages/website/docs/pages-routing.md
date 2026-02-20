@@ -386,7 +386,26 @@ Shared data is separate from page props — props come from the loader, `useShar
 
 ## Forms and Actions
 
-`useForm` handles form submissions, loading state, and validation errors. It pairs with your page's `action` handler — the form submits to the current page URL, the action processes the mutation, and the page re-renders with fresh data.
+`useForm` handles form submissions, loading state, and validation errors. It is **fully typed end-to-end** — the URL autocompletes to pages that have an `action`, `form.data` is typed to match the action's validator schema, and `form.errors` keys are constrained to the body's field names. No manual type annotations needed.
+
+Given an action with a validator:
+
+```ts
+// pages/users/create.server.ts
+import { defineHandler } from "vite-cloud";
+import * as v from "valibot";
+
+export const action = defineHandler.withValidator({
+  body: v.object({
+    name: v.string(),
+    email: v.pipe(v.string(), v.email()),
+  }),
+})(async (c, { body }) => {
+  await db.insert("users", body);
+});
+```
+
+`useForm` automatically infers body fields and error keys from the validator — the types flow from server to client with zero duplication:
 
 First, define the action in your server handler:
 
@@ -418,13 +437,14 @@ Then, use `useForm` in the page component to submit to this action:
 import { useForm } from "@vite-cloud/react";
 
 export default function CreateUser() {
-  const form = useForm({ name: "", email: "" });
+  // "/users/create" autocompletes; { name, email } is typed from the action's validator
+  const form = useForm("/users/create", { name: "", email: "" });
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        form.post("/users");
+        form.post();
       }}
     >
       <input value={form.data.name} onChange={(e) => form.setData("name", e.target.value)} />
@@ -444,19 +464,16 @@ export default function CreateUser() {
 <script setup lang="ts">
 import { useForm } from "@vite-cloud/vue";
 
-const form = useForm({ name: "", email: "" });
-
-function submit() {
-  form.post("/users");
-}
+// "/users/create" autocompletes; { name, email } is typed from the action's validator
+const form = useForm("/users/create", { name: "", email: "" });
 </script>
 
 <template>
-  <form @submit.prevent="submit">
-    <input v-model="form.name" />
+  <form @submit.prevent="form.post()">
+    <input v-model="form.data.name" />
     <span v-if="form.errors.name">{{ form.errors.name }}</span>
 
-    <input v-model="form.email" />
+    <input v-model="form.data.email" />
     <span v-if="form.errors.email">{{ form.errors.email }}</span>
 
     <button :disabled="form.processing">Create</button>
@@ -466,16 +483,27 @@ function submit() {
 
 :::
 
+The types are inferred from your action's `withValidator()` schema in the companion `.server.ts` file. If no validator is defined, the body type falls back to `Record<string, unknown>` — you still get URL autocomplete either way.
+
 `useForm` returns a reactive object with:
 
-| Property / Method                | Purpose                                                   |
-| -------------------------------- | --------------------------------------------------------- |
-| `post`, `put`, `patch`, `delete` | Submit the form with the given HTTP method.               |
-| `data` / `setData`               | Current form values (React). Vue uses `v-model` directly. |
-| `errors`                         | Field-level validation errors from the server.            |
-| `processing`                     | `true` while the submission is in flight.                 |
-| `isDirty`                        | `true` if form data differs from initial values.          |
-| `reset`                          | Reset form data to initial values.                        |
+| Property / Method                | Purpose                                                        |
+| -------------------------------- | -------------------------------------------------------------- |
+| `data` / `setData`               | Current form values, typed to match the action's body schema.  |
+| `errors`                         | Field-level validation errors, keys typed to body field names. |
+| `post`, `put`, `patch`, `delete` | Submit the form (URL is already bound).                        |
+| `processing`                     | `true` while the submission is in flight.                      |
+| `isDirty`                        | `true` if form data differs from initial values.               |
+| `reset(...fields)`               | Reset form data to initial values. Field names autocomplete.   |
+| `clearErrors(...fields)`         | Clear validation errors. Field names autocomplete.             |
+
+For dynamic routes, pass `params` in the options:
+
+```ts
+// pages/users/[id].server.ts has an action
+const form = useForm("/users/:id", { name: "" }, { params: { id: "42" } });
+form.put(); // submits to /users/42
+```
 
 ### Validation Errors
 
