@@ -21,20 +21,26 @@ export function pagesPlugin(pagesDir: string): Plugin {
       }
     },
 
-    resolveId(id) {
-      if (id === RENDERER_ID) return "\0" + RENDERER_ID;
-      if (id === CLIENT_ENTRY_ID) return "\0" + CLIENT_ENTRY_ID;
+    resolveId: {
+      filter: { id: /^virtual:vite-cloud-pages-(renderer|client)$/ },
+      handler(id) {
+        return "\0" + id;
+      },
     },
 
-    load(id) {
-      if (id === "\0" + RENDERER_ID) {
-        if (!pageScan) return "export function renderPage() { throw new Error('No pages found'); }";
-        return generateRendererModule(pageScan, pagesDir);
-      }
-      if (id === "\0" + CLIENT_ENTRY_ID) {
-        if (!pageScan) return "";
-        return generateClientEntry(pageScan, pagesDir);
-      }
+    load: {
+      filter: { id: /^\0virtual:vite-cloud-pages-(renderer|client)$/ },
+      handler(id) {
+        if (id === "\0" + RENDERER_ID) {
+          if (!pageScan)
+            return "export function renderPage() { throw new Error('No pages found'); }";
+          return generateRendererModule(pageScan, pagesDir);
+        }
+        if (id === "\0" + CLIENT_ENTRY_ID) {
+          if (!pageScan) return "";
+          return generateClientEntry(pageScan, pagesDir);
+        }
+      },
     },
 
     config(_, env) {
