@@ -1,8 +1,10 @@
 # Pages Routing
 
-Pages is an [Inertia.js](https://inertiajs.com/)-inspired rendering mode that gives you server-driven routing with SPA-like navigation. Think of it as the DX of Remix loaders and actions, but with automatic SSR, client-side page transitions, and no manual hydration setup.
+Pages routing provides the server-rendered, components-as-pages, collocated-data-loading routing system that is seen in many existing JavaScript meta frameworks. However, pages routing in Vite Cloud is different from most in that it is **rendering framework agnostic.** It is built on patterns inspired by [Inertia.js](https://inertiajs.com/): The server returns the data, and the component receives it as props. The client-side routing logic is minimal, allowing Vite Cloud to support any rendering framework Vite can support. Today, only React and Vue have first-party adapters, but more will come in the future.
 
-Pages mode activates when a `pages/` directory exists. It coexists with `routes/` — use `pages/` for UI pages and `routes/` for [server routes](./server-routing.md).
+Pages mode activates when a `pages/` directory exists. It coexists with `routes/` — use `pages/` for UI pages and `routes/` for APIs. Components in `pages/` will be server-rendered, which means **they will run in both Cloudflare Workers and browsers**.
+
+Pages mode is also entirely optional - you can use any client-side router to build a pure client-side SPA that interacts with the backend API via the [typed fetch](./typed-fetch.md) utility.
 
 ## Setup
 
@@ -19,8 +21,6 @@ npm install @vite-cloud/vue
 ```
 
 :::
-
-Right now there are only React and Vue support, but more will be coming!
 
 Add both plugins to your Vite config:
 
@@ -108,7 +108,7 @@ File-based routing rules are the same as [server routing](./server-routing.md): 
 
 ## Server Handlers
 
-Every page can have a companion `.server.ts` file that exports a `loader` and/or `action`. If you've used Remix, these concepts are familiar. Server handlers use the exact same `defineHandler` API as [server routes](./server-routing.md) — you get the same typed `c.env` bindings, `withValidator()` support, and Hono context methods.
+Every page can have a companion `.server.ts` file that exports a `loader` and/or `action`. Server handlers use the exact same `defineHandler` API as [server routes](./server-routing.md) — you get the same typed `c.env` bindings, `withValidator()` support, and Hono context methods.
 
 **`loader`** runs on GET requests and returns an object that becomes the page's props:
 
@@ -181,6 +181,8 @@ defineProps<Props>();
 </template>
 ```
 
+Aside from the loader, the component can also use the [typed fetch]()
+
 :::
 
 ### Vue: `<script server>` {#vue-script-server}
@@ -222,11 +224,11 @@ If both `<script server>` and a `.server.ts` file exist, the `.server.ts` file t
 
 Pages uses an Inertia-style protocol under the hood:
 
-| Request               | Response                                                 |
-| --------------------- | -------------------------------------------------------- |
-| Initial page load     | Full SSR HTML. Client hydrates automatically.            |
-| Subsequent navigation | JSON with component name + props. Client swaps the page. |
-| Form submission       | Runs action, then returns fresh props or a redirect.     |
+| Request               | Response                                                              |
+| --------------------- | --------------------------------------------------------------------- |
+| Initial page load     | Full SSR HTML. Client hydrates automatically.                         |
+| Subsequent navigation | JSON with component name + props. Client component swap or re-render. |
+| Form submission       | Runs action, then returns fresh props or a redirect.                  |
 
 This means the first page load is server-rendered for SEO and performance, and all subsequent navigations feel instant — no full page reloads.
 
@@ -385,6 +387,29 @@ Shared data is separate from page props — props come from the loader, `useShar
 ## Forms and Actions
 
 `useForm` handles form submissions, loading state, and validation errors. It pairs with your page's `action` handler — the form submits to the current page URL, the action processes the mutation, and the page re-renders with fresh data.
+
+First, define the action in your server handler:
+
+```ts
+// pages/users/create.server.ts
+import { defineHandler } from "vite-cloud";
+import { db } from "vite-cloud/db";
+import * as v from "valibot";
+
+const createUserSchema = v.object({
+  name: v.pipe(v.string(), v.minLength(1)),
+  email: v.pipe(v.string(), v.email()),
+});
+
+export const action = defineHandler.withValidator({
+  body: createUserSchema,
+})(async (c, { body }) => {
+  await db.insert("users", body);
+  return c.redirect("/users");
+});
+```
+
+Then, use `useForm` in the page component to submit to this action:
 
 ::: code-group
 
