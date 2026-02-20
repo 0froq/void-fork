@@ -132,7 +132,7 @@ describe("compileRouteTable with pages", () => {
           componentPath: "users/index.vue",
           serverPath: "users/index.server.ts",
           hasInlineServer: false,
-          methods: ["GET", "POST"],
+          methods: ["loader", "action"],
           componentId: "users",
         },
       ],
@@ -157,11 +157,11 @@ describe("compileRouteTable with pages", () => {
 
     // GET handler uses loader
     expect(code).toContain('app.get("/users"');
-    expect(code).toContain("mod.GET, c");
+    expect(code).toContain("mod.loader, c");
 
-    // POST mutation handler
-    expect(code).toContain('app.post("/users"');
-    expect(code).toContain("handlePageMutation(mod.POST, mod.GET");
+    // Action mutation handler (POST, PUT, PATCH, DELETE)
+    expect(code).toContain('app.on(["POST", "PUT", "PATCH", "DELETE"], "/users"');
+    expect(code).toContain("handlePageMutation(mod.action, mod.loader");
   });
 
   it("uses ?server virtual module for inline <script server>", () => {
