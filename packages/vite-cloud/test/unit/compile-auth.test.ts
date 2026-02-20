@@ -39,7 +39,7 @@ const allAuth: AuthCompileOptions = {
 
 describe("compileRouteTable with auth", () => {
   it("generates no auth code when auth is null", () => {
-    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/jobs", "/queues", null, {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
       auth: null,
     });
@@ -50,7 +50,7 @@ describe("compileRouteTable with auth", () => {
   });
 
   it("generates session imports and middleware when auth is email-only", () => {
-    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/jobs", "/queues", null, {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
       auth: emailAuth,
     });
@@ -73,7 +73,7 @@ describe("compileRouteTable with auth", () => {
   });
 
   it("generates email register and login routes", () => {
-    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/jobs", "/queues", null, {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
       auth: emailAuth,
     });
@@ -84,7 +84,7 @@ describe("compileRouteTable with auth", () => {
   });
 
   it("generates GitHub OAuth route but no email routes for github-only", () => {
-    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/jobs", "/queues", null, {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
       auth: githubAuth,
     });
@@ -97,7 +97,7 @@ describe("compileRouteTable with auth", () => {
   });
 
   it("generates all auth routes for all providers", () => {
-    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/jobs", "/queues", null, {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
       auth: allAuth,
     });
@@ -115,7 +115,7 @@ describe("compileRouteTable with auth", () => {
         emptyScan,
         "/routes",
         "/middleware",
-        "/jobs",
+        "/crons",
         "/queues",
         null,
         {
@@ -129,7 +129,7 @@ describe("compileRouteTable with auth", () => {
   });
 
   it("generates auth table creation middleware", () => {
-    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/jobs", "/queues", null, {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
       auth: emailAuth,
     });
@@ -139,7 +139,7 @@ describe("compileRouteTable with auth", () => {
   });
 
   it("generates session middleware that reads from AUTH_KV", () => {
-    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/jobs", "/queues", null, {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
       auth: emailAuth,
     });
@@ -154,7 +154,7 @@ describe("compileRouteTable with auth", () => {
       jobs: [],
       queues: [],
     };
-    const code = compileRouteTable(scan, "/routes", "/middleware", "/jobs", "/queues", null, {
+    const code = compileRouteTable(scan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
       auth: emailAuth,
     });
@@ -179,7 +179,7 @@ describe("compileRouteTable with auth", () => {
       jobs: [],
       queues: [],
     };
-    const code = compileRouteTable(scan, "/routes", "/middleware", "/jobs", "/queues", null, {
+    const code = compileRouteTable(scan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
       auth: emailAuth,
     });
@@ -191,7 +191,7 @@ describe("compileRouteTable with auth", () => {
   });
 
   it("uses GITHUB_OAUTH_ID/SECRET env vars for GitHub OAuth", () => {
-    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/jobs", "/queues", null, {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
       auth: githubAuth,
     });
@@ -211,7 +211,7 @@ describe("compileRouteTable with auth", () => {
       githubProviderPath: null,
       googleProviderPath: "/resolved/oauth/google.mjs",
     };
-    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/jobs", "/queues", null, {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
       auth: googleAuth,
     });
@@ -223,7 +223,7 @@ describe("compileRouteTable with auth", () => {
   });
 
   it("passes OAuth credentials explicitly to provider middleware", () => {
-    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/jobs", "/queues", null, {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
       auth: allAuth,
     });

@@ -77,11 +77,11 @@ describe("scanRoutes", () => {
     expect(result.routes[1].pattern).toBe("/**");
   });
 
-  it("discovers cron jobs from jobs directory", async () => {
+  it("discovers cron jobs from crons directory", async () => {
     createFile("routes/api/hello.ts");
-    createFile("jobs/sync.ts", 'export const cron = "0 * * * *"\nexport default () => {}');
+    createFile("crons/sync.ts", 'export const cron = "0 * * * *"\nexport default () => {}');
     createFile(
-      "jobs/reports/daily.mjs",
+      "crons/reports/daily.mjs",
       'export const cron = "0 0 * * *"\nexport default async () => {}',
     );
 
@@ -94,8 +94,8 @@ describe("scanRoutes", () => {
 
   it("ignores underscored job files and directories", async () => {
     createFile("routes/api/hello.ts");
-    createFile("jobs/_internal.ts", 'export const cron = "0 * * * *"');
-    createFile("jobs/_private/report.ts", 'export const cron = "0 0 * * *"');
+    createFile("crons/_internal.ts", 'export const cron = "0 * * * *"');
+    createFile("crons/_private/report.ts", 'export const cron = "0 0 * * *"');
 
     const result = await scanRoutes(TMP);
     expect(result.jobs).toEqual([]);
@@ -103,7 +103,7 @@ describe("scanRoutes", () => {
 
   it("throws when a job is missing cron export", async () => {
     createFile("routes/api/hello.ts");
-    createFile("jobs/sync.ts", "export default () => {}");
+    createFile("crons/sync.ts", "export default () => {}");
 
     await expect(scanRoutes(TMP)).rejects.toThrow("missing `export const cron");
   });

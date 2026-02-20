@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { glob } from "tinyglobby";
 import { parseRouteFilename, type RouteDefinition } from "./parse-filename";
 import { detectHttpExports } from "./detect-exports";
-import { scanJobs, type JobDefinition } from "../jobs/scan";
+import { scanJobs, type JobDefinition } from "../crons/scan";
 import { scanQueues, type QueueDefinition } from "../queues/scan";
 
 export interface ScanResult {

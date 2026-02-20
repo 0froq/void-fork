@@ -43,7 +43,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   let ssr: SsrCompileOptions | null = null;
   const routesDir = join(root, "routes");
   const middlewareDir = join(root, "middleware");
-  const jobsDir = join(root, "jobs");
+  const jobsDir = join(root, "crons");
   const queuesDir = join(root, "queues");
   const srcDir = join(root, "src");
   const ssrEntryAbsPaths = new Set(

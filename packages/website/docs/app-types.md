@@ -36,7 +36,7 @@ Your worker handles API routes and (optionally) SSR. Static assets are served fr
 **Detected when any of these exist:**
 
 - `routes/` directory
-- `jobs/` directory
+- `crons/` directory
 - SSR entry (`src/main.ssr.ts` or `src/main.ssr.tsx`)
 
 ## Vite SPA
@@ -58,7 +58,7 @@ Vite Cloud detects that `vite` is a dependency and no backend files exist, runs 
 **Detected when:**
 
 - `vite` is in your dependencies
-- No backend files exist (`routes/`, `jobs/`, SSR entry)
+- No backend files exist (`routes/`, `crons/`, SSR entry)
 
 ## Meta Frameworks
 
@@ -128,7 +128,7 @@ When running `vcc deploy` and no `mode` is set in `vite-cloud.json`, the detecti
 | 1        | `--dir` flag                                           | SSG (or SPA with `--spa`)          |
 | 2        | `vitepress` in dependencies                            | SSG, builds with `vitepress build` |
 | 3        | `@tanstack/react-start` or `@react-router/dev` in deps | Framework                          |
-| 4        | Backend files exist (`routes/`, `jobs/`, SSR entry)    | Full-stack                         |
+| 4        | Backend files exist (`routes/`, `crons/`, SSR entry)   | Full-stack                         |
 | 5        | `vite` in dependencies, no backend files               | SPA, builds with `vite build`      |
 | 6        | `dist/index.html` or `./index.html` exists             | SSG (no build step)                |
 
