@@ -253,10 +253,12 @@ async function runFullDeploy(
   // In framework mode: skip job/queue scanning, SSR is always true
   const schedules = isFrameworkMode
     ? []
-    : scanJobsSync(root).map((job) => ({
-        name: job.name,
-        cron: job.cron,
-      }));
+    : scanJobsSync(root).flatMap((job) =>
+        job.crons.map((cron) => ({
+          name: job.name,
+          cron,
+        })),
+      );
   const queues = isFrameworkMode
     ? []
     : scanQueuesSync(root).map((q) => ({

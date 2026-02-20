@@ -304,7 +304,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
   if (scan.jobs.length > 0) {
     for (let i = 0; i < scan.jobs.length; i++) {
       const job = scan.jobs[i];
-      lines.push(`const job${i}Cron = ${JSON.stringify(job.cron)};`);
+      lines.push(`const job${i}Crons = ${JSON.stringify(job.crons)};`);
     }
     lines.push("");
     lines.push("export async function scheduled(controller, env, ctx) {");
@@ -312,7 +312,13 @@ window.__vite_plugin_react_preamble_installed__ = true;
     for (let i = 0; i < scan.jobs.length; i++) {
       const job = scan.jobs[i];
       const filePath = JSON.stringify(`${jobsDir}/${job.filePath}`);
-      lines.push(`    case job${i}Cron: {`);
+      for (let j = 0; j < job.crons.length; j++) {
+        if (j < job.crons.length - 1) {
+          lines.push(`    case job${i}Crons[${j}]:`);
+        } else {
+          lines.push(`    case job${i}Crons[${j}]: {`);
+        }
+      }
       lines.push(`      const mod = await import(${filePath});`);
       lines.push("      if (typeof mod.default === 'function') {");
       lines.push("        await mod.default(controller, env, ctx);");

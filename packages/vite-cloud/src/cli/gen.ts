@@ -465,11 +465,11 @@ export default defineMiddleware(async (c, next) => {
 
 function runCron(root: string, name: string): void {
   const filePath = join(root, "crons", name + ".ts");
-  const content = `import { defineJob } from "vite-cloud";
+  const content = `import { defineScheduled } from "vite-cloud";
 
 export const cron = "* * * * *";
 
-export default defineJob(async (controller, env) => {
+export default defineScheduled(async (controller, env) => {
   // TODO: implement ${name}
 });
 `;

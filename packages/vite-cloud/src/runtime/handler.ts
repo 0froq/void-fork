@@ -44,7 +44,7 @@ export interface RenderAssetTags {
 type RenderFn = (c: CloudContext, assetTags: RenderAssetTags) => Response | Promise<Response>;
 type JobController = ScheduledController;
 type JobExecutionContext = ExecutionContext;
-type JobFn = (
+type ScheduledFn = (
   controller: JobController,
   env: CloudEnv["Bindings"],
   ctx: JobExecutionContext,
@@ -184,7 +184,7 @@ export function defineMiddleware(
  * Identity function that provides type inference for scheduled jobs.
  * At runtime it simply returns the function passed to it.
  */
-export function defineJob(handler: JobFn): JobFn {
+export function defineScheduled(handler: ScheduledFn): ScheduledFn {
   return handler;
 }
 

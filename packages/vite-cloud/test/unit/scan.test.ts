@@ -87,8 +87,21 @@ describe("scanRoutes", () => {
 
     const result = await scanRoutes(TMP);
     expect(result.jobs).toEqual([
-      { filePath: "reports/daily.mjs", name: "reports/daily", cron: "0 0 * * *" },
-      { filePath: "sync.ts", name: "sync", cron: "0 * * * *" },
+      { filePath: "reports/daily.mjs", name: "reports/daily", crons: ["0 0 * * *"] },
+      { filePath: "sync.ts", name: "sync", crons: ["0 * * * *"] },
+    ]);
+  });
+
+  it("discovers cron jobs with array cron syntax", async () => {
+    createFile("routes/api/hello.ts");
+    createFile(
+      "crons/multi.ts",
+      'export const cron = ["0 * * * *", "30 * * * *"]\nexport default () => {}',
+    );
+
+    const result = await scanRoutes(TMP);
+    expect(result.jobs).toEqual([
+      { filePath: "multi.ts", name: "multi", crons: ["0 * * * *", "30 * * * *"] },
     ]);
   });
 

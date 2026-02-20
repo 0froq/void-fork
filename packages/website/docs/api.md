@@ -113,14 +113,14 @@ export default defineMiddleware(async (c, next) => {
 function defineMiddleware(handler: MiddlewareHandler<CloudEnv>): MiddlewareHandler<CloudEnv>;
 ```
 
-### `defineJob(handler)`
+### `defineScheduled(handler)`
 
 Wraps a Cloudflare [Scheduled handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) with type inference.
 
 ```ts
-import { defineJob } from "vite-cloud";
+import { defineScheduled } from "vite-cloud";
 
-export default defineJob(async (controller, env, ctx) => {
+export default defineScheduled(async (controller, env, ctx) => {
   const { results } = await env.DB.prepare("SELECT * FROM stale").all();
   // ...
 });
@@ -129,13 +129,13 @@ export default defineJob(async (controller, env, ctx) => {
 **Signature:**
 
 ```ts
-function defineJob(
+function defineScheduled(
   handler: (
     controller: ScheduledController,
     env: CloudEnv["Bindings"],
     ctx: ExecutionContext,
   ) => unknown | Promise<unknown>,
-): JobFn;
+): ScheduledFn;
 ```
 
 ### `defineQueue<T>(handler)`
@@ -636,15 +636,15 @@ Declares the `Cloudflare.Env` namespace with `DB: D1Database`, `KV: KVNamespace`
 
 ## Subpath Exports
 
-| Import path            | Contents                                                                               |
-| ---------------------- | -------------------------------------------------------------------------------------- |
-| `vite-cloud`           | Plugin default export + all handler/type re-exports                                    |
-| `vite-cloud/handler`   | `defineHandler`, `defineMiddleware`, `defineJob`, `defineQueue`, `defineRender`, types |
-| `vite-cloud/auth`      | `requireAuth`, `AuthUser`                                                              |
-| `vite-cloud/client`    | `fetch`, `FetchError`, `auth`, `AuthError`, `AuthUser`                                 |
-| `vite-cloud/response`  | `convertReturnValue`                                                                   |
-| `vite-cloud/validator` | `runValidation`, `ValidatorSlots`, `HandlerInput`                                      |
-| `vite-cloud/db`        | `db`, `createDb`, `QueryClient`, `DbTables`, `DbInsertTables`                          |
-| `vite-cloud/routes`    | `RouteMap` stub (types only)                                                           |
-| `vite-cloud/queues`    | `queues` proxy for sending messages to typed queues                                    |
-| `vite-cloud/env`       | Global Cloudflare env types (types only)                                               |
+| Import path            | Contents                                                                                     |
+| ---------------------- | -------------------------------------------------------------------------------------------- |
+| `vite-cloud`           | Plugin default export + all handler/type re-exports                                          |
+| `vite-cloud/handler`   | `defineHandler`, `defineMiddleware`, `defineScheduled`, `defineQueue`, `defineRender`, types |
+| `vite-cloud/auth`      | `requireAuth`, `AuthUser`                                                                    |
+| `vite-cloud/client`    | `fetch`, `FetchError`, `auth`, `AuthError`, `AuthUser`                                       |
+| `vite-cloud/response`  | `convertReturnValue`                                                                         |
+| `vite-cloud/validator` | `runValidation`, `ValidatorSlots`, `HandlerInput`                                            |
+| `vite-cloud/db`        | `db`, `createDb`, `QueryClient`, `DbTables`, `DbInsertTables`                                |
+| `vite-cloud/routes`    | `RouteMap` stub (types only)                                                                 |
+| `vite-cloud/queues`    | `queues` proxy for sending messages to typed queues                                          |
+| `vite-cloud/env`       | Global Cloudflare env types (types only)                                                     |

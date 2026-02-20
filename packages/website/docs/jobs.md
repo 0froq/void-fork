@@ -1,4 +1,4 @@
-# Jobs
+# Cron Jobs
 
 Vite Cloud supports cron-triggered jobs from a top-level `crons/` directory.
 
@@ -8,25 +8,40 @@ Create files in `crons/**/*.ts` (`.mts`, `.js`, `.mjs` also supported).
 
 Each job file must export:
 
-- `export const cron = "<expression>"`
-- a default handler (recommended: wrapped with `defineJob`)
+- `export const cron = "<expression>"` (or an array of expressions)
+- a default handler (recommended: wrapped with `defineScheduled`)
 
 Example:
 
 ```ts
 // crons/hourly-heartbeat.ts
-import { defineJob } from "vite-cloud";
+import { defineScheduled } from "vite-cloud";
 
 export const cron = "0 * * * *";
 
-export default defineJob(async (controller, env) => {
+export default defineScheduled(async (controller, env) => {
   await env.KV.put("jobs:last-heartbeat", controller.scheduledTime.toString());
 });
 ```
 
-## `defineJob`
+### Multiple schedules
 
-`defineJob(fn)` is a typed identity helper for scheduled jobs.
+A single job file can export an array of cron expressions:
+
+```ts
+// crons/cleanup.ts
+import { defineScheduled } from "vite-cloud";
+
+export const cron = ["0 * * * *", "30 * * * *"];
+
+export default defineScheduled(async (controller, env) => {
+  // Runs at :00 and :30 every hour
+});
+```
+
+## `defineScheduled`
+
+`defineScheduled(fn)` is a typed identity helper for scheduled jobs.
 
 Handler signature:
 
