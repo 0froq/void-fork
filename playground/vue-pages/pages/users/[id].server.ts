@@ -5,7 +5,7 @@ const USERS = [
   { id: 2, name: "Bob", email: "bob@example.com", created_at: "2025-01-02" },
 ];
 
-export const GET = defineHandler((c) => {
+export const loader = defineHandler((c) => {
   const id = Number(c.req.param("id"));
   const user = USERS.find((u) => u.id === id);
 

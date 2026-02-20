@@ -16,7 +16,7 @@ describe("scriptServerPlugin", () => {
   it("strips <script server> block and returns cleaned SFC", () => {
     const p = createPlugin();
     const code = `<script server>
-export const GET = () => ({ users: [] });
+export const loader = () => ({ users: [] });
 </script>
 <template><div>Users</div></template>
 <script setup>
@@ -26,7 +26,7 @@ const msg = "hello";
     const result = p.transform(code, "/project/pages/users.vue");
     expect(result).not.toBeNull();
     expect(result!.code).not.toContain("<script server>");
-    expect(result!.code).not.toContain("export const GET");
+    expect(result!.code).not.toContain("export const loader");
     expect(result!.code).toContain("<template><div>Users</div></template>");
     expect(result!.code).toContain("<script setup>");
   });
@@ -35,7 +35,7 @@ const msg = "hello";
     const p = createPlugin();
     // First, transform to extract
     p.transform(
-      "<script server>\nexport const GET = () => [];\n</script>\n<template><div /></template>",
+      "<script server>\nexport const loader = () => [];\n</script>\n<template><div /></template>",
       "/project/pages/users.vue",
     );
 
@@ -46,12 +46,12 @@ const msg = "hello";
   it("loads the extracted server code", () => {
     const p = createPlugin();
     p.transform(
-      "<script server>\nexport const GET = () => [];\n</script>\n<template><div /></template>",
+      "<script server>\nexport const loader = () => [];\n</script>\n<template><div /></template>",
       "/project/pages/users.vue",
     );
 
     const code = p.load("\0/project/pages/users.vue?server");
-    expect(code).toContain("export const GET");
+    expect(code).toContain("export const loader");
   });
 
   it("passes through files without <script server> unchanged", () => {
@@ -64,7 +64,7 @@ const msg = "hello";
   it("ignores files outside pages/", () => {
     const p = createPlugin();
     const code =
-      "<script server>\nexport const GET = () => [];\n</script>\n<template><div /></template>";
+      "<script server>\nexport const loader = () => [];\n</script>\n<template><div /></template>";
     const result = p.transform(code, "/project/src/App.vue");
     expect(result).toBeUndefined();
   });
@@ -78,17 +78,17 @@ const msg = "hello";
   it("handles <script server lang='ts'>", () => {
     const p = createPlugin();
     const code = `<script server lang="ts">
-export const GET = () => ({ count: 42 });
+export const loader = () => ({ count: 42 });
 </script>
 <template><div>{{ count }}</div></template>`;
 
     const result = p.transform(code, "/project/pages/typed.vue");
     expect(result).not.toBeNull();
-    expect(result!.code).not.toContain("export const GET");
+    expect(result!.code).not.toContain("export const loader");
 
     // Should be loadable
     p.resolveId("/project/pages/typed.vue?server");
     const loaded = p.load("\0/project/pages/typed.vue?server");
-    expect(loaded).toContain("export const GET");
+    expect(loaded).toContain("export const loader");
   });
 });

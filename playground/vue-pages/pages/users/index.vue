@@ -7,11 +7,11 @@ const USERS = [
   { id: 2, name: "Bob", email: "bob@example.com" },
 ];
 
-export const GET = defineHandler(() => {
+export const loader = defineHandler(() => {
   return { users: USERS };
 });
 
-export const POST = defineHandler(async (c) => {
+export const action = defineHandler(async (c) => {
   const body = await c.req.json<{ name: string; email: string }>();
   const errors: Record<string, string> = {};
 

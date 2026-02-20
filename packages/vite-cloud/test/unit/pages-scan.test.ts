@@ -58,14 +58,14 @@ describe("scanPages", () => {
     writeFile("users/index.vue", "<template><div>Users</div></template>");
     writeFile(
       "users/index.server.ts",
-      "export const GET = () => [];\nexport const POST = () => ({});",
+      "export const loader = () => [];\nexport const action = () => ({});",
     );
 
     const result = await scanPages(TMP);
     const page = result.pages.find((p) => p.componentId === "users");
     expect(page).toBeDefined();
     expect(page!.serverPath).toBe("users/index.server.ts");
-    expect(page!.methods).toEqual(["GET", "POST"]);
+    expect(page!.methods).toEqual(["loader", "action"]);
     expect(page!.hasInlineServer).toBe(false);
   });
 
@@ -73,7 +73,7 @@ describe("scanPages", () => {
     writeFile(
       "users/index.vue",
       `<script server>
-export const GET = () => [];
+export const loader = () => [];
 </script>
 <template><div>Users</div></template>`,
     );
@@ -89,11 +89,11 @@ export const GET = () => [];
     writeFile(
       "users/index.vue",
       `<script server>
-export const GET = () => [];
+export const loader = () => [];
 </script>
 <template><div>Users</div></template>`,
     );
-    writeFile("users/index.server.ts", "export const GET = () => [];");
+    writeFile("users/index.server.ts", "export const loader = () => [];");
 
     const result = await scanPages(TMP);
     const page = result.pages.find((p) => p.componentId === "users");

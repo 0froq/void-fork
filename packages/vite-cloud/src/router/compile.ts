@@ -673,13 +673,13 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
       lines.push(`}`);
     }
 
-    // GET handler (always registered — pages always handle GET)
+    // Loader (always registered — pages always handle GET)
     lines.push(`app.get(${JSON.stringify(page.pattern)}, async (c) => {`);
     if (serverImportPath) {
       const loaderName = `_pload_${safeId}`;
       lines.push(`  const mod = await ${loaderName}();`);
       lines.push(
-        `  return handlePageGet(mod.GET, c, ${JSON.stringify(page.componentId)}, renderPage, getPagesAssetTags);`,
+        `  return handlePageGet(mod.loader, c, ${JSON.stringify(page.componentId)}, renderPage, getPagesAssetTags);`,
       );
     } else {
       lines.push(
@@ -688,15 +688,15 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     }
     lines.push(`});`);
 
-    // Mutation handlers (POST, PUT, PATCH, DELETE)
-    const mutationMethods = page.methods.filter((m) => m !== "GET");
-    for (const method of mutationMethods) {
-      const honoMethod = method.toLowerCase();
+    // Action (POST, PUT, PATCH, DELETE all route to action)
+    if (page.methods.includes("action")) {
       const loaderName = `_pload_${safeId}`;
-      lines.push(`app.${honoMethod}(${JSON.stringify(page.pattern)}, async (c) => {`);
+      lines.push(
+        `app.on(["POST", "PUT", "PATCH", "DELETE"], ${JSON.stringify(page.pattern)}, async (c) => {`,
+      );
       lines.push(`  const mod = await ${loaderName}();`);
       lines.push(
-        `  return handlePageMutation(mod.${method}, mod.GET, c, ${JSON.stringify(page.componentId)}, renderPage, getPagesAssetTags);`,
+        `  return handlePageMutation(mod.action, mod.loader, c, ${JSON.stringify(page.componentId)}, renderPage, getPagesAssetTags);`,
       );
       lines.push(`});`);
     }
