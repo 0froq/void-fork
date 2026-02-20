@@ -16,6 +16,10 @@ export async function runGenCommand(root: string, args: GenArgs): Promise<void> 
     runRoute(root, args.path, args.methods);
   } else if (args.subcommand === "middleware") {
     runMiddleware(root, args.name);
+  } else if (args.subcommand === "cron") {
+    runCron(root, args.name);
+  } else if (args.subcommand === "queue") {
+    runQueue(root, args.name);
   } else {
     runSsr(root, args.framework);
   }
@@ -457,6 +461,41 @@ export default defineMiddleware(async (c, next) => {
   writeIfNotExists(filePath, content);
 
   outro("Middleware created.");
+}
+
+function runCron(root: string, name: string): void {
+  const filePath = join(root, "crons", name + ".ts");
+  const content = `import { defineJob } from "vite-cloud";
+
+export const cron = "* * * * *";
+
+export default defineJob(async (controller, env) => {
+  // TODO: implement ${name}
+});
+`;
+  writeIfNotExists(filePath, content);
+
+  outro("Cron job created.");
+}
+
+function runQueue(root: string, name: string): void {
+  const filePath = join(root, "queues", name + ".ts");
+  const content = `import { defineQueue } from "vite-cloud";
+
+interface Message {}
+
+// export const maxBatchSize = 10;
+// export const maxBatchTimeout = 5;
+
+export default defineQueue<Message>(async (batch, env) => {
+  for (const message of batch.messages) {
+    // TODO: process message
+  }
+});
+`;
+  writeIfNotExists(filePath, content);
+
+  outro("Queue consumer created.");
 }
 
 function runSsr(root: string, framework?: "react" | "vue" | "svelte" | "solid"): void {

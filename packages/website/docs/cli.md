@@ -240,6 +240,30 @@ Creates three files:
 
 If no flag is provided, the framework is auto-detected from `package.json` dependencies.
 
+### `vcc gen cron`
+
+```
+vcc gen cron <name>
+```
+
+Create a cron job file in `crons/` with `defineJob` and a placeholder cron expression.
+
+```sh
+vcc gen cron hourly-sync
+```
+
+### `vcc gen queue`
+
+```
+vcc gen queue <name>
+```
+
+Create a queue consumer file in `queues/` with `defineQueue`, a `Message` interface, and commented-out batch options.
+
+```sh
+vcc gen queue emails
+```
+
 ## Secrets
 
 ### `vcc secret put`

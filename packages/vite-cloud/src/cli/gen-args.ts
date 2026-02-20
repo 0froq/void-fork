@@ -9,7 +9,9 @@ export type GenArgs =
   | { subcommand: "migration"; name: string }
   | { subcommand: "route"; path: string; methods: string[] }
   | { subcommand: "middleware"; name: string }
-  | { subcommand: "ssr"; framework?: "react" | "vue" | "svelte" | "solid" };
+  | { subcommand: "ssr"; framework?: "react" | "vue" | "svelte" | "solid" }
+  | { subcommand: "cron"; name: string }
+  | { subcommand: "queue"; name: string };
 
 const COLUMN_TYPES = new Set(["string", "text", "datetime", "integer", "boolean", "real", "blob"]);
 
@@ -131,6 +133,38 @@ function parseSsrArgs(args: string[]): GenArgs {
   return { subcommand: "ssr", framework: frameworks[0] };
 }
 
+function parseCronArgs(args: string[]): GenArgs {
+  const [name, extra] = args;
+  if (!name) {
+    throw new Error("Error: Usage: vcc gen cron <name>");
+  }
+  if (extra) {
+    throw new Error(`Error: Unexpected argument: ${extra}`);
+  }
+  if (!/^[a-z_][a-z0-9_-]*$/.test(name)) {
+    throw new Error(
+      "Error: Cron name must be lowercase alphanumeric + underscores/hyphens, no leading digits.",
+    );
+  }
+  return { subcommand: "cron", name };
+}
+
+function parseQueueArgs(args: string[]): GenArgs {
+  const [name, extra] = args;
+  if (!name) {
+    throw new Error("Error: Usage: vcc gen queue <name>");
+  }
+  if (extra) {
+    throw new Error(`Error: Unexpected argument: ${extra}`);
+  }
+  if (!/^[a-z_][a-z0-9_-]*$/.test(name)) {
+    throw new Error(
+      "Error: Queue name must be lowercase alphanumeric + underscores/hyphens, no leading digits.",
+    );
+  }
+  return { subcommand: "queue", name };
+}
+
 export function parseGenArgs(args: string[]): GenArgs {
   const [subcommand, ...rest] = args;
 
@@ -139,6 +173,8 @@ export function parseGenArgs(args: string[]): GenArgs {
   if (subcommand === "route") return parseRouteArgs(rest);
   if (subcommand === "middleware") return parseMiddlewareArgs(rest);
   if (subcommand === "ssr") return parseSsrArgs(rest);
+  if (subcommand === "cron") return parseCronArgs(rest);
+  if (subcommand === "queue") return parseQueueArgs(rest);
 
-  throw new Error("Error: Usage: vcc gen <model|migration|route|middleware|ssr>");
+  throw new Error("Error: Usage: vcc gen <model|migration|route|middleware|ssr|cron|queue>");
 }
