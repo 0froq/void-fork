@@ -1,11 +1,22 @@
 import { extendConfig } from "@voidzero-dev/vitepress-theme/config";
 import { defineConfig } from "vitepress";
+import { groupIconMdPlugin, groupIconVitePlugin } from "vitepress-plugin-group-icons";
 
 export default extendConfig(
   defineConfig({
     title: "Vite Cloud",
     description: "Fullstack Vite plugin for Cloudflare Workers",
     cleanUrls: true,
+
+    markdown: {
+      config(md) {
+        md.use(groupIconMdPlugin);
+      },
+    },
+
+    vite: {
+      plugins: [groupIconVitePlugin()],
+    },
 
     themeConfig: {
       search: {

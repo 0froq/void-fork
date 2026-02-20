@@ -1,5 +1,6 @@
 import type { Theme } from "vitepress";
 import BaseTheme, { themeContextKey } from "@voidzero-dev/vitepress-theme";
+import "virtual:group-icons.css";
 import "./styles.css";
 
 import logoDark from "./logo-dark.svg";

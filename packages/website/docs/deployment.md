@@ -11,7 +11,7 @@ Vite Cloud apps run on Cloudflare's infrastructure but you don't need to use you
 ### First deploy
 
 ```bash
-npm i -g vite-cloud   # or use npx vcc
+npm i -g vite-cloud   # or use vcc
 vcc login              # OAuth via GitHub or Google
 vcc deploy             # auto-detects app type, builds, deploys
 ```
@@ -49,7 +49,7 @@ If none match, the CLI prompts interactively.
 
 ## GitHub Actions
 
-You can deploy from a GitHub repo with a simple GitHub Actions workflow:
+You can deploy from a GitHub repo with a simple GitHub Actions workflow. Running `vcc init --github` will generate this as `.github/workflows/deploy.yml` in your project:
 
 ```yaml
 name: Deploy
