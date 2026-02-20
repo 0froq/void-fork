@@ -46,7 +46,7 @@ function parseJobFiles(root: string, jobsDir: string, files: string[]): JobDefin
     });
 }
 
-export async function scanJobs(root: string, jobsDir = "jobs"): Promise<JobDefinition[]> {
+export async function scanJobs(root: string, jobsDir = "crons"): Promise<JobDefinition[]> {
   const pattern = `**/*.{${JOB_EXTENSIONS.join(",")}}`;
   const files = await glob(pattern, { cwd: `${root}/${jobsDir}`, absolute: false }).catch(
     () => [] as string[],
@@ -54,7 +54,7 @@ export async function scanJobs(root: string, jobsDir = "jobs"): Promise<JobDefin
   return parseJobFiles(root, jobsDir, files);
 }
 
-export function scanJobsSync(root: string, jobsDir = "jobs"): JobDefinition[] {
+export function scanJobsSync(root: string, jobsDir = "crons"): JobDefinition[] {
   const pattern = `**/*.{${JOB_EXTENSIONS.join(",")}}`;
   let files: string[];
   try {

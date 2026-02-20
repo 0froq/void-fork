@@ -11,7 +11,7 @@ import {
   FRAMEWORK_SCAN_DIRS,
   type Framework,
 } from "./plugin-inference";
-import { scanJobsSync } from "./jobs/scan";
+import { scanJobsSync } from "./crons/scan";
 import { scanQueuesSync } from "./queues/scan";
 import { validateSsrEntry } from "./ssr/entry";
 import { readConfig, normalizeAuth } from "./config";

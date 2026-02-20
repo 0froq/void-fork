@@ -88,10 +88,10 @@ describe("detectPreset", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null when jobs/ dir exists (backend files)", () => {
+  it("returns null when crons/ dir exists (backend files)", () => {
     const root = setupProject({
       pkg: { dependencies: { vite: "^6.0.0" } },
-      dirs: ["jobs"],
+      dirs: ["crons"],
     });
     const result = detectPreset(root);
     expect(result).toBeNull();

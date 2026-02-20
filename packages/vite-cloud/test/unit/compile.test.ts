@@ -39,7 +39,7 @@ describe("compileRouteTable", () => {
       scan,
       "/routes",
       "/middleware",
-      "/jobs",
+      "/crons",
       "/queues",
       null,
       testOptions,
@@ -70,7 +70,7 @@ describe("compileRouteTable", () => {
     // Should generate scheduled handler for cron jobs
     expect(code).toContain("export async function scheduled(controller, env, ctx)");
     expect(code).toContain('const job0Cron = "0 * * * *"');
-    expect(code).toContain('import("/jobs/sync.ts")');
+    expect(code).toContain('import("/crons/sync.ts")');
     // Should export app as default
     expect(code).toContain("export default app");
   });
@@ -96,7 +96,7 @@ describe("compileRouteTable", () => {
       scan,
       "/routes",
       "/middleware",
-      "/jobs",
+      "/crons",
       "/queues",
       null,
       testOptions,
@@ -112,7 +112,7 @@ describe("compileRouteTable", () => {
       scan,
       "/routes",
       "/middleware",
-      "/jobs",
+      "/crons",
       "/queues",
       null,
       testOptions,
@@ -129,7 +129,7 @@ describe("compileRouteTable", () => {
       scan,
       "/routes",
       "/middleware",
-      "/jobs",
+      "/crons",
       "/queues",
       {
         serverEntryPath: "/src/main.ssr.ts",
@@ -170,7 +170,7 @@ describe("compileRouteTable", () => {
       scan,
       "/routes",
       "/middleware",
-      "/jobs",
+      "/crons",
       "/queues",
       null,
       testOptions,
@@ -200,7 +200,7 @@ describe("compileRouteTable", () => {
       scan,
       "/routes",
       "/middleware",
-      "/jobs",
+      "/crons",
       "/queues",
       null,
       testOptions,
@@ -215,7 +215,7 @@ describe("compileRouteTable", () => {
       scan,
       "/routes",
       "/middleware",
-      "/jobs",
+      "/crons",
       "/queues",
       null,
       testOptions,

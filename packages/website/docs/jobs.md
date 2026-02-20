@@ -1,10 +1,10 @@
 # Jobs
 
-Vite Cloud supports cron-triggered jobs from a top-level `jobs/` directory.
+Vite Cloud supports cron-triggered jobs from a top-level `crons/` directory.
 
 ## Job files
 
-Create files in `jobs/**/*.ts` (`.mts`, `.js`, `.mjs` also supported).
+Create files in `crons/**/*.ts` (`.mts`, `.js`, `.mjs` also supported).
 
 Each job file must export:
 
@@ -14,7 +14,7 @@ Each job file must export:
 Example:
 
 ```ts
-// jobs/hourly-heartbeat.ts
+// crons/hourly-heartbeat.ts
 import { defineJob } from "vite-cloud";
 
 export const cron = "0 * * * *";

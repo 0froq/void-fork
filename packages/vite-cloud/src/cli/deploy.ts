@@ -11,7 +11,7 @@ import { inferProjectBindings, FRAMEWORK_SCAN_DIRS, detectFramework } from "../p
 import { promptProjectSelection, promptProjectSlug } from "./prompt";
 import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
-import { scanJobsSync } from "../jobs/scan";
+import { scanJobsSync } from "../crons/scan";
 import { scanQueuesSync } from "../queues/scan";
 import { validateSsrEntry, getRevalidateConfig } from "../ssr/entry";
 import { detectPreset, type StaticPreset } from "./preset";
