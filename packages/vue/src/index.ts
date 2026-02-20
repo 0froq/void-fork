@@ -12,7 +12,3 @@ export function viteCloudVue(options?: ViteCloudVueOptions): Plugin[] {
   const pagesDir = join(process.cwd(), "pages");
   return [scriptServerPlugin(pagesDir), vue(options?.vue) as Plugin, pagesPlugin(pagesDir)];
 }
-
-export { Link } from "./runtime/link";
-export { useShared } from "./runtime/use-shared";
-export { useForm } from "./runtime/use-form";

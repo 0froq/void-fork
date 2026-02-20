@@ -7,7 +7,7 @@ export const GET = defineHandler(() => {
 </script>
 
 <script setup lang="ts">
-import { Link } from "@vite-cloud/vue/runtime";
+import { Link } from "@vite-cloud/vue";
 
 const props = defineProps<{ title: string }>();
 </script>
