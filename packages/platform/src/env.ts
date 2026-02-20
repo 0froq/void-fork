@@ -1,4 +1,5 @@
 import type { Env } from "hono";
+import type { Db } from "./db";
 
 export interface PlatformEnv extends Env {
   Bindings: {
@@ -24,5 +25,6 @@ export interface PlatformEnv extends Env {
   Variables: {
     userId: string;
     userLogin: string;
+    db: Db;
   };
 }

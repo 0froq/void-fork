@@ -2,13 +2,11 @@ import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { PlatformEnv } from "../../env";
 import { verifyJwt } from "../../auth/jwt";
-import { getUser } from "../../db";
+import { getUser, getFirstAdmin } from "../../db";
 
 export const adminAuthMiddleware: MiddlewareHandler<PlatformEnv> = async (c, next) => {
   if (c.env.DEV_AUTH_BYPASS) {
-    const admin = await c.env.DB.prepare(
-      "SELECT id, login FROM users WHERE role = 'admin' LIMIT 1",
-    ).first<{ id: string; login: string }>();
+    const admin = await getFirstAdmin(c.get("db"));
     if (admin) {
       c.set("userId", admin.id);
       c.set("userLogin", admin.login);
@@ -26,7 +24,7 @@ export const adminAuthMiddleware: MiddlewareHandler<PlatformEnv> = async (c, nex
     return c.redirect("/admin/login");
   }
 
-  const user = await getUser(c.env.DB, payload.sub);
+  const user = await getUser(c.get("db"), payload.sub);
   if (!user || user.role !== "admin") {
     return c.html("<h1>403 Forbidden</h1><p>Admin access required.</p>", 403);
   }

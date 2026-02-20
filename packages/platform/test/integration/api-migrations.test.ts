@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
 import app from "../../src/index";
+import { resources } from "../../src/schema";
 import {
   setupEnv,
   teardownEnv,
@@ -22,7 +23,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await clearTables(env.DB);
+  await clearTables(env.db);
 });
 
 afterEach(() => {
@@ -36,9 +37,9 @@ describe("GET /projects/:id/migrations", () => {
   });
 
   it("returns 403 for wrong user", async () => {
-    const alice = await createTestUser(env.DB, "alice-mig");
-    const bob = await createTestUser(env.DB, "bob-mig");
-    const project = await createTestProject(env.DB, alice.id, "alice-mig-app");
+    const alice = await createTestUser(env.db, "alice-mig");
+    const bob = await createTestUser(env.db, "bob-mig");
+    const project = await createTestProject(env.db, alice.id, "alice-mig-app");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/migrations`, {
@@ -50,8 +51,8 @@ describe("GET /projects/:id/migrations", () => {
   });
 
   it("returns empty applied when no D1 resource exists", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "no-d1-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "no-d1-app");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/migrations`, {
@@ -64,15 +65,17 @@ describe("GET /projects/:id/migrations", () => {
   });
 
   it("returns applied migrations from remote D1", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "d1-mig-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "d1-mig-app");
 
     // Insert a D1 resource
-    await env.DB.prepare(
-      "INSERT INTO resources (id, project_id, type, cf_id, binding_name) VALUES (?, ?, ?, ?, ?)",
-    )
-      .bind("res_mig1", project.id, "d1", "d1-mig-uuid", "DB")
-      .run();
+    await env.db.insert(resources).values({
+      id: "res_mig1",
+      project_id: project.id,
+      type: "d1",
+      cf_id: "d1-mig-uuid",
+      binding_name: "DB",
+    });
 
     mockCfApi({
       queryD1: () =>

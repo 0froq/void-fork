@@ -18,8 +18,8 @@ app.get("/", async (c) => {
   const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
   const [deployments, total] = await Promise.all([
-    getAllDeploymentsWithProject(c.env.DB, PAGE_SIZE, offset),
-    countDeployments(c.env.DB),
+    getAllDeploymentsWithProject(c.get("db"), PAGE_SIZE, offset),
+    countDeployments(c.get("db")),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   return c.html(
@@ -34,11 +34,11 @@ app.get("/", async (c) => {
 
 // GET /deployments/:id
 app.get("/:id", async (c) => {
-  const deployment = await getDeployment(c.env.DB, c.req.param("id"));
+  const deployment = await getDeployment(c.get("db"), c.req.param("id"));
   if (!deployment) {
     return c.html("<h1>Deployment not found</h1>", 404);
   }
-  const project = await getProject(c.env.DB, deployment.project_id);
+  const project = await getProject(c.get("db"), deployment.project_id);
 
   const statusCls =
     deployment.status === "live"

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import app from "../../src/index";
 import { signJwt } from "../../src/auth/jwt";
+import { users } from "../../src/schema";
 import {
   setupEnv,
   teardownEnv,
@@ -21,7 +22,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await clearTables(env.DB);
+  await clearTables(env.db);
 });
 
 describe("GET /me", () => {
@@ -47,11 +48,13 @@ describe("GET /me", () => {
   it("returns 401 with expired JWT", async () => {
     // Insert user with real timers
     const userId = "user_expired";
-    await env.DB.prepare(
-      "INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login) VALUES (?, ?, ?, ?, ?, ABS(RANDOM()), ?)",
-    )
-      .bind(userId, "github", "99999", "expired", null, "expired")
-      .run();
+    await env.db.insert(users).values({
+      id: userId,
+      provider: "github",
+      provider_id: "99999",
+      login: "expired",
+      email: null,
+    });
 
     // Sign JWT in the past so it's expired
     vi.useFakeTimers();
@@ -69,7 +72,7 @@ describe("GET /me", () => {
   });
 
   it("returns user login with valid JWT", async () => {
-    const user = await createTestUser(env.DB, "alice");
+    const user = await createTestUser(env.db, "alice");
 
     const res = await app.fetch(
       new Request("http://localhost/me", {

@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
 import app from "../../src/index";
+import { eq, sql } from "drizzle-orm";
+import { deployments, resources, domains, projects } from "../../src/schema";
 import {
   setupEnv,
   teardownEnv,
@@ -23,7 +25,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await clearTables(env.DB);
+  await clearTables(env.db);
 });
 
 afterEach(() => {
@@ -71,7 +73,7 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("returns 404 for nonexistent project", async () => {
-    const user = await createTestUser(env.DB);
+    const user = await createTestUser(env.db);
     mockCfApi();
 
     const res = await app.fetch(
@@ -87,9 +89,9 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("returns 403 when user does not own project", async () => {
-    const alice = await createTestUser(env.DB, "alice");
-    const bob = await createTestUser(env.DB, "bob");
-    const project = await createTestProject(env.DB, alice.id, "alice-app");
+    const alice = await createTestUser(env.db, "alice");
+    const bob = await createTestUser(env.db, "bob");
+    const project = await createTestProject(env.db, alice.id, "alice-app");
     mockCfApi();
 
     const res = await app.fetch(
@@ -105,8 +107,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("succeeds with minimal deploy (no bindings, no assets)", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "minimal-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "minimal-app");
     mockCfApi();
 
     const res = await app.fetch(
@@ -126,15 +128,17 @@ describe("POST /projects/:id/deploy", () => {
     expect(body.url).toBe("https://minimal-app.vitecloud.app");
 
     // Verify deployment is marked live in D1
-    const dpl = await env.DB.prepare("SELECT status FROM deployments WHERE id = ?")
-      .bind(body.deployment)
-      .first<{ status: string }>();
+    const dpl = await env.db
+      .select({ status: deployments.status })
+      .from(deployments)
+      .where(eq(deployments.id, body.deployment))
+      .get();
     expect(dpl?.status).toBe("live");
   });
 
   it("stores assets in R2 at correct keys", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "asset-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "asset-app");
     mockCfApi();
 
     const res = await app.fetch(
@@ -165,8 +169,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("updates KV routing", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "routed-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "routed-app");
     mockCfApi();
 
     const res = await app.fetch(
@@ -189,8 +193,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("includes header rules in KV routing for full deploy", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "headers-full");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "headers-full");
     mockCfApi();
 
     const headers = [
@@ -220,8 +224,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("stores ssr flag in KV routing when manifest enables ssr", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "ssr-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "ssr-app");
     mockCfApi();
 
     const res = await app.fetch(
@@ -247,8 +251,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("sends worker upload to correct CF API endpoint", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "worker-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "worker-app");
     const fetchMock = mockCfApi();
 
     const res = await app.fetch(
@@ -275,8 +279,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("passes cron triggers to worker upload metadata", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "cron-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "cron-app");
     const fetchMock = mockCfApi();
 
     const res = await app.fetch(
@@ -311,8 +315,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("provisions D1 when manifest requires it", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "d1-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "d1-app");
     mockCfApi();
 
     const res = await app.fetch(
@@ -328,27 +332,29 @@ describe("POST /projects/:id/deploy", () => {
     expect(res.status).toBe(200);
 
     // Verify resource row was created in D1
-    const resource = await env.DB.prepare(
-      "SELECT * FROM resources WHERE project_id = ? AND type = 'd1'",
-    )
-      .bind(project.id)
-      .first<{ cf_id: string; binding_name: string }>();
-    expect(resource).not.toBeNull();
+    const resource = await env.db
+      .select({ cf_id: resources.cf_id, binding_name: resources.binding_name })
+      .from(resources)
+      .where(eq(resources.project_id, project.id))
+      .get();
+    expect(resource).toBeDefined();
     expect(resource!.cf_id).toBe("d1-test-uuid");
     expect(resource!.binding_name).toBe("DB");
   });
 
   it("skips provisioning when resource already exists", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "existing-d1");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "existing-d1");
     const fetchMock = mockCfApi();
 
     // Pre-insert a resource
-    await env.DB.prepare(
-      "INSERT INTO resources (id, project_id, type, cf_id, binding_name) VALUES (?, ?, ?, ?, ?)",
-    )
-      .bind("res_existing", project.id, "d1", "existing-d1-uuid", "DB")
-      .run();
+    await env.db.insert(resources).values({
+      id: "res_existing",
+      project_id: project.id,
+      type: "d1",
+      cf_id: "existing-d1-uuid",
+      binding_name: "DB",
+    });
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -375,8 +381,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("runs migrations before worker deploy", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "migrate-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "migrate-app");
 
     const callOrder: string[] = [];
     mockCfApi({
@@ -418,8 +424,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("rejects destructive migration without pragma", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "destructive-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "destructive-app");
     mockCfApi();
 
     const res = await app.fetch(
@@ -440,33 +446,37 @@ describe("POST /projects/:id/deploy", () => {
     expect(body.error).toContain("destructive migration rejected");
 
     // Verify deployment is marked failed with error message
-    const dpl = await env.DB.prepare(
-      "SELECT status, error_message FROM deployments WHERE project_id = ?",
-    )
-      .bind(project.id)
-      .first<{ status: string; error_message: string | null }>();
+    const dpl = await env.db
+      .select({ status: deployments.status, error_message: deployments.error_message })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id))
+      .get();
     expect(dpl?.status).toBe("failed");
     expect(dpl?.error_message).toContain("destructive migration rejected: 002_drop.sql");
   });
 
   it("updates KV routing for active custom domains on deploy", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "domain-deploy");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "domain-deploy");
     mockCfApi();
 
     // Insert an active domain
-    await env.DB.prepare(
-      "INSERT INTO domains (id, project_id, hostname, cf_hostname_id, status) VALUES (?, ?, ?, ?, ?)",
-    )
-      .bind("dom_deploy", project.id, "deploy.example.com", "ch-deploy", "active")
-      .run();
+    await env.db.insert(domains).values({
+      id: "dom_deploy",
+      project_id: project.id,
+      hostname: "deploy.example.com",
+      cf_hostname_id: "ch-deploy",
+      status: "active",
+    });
 
     // Insert a pending domain (should NOT get KV routing)
-    await env.DB.prepare(
-      "INSERT INTO domains (id, project_id, hostname, cf_hostname_id, status) VALUES (?, ?, ?, ?, ?)",
-    )
-      .bind("dom_pending", project.id, "pending.example.com", "ch-pending", "pending")
-      .run();
+    await env.db.insert(domains).values({
+      id: "dom_pending",
+      project_id: project.id,
+      hostname: "pending.example.com",
+      cf_hostname_id: "ch-pending",
+      status: "pending",
+    });
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -497,17 +507,18 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("returns 429 when deploy count exceeds plan limit", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "limit-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "limit-app");
     mockCfApi();
 
     // Insert 100 deployments created today (free tier limit)
     for (let i = 0; i < 100; i++) {
-      await env.DB.prepare(
-        "INSERT INTO deployments (id, project_id, status, created_at) VALUES (?, ?, 'live', datetime('now'))",
-      )
-        .bind(`dpl_limit_${i}`, project.id)
-        .run();
+      await env.db.insert(deployments).values({
+        id: `dpl_limit_${i}`,
+        project_id: project.id,
+        status: "live",
+        created_at: sql`datetime('now')`,
+      });
     }
 
     const res = await app.fetch(
@@ -525,17 +536,18 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("allows deploy when under plan limit", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "under-limit-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "under-limit-app");
     mockCfApi();
 
     // Insert 99 deployments (under free tier limit of 100)
     for (let i = 0; i < 99; i++) {
-      await env.DB.prepare(
-        "INSERT INTO deployments (id, project_id, status, created_at) VALUES (?, ?, 'live', datetime('now'))",
-      )
-        .bind(`dpl_under_${i}`, project.id)
-        .run();
+      await env.db.insert(deployments).values({
+        id: `dpl_under_${i}`,
+        project_id: project.id,
+        status: "live",
+        created_at: sql`datetime('now')`,
+      });
     }
 
     const res = await app.fetch(
@@ -550,8 +562,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("includes limits in KV routing entry matching user plan", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "limits-kv-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "limits-kv-app");
     mockCfApi();
 
     const res = await app.fetch(
@@ -571,8 +583,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("omits limits for custom plan (all unlimited)", async () => {
-    const user = await createTestUser(env.DB, "customuser", "github", undefined, "custom");
-    const project = await createTestProject(env.DB, user.id, "custom-plan-app");
+    const user = await createTestUser(env.db, "customuser", "github", undefined, "custom");
+    const project = await createTestProject(env.db, user.id, "custom-plan-app");
     mockCfApi();
 
     const res = await app.fetch(
@@ -590,8 +602,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("includes manifest vars as plain_text bindings in worker upload", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "vars-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "vars-app");
     const fetchMock = mockCfApi();
 
     const res = await app.fetch(
@@ -632,8 +644,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("marks deployment failed when worker upload fails", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "fail-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "fail-app");
     mockCfApi({
       uploadWorker: () => new Response("internal error", { status: 500 }),
     });
@@ -651,18 +663,18 @@ describe("POST /projects/:id/deploy", () => {
     expect(body.error).toBe("worker upload failed");
 
     // Verify deployment is marked failed with error message
-    const dpl = await env.DB.prepare(
-      "SELECT status, error_message FROM deployments WHERE project_id = ?",
-    )
-      .bind(project.id)
-      .first<{ status: string; error_message: string | null }>();
+    const dpl = await env.db
+      .select({ status: deployments.status, error_message: deployments.error_message })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id))
+      .get();
     expect(dpl?.status).toBe("failed");
     expect(dpl?.error_message).toContain("worker upload failed:");
   });
 
   it("provisions queue and adds consumer on deploy with queues manifest", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "queue-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "queue-app");
     const fetchMock = mockCfApi();
 
     const res = await app.fetch(
@@ -681,12 +693,12 @@ describe("POST /projects/:id/deploy", () => {
     expect(res.status).toBe(200);
 
     // Verify queue resource was created in D1
-    const resource = await env.DB.prepare(
-      "SELECT * FROM resources WHERE project_id = ? AND type = 'queue'",
-    )
-      .bind(project.id)
-      .first<{ cf_id: string; binding_name: string }>();
-    expect(resource).not.toBeNull();
+    const resource = await env.db
+      .select({ cf_id: resources.cf_id, binding_name: resources.binding_name })
+      .from(resources)
+      .where(eq(resources.project_id, project.id))
+      .get();
+    expect(resource).toBeDefined();
     expect(resource!.cf_id).toBe("queue-test-id");
     expect(resource!.binding_name).toBe("emails");
 
@@ -699,8 +711,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("includes queue producer binding in worker upload metadata", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "queue-binding-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "queue-binding-app");
     const fetchMock = mockCfApi();
 
     const res = await app.fetch(
@@ -738,8 +750,8 @@ describe("POST /projects/:id/deploy", () => {
   });
 
   it("writes queue routing entry to KV", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "queue-kv-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "queue-kv-app");
     mockCfApi();
 
     const res = await app.fetch(
@@ -792,8 +804,8 @@ function buildStaticDeployForm(opts: {
 
 describe("POST /projects/:id/deploy (static)", () => {
   it("succeeds with static SPA deploy (no worker upload)", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "spa-site");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "spa-site");
     // No mockCfApi needed — static deploys don't call CF API
 
     const res = await app.fetch(
@@ -824,8 +836,8 @@ describe("POST /projects/:id/deploy (static)", () => {
   });
 
   it("stores static assets in R2", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "static-r2");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "static-r2");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -853,8 +865,8 @@ describe("POST /projects/:id/deploy (static)", () => {
   });
 
   it("writes KV routing with mode for static SPA", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "kv-spa");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "kv-spa");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -875,8 +887,8 @@ describe("POST /projects/:id/deploy (static)", () => {
   });
 
   it("includes header rules in KV routing when manifest has headers", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "headers-spa");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "headers-spa");
 
     const headers = [
       { pattern: "/*", headers: [["X-Frame-Options", "DENY"]] as [string, string][] },
@@ -906,8 +918,8 @@ describe("POST /projects/:id/deploy (static)", () => {
   });
 
   it("writes KV routing with mode for static SSG", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "kv-ssg");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "kv-ssg");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -928,8 +940,8 @@ describe("POST /projects/:id/deploy (static)", () => {
   });
 
   it("updates project mode column on static deploy", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "mode-update");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "mode-update");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -941,17 +953,19 @@ describe("POST /projects/:id/deploy (static)", () => {
     );
     expect(res.status).toBe(200);
 
-    const row = await env.DB.prepare("SELECT mode FROM projects WHERE id = ?")
-      .bind(project.id)
-      .first<{ mode: string }>();
+    const row = await env.db
+      .select({ mode: projects.mode })
+      .from(projects)
+      .where(eq(projects.id, project.id))
+      .get();
     expect(row?.mode).toBe("ssg");
   });
 });
 
 describe("POST /projects/:id/assets/check", () => {
   it("returns all paths as needed when no manifest exists", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "check-new");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "check-new");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/assets/check`, {
@@ -972,8 +986,8 @@ describe("POST /projects/:id/assets/check", () => {
   });
 
   it("returns empty needed list when all hashes match", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "check-match");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "check-match");
 
     // Seed manifest
     await env.ASSETS.put(
@@ -1000,8 +1014,8 @@ describe("POST /projects/:id/assets/check", () => {
   });
 
   it("returns only changed and new paths", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "check-partial");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "check-partial");
 
     // Seed manifest with two files
     await env.ASSETS.put(
@@ -1044,9 +1058,9 @@ describe("POST /projects/:id/assets/check", () => {
   });
 
   it("returns 403 when user does not own project", async () => {
-    const alice = await createTestUser(env.DB, "alice-check");
-    const bob = await createTestUser(env.DB, "bob-check");
-    const project = await createTestProject(env.DB, alice.id, "check-forbidden");
+    const alice = await createTestUser(env.db, "alice-check");
+    const bob = await createTestUser(env.db, "bob-check");
+    const project = await createTestProject(env.db, alice.id, "check-forbidden");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/assets/check`, {
@@ -1065,8 +1079,8 @@ describe("POST /projects/:id/assets/check", () => {
 
 describe("Deploy with assetHashes (manifest management)", () => {
   it("writes asset manifest to R2 on deploy", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "manifest-write");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "manifest-write");
 
     const hashes = { "index.html": "aaa111", "assets/app.js": "bbb222" };
     const res = await app.fetch(
@@ -1090,8 +1104,8 @@ describe("Deploy with assetHashes (manifest management)", () => {
   });
 
   it("deletes stale R2 objects on deploy", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "manifest-stale");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "manifest-stale");
 
     // Seed old manifest and R2 objects
     await env.ASSETS.put(

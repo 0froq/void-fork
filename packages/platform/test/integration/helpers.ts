@@ -1,35 +1,11 @@
 import { Miniflare } from "miniflare";
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { vi } from "vitest";
+import { migrate } from "drizzle-orm/d1/migrator";
+import { createDb, type Db } from "../../src/db";
+import { users, projects, deployments, resources, domains } from "../../src/schema";
 import { signJwt } from "../../src/auth/jwt";
-
-const MIGRATION_0001 = fileURLToPath(new URL("../../migrations/0001_initial.sql", import.meta.url));
-const MIGRATION_0002 = fileURLToPath(
-  new URL("../../migrations/0002_provider_auth.sql", import.meta.url),
-);
-const MIGRATION_0003 = fileURLToPath(
-  new URL("../../migrations/0003_project_mode.sql", import.meta.url),
-);
-const MIGRATION_0004 = fileURLToPath(
-  new URL("../../migrations/0004_deployment_source.sql", import.meta.url),
-);
-const MIGRATION_0005 = fileURLToPath(new URL("../../migrations/0005_domains.sql", import.meta.url));
-const MIGRATION_0006 = fileURLToPath(
-  new URL("../../migrations/0006_usage_tiers.sql", import.meta.url),
-);
-const MIGRATION_0007 = fileURLToPath(
-  new URL("../../migrations/0007_billing_cycle.sql", import.meta.url),
-);
-const MIGRATION_0008 = fileURLToPath(
-  new URL("../../migrations/0008_user_roles.sql", import.meta.url),
-);
-const MIGRATION_0009 = fileURLToPath(
-  new URL("../../migrations/0009_deployment_errors.sql", import.meta.url),
-);
-const MIGRATION_0010 = fileURLToPath(
-  new URL("../../migrations/0010_drop_project_name.sql", import.meta.url),
-);
+import type { PlanId } from "../../src/tiers";
 
 export const JWT_SECRET = "test-jwt-secret";
 export const CF_API_TOKEN = "test-cf-token";
@@ -38,6 +14,7 @@ export const CF_ZONE_ID = "test-zone-id";
 
 export type TestEnv = {
   DB: D1Database;
+  db: Db;
   ASSETS: R2Bucket;
   ROUTING: KVNamespace;
   DISPATCH: DispatchNamespace;
@@ -56,13 +33,6 @@ export type TestEnv = {
 
 let mf: Miniflare;
 
-function splitStatements(sql: string): string[] {
-  return sql
-    .split(";")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
 export async function setupEnv(): Promise<TestEnv> {
   mf = new Miniflare({
     modules: true,
@@ -72,61 +42,18 @@ export async function setupEnv(): Promise<TestEnv> {
     r2Buckets: ["ASSETS"],
   });
 
-  const db = await mf.getD1Database("DB");
+  const d1 = await mf.getD1Database("DB");
   const kv = await mf.getKVNamespace("ROUTING");
   const r2 = await mf.getR2Bucket("ASSETS");
 
-  // Apply migrations sequentially
-  const schema1 = readFileSync(MIGRATION_0001, "utf-8");
-  await db.batch(splitStatements(schema1).map((s) => db.prepare(s)));
-
-  const schema2 = readFileSync(MIGRATION_0002, "utf-8");
-  for (const stmt of splitStatements(schema2)) {
-    await db.prepare(stmt).run();
-  }
-
-  const schema3 = readFileSync(MIGRATION_0003, "utf-8");
-  for (const stmt of splitStatements(schema3)) {
-    await db.prepare(stmt).run();
-  }
-
-  const schema4 = readFileSync(MIGRATION_0004, "utf-8");
-  for (const stmt of splitStatements(schema4)) {
-    await db.prepare(stmt).run();
-  }
-
-  const schema5 = readFileSync(MIGRATION_0005, "utf-8");
-  for (const stmt of splitStatements(schema5)) {
-    await db.prepare(stmt).run();
-  }
-
-  const schema6 = readFileSync(MIGRATION_0006, "utf-8");
-  for (const stmt of splitStatements(schema6)) {
-    await db.prepare(stmt).run();
-  }
-
-  const schema7 = readFileSync(MIGRATION_0007, "utf-8");
-  for (const stmt of splitStatements(schema7)) {
-    await db.prepare(stmt).run();
-  }
-
-  const schema8 = readFileSync(MIGRATION_0008, "utf-8");
-  for (const stmt of splitStatements(schema8)) {
-    await db.prepare(stmt).run();
-  }
-
-  const schema9 = readFileSync(MIGRATION_0009, "utf-8");
-  for (const stmt of splitStatements(schema9)) {
-    await db.prepare(stmt).run();
-  }
-
-  const schema10 = readFileSync(MIGRATION_0010, "utf-8");
-  for (const stmt of splitStatements(schema10)) {
-    await db.prepare(stmt).run();
-  }
+  const db = createDb(d1);
+  await migrate(db, {
+    migrationsFolder: fileURLToPath(new URL("../../drizzle", import.meta.url)),
+  });
 
   return {
-    DB: db,
+    DB: d1,
+    db,
     ASSETS: r2 as unknown as R2Bucket,
     ROUTING: kv as unknown as KVNamespace,
     DISPATCH: {} as DispatchNamespace,
@@ -145,34 +72,35 @@ export async function teardownEnv(): Promise<void> {
   await mf.dispose();
 }
 
-export async function clearTables(db: D1Database): Promise<void> {
-  await db.batch([
-    db.prepare("DELETE FROM domains"),
-    db.prepare("DELETE FROM resources"),
-    db.prepare("DELETE FROM deployments"),
-    db.prepare("DELETE FROM projects"),
-    db.prepare("DELETE FROM users"),
-  ]);
+export async function clearTables(db: Db): Promise<void> {
+  await db.delete(domains);
+  await db.delete(resources);
+  await db.delete(deployments);
+  await db.delete(projects);
+  await db.delete(users);
 }
 
 let userCounter = 0;
 
 export async function createTestUser(
-  db: D1Database,
+  db: Db,
   login = "testuser",
   provider = "github",
   providerId?: string,
-  plan = "free",
+  plan: PlanId = "free",
   role: "user" | "admin" = "user",
 ): Promise<{ id: string; login: string; jwt: string }> {
   const id = `user_test${++userCounter}`;
   const pid = providerId ?? String(10000 + userCounter);
-  await db
-    .prepare(
-      "INSERT INTO users (id, provider, provider_id, login, email, plan, role, github_id, github_login) VALUES (?, ?, ?, ?, ?, ?, ?, ABS(RANDOM()), ?)",
-    )
-    .bind(id, provider, pid, login, null, plan, role, login)
-    .run();
+  await db.insert(users).values({
+    id,
+    provider,
+    provider_id: pid,
+    login,
+    email: null,
+    plan,
+    role,
+  });
   const jwt = await signJwt({ sub: id, login }, JWT_SECRET);
   return { id, login, jwt };
 }
@@ -180,24 +108,21 @@ export async function createTestUser(
 let projectCounter = 0;
 
 export async function createTestProject(
-  db: D1Database,
+  db: Db,
   userId: string,
   slug?: string,
 ): Promise<{ id: string; slug: string }> {
   const n = ++projectCounter;
   const s = slug ?? `test-project-${n}`;
   const id = `proj_test${n}`;
-  await db
-    .prepare("INSERT INTO projects (id, user_id, slug) VALUES (?, ?, ?)")
-    .bind(id, userId, s)
-    .run();
+  await db.insert(projects).values({ id, user_id: userId, slug: s });
   return { id, slug: s };
 }
 
 let deploymentCounter = 0;
 
 export async function createTestDeployment(
-  db: D1Database,
+  db: Db,
   projectId: string,
   status: "pending" | "live" | "failed" = "live",
   source?: string,
@@ -205,12 +130,13 @@ export async function createTestDeployment(
 ): Promise<{ id: string }> {
   const n = ++deploymentCounter;
   const id = `dpl_test${n}`;
-  await db
-    .prepare(
-      "INSERT INTO deployments (id, project_id, status, source, error_message) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind(id, projectId, status, source ?? null, errorMessage ?? null)
-    .run();
+  await db.insert(deployments).values({
+    id,
+    project_id: projectId,
+    status,
+    source: source ?? null,
+    error_message: errorMessage ?? null,
+  });
   return { id };
 }
 

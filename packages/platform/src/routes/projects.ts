@@ -16,12 +16,12 @@ const app = new Hono<PlatformEnv>();
 // List all projects for the current user
 app.get("/", async (c) => {
   const userId = c.get("userId");
-  const projects = await getProjectsByUserId(c.env.DB, userId);
+  const projects = await getProjectsByUserId(c.get("db"), userId);
 
   // Batch-fetch active custom domains for all projects
   const projectsWithDomains = await Promise.all(
     projects.map(async (p) => {
-      const domains = await getDomainsByProjectId(c.env.DB, p.id);
+      const domains = await getDomainsByProjectId(c.get("db"), p.id);
       const domain = domains.find((d) => d.status === "active") ?? domains[0];
       return { ...p, custom_domain: domain?.hostname ?? null };
     }),
@@ -44,19 +44,19 @@ app.post("/", async (c) => {
   }
 
   // Check for slug uniqueness
-  const existing = await getProjectBySlug(c.env.DB, body.slug);
+  const existing = await getProjectBySlug(c.get("db"), body.slug);
   if (existing) {
     return c.json({ error: "slug already taken" }, 409);
   }
 
   const userId = c.get("userId");
-  const project = await createProject(c.env.DB, userId, body.slug);
+  const project = await createProject(c.get("db"), userId, body.slug);
   return c.json(project, 201);
 });
 
 // Get project by ID
 app.get("/:id", async (c) => {
-  const project = await getProject(c.env.DB, c.req.param("id"));
+  const project = await getProject(c.get("db"), c.req.param("id"));
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }
@@ -65,7 +65,7 @@ app.get("/:id", async (c) => {
 
 // List deployments for a project
 app.get("/:id/deployments", async (c) => {
-  const project = await getProject(c.env.DB, c.req.param("id"));
+  const project = await getProject(c.get("db"), c.req.param("id"));
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }
@@ -74,13 +74,13 @@ app.get("/:id/deployments", async (c) => {
     return c.json({ error: "forbidden" }, 403);
   }
 
-  const deployments = await getProjectDeployments(c.env.DB, project.id);
+  const deployments = await getProjectDeployments(c.get("db"), project.id);
   return c.json(deployments);
 });
 
 // Get migration status for a project
 app.get("/:id/migrations", async (c) => {
-  const project = await getProject(c.env.DB, c.req.param("id"));
+  const project = await getProject(c.get("db"), c.req.param("id"));
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }
@@ -89,7 +89,7 @@ app.get("/:id/migrations", async (c) => {
     return c.json({ error: "forbidden" }, 403);
   }
 
-  const resources = await getProjectResources(c.env.DB, project.id);
+  const resources = await getProjectResources(c.get("db"), project.id);
   const d1Resource = resources.find((r) => r.type === "d1");
   if (!d1Resource) {
     return c.json({ applied: [] });

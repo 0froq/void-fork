@@ -22,7 +22,7 @@ const app = new Hono<PlatformEnv>();
 // Add a custom domain to a project
 app.post("/:id/domains", async (c) => {
   const projectId = c.req.param("id");
-  const project = await getProject(c.env.DB, projectId);
+  const project = await getProject(c.get("db"), projectId);
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }
@@ -49,7 +49,7 @@ app.post("/:id/domains", async (c) => {
   }
 
   // Uniqueness check
-  const existing = await getDomainByHostname(c.env.DB, hostname);
+  const existing = await getDomainByHostname(c.get("db"), hostname);
   if (existing) {
     return c.json({ error: "hostname already in use" }, 409);
   }
@@ -58,7 +58,7 @@ app.post("/:id/domains", async (c) => {
   const cfHostname = await createCustomHostname(c.env.CF_ZONE_ID, c.env.CF_API_TOKEN, hostname);
 
   // Insert domain record
-  const domain = await createDomain(c.env.DB, projectId, hostname, cfHostname.id);
+  const domain = await createDomain(c.get("db"), projectId, hostname, cfHostname.id);
 
   return c.json({
     ...domain,
@@ -69,7 +69,7 @@ app.post("/:id/domains", async (c) => {
 // List domains for a project
 app.get("/:id/domains", async (c) => {
   const projectId = c.req.param("id");
-  const project = await getProject(c.env.DB, projectId);
+  const project = await getProject(c.get("db"), projectId);
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }
@@ -78,7 +78,7 @@ app.get("/:id/domains", async (c) => {
     return c.json({ error: "forbidden" }, 403);
   }
 
-  const domains = await getDomainsByProjectId(c.env.DB, projectId);
+  const domains = await getDomainsByProjectId(c.get("db"), projectId);
   return c.json(domains);
 });
 
@@ -87,7 +87,7 @@ app.get("/:id/domains/:domainId", async (c) => {
   const projectId = c.req.param("id");
   const domainId = c.req.param("domainId");
 
-  const project = await getProject(c.env.DB, projectId);
+  const project = await getProject(c.get("db"), projectId);
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }
@@ -96,7 +96,7 @@ app.get("/:id/domains/:domainId", async (c) => {
     return c.json({ error: "forbidden" }, 403);
   }
 
-  const domain = await getDomain(c.env.DB, domainId);
+  const domain = await getDomain(c.get("db"), domainId);
   if (!domain || domain.project_id !== projectId) {
     return c.json({ error: "domain not found" }, 404);
   }
@@ -110,7 +110,7 @@ app.get("/:id/domains/:domainId", async (c) => {
 
   // If CF says active and DB says pending, update DB + write KV routing entry
   if (cfHostname.status === "active" && domain.status === "pending") {
-    await updateDomainStatus(c.env.DB, domain.id, "active");
+    await updateDomainStatus(c.get("db"), domain.id, "active");
 
     // Write KV routing entry for this domain
     const slugRouting = await c.env.ROUTING.get(project.slug);
@@ -132,7 +132,7 @@ app.delete("/:id/domains/:domainId", async (c) => {
   const projectId = c.req.param("id");
   const domainId = c.req.param("domainId");
 
-  const project = await getProject(c.env.DB, projectId);
+  const project = await getProject(c.get("db"), projectId);
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }
@@ -141,7 +141,7 @@ app.delete("/:id/domains/:domainId", async (c) => {
     return c.json({ error: "forbidden" }, 403);
   }
 
-  const domain = await getDomain(c.env.DB, domainId);
+  const domain = await getDomain(c.get("db"), domainId);
   if (!domain || domain.project_id !== projectId) {
     return c.json({ error: "domain not found" }, 404);
   }
@@ -153,7 +153,7 @@ app.delete("/:id/domains/:domainId", async (c) => {
   await c.env.ROUTING.delete(`domain:${domain.hostname}`);
 
   // Delete DB record
-  await deleteDomain(c.env.DB, domain.id);
+  await deleteDomain(c.get("db"), domain.id);
 
   return c.json({ ok: true });
 });

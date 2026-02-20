@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
 import app from "../../src/index";
+import { eq } from "drizzle-orm";
+import { resources, projects, deployments } from "../../src/schema";
 import {
   setupEnv,
   teardownEnv,
@@ -22,7 +24,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await clearTables(env.DB);
+  await clearTables(env.db);
 });
 
 afterEach(() => {
@@ -35,11 +37,13 @@ async function addResource(
   cfId: string,
   bindingName: string,
 ): Promise<void> {
-  await env.DB.prepare(
-    "INSERT INTO resources (id, project_id, type, cf_id, binding_name) VALUES (?, ?, ?, ?, ?)",
-  )
-    .bind(`res_${type}_${cfId}`, projectId, type, cfId, bindingName)
-    .run();
+  await env.db.insert(resources).values({
+    id: `res_${type}_${cfId}`,
+    project_id: projectId,
+    type,
+    cf_id: cfId,
+    binding_name: bindingName,
+  });
 }
 
 describe("DELETE /projects/:id", () => {
@@ -54,7 +58,7 @@ describe("DELETE /projects/:id", () => {
   });
 
   it("returns 404 for nonexistent project", async () => {
-    const user = await createTestUser(env.DB);
+    const user = await createTestUser(env.db);
     mockCfApi();
 
     const res = await app.fetch(
@@ -69,9 +73,9 @@ describe("DELETE /projects/:id", () => {
   });
 
   it("returns 403 when user does not own project", async () => {
-    const alice = await createTestUser(env.DB, "alice");
-    const bob = await createTestUser(env.DB, "bob");
-    const project = await createTestProject(env.DB, alice.id, "alice-app");
+    const alice = await createTestUser(env.db, "alice");
+    const bob = await createTestUser(env.db, "bob");
+    const project = await createTestProject(env.db, alice.id, "alice-app");
     mockCfApi();
 
     const res = await app.fetch(
@@ -86,8 +90,8 @@ describe("DELETE /projects/:id", () => {
   });
 
   it("deletes project with no resources", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "empty-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "empty-app");
     mockCfApi();
 
     const res = await app.fetch(
@@ -102,15 +106,13 @@ describe("DELETE /projects/:id", () => {
     expect(body).toEqual({ ok: true, id: project.id, slug: "empty-app" });
 
     // Verify project is gone from DB
-    const dbProject = await env.DB.prepare("SELECT * FROM projects WHERE id = ?")
-      .bind(project.id)
-      .first();
-    expect(dbProject).toBeNull();
+    const dbProject = await env.db.select().from(projects).where(eq(projects.id, project.id)).get();
+    expect(dbProject).toBeUndefined();
   });
 
   it("deletes project with resources, assets, and routing", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "full-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "full-app");
     mockCfApi();
 
     // Add resources
@@ -119,9 +121,11 @@ describe("DELETE /projects/:id", () => {
     await addResource(project.id, "r2", "r2-bucket-789", "STORAGE");
 
     // Add a deployment
-    await env.DB.prepare("INSERT INTO deployments (id, project_id, status) VALUES (?, ?, ?)")
-      .bind("dpl_test1", project.id, "live")
-      .run();
+    await env.db.insert(deployments).values({
+      id: "dpl_test1",
+      project_id: project.id,
+      status: "live",
+    });
 
     // Add R2 assets
     await env.ASSETS.put(`${project.id}/current/index.html`, "<h1>Hello</h1>");
@@ -145,20 +149,22 @@ describe("DELETE /projects/:id", () => {
     expect(body).toEqual({ ok: true, id: project.id, slug: "full-app" });
 
     // Verify DB records are gone
-    const dbProject = await env.DB.prepare("SELECT * FROM projects WHERE id = ?")
-      .bind(project.id)
-      .first();
-    expect(dbProject).toBeNull();
+    const dbProject = await env.db.select().from(projects).where(eq(projects.id, project.id)).get();
+    expect(dbProject).toBeUndefined();
 
-    const dbResources = await env.DB.prepare("SELECT * FROM resources WHERE project_id = ?")
-      .bind(project.id)
+    const dbResources = await env.db
+      .select()
+      .from(resources)
+      .where(eq(resources.project_id, project.id))
       .all();
-    expect(dbResources.results).toHaveLength(0);
+    expect(dbResources).toHaveLength(0);
 
-    const dbDeployments = await env.DB.prepare("SELECT * FROM deployments WHERE project_id = ?")
-      .bind(project.id)
+    const dbDeployments = await env.db
+      .select()
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id))
       .all();
-    expect(dbDeployments.results).toHaveLength(0);
+    expect(dbDeployments).toHaveLength(0);
 
     // Verify R2 assets cleaned up
     const listed = await env.ASSETS.list({ prefix: `${project.id}/` });
@@ -170,8 +176,8 @@ describe("DELETE /projects/:id", () => {
   });
 
   it("returns warnings on CF resource deletion failure", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "warn-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "warn-app");
     mockCfApi({
       deleteD1: () => cfError("database not found", 404),
     });
@@ -193,17 +199,15 @@ describe("DELETE /projects/:id", () => {
     expect(body.warnings![0]).toContain("d1");
 
     // Project should still be deleted from DB despite warnings
-    const dbProject = await env.DB.prepare("SELECT * FROM projects WHERE id = ?")
-      .bind(project.id)
-      .first();
-    expect(dbProject).toBeNull();
+    const dbProject = await env.db.select().from(projects).where(eq(projects.id, project.id)).get();
+    expect(dbProject).toBeUndefined();
   });
 
   it("does not warn when worker 404s (static project)", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "static-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "static-app");
     // Set mode to spa (static project — no worker deployed)
-    await env.DB.prepare("UPDATE projects SET mode = ? WHERE id = ?").bind("spa", project.id).run();
+    await env.db.update(projects).set({ mode: "spa" }).where(eq(projects.id, project.id));
     mockCfApi({
       deleteWorker: () => new Response("not found", { status: 404 }),
     });
@@ -222,8 +226,8 @@ describe("DELETE /projects/:id", () => {
   });
 
   it("calls worker dispatch deletion", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "worker-del");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "worker-del");
     const fetchMock = mockCfApi();
 
     const res = await app.fetch(

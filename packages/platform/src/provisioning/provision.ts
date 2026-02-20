@@ -1,5 +1,5 @@
 import type { DeployManifest, Resource } from "../types";
-import { getProjectResources, createResource } from "../db";
+import { getProjectResources, createResource, type Db } from "../db";
 import { createD1Database, createKVNamespace, createR2Bucket, createQueue } from "./cloudflare-api";
 
 export interface WorkerBinding {
@@ -12,7 +12,7 @@ export interface WorkerBinding {
 }
 
 export async function provisionBindings(
-  db: D1Database,
+  db: Db,
   accountId: string,
   apiToken: string,
   projectId: string,
@@ -57,7 +57,7 @@ export async function provisionBindings(
 }
 
 async function ensureResource(
-  db: D1Database,
+  db: Db,
   accountId: string,
   apiToken: string,
   projectId: string,

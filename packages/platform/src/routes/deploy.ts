@@ -25,7 +25,7 @@ const app = new Hono<PlatformEnv>();
 // Check which assets need uploading
 app.post("/:id/assets/check", async (c) => {
   const projectId = c.req.param("id");
-  const project = await getProject(c.env.DB, projectId);
+  const project = await getProject(c.get("db"), projectId);
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }
@@ -44,7 +44,7 @@ app.post("/:id/assets/check", async (c) => {
 // Deploy to a project
 app.post("/:id/deploy", async (c) => {
   const projectId = c.req.param("id");
-  const project = await getProject(c.env.DB, projectId);
+  const project = await getProject(c.get("db"), projectId);
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }
@@ -54,10 +54,10 @@ app.post("/:id/deploy", async (c) => {
   }
 
   // Enforce deploy count limit
-  const user = await getUser(c.env.DB, c.get("userId"));
+  const user = await getUser(c.get("db"), c.get("userId"));
   const planLimits = getPlanLimits(user?.plan ?? "free");
   if (planLimits.deploysPerDay > 0) {
-    const todayCount = await countUserDeploymentsToday(c.env.DB, c.get("userId"));
+    const todayCount = await countUserDeploymentsToday(c.get("db"), c.get("userId"));
     if (!isWithinLimit(planLimits.deploysPerDay, todayCount)) {
       return c.json({ error: "deploy limit exceeded", limit: planLimits.deploysPerDay }, 429);
     }
@@ -71,12 +71,12 @@ app.post("/:id/deploy", async (c) => {
   const source = (formData.get("source") as string | null) ?? null;
 
   // Create deployment record
-  const deployment = await createDeployment(c.env.DB, projectId, manifestRaw, source);
+  const deployment = await createDeployment(c.get("db"), projectId, manifestRaw, source);
 
   try {
     // Static-only deploy path: skip worker upload, bindings, and migrations
     if (manifest.static) {
-      await updateDeploymentStatus(c.env.DB, deployment.id, "uploading");
+      await updateDeploymentStatus(c.get("db"), deployment.id, "uploading");
 
       // Upload static assets to R2 (concurrency-limited to match Workers connection limit)
       const assetUploads = collectAssetEntries(formData);
@@ -117,7 +117,7 @@ app.post("/:id/deploy", async (c) => {
       await c.env.ROUTING.put(project.slug, staticRoutingJson);
 
       // Update KV routing for active custom domains
-      const staticDomains = await getDomainsByProjectId(c.env.DB, projectId);
+      const staticDomains = await getDomainsByProjectId(c.get("db"), projectId);
       for (const domain of staticDomains) {
         if (domain.status === "active") {
           await c.env.ROUTING.put(`domain:${domain.hostname}`, staticRoutingJson);
@@ -125,8 +125,8 @@ app.post("/:id/deploy", async (c) => {
       }
 
       // Mark deployment as live + update project mode
-      await updateDeploymentStatus(c.env.DB, deployment.id, "live");
-      await updateProjectMode(c.env.DB, projectId, manifest.static);
+      await updateDeploymentStatus(c.get("db"), deployment.id, "live");
+      await updateProjectMode(c.get("db"), projectId, manifest.static);
 
       const siteDomain = c.env.SITE_DOMAIN ?? DEFAULT_SITE_DOMAIN;
       const staticActiveDomains = staticDomains.filter((d) => d.status === "active");
@@ -148,11 +148,11 @@ app.post("/:id/deploy", async (c) => {
     }
 
     // Full deploy path (existing behavior)
-    await updateDeploymentStatus(c.env.DB, deployment.id, "uploading");
+    await updateDeploymentStatus(c.get("db"), deployment.id, "uploading");
 
     // Provision bindings (D1, KV, R2) — creates CF resources if needed
     const workerBindings = await provisionBindings(
-      c.env.DB,
+      c.get("db"),
       c.env.CF_ACCOUNT_ID,
       c.env.CF_API_TOKEN,
       projectId,
@@ -171,7 +171,7 @@ app.post("/:id/deploy", async (c) => {
         const validation = validateMigrationSQL(sql);
         if (!validation.allowed) {
           const msg = `destructive migration rejected: ${name}`;
-          await updateDeploymentStatus(c.env.DB, deployment.id, "failed", msg);
+          await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
           return c.json({ error: msg }, 400);
         }
 
@@ -184,11 +184,11 @@ app.post("/:id/deploy", async (c) => {
       const d1Resource = workerBindings.find((b) => b.type === "d1");
       if (!d1Resource || !d1Resource.id) {
         const msg = "migrations require a D1 database but none is provisioned";
-        await updateDeploymentStatus(c.env.DB, deployment.id, "failed", msg);
+        await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
         return c.json({ error: msg }, 400);
       }
 
-      await updateDeploymentStatus(c.env.DB, deployment.id, "migrating");
+      await updateDeploymentStatus(c.get("db"), deployment.id, "migrating");
 
       try {
         const result = await runRemoteMigrations(
@@ -200,7 +200,7 @@ app.post("/:id/deploy", async (c) => {
         migrationsApplied = result.applied.length;
       } catch (err) {
         const msg = `migration failed: ${err instanceof Error ? err.message : String(err)}`;
-        await updateDeploymentStatus(c.env.DB, deployment.id, "failed", msg);
+        await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
         return c.json(
           {
             error: "migration failed",
@@ -284,7 +284,7 @@ app.post("/:id/deploy", async (c) => {
     if (!cfResponse.ok) {
       const error = await cfResponse.text();
       const msg = `worker upload failed: ${error}`;
-      await updateDeploymentStatus(c.env.DB, deployment.id, "failed", msg);
+      await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
       return c.json({ error: "worker upload failed", details: error }, 502);
     }
 
@@ -375,7 +375,7 @@ app.post("/:id/deploy", async (c) => {
     await c.env.ROUTING.put(project.slug, routingJson);
 
     // Update KV routing for active custom domains
-    const fullDomains = await getDomainsByProjectId(c.env.DB, projectId);
+    const fullDomains = await getDomainsByProjectId(c.get("db"), projectId);
     for (const domain of fullDomains) {
       if (domain.status === "active") {
         await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
@@ -383,8 +383,8 @@ app.post("/:id/deploy", async (c) => {
     }
 
     // 7. Mark deployment as live + update project mode
-    await updateDeploymentStatus(c.env.DB, deployment.id, "live");
-    await updateProjectMode(c.env.DB, projectId, manifest.framework ? "framework" : "fullstack");
+    await updateDeploymentStatus(c.get("db"), deployment.id, "live");
+    await updateProjectMode(c.get("db"), projectId, manifest.framework ? "framework" : "fullstack");
 
     const siteDomain = c.env.SITE_DOMAIN ?? DEFAULT_SITE_DOMAIN;
     const fullActiveDomains = fullDomains.filter((d) => d.status === "active");
@@ -406,7 +406,7 @@ app.post("/:id/deploy", async (c) => {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await updateDeploymentStatus(c.env.DB, deployment.id, "failed", msg);
+    await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
     throw err;
   }
 });

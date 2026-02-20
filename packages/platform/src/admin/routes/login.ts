@@ -4,7 +4,7 @@ import type { PlatformEnv } from "../../env";
 import { getGoogleAuthorizeUrl, exchangeCodeForToken, getGoogleUser } from "../../auth/google";
 import { signJwt } from "../../auth/jwt";
 import { hmacSignState, hmacVerifyState } from "../../auth/hmac";
-import { getUserByProvider, getUserByEmail } from "../../db";
+import { getUserByProvider, getUserByEmail, updateUserProviderId } from "../../db";
 
 const app = new Hono<PlatformEnv>();
 
@@ -74,16 +74,14 @@ app.get("/callback", async (c) => {
   const providerId = googleUser.id;
   const login = googleUser.email;
 
-  let user = await getUserByProvider(c.env.DB, "google", providerId);
+  let user = await getUserByProvider(c.get("db"), "google", providerId);
 
   // Fall back to email lookup — handles first login after seeding by email
   if (!user) {
-    const byEmail = await getUserByEmail(c.env.DB, login);
+    const byEmail = await getUserByEmail(c.get("db"), login);
     if (byEmail && byEmail.provider === "google") {
       // Backfill the real provider_id so future logins match directly
-      await c.env.DB.prepare("UPDATE users SET provider_id = ? WHERE id = ?")
-        .bind(providerId, byEmail.id)
-        .run();
+      await updateUserProviderId(c.get("db"), byEmail.id, providerId);
       user = byEmail;
     }
   }

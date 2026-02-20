@@ -112,13 +112,13 @@ app.get("/callback", async (c) => {
   }
 
   // Upsert user
-  let user = await getUserByProvider(c.env.DB, resolvedProvider, providerId);
+  let user = await getUserByProvider(c.get("db"), resolvedProvider, providerId);
   if (user) {
-    await updateUser(c.env.DB, user.id, login, email);
+    await updateUser(c.get("db"), user.id, login, email);
   } else {
     // Check for duplicate email across providers
     if (email) {
-      const existing = await getUserByEmail(c.env.DB, email);
+      const existing = await getUserByEmail(c.get("db"), email);
       if (existing) {
         const redirectUrl = new URL(redirect);
         redirectUrl.searchParams.set("error", "email_conflict");
@@ -134,7 +134,7 @@ app.get("/callback", async (c) => {
         return c.redirect(redirectUrl.toString());
       }
     }
-    user = await createUser(c.env.DB, resolvedProvider, providerId, login, email);
+    user = await createUser(c.get("db"), resolvedProvider, providerId, login, email);
   }
 
   // Sign JWT

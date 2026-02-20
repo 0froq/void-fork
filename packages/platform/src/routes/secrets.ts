@@ -17,7 +17,7 @@ app.put("/:id/secrets/:name", async (c) => {
     return c.json({ error: "invalid secret name" }, 400);
   }
 
-  const project = await getProject(c.env.DB, projectId);
+  const project = await getProject(c.get("db"), projectId);
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }
@@ -68,7 +68,7 @@ app.delete("/:id/secrets/:name", async (c) => {
     return c.json({ error: "invalid secret name" }, 400);
   }
 
-  const project = await getProject(c.env.DB, projectId);
+  const project = await getProject(c.get("db"), projectId);
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }

@@ -1,43 +1,11 @@
-export interface User {
-  id: string;
-  provider: string;
-  provider_id: string;
-  login: string;
-  email: string | null;
-  plan: string;
-  role: "user" | "admin";
-  billing_cycle_start: string;
-  suspended_reason: string | null;
-  created_at: string;
-}
+import type { InferSelectModel } from "drizzle-orm";
+import type { users, projects, deployments, resources, domains } from "./schema";
 
-export interface Project {
-  id: string;
-  user_id: string;
-  slug: string;
-  mode: string;
-  created_at: string;
-}
-
-export interface Deployment {
-  id: string;
-  project_id: string;
-  status: "pending" | "uploading" | "migrating" | "live" | "failed";
-  source: string | null;
-  manifest: string | null;
-  error_message: string | null;
-  created_at: string;
-  deployed_at: string | null;
-}
-
-export interface Resource {
-  id: string;
-  project_id: string;
-  type: "d1" | "kv" | "r2" | "queue";
-  cf_id: string;
-  binding_name: string;
-  created_at: string;
-}
+export type User = InferSelectModel<typeof users>;
+export type Project = InferSelectModel<typeof projects>;
+export type Deployment = InferSelectModel<typeof deployments>;
+export type Resource = InferSelectModel<typeof resources>;
+export type Domain = InferSelectModel<typeof domains>;
 
 export interface MigrationMeta {
   name: string;
@@ -59,15 +27,6 @@ export interface QueueMeta {
 export interface HeaderRule {
   pattern: string;
   headers: [string, string][];
-}
-
-export interface Domain {
-  id: string;
-  project_id: string;
-  hostname: string;
-  cf_hostname_id: string;
-  status: string;
-  created_at: string;
 }
 
 export interface DeployManifest {

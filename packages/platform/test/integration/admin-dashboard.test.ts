@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { app } from "../../src/index";
+import { deployments } from "../../src/schema";
 import {
   setupEnv,
   teardownEnv,
@@ -22,7 +23,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await clearTables(env.DB);
+  await clearTables(env.db);
 });
 
 function req(path: string, cookie?: string, init?: RequestInit): Response | Promise<Response> {
@@ -50,13 +51,13 @@ describe("auth middleware", () => {
   });
 
   test("returns 403 for non-admin user", async () => {
-    const user = await createTestUser(env.DB, "regular");
+    const user = await createTestUser(env.db, "regular");
     const res = await req("/admin/", user.jwt);
     expect(res.status).toBe(403);
   });
 
   test("allows admin user", async () => {
-    const admin = await createTestUser(env.DB, "admin", "github", undefined, "free", "admin");
+    const admin = await createTestUser(env.db, "admin", "github", undefined, "free", "admin");
     const res = await req("/admin/", admin.jwt);
     expect(res.status).toBe(200);
   });
@@ -64,9 +65,9 @@ describe("auth middleware", () => {
 
 describe("GET /admin/ (dashboard)", () => {
   test("renders dashboard with stats and projects", async () => {
-    const admin = await createTestUser(env.DB, "admin1", "github", undefined, "free", "admin");
-    await createTestUser(env.DB, "user1");
-    await createTestProject(env.DB, admin.id, "dash-proj");
+    const admin = await createTestUser(env.db, "admin1", "github", undefined, "free", "admin");
+    await createTestUser(env.db, "user1");
+    await createTestProject(env.db, admin.id, "dash-proj");
 
     const res = await req("/admin/", admin.jwt);
     expect(res.status).toBe(200);
@@ -78,7 +79,7 @@ describe("GET /admin/ (dashboard)", () => {
   });
 
   test("stat cards link to views", async () => {
-    const admin = await createTestUser(env.DB, "admin1b", "github", undefined, "free", "admin");
+    const admin = await createTestUser(env.db, "admin1b", "github", undefined, "free", "admin");
     const res = await req("/admin/", admin.jwt);
     const html = await res.text();
     expect(html).toContain('href="/admin/users"');
@@ -89,8 +90,8 @@ describe("GET /admin/ (dashboard)", () => {
 
 describe("GET /admin/users", () => {
   test("renders users list", async () => {
-    const admin = await createTestUser(env.DB, "admin2", "github", undefined, "free", "admin");
-    await createTestUser(env.DB, "user2");
+    const admin = await createTestUser(env.db, "admin2", "github", undefined, "free", "admin");
+    await createTestUser(env.db, "user2");
 
     const res = await req("/admin/users", admin.jwt);
     expect(res.status).toBe(200);
@@ -99,10 +100,10 @@ describe("GET /admin/users", () => {
   });
 
   test("paginates users", async () => {
-    const admin = await createTestUser(env.DB, "admin2b", "github", undefined, "free", "admin");
+    const admin = await createTestUser(env.db, "admin2b", "github", undefined, "free", "admin");
     // Create 20 more users to span 2 pages (PAGE_SIZE=20, +1 admin = 21)
     for (let i = 0; i < 20; i++) {
-      await createTestUser(env.DB, `paguser-${String(i).padStart(2, "0")}`);
+      await createTestUser(env.db, `paguser-${String(i).padStart(2, "0")}`);
     }
 
     const res1 = await req("/admin/users", admin.jwt);
@@ -118,9 +119,9 @@ describe("GET /admin/users", () => {
   });
 
   test("searches users", async () => {
-    const admin = await createTestUser(env.DB, "admin3", "github", undefined, "free", "admin");
-    await createTestUser(env.DB, "findable");
-    await createTestUser(env.DB, "hidden");
+    const admin = await createTestUser(env.db, "admin3", "github", undefined, "free", "admin");
+    await createTestUser(env.db, "findable");
+    await createTestUser(env.db, "hidden");
 
     const res = await req("/admin/users?search=findable", admin.jwt);
     expect(res.status).toBe(200);
@@ -132,8 +133,8 @@ describe("GET /admin/users", () => {
 
 describe("GET /admin/users/:id", () => {
   test("renders user detail", async () => {
-    const admin = await createTestUser(env.DB, "admin4", "github", undefined, "free", "admin");
-    const user = await createTestUser(env.DB, "detailuser");
+    const admin = await createTestUser(env.db, "admin4", "github", undefined, "free", "admin");
+    const user = await createTestUser(env.db, "detailuser");
 
     const res = await req(`/admin/users/${user.id}`, admin.jwt);
     expect(res.status).toBe(200);
@@ -144,8 +145,8 @@ describe("GET /admin/users/:id", () => {
   });
 
   test("renders plan limits card", async () => {
-    const admin = await createTestUser(env.DB, "admin4b", "github", undefined, "free", "admin");
-    const user = await createTestUser(env.DB, "limitsuser");
+    const admin = await createTestUser(env.db, "admin4b", "github", undefined, "free", "admin");
+    const user = await createTestUser(env.db, "limitsuser");
 
     const res = await req(`/admin/users/${user.id}`, admin.jwt);
     expect(res.status).toBe(200);
@@ -160,11 +161,11 @@ describe("GET /admin/users/:id", () => {
   });
 
   test("shows deploy count today", async () => {
-    const admin = await createTestUser(env.DB, "admin4c", "github", undefined, "free", "admin");
-    const user = await createTestUser(env.DB, "deploycountuser");
-    const project = await createTestProject(env.DB, user.id, "dc-proj");
-    await createTestDeployment(env.DB, project.id, "live");
-    await createTestDeployment(env.DB, project.id, "live");
+    const admin = await createTestUser(env.db, "admin4c", "github", undefined, "free", "admin");
+    const user = await createTestUser(env.db, "deploycountuser");
+    const project = await createTestProject(env.db, user.id, "dc-proj");
+    await createTestDeployment(env.db, project.id, "live");
+    await createTestDeployment(env.db, project.id, "live");
 
     const res = await req(`/admin/users/${user.id}`, admin.jwt);
     expect(res.status).toBe(200);
@@ -176,8 +177,8 @@ describe("GET /admin/users/:id", () => {
 
 describe("POST /admin/users/:id/plan", () => {
   test("updates plan and redirects", async () => {
-    const admin = await createTestUser(env.DB, "admin5", "github", undefined, "free", "admin");
-    const user = await createTestUser(env.DB, "planuser");
+    const admin = await createTestUser(env.db, "admin5", "github", undefined, "free", "admin");
+    const user = await createTestUser(env.db, "planuser");
 
     const body = new URLSearchParams({ plan: "pro" });
     const res = await req(`/admin/users/${user.id}/plan`, admin.jwt, {
@@ -192,9 +193,9 @@ describe("POST /admin/users/:id/plan", () => {
 
 describe("POST /admin/users/:id/suspend + unsuspend", () => {
   test("suspends and unsuspends via forms", async () => {
-    const admin = await createTestUser(env.DB, "admin6", "github", undefined, "free", "admin");
-    const user = await createTestUser(env.DB, "suspuser");
-    const project = await createTestProject(env.DB, user.id, "susp-slug");
+    const admin = await createTestUser(env.db, "admin6", "github", undefined, "free", "admin");
+    const user = await createTestUser(env.db, "suspuser");
+    const project = await createTestProject(env.db, user.id, "susp-slug");
     await env.ROUTING.put(project.slug, JSON.stringify({ workerName: "w", projectId: project.id }));
 
     // Suspend
@@ -224,9 +225,9 @@ describe("POST /admin/users/:id/suspend + unsuspend", () => {
 
 describe("GET /admin/projects", () => {
   test("renders projects list", async () => {
-    const admin = await createTestUser(env.DB, "admin7", "github", undefined, "free", "admin");
-    const user = await createTestUser(env.DB, "projowner");
-    await createTestProject(env.DB, user.id, "my-proj");
+    const admin = await createTestUser(env.db, "admin7", "github", undefined, "free", "admin");
+    const user = await createTestUser(env.db, "projowner");
+    await createTestProject(env.db, user.id, "my-proj");
 
     const res = await req("/admin/projects", admin.jwt);
     expect(res.status).toBe(200);
@@ -235,10 +236,10 @@ describe("GET /admin/projects", () => {
   });
 
   test("paginates projects", async () => {
-    const admin = await createTestUser(env.DB, "admin7b", "github", undefined, "free", "admin");
+    const admin = await createTestUser(env.db, "admin7b", "github", undefined, "free", "admin");
     // Create 21 projects to span 2 pages (PAGE_SIZE=20)
     for (let i = 0; i < 21; i++) {
-      await createTestProject(env.DB, admin.id, `pagproj-${String(i).padStart(2, "0")}`);
+      await createTestProject(env.db, admin.id, `pagproj-${String(i).padStart(2, "0")}`);
     }
 
     // Page 1: should have 20 projects and a Next link
@@ -259,9 +260,9 @@ describe("GET /admin/projects", () => {
 
 describe("GET /admin/projects/:id", () => {
   test("renders project detail", async () => {
-    const admin = await createTestUser(env.DB, "admin8", "github", undefined, "free", "admin");
-    const user = await createTestUser(env.DB, "projowner2");
-    const project = await createTestProject(env.DB, user.id, "detail-proj");
+    const admin = await createTestUser(env.db, "admin8", "github", undefined, "free", "admin");
+    const user = await createTestUser(env.db, "projowner2");
+    const project = await createTestProject(env.db, user.id, "detail-proj");
 
     const res = await req(`/admin/projects/${project.id}`, admin.jwt);
     expect(res.status).toBe(200);
@@ -272,9 +273,9 @@ describe("GET /admin/projects/:id", () => {
   });
 
   test("shows deployment error in project detail table", async () => {
-    const admin = await createTestUser(env.DB, "admin8b", "github", undefined, "free", "admin");
-    const project = await createTestProject(env.DB, admin.id, "proj-err");
-    await createTestDeployment(env.DB, project.id, "failed", "cli", "worker upload failed: 500");
+    const admin = await createTestUser(env.db, "admin8b", "github", undefined, "free", "admin");
+    const project = await createTestProject(env.db, admin.id, "proj-err");
+    await createTestDeployment(env.db, project.id, "failed", "cli", "worker upload failed: 500");
 
     const res = await req(`/admin/projects/${project.id}`, admin.jwt);
     expect(res.status).toBe(200);
@@ -283,9 +284,9 @@ describe("GET /admin/projects/:id", () => {
   });
 
   test("links deployment IDs to detail page", async () => {
-    const admin = await createTestUser(env.DB, "admin8c", "github", undefined, "free", "admin");
-    const project = await createTestProject(env.DB, admin.id, "proj-link");
-    const deployment = await createTestDeployment(env.DB, project.id, "live");
+    const admin = await createTestUser(env.db, "admin8c", "github", undefined, "free", "admin");
+    const project = await createTestProject(env.db, admin.id, "proj-link");
+    const deployment = await createTestDeployment(env.db, project.id, "live");
 
     const res = await req(`/admin/projects/${project.id}`, admin.jwt);
     expect(res.status).toBe(200);
@@ -296,10 +297,10 @@ describe("GET /admin/projects/:id", () => {
 
 describe("GET /admin/deployments", () => {
   test("renders deployments list", async () => {
-    const admin = await createTestUser(env.DB, "admin10", "github", undefined, "free", "admin");
-    const user = await createTestUser(env.DB, "deplowner");
-    const project = await createTestProject(env.DB, user.id, "depl-proj");
-    await createTestDeployment(env.DB, project.id, "live", "cli");
+    const admin = await createTestUser(env.db, "admin10", "github", undefined, "free", "admin");
+    const user = await createTestUser(env.db, "deplowner");
+    const project = await createTestProject(env.db, user.id, "depl-proj");
+    await createTestDeployment(env.db, project.id, "live", "cli");
 
     const res = await req("/admin/deployments", admin.jwt);
     expect(res.status).toBe(200);
@@ -311,9 +312,9 @@ describe("GET /admin/deployments", () => {
   });
 
   test("shows error preview for failed deployments", async () => {
-    const admin = await createTestUser(env.DB, "admin10b", "github", undefined, "free", "admin");
-    const project = await createTestProject(env.DB, admin.id, "errl-proj");
-    await createTestDeployment(env.DB, project.id, "failed", "cli", "migration failed: syntax");
+    const admin = await createTestUser(env.db, "admin10b", "github", undefined, "free", "admin");
+    const project = await createTestProject(env.db, admin.id, "errl-proj");
+    await createTestDeployment(env.db, project.id, "failed", "cli", "migration failed: syntax");
 
     const res = await req("/admin/deployments", admin.jwt);
     expect(res.status).toBe(200);
@@ -322,10 +323,10 @@ describe("GET /admin/deployments", () => {
   });
 
   test("paginates deployments", async () => {
-    const admin = await createTestUser(env.DB, "admin11", "github", undefined, "free", "admin");
-    const project = await createTestProject(env.DB, admin.id, "pagdepl-proj");
+    const admin = await createTestUser(env.db, "admin11", "github", undefined, "free", "admin");
+    const project = await createTestProject(env.db, admin.id, "pagdepl-proj");
     for (let i = 0; i < 21; i++) {
-      await createTestDeployment(env.DB, project.id, "live");
+      await createTestDeployment(env.db, project.id, "live");
     }
 
     const res1 = await req("/admin/deployments?page=1", admin.jwt);
@@ -344,9 +345,9 @@ describe("GET /admin/deployments", () => {
 
 describe("GET /admin/deployments/:id", () => {
   test("renders deployment detail", async () => {
-    const admin = await createTestUser(env.DB, "admin12", "github", undefined, "free", "admin");
-    const project = await createTestProject(env.DB, admin.id, "depldetail-proj");
-    const deployment = await createTestDeployment(env.DB, project.id, "live", "cli");
+    const admin = await createTestUser(env.db, "admin12", "github", undefined, "free", "admin");
+    const project = await createTestProject(env.db, admin.id, "depldetail-proj");
+    const deployment = await createTestDeployment(env.db, project.id, "live", "cli");
 
     const res = await req(`/admin/deployments/${deployment.id}`, admin.jwt);
     expect(res.status).toBe(200);
@@ -358,10 +359,10 @@ describe("GET /admin/deployments/:id", () => {
   });
 
   test("shows error banner for failed deployment", async () => {
-    const admin = await createTestUser(env.DB, "admin12b", "github", undefined, "free", "admin");
-    const project = await createTestProject(env.DB, admin.id, "errdetail-proj");
+    const admin = await createTestUser(env.db, "admin12b", "github", undefined, "free", "admin");
+    const project = await createTestProject(env.db, admin.id, "errdetail-proj");
     const deployment = await createTestDeployment(
-      env.DB,
+      env.db,
       project.id,
       "failed",
       "cli",
@@ -376,8 +377,8 @@ describe("GET /admin/deployments/:id", () => {
   });
 
   test("renders parsed manifest card", async () => {
-    const admin = await createTestUser(env.DB, "admin12c", "github", undefined, "free", "admin");
-    const project = await createTestProject(env.DB, admin.id, "manifest-proj");
+    const admin = await createTestUser(env.db, "admin12c", "github", undefined, "free", "admin");
+    const project = await createTestProject(env.db, admin.id, "manifest-proj");
     const n = ++manifestCounter;
     const id = `dpl_manifest${n}`;
     const manifest = JSON.stringify({
@@ -385,11 +386,12 @@ describe("GET /admin/deployments/:id", () => {
       migrations: [{ name: "001_init.sql", destructive: false }],
       schedules: [{ name: "sync", cron: "0 * * * *" }],
     });
-    await env.DB.prepare(
-      "INSERT INTO deployments (id, project_id, status, manifest) VALUES (?, ?, ?, ?)",
-    )
-      .bind(id, project.id, "live", manifest)
-      .run();
+    await env.db.insert(deployments).values({
+      id,
+      project_id: project.id,
+      status: "live",
+      manifest,
+    });
 
     const res = await req(`/admin/deployments/${id}`, admin.jwt);
     expect(res.status).toBe(200);
@@ -406,7 +408,7 @@ describe("GET /admin/deployments/:id", () => {
   });
 
   test("returns 404 for unknown deployment", async () => {
-    const admin = await createTestUser(env.DB, "admin13", "github", undefined, "free", "admin");
+    const admin = await createTestUser(env.db, "admin13", "github", undefined, "free", "admin");
     const res = await req("/admin/deployments/dpl_nonexistent", admin.jwt);
     expect(res.status).toBe(404);
   });
@@ -424,7 +426,7 @@ describe("GET /admin/login", () => {
 
 describe("GET /admin/logout", () => {
   test("clears cookie and redirects", async () => {
-    const admin = await createTestUser(env.DB, "admin9", "github", undefined, "free", "admin");
+    const admin = await createTestUser(env.db, "admin9", "github", undefined, "free", "admin");
     const res = await req("/admin/logout", admin.jwt);
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toBe("/admin/login");

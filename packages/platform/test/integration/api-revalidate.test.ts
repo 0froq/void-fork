@@ -20,7 +20,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await clearTables(env.DB);
+  await clearTables(env.db);
 });
 
 afterEach(() => {
@@ -41,7 +41,7 @@ describe("POST /projects/:id/revalidate", () => {
   });
 
   it("returns 404 for nonexistent project", async () => {
-    const user = await createTestUser(env.DB);
+    const user = await createTestUser(env.db);
 
     const res = await app.fetch(
       new Request("http://localhost/projects/proj_nonexistent/revalidate", {
@@ -58,9 +58,9 @@ describe("POST /projects/:id/revalidate", () => {
   });
 
   it("returns 403 for non-owner", async () => {
-    const owner = await createTestUser(env.DB, "owner");
-    const other = await createTestUser(env.DB, "other");
-    const project = await createTestProject(env.DB, owner.id);
+    const owner = await createTestUser(env.db, "owner");
+    const other = await createTestUser(env.db, "other");
+    const project = await createTestProject(env.db, owner.id);
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -77,8 +77,8 @@ describe("POST /projects/:id/revalidate", () => {
   });
 
   it("returns 400 without paths or all", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id);
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -95,8 +95,8 @@ describe("POST /projects/:id/revalidate", () => {
   });
 
   it("purges specific paths from R2", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id);
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
 
     // Seed ISR cache entries
     await env.ASSETS.put(`${project.id}/isr/__index__`, "home", {
@@ -136,8 +136,8 @@ describe("POST /projects/:id/revalidate", () => {
   });
 
   it("purges all ISR entries with all: true", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id);
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
 
     // Seed ISR cache entries
     await env.ASSETS.put(`${project.id}/isr/__index__`, "home", {

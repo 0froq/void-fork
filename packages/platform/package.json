@@ -16,16 +16,18 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "typecheck": "tsgo --noEmit",
-    "migrate": "wrangler d1 migrations apply vite-cloud-platform",
-    "migrate:staging": "wrangler d1 migrations apply vite-cloud-platform-staging --env staging",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
     "setup": "node scripts/setup-local.ts"
   },
   "dependencies": {
+    "drizzle-orm": "^0.45.1",
     "hono": "^4.11.9"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
     "@typescript/native-preview": "catalog:",
+    "drizzle-kit": "^0.31.9",
     "miniflare": "^4",
     "wrangler": "catalog:"
   },

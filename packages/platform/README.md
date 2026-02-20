@@ -1,6 +1,6 @@
 # @vite-cloud/platform
 
-Control Plane API + Admin Dashboard. CF Worker using Hono, D1, R2, KV, and Workers for Platforms (dispatch namespaces). No tsdown — wrangler handles TS bundling.
+Control Plane API + Admin Dashboard. CF Worker using Hono, Drizzle ORM + D1, R2, KV, and Workers for Platforms (dispatch namespaces). No tsdown — wrangler handles TS bundling.
 
 ## Source Layout
 
@@ -8,9 +8,10 @@ Control Plane API + Admin Dashboard. CF Worker using Hono, D1, R2, KV, and Worke
 src/
   index.ts                  # Hono app + scheduled handler (cron), mounts route groups + auth middleware
   env.ts                    # PlatformEnv type (D1, R2, KV, DISPATCH, secrets, Variables)
-  types.ts                  # User, Project, Deployment, Resource, DeployManifest, QueueMeta
+  schema.ts                 # Drizzle schema — source of truth for all DB tables + types
+  types.ts                  # DB types (inferred from schema) + DeployManifest, QueueMeta, etc.
   id.ts                     # generateId(prefix) → "proj_a1b2c3d4e5f6"
-  db.ts                     # Typed D1 query wrappers (CRUD for all tables)
+  db.ts                     # Drizzle query functions (createDb, CRUD for all tables)
   tiers.ts                  # PlanId, PlanLimits, PLAN_LIMITS constants, getPlanLimits(), isWithinLimit()
   auth/
     jwt.ts                  # HS256 JWT sign/verify via Web Crypto API
@@ -46,11 +47,10 @@ src/
     secrets.ts              # Worker secret management (put/delete)
     domains.ts              # Custom domain CRUD + CF for SaaS
     usage.ts                # Usage queries (per-project + aggregate)
-migrations/
-  0001_initial.sql          # users, projects, deployments, resources tables
-  0002_provider_auth.sql    # Migrate users to provider-agnostic schema
-  ...
-  0006_usage_tiers.sql      # Add plan column to users table
+drizzle/
+  0000_messy_patriot.sql    # Baseline migration (all 5 tables)
+  0001_perpetual_ezekiel.sql # Drop ghost columns (github_id, github_login), add NOT NULL to projects.mode
+  meta/_journal.json        # Drizzle migration journal
 ```
 
 ## API Endpoints
@@ -234,7 +234,7 @@ Integration tests call the Hono app via `app.fetch(request, env)` with **real** 
 
 Shared helpers in `test/integration/helpers.ts`:
 
-- `setupEnv()` / `teardownEnv()` — Miniflare lifecycle (D1, KV, R2 bindings)
-- `clearTables()` — D1 cleanup between tests (FK order)
-- `createTestUser()` / `createTestProject()` / `createTestDeployment()` — factories with JWT signing
+- `setupEnv()` / `teardownEnv()` — Miniflare lifecycle (D1, KV, R2 bindings) + Drizzle migration
+- `clearTables()` — Drizzle delete in FK order
+- `createTestUser()` / `createTestProject()` / `createTestDeployment()` — Drizzle insert factories with JWT signing
 - `mockCfApi()` — URL-based fetch mock for CF API with configurable overrides

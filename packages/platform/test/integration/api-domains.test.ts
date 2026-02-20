@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
 import app from "../../src/index";
+import { eq } from "drizzle-orm";
+import { domains } from "../../src/schema";
 import {
   setupEnv,
   teardownEnv,
@@ -22,7 +24,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await clearTables(env.DB);
+  await clearTables(env.db);
 });
 
 afterEach(() => {
@@ -31,8 +33,8 @@ afterEach(() => {
 
 describe("POST /projects/:id/domains", () => {
   it("adds a custom domain", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "domain-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "domain-app");
     mockCfApi({
       createCustomHostname: () =>
         cfSuccess({
@@ -69,7 +71,7 @@ describe("POST /projects/:id/domains", () => {
   });
 
   it("returns 404 for non-existent project", async () => {
-    const user = await createTestUser(env.DB);
+    const user = await createTestUser(env.db);
     mockCfApi();
 
     const res = await app.fetch(
@@ -88,9 +90,9 @@ describe("POST /projects/:id/domains", () => {
   });
 
   it("returns 403 when user does not own project", async () => {
-    const alice = await createTestUser(env.DB, "alice");
-    const bob = await createTestUser(env.DB, "bob");
-    const project = await createTestProject(env.DB, alice.id, "alice-domain");
+    const alice = await createTestUser(env.db, "alice");
+    const bob = await createTestUser(env.db, "bob");
+    const project = await createTestProject(env.db, alice.id, "alice-domain");
     mockCfApi();
 
     const res = await app.fetch(
@@ -109,8 +111,8 @@ describe("POST /projects/:id/domains", () => {
   });
 
   it("returns 409 for duplicate hostname", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "dup-domain");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "dup-domain");
     mockCfApi({
       createCustomHostname: () =>
         cfSuccess({
@@ -122,11 +124,12 @@ describe("POST /projects/:id/domains", () => {
     });
 
     // Insert existing domain
-    await env.DB.prepare(
-      "INSERT INTO domains (id, project_id, hostname, cf_hostname_id) VALUES (?, ?, ?, ?)",
-    )
-      .bind("dom_existing", project.id, "taken.example.com", "ch-existing")
-      .run();
+    await env.db.insert(domains).values({
+      id: "dom_existing",
+      project_id: project.id,
+      hostname: "taken.example.com",
+      cf_hostname_id: "ch-existing",
+    });
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/domains`, {
@@ -145,8 +148,8 @@ describe("POST /projects/:id/domains", () => {
   });
 
   it("rejects vitecloud.app subdomains", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "reject-vc");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "reject-vc");
     mockCfApi();
 
     const res = await app.fetch(
@@ -166,8 +169,8 @@ describe("POST /projects/:id/domains", () => {
   });
 
   it("rejects invalid hostname format", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "invalid-host");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "invalid-host");
     mockCfApi();
 
     const res = await app.fetch(
@@ -189,19 +192,23 @@ describe("POST /projects/:id/domains", () => {
 
 describe("GET /projects/:id/domains", () => {
   it("lists domains for a project", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "list-domain");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "list-domain");
 
-    await env.DB.prepare(
-      "INSERT INTO domains (id, project_id, hostname, cf_hostname_id, status) VALUES (?, ?, ?, ?, ?)",
-    )
-      .bind("dom_1", project.id, "a.example.com", "ch-1", "active")
-      .run();
-    await env.DB.prepare(
-      "INSERT INTO domains (id, project_id, hostname, cf_hostname_id, status) VALUES (?, ?, ?, ?, ?)",
-    )
-      .bind("dom_2", project.id, "b.example.com", "ch-2", "pending")
-      .run();
+    await env.db.insert(domains).values({
+      id: "dom_1",
+      project_id: project.id,
+      hostname: "a.example.com",
+      cf_hostname_id: "ch-1",
+      status: "active",
+    });
+    await env.db.insert(domains).values({
+      id: "dom_2",
+      project_id: project.id,
+      hostname: "b.example.com",
+      cf_hostname_id: "ch-2",
+      status: "pending",
+    });
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/domains`, {
@@ -220,8 +227,8 @@ describe("GET /projects/:id/domains", () => {
 
 describe("GET /projects/:id/domains/:domainId", () => {
   it("returns domain status from CF API", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "status-domain");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "status-domain");
     mockCfApi({
       getCustomHostname: () =>
         cfSuccess({
@@ -232,11 +239,13 @@ describe("GET /projects/:id/domains/:domainId", () => {
         }),
     });
 
-    await env.DB.prepare(
-      "INSERT INTO domains (id, project_id, hostname, cf_hostname_id, status) VALUES (?, ?, ?, ?, ?)",
-    )
-      .bind("dom_status", project.id, "status.example.com", "ch-status", "pending")
-      .run();
+    await env.db.insert(domains).values({
+      id: "dom_status",
+      project_id: project.id,
+      hostname: "status.example.com",
+      cf_hostname_id: "ch-status",
+      status: "pending",
+    });
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/domains/dom_status`, {
@@ -257,8 +266,8 @@ describe("GET /projects/:id/domains/:domainId", () => {
   });
 
   it("activates domain and writes KV when CF reports active", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "activate-domain");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "activate-domain");
     mockCfApi({
       getCustomHostname: () =>
         cfSuccess({
@@ -269,11 +278,13 @@ describe("GET /projects/:id/domains/:domainId", () => {
         }),
     });
 
-    await env.DB.prepare(
-      "INSERT INTO domains (id, project_id, hostname, cf_hostname_id, status) VALUES (?, ?, ?, ?, ?)",
-    )
-      .bind("dom_activate", project.id, "active.example.com", "ch-active", "pending")
-      .run();
+    await env.db.insert(domains).values({
+      id: "dom_activate",
+      project_id: project.id,
+      hostname: "active.example.com",
+      cf_hostname_id: "ch-active",
+      status: "pending",
+    });
 
     // Seed KV routing for the slug
     await env.ROUTING.put(
@@ -293,9 +304,11 @@ describe("GET /projects/:id/domains/:domainId", () => {
     expect(body.status).toBe("active");
 
     // Verify DB was updated
-    const row = await env.DB.prepare("SELECT status FROM domains WHERE id = ?")
-      .bind("dom_activate")
-      .first<{ status: string }>();
+    const row = await env.db
+      .select({ status: domains.status })
+      .from(domains)
+      .where(eq(domains.id, "dom_activate"))
+      .get();
     expect(row?.status).toBe("active");
 
     // Verify KV routing entry was written
@@ -309,15 +322,17 @@ describe("GET /projects/:id/domains/:domainId", () => {
 
 describe("DELETE /projects/:id/domains/:domainId", () => {
   it("removes a custom domain", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "remove-domain");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "remove-domain");
     const fetchMock = mockCfApi();
 
-    await env.DB.prepare(
-      "INSERT INTO domains (id, project_id, hostname, cf_hostname_id, status) VALUES (?, ?, ?, ?, ?)",
-    )
-      .bind("dom_remove", project.id, "remove.example.com", "ch-remove", "active")
-      .run();
+    await env.db.insert(domains).values({
+      id: "dom_remove",
+      project_id: project.id,
+      hostname: "remove.example.com",
+      cf_hostname_id: "ch-remove",
+      status: "active",
+    });
 
     // Seed KV routing for the domain
     await env.ROUTING.put("domain:remove.example.com", JSON.stringify({ projectId: project.id }));
@@ -334,10 +349,8 @@ describe("DELETE /projects/:id/domains/:domainId", () => {
     expect(await res.json()).toEqual({ ok: true });
 
     // Verify DB record deleted
-    const row = await env.DB.prepare("SELECT * FROM domains WHERE id = ?")
-      .bind("dom_remove")
-      .first();
-    expect(row).toBeNull();
+    const row = await env.db.select().from(domains).where(eq(domains.id, "dom_remove")).get();
+    expect(row).toBeUndefined();
 
     // Verify KV routing entry deleted
     const domainRouting = await env.ROUTING.get("domain:remove.example.com");
@@ -354,8 +367,8 @@ describe("DELETE /projects/:id/domains/:domainId", () => {
   });
 
   it("returns 404 for non-existent domain", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "no-domain");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "no-domain");
     mockCfApi();
 
     const res = await app.fetch(

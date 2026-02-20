@@ -21,7 +21,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await clearTables(env.DB);
+  await clearTables(env.db);
 });
 
 describe("GET /projects", () => {
@@ -31,7 +31,7 @@ describe("GET /projects", () => {
   });
 
   it("returns empty array when no projects", async () => {
-    const user = await createTestUser(env.DB);
+    const user = await createTestUser(env.db);
 
     const res = await app.fetch(
       new Request("http://localhost/projects", {
@@ -44,10 +44,10 @@ describe("GET /projects", () => {
   });
 
   it("returns only the authenticated user's projects", async () => {
-    const alice = await createTestUser(env.DB, "alice");
-    const bob = await createTestUser(env.DB, "bob");
-    await createTestProject(env.DB, alice.id, "alice-app");
-    await createTestProject(env.DB, bob.id, "bob-app");
+    const alice = await createTestUser(env.db, "alice");
+    const bob = await createTestUser(env.db, "bob");
+    await createTestProject(env.db, alice.id, "alice-app");
+    await createTestProject(env.db, bob.id, "bob-app");
 
     const res = await app.fetch(
       new Request("http://localhost/projects", {
@@ -64,7 +64,7 @@ describe("GET /projects", () => {
 
 describe("POST /projects", () => {
   it("creates project with valid slug", async () => {
-    const user = await createTestUser(env.DB);
+    const user = await createTestUser(env.db);
 
     const res = await app.fetch(
       new Request("http://localhost/projects", {
@@ -87,7 +87,7 @@ describe("POST /projects", () => {
   });
 
   it("rejects missing slug", async () => {
-    const user = await createTestUser(env.DB);
+    const user = await createTestUser(env.db);
 
     const res = await app.fetch(
       new Request("http://localhost/projects", {
@@ -104,7 +104,7 @@ describe("POST /projects", () => {
   });
 
   it("rejects invalid slug format", async () => {
-    const user = await createTestUser(env.DB);
+    const user = await createTestUser(env.db);
 
     const res = await app.fetch(
       new Request("http://localhost/projects", {
@@ -124,8 +124,8 @@ describe("POST /projects", () => {
   });
 
   it("rejects duplicate slug", async () => {
-    const user = await createTestUser(env.DB);
-    await createTestProject(env.DB, user.id, "taken-slug");
+    const user = await createTestUser(env.db);
+    await createTestProject(env.db, user.id, "taken-slug");
 
     const res = await app.fetch(
       new Request("http://localhost/projects", {
@@ -153,7 +153,7 @@ describe("GET /projects/:id/deployments", () => {
   });
 
   it("returns 404 for nonexistent project", async () => {
-    const user = await createTestUser(env.DB);
+    const user = await createTestUser(env.db);
 
     const res = await app.fetch(
       new Request("http://localhost/projects/proj_nonexistent/deployments", {
@@ -165,9 +165,9 @@ describe("GET /projects/:id/deployments", () => {
   });
 
   it("returns 403 when not the project owner", async () => {
-    const alice = await createTestUser(env.DB, "alice");
-    const bob = await createTestUser(env.DB, "bob");
-    const project = await createTestProject(env.DB, alice.id, "alice-project");
+    const alice = await createTestUser(env.db, "alice");
+    const bob = await createTestUser(env.db, "bob");
+    const project = await createTestProject(env.db, alice.id, "alice-project");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deployments`, {
@@ -179,8 +179,8 @@ describe("GET /projects/:id/deployments", () => {
   });
 
   it("returns empty array when no deployments", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id);
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deployments`, {
@@ -193,12 +193,12 @@ describe("GET /projects/:id/deployments", () => {
   });
 
   it("returns deployments with source field", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id);
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
 
-    const d1 = await createDeployment(env.DB, project.id, null, "manual");
-    await updateDeploymentStatus(env.DB, d1.id, "live");
-    const d2 = await createDeployment(env.DB, project.id, null, "ci");
+    const d1 = await createDeployment(env.db, project.id, null, "manual");
+    await updateDeploymentStatus(env.db, d1.id, "live");
+    const d2 = await createDeployment(env.db, project.id, null, "ci");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deployments`, {

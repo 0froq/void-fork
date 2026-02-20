@@ -20,8 +20,8 @@ app.get("/", async (c) => {
   const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
   const [projects, total] = await Promise.all([
-    getAllProjectsWithOwner(c.env.DB, PAGE_SIZE, offset),
-    countProjects(c.env.DB),
+    getAllProjectsWithOwner(c.get("db"), PAGE_SIZE, offset),
+    countProjects(c.get("db")),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const siteDomain = c.env.SITE_DOMAIN ?? "vitecloud.app";
@@ -38,15 +38,15 @@ app.get("/", async (c) => {
 
 // GET /projects/:id
 app.get("/:id", async (c) => {
-  const project = await getProject(c.env.DB, c.req.param("id"));
+  const project = await getProject(c.get("db"), c.req.param("id"));
   if (!project) {
     return c.html("<h1>Project not found</h1>", 404);
   }
   const [deployments, resources, owner, domains] = await Promise.all([
-    getProjectDeployments(c.env.DB, project.id, 10),
-    getProjectResources(c.env.DB, project.id),
-    getUser(c.env.DB, project.user_id),
-    getDomainsByProjectId(c.env.DB, project.id),
+    getProjectDeployments(c.get("db"), project.id, 10),
+    getProjectResources(c.get("db"), project.id),
+    getUser(c.get("db"), project.user_id),
+    getDomainsByProjectId(c.get("db"), project.id),
   ]);
 
   const cfAccountId = c.env.CF_ACCOUNT_ID;

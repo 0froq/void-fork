@@ -21,7 +21,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await clearTables(env.DB);
+  await clearTables(env.db);
 });
 
 afterEach(() => {
@@ -42,8 +42,8 @@ describe("project secrets API", () => {
   });
 
   it("sets a secret for owned project", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "secret-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "secret-app");
     const fetchMock = mockCfApi();
 
     const res = await app.fetch(
@@ -70,8 +70,8 @@ describe("project secrets API", () => {
   });
 
   it("deletes a secret for owned project", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "secret-delete-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "secret-delete-app");
     const fetchMock = mockCfApi();
 
     const res = await app.fetch(
@@ -96,9 +96,9 @@ describe("project secrets API", () => {
   });
 
   it("returns 403 for non-owner", async () => {
-    const alice = await createTestUser(env.DB, "alice");
-    const bob = await createTestUser(env.DB, "bob");
-    const project = await createTestProject(env.DB, alice.id, "alice-secret-app");
+    const alice = await createTestUser(env.db, "alice");
+    const bob = await createTestUser(env.db, "bob");
+    const project = await createTestProject(env.db, alice.id, "alice-secret-app");
     mockCfApi();
 
     const res = await app.fetch(
@@ -118,8 +118,8 @@ describe("project secrets API", () => {
   });
 
   it("validates secret name", async () => {
-    const user = await createTestUser(env.DB);
-    const project = await createTestProject(env.DB, user.id, "secret-name-app");
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "secret-name-app");
     mockCfApi();
 
     const res = await app.fetch(

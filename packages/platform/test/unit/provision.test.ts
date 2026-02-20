@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { provisionBindings } from "../../src/provisioning/provision";
+import type { Db } from "../../src/db";
 import type { DeployManifest, Resource } from "../../src/types";
 
 // Mock the CF API module
@@ -37,7 +38,7 @@ import { getProjectResources, createResource } from "../../src/db";
 const ACCOUNT_ID = "test-account";
 const API_TOKEN = "test-token";
 const PROJECT_ID = "proj_abc123";
-const mockDb = {} as D1Database;
+const mockDb = {} as Db;
 
 beforeEach(() => {
   vi.clearAllMocks();

@@ -22,7 +22,7 @@ const app = new Hono<PlatformEnv>();
 
 app.delete("/:id", async (c) => {
   const projectId = c.req.param("id");
-  const project = await getProject(c.env.DB, projectId);
+  const project = await getProject(c.get("db"), projectId);
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }
@@ -32,7 +32,7 @@ app.delete("/:id", async (c) => {
   }
 
   const warnings: string[] = [];
-  const resources = await getProjectResources(c.env.DB, projectId);
+  const resources = await getProjectResources(c.get("db"), projectId);
 
   // Best-effort CF resource cleanup
   for (const resource of resources) {
@@ -103,7 +103,7 @@ app.delete("/:id", async (c) => {
   }
 
   // Clean up custom hostnames from CF + KV
-  const projectDomains = await getDomainsByProjectId(c.env.DB, projectId);
+  const projectDomains = await getDomainsByProjectId(c.get("db"), projectId);
   for (const domain of projectDomains) {
     try {
       await deleteCustomHostname(c.env.CF_ZONE_ID, c.env.CF_API_TOKEN, domain.cf_hostname_id);
@@ -120,12 +120,12 @@ app.delete("/:id", async (c) => {
       );
     }
   }
-  await deleteProjectDomains(c.env.DB, projectId);
+  await deleteProjectDomains(c.get("db"), projectId);
 
   // Delete DB records in FK order: resources -> deployments -> project
-  await deleteProjectResources(c.env.DB, projectId);
-  await deleteProjectDeployments(c.env.DB, projectId);
-  await deleteProject(c.env.DB, projectId);
+  await deleteProjectResources(c.get("db"), projectId);
+  await deleteProjectDeployments(c.get("db"), projectId);
+  await deleteProject(c.get("db"), projectId);
 
   return c.json({
     ok: true,

@@ -8,7 +8,7 @@ const app = new Hono<PlatformEnv>();
 // Project usage for current billing period
 app.get("/:id/usage", async (c) => {
   const projectId = c.req.param("id");
-  const project = await getProject(c.env.DB, projectId);
+  const project = await getProject(c.get("db"), projectId);
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }
@@ -16,7 +16,7 @@ app.get("/:id/usage", async (c) => {
     return c.json({ error: "forbidden" }, 403);
   }
 
-  const user = await getUser(c.env.DB, c.get("userId"));
+  const user = await getUser(c.get("db"), c.get("userId"));
   const since = getCurrentBillingPeriodStart(user!.billing_cycle_start);
   const usage = await queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since);
 
@@ -25,12 +25,12 @@ app.get("/:id/usage", async (c) => {
 
 // Aggregate usage across all user's projects
 app.get("/", async (c) => {
-  const projects = await getProjectsByUserId(c.env.DB, c.get("userId"));
+  const projects = await getProjectsByUserId(c.get("db"), c.get("userId"));
   if (projects.length === 0) {
     return c.json({ requests: 0, bandwidthBytes: 0, projects: [] });
   }
 
-  const user = await getUser(c.env.DB, c.get("userId"));
+  const user = await getUser(c.get("db"), c.get("userId"));
   const since = getCurrentBillingPeriodStart(user!.billing_cycle_start);
 
   const projectUsages = await Promise.all(

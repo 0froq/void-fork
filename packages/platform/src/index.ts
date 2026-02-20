@@ -15,11 +15,23 @@ import { dashboardHandler } from "./admin/routes/system";
 import adminUsers from "./admin/routes/users";
 import adminProjects from "./admin/routes/projects";
 import adminDeployments from "./admin/routes/deployments";
-import { getProjectsByUserId } from "./db";
+import {
+  createDb,
+  getProjectsByUserId,
+  getAllUsersWithPlan,
+  suspendUser,
+  unsuspendUser,
+} from "./db";
 import { queryProjectUsage } from "./routes/usage";
 import { getCurrentBillingPeriodStart, getPlanLimits, isWithinLimit } from "./tiers";
 
 const app = new Hono<PlatformEnv>();
+
+// Drizzle middleware — creates a Db instance per request
+app.use("*", async (c, next) => {
+  c.set("db", createDb(c.env.DB));
+  await next();
+});
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 app.route("/auth", auth);
@@ -48,25 +60,23 @@ async function scheduled(
   env: PlatformEnv["Bindings"],
   _ctx: ExecutionContext,
 ): Promise<void> {
-  // Query all users, check their usage against plan limits
-  const users = await env.DB.prepare("SELECT id, plan, billing_cycle_start FROM users").all<{
-    id: string;
-    plan: string;
-    billing_cycle_start: string;
-  }>();
+  const db = createDb(env.DB);
 
-  for (const user of users.results) {
+  // Query all users, check their usage against plan limits
+  const allUsers = await getAllUsersWithPlan(db);
+
+  for (const user of allUsers) {
     const limits = getPlanLimits(user.plan);
     if (limits.requestsPerMonth === 0) continue; // unlimited
 
-    const projects = await getProjectsByUserId(env.DB, user.id);
-    if (projects.length === 0) continue;
+    const userProjects = await getProjectsByUserId(db, user.id);
+    if (userProjects.length === 0) continue;
 
     const since = getCurrentBillingPeriodStart(user.billing_cycle_start);
 
     // Sum usage across all user's projects
     let totalRequests = 0;
-    for (const project of projects) {
+    for (const project of userProjects) {
       const usage = await queryProjectUsage(env.CF_ACCOUNT_ID, env.CF_API_TOKEN, project.id, since);
       totalRequests += usage.requests;
     }
@@ -74,7 +84,7 @@ async function scheduled(
     const exceeded = !isWithinLimit(limits.requestsPerMonth, totalRequests);
 
     // Update suspension status for all user's projects
-    for (const project of projects) {
+    for (const project of userProjects) {
       const routingRaw = await env.ROUTING.get(project.slug);
       if (!routingRaw) continue;
 
@@ -84,15 +94,11 @@ async function scheduled(
       if (exceeded && !currentlySuspended) {
         routing.suspended = "requests_exceeded";
         await env.ROUTING.put(project.slug, JSON.stringify(routing));
-        await env.DB.prepare("UPDATE users SET suspended_reason = ? WHERE id = ?")
-          .bind("requests_exceeded", user.id)
-          .run();
+        await suspendUser(db, user.id, "requests_exceeded");
       } else if (!exceeded && currentlySuspended) {
         delete routing.suspended;
         await env.ROUTING.put(project.slug, JSON.stringify(routing));
-        await env.DB.prepare("UPDATE users SET suspended_reason = NULL WHERE id = ?")
-          .bind(user.id)
-          .run();
+        await unsuspendUser(db, user.id);
       }
     }
   }

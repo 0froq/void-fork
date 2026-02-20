@@ -8,7 +8,7 @@ const app = new Hono<PlatformEnv>();
 
 app.post("/:id/revalidate", async (c) => {
   const projectId = c.req.param("id");
-  const project = await getProject(c.env.DB, projectId);
+  const project = await getProject(c.get("db"), projectId);
   if (!project) {
     return c.json({ error: "project not found" }, 404);
   }

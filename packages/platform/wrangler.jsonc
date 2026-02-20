@@ -11,7 +11,6 @@
       "binding": "DB",
       "database_name": "vite-cloud-platform",
       "database_id": "f85c1d7d-7b41-4f85-88e5-ad37966825e7",
-      "migrations_dir": "migrations",
     },
   ],
   "r2_buckets": [
@@ -46,7 +45,6 @@
           "binding": "DB",
           "database_name": "vite-cloud-platform-staging",
           "database_id": "e78b32c1-497a-40ad-8f83-7049e139983e",
-          "migrations_dir": "migrations",
         },
       ],
       "r2_buckets": [
