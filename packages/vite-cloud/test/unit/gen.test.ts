@@ -617,3 +617,57 @@ describe("gen ssr", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// gen cron
+// ---------------------------------------------------------------------------
+
+describe("gen cron", () => {
+  it("generates cron job file with defineJob", async () => {
+    mkdirSync(TMP, { recursive: true });
+    await runGenCommand(TMP, { subcommand: "cron", name: "hourly-sync" });
+
+    const content = read("crons/hourly-sync.ts");
+    expect(content).toContain('import { defineJob } from "vite-cloud"');
+    expect(content).toContain('export const cron = "* * * * *"');
+    expect(content).toContain("export default defineJob(");
+    expect(content).toContain("// TODO: implement hourly-sync");
+  });
+
+  it("does not overwrite existing file", async () => {
+    mkdirSync(join(TMP, "crons"), { recursive: true });
+    writeFileSync(join(TMP, "crons/sync.ts"), "// existing");
+
+    await runGenCommand(TMP, { subcommand: "cron", name: "sync" });
+
+    expect(read("crons/sync.ts")).toBe("// existing");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gen queue
+// ---------------------------------------------------------------------------
+
+describe("gen queue", () => {
+  it("generates queue consumer file with defineQueue", async () => {
+    mkdirSync(TMP, { recursive: true });
+    await runGenCommand(TMP, { subcommand: "queue", name: "emails" });
+
+    const content = read("queues/emails.ts");
+    expect(content).toContain('import { defineQueue } from "vite-cloud"');
+    expect(content).toContain("interface Message {}");
+    expect(content).toContain("// export const maxBatchSize = 10;");
+    expect(content).toContain("// export const maxBatchTimeout = 5;");
+    expect(content).toContain("export default defineQueue<Message>(");
+    expect(content).toContain("batch.messages");
+  });
+
+  it("does not overwrite existing file", async () => {
+    mkdirSync(join(TMP, "queues"), { recursive: true });
+    writeFileSync(join(TMP, "queues/emails.ts"), "// existing");
+
+    await runGenCommand(TMP, { subcommand: "queue", name: "emails" });
+
+    expect(read("queues/emails.ts")).toBe("// existing");
+  });
+});

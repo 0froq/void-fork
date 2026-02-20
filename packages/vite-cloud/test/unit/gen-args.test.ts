@@ -4,13 +4,13 @@ import { parseGenArgs } from "../../src/cli/gen-args";
 describe("parseGenArgs", () => {
   it("errors on no subcommand", () => {
     expect(() => parseGenArgs([])).toThrow(
-      "Error: Usage: vcc gen <model|migration|route|middleware|ssr>",
+      "Error: Usage: vcc gen <model|migration|route|middleware|ssr|cron|queue>",
     );
   });
 
   it("errors on unknown subcommand", () => {
     expect(() => parseGenArgs(["unknown"])).toThrow(
-      "Error: Usage: vcc gen <model|migration|route|middleware|ssr>",
+      "Error: Usage: vcc gen <model|migration|route|middleware|ssr|cron|queue>",
     );
   });
 
@@ -216,6 +216,70 @@ describe("parseGenArgs", () => {
 
     it("errors on unexpected positional", () => {
       expect(() => parseGenArgs(["ssr", "extra"])).toThrow("Error: Unexpected argument: extra");
+    });
+  });
+
+  describe("cron", () => {
+    it("parses cron name", () => {
+      expect(parseGenArgs(["cron", "hourly-sync"])).toEqual({
+        subcommand: "cron",
+        name: "hourly-sync",
+      });
+    });
+
+    it("errors on missing name", () => {
+      expect(() => parseGenArgs(["cron"])).toThrow("Error: Usage: vcc gen cron <name>");
+    });
+
+    it("errors on extra argument", () => {
+      expect(() => parseGenArgs(["cron", "sync", "extra"])).toThrow(
+        "Error: Unexpected argument: extra",
+      );
+    });
+
+    it("errors on invalid name", () => {
+      expect(() => parseGenArgs(["cron", "1bad"])).toThrow(
+        "Error: Cron name must be lowercase alphanumeric",
+      );
+    });
+
+    it("allows hyphens in name", () => {
+      expect(parseGenArgs(["cron", "daily-report"])).toEqual({
+        subcommand: "cron",
+        name: "daily-report",
+      });
+    });
+  });
+
+  describe("queue", () => {
+    it("parses queue name", () => {
+      expect(parseGenArgs(["queue", "emails"])).toEqual({
+        subcommand: "queue",
+        name: "emails",
+      });
+    });
+
+    it("errors on missing name", () => {
+      expect(() => parseGenArgs(["queue"])).toThrow("Error: Usage: vcc gen queue <name>");
+    });
+
+    it("errors on extra argument", () => {
+      expect(() => parseGenArgs(["queue", "emails", "extra"])).toThrow(
+        "Error: Unexpected argument: extra",
+      );
+    });
+
+    it("errors on invalid name", () => {
+      expect(() => parseGenArgs(["queue", "1bad"])).toThrow(
+        "Error: Queue name must be lowercase alphanumeric",
+      );
+    });
+
+    it("allows hyphens in name", () => {
+      expect(parseGenArgs(["queue", "order-notifications"])).toEqual({
+        subcommand: "queue",
+        name: "order-notifications",
+      });
     });
   });
 });

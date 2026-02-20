@@ -110,6 +110,8 @@ Rails/Laravel-style scaffolding commands for common boilerplate:
 | `vcc gen route <path> [--methods get,post,...]`   | Route file with `defineHandler` exports          |
 | `vcc gen middleware <name>`                       | Numbered middleware file with `defineMiddleware` |
 | `vcc gen ssr [--react\|--vue\|--svelte\|--solid]` | SSR entry + client entry + App component         |
+| `vcc gen cron <name>`                             | Cron job file with `defineJob` in `crons/`       |
+| `vcc gen queue <name>`                            | Queue consumer file with `defineQueue`           |
 
 Column types for `gen model`: `string`, `text`, `datetime` → TEXT; `integer`, `boolean` → INTEGER; `real` → REAL; `blob` → BLOB. Append `?` for nullable (e.g. `bio:text?`).
 
