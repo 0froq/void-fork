@@ -25,9 +25,11 @@ export function scriptServerPlugin(pagesDir: string): Plugin {
         // Store extracted content
         serverBlocks.set(id, match[1]);
 
-        // Strip the <script server> block from the SFC
-        const cleaned = code.replace(SCRIPT_SERVER_RE, "");
-        return { code: cleaned, map: null };
+        // Strip the <script server> block, preserving line positions
+        const cleaned = code.replace(SCRIPT_SERVER_RE, (m) =>
+          "\n".repeat(m.split("\n").length - 1),
+        );
+        return { code: cleaned, map: { mappings: "" } };
       },
     },
 
