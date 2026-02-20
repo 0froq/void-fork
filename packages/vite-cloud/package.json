@@ -12,6 +12,7 @@
     "skills",
     "docs",
     "AGENT_PROMPT.md",
+    "getting-started-prompt.txt",
     "README.md"
   ],
   "type": "module",

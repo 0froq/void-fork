@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import { execSync } from "node:child_process";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { log, outro, note } from "@clack/prompts";
 import { runDeploy } from "./deploy";
 import { runLink } from "./link";
@@ -210,17 +213,15 @@ if (command === "staging") {
     });
   });
 } else if (command === "agent-prompt") {
-  process.stdout
-    .write(`Vite Cloud is a fullstack Vite framework and deployment platform for Cloudflare. Scaffold a new app with:
-
-npm create vite-cloud@latest my-app
-cd my-app
-npm install
-
-The scaffolded project includes a CLAUDE.md (or AGENTS.md) file with detailed framework instructions covering routing, database, auth, typed fetch, and more. Read it before building.
-
-Now ask me what I want to build.
-`);
+  let dir = join(fileURLToPath(import.meta.url), "..");
+  for (let i = 0; i < 5; i++) {
+    const promptPath = join(dir, "getting-started-prompt.txt");
+    if (existsSync(promptPath)) {
+      process.stdout.write(readFileSync(promptPath, "utf-8"));
+      break;
+    }
+    dir = join(dir, "..");
+  }
 } else {
   const BLUE = "\x1b[34m";
   const RESET = "\x1b[0m";
