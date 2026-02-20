@@ -97,6 +97,33 @@ describe("detectPreset", () => {
     expect(result).toBeNull();
   });
 
+  it("returns null when middleware/ dir exists (backend files)", () => {
+    const root = setupProject({
+      pkg: { dependencies: { vite: "^6.0.0" } },
+      dirs: ["middleware"],
+    });
+    const result = detectPreset(root);
+    expect(result).toBeNull();
+  });
+
+  it("returns null when pages/ dir exists (backend files)", () => {
+    const root = setupProject({
+      pkg: { dependencies: { vite: "^6.0.0" } },
+      dirs: ["pages"],
+    });
+    const result = detectPreset(root);
+    expect(result).toBeNull();
+  });
+
+  it("returns null when queues/ dir exists (backend files)", () => {
+    const root = setupProject({
+      pkg: { dependencies: { vite: "^6.0.0" } },
+      dirs: ["queues"],
+    });
+    const result = detectPreset(root);
+    expect(result).toBeNull();
+  });
+
   it("detects plain Vite SPA (no backend files)", () => {
     const root = setupProject({
       pkg: { dependencies: { vite: "^6.0.0" } },

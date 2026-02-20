@@ -4,14 +4,13 @@ outline: deep
 
 # Deployment
 
-Vite Cloud apps run on Cloudflare's infrastructure but you don't need to use your own Cloudflare account. Vite Cloud aims to provide a simpler app-centric deployment experience similar to that of Vercel and Netlify.
+Vite Cloud apps run on Cloudflare's infrastructure but you don't need to use your own Cloudflare account. Our long term goal is to provide a simpler app-centric deployment experience similar to that of Vercel and Netlify. But right now, Vite Cloud only supports deploying via the CLI or GitHub actions.
 
 ## CLI
 
 ### First deploy
 
 ```bash
-npm i -g vite-cloud   # or use vcc
 vcc login              # OAuth via GitHub or Google
 vcc deploy             # auto-detects app type, builds, deploys
 ```
@@ -80,7 +79,7 @@ To get a deploy token, run `vcc token` to copy it to your clipboard, then add it
 
 ### Full-stack
 
-For projects with API routes, SSR, jobs, or any backend code:
+For projects with API routes, pages, queues, jobs, or any backend code:
 
 ```
 vcc deploy
@@ -93,14 +92,15 @@ vcc deploy
   │    ├─ Infer Cloudflare bindings (D1, KV, R2) from source
   │    ├─ Collect and validate migrations from migrations/*.sql
   │    ├─ Scan for scheduled jobs (cron triggers)
-  │    └─ Detect SSR entry (src/main.ssr.ts)
+  │    ├─ Scan for queue consumers (queues/*.ts)
+  │    └─ Detect custom SSR entry (src/main.ssr.ts)
   │
   ├─ 3. Check assets
   │    Compare SHA-256 hashes — only upload changed files
   │
   ├─ 4. Upload
   │    POST /projects/:id/deploy (multipart)
-  │    ├─ manifest (bindings, migrations, schedules, headers)
+  │    ├─ manifest (bindings, migrations, schedules, queues, headers)
   │    ├─ worker:<path> (worker JS modules)
   │    └─ asset:<path> (static files)
   │

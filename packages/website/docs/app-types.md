@@ -1,64 +1,53 @@
 # App Types
 
-Vite Cloud supports four types of apps:
+Vite Cloud supports three types of apps:
 
-1. Vite apps with optional Cloudflare Workers backend
-2. Vite-based meta frameworks that can run on Cloudflare, e.g. [Tanstack Start](https://tanstack.com/start/latest)
-3. Any Static site generator that output static assets, e.g. [Vitepress](https://vitepress.dev/)
+1. Vite apps that leverage Vite Cloud's backend ([API routes](./server-routing.md)) or full-stack ([pages mode](./pages-routing.md)) features
+2. Other Vite-based meta frameworks that can run on Cloudflare, e.g. [TanStack Start](https://tanstack.com/start/latest), [React Router](https://reactrouter.com/)
+3. Purely static sites — SPAs, SSGs like [VitePress](https://vitepress.dev/), or any directory of static files
 
 The type is auto-detected from your project structure, or you can set it explicitly in [`vite-cloud.json`](./config.md).
 
 ## Vite Full-Stack
 
-A Vite app with backend code that runs on Cloudflare Workers. This is the default when your project has API routes, SSR, SSG, jobs, or any server-side logic. In this mode, **Vite Cloud is both the framework and the platform**. This opinionated setup unlocks some developer experience perks that are unique to Vite Cloud, while still staying frontend-framework-agnostic. You can use it with any frontend framework that works with Vite: React, Vue, Svelte, or Solid.
+A Vite app with backend code that runs on Cloudflare Workers. In this mode, **Vite Cloud is both the framework and the platform** — an opinionated setup that unlocks DX perks unique to Vite Cloud, while staying frontend-framework-agnostic. You can use it with React, Vue, Svelte, Solid, or any frontend that works with Vite.
 
-All Vite Cloud features that involve backend logic, such as [Server Routing](./server-routing.md) and [Authentication](./auth.md), are only available in this mode.
+All Vite Cloud features that involve backend logic — [server routing](./server-routing.md), [pages mode](./pages-routing.md), [authentication](./auth.md), [typed fetch](./typed-fetch.md), [cron jobs](./jobs.md), [queues](./queues.md) — are only available in this mode.
+
+A full-stack app can be **API-only** (just `routes/`), a **SPA + API** (frontend in `src/` with API routes), or **full-stack with pages mode** (server-rendered pages in `pages/` with co-located data loading):
 
 ```
 my-app/
-  src/
-    App.tsx
+  pages/                   ← pages mode (SSR + SPA navigation)
+    layout.vue
+    index.vue
+    index.server.ts
+    users/
+      index.vue
+      index.server.ts
   routes/
     api/
-      hello.ts          ← export const GET = defineHandler(...)
+      hello.ts             ← export const GET = defineHandler(...)
       users/
-        index.ts         ← export const GET, POST
-        [id].ts          ← export const GET
+        index.ts            ← export const GET, POST
+        [id].ts             ← export const GET
   middleware/
-    logger.ts
+    01.auth.ts
   migrations/
     001_create_users.sql
-  vite.config.ts         ← plugins: [viteCloud()]
+  vite.config.ts            ← plugins: [viteCloud()]
 ```
 
-Your worker handles API routes and (optionally) SSR. Static assets are served from the edge via R2. Cloudflare bindings (D1, KV, R2) are inferred from your source code and provisioned automatically.
+Your worker handles API routes, page rendering, and (optionally) [custom SSR](./ssr.md). Static assets are served from the edge via R2. Cloudflare bindings (D1, KV, R2) are inferred from your source code and provisioned automatically.
 
 **Detected when any of these exist:**
 
 - `routes/` directory
+- `pages/` directory
+- `middleware/` directory
 - `crons/` directory
-- SSR entry (`src/main.ssr.ts` or `src/main.ssr.tsx`)
-
-## Vite SPA
-
-A client-side single-page app without backend code. All paths that don't match a static file fall back to `index.html` with a 200 status, so client-side routing (React Router, Vue Router, etc.) works out of the box.
-
-```
-my-react-app/
-  src/
-    App.tsx
-    main.tsx
-  index.html
-  vite.config.ts
-  package.json           ← vite in dependencies, no routes/
-```
-
-Vite Cloud detects that `vite` is a dependency and no backend files exist, runs `vite build`, and deploys `dist/` as a SPA.
-
-**Detected when:**
-
-- `vite` is in your dependencies
-- No backend files exist (`routes/`, `crons/`, SSR entry)
+- `queues/` directory
+- Custom SSR entry (`src/main.ssr.ts` or `src/main.ssr.tsx`)
 
 ## Meta Frameworks
 
@@ -91,20 +80,13 @@ Features like `defineHandler`, file-based routing, auth, and the [typed fetch cl
 
 **Detected when** `@tanstack/react-start` or `@react-router/dev` is in your dependencies.
 
-## Static Site
+## Static Sites
 
-A statically generated site where each page has its own HTML file. This is the default for VitePress sites and `--dir` deploys.
+Any project that produces static files — SPAs, SSGs, or plain directories. No Cloudflare Worker is deployed; assets are served directly from the edge.
 
-```
-my-docs/
-  docs/
-    index.md
-    guide/
-      getting-started.md
-    .vitepress/
-      config.ts
-  package.json           ← vitepress in dependencies
-```
+**SPAs** (client-side single-page apps) fall back all non-file paths to `index.html` with a 200 status, so client-side routing works out of the box. Detected when `vite` is a dependency and no backend files exist.
+
+**SSGs** (static site generators like VitePress) produce per-page HTML files. Detected when `vitepress` is a dependency, or when using the `--dir` flag.
 
 At the edge, the resolution order is:
 
@@ -113,24 +95,18 @@ At the edge, the resolution order is:
 3. `404.html` with **status 404** (if the file exists)
 4. Plain 404 response
 
-**Detected when:**
-
-- `vitepress` is in your dependencies, **or**
-- `--dir` flag is used, **or**
-- `dist/index.html` or `./index.html` exists (no build tool detected)
-
 ## Auto-Detection
 
 When running `vcc deploy` and no `mode` is set in `vite-cloud.json`, the detection logic runs in this order:
 
-| Priority | Condition                                              | Type                               |
-| -------- | ------------------------------------------------------ | ---------------------------------- |
-| 1        | `--dir` flag                                           | SSG (or SPA with `--spa`)          |
-| 2        | `vitepress` in dependencies                            | SSG, builds with `vitepress build` |
-| 3        | `@tanstack/react-start` or `@react-router/dev` in deps | Framework                          |
-| 4        | Backend files exist (`routes/`, `crons/`, SSR entry)   | Full-stack                         |
-| 5        | `vite` in dependencies, no backend files               | SPA, builds with `vite build`      |
-| 6        | `dist/index.html` or `./index.html` exists             | SSG (no build step)                |
+| Priority | Condition                                                                                | Type                               |
+| -------- | ---------------------------------------------------------------------------------------- | ---------------------------------- |
+| 1        | `--dir` flag                                                                             | SSG (or SPA with `--spa`)          |
+| 2        | `vitepress` in dependencies                                                              | SSG, builds with `vitepress build` |
+| 3        | `@tanstack/react-start` or `@react-router/dev` in deps                                   | Framework                          |
+| 4        | Backend files exist (`routes/`, `pages/`, `middleware/`, `crons/`, `queues/`, SSR entry) | Full-stack                         |
+| 5        | `vite` in dependencies, no backend files                                                 | SPA, builds with `vite build`      |
+| 6        | `dist/index.html` or `./index.html` exists                                               | SSG (no build step)                |
 
 ## Explicit Configuration
 
@@ -143,5 +119,5 @@ To lock the app type and skip auto-detection, set `mode` in [`vite-cloud.json`](
 }
 ```
 
-- `mode`: `"spa"`, `"ssg"`, `"fullstack"`, or `"framework"`
+- `mode`: `"fullstack"`, `"framework"`, `"spa"`, or `"ssg"`
 - `outputDir`: output directory for static modes (relative to project root, defaults to `"dist"`)
