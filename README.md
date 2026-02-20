@@ -52,9 +52,9 @@ See [`packages/vite-cloud/AGENTS.md`](./packages/vite-cloud/AGENTS.md) for archi
 
 Vue framework adapter for Pages mode. Provides Inertia-inspired full-stack DX: server-driven routing with SPA navigation, automatic prop passing, form helpers, and full SSR.
 
-**Vite plugins:** `viteCloudVue()` returns three plugins — `scriptServerPlugin` (extracts `<script server>` blocks from `.vue` SFCs before `@vitejs/plugin-vue`), `@vitejs/plugin-vue`, and `pagesPlugin` (provides `virtual:vite-cloud-pages-renderer` and `virtual:vite-cloud-pages-client` virtual modules for SSR rendering and client hydration).
+**Vite plugins** (`@vite-cloud/vue/plugin`): `viteCloudVue()` returns three plugins — `scriptServerPlugin` (extracts `<script server>` blocks from `.vue` SFCs before `@vitejs/plugin-vue`), `@vitejs/plugin-vue`, and `pagesPlugin` (provides `virtual:vite-cloud-pages-renderer` and `virtual:vite-cloud-pages-client` virtual modules for SSR rendering and client hydration).
 
-**Runtime exports** (`@vite-cloud/vue/runtime`):
+**Runtime exports** (`@vite-cloud/vue`):
 
 - `Link` — Vue component for SPA navigation (renders `<a>` for GET, `<button>` for non-GET methods)
 - `useForm(defaults)` — Reactive form helper with `data`, `errors`, `isDirty`, `processing`, `wasSuccessful`, `recentlySuccessful`, `reset()`, `clearErrors()`, `post()`, `put()`, `patch()`, `delete()`

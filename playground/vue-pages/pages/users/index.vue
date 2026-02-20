@@ -27,7 +27,7 @@ export const POST = defineHandler(async (c) => {
 </script>
 
 <script setup lang="ts">
-import { Link, useForm } from "@vite-cloud/vue/runtime";
+import { Link, useForm } from "@vite-cloud/vue";
 
 const props = defineProps<{
   users: Array<{ id: number; name: string; email: string }>;

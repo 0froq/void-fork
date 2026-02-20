@@ -80,7 +80,7 @@ export const POST = defineHandler.withValidator({ body: createUserSchema })(asyn
 </script>
 
 <script setup lang="ts">
-import { useForm, useShared, Link } from "@vite-cloud/vue/runtime";
+import { useForm, useShared, Link } from "@vite-cloud/vue";
 
 interface User {
   id: number;
@@ -240,7 +240,7 @@ pages/
 ```vue
 <!-- pages/layout.vue -->
 <script setup>
-import { useShared, Link } from "@vite-cloud/vue/runtime";
+import { useShared, Link } from "@vite-cloud/vue";
 const { auth } = useShared();
 </script>
 
@@ -285,7 +285,7 @@ Client-side access via `useShared()`:
 
 ```vue
 <script setup>
-import { useShared } from "@vite-cloud/vue/runtime";
+import { useShared } from "@vite-cloud/vue";
 const { auth, flash } = useShared();
 </script>
 ```
@@ -361,7 +361,7 @@ Each adapter is a Vite plugin + runtime library. The adapter:
 The adapter's Vite plugin must extract `<script server>` **before** the framework plugin compiles the SFC:
 
 ```ts
-// @vite-cloud/vue internals
+// @vite-cloud/vue/plugin internals
 import vue from "@vitejs/plugin-vue";
 
 export function viteCloudVue(options?) {
@@ -379,7 +379,7 @@ export function viteCloudVue(options?) {
 // vite.config.ts
 import { defineConfig } from "vite";
 import viteCloud from "vite-cloud";
-import { viteCloudVue } from "@vite-cloud/vue";
+import { viteCloudVue } from "@vite-cloud/vue/plugin";
 
 export default defineConfig({
   plugins: [viteCloud(), ...viteCloudVue()],

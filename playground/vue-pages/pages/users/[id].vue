@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link } from "@vite-cloud/vue/runtime";
+import { Link } from "@vite-cloud/vue";
 
 const props = defineProps<{
   user: { id: number; name: string; email: string; created_at: string };
