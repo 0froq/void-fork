@@ -503,7 +503,30 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     }
   }
 
-  // Step 3: Demo code (only in full interactive flow)
+  // Step 3: Link skills
+  if (!targeted || initArgs?.agent) {
+    const { detectAgents, linkSkillsForAgents } = await import("./skills");
+    const detectedAgents = detectAgents(root);
+    if (detectedAgents.length > 0) {
+      const agentNames = detectedAgents.map((a) => a.displayName).join(", ");
+      if (targeted) {
+        linkSkillsForAgents(root);
+      } else {
+        const linkSkills = await confirm({
+          message: `Link vite-cloud skills for ${agentNames}?`,
+        });
+        if (isCancel(linkSkills)) {
+          cancel("Setup cancelled.");
+          process.exit(0);
+        }
+        if (linkSkills) {
+          linkSkillsForAgents(root);
+        }
+      }
+    }
+  }
+
+  // Step 4: Demo code (only in full interactive flow)
   if (!targeted) {
     if (state.hasRoutes || state.hasMigrations) {
       log.info("Project already has routes or migrations, skipping demo");
@@ -523,7 +546,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     }
   }
 
-  // Step 4: GitHub Actions
+  // Step 5: GitHub Actions
   if (!targeted || initArgs.github) {
     const deployYmlPath = join(root, ".github", "workflows", "deploy.yml");
     if (existsSync(deployYmlPath)) {

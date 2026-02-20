@@ -151,7 +151,7 @@ const agents: Record<string, AgentConfig> = {
   },
 };
 
-function detectAgents(root: string): AgentConfig[] {
+export function detectAgents(root: string): AgentConfig[] {
   return Object.values(agents).filter((a) => a.detect(root));
 }
 
@@ -189,6 +189,27 @@ function linkSkills(
     linked++;
   }
   return linked;
+}
+
+/**
+ * Link skills for all detected agents. Returns total number of newly linked skills.
+ * Used by both `vcc skills` and `vcc init`.
+ */
+export function linkSkillsForAgents(root: string): number {
+  const packageDir = getPackageDir();
+  const skillsDir = join(packageDir, "skills");
+  const skills = parseSkills(skillsDir);
+  if (skills.length === 0) return 0;
+
+  const detected = detectAgents(root);
+  if (detected.length === 0) return 0;
+
+  let totalLinked = 0;
+  for (const agent of detected) {
+    log.info(`${agent.displayName} → ${agent.skillsDir}`);
+    totalLinked += linkSkills(root, skillsDir, skills, agent.skillsDir);
+  }
+  return totalLinked;
 }
 
 export async function runSkillsCommand(): Promise<void> {
