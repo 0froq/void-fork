@@ -1,33 +1,3 @@
-<template>
-  <div>
-    <h1>Users</h1>
-
-    <ul>
-      <li v-for="user in users" :key="user.id">
-        <Link :href="`/users/${user.id}`">{{ user.name }}</Link>
-        ({{ user.email }})
-      </li>
-    </ul>
-
-    <h2>Add User</h2>
-    <form @submit.prevent="form.post('/users')">
-      <div>
-        <label>Name:</label>
-        <input v-model="form.data.name" />
-        <span v-if="form.errors.name" style="color: red">{{ form.errors.name }}</span>
-      </div>
-      <div>
-        <label>Email:</label>
-        <input v-model="form.data.email" />
-        <span v-if="form.errors.email" style="color: red">{{ form.errors.email }}</span>
-      </div>
-      <button type="submit" :disabled="form.processing">
-        {{ form.processing ? "Saving..." : "Add User" }}
-      </button>
-    </form>
-  </div>
-</template>
-
 <script server lang="ts">
 import { defineHandler } from "vite-cloud";
 import { ValidationError } from "vite-cloud/handler";
@@ -68,3 +38,33 @@ const form = useForm({
   email: "",
 });
 </script>
+
+<template>
+  <div>
+    <h1>Users</h1>
+
+    <ul>
+      <li v-for="user in users" :key="user.id">
+        <Link :href="`/users/${user.id}`">{{ user.name }}</Link>
+        ({{ user.email }})
+      </li>
+    </ul>
+
+    <h2>Add User</h2>
+    <form @submit.prevent="form.post('/users')">
+      <div>
+        <label>Name:</label>
+        <input v-model="form.data.name" />
+        <span v-if="form.errors.name" style="color: red">{{ form.errors.name }}</span>
+      </div>
+      <div>
+        <label>Email:</label>
+        <input v-model="form.data.email" />
+        <span v-if="form.errors.email" style="color: red">{{ form.errors.email }}</span>
+      </div>
+      <button type="submit" :disabled="form.processing">
+        {{ form.processing ? "Saving..." : "Add User" }}
+      </button>
+    </form>
+  </div>
+</template>
