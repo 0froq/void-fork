@@ -8,14 +8,14 @@ This is the development repo of Vite Cloud.
 - Refer to the [Progress Doc](./meta/0000-progress.md) for tracking progress.
 - Documentation source lives in `packages/website/docs/`. A root-level `docs/` symlink points there for convenience.
 
-## Plan Mode Best Practices
+## Best Practices That Must Be Followed
 
-Every implementation plan should include the following:
-
-- Verification: run `pnpm lint`, `pnpm fmt`, and `pnpm check`. Run `pnpm test` on tests relevant to the current feature first, then run the full test suite.
-- Documentation: after verification, update `README.md` (this file) with relevant changes, and also update: affected packages's `README.md` or `AGENTS.md`, and relevant docs md files in `packages/website/docs`.
-- Progress tracking: tick off relevant steps in `meta/0000-progress.md` when applicable.
-- Design decision log (optional): for particularly substantial changes, ask the user if they want to create a numbered design decision doc in `meta` following existing file format.
+- **Never** commit without asking for confirmation.
+- Every implementation plan should include the following:
+  - Verification: run `pnpm lint`, `pnpm fmt`, and `pnpm check`. Run `pnpm test` on tests relevant to the current feature first, then run the full test suite.
+  - Documentation: after verification, update `README.md` (this file) with relevant changes, and also update: affected packages's `README.md` or `AGENTS.md`, and relevant docs md files in `packages/website/docs`.
+  - Progress tracking: tick off relevant steps in `meta/0000-progress.md` when applicable.
+  - Design decision log (optional): for particularly substantial changes, ask the user if they want to create a numbered design decision doc in `meta` following existing file format.
 
 ## Quick Reference
 
@@ -98,6 +98,18 @@ Verified working:
 - `cd playground/spa && pnpm dev`
 - `cd playground/ssr && pnpm dev`
 - `cd playground/spa && pnpm typecheck` (includes typed routes via generated `.vite-cloud/routes.d.ts`)
+
+## Coding Agent Integration
+
+Vite Cloud ships with first-class support for coding agents (Claude Code, Cursor, Codex, etc.):
+
+- **`AGENT_PROMPT.md`** — compressed reference prompt shipped in the `vite-cloud` npm package. Covers project structure, routing, DB, auth, typed fetch, KV/storage/queues/cron, CLI, and deployment.
+- **`docs/`** — all 23 docs markdown files are included in the npm package at `node_modules/vite-cloud/docs/`.
+- **`vcc init --agent`** — detects existing agent files (`.claude/`, `CLAUDE.md`, `AGENTS.md`) and injects Vite Cloud instructions with versioned markers. Supports update-in-place when the version changes.
+- **`vcc agent-prompt`** — prints the agent reference prompt to stdout.
+- **`create-vite-cloud`** — auto-detects running agents (via `CLAUDE`, `CURSOR_SESSION_ID`, `CODEX` env vars) and creates the appropriate agent file. Interactive mode prompts users to choose.
+
+Agent instructions use versioned markers (`<!--injected-by-vite-cloud-v0.0.1-->` / `<!--/injected-by-vite-cloud-->`) for safe update-in-place across version upgrades.
 
 ## Code Generation (`vcc gen`)
 

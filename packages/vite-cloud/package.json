@@ -10,6 +10,8 @@
     "env.d.ts",
     "schema.json",
     "skills",
+    "docs",
+    "AGENT_PROMPT.md",
     "README.md"
   ],
   "type": "module",
@@ -78,7 +80,7 @@
     }
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown && cp -r ../website/docs docs",
     "dev": "tsdown --watch",
     "typecheck": "tsgo --noEmit"
   },

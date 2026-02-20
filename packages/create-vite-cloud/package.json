@@ -6,11 +6,12 @@
   },
   "files": [
     "dist",
-    "template"
+    "template",
+    "prompt"
   ],
   "type": "module",
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown && mkdir -p prompt && cp ../vite-cloud/AGENT_PROMPT.md prompt/AGENT_PROMPT.md",
     "dev": "tsdown --watch"
   },
   "dependencies": {
