@@ -233,7 +233,6 @@ if (command === "staging") {
     [
       "\x1b[0mvcd init                           \x1b[2mSet up vite-cloud in an existing project",
       "\x1b[0m  --tsconfig                       \x1b[2mOnly update tsconfig.json",
-      "\x1b[0m  --auth <providers>               \x1b[2mOnly configure auth (github,google,email)",
       "\x1b[0m  --github                         \x1b[2mOnly create GitHub Actions workflow",
       "",
       "\x1b[0mvcd deploy                         \x1b[2mBuild and deploy to Vite Cloud",
