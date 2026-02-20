@@ -3,11 +3,11 @@
 -- Staging: npx wrangler d1 execute vite-cloud-platform-staging --env staging --file scripts/seed.sql
 
 -- Users
-INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login, plan, billing_cycle_start, suspended_reason, role, created_at) VALUES ('user_seed1', 'github', '100001', 'alice', 'alice@example.com', 100001, 'alice', 'free', datetime('now', '-30 days'), NULL, 'user', datetime('now', '-90 days'));
-INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login, plan, billing_cycle_start, suspended_reason, role, created_at) VALUES ('user_seed2', 'github', '100002', 'bob', 'bob@example.com', 100002, 'bob', 'solo', datetime('now', '-7 days'), NULL, 'user', datetime('now', '-60 days'));
-INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login, plan, billing_cycle_start, suspended_reason, role, created_at) VALUES ('user_seed3', 'google', '100003', 'carol', 'carol@example.com', 100003, 'carol', 'pro', datetime('now', '-60 days'), NULL, 'user', datetime('now', '-60 days'));
-INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login, plan, billing_cycle_start, suspended_reason, role, created_at) VALUES ('user_seed4', 'github', '100004', 'dave', 'dave@example.com', 100004, 'dave', 'sponsored', datetime('now', '-90 days'), NULL, 'user', datetime('now', '-90 days'));
-INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login, plan, billing_cycle_start, suspended_reason, role, created_at) VALUES ('user_seed5', 'google', '100005', 'eve', 'eve@example.com', 100005, 'eve', 'free', datetime('now', '-30 days'), 'usage_limit_exceeded', 'user', datetime('now', '-30 days'));
+INSERT INTO users (id, provider, provider_id, login, email, plan, billing_cycle_start, suspended_reason, role, created_at) VALUES ('user_seed1', 'github', '100001', 'alice', 'alice@example.com', 'free', '2026-01-21T00:00:00.000Z', NULL, 'user', '2025-11-22T00:00:00.000Z');
+INSERT INTO users (id, provider, provider_id, login, email, plan, billing_cycle_start, suspended_reason, role, created_at) VALUES ('user_seed2', 'github', '100002', 'bob', 'bob@example.com', 'solo', '2026-02-13T00:00:00.000Z', NULL, 'user', '2025-12-22T00:00:00.000Z');
+INSERT INTO users (id, provider, provider_id, login, email, plan, billing_cycle_start, suspended_reason, role, created_at) VALUES ('user_seed3', 'google', '100003', 'carol', 'carol@example.com', 'pro', '2025-12-22T00:00:00.000Z', NULL, 'user', '2025-12-22T00:00:00.000Z');
+INSERT INTO users (id, provider, provider_id, login, email, plan, billing_cycle_start, suspended_reason, role, created_at) VALUES ('user_seed4', 'github', '100004', 'dave', 'dave@example.com', 'sponsored', '2025-11-22T00:00:00.000Z', NULL, 'user', '2025-11-22T00:00:00.000Z');
+INSERT INTO users (id, provider, provider_id, login, email, plan, billing_cycle_start, suspended_reason, role, created_at) VALUES ('user_seed5', 'google', '100005', 'eve', 'eve@example.com', 'free', '2026-01-21T00:00:00.000Z', 'usage_limit_exceeded', 'user', '2026-01-21T00:00:00.000Z');
 
 -- Projects
 INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed1', 'user_seed1', 'my-app', 'fullstack', datetime('now', '-60 days'));

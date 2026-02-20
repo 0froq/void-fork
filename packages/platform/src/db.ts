@@ -27,6 +27,7 @@ export async function createUser(
     provider_id: providerId,
     login,
     email,
+    billing_cycle_start: new Date().toISOString(),
   });
   return {
     id,

@@ -83,7 +83,11 @@ export function isWithinLimit(limit: number, current: number): boolean {
  * months (e.g. signup Jan 31 → Feb 28 in non-leap years).
  */
 export function getCurrentBillingPeriodStart(billingCycleStart: string): Date {
-  const signup = new Date(billingCycleStart);
+  // Handle SQLite datetime format (space instead of T, no Z)
+  const normalized = billingCycleStart.includes("T")
+    ? billingCycleStart
+    : billingCycleStart.replace(" ", "T") + "Z";
+  const signup = new Date(normalized);
   const anchorDay = signup.getUTCDate();
   const now = new Date();
   const year = now.getUTCFullYear();
