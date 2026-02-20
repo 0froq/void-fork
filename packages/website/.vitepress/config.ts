@@ -75,7 +75,7 @@ export default extendConfig(
               { text: "Key-Value Storage", link: "/docs/kv" },
               { text: "Blob Storage", link: "/docs/storage" },
               { text: "Authentication", link: "/docs/auth" },
-              { text: "Manual SSR", link: "/docs/ssr" },
+              { text: "Custom SSR", link: "/docs/ssr" },
               { text: "Edge Caching", link: "/docs/edge-caching" },
               { text: "Cron Jobs", link: "/docs/jobs" },
               { text: "Queues", link: "/docs/queues" },
