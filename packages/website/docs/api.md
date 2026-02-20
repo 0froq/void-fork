@@ -587,7 +587,7 @@ import type { CloudContext } from "vite-cloud";
 
 ### `CloudEnv`
 
-Hono environment type for Vite Cloud workers. Extends Hono's `Env` with Cloudflare bindings and session variables.
+Hono environment type for Vite Cloud workers. Extends Hono's `Env` with Cloudflare bindings and context variables.
 
 ```ts
 interface CloudEnv extends Env {
@@ -598,11 +598,34 @@ interface CloudEnv extends Env {
     AUTH_KV: KVNamespace;
     [key: string]: unknown;
   };
-  Variables: {
-    user: AuthUser | null;
-  };
+  Variables: CloudContextVariables;
 }
 ```
+
+### `CloudContextVariables`
+
+The context variables type used by `c.set()` / `c.get()`. Augment this interface to add typed variables that flow through all middleware and handlers:
+
+```ts
+interface CloudContextVariables {
+  user: AuthUser | null;
+  [key: string]: unknown;
+}
+```
+
+**Augmentation example:**
+
+```ts
+declare module "vite-cloud" {
+  interface CloudContextVariables {
+    requestId: string;
+  }
+}
+
+// c.get("requestId") → string
+```
+
+See [Type Safety](./type-safety.md#context-variables) for details.
 
 ### `TypedHandler<V, R>`
 
@@ -633,6 +656,89 @@ Importing `"vite-cloud/env"` provides global Cloudflare environment types:
 ```
 
 Declares the `Cloudflare.Env` namespace with `DB: D1Database`, `KV: KVNamespace`, and `STORAGE: R2Bucket`.
+
+For handler context variables (`c.set()` / `c.get()`), augment [`CloudContextVariables`](#cloudcontextvariables) — this is separate from `Cloudflare.Env`, which types the worker bindings. Framework adaptors (`@vite-cloud/vue`, `@vite-cloud/react`) also augment `CloudContextVariables` to add the `shared` key used by `useShared()`.
+
+## Framework Adaptors
+
+Framework adaptors for [Pages Routing](./pages-routing.md). Each adaptor provides a Vite plugin and client-side runtime.
+
+### `@vite-cloud/vue`
+
+#### `viteCloudVue(options?)`
+
+Imported from `"@vite-cloud/vue/plugin"`. Returns an array of Vite plugins that handle `<script server>` extraction, Vue SFC compilation, and SSR/hydration entry generation. Includes `@vitejs/plugin-vue` — no need to install or configure it separately.
+
+```ts
+import { viteCloudVue } from "@vite-cloud/vue/plugin";
+
+export default defineConfig({
+  plugins: [viteCloud(), viteCloudVue()],
+});
+```
+
+**Signature:**
+
+```ts
+function viteCloudVue(options?: ViteCloudVueOptions): Plugin[];
+```
+
+**Options:**
+
+```ts
+interface ViteCloudVueOptions {
+  vue?: VuePluginOptions; // passed through to @vitejs/plugin-vue
+}
+```
+
+#### Vue Runtime
+
+Imported from `"@vite-cloud/vue"`.
+
+| Export              | Description                                                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Link`              | Vue component for SPA navigation. Renders `<a>` for GET, `<button>` for non-GET methods. Props: `href`, `method`, `data`, `preserveScroll`. |
+| `useRouter()`       | Returns the page router for programmatic navigation: `visit`, `reload`, `post`, `put`, `patch`, `delete`.                                   |
+| `useForm(defaults)` | Reactive form helper. Returns `{ data, post, put, patch, delete, processing, errors, isDirty, reset, clearErrors }`.                        |
+| `useShared()`       | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                    |
+
+### `@vite-cloud/react`
+
+#### `viteCloudReact(options?)`
+
+Imported from `"@vite-cloud/react/plugin"`. Returns an array of Vite plugins that handle SSR/hydration entry generation. Includes `@vitejs/plugin-react` — no need to install or configure it separately.
+
+```ts
+import { viteCloudReact } from "@vite-cloud/react/plugin";
+
+export default defineConfig({
+  plugins: [viteCloud(), viteCloudReact()],
+});
+```
+
+**Signature:**
+
+```ts
+function viteCloudReact(options?: ViteCloudReactOptions): Plugin[];
+```
+
+**Options:**
+
+```ts
+interface ViteCloudReactOptions {
+  react?: ReactPluginOptions; // passed through to @vitejs/plugin-react
+}
+```
+
+#### React Runtime
+
+Imported from `"@vite-cloud/react"`.
+
+| Export              | Description                                                                                                                                   |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Link`              | React component for SPA navigation. Renders `<a>` for GET, `<button>` for non-GET methods. Props: `href`, `method`, `data`, `preserveScroll`. |
+| `useForm(defaults)` | Form helper hook. Returns `{ data, setData, post, put, patch, delete, processing, errors, isDirty, reset, clearErrors }`.                     |
+| `useShared()`       | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                      |
 
 ## Subpath Exports
 

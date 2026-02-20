@@ -10,6 +10,11 @@ import { runValidation, type ValidatorSlots, type HandlerInput } from "./validat
  * auth session KV namespace. The `Variables` bag carries the
  * authenticated user set by the auth middleware.
  */
+export interface CloudContextVariables {
+  user: AuthUser | null;
+  [key: string]: unknown;
+}
+
 export interface CloudEnv extends Env {
   Bindings: {
     DB: D1Database;
@@ -18,9 +23,7 @@ export interface CloudEnv extends Env {
     AUTH_KV: KVNamespace;
     [key: string]: unknown;
   };
-  Variables: {
-    user: AuthUser | null;
-  };
+  Variables: CloudContextVariables;
 }
 
 /**
