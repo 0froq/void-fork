@@ -141,4 +141,171 @@ describe("generateRouteTypes", () => {
     // Should have relative path from .vite-cloud to routes
     expect(dts).toContain("../routes/api/deep/nested");
   });
+
+  it("generates PageActionMap for pages with actions", () => {
+    const scan: ScanResult = {
+      routes: [],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: {
+        pages: [
+          {
+            pattern: "/users",
+            params: [],
+            catchAll: false,
+            componentPath: "users/index.vue",
+            serverPath: "users/index.server.ts",
+            hasInlineServer: false,
+            methods: ["loader", "action"],
+            componentId: "users",
+          },
+        ],
+        layouts: [],
+      },
+    };
+
+    const dts = generateRouteTypes(
+      scan,
+      "/project/routes",
+      "/project/.vite-cloud",
+      "/project/pages",
+    );
+
+    expect(dts).toContain("interface PageActionMap");
+    expect(dts).toContain('"/users"');
+    expect(dts).toContain('typeof import("../pages/users/index.server")');
+    expect(dts).toContain("body:");
+  });
+
+  it("generates params in PageActionMap for dynamic routes", () => {
+    const scan: ScanResult = {
+      routes: [],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: {
+        pages: [
+          {
+            pattern: "/users/:id",
+            params: ["id"],
+            catchAll: false,
+            componentPath: "users/[id].vue",
+            serverPath: "users/[id].server.ts",
+            hasInlineServer: false,
+            methods: ["loader", "action"],
+            componentId: "users/[id]",
+          },
+        ],
+        layouts: [],
+      },
+    };
+
+    const dts = generateRouteTypes(
+      scan,
+      "/project/routes",
+      "/project/.vite-cloud",
+      "/project/pages",
+    );
+
+    expect(dts).toContain('"/users/:id"');
+    expect(dts).toContain("params: { id: string }");
+  });
+
+  it("falls back to Record<string, unknown> for inline script server pages", () => {
+    const scan: ScanResult = {
+      routes: [],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: {
+        pages: [
+          {
+            pattern: "/settings",
+            params: [],
+            catchAll: false,
+            componentPath: "settings.vue",
+            serverPath: null,
+            hasInlineServer: true,
+            methods: ["loader", "action"],
+            componentId: "settings",
+          },
+        ],
+        layouts: [],
+      },
+    };
+
+    const dts = generateRouteTypes(
+      scan,
+      "/project/routes",
+      "/project/.vite-cloud",
+      "/project/pages",
+    );
+
+    // Inline <script server> can't be resolved by TypeScript — falls back
+    expect(dts).toContain('"/settings"');
+    expect(dts).toContain("body: Record<string, unknown>");
+    expect(dts).not.toContain(".vue?server");
+  });
+
+  it("skips pages without action in PageActionMap", () => {
+    const scan: ScanResult = {
+      routes: [],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: {
+        pages: [
+          {
+            pattern: "/about",
+            params: [],
+            catchAll: false,
+            componentPath: "about.vue",
+            serverPath: "about.server.ts",
+            hasInlineServer: false,
+            methods: ["loader"],
+            componentId: "about",
+          },
+        ],
+        layouts: [],
+      },
+    };
+
+    const dts = generateRouteTypes(
+      scan,
+      "/project/routes",
+      "/project/.vite-cloud",
+      "/project/pages",
+    );
+
+    expect(dts).not.toContain("PageActionMap");
+  });
+
+  it("omits PageActionMap when pagesDir is not provided", () => {
+    const scan: ScanResult = {
+      routes: [],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: {
+        pages: [
+          {
+            pattern: "/users",
+            params: [],
+            catchAll: false,
+            componentPath: "users/index.vue",
+            serverPath: "users/index.server.ts",
+            hasInlineServer: false,
+            methods: ["loader", "action"],
+            componentId: "users",
+          },
+        ],
+        layouts: [],
+      },
+    };
+
+    const dts = generateRouteTypes(scan, "/project/routes", "/project/.vite-cloud");
+
+    expect(dts).not.toContain("PageActionMap");
+  });
 });

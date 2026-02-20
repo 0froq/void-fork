@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
     "hono": "^4.11.9",
@@ -14,7 +14,9 @@
   },
   "devDependencies": {
     "@vite-cloud/vue": "workspace:*",
+    "typescript": "~5.8.3",
     "vite": "catalog:",
-    "vite-cloud": "workspace:*"
+    "vite-cloud": "workspace:*",
+    "vue-tsc": "^3.2.4"
   }
 }
