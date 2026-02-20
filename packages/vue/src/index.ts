@@ -6,9 +6,14 @@ import { join } from "node:path";
 
 export interface ViteCloudVueOptions {
   vue?: Parameters<typeof vue>[0];
+  viewTransitions?: boolean;
 }
 
 export function viteCloudVue(options?: ViteCloudVueOptions): Plugin[] {
   const pagesDir = join(process.cwd(), "pages");
-  return [scriptServerPlugin(pagesDir), vue(options?.vue) as Plugin, pagesPlugin(pagesDir)];
+  return [
+    scriptServerPlugin(pagesDir),
+    vue(options?.vue) as Plugin,
+    pagesPlugin(pagesDir, { viewTransitions: options?.viewTransitions }),
+  ];
 }
