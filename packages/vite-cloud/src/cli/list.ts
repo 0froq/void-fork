@@ -59,14 +59,15 @@ async function showDeployments(
   const modeWidth = Math.max("mode".length, ...rows.map((r) => r.mode.length));
   const statusWidth = Math.max("status".length, ...rows.map((r) => r.statusRaw.length));
   const sourceWidth = Math.max("source".length, ...rows.map((r) => r.source.length));
+  const commitWidth = Math.max("commit".length, ...rows.map((r) => r.commit.length));
   const isrWidth = Math.max("isr".length, ...rows.map((r) => r.isr.length));
 
   const prefix = "\x1b[90m│\x1b[0m  ";
-  const header = `${prefix}\x1b[2m${"id".padEnd(idWidth)}  ${"mode".padEnd(modeWidth)}  ${"status".padEnd(statusWidth)}  ${"source".padEnd(sourceWidth)}  ${"isr".padEnd(isrWidth)}  deployed\x1b[0m`;
+  const header = `${prefix}\x1b[2m${"id".padEnd(idWidth)}  ${"mode".padEnd(modeWidth)}  ${"status".padEnd(statusWidth)}  ${"source".padEnd(sourceWidth)}  ${"commit".padEnd(commitWidth)}  ${"isr".padEnd(isrWidth)}  deployed\x1b[0m`;
 
   const lines = rows.map(
     (row) =>
-      `${prefix}${row.id.padEnd(idWidth)}  ${row.mode.padEnd(modeWidth)}  ${row.statusColored}${"".padEnd(statusWidth - row.statusRaw.length)}  ${row.source.padEnd(sourceWidth)}  ${row.isr.padEnd(isrWidth)}  ${row.deployed}`,
+      `${prefix}${row.id.padEnd(idWidth)}  ${row.mode.padEnd(modeWidth)}  ${row.statusColored}${"".padEnd(statusWidth - row.statusRaw.length)}  ${row.source.padEnd(sourceWidth)}  ${row.commit.padEnd(commitWidth)}  ${row.isr.padEnd(isrWidth)}  ${row.deployed}`,
   );
 
   console.log(prefix);
@@ -81,6 +82,7 @@ interface DeploymentRow {
   statusRaw: string;
   statusColored: string;
   source: string;
+  commit: string;
   isr: string;
   deployed: string;
 }
@@ -98,6 +100,7 @@ function formatDeploymentRow(d: DeploymentResponse): DeploymentRow {
   const mode = manifest?.static ?? (manifest?.framework ? "framework" : "fullstack");
   const isr = manifest?.revalidate && manifest.revalidate > 0 ? `${manifest.revalidate}s` : "-";
   const source = d.source ?? "-";
+  const commit = d.commit ? d.commit.slice(0, 7) : "-";
 
   const statusRaw = d.status;
   let statusColored = statusRaw;
@@ -109,7 +112,7 @@ function formatDeploymentRow(d: DeploymentResponse): DeploymentRow {
 
   const deployed = d.deployed_at ? formatRelativeTime(d.deployed_at) : "-";
 
-  return { id: d.id, mode, statusRaw, statusColored, source, isr, deployed };
+  return { id: d.id, mode, statusRaw, statusColored, source, commit, isr, deployed };
 }
 
 function formatRelativeTime(iso: string): string {
