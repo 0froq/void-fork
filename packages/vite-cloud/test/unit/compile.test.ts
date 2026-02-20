@@ -33,6 +33,7 @@ describe("compileRouteTable", () => {
       middleware: [{ order: 1, filePath: "01.logger.ts" }],
       jobs: [{ filePath: "sync.ts", name: "sync", crons: ["0 * * * *"] }],
       queues: [],
+      pages: { pages: [], layouts: [] },
     };
 
     const code = compileRouteTable(
@@ -81,6 +82,7 @@ describe("compileRouteTable", () => {
       middleware: [],
       jobs: [{ filePath: "multi.ts", name: "multi", crons: ["0 * * * *", "30 * * * *"] }],
       queues: [],
+      pages: { pages: [], layouts: [] },
     };
 
     const code = compileRouteTable(
@@ -115,6 +117,7 @@ describe("compileRouteTable", () => {
       middleware: [],
       jobs: [],
       queues: [],
+      pages: { pages: [], layouts: [] },
     };
 
     const code = compileRouteTable(
@@ -132,7 +135,13 @@ describe("compileRouteTable", () => {
   });
 
   it("handles empty scan result", () => {
-    const scan: ScanResult = { routes: [], middleware: [], jobs: [], queues: [] };
+    const scan: ScanResult = {
+      routes: [],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: { pages: [], layouts: [] },
+    };
     const code = compileRouteTable(
       scan,
       "/routes",
@@ -149,7 +158,13 @@ describe("compileRouteTable", () => {
   });
 
   it("adds SSR fallback handler when ssr entry is provided", () => {
-    const scan: ScanResult = { routes: [], middleware: [], jobs: [], queues: [] };
+    const scan: ScanResult = {
+      routes: [],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: { pages: [], layouts: [] },
+    };
     const code = compileRouteTable(
       scan,
       "/routes",
@@ -189,6 +204,7 @@ describe("compileRouteTable", () => {
           bindingName: "QUEUE_EMAILS",
         },
       ],
+      pages: { pages: [], layouts: [] },
     };
 
     const code = compileRouteTable(
@@ -219,6 +235,7 @@ describe("compileRouteTable", () => {
           bindingName: "QUEUE_EMAILS",
         },
       ],
+      pages: { pages: [], layouts: [] },
     };
 
     const code = compileRouteTable(
@@ -235,7 +252,13 @@ describe("compileRouteTable", () => {
   });
 
   it("omits /__queue route when no queues defined", () => {
-    const scan: ScanResult = { routes: [], middleware: [], jobs: [], queues: [] };
+    const scan: ScanResult = {
+      routes: [],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: { pages: [], layouts: [] },
+    };
     const code = compileRouteTable(
       scan,
       "/routes",

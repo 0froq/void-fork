@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadEnv, type Plugin } from "vite";
 import { cloudflare, type WorkerConfig } from "@cloudflare/vite-plugin";
@@ -234,6 +234,7 @@ export default function viteCloud(): Plugin[] {
 
   const jobs = scanJobsSync(root);
   const ssrEntry = validateSsrEntry(root);
+  const hasPages = existsSync(join(root, "pages"));
 
   workerConfig.main = join(root, ".vite-cloud", "entry.ts");
 
@@ -243,12 +244,18 @@ export default function viteCloud(): Plugin[] {
     };
   }
 
-  if (ssrEntry) {
+  if (ssrEntry || hasPages) {
     workerConfig.assets = {
       binding: "ASSETS",
-      // Route HTML/document requests to the worker first for SSR, but let Vite dev
+      // Route HTML/document requests to the worker first for SSR/Pages, but let Vite dev
       // internals and source module requests bypass to the asset worker.
-      run_worker_first: ["/**", "!/@*", "!/src/*", "!/node_modules/*"],
+      run_worker_first: [
+        "/**",
+        "!/@*",
+        "!/src/*",
+        "!/node_modules/*",
+        ...(hasPages ? ["!/pages/*"] : []),
+      ],
     };
   }
 

@@ -18,6 +18,7 @@ describe("generateRouteTypes", () => {
       middleware: [],
       jobs: [],
       queues: [],
+      pages: { pages: [], layouts: [] },
     };
 
     const dts = generateRouteTypes(scan, "/project/routes", "/project/.vite-cloud");
@@ -45,6 +46,7 @@ describe("generateRouteTypes", () => {
       middleware: [],
       jobs: [],
       queues: [],
+      pages: { pages: [], layouts: [] },
     };
 
     const dts = generateRouteTypes(scan, "/project/routes", "/project/.vite-cloud");
@@ -69,6 +71,7 @@ describe("generateRouteTypes", () => {
       middleware: [],
       jobs: [],
       queues: [],
+      pages: { pages: [], layouts: [] },
     };
 
     const dts = generateRouteTypes(scan, "/project/routes", "/project/.vite-cloud");
@@ -91,6 +94,7 @@ describe("generateRouteTypes", () => {
       middleware: [],
       jobs: [],
       queues: [],
+      pages: { pages: [], layouts: [] },
     };
 
     const dts = generateRouteTypes(scan, "/project/routes", "/project/.vite-cloud");
@@ -100,7 +104,13 @@ describe("generateRouteTypes", () => {
   });
 
   it("includes Serialize and ExtractInput helper types", () => {
-    const scan: ScanResult = { routes: [], middleware: [], jobs: [], queues: [] };
+    const scan: ScanResult = {
+      routes: [],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: { pages: [], layouts: [] },
+    };
     const dts = generateRouteTypes(scan, "/project/routes", "/project/.vite-cloud");
 
     expect(dts).toContain("type Serialize<T>");
@@ -123,6 +133,7 @@ describe("generateRouteTypes", () => {
       middleware: [],
       jobs: [],
       queues: [],
+      pages: { pages: [], layouts: [] },
     };
 
     const dts = generateRouteTypes(scan, "/project/routes", "/project/.vite-cloud");

@@ -51,6 +51,8 @@ export default defineConfig({
     "src/runtime/queues.ts",
     "src/runtime/storage.ts",
     "src/runtime/isr.ts",
+    "src/pages/index.ts",
+    "src/pages/protocol.ts",
     "src/cli/cli.ts",
   ],
   format: "esm",

@@ -29,6 +29,15 @@ export interface SsrCompileOptions {
   clientEntryRelativePath: string;
 }
 
+export interface PagesCompileOptions {
+  /** Absolute path to pages/ directory */
+  pagesDir: string;
+  /** Absolute path to vite-cloud/pages-protocol module */
+  protocolPath: string;
+  /** Virtual module ID for the client entry (used for asset tags) */
+  clientEntryId: string;
+}
+
 /**
  * Generate the code for the virtual route table module (virtual:vite-cloud-routes).
  * This module creates a Hono app with:
@@ -43,6 +52,7 @@ export function compileRouteTable(
   queuesDir: string,
   ssr: SsrCompileOptions | null,
   options: CompileOptions,
+  pages: PagesCompileOptions | null = null,
 ): string {
   const lines: string[] = [];
   const auth = options.auth;
@@ -168,6 +178,11 @@ export function compileRouteTable(
     }
   }
   lines.push("");
+
+  // Pages mode — generate page route handlers
+  if (pages && scan.pages.pages.length > 0) {
+    compilePageRoutes(lines, scan, pages);
+  }
 
   if (ssr) {
     const clientEntryUrl = `/${ssr.clientEntryRelativePath}`;
@@ -539,6 +554,167 @@ function compileAuthRoutes(lines: string[], auth: AuthCompileOptions): void {
   lines.push('    Location: "/", "Set-Cookie": buildClearCookieHeader()');
   lines.push("  }});");
   lines.push("});");
+  lines.push("");
+}
+
+function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompileOptions): void {
+  // Import protocol helpers and renderer
+  lines.push(
+    `import { handlePageGet, handlePageMutation } from ${JSON.stringify(pages.protocolPath)};`,
+  );
+  lines.push(`import { renderPage } from "virtual:vite-cloud-pages-renderer";`);
+  lines.push("");
+
+  // Asset tags — reuse the SSR asset tags pattern with the pages client entry
+  const clientEntryId = pages.clientEntryId;
+  lines.push(`const PAGES_CLIENT_ENTRY_ID = ${JSON.stringify(clientEntryId)};`);
+  lines.push(`const PAGES_CLIENT_ENTRY_URL = ${JSON.stringify("/@id/__x00__" + clientEntryId)};`);
+  lines.push(`let cachedPagesManifest = null;`);
+  lines.push("");
+  lines.push(`function escapeHtmlAttr(value) {`);
+  lines.push(`  return String(value).replace(/"/g, "&quot;");`);
+  lines.push(`}`);
+  lines.push("");
+  lines.push(`function getPagesDevClientTags() {`);
+  lines.push(`  const headTags = [\`<script type="module" src="/@vite/client"></script>\`];`);
+  lines.push(
+    `  const bodyTag = \`<script type="module" src="\${escapeHtmlAttr(PAGES_CLIENT_ENTRY_URL)}"></script>\`;`,
+  );
+  lines.push(`  return { head: headTags.join("\\n"), body: bodyTag };`);
+  lines.push(`}`);
+  lines.push("");
+  lines.push(`function collectPagesManifestFiles(manifest, entryId) {`);
+  lines.push(`  const seen = new Set();`);
+  lines.push(`  const toVisit = [entryId];`);
+  lines.push(`  while (toVisit.length > 0) {`);
+  lines.push(`    const currentId = toVisit.pop();`);
+  lines.push(`    if (seen.has(currentId)) continue;`);
+  lines.push(`    seen.add(currentId);`);
+  lines.push(`    const chunk = manifest[currentId];`);
+  lines.push(`    if (!chunk || !Array.isArray(chunk.imports)) continue;`);
+  lines.push(`    for (const importedId of chunk.imports) toVisit.push(importedId);`);
+  lines.push(`  }`);
+  lines.push(`  return Array.from(seen);`);
+  lines.push(`}`);
+  lines.push("");
+  lines.push(`async function loadPagesManifest(request, env) {`);
+  lines.push(`  if (cachedPagesManifest) return cachedPagesManifest;`);
+  lines.push(`  const assets = env?.ASSETS;`);
+  lines.push(`  if (!assets || typeof assets.fetch !== "function") return null;`);
+  lines.push(`  const manifestUrl = new URL("/.vite/manifest.json", request.url);`);
+  lines.push(`  const response = await assets.fetch(new Request(manifestUrl.toString()));`);
+  lines.push(`  if (!response.ok) return null;`);
+  lines.push(`  cachedPagesManifest = await response.json();`);
+  lines.push(`  return cachedPagesManifest;`);
+  lines.push(`}`);
+  lines.push("");
+  lines.push(`async function getPagesAssetTags(request, env) {`);
+  lines.push(`  const manifest = await loadPagesManifest(request, env);`);
+  lines.push(`  if (!manifest || typeof manifest !== "object") {`);
+  lines.push(`    return getPagesDevClientTags();`);
+  lines.push(`  }`);
+  lines.push(`  const entry = manifest[PAGES_CLIENT_ENTRY_ID];`);
+  lines.push(`  if (!entry || typeof entry !== "object" || typeof entry.file !== "string") {`);
+  lines.push(`    return { head: "", body: "" };`);
+  lines.push(`  }`);
+  lines.push(`  const ids = collectPagesManifestFiles(manifest, PAGES_CLIENT_ENTRY_ID);`);
+  lines.push(`  const cssFiles = new Set();`);
+  lines.push(`  const preloadFiles = new Set();`);
+  lines.push(`  for (const id of ids) {`);
+  lines.push(`    const chunk = manifest[id];`);
+  lines.push(`    if (!chunk || typeof chunk !== "object") continue;`);
+  lines.push(`    if (Array.isArray(chunk.css)) {`);
+  lines.push(`      for (const cssFile of chunk.css) cssFiles.add(cssFile);`);
+  lines.push(`    }`);
+  lines.push(`    if (id !== PAGES_CLIENT_ENTRY_ID && typeof chunk.file === "string") {`);
+  lines.push(`      preloadFiles.add(chunk.file);`);
+  lines.push(`    }`);
+  lines.push(`  }`);
+  lines.push(`  const headTags = [];`);
+  lines.push(`  for (const cssFile of cssFiles) {`);
+  lines.push(`    headTags.push(\`<link rel="stylesheet" href="/\${escapeHtmlAttr(cssFile)}">\`);`);
+  lines.push(`  }`);
+  lines.push(`  for (const preloadFile of preloadFiles) {`);
+  lines.push(
+    `    headTags.push(\`<link rel="modulepreload" href="/\${escapeHtmlAttr(preloadFile)}">\`);`,
+  );
+  lines.push(`  }`);
+  lines.push(
+    `  const bodyTag = \`<script type="module" src="/\${escapeHtmlAttr(entry.file)}"></script>\`;`,
+  );
+  lines.push(`  return { head: headTags.join("\\n"), body: bodyTag };`);
+  lines.push(`}`);
+  lines.push("");
+
+  // Generate lazy loaders and route registrations for each page
+  const seenServerFiles = new Set<string>();
+  for (const page of scan.pages.pages) {
+    const safeId = page.componentId.replace(/[^a-zA-Z0-9]/g, "_");
+
+    // Determine server module path
+    let serverImportPath: string | null = null;
+    if (page.serverPath) {
+      serverImportPath = `${pages.pagesDir}/${page.serverPath}`;
+    } else if (page.hasInlineServer) {
+      serverImportPath = `${pages.pagesDir}/${page.componentPath}?server`;
+    }
+
+    // Generate lazy loader for server module (if any)
+    if (serverImportPath && !seenServerFiles.has(serverImportPath)) {
+      seenServerFiles.add(serverImportPath);
+      const varName = `_pmod_${safeId}`;
+      const loaderName = `_pload_${safeId}`;
+      lines.push(`let ${varName};`);
+      lines.push(`async function ${loaderName}() {`);
+      lines.push(
+        `  if (!${varName}) ${varName} = await import(${JSON.stringify(serverImportPath)});`,
+      );
+      lines.push(`  return ${varName};`);
+      lines.push(`}`);
+    }
+
+    // GET handler (always registered — pages always handle GET)
+    lines.push(`app.get(${JSON.stringify(page.pattern)}, async (c) => {`);
+    if (serverImportPath) {
+      const loaderName = `_pload_${safeId}`;
+      lines.push(`  const mod = await ${loaderName}();`);
+      lines.push(
+        `  return handlePageGet(mod.GET, c, ${JSON.stringify(page.componentId)}, renderPage, getPagesAssetTags);`,
+      );
+    } else {
+      lines.push(
+        `  return handlePageGet(undefined, c, ${JSON.stringify(page.componentId)}, renderPage, getPagesAssetTags);`,
+      );
+    }
+    lines.push(`});`);
+
+    // Mutation handlers (POST, PUT, PATCH, DELETE)
+    const mutationMethods = page.methods.filter((m) => m !== "GET");
+    for (const method of mutationMethods) {
+      const honoMethod = method.toLowerCase();
+      const loaderName = `_pload_${safeId}`;
+      lines.push(`app.${honoMethod}(${JSON.stringify(page.pattern)}, async (c) => {`);
+      lines.push(`  const mod = await ${loaderName}();`);
+      lines.push(
+        `  return handlePageMutation(mod.${method}, mod.GET, c, ${JSON.stringify(page.componentId)}, renderPage, getPagesAssetTags);`,
+      );
+      lines.push(`});`);
+    }
+  }
+  lines.push("");
+
+  // Page fallback — renders index page for unmatched non-API, non-asset paths.
+  // Uses notFound (not get("*")) so Vite's module pipeline can serve .vue/.ts files in dev.
+  lines.push(`app.notFound(async (c) => {`);
+  lines.push(`  const path = c.req.path;`);
+  lines.push(`  if (path === "/api" || path.startsWith("/api/")) {`);
+  lines.push(`    return c.text("Not Found", 404);`);
+  lines.push(`  }`);
+  lines.push(`  if (/\\/[^/]+\\.[^/]+$/.test(path)) {`);
+  lines.push(`    return c.text("Not Found", 404);`);
+  lines.push(`  }`);
+  lines.push(`  return handlePageGet(undefined, c, "index", renderPage, getPagesAssetTags);`);
+  lines.push(`});`);
   lines.push("");
 }
 

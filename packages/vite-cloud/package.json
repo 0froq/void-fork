@@ -76,6 +76,14 @@
       "types": "./dist/runtime/isr.d.mts",
       "import": "./dist/runtime/isr.mjs"
     },
+    "./pages": {
+      "types": "./dist/pages/index.d.mts",
+      "import": "./dist/pages/index.mjs"
+    },
+    "./pages-protocol": {
+      "types": "./dist/pages/protocol.d.mts",
+      "import": "./dist/pages/protocol.mjs"
+    },
     "./env": {
       "types": "./env.d.ts"
     }

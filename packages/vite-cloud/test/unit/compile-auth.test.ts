@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { compileRouteTable, type AuthCompileOptions } from "../../src/router/compile";
 import type { ScanResult } from "../../src/router/scan";
 
-const emptyScan: ScanResult = { routes: [], middleware: [], jobs: [], queues: [] };
+const emptyScan: ScanResult = {
+  routes: [],
+  middleware: [],
+  jobs: [],
+  queues: [],
+  pages: { pages: [], layouts: [] },
+};
 
 const baseOptions = {
   honoPath: "/resolved/hono/index.mjs",
@@ -153,6 +159,7 @@ describe("compileRouteTable with auth", () => {
       middleware: [{ order: 1, filePath: "01.logger.ts" }],
       jobs: [],
       queues: [],
+      pages: { pages: [], layouts: [] },
     };
     const code = compileRouteTable(scan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
@@ -178,6 +185,7 @@ describe("compileRouteTable with auth", () => {
       middleware: [{ order: 1, filePath: "01.logger.ts" }],
       jobs: [],
       queues: [],
+      pages: { pages: [], layouts: [] },
     };
     const code = compileRouteTable(scan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
