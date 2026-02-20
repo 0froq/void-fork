@@ -31,7 +31,7 @@ describe("compileRouteTable", () => {
         },
       ],
       middleware: [{ order: 1, filePath: "01.logger.ts" }],
-      jobs: [{ filePath: "sync.ts", name: "sync", cron: "0 * * * *" }],
+      jobs: [{ filePath: "sync.ts", name: "sync", crons: ["0 * * * *"] }],
       queues: [],
     };
 
@@ -69,10 +69,35 @@ describe("compileRouteTable", () => {
     expect(code).toContain('import("/routes/api/users/[id].ts")');
     // Should generate scheduled handler for cron jobs
     expect(code).toContain("export async function scheduled(controller, env, ctx)");
-    expect(code).toContain('const job0Cron = "0 * * * *"');
+    expect(code).toContain('const job0Crons = ["0 * * * *"]');
     expect(code).toContain('import("/crons/sync.ts")');
     // Should export app as default
     expect(code).toContain("export default app");
+  });
+
+  it("generates multiple case labels for multi-cron jobs", () => {
+    const scan: ScanResult = {
+      routes: [],
+      middleware: [],
+      jobs: [{ filePath: "multi.ts", name: "multi", crons: ["0 * * * *", "30 * * * *"] }],
+      queues: [],
+    };
+
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/crons",
+      "/queues",
+      null,
+      testOptions,
+    );
+
+    expect(code).toContain('const job0Crons = ["0 * * * *","30 * * * *"]');
+    // Two case labels falling through to the same handler
+    expect(code).toContain("case job0Crons[0]:");
+    expect(code).toContain("case job0Crons[1]: {");
+    expect(code).toContain('import("/crons/multi.ts")');
   });
 
   it("falls back to app.all with mod.default for no HTTP exports", () => {

@@ -239,7 +239,7 @@ export default function viteCloud(): Plugin[] {
 
   if (jobs.length > 0) {
     workerConfig.triggers = {
-      crons: jobs.map((job) => job.cron),
+      crons: jobs.flatMap((job) => job.crons),
     };
   }
 
@@ -269,7 +269,7 @@ export default function viteCloud(): Plugin[] {
 export {
   defineHandler,
   defineMiddleware,
-  defineJob,
+  defineScheduled,
   defineRender,
   defineQueue,
 } from "./runtime/handler";

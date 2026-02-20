@@ -623,14 +623,14 @@ describe("gen ssr", () => {
 // ---------------------------------------------------------------------------
 
 describe("gen cron", () => {
-  it("generates cron job file with defineJob", async () => {
+  it("generates cron job file with defineScheduled", async () => {
     mkdirSync(TMP, { recursive: true });
     await runGenCommand(TMP, { subcommand: "cron", name: "hourly-sync" });
 
     const content = read("crons/hourly-sync.ts");
-    expect(content).toContain('import { defineJob } from "vite-cloud"');
+    expect(content).toContain('import { defineScheduled } from "vite-cloud"');
     expect(content).toContain('export const cron = "* * * * *"');
-    expect(content).toContain("export default defineJob(");
+    expect(content).toContain("export default defineScheduled(");
     expect(content).toContain("// TODO: implement hourly-sync");
   });
 

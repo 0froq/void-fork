@@ -9,26 +9,41 @@ export interface JobDefinition {
   filePath: string;
   /** Deterministic job name (path without extension) */
   name: string;
-  /** Cron expression from `export const cron = "..."` */
-  cron: string;
+  /** Cron expressions from `export const cron = "..."` or `export const cron = ["...", "..."]` */
+  crons: string[];
 }
 
 function extractJobName(filePath: string): string {
   return filePath.replace(/\.[^.]+$/, "");
 }
 
-function extractCronExpression(source: string, filePath: string): string {
-  const match = source.match(/export\s+const\s+cron\s*=\s*(['"`])([^'"`]+)\1/);
-  if (!match) {
-    throw new Error(
-      `Invalid job file "${filePath}": missing \`export const cron = "<schedule>"\` literal`,
-    );
+function extractCronExpressions(source: string, filePath: string): string[] {
+  // Try single string: export const cron = "..."
+  const singleMatch = source.match(/export\s+const\s+cron\s*=\s*(['"`])([^'"`]+)\1/);
+  if (singleMatch) {
+    const cron = singleMatch[2].trim();
+    if (!cron) {
+      throw new Error(`Invalid job file "${filePath}": cron expression cannot be empty`);
+    }
+    return [cron];
   }
-  const cron = match[2].trim();
-  if (!cron) {
-    throw new Error(`Invalid job file "${filePath}": cron expression cannot be empty`);
+
+  // Try array: export const cron = ["...", "..."]
+  const arrayMatch = source.match(/export\s+const\s+cron\s*=\s*\[([^\]]+)\]/);
+  if (arrayMatch) {
+    const items = arrayMatch[1].match(/(['"`])([^'"`]+)\1/g);
+    if (!items || items.length === 0) {
+      throw new Error(`Invalid job file "${filePath}": cron array cannot be empty`);
+    }
+    return items.map((item) => {
+      const m = item.match(/['"`]([^'"`]+)['"`]/);
+      return m![1].trim();
+    });
   }
-  return cron;
+
+  throw new Error(
+    `Invalid job file "${filePath}": missing \`export const cron = "<schedule>"\` literal`,
+  );
 }
 
 function parseJobFiles(root: string, jobsDir: string, files: string[]): JobDefinition[] {
@@ -41,7 +56,7 @@ function parseJobFiles(root: string, jobsDir: string, files: string[]): JobDefin
       return {
         filePath,
         name: extractJobName(filePath),
-        cron: extractCronExpression(source, filePath),
+        crons: extractCronExpressions(source, filePath),
       };
     });
 }

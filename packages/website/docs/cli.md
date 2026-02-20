@@ -246,7 +246,7 @@ If no flag is provided, the framework is auto-detected from `package.json` depen
 vcc gen cron <name>
 ```
 
-Create a cron job file in `crons/` with `defineJob` and a placeholder cron expression.
+Create a cron job file in `crons/` with `defineScheduled` and a placeholder cron expression.
 
 ```sh
 vcc gen cron hourly-sync
