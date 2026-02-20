@@ -168,6 +168,7 @@ export interface CfApiMocks {
   createCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
   getCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
   deleteCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  analyticsQuery: (url: string, init?: RequestInit) => Response | Promise<Response>;
 }
 
 const defaultMocks: CfApiMocks = {
@@ -200,6 +201,7 @@ const defaultMocks: CfApiMocks = {
       ssl: { status: "pending" },
     }),
   deleteCustomHostname: () => cfSuccess(null),
+  analyticsQuery: () => Response.json({ data: [{ requests: 0, bandwidth_bytes: 0 }] }),
 };
 
 export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeof vi.fn> {
@@ -219,6 +221,9 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
     }
     if (method === "DELETE" && url.includes("/custom_hostnames/")) {
       return mocks.deleteCustomHostname(url, init);
+    }
+    if (method === "POST" && url.includes("/analytics_engine/sql")) {
+      return mocks.analyticsQuery(url, init);
     }
     if (method === "PUT" && url.includes("/workers/dispatch/") && url.includes("/secrets")) {
       return mocks.setWorkerSecret(url, init);

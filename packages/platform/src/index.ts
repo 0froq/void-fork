@@ -15,13 +15,8 @@ import { dashboardHandler } from "./admin/routes/system";
 import adminUsers from "./admin/routes/users";
 import adminProjects from "./admin/routes/projects";
 import adminDeployments from "./admin/routes/deployments";
-import {
-  createDb,
-  getProjectsByUserId,
-  getAllUsersWithPlan,
-  suspendUser,
-  unsuspendUser,
-} from "./db";
+import { createDb, getUsersWithProjectsBatch, suspendUser, unsuspendUserIfReason } from "./db";
+import type { Db } from "./db";
 import { queryProjectUsage } from "./routes/usage";
 import { getCurrentBillingPeriodStart, getPlanLimits, isWithinLimit } from "./tiers";
 
@@ -55,6 +50,9 @@ app.route("/admin/users", adminUsers);
 app.route("/admin/projects", adminProjects);
 app.route("/admin/deployments", adminDeployments);
 
+const BATCH_SIZE = 50;
+const ANALYTICS_CONCURRENCY = 10;
+
 async function scheduled(
   _controller: ScheduledController,
   env: PlatformEnv["Bindings"],
@@ -62,46 +60,86 @@ async function scheduled(
 ): Promise<void> {
   const db = createDb(env.DB);
 
-  // Query all users, check their usage against plan limits
-  const allUsers = await getAllUsersWithPlan(db);
+  let offset = 0;
+  while (true) {
+    const batch = await getUsersWithProjectsBatch(db, BATCH_SIZE, offset);
+    if (batch.length === 0) break;
 
-  for (const user of allUsers) {
-    const limits = getPlanLimits(user.plan);
-    if (limits.requestsPerMonth === 0) continue; // unlimited
+    await Promise.allSettled(
+      batch.map(({ user, projects }) => processUserUsage(env, db, user, projects)),
+    );
 
-    const userProjects = await getProjectsByUserId(db, user.id);
-    if (userProjects.length === 0) continue;
+    offset += BATCH_SIZE;
+  }
+}
 
-    const since = getCurrentBillingPeriodStart(user.billing_cycle_start);
+async function processUserUsage(
+  env: PlatformEnv["Bindings"],
+  db: Db,
+  user: { id: string; plan: string; billing_cycle_start: string; suspended_reason: string | null },
+  userProjects: { id: string; slug: string }[],
+): Promise<void> {
+  const limits = getPlanLimits(user.plan);
+  if (limits.requestsPerMonth === 0) return; // unlimited
+  if (userProjects.length === 0) return;
 
-    // Sum usage across all user's projects
-    let totalRequests = 0;
-    for (const project of userProjects) {
-      const usage = await queryProjectUsage(env.CF_ACCOUNT_ID, env.CF_API_TOKEN, project.id, since);
-      totalRequests += usage.requests;
+  const since = getCurrentBillingPeriodStart(user.billing_cycle_start);
+
+  // Query analytics for all projects with bounded concurrency
+  const usages = await asyncPool(userProjects, ANALYTICS_CONCURRENCY, (project) =>
+    queryProjectUsage(env.CF_ACCOUNT_ID, env.CF_API_TOKEN, project.id, since),
+  );
+
+  let totalRequests = 0;
+  for (const usage of usages) {
+    totalRequests += usage.requests;
+  }
+
+  const exceeded = !isWithinLimit(limits.requestsPerMonth, totalRequests);
+
+  // Update KV routing entries for each project
+  for (const project of userProjects) {
+    const routingRaw = await env.ROUTING.get(project.slug);
+    if (!routingRaw) continue;
+
+    const routing = JSON.parse(routingRaw);
+
+    if (exceeded && !routing.suspended) {
+      routing.suspended = "requests_exceeded";
+      await env.ROUTING.put(project.slug, JSON.stringify(routing));
+    } else if (!exceeded && routing.suspended === "requests_exceeded") {
+      delete routing.suspended;
+      await env.ROUTING.put(project.slug, JSON.stringify(routing));
     }
+    // Leave admin-suspended or other suspension reasons untouched
+  }
 
-    const exceeded = !isWithinLimit(limits.requestsPerMonth, totalRequests);
+  // Update DB suspension status
+  if (exceeded) {
+    await suspendUser(db, user.id, "requests_exceeded");
+  } else {
+    await unsuspendUserIfReason(db, user.id, "requests_exceeded");
+  }
+}
 
-    // Update suspension status for all user's projects
-    for (const project of userProjects) {
-      const routingRaw = await env.ROUTING.get(project.slug);
-      if (!routingRaw) continue;
+async function asyncPool<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
 
-      const routing = JSON.parse(routingRaw);
-      const currentlySuspended = !!routing.suspended;
-
-      if (exceeded && !currentlySuspended) {
-        routing.suspended = "requests_exceeded";
-        await env.ROUTING.put(project.slug, JSON.stringify(routing));
-        await suspendUser(db, user.id, "requests_exceeded");
-      } else if (!exceeded && currentlySuspended) {
-        delete routing.suspended;
-        await env.ROUTING.put(project.slug, JSON.stringify(routing));
-        await unsuspendUser(db, user.id);
-      }
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const i = nextIndex++;
+      results[i] = await fn(items[i]);
     }
   }
+
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
 }
 
 export { app, scheduled };

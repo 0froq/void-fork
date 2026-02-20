@@ -48,8 +48,8 @@ src/
     domains.ts              # Custom domain CRUD + CF for SaaS
     usage.ts                # Usage queries (per-project + aggregate)
 drizzle/
-  0000_messy_patriot.sql    # Baseline migration (all 5 tables)
-  0001_perpetual_ezekiel.sql # Drop ghost columns (github_id, github_login), add NOT NULL to projects.mode
+  0000_lush_rhodey.sql      # Baseline migration (all 5 tables)
+  0001_supreme_the_twelve.sql # Add composite indexes on deployments(project_id, created_at) and domains(project_id, created_at)
   meta/_journal.json        # Drizzle migration journal
 ```
 
@@ -136,7 +136,7 @@ Five plan tiers: `free`, `solo`, `pro`, `sponsored`, `custom`. Defined in `src/t
 
 - **Immediate enforcement**: Deploy count per day (checked at deploy time via D1 query)
 - **Per-request enforcement**: CPU time and sub-requests via CF Custom Limits (passed in KV routing `limits` field, applied by dispatch worker)
-- **Async enforcement**: Request count per month via Cron Trigger (`*/5 * * * *`) — queries Analytics Engine, sets/clears `suspended` flag in KV routing entries
+- **Async enforcement**: Request count per month via Cron Trigger (`*/5 * * * *`) — batched user processing (50 users/batch) with concurrent analytics queries (10 concurrency), sets/clears `suspended: "requests_exceeded"` in KV routing entries. Only clears suspension if the reason is `"requests_exceeded"` (preserves admin suspensions). Errors are isolated per-user via `Promise.allSettled`.
 - **Usage queries**: `GET /projects/:id/usage` (per-project) and `GET /usage` (aggregate) query Analytics Engine SQL API with `_sample_interval` multiplier
 
 The platform default export is `{ fetch: app.fetch, scheduled }` — `app` (the Hono instance) is also exported as a named export for integration tests.
@@ -224,13 +224,14 @@ Used by the platform worker at runtime to provision and manage user resources vi
 
 Integration tests call the Hono app via `app.fetch(request, env)` with **real** Miniflare D1/KV/R2 bindings and **mocked** external fetch calls (GitHub API, CF API). This tests the full request→middleware→route→DB→response chain.
 
-| Test file                                  | Covers                                                                                                              |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `test/integration/api-health.test.ts`      | Health endpoint smoke test (1 test)                                                                                 |
-| `test/integration/api-me.test.ts`          | Auth middleware: missing/invalid/expired JWT, valid (4)                                                             |
-| `test/integration/api-projects.test.ts`    | Projects CRUD: auth, list, create, validation, dupes (12)                                                           |
-| `test/integration/api-deploy.test.ts`      | Deploy pipeline: auth, provisioning, migrations, R2, KV, limits, queues, failure modes (36)                         |
-| `test/integration/admin-dashboard.test.ts` | Admin dashboard: auth, pages, forms, search, pagination, deployments, error display, plan limits, login/logout (28) |
+| Test file                                  | Covers                                                                                                                                                          |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/integration/api-health.test.ts`      | Health endpoint smoke test (1 test)                                                                                                                             |
+| `test/integration/api-me.test.ts`          | Auth middleware: missing/invalid/expired JWT, valid (4)                                                                                                         |
+| `test/integration/api-projects.test.ts`    | Projects CRUD: auth, list, create, validation, dupes (12)                                                                                                       |
+| `test/integration/api-deploy.test.ts`      | Deploy pipeline: auth, provisioning, migrations, R2, KV, limits, queues, failure modes (36)                                                                     |
+| `test/integration/admin-dashboard.test.ts` | Admin dashboard: auth, pages, forms, search, pagination, deployments, error display, plan limits, login/logout (28)                                             |
+| `test/integration/scheduled.test.ts`       | Cron handler: empty DB, unlimited skip, no-projects skip, within limits, exceeds limits, unsuspend, admin-suspended preserved, error isolation, multi-batch (9) |
 
 Shared helpers in `test/integration/helpers.ts`:
 

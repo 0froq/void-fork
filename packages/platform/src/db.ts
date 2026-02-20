@@ -1,4 +1,4 @@
-import { and, count, desc, asc, eq, like, or, sql, getTableColumns } from "drizzle-orm";
+import { and, count, desc, asc, eq, inArray, like, or, sql, getTableColumns } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema";
 import { users, projects, deployments, resources, domains } from "./schema";
@@ -405,4 +405,47 @@ export async function getAllUsersWithPlan(db: Db) {
     })
     .from(users)
     .all();
+}
+
+export async function getUsersWithProjectsBatch(db: Db, limit: number, offset: number) {
+  const userRows = await db
+    .select({
+      id: users.id,
+      plan: users.plan,
+      billing_cycle_start: users.billing_cycle_start,
+      suspended_reason: users.suspended_reason,
+    })
+    .from(users)
+    .orderBy(asc(users.id))
+    .limit(limit)
+    .offset(offset)
+    .all();
+
+  if (userRows.length === 0) return [];
+
+  const userIds = userRows.map((u) => u.id);
+  const projectRows = await db
+    .select({ id: projects.id, slug: projects.slug, user_id: projects.user_id })
+    .from(projects)
+    .where(inArray(projects.user_id, userIds))
+    .all();
+
+  const projectsByUser = new Map<string, typeof projectRows>();
+  for (const p of projectRows) {
+    const list = projectsByUser.get(p.user_id) ?? [];
+    list.push(p);
+    projectsByUser.set(p.user_id, list);
+  }
+
+  return userRows.map((user) => ({
+    user,
+    projects: projectsByUser.get(user.id) ?? [],
+  }));
+}
+
+export async function unsuspendUserIfReason(db: Db, id: string, reason: string): Promise<void> {
+  await db
+    .update(users)
+    .set({ suspended_reason: null })
+    .where(and(eq(users.id, id), eq(users.suspended_reason, reason)));
 }

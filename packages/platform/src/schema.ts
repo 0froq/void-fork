@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, unique, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, sqliteTable, text, unique, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type { PlanId } from "./tiers";
 
 // ---------------------------------------------------------------------------
@@ -51,23 +51,27 @@ export const projects = sqliteTable(
 // ---------------------------------------------------------------------------
 // deployments
 // ---------------------------------------------------------------------------
-export const deployments = sqliteTable("deployments", {
-  id: text("id").primaryKey(),
-  project_id: text("project_id")
-    .notNull()
-    .references(() => projects.id),
-  status: text("status")
-    .notNull()
-    .default("pending")
-    .$type<"pending" | "uploading" | "migrating" | "live" | "failed">(),
-  manifest: text("manifest"),
-  source: text("source"),
-  error_message: text("error_message"),
-  created_at: text("created_at")
-    .notNull()
-    .default(sql`(datetime('now'))`),
-  deployed_at: text("deployed_at"),
-});
+export const deployments = sqliteTable(
+  "deployments",
+  {
+    id: text("id").primaryKey(),
+    project_id: text("project_id")
+      .notNull()
+      .references(() => projects.id),
+    status: text("status")
+      .notNull()
+      .default("pending")
+      .$type<"pending" | "uploading" | "migrating" | "live" | "failed">(),
+    manifest: text("manifest"),
+    source: text("source"),
+    error_message: text("error_message"),
+    created_at: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    deployed_at: text("deployed_at"),
+  },
+  (t) => [index("idx_deployments_project_id").on(t.project_id, t.created_at)],
+);
 
 // ---------------------------------------------------------------------------
 // resources
@@ -92,15 +96,19 @@ export const resources = sqliteTable(
 // ---------------------------------------------------------------------------
 // domains
 // ---------------------------------------------------------------------------
-export const domains = sqliteTable("domains", {
-  id: text("id").primaryKey(),
-  project_id: text("project_id")
-    .notNull()
-    .references(() => projects.id),
-  hostname: text("hostname").notNull().unique(),
-  cf_hostname_id: text("cf_hostname_id").notNull(),
-  status: text("status").notNull().default("pending").$type<"pending" | "active">(),
-  created_at: text("created_at")
-    .notNull()
-    .default(sql`(datetime('now'))`),
-});
+export const domains = sqliteTable(
+  "domains",
+  {
+    id: text("id").primaryKey(),
+    project_id: text("project_id")
+      .notNull()
+      .references(() => projects.id),
+    hostname: text("hostname").notNull().unique(),
+    cf_hostname_id: text("cf_hostname_id").notNull(),
+    status: text("status").notNull().default("pending").$type<"pending" | "active">(),
+    created_at: text("created_at")
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (t) => [index("idx_domains_project_id").on(t.project_id, t.created_at)],
+);
