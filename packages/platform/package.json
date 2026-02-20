@@ -15,6 +15,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply vite-cloud-platform --remote",
+    "migrate:staging": "wrangler d1 migrations apply vite-cloud-platform-staging --env staging --remote",
     "typecheck": "tsgo --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",

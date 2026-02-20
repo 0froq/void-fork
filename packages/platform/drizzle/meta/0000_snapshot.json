@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5f5733ff-14a9-4c3f-a86d-5b19f20706a7",
+  "id": "b4a2e77c-e4fa-4728-949c-87c0e6cc25f9",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "deployments": {
@@ -180,7 +180,7 @@
           "name": "mode",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false,
           "default": "'worker'"
         },
@@ -294,20 +294,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "github_id": {
-          "name": "github_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "github_login": {
-          "name": "github_login",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "provider": {
           "name": "provider",
           "type": "text",
@@ -380,11 +366,6 @@
         }
       },
       "indexes": {
-        "users_github_id_unique": {
-          "name": "users_github_id_unique",
-          "columns": ["github_id"],
-          "isUnique": true
-        },
         "idx_users_provider_id": {
           "name": "idx_users_provider_id",
           "columns": ["provider", "provider_id"],

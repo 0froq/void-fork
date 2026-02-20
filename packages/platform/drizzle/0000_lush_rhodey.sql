@@ -25,7 +25,7 @@ CREATE TABLE `projects` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
 	`slug` text NOT NULL,
-	`mode` text DEFAULT 'worker',
+	`mode` text DEFAULT 'worker' NOT NULL,
 	`created_at` text DEFAULT (datetime('now')) NOT NULL,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
@@ -44,8 +44,6 @@ CREATE TABLE `resources` (
 CREATE UNIQUE INDEX `resources_project_id_type_binding_name_unique` ON `resources` (`project_id`,`type`,`binding_name`);--> statement-breakpoint
 CREATE TABLE `users` (
 	`id` text PRIMARY KEY NOT NULL,
-	`github_id` integer NOT NULL,
-	`github_login` text NOT NULL,
 	`provider` text DEFAULT 'github' NOT NULL,
 	`provider_id` text DEFAULT '' NOT NULL,
 	`login` text DEFAULT '' NOT NULL,
@@ -57,5 +55,4 @@ CREATE TABLE `users` (
 	`created_at` text DEFAULT (datetime('now')) NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `users_github_id_unique` ON `users` (`github_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `idx_users_provider_id` ON `users` (`provider`,`provider_id`);
