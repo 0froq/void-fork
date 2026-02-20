@@ -110,7 +110,7 @@ Rails/Laravel-style scaffolding commands for common boilerplate:
 | `vcc gen route <path> [--methods get,post,...]`   | Route file with `defineHandler` exports          |
 | `vcc gen middleware <name>`                       | Numbered middleware file with `defineMiddleware` |
 | `vcc gen ssr [--react\|--vue\|--svelte\|--solid]` | SSR entry + client entry + App component         |
-| `vcc gen cron <name>`                             | Cron job file with `defineJob` in `crons/`       |
+| `vcc gen cron <name>`                             | Cron job file with `defineScheduled` in `crons/` |
 | `vcc gen queue <name>`                            | Queue consumer file with `defineQueue`           |
 
 Column types for `gen model`: `string`, `text`, `datetime` → TEXT; `integer`, `boolean` → INTEGER; `real` → REAL; `blob` → BLOB. Append `?` for nullable (e.g. `bio:text?`).
@@ -175,3 +175,4 @@ Staging auto-deploys on push to `main` via `.github/workflows/deploy-staging.yml
 - **tsconfig `lib` must be explicit** for CF Workers packages. Without `"lib": ["ES2022"]`, TS defaults to including `lib.dom.d.ts` which shadows `@cloudflare/workers-types` globals (e.g. `CacheStorage.default`). Applied to `dispatch`, `vite-cloud`, `create-vite-cloud`. Not applied to `platform` (its tests use Miniflare/Node which needs DOM-compatible `URL` types).
 - **OAuth env vars use `_OAUTH_` prefix** (`GITHUB_OAUTH_ID`, `GITHUB_OAUTH_SECRET`, `GOOGLE_OAUTH_ID`, `GOOGLE_OAUTH_SECRET`). These are passed explicitly to `@hono/oauth-providers` middleware, overriding its default `GITHUB_ID`/`GOOGLE_ID` convention, to avoid naming collisions and make the purpose clear.
 - **D1 does not allow `PRAGMA foreign_keys=OFF`** — D1 enforces `foreign_keys=ON` always. Drizzle-generated migrations that do table rebuilds (e.g. adding NOT NULL to an existing column) use `PRAGMA foreign_keys=OFF/ON`, which silently fails on D1. Hand-edit these to `PRAGMA defer_foreign_keys=on/off` instead, which defers FK checks to the end of the current transaction.
+- **`packages/mcp/src/docs.ts` is auto generated and ignored by git**. Do not read or edit this file.
