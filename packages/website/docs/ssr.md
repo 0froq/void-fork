@@ -1,6 +1,10 @@
-# Server-side Rendering (SSR)
+# Manual SSR
 
-Vite Cloud supports framework-agnostic SSR via explicit server and client entries.
+Vite Cloud supports framework-agnostic SSR via explicit server and client entries. This is for advanced use cases where you want full control over rendering and hydration.
+
+::: tip
+For most apps, [Pages Routing](./pages-routing.md) handles SSR automatically — no entry files or hydration code needed.
+:::
 
 ## Required entries
 
