@@ -272,6 +272,78 @@ Given that Vite Cloud is pre-1.0, this is acceptable as a clean break. For users
 
 ---
 
+## Validation Library Interaction
+
+### Current State
+
+`vcc gen model` auto-detects the user's validation library (valibot, zod, or arktype) and generates standalone validation schemas in route handlers. These schemas are hand-crafted — they duplicate the column types already expressed in the migration SQL:
+
+```ts
+// Generated route — validation schema is independent of DB schema
+export const POST = defineHandler.withValidator({
+  body: v.object({
+    title: v.pipe(v.string(), v.minLength(1)),
+    body: v.string(),
+  }),
+})(async (c, { body }) => {
+  await db.insert(posts).values(body);
+});
+```
+
+This works but creates two sources of truth: the DB schema and the validation schema. They can drift apart.
+
+### Drizzle Companion Libraries
+
+Drizzle provides official companion packages that derive validation schemas directly from table definitions:
+
+- [`drizzle-valibot`](https://orm.drizzle.team/docs/valibot) — `createInsertSchema(table)`, `createSelectSchema(table)`
+- [`drizzle-zod`](https://orm.drizzle.team/docs/zod) — same API surface
+- [`drizzle-typebox`](https://orm.drizzle.team/docs/typebox) — same API surface
+
+```ts
+import { createInsertSchema } from "drizzle-valibot";
+import { posts } from "../../db/schema";
+
+const insertPostSchema = createInsertSchema(posts);
+
+export const POST = defineHandler.withValidator({
+  body: insertPostSchema,
+})(async (c, { body }) => {
+  await db.insert(posts).values(body);
+});
+```
+
+This eliminates the dual source of truth — the validation schema is always in sync with the DB columns, nullability, and defaults.
+
+### Considerations
+
+1. **`vcc gen model` should use companion libraries.** When generating route handlers, instead of building up validation schemas field-by-field, import and use `createInsertSchema(table)`. This keeps the schema as the single source of truth and makes the generated code shorter.
+
+2. **Refinements on top of derived schemas.** Drizzle schemas only capture column types and nullability — not business rules like `minLength(1)`, `email()`, or `maxLength(255)`. Users need to layer refinements on top:
+
+   ```ts
+   import { createInsertSchema } from "drizzle-valibot";
+   import * as v from "valibot";
+
+   const insertPostSchema = createInsertSchema(posts, {
+     title: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+     body: v.pipe(v.string(), v.minLength(1)),
+   });
+   ```
+
+   The companion libraries support per-column overrides as a second argument. `gen model` could generate these override stubs so users have a natural place to add constraints.
+
+3. **ArkType gap.** There is no official `drizzle-arktype` companion library. ArkType users would still need standalone schemas or a manual mapping. Options:
+   - Drop ArkType from `gen model` (simplifies maintenance, ArkType usage is minimal)
+   - Keep ArkType with standalone schemas as a fallback
+   - Wait for a community `drizzle-arktype` package
+
+4. **Standard Schema compatibility.** Drizzle companion schemas conform to Standard Schema, which is what `defineHandler.withValidator()` already accepts. No adapter layer is needed — the derived schemas plug directly into the existing validation pipeline.
+
+5. **Optional dependency.** The companion library (`drizzle-valibot`, `drizzle-zod`) should be a peer/optional dependency, not bundled with `vite-cloud`. Users who don't use `gen model` or prefer handwritten schemas shouldn't pay for it. `gen model` can prompt to install it (similar to how it currently prompts for the validation library choice).
+
+---
+
 ## Open Questions
 
 1. **Schema location:** `db/schema.ts` vs `src/schema.ts` vs `schema.ts`? `db/schema.ts` mirrors the `routes/` and `middleware/` top-level directory convention.
