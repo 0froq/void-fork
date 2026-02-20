@@ -1,12 +1,14 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { intro, outro, log, confirm, isCancel, cancel, note } from "@clack/prompts";
+import { intro, outro, log, confirm, isCancel, cancel, note, select } from "@clack/prompts";
 import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
 
 export interface InitArgs {
   tsconfig: boolean;
   github: boolean;
+  agent: boolean;
 }
 
 export function parseInitArgs(args: string[]): InitArgs {
@@ -17,6 +19,7 @@ export function parseInitArgs(args: string[]): InitArgs {
       options: {
         tsconfig: { type: "boolean" },
         github: { type: "boolean" },
+        agent: { type: "boolean" },
       },
       strict: true,
     });
@@ -28,6 +31,7 @@ export function parseInitArgs(args: string[]): InitArgs {
   return {
     tsconfig: parsed.values.tsconfig === true,
     github: parsed.values.github === true,
+    agent: parsed.values.agent === true,
   };
 }
 
@@ -172,7 +176,7 @@ function setupTsconfig(root: string, state: ProjectState): void {
         skipLibCheck: true,
         types: ["vite-cloud/env"],
       },
-      include: ["src", "routes", "middleware"],
+      include: ["src", "routes", "middleware", "crons", "queues"],
     };
     writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2) + "\n");
     log.success("Created tsconfig.json");
@@ -350,12 +354,86 @@ console.log(posts);
   );
 }
 
+interface AgentDetection {
+  type: "claude" | "generic" | null;
+  filePath: string | null;
+}
+
+function detectAgent(root: string): AgentDetection {
+  if (existsSync(join(root, ".claude")) || existsSync(join(root, "CLAUDE.md"))) {
+    return { type: "claude", filePath: "CLAUDE.md" };
+  }
+  if (existsSync(join(root, "AGENTS.md"))) {
+    return { type: "generic", filePath: "AGENTS.md" };
+  }
+  return { type: null, filePath: null };
+}
+
+function getPackageDir(): string {
+  // Walk up from the current file to find the vite-cloud package root.
+  // tsdown bundles this as a chunk at dist/ level, so the nesting depth varies.
+  let dir = join(fileURLToPath(import.meta.url), "..");
+  for (let i = 0; i < 5; i++) {
+    if (existsSync(join(dir, "package.json"))) {
+      const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8"));
+      if (pkg.name === "vite-cloud") return dir;
+    }
+    dir = join(dir, "..");
+  }
+  throw new Error("Could not find vite-cloud package root");
+}
+
+function readAgentPrompt(): string {
+  return readFileSync(join(getPackageDir(), "AGENT_PROMPT.md"), "utf-8");
+}
+
+function getOwnVersion(): string {
+  const pkg = JSON.parse(readFileSync(join(getPackageDir(), "package.json"), "utf-8"));
+  return pkg.version;
+}
+
+const MARKER_OPEN_RE = /<!--injected-by-vite-cloud-v([\d.]+)-->/;
+const MARKER_CLOSE = "<!--/injected-by-vite-cloud-->";
+const MARKER_BLOCK_RE =
+  /<!--injected-by-vite-cloud-v[\d.]+-->\n[\s\S]*?<!--\/injected-by-vite-cloud-->/;
+
+function injectAgentBlock(root: string, filePath: string): void {
+  const fullPath = join(root, filePath);
+  const version = getOwnVersion();
+  const promptContent = readAgentPrompt();
+  const openMarker = `<!--injected-by-vite-cloud-v${version}-->`;
+  const block = `${openMarker}\n${promptContent}\n${MARKER_CLOSE}`;
+
+  if (existsSync(fullPath)) {
+    const existing = readFileSync(fullPath, "utf-8");
+    const match = existing.match(MARKER_OPEN_RE);
+    if (match) {
+      if (match[1] === version) {
+        log.info(`${filePath} already has Vite Cloud instructions (v${version})`);
+        return;
+      }
+      // Replace existing block with updated version
+      const updated = existing.replace(MARKER_BLOCK_RE, block);
+      writeFileSync(fullPath, updated);
+      log.success(`Updated Vite Cloud instructions in ${filePath} (v${match[1]} → v${version})`);
+    } else {
+      // Append block to end of file
+      const separator = existing.endsWith("\n") ? "\n" : "\n\n";
+      writeFileSync(fullPath, existing + separator + block + "\n");
+      log.success(`Added Vite Cloud instructions to ${filePath}`);
+    }
+  } else {
+    writeFileSync(fullPath, block + "\n");
+    log.success(`Created ${filePath} with Vite Cloud instructions`);
+  }
+}
+
 export async function runInitCommand(root: string, initArgs?: InitArgs): Promise<void> {
   console.log();
   intro("\x1b[34mvite-cloud init\x1b[0m");
 
   const state = detectProjectState(root);
-  const targeted = initArgs && (initArgs.tsconfig || initArgs.github);
+  const targeted = initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agent);
 
   // Step 1: TypeScript / tsconfig
   if (!targeted || initArgs.tsconfig) {
@@ -387,7 +465,45 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     ensureProjectTsconfig(root);
   }
 
-  // Step 2: Demo code (only in full interactive flow)
+  // Step 2: Agent instructions
+  if (!targeted || initArgs?.agent) {
+    const detected = detectAgent(root);
+    if (targeted) {
+      // --agent flag: auto-inject to detected file or default CLAUDE.md
+      injectAgentBlock(root, detected.filePath ?? "CLAUDE.md");
+    } else if (detected.type) {
+      const addAgent = await confirm({
+        message: `Add Vite Cloud instructions to ${detected.filePath}?`,
+      });
+      if (isCancel(addAgent)) {
+        cancel("Setup cancelled.");
+        process.exit(0);
+      }
+      if (addAgent) {
+        injectAgentBlock(root, detected.filePath!);
+      }
+    } else {
+      const agentChoice = await select({
+        message: "Add coding agent instructions?",
+        options: [
+          { value: "claude", label: "Claude Code (CLAUDE.md)" },
+          { value: "generic", label: "Other agents (AGENTS.md)" },
+          { value: "skip", label: "Skip" },
+        ],
+      });
+      if (isCancel(agentChoice)) {
+        cancel("Setup cancelled.");
+        process.exit(0);
+      }
+      if (agentChoice === "claude") {
+        injectAgentBlock(root, "CLAUDE.md");
+      } else if (agentChoice === "generic") {
+        injectAgentBlock(root, "AGENTS.md");
+      }
+    }
+  }
+
+  // Step 3: Demo code (only in full interactive flow)
   if (!targeted) {
     if (state.hasRoutes || state.hasMigrations) {
       log.info("Project already has routes or migrations, skipping demo");
@@ -407,7 +523,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     }
   }
 
-  // Step 3: GitHub Actions
+  // Step 4: GitHub Actions
   if (!targeted || initArgs.github) {
     const deployYmlPath = join(root, ".github", "workflows", "deploy.yml");
     if (existsSync(deployYmlPath)) {

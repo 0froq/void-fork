@@ -130,7 +130,7 @@ Extend the generated tsconfig in your project's `tsconfig.json`:
     "jsx": "react-jsx",
     "types": ["vite-cloud/env"]
   },
-  "include": ["src", "routes", "middleware"]
+  "include": ["src", "routes", "middleware", "crons", "queues"]
 }
 ```
 

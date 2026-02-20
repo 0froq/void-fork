@@ -209,6 +209,28 @@ if (command === "staging") {
       process.exit(1);
     });
   });
+} else if (command === "agent-prompt") {
+  import("node:path").then(({ join }) => {
+    import("node:url").then(({ fileURLToPath }) => {
+      import("node:fs").then(({ readFileSync, existsSync }) => {
+        // Walk up from the current file to find the vite-cloud package root
+        let dir = join(fileURLToPath(import.meta.url), "..");
+        for (let i = 0; i < 5; i++) {
+          if (existsSync(join(dir, "package.json"))) {
+            const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8"));
+            if (pkg.name === "vite-cloud") {
+              const prompt = readFileSync(join(dir, "AGENT_PROMPT.md"), "utf-8");
+              process.stdout.write(prompt);
+              return;
+            }
+          }
+          dir = join(dir, "..");
+        }
+        log.error("Could not find vite-cloud package root");
+        process.exit(1);
+      });
+    });
+  });
 } else {
   const BLUE = "\x1b[34m";
   const RESET = "\x1b[0m";
@@ -234,6 +256,7 @@ if (command === "staging") {
       "\x1b[0mvcc init                           \x1b[2mSet up vite-cloud in an existing project",
       "\x1b[0m  --tsconfig                       \x1b[2mOnly update tsconfig.json",
       "\x1b[0m  --github                         \x1b[2mOnly create GitHub Actions workflow",
+      "\x1b[0m  --agent                          \x1b[2mOnly add coding agent instructions",
       "",
       "\x1b[0mvcc deploy                         \x1b[2mBuild and deploy to Vite Cloud",
       "\x1b[0m  --project <name>                 \x1b[2mDeploy target project name",
@@ -282,6 +305,11 @@ if (command === "staging") {
       "\x1b[0mvcc gen route <path> [--methods]   \x1b[2mGenerate a route with handler exports",
       "\x1b[0mvcc gen middleware <name>          \x1b[2mGenerate a numbered middleware file",
       "\x1b[0mvcc gen ssr [--react|--vue|...]    \x1b[2mGenerate SSR entry + client + App component",
+      "\x1b[0mvcc gen cron <name>               \x1b[2mGenerate a cron job file",
+      "\x1b[0mvcc gen queue <name>              \x1b[2mGenerate a queue consumer file",
+      "",
+      "\x1b[0m\x1b[1m\x1b[36magent\x1b[39m",
+      "\x1b[0mvcc agent-prompt                   \x1b[2mPrint the coding agent reference prompt",
     ].join("\n"),
     "\x1b[34mCommands\x1b[0m",
   );
