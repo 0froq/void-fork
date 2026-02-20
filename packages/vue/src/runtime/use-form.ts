@@ -49,19 +49,25 @@ export function useForm<T extends Record<string, unknown>>(defaults: T) {
     clearErrors();
 
     try {
-      await router.visit(url, {
+      const pageData = await router.visit(url, {
         method,
         data: { ...data },
         ...options,
       });
 
-      // If we get here without errors being set by the router, it's a success
-      wasSuccessful.value = true;
-      recentlySuccessful.value = true;
-      defaults_ = { ...data } as T;
-      successTimeout = setTimeout(() => {
-        recentlySuccessful.value = false;
-      }, 2000);
+      // Bridge validation errors from the server response into the form
+      if (pageData?.errors) {
+        Object.assign(errors, pageData.errors);
+      }
+
+      if (Object.keys(errors).length === 0) {
+        wasSuccessful.value = true;
+        recentlySuccessful.value = true;
+        defaults_ = { ...data } as T;
+        successTimeout = setTimeout(() => {
+          recentlySuccessful.value = false;
+        }, 2000);
+      }
     } catch {
       // Request failed
     } finally {

@@ -174,6 +174,8 @@ export const router = {
     if (!options.preserveState) {
       window.history.pushState({}, "", pageData.url);
     }
+
+    return pageData;
   },
 
   async reload() {
