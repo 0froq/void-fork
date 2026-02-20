@@ -5,13 +5,9 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { log, outro, note } from "@clack/prompts";
-import { runDeploy } from "./deploy";
 import { runLink } from "./link";
 import { runLoginCommand } from "./login";
-import { runListCommand } from "./list";
 import { runProjectsCommand } from "./projects";
-import { runSecretCommand } from "./secret";
-import { runDeleteCommand } from "./delete";
 import { getToken, removeToken, isStagingMode, setStagingMode, printStagingBanner } from "./auth";
 import { PlatformClient } from "./client";
 import { parseDeployArgs } from "./args";
@@ -46,14 +42,16 @@ if (command === "staging") {
     process.exit(1);
   }
 
-  runDeploy(root, {
-    projectSlug: deployArgs.projectSlug,
-    dir: deployArgs.dir,
-    spa: deployArgs.spa,
-    skipBuild: deployArgs.skipBuild,
-  }).catch((err) => {
-    log.error(err.message ?? err);
-    process.exit(1);
+  import("./deploy").then(({ runDeploy }) => {
+    runDeploy(root, {
+      projectSlug: deployArgs.projectSlug,
+      dir: deployArgs.dir,
+      spa: deployArgs.spa,
+      skipBuild: deployArgs.skipBuild,
+    }).catch((err) => {
+      log.error(err.message ?? err);
+      process.exit(1);
+    });
   });
 } else if (command === "link") {
   const root = process.cwd();
@@ -91,9 +89,11 @@ if (command === "staging") {
     });
 } else if (command === "list" || command === "ls") {
   const root = process.cwd();
-  runListCommand(root, args[1]).catch((err) => {
-    log.error(err.message ?? err);
-    process.exit(1);
+  import("./list").then(({ runListCommand }) => {
+    runListCommand(root, args[1]).catch((err) => {
+      log.error(err.message ?? err);
+      process.exit(1);
+    });
   });
 } else if (command === "projects") {
   runProjectsCommand().catch((err) => {
@@ -110,9 +110,11 @@ if (command === "staging") {
     process.exit(1);
   }
 
-  runSecretCommand(root, secretArgs).catch((err) => {
-    log.error(err.message ?? err);
-    process.exit(1);
+  import("./secret").then(({ runSecretCommand }) => {
+    runSecretCommand(root, secretArgs).catch((err) => {
+      log.error(err.message ?? err);
+      process.exit(1);
+    });
   });
 } else if (command === "token") {
   (async () => {
@@ -145,9 +147,11 @@ if (command === "staging") {
   });
 } else if (command === "delete") {
   const root = process.cwd();
-  runDeleteCommand(root, args[1]).catch((err) => {
-    log.error(err.message ?? err);
-    process.exit(1);
+  import("./delete").then(({ runDeleteCommand }) => {
+    runDeleteCommand(root, args[1]).catch((err) => {
+      log.error(err.message ?? err);
+      process.exit(1);
+    });
   });
 } else if (command === "domain") {
   const root = process.cwd();

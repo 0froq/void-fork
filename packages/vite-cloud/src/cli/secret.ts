@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { getToken } from "./auth";
 import { PlatformClient } from "./client";
 import { readProjectConfig } from "./project";
-import { getRequestedProjectSlug, resolveProjectBySlug } from "./deploy";
+import { getRequestedProjectSlug, resolveProjectBySlug } from "./resolve-project";
 import type { SecretArgs } from "./secret-args";
 import { intro, outro, log, cancel, isCancel, password, confirm } from "@clack/prompts";
 
