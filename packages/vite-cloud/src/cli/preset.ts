@@ -110,7 +110,10 @@ function detectVitePressSourceDir(root: string): string {
  */
 export function hasBackendFiles(root: string): boolean {
   if (existsSync(join(root, "routes"))) return true;
+  if (existsSync(join(root, "pages"))) return true;
+  if (existsSync(join(root, "middleware"))) return true;
   if (existsSync(join(root, "crons"))) return true;
+  if (existsSync(join(root, "queues"))) return true;
   if (hasSsrEntry(root)) return true;
   return false;
 }
