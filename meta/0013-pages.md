@@ -416,39 +416,47 @@ When pages mode is active, `run_worker_first` must exclude `/pages/*` in additio
 
 Static assets (`/assets/*`) are excluded from `run_worker_first` so Cloudflare serves them directly from the edge/CDN without invoking the worker. The `notFound` handler also has a fallback to `env.ASSETS.fetch(c.req.raw)` for any other file-extension paths that slip through (e.g. `/favicon.ico`), mirroring the existing SSR codepath's `fetchFromAssets()` pattern.
 
+### Rolldown Hook Filters
+
+All `transform`, `resolveId`, and `load` hooks in adapter plugins use declarative `filter` objects instead of early-return guards. This lets Rolldown evaluate conditions in Rust before crossing the FFI boundary into JavaScript, avoiding unnecessary JS invocations. For example, a `transform` hook can use `filter: { id: { include: /\.vue$/, exclude: /node_modules/ }, code: /<script\s+server\b/ }` — Rolldown skips any module that doesn't match both conditions without ever calling into JS. Dynamic checks (like `id.startsWith(pagesDir)`) that depend on runtime state remain in the handler. All adapter plugins should follow this pattern.
+
+### Source Map Preservation in `<script server>` Stripping
+
+When stripping the `<script server>` block, the adapter plugin replaces the matched text with an equivalent number of newlines (`"\n".repeat(lines - 1)`) rather than an empty string. This preserves line positions for all code after the block, so downstream plugins (SFC compilers, JSX transforms, etc.) see correct line numbers. The transform returns `map: { mappings: "" }` to signal an identity mapping — no position changes relative to the input. Every adapter that extracts `<script server>` blocks must use this technique.
+
 ### Client Entry: Virtual Module URL in `<script>` Tags
 
 Browser-facing `<script src>` tags cannot use Vite's `\0`-prefixed virtual module IDs directly. The client entry script tag uses `/@id/__x00__virtual:vite-cloud-pages-client` — Vite's URL-based virtual module resolution format.
 
 ### Client-Side Page Updates Must Be Atomic
 
-The `updatePage()` function resolves component + layouts via `Promise.all` before setting any Vue refs. Setting refs across multiple `await` boundaries (e.g. setting `currentComponent` after one await, then `currentLayouts` after another) allows Vue to flush a render between the awaits, causing the new component to render with stale props. The fix: resolve all async work first, then update props → layouts → component synchronously in a single microtask.
+The client entry must resolve all async work (component loading, layout resolution) via `Promise.all` before updating any reactive state. Setting reactive state across multiple `await` boundaries allows the framework to flush a render between the awaits, causing the new component to render with stale props. The fix: resolve all async work first, then update props → layouts → component synchronously in a single microtask. Props must be set BEFORE the component ref — if the component changes first, the framework renders the new component with stale props from the previous page.
 
 ### No Global Click Interceptor — Use `Link` Component
 
 The client entry does NOT include a global `document.addEventListener("click")` interceptor for `<a>` tags. Instead, SPA navigation is handled exclusively by the `Link` component. A global interceptor conflicts with `Link` — both fire `router.visit()` on the same click event, causing double navigation. The `Link` component already handles modifier keys, external URLs, and non-GET methods correctly.
 
-### SSR `provide`/`inject` Must Be Complete
+### SSR Context Must Be Complete
 
-During SSR rendering, the app must `provide()` all keys that components may `inject()`, even if the value is `null`. The SSR renderer provides `__vc_shared`, `__vc_errors`, AND `__vc_router` (as `null`). Runtime composables (`useForm`, `Link`) use `inject("key", null)` with a default to avoid Vue warnings when the injection is missing during SSR.
+During SSR rendering, the app must provide all context keys that components may read (shared data, errors, router), even if the value is `null`. Runtime composables (`useForm`, `Link`) must accept a missing context gracefully (e.g. default to `null`) to avoid framework warnings during SSR when client-only context like the router is unavailable.
 
 ## Pitfalls
 
-### Vue Ref Update Atomicity
+### Reactive State Update Atomicity
 
-**Problem:** Multiple `await`s between `ref.value =` assignments in the same function:
+**Problem:** Multiple `await`s between reactive state assignments in the same function:
 
 ```js
-// BAD — Vue flushes renders between the two awaits
+// BAD — framework flushes renders between the two awaits
 currentComponent.value = await resolveComponent(data.component);
-currentLayouts.value = await resolveLayouts(data.component); // Vue renders here!
+currentLayouts.value = await resolveLayouts(data.component); // render happens here!
 currentProps.value = data.props; // Too late — component already rendered with old props
 ```
 
-**Fix:** Resolve all async work first, then batch-update refs:
+**Fix:** Resolve all async work first, then batch-update state:
 
 ```js
-// GOOD — all refs updated synchronously after async work completes
+// GOOD — all state updated synchronously after async work completes
 const [comp, layouts] = await Promise.all([
   resolveComponent(data.component),
   resolveLayouts(data.component),
@@ -458,7 +466,7 @@ currentLayouts.value = layouts;
 currentComponent.value = comp;
 ```
 
-**Rule:** Set props BEFORE component. If the component ref changes, Vue's next render sees the new component. If props haven't been updated yet, the new component renders with stale props from the previous page.
+**Rule:** Set props BEFORE component. If the component ref changes, the framework's next render sees the new component. If props haven't been updated yet, the new component renders with stale props from the previous page. This applies to any reactive framework (Vue refs, React state, Svelte stores, Solid signals).
 
 ### `app.get("*")` Blocks Vite Dev Server
 
@@ -501,7 +509,7 @@ await page.click('a[href="/users"]');
 // Check URL, content, and console for warnings
 ```
 
-This captures Vue warnings, hydration errors, and JavaScript exceptions that only appear in the browser — not in server logs. Run the script from the monorepo root (where `playwright` is installed).
+This captures framework warnings, hydration errors, and JavaScript exceptions that only appear in the browser — not in server logs. Run the script from the monorepo root (where `playwright` is installed).
 
 ### Isolating Dev vs Production Bugs
 
