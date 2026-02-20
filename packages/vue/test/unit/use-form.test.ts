@@ -6,21 +6,34 @@ import { reactive, ref, isReactive, isRef, nextTick, watch } from "vue";
 // requires a Vue app. The actual integration is tested in the playground.
 
 describe("useForm reactive logic", () => {
-  function createForm<T extends Record<string, unknown>>(defaults: T) {
-    const data = reactive({ ...defaults }) as T;
+  function createForm(
+    url: string,
+    defaults: Record<string, unknown>,
+    options?: { params?: Record<string, string> },
+  ) {
+    let resolvedUrl = url;
+    const formDefaults = defaults;
+
+    if (options?.params) {
+      for (const [key, value] of Object.entries(options.params)) {
+        resolvedUrl = resolvedUrl.replace(`:${key}`, encodeURIComponent(value));
+      }
+    }
+
+    const data = reactive({ ...formDefaults }) as Record<string, unknown>;
     const errors = reactive<Record<string, string>>({});
     const processing = ref(false);
     const wasSuccessful = ref(false);
     const recentlySuccessful = ref(false);
 
-    let defaults_ = { ...defaults };
+    let defaults_ = { ...formDefaults };
 
     const isDirty = ref(false);
     watch(
       () => ({ ...data }),
       (val) => {
         isDirty.value = Object.keys(defaults_).some(
-          (key) => JSON.stringify(val[key]) !== JSON.stringify(defaults_[key as keyof T]),
+          (key) => JSON.stringify(val[key]) !== JSON.stringify(defaults_[key]),
         );
       },
       { deep: true },
@@ -53,28 +66,29 @@ describe("useForm reactive logic", () => {
       recentlySuccessful,
       reset,
       clearErrors,
+      _url: resolvedUrl,
     };
   }
 
   it("initial data matches defaults", () => {
-    const form = createForm({ name: "", email: "" });
+    const form = createForm("/test", { name: "", email: "" });
     expect(form.data.name).toBe("");
     expect(form.data.email).toBe("");
   });
 
   it("data is reactive", () => {
-    const form = createForm({ name: "test" });
+    const form = createForm("/test", { name: "test" });
     expect(isReactive(form.data)).toBe(true);
   });
 
   it("updating data changes value", () => {
-    const form = createForm({ name: "" });
+    const form = createForm("/test", { name: "" });
     (form.data as any).name = "John";
     expect(form.data.name).toBe("John");
   });
 
   it("isDirty becomes true when data changes", async () => {
-    const form = createForm({ name: "default" });
+    const form = createForm("/test", { name: "default" });
     expect(form.isDirty.value).toBe(false);
 
     (form.data as any).name = "changed";
@@ -84,7 +98,7 @@ describe("useForm reactive logic", () => {
   });
 
   it("isDirty becomes false when data reverts to defaults", async () => {
-    const form = createForm({ name: "default" });
+    const form = createForm("/test", { name: "default" });
     (form.data as any).name = "changed";
     await nextTick();
     expect(form.isDirty.value).toBe(true);
@@ -95,7 +109,7 @@ describe("useForm reactive logic", () => {
   });
 
   it("reset() reverts all fields to defaults", async () => {
-    const form = createForm({ name: "default", email: "default@test.com" });
+    const form = createForm("/test", { name: "default", email: "default@test.com" });
     (form.data as any).name = "changed";
     (form.data as any).email = "changed@test.com";
 
@@ -108,7 +122,7 @@ describe("useForm reactive logic", () => {
   });
 
   it("reset(field) reverts specific fields only", () => {
-    const form = createForm({ name: "default", email: "default@test.com" });
+    const form = createForm("/test", { name: "default", email: "default@test.com" });
     (form.data as any).name = "changed";
     (form.data as any).email = "changed@test.com";
 
@@ -119,7 +133,7 @@ describe("useForm reactive logic", () => {
   });
 
   it("clearErrors() removes all errors", () => {
-    const form = createForm({ name: "" });
+    const form = createForm("/test", { name: "" });
     form.errors.name = "required";
     form.errors.email = "invalid";
 
@@ -129,7 +143,7 @@ describe("useForm reactive logic", () => {
   });
 
   it("clearErrors(field) removes specific errors", () => {
-    const form = createForm({ name: "" });
+    const form = createForm("/test", { name: "" });
     form.errors.name = "required";
     form.errors.email = "invalid";
 
@@ -140,14 +154,41 @@ describe("useForm reactive logic", () => {
   });
 
   it("processing is a ref initialized to false", () => {
-    const form = createForm({ name: "" });
+    const form = createForm("/test", { name: "" });
     expect(isRef(form.processing)).toBe(true);
     expect(form.processing.value).toBe(false);
   });
 
   it("wasSuccessful and recentlySuccessful are refs initialized to false", () => {
-    const form = createForm({ name: "" });
+    const form = createForm("/test", { name: "" });
     expect(form.wasSuccessful.value).toBe(false);
     expect(form.recentlySuccessful.value).toBe(false);
+  });
+
+  it("stores URL", () => {
+    const form = createForm("/users", { name: "", email: "" });
+    expect(form.data.name).toBe("");
+    expect(form.data.email).toBe("");
+    expect(form._url).toBe("/users");
+  });
+
+  it("resolves :param segments in URL", () => {
+    const form = createForm("/users/:id", { name: "Alice" }, { params: { id: "42" } });
+    expect(form.data.name).toBe("Alice");
+    expect(form._url).toBe("/users/42");
+  });
+
+  it("encodes param values in URL", () => {
+    const form = createForm("/users/:id", { name: "" }, { params: { id: "hello world" } });
+    expect(form._url).toBe("/users/hello%20world");
+  });
+
+  it("resolves multiple params", () => {
+    const form = createForm(
+      "/org/:orgId/users/:userId",
+      { name: "" },
+      { params: { orgId: "a", userId: "b" } },
+    );
+    expect(form._url).toBe("/org/a/users/b");
   });
 });

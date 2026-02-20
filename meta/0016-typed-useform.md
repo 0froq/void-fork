@@ -22,20 +22,21 @@ declare module "vite-cloud/routes" {
   // New — page actions
   interface PageActionMap {
     "/users": {
-      body: { name: string; email: string };  // from withValidator({ body: schema })
+      body: { name: string; email: string }; // from withValidator({ body: schema })
     };
     "/users/:id": {
       body: { name: string };
       params: { id: string };
     };
     "/settings": {
-      body: Record<string, unknown>;  // action exists but no validator
+      body: Record<string, unknown>; // action exists but no validator
     };
   }
 }
 ```
 
 **Rules:**
+
 - All pages with actions get entries (enables URL autocomplete even without validators)
 - `body` type extracted from `withValidator({ body: schema })` via existing `__validators` machinery
 - Actions without validators get `body: Record<string, unknown>`
@@ -51,13 +52,11 @@ Two overloads — typed (URL-first) and untyped (backward compatible):
 function useForm<U extends keyof PageActionMap>(
   url: U,
   defaults: PageActionMap[U]["body"],
-  options?: { params: PageActionMap[U] extends { params: infer P } ? P : never }
+  options?: { params: PageActionMap[U] extends { params: infer P } ? P : never },
 ): TypedForm<PageActionMap[U]>;
 
 // Untyped: backward compatible
-function useForm<T extends Record<string, unknown>>(
-  defaults: T
-): Form<T>;
+function useForm<T extends Record<string, unknown>>(defaults: T): Form<T>;
 ```
 
 **Usage examples:**
@@ -65,17 +64,17 @@ function useForm<T extends Record<string, unknown>>(
 ```typescript
 // Static route — full typing
 const form = useForm("/users", { name: "", email: "" });
-form.post();           // posts to "/users"
-form.errors.name;      // string | undefined
-form.errors.foo;       // TS error
+form.post(); // posts to "/users"
+form.errors.name; // string | undefined
+form.errors.foo; // TS error
 
 // Dynamic route — params resolve at runtime
 const form = useForm("/users/:id", { name: "" }, { params: { id: String(props.user.id) } });
-form.post();           // posts to "/users/123"
+form.post(); // posts to "/users/123"
 
 // Untyped — backward compatible
 const form = useForm({ name: "", email: "" });
-form.post("/users");   // explicit URL, no type narrowing
+form.post("/users"); // explicit URL, no type narrowing
 ```
 
 ### Typed Form Return Type
@@ -111,7 +110,7 @@ For pages without validators (`body: Record<string, unknown>`), errors falls bac
 For routes with dynamic segments, params are passed as a third argument and resolved at runtime by replacing `:segment` placeholders:
 
 ```typescript
-useForm("/users/:id", defaults, { params: { id: "123" } })
+useForm("/users/:id", defaults, { params: { id: "123" } });
 // Runtime: posts to "/users/123"
 ```
 
@@ -121,12 +120,12 @@ The `params` option is required (via conditional types) when the route has dynam
 
 ## Files Changed
 
-| File | Change |
-|------|--------|
+| File                                             | Change                                                     |
+| ------------------------------------------------ | ---------------------------------------------------------- |
 | `packages/vite-cloud/src/codegen/route-types.ts` | Generate `PageActionMap` entries from page action handlers |
-| `packages/vite-cloud/src/runtime/routes-stub.ts` | Add empty `PageActionMap` interface stub |
-| `packages/vue/src/runtime/use-form.ts` | Add URL-first overload, runtime param resolution |
-| `packages/vue/src/index.ts` | Re-export updated `useForm` types |
+| `packages/vite-cloud/src/runtime/routes-stub.ts` | Add empty `PageActionMap` interface stub                   |
+| `packages/vue/src/runtime/use-form.ts`           | Add URL-first overload, runtime param resolution           |
+| `packages/vue/src/index.ts`                      | Re-export updated `useForm` types                          |
 
 ## Edge Cases
 

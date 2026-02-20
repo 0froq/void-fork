@@ -33,7 +33,7 @@ const props = defineProps<{
   users: Array<{ id: number; name: string; email: string }>;
 }>();
 
-const form = useForm({
+const form = useForm("/users", {
   name: "",
   email: "",
 });
@@ -51,7 +51,7 @@ const form = useForm({
     </ul>
 
     <h2>Add User</h2>
-    <form @submit.prevent="form.post('/users')">
+    <form @submit.prevent="form.post()">
       <div>
         <label>Name:</label>
         <input v-model="form.data.name" />

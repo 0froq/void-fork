@@ -22,7 +22,7 @@ Vue framework adapter for Vite Cloud Pages mode. Provides Inertia-inspired full-
 ## Runtime Exports
 
 - **`Link`** — Vue component for SPA navigation. Renders `<a>` for GET, `<button>` for non-GET methods. Props: `href`, `method`, `data`, `preserveScroll`. Calls `router.visit()` on click.
-- **`useForm(defaults)`** — Reactive form helper. Returns `{ data, errors, isDirty, processing, wasSuccessful, recentlySuccessful, reset(), clearErrors(), post(), put(), patch(), delete() }`. Submission calls `router.visit()` with the form data and bridges validation errors from the page response.
+- **`useForm(url, defaults, options?)`** — Typed reactive form helper bound to a page action URL. Body fields, error keys, and `reset()`/`clearErrors()` arguments are inferred from the action's validators. Returns `{ data, errors, isDirty, processing, wasSuccessful, recentlySuccessful, reset(), clearErrors(), post(), put(), patch(), delete() }`. For dynamic routes, pass `{ params: { id: "42" } }` as options. Submission calls `router.visit()` with the form data and bridges validation errors from the page response.
 - **`useShared<T>()`** — Access middleware-set shared data (from `c.set("shared", ...)`). Returns a reactive object.
 
 All composables use Vue's `provide`/`inject` internally. The SSR renderer provides `__vc_shared`, `__vc_errors`, and `__vc_router` (as `null` during SSR). The client entry provides the live reactive objects and the real router.
