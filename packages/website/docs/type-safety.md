@@ -94,13 +94,47 @@ await fetch("/api/users", {
 
 The validator schema is the single source of truth — it defines runtime validation, handler input types, and client-side type checking all at once.
 
+## Action → useForm
+
+The same pipeline extends to [pages mode](./pages-routing.md). When a page action uses `withValidator()` in a `.server.ts` file, the body schema flows through to `useForm` — typed `data`, typed `errors` keys, and URL autocomplete:
+
+```ts
+// pages/users/create.server.ts
+export const action = defineHandler.withValidator({
+  body: v.object({ name: v.string(), email: v.pipe(v.string(), v.email()) }),
+})(async (c, { body }) => {
+  await db.insert("users", body);
+});
+```
+
+```ts
+import { useForm } from "@vite-cloud/vue"; // or "@vite-cloud/react"
+
+const form = useForm("/users/create", { name: "", email: "" });
+//                    ^ autocompletes     ^ must match body schema
+
+form.errors.email; // string | undefined ✓
+form.errors.foo; // ✗ TypeScript error
+form.reset("name"); // field names autocomplete
+```
+
+For dynamic routes, `params` is required:
+
+```ts
+const form = useForm("/users/:id", { name: "" }, { params: { id: "42" } });
+form.put(); // submits to /users/42
+```
+
+Actions without validators still get URL autocomplete — the body falls back to `Record<string, unknown>`. See [Pages Routing — Forms and Actions](./pages-routing.md#forms-and-actions) for the full API.
+
 ## What Gets Checked
 
-| Layer        | What's type-checked                                                    |
-| ------------ | ---------------------------------------------------------------------- |
-| Database     | Table names, column names, value types, required vs optional on insert |
-| Handlers     | `c.env` bindings, validator input, return type                         |
-| Fetch client | Route paths, HTTP methods, `body`/`query`/`params`, response type      |
+| Layer        | What's type-checked                                                                              |
+| ------------ | ------------------------------------------------------------------------------------------------ |
+| Database     | Table names, column names, value types, required vs optional on insert                           |
+| Handlers     | `c.env` bindings, validator input, return type                                                   |
+| Fetch client | Route paths, HTTP methods, `body`/`query`/`params`, response type                                |
+| `useForm`    | Page action URLs, `data` fields, `errors` keys, `reset()`/`clearErrors()` args, dynamic `params` |
 
 ## Serialization
 

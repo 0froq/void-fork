@@ -20,6 +20,8 @@ yarn create vite-cloud
 bun create vite-cloud
 ```
 
+:::
+
 ## Using with Coding Agents
 
 The fastest way to get started is to copy the prompt below and paste it into your coding agent (Claude Code, Cursor, Codex, etc.):
