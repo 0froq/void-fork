@@ -6,7 +6,7 @@ import { build, loadEnv, resolveConfig } from "vite";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
 import { computeAssetHashes, packageBuild, packageStaticBuild } from "./package";
-import { PlatformClient, type ProjectResponse } from "./client";
+import { PlatformClient } from "./client";
 import { inferProjectBindings, FRAMEWORK_SCAN_DIRS, detectFramework } from "../plugin-inference";
 import { promptProjectSelection, promptProjectSlug } from "./prompt";
 import { collectMigrations } from "../migrations/collect";
@@ -16,41 +16,13 @@ import { scanQueuesSync } from "../queues/scan";
 import { validateSsrEntry, getRevalidateConfig } from "../ssr/entry";
 import { detectPreset, type StaticPreset } from "./preset";
 import { readConfig, convertHeadersConfig } from "../config";
+import { getRequestedProjectSlug, resolveProjectBySlug, inferDefaultSlug } from "./resolve-project";
 
 export interface RunDeployOptions {
   projectSlug?: string;
   dir?: string;
   spa?: boolean;
   skipBuild?: boolean;
-}
-
-export function getRequestedProjectSlug(options?: RunDeployOptions): string | null {
-  const cliSlug = options?.projectSlug?.trim();
-  if (cliSlug) {
-    return cliSlug;
-  }
-
-  const envSlug = process.env.VITE_CLOUD_PROJECT?.trim();
-  if (envSlug) {
-    return envSlug;
-  }
-
-  return null;
-}
-
-export function resolveProjectBySlug(
-  projects: ProjectResponse[],
-  slug: string,
-): ProjectConfig | null {
-  const project = projects.find((candidate) => candidate.slug === slug);
-  return project ? { projectId: project.id, slug: project.slug } : null;
-}
-
-export function inferDefaultSlug(root: string): string {
-  const pkgPath = join(root, "package.json");
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-  const name: string = pkg.name ?? "my-app";
-  return name.replace(/^@[^/]+\//, "").replace(/[^a-z0-9-]/g, "-");
 }
 
 /**
