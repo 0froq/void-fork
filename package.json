@@ -21,6 +21,8 @@
     "deploy:docs": "pnpm -F website run deploy",
     "deploy:staging:docs": "pnpm -F website run deploy --project vite-cloud-staging",
     "deploy:mcp": "pnpm -F mcp run deploy",
+    "health": "node packages/platform/scripts/health.ts",
+    "health:staging": "node packages/platform/scripts/health.ts --staging",
     "prepare": "husky"
   },
   "devDependencies": {
