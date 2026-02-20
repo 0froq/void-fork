@@ -348,6 +348,18 @@ Check verification and SSL status for a specific domain. Shows hostname, status,
 
 Project resolution for domain commands follows the same order as deploy (`--project`, `VITE_CLOUD_PROJECT`, linked project).
 
+## Agent
+
+### `vcc agent-prompt`
+
+Print the coding agent reference prompt to stdout. Useful for piping into agent tools or inspecting the shipped prompt.
+
+### `vcc skills`
+
+Link vite-cloud skills to your coding agent's skills directory.
+
+Auto-detects which agents are present in your project (Claude Code, Cursor, Windsurf, Gemini CLI, GitHub Copilot, Codex, and [many more](https://github.com/vercel-labs/skills/blob/main/src/agents.ts)) and creates symlinks from each agent's skills directory to the skill files shipped in the `vite-cloud` package. Re-running is safe — already-linked skills are skipped.
+
 ## Environment variables
 
 | Variable             | Purpose                                                | Default |

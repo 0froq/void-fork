@@ -13,7 +13,13 @@ This is the development repo of Vite Cloud.
 - **Never** commit without asking for confirmation.
 - Every implementation plan should include the following:
   - Verification: run `pnpm lint`, `pnpm fmt`, and `pnpm check`. Run `pnpm test` on tests relevant to the current feature first, then run the full test suite.
-  - Documentation: after verification, update `README.md` (this file) with relevant changes, and also update: affected packages's `README.md` or `AGENTS.md`, and relevant docs md files in `packages/website/docs`.
+  - Documentation: after verification, update all docs if relevant and applicable:
+    - `README.md` (this file)
+    - affected packages's `README.md` or `AGENTS.md`
+    - relevant docs md files in `packages/website/docs`
+    - `packages/vite-cloud/skills/vcc-cli` (if change affects CLI)
+    - `packages/vite-cloud/AGENT_PROMPT.md`
+    - `packages/vite-cloud/getting-started-prompt.txt`
   - Progress tracking: tick off relevant steps in `meta/0000-progress.md` when applicable.
   - Design decision log (optional): for particularly substantial changes, ask the user if they want to create a numbered design decision doc in `meta` following existing file format.
 
@@ -75,7 +81,7 @@ See [`packages/dispatch/README.md`](./packages/dispatch/README.md) for request f
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). 882 tests across 68 files. See each package README for detailed test listings.
+Tests run from root with `pnpm test` (vitest). 909 tests across 69 files. See each package README for detailed test listings.
 
 ## Playground
 
@@ -104,9 +110,13 @@ Verified working:
 Vite Cloud ships with first-class support for coding agents (Claude Code, Cursor, Codex, etc.):
 
 - **`AGENT_PROMPT.md`** — compressed reference prompt shipped in the `vite-cloud` npm package. Covers project structure, routing, DB, auth, typed fetch, KV/storage/queues/cron, CLI, and deployment.
+- **`skills/`** — Claude Code skills shipped in the npm package:
+  - `vcc-cli` — guides agents through CLI operations (deploy, db, gen, secrets, domains, projects) using a decision-tree pattern with lazy-loaded reference files.
+  - `migrate-vite-cloudflare-to-vite-cloud` — guides migration from `@cloudflare/vite-plugin` to `vite-cloud`.
 - **`docs/`** — all 23 docs markdown files are included in the npm package at `node_modules/vite-cloud/docs/`.
 - **`vcc init --agent`** — detects existing agent files (`.claude/`, `CLAUDE.md`, `AGENTS.md`) and injects Vite Cloud instructions with versioned markers. Supports update-in-place when the version changes.
 - **`vcc agent-prompt`** — prints the agent reference prompt to stdout.
+- **`vcc skills`** — auto-detects coding agents in the project (Claude Code, Cursor, Windsurf, Gemini CLI, Copilot, Codex, etc.) and symlinks skills from the `vite-cloud` package into each agent's skills directory.
 - **`create-vite-cloud`** — auto-detects running agents (via `CLAUDE`, `CURSOR_SESSION_ID`, `CODEX` env vars) and creates the appropriate agent file. Interactive mode prompts users to choose.
 
 Agent instructions use versioned markers (`<!--injected-by-vite-cloud-v0.0.1-->` / `<!--/injected-by-vite-cloud-->`) for safe update-in-place across version upgrades.
