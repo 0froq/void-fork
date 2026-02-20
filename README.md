@@ -117,7 +117,7 @@ Vite Cloud ships with first-class support for coding agents (Claude Code, Cursor
 - **`vcc init --agent`** — detects existing agent files (`.claude/`, `CLAUDE.md`, `AGENTS.md`) and injects Vite Cloud instructions with versioned markers. Supports update-in-place when the version changes.
 - **`vcc agent-prompt`** — prints the agent reference prompt to stdout.
 - **`vcc skills`** — auto-detects coding agents in the project (Claude Code, Cursor, Windsurf, Gemini CLI, Copilot, Codex, etc.) and symlinks skills from the `vite-cloud` package into each agent's skills directory.
-- **`create-vite-cloud`** — auto-detects running agents (via `CLAUDE`, `CURSOR_SESSION_ID`, `CODEX` env vars) and creates the appropriate agent file. Interactive mode prompts users to choose.
+- **`create-vite-cloud`** — scaffolds a new project, auto-detects and runs the preferred package manager, then runs `vcc init` interactively for agent setup, skills linking, and GitHub Actions.
 
 Agent instructions use versioned markers (`<!--injected-by-vite-cloud-v0.0.1-->` / `<!--/injected-by-vite-cloud-->`) for safe update-in-place across version upgrades.
 
