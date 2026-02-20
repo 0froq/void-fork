@@ -17,7 +17,7 @@ This is the development repo of Vite Cloud.
     - `README.md` (this file)
     - affected packages's `README.md` or `AGENTS.md`
     - relevant docs md files in `packages/website/docs`
-    - `packages/vite-cloud/skills/vcc-cli` (if change affects CLI)
+    - `packages/vite-cloud/skills/vite-cloud-cli` (if change affects CLI)
     - `packages/vite-cloud/AGENT_PROMPT.md`
     - `packages/vite-cloud/getting-started-prompt.txt`
   - Progress tracking: tick off relevant steps in `meta/0000-progress.md` when applicable.
@@ -137,7 +137,7 @@ Vite Cloud ships with first-class support for coding agents (Claude Code, Cursor
 
 - **`AGENT_PROMPT.md`** — compressed reference prompt shipped in the `vite-cloud` npm package. Covers project structure, routing, DB, auth, typed fetch, KV/storage/queues/cron, CLI, and deployment.
 - **`skills/`** — Claude Code skills shipped in the npm package:
-  - `vcc-cli` — guides agents through CLI operations (deploy, db, gen, secrets, domains, projects) using a decision-tree pattern with lazy-loaded reference files.
+  - `vite-cloud-cli` — guides agents through CLI operations (deploy, db, gen, secrets, domains, projects) using a decision-tree pattern with lazy-loaded reference files.
   - `migrate-vite-cloudflare-to-vite-cloud` — guides migration from `@cloudflare/vite-plugin` to `vite-cloud`.
 - **`docs/`** — all 23 docs markdown files are included in the npm package at `node_modules/vite-cloud/docs/`.
 - **`vcc init --agent`** — detects existing agent files (`.claude/`, `CLAUDE.md`, `AGENTS.md`) and injects Vite Cloud instructions with versioned markers. Supports update-in-place when the version changes.
