@@ -1,3 +1,39 @@
+<script setup>
+import { onMounted } from 'vue'
+onMounted(() => {
+  const key = 'vitepress:code-group-tab'
+  const saved = localStorage.getItem(key)
+  if (saved) syncAll(saved)
+  window.addEventListener('click', (e) => {
+    const label = e.target.closest?.('.vp-code-group .tabs label')
+    if (!label) return
+    const title = label.getAttribute('data-title')
+    if (title) {
+      localStorage.setItem(key, title)
+      const rect = label.getBoundingClientRect()
+      syncAll(title)
+      const shift = label.getBoundingClientRect().top - rect.top
+      if (shift) window.scrollBy(0, shift)
+    }
+  })
+  function syncAll(title) {
+    document.querySelectorAll('.vp-code-group').forEach((group) => {
+      const label = group.querySelector(`.tabs label[data-title="${title}"]`)
+      if (!label) return
+      const input = group.querySelector(`#${CSS.escape(label.getAttribute('for'))}`)
+      if (!input || input.checked) return
+      const i = Array.from(group.querySelectorAll('.tabs input')).indexOf(input)
+      const blocks = group.querySelector('.blocks')
+      if (!blocks || i < 0) return
+      input.checked = true
+      const current = blocks.querySelector('.active')
+      if (current) current.classList.remove('active')
+      blocks.children[i]?.classList.add('active')
+    })
+  }
+})
+</script>
+
 # Pages Routing
 
 Pages routing provides the server-rendered, components-as-pages, collocated-data-loading routing system that is seen in many existing JavaScript meta frameworks. However, pages routing in Vite Cloud is different from most in that it is **rendering framework agnostic.** It is built on patterns inspired by [Inertia.js](https://inertiajs.com/): The server returns the data, and the component receives it as props. The client-side routing logic is minimal, allowing Vite Cloud to support any rendering framework Vite can support. Today, only React and Vue have first-party adapters, but more will come in the future.
