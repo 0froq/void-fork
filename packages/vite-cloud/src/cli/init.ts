@@ -9,6 +9,7 @@ export interface InitArgs {
   tsconfig: boolean;
   github: boolean;
   agent: boolean;
+  skills: boolean;
 }
 
 export function parseInitArgs(args: string[]): InitArgs {
@@ -20,6 +21,7 @@ export function parseInitArgs(args: string[]): InitArgs {
         tsconfig: { type: "boolean" },
         github: { type: "boolean" },
         agent: { type: "boolean" },
+        skills: { type: "boolean" },
       },
       strict: true,
     });
@@ -32,6 +34,7 @@ export function parseInitArgs(args: string[]): InitArgs {
     tsconfig: parsed.values.tsconfig === true,
     github: parsed.values.github === true,
     agent: parsed.values.agent === true,
+    skills: parsed.values.skills === true,
   };
 }
 
@@ -433,7 +436,8 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   intro("\x1b[34mvite-cloud init\x1b[0m");
 
   const state = detectProjectState(root);
-  const targeted = initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agent);
+  const targeted =
+    initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agent || initArgs.skills);
 
   // Step 1: TypeScript / tsconfig
   if (!targeted || initArgs.tsconfig) {
@@ -504,7 +508,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   }
 
   // Step 3: Link skills
-  if (!targeted || initArgs?.agent) {
+  if (!targeted || initArgs?.agent || initArgs?.skills) {
     const { detectAgents, linkSkillsForAgents } = await import("./skills");
     const detectedAgents = detectAgents(root);
     if (detectedAgents.length > 0) {
