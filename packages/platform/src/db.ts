@@ -130,16 +130,22 @@ export async function createDeployment(
   projectId: string,
   manifest: string | null,
   source?: string | null,
+  commit?: string | null,
 ): Promise<Deployment> {
   const id = generateId("dpl");
-  await db
-    .insert(deployments)
-    .values({ id, project_id: projectId, manifest, source: source ?? null });
+  await db.insert(deployments).values({
+    id,
+    project_id: projectId,
+    manifest,
+    source: source ?? null,
+    commit: commit ?? null,
+  });
   return {
     id,
     project_id: projectId,
     status: "pending",
     source: source ?? null,
+    commit: commit ?? null,
     manifest,
     error_message: null,
     created_at: new Date().toISOString(),

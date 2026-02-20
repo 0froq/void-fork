@@ -64,6 +64,7 @@ export const deployments = sqliteTable(
       .$type<"pending" | "uploading" | "migrating" | "live" | "failed">(),
     manifest: text("manifest"),
     source: text("source"),
+    commit: text("commit"),
     error_message: text("error_message"),
     created_at: text("created_at")
       .notNull()

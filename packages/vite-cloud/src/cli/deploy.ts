@@ -122,10 +122,13 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   }
   // vcConfig.mode === "fullstack" or "framework" → preset stays null → full deploy
 
+  // Detect git commit before build (only when not skipping build)
+  const gitCommit = options?.skipBuild ? null : getGitCommit(root);
+
   if (preset) {
-    await runStaticDeploy(root, config, client, preset, headers, options?.skipBuild);
+    await runStaticDeploy(root, config, client, preset, headers, options?.skipBuild, gitCommit);
   } else {
-    await runFullDeploy(root, config, client, headers, options?.skipBuild);
+    await runFullDeploy(root, config, client, headers, options?.skipBuild, gitCommit);
   }
 }
 
@@ -136,6 +139,7 @@ async function runStaticDeploy(
   preset: StaticPreset,
   headers?: import("./types").HeaderRule[],
   skipBuild?: boolean,
+  commit?: string | null,
 ): Promise<void> {
   const modeLabel = preset.mode === "spa" ? "Static SPA" : "Static SSG";
   log.info(`${modeLabel} deploy`);
@@ -169,6 +173,7 @@ async function runStaticDeploy(
     headers,
   );
   formData.append("source", getTokenSource());
+  if (commit) formData.append("commit", commit);
 
   s.message("Deploying...");
   const result = await client.deploy(config.projectId, formData);
@@ -186,6 +191,7 @@ async function runFullDeploy(
   client: PlatformClient,
   headers?: import("./types").HeaderRule[],
   skipBuild?: boolean,
+  commit?: string | null,
 ): Promise<void> {
   // 3. Resolve Vite config for outDir
   const resolved = await resolveConfig({ root }, "build");
@@ -287,6 +293,7 @@ async function runFullDeploy(
     queues,
   );
   formData.append("source", getTokenSource());
+  if (commit) formData.append("commit", commit);
 
   s.message("Deploying...");
   const result = await client.deploy(config.projectId, formData);
@@ -333,6 +340,20 @@ async function createNewProject(
   writeProjectConfig(root, config);
   log.success(`Project created: ${config.slug}`);
   return config;
+}
+
+function getGitCommit(root: string): string | null {
+  try {
+    // Check if in a git repo
+    execSync("git rev-parse --is-inside-work-tree", { cwd: root, stdio: "ignore" });
+    // Check if working tree is clean
+    const status = execSync("git status --porcelain", { cwd: root, encoding: "utf-8" }).trim();
+    if (status !== "") return null;
+    // Get current commit hash
+    return execSync("git rev-parse HEAD", { cwd: root, encoding: "utf-8" }).trim();
+  } catch {
+    return null;
+  }
 }
 
 /**

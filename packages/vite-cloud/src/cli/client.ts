@@ -33,6 +33,7 @@ export interface DeploymentResponse {
   id: string;
   status: string;
   source: string | null;
+  commit: string | null;
   manifest: string | null;
   created_at: string;
   deployed_at: string | null;

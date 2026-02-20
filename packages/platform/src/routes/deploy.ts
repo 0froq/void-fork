@@ -69,9 +69,10 @@ app.post("/:id/deploy", async (c) => {
     ? (JSON.parse(manifestRaw) as DeployManifest)
     : { bindings: {} };
   const source = (formData.get("source") as string | null) ?? null;
+  const commit = (formData.get("commit") as string | null) ?? null;
 
   // Create deployment record
-  const deployment = await createDeployment(c.get("db"), projectId, manifestRaw, source);
+  const deployment = await createDeployment(c.get("db"), projectId, manifestRaw, source, commit);
 
   try {
     // Static-only deploy path: skip worker upload, bindings, and migrations

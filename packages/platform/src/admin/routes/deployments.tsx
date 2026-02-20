@@ -104,6 +104,10 @@ app.get("/:id", async (c) => {
               <td>{deployment.source ?? "-"}</td>
             </tr>
             <tr>
+              <th>Commit</th>
+              <td style="font-family: monospace; font-size: 0.8rem">{deployment.commit ?? "-"}</td>
+            </tr>
+            <tr>
               <th>Created</th>
               <td>{deployment.created_at}</td>
             </tr>
