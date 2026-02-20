@@ -226,13 +226,6 @@ if (command === "staging") {
     }
     dir = join(dir, "..");
   }
-} else if (command === "skills") {
-  import("./skills").then(({ runSkillsCommand }) => {
-    runSkillsCommand().catch((err) => {
-      log.error(err instanceof Error ? err.message : String(err));
-      process.exit(1);
-    });
-  });
 } else {
   const BLUE = "\x1b[34m";
   const RESET = "\x1b[0m";
@@ -311,8 +304,9 @@ if (command === "staging") {
       "\x1b[0mvcc gen queue <name>              \x1b[2mGenerate a queue consumer file",
       "",
       "\x1b[0m\x1b[1m\x1b[36magent\x1b[39m",
+      "\x1b[0mvcc init --agent                   \x1b[2mInject agent instructions into CLAUDE.md/AGENTS.md",
+      "\x1b[0mvcc init --skills                  \x1b[2mLink vite-cloud skills to your agent",
       "\x1b[0mvcc agent-prompt                   \x1b[2mPrint the coding agent reference prompt",
-      "\x1b[0mvcc skills                         \x1b[2mLink vite-cloud skills to your agent",
     ].join("\n"),
     "\x1b[34mCommands\x1b[0m",
   );

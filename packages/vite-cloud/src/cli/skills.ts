@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { intro, log, outro } from "@clack/prompts";
+import { log } from "@clack/prompts";
 
 function getPackageDir(): string {
   let dir = join(fileURLToPath(import.meta.url), "..");
@@ -193,7 +193,7 @@ function linkSkills(
 
 /**
  * Link skills for all detected agents. Returns total number of newly linked skills.
- * Used by both `vcc skills` and `vcc init`.
+ * Used by `vcc init` (interactive flow and `--agent`/`--skills` flags).
  */
 export function linkSkillsForAgents(root: string): number {
   const packageDir = getPackageDir();
@@ -210,48 +210,4 @@ export function linkSkillsForAgents(root: string): number {
     totalLinked += linkSkills(root, skillsDir, skills, agent.skillsDir);
   }
   return totalLinked;
-}
-
-export async function runSkillsCommand(): Promise<void> {
-  intro("vcc skills");
-
-  const packageDir = getPackageDir();
-  const skillsDir = join(packageDir, "skills");
-  const skills = parseSkills(skillsDir);
-
-  if (skills.length === 0) {
-    log.warn("No skills found in the vite-cloud package.");
-    outro("Done");
-    return;
-  }
-
-  const root = process.cwd();
-  const detected = detectAgents(root);
-
-  if (detected.length === 0) {
-    log.info(
-      `Found ${skills.length} skill(s) in the vite-cloud package:\n` +
-        skills.map((s) => `  ${s.name} — ${s.description}`).join("\n") +
-        `\n\nSkills are located at:\n  ${skillsDir}\n\n` +
-        "No supported agent detected in this project.\n" +
-        "Supported agents: " +
-        Object.values(agents)
-          .map((a) => a.displayName)
-          .join(", "),
-    );
-    outro("Done");
-    return;
-  }
-
-  let totalLinked = 0;
-  for (const agent of detected) {
-    log.info(`${agent.displayName} → ${agent.skillsDir}`);
-    totalLinked += linkSkills(root, skillsDir, skills, agent.skillsDir);
-  }
-
-  if (totalLinked > 0) {
-    outro(`Linked ${totalLinked} skill(s) for ${detected.map((a) => a.displayName).join(", ")}`);
-  } else {
-    outro("All skills already linked.");
-  }
 }

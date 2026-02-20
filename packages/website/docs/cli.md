@@ -28,15 +28,16 @@ We do not recommend installing `vite-cloud` globally, because the CLI needs to b
 ### `vcc init`
 
 ```
-vcc init [--tsconfig] [--github] [--agent]
+vcc init [--tsconfig] [--github] [--agent] [--skills]
 ```
 
 Interactive setup wizard for adding vite-cloud to an existing project. Walks through:
 
 1. **TypeScript** — creates or updates `tsconfig.json` (adds `extends .vite-cloud/tsconfig.json` and `vite-cloud/env` types)
 2. **Agent instructions** — adds Vite Cloud framework instructions to `CLAUDE.md` or `AGENTS.md`
-3. **Demo code** — optionally scaffolds a migration, API route, and typed fetch example
-4. **GitHub Actions** — optionally creates `.github/workflows/deploy.yml` with the correct package manager commands
+3. **Skills** — links vite-cloud skills to detected coding agents
+4. **Demo code** — optionally scaffolds a migration, API route, and typed fetch example
+5. **GitHub Actions** — optionally creates `.github/workflows/deploy.yml` with the correct package manager commands
 
 Use flags to run individual steps without prompts:
 
@@ -44,6 +45,7 @@ Use flags to run individual steps without prompts:
 | ------------ | -------------------------------------------------------- |
 | `--tsconfig` | Only update `tsconfig.json`                              |
 | `--agent`    | Only add coding agent instructions (CLAUDE.md/AGENTS.md) |
+| `--skills`   | Only link vite-cloud skills to detected coding agents    |
 | `--github`   | Only create GitHub Actions workflow                      |
 
 Flags can be combined. When any flag is provided, only the specified steps run and interactive prompts are skipped.
@@ -354,7 +356,7 @@ Project resolution for domain commands follows the same order as deploy (`--proj
 
 Print the coding agent reference prompt to stdout. Useful for piping into agent tools or inspecting the shipped prompt.
 
-### `vcc skills`
+### `vcc init --skills`
 
 Link vite-cloud skills to your coding agent's skills directory.
 
