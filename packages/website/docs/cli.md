@@ -6,17 +6,17 @@ outline: deep
 
 `vite-cloud` ships a CLI with two binaries:
 
-- `vcd` (short)
+- `vcc` (short)
 - `vite-cloud` (alias)
 
-Examples below use `vcd`.
+Examples below use `vcc`.
 
 ## Setup
 
-### `vcd init`
+### `vcc init`
 
 ```
-vcd init [--tsconfig] [--auth <providers>] [--github]
+vcc init [--tsconfig] [--auth <providers>] [--github]
 ```
 
 Interactive setup wizard for adding vite-cloud to an existing project. Walks through:
@@ -38,33 +38,33 @@ Flags can be combined. When any flag is provided, only the specified steps run a
 
 ## Auth
 
-### `vcd login`
+### `vcc login`
 
 OAuth login (GitHub or Google — you choose at the prompt). Saves token to `~/.vite-cloud/config.json`.
 
-### `vcd logout`
+### `vcc logout`
 
 Removes saved credentials.
 
-### `vcd whoami`
+### `vcc whoami`
 
 Prints your current login.
 
-### `vcd token`
+### `vcc token`
 
 Copies your auth token to the system clipboard. Useful for setting up CI secrets.
 
 ## Project commands
 
-### `vcd projects`
+### `vcc projects`
 
 List all your projects (slug, mode, URL).
 
-### `vcd link [name]`
+### `vcc link [name]`
 
 Link current directory to an existing project by slug, or select interactively if omitted. State is stored in `.vite-cloud/project.json`.
 
-### `vcd delete [name]`
+### `vcc delete [name]`
 
 Permanently delete a project and all its resources (databases, KV namespaces, R2 buckets, deployments). Requires typing the project slug to confirm.
 
@@ -72,19 +72,19 @@ If `[name]` is omitted, uses the linked project.
 
 ## Deployment history
 
-### `vcd list [name]`
+### `vcc list [name]`
 
-Show the last 5 deployments for a project. Alias: `vcd ls`.
+Show the last 5 deployments for a project. Alias: `vcc ls`.
 
 - If `[name]` is provided, looks up the project by slug
 - Otherwise uses the linked project from `.vite-cloud/project.json`
 
 ## Deploy
 
-### `vcd deploy`
+### `vcc deploy`
 
 ```
-vcd deploy [--project <name>] [--dir <path>] [--spa] [--skip-build]
+vcc deploy [--project <name>] [--dir <path>] [--spa] [--skip-build]
 ```
 
 Auto-detects your project type and chooses the right pipeline. See [App Types](./app-types.md) and [Deployment](./deployment.md) for details.
@@ -106,43 +106,43 @@ If no project is linked and no override is provided, CLI prompts to link or crea
 
 ## Database
 
-### `vcd db status`
+### `vcc db status`
 
 Show migration status. Displays which migrations are applied or pending locally. When logged in and linked to a project, also shows remote status.
 
-### `vcd db reset`
+### `vcc db reset`
 
 Drop the local D1 database and re-apply all migrations. Does not affect the remote database.
 
-### `vcd db seed`
+### `vcc db seed`
 
 ```
-vcd db seed [--file <path>]
+vcc db seed [--file <path>]
 ```
 
 Reset the local database, re-apply all migrations, then execute a seed file. Defaults to `migrations/seed.sql`. The seed file is excluded from migration collection — it's never deployed or applied as a migration.
 
-### `vcd db execute`
+### `vcc db execute`
 
 ```
-vcd db execute <sql>
-vcd db execute --file <path>
+vcc db execute <sql>
+vcc db execute --file <path>
 ```
 
 Run ad-hoc SQL against the local D1 database. Provide SQL inline or from a file. SELECT queries display results as a formatted table; other statements execute silently.
 
-### `vcd db migrate`
+### `vcc db migrate`
 
 ```
-vcd db migrate
+vcc db migrate
 ```
 
-Apply pending migrations to the local database without resetting. Unlike `vcd db reset`, this preserves existing data and only runs migrations that haven't been applied yet.
+Apply pending migrations to the local database without resetting. Unlike `vcc db reset`, this preserves existing data and only runs migrations that haven't been applied yet.
 
-### `vcd db export`
+### `vcc db export`
 
 ```
-vcd db export [--output <path>] [--no-data] [--no-schema] [--table <name>]
+vcc db export [--output <path>] [--no-data] [--no-schema] [--table <name>]
 ```
 
 Dump the local database as SQL. Outputs to stdout by default (pipeable), or to a file with `--output`.
@@ -156,16 +156,16 @@ Dump the local database as SQL. Outputs to stdout by default (pipeable), or to a
 
 ## Code Generation
 
-### `vcd gen model`
+### `vcc gen model`
 
 ```
-vcd gen model <name> [columns...]
+vcc gen model <name> [columns...]
 ```
 
 Scaffold a complete model: migration file, CRUD API routes, and regenerated DB types in one command.
 
 ```sh
-vcd gen model posts title:string body:text published:boolean
+vcc gen model posts title:string body:text published:boolean
 ```
 
 Creates:
@@ -181,53 +181,53 @@ Column format: `name:type` or `name:type?` (nullable). Types: `string`, `text`, 
 
 Model names must be lowercase alphanumeric with underscores (e.g. `posts`, `user_roles`). Existing files are never overwritten.
 
-### `vcd gen migration`
+### `vcc gen migration`
 
 ```
-vcd gen migration <name>
+vcc gen migration <name>
 ```
 
 Create an empty migration file with auto-numbered prefix. The number is one greater than the highest existing migration.
 
 ```sh
-vcd gen migration add_avatar_to_users
+vcc gen migration add_avatar_to_users
 # → migrations/002_add_avatar_to_users.sql
 ```
 
-### `vcd gen route`
+### `vcc gen route`
 
 ```
-vcd gen route <path> [--methods get,post,...]
+vcc gen route <path> [--methods get,post,...]
 ```
 
 Create a route file with `defineHandler` exports. Defaults to GET.
 
 ```sh
-vcd gen route api/health
-vcd gen route api/users --methods get,post,delete
+vcc gen route api/health
+vcc gen route api/users --methods get,post,delete
 ```
 
 Creates `routes/<path>.ts` with an exported handler for each method. Supported methods: `get`, `post`, `put`, `patch`, `delete`.
 
-### `vcd gen middleware`
+### `vcc gen middleware`
 
 ```
-vcd gen middleware <name>
+vcc gen middleware <name>
 ```
 
 Create a numbered middleware file with `defineMiddleware` default export.
 
 ```sh
-vcd gen middleware auth
+vcc gen middleware auth
 # → middleware/01.auth.ts (or 02, 03, etc.)
 ```
 
 The prefix is auto-detected from existing middleware files.
 
-### `vcd gen ssr`
+### `vcc gen ssr`
 
 ```
-vcd gen ssr [--react | --vue | --svelte | --solid]
+vcc gen ssr [--react | --vue | --svelte | --solid]
 ```
 
 Scaffold SSR entry points and a minimal App component for your framework.
@@ -242,70 +242,70 @@ If no flag is provided, the framework is auto-detected from `package.json` depen
 
 ## Secrets
 
-### `vcd secret put`
+### `vcc secret put`
 
 ```
-vcd secret put <name> [--project <name>]
-vcd secret put <name=value> [--project <name>]
+vcc secret put <name> [--project <name>]
+vcc secret put <name=value> [--project <name>]
 ```
 
 Value input modes:
 
-- inline: `vcd secret put API_KEY=abcd`
-- prompt (TTY): `vcd secret put API_KEY` (masked input)
-- stdin: `echo -n "abcd" | vcd secret put API_KEY`
+- inline: `vcc secret put API_KEY=abcd`
+- prompt (TTY): `vcc secret put API_KEY` (masked input)
+- stdin: `echo -n "abcd" | vcc secret put API_KEY`
 
-### `vcd secret sync`
+### `vcc secret sync`
 
 ```
-vcd secret sync <file> [--project <name>]
+vcc secret sync <file> [--project <name>]
 ```
 
 Bulk upload secrets from a dotenv file. Each `KEY=value` line in the file is uploaded as a secret.
 
 ```sh
-vcd secret sync .env.local       # uploads secrets from .env.local
-vcd secret sync .env.production  # uploads a specific file
+vcc secret sync .env.local       # uploads secrets from .env.local
+vcc secret sync .env.production  # uploads a specific file
 ```
 
-### `vcd secret delete`
+### `vcc secret delete`
 
 ```
-vcd secret delete <name> [--project <name>]
+vcc secret delete <name> [--project <name>]
 ```
 
 Project resolution for secrets follows the same order as deploy (`--project`, env var, linked project).
 
 ## Custom Domains
 
-### `vcd domain add`
+### `vcc domain add`
 
 ```
-vcd domain add <hostname> [--project <name>]
+vcc domain add <hostname> [--project <name>]
 ```
 
 Add a custom domain to a project. Prints the CNAME target you need to add in your DNS provider.
 
-### `vcd domain remove`
+### `vcc domain remove`
 
 ```
-vcd domain remove <hostname> [--project <name>]
+vcc domain remove <hostname> [--project <name>]
 ```
 
 Remove a custom domain from a project.
 
-### `vcd domain list`
+### `vcc domain list`
 
 ```
-vcd domain list [--project <name>]
+vcc domain list [--project <name>]
 ```
 
 List all custom domains and their status (active/pending).
 
-### `vcd domain status`
+### `vcc domain status`
 
 ```
-vcd domain status <hostname> [--project <name>]
+vcc domain status <hostname> [--project <name>]
 ```
 
 Check verification and SSL status for a specific domain. Shows hostname, status, SSL status, and any verification errors.

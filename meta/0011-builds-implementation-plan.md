@@ -2,11 +2,11 @@
 
 ## Context
 
-Vite Cloud currently requires users to build locally via `vcd deploy`. This plan implements a remote build service triggered by GitHub push webhooks, running in Cloudflare Containers orchestrated by Durable Objects. The design is documented in `meta/0010-builds.md`.
+Vite Cloud currently requires users to build locally via `vcc deploy`. This plan implements a remote build service triggered by GitHub push webhooks, running in Cloudflare Containers orchestrated by Durable Objects. The design is documented in `meta/0010-builds.md`.
 
 Two deploy paths will coexist:
 
-- **`vcd deploy`** — build locally, upload artifacts (existing, unchanged)
+- **`vcc deploy`** — build locally, upload artifacts (existing, unchanged)
 - **GitHub push** — build remotely on Vite Cloud infra, deploy automatically
 
 ## Critical Files (Existing)
@@ -189,7 +189,7 @@ Extract from `deploy.ts`:
 ### Verify
 
 - `pnpm check`
-- Deploy a playground app with `vcd deploy` — must still work identically
+- Deploy a playground app with `vcc deploy` — must still work identically
 - Run existing platform tests
 
 ---
@@ -565,7 +565,7 @@ Add a Builds section to the admin dashboard, following the existing pattern of s
 
 - In `GET /deployments/:id` detail view, add a row to the table:
   - "Build" row: query `getBuildByDeploymentId(db, deployment.id)` — if found, render link to `/admin/builds/:buildId` with build status badge
-  - If no build found, show "-" (deploy was via `vcd deploy`, not a remote build)
+  - If no build found, show "-" (deploy was via `vcc deploy`, not a remote build)
 
 **Edit `packages/platform/src/admin/views/deployments-list.tsx`:**
 

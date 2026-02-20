@@ -11,9 +11,9 @@ Vite Cloud apps run on Cloudflare's infrastructure but you don't need to use you
 ### First deploy
 
 ```bash
-npm i -g vite-cloud   # or use npx vcd
-vcd login              # OAuth via GitHub or Google
-vcd deploy             # auto-detects app type, builds, deploys
+npm i -g vite-cloud   # or use npx vcc
+vcc login              # OAuth via GitHub or Google
+vcc deploy             # auto-detects app type, builds, deploys
 ```
 
 On first deploy, the CLI prompts you to create or select a project. The project link is saved to `.vite-cloud/project.json` for subsequent deploys.
@@ -21,7 +21,7 @@ On first deploy, the CLI prompts you to create or select a project. The project 
 ### Flags
 
 ```bash
-vcd deploy [--project <name>] [--dir <path>] [--spa]
+vcc deploy [--project <name>] [--dir <path>] [--spa]
 ```
 
 | Flag               | Purpose                                           |
@@ -68,13 +68,13 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install
-      - run: pnpm vcd deploy
+      - run: pnpm vcc deploy
         env:
           VITE_CLOUD_TOKEN: ${{ secrets.VITE_CLOUD_TOKEN }}
           VITE_CLOUD_PROJECT: my-app
 ```
 
-To get a deploy token, run `vcd token` to copy it to your clipboard, then add it as a GitHub Actions secret.
+To get a deploy token, run `vcc token` to copy it to your clipboard, then add it as a GitHub Actions secret.
 
 ## Deploy Pipeline
 
@@ -83,7 +83,7 @@ To get a deploy token, run `vcd token` to copy it to your clipboard, then add it
 For projects with API routes, SSR, jobs, or any backend code:
 
 ```
-vcd deploy
+vcc deploy
   │
   ├─ 1. Build
   │    vite build → dist/client/ (static assets)
@@ -124,7 +124,7 @@ Framework mode (TanStack Start, React Router) follows the same pipeline but skip
 For client-side apps without backend code:
 
 ```
-vcd deploy
+vcc deploy
   │
   ├─ 1. Build
   │    vite build → dist/ (static assets)
@@ -150,7 +150,7 @@ vcd deploy
 For statically generated sites (VitePress, etc.):
 
 ```
-vcd deploy
+vcc deploy
   │
   ├─ 1. Build
   │    vitepress build → .vitepress/dist/ (or custom outputDir)
@@ -177,8 +177,8 @@ vcd deploy
 Skip the build step entirely with `--dir`:
 
 ```bash
-vcd deploy --dir public         # SSG mode (default)
-vcd deploy --dir build --spa    # SPA mode
+vcc deploy --dir public         # SSG mode (default)
+vcc deploy --dir build --spa    # SPA mode
 ```
 
 The CLI uploads all files from the directory directly — no build command runs.

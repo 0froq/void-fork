@@ -18,7 +18,7 @@ const VALID_METHODS = new Set(["get", "post", "put", "patch", "delete"]);
 function parseModelArgs(args: string[]): GenArgs {
   const [name, ...rest] = args;
   if (!name) {
-    throw new Error("Error: Usage: vcd gen model <name> [columns...]");
+    throw new Error("Error: Usage: vcc gen model <name> [columns...]");
   }
   if (!/^[a-z_][a-z0-9_]*$/.test(name)) {
     throw new Error(
@@ -47,7 +47,7 @@ function parseModelArgs(args: string[]): GenArgs {
 function parseMigrationArgs(args: string[]): GenArgs {
   const [name, extra] = args;
   if (!name) {
-    throw new Error("Error: Usage: vcd gen migration <name>");
+    throw new Error("Error: Usage: vcc gen migration <name>");
   }
   if (extra) {
     throw new Error(`Error: Unexpected argument: ${extra}`);
@@ -72,7 +72,7 @@ function parseRouteArgs(args: string[]): GenArgs {
 
   const [routePath, extra] = parsed.positionals;
   if (!routePath) {
-    throw new Error("Error: Usage: vcd gen route <path> [--methods get,post,...]");
+    throw new Error("Error: Usage: vcc gen route <path> [--methods get,post,...]");
   }
   if (extra) {
     throw new Error(`Error: Unexpected argument: ${extra}`);
@@ -98,7 +98,7 @@ function parseRouteArgs(args: string[]): GenArgs {
 function parseMiddlewareArgs(args: string[]): GenArgs {
   const [name, extra] = args;
   if (!name) {
-    throw new Error("Error: Usage: vcd gen middleware <name>");
+    throw new Error("Error: Usage: vcc gen middleware <name>");
   }
   if (extra) {
     throw new Error(`Error: Unexpected argument: ${extra}`);
@@ -140,5 +140,5 @@ export function parseGenArgs(args: string[]): GenArgs {
   if (subcommand === "middleware") return parseMiddlewareArgs(rest);
   if (subcommand === "ssr") return parseSsrArgs(rest);
 
-  throw new Error("Error: Usage: vcd gen <model|migration|route|middleware|ssr>");
+  throw new Error("Error: Usage: vcc gen <model|migration|route|middleware|ssr>");
 }

@@ -25,28 +25,28 @@ Migrations run automatically when the dev server starts. On deploy, they run aga
 
 The CLI provides commands to inspect, reset, and seed your local database. Place dev data in `migrations/seed.sql` — it's automatically excluded from migration collection and will never be deployed.
 
-- `vcd db status` — show which migrations are applied locally (and remotely if linked)
-- `vcd db reset` — drop the local DB and re-apply all migrations
-- `vcd db seed` — reset + run `migrations/seed.sql` (or `--file <path>`)
-- `vcd db execute <sql>` — run ad-hoc SQL against the local DB (or `--file <path>`)
-- `vcd db migrate` — apply pending migrations without resetting
-- `vcd db export` — dump local DB as SQL (supports `--output`, `--no-data`, `--no-schema`, `--table`)
+- `vcc db status` — show which migrations are applied locally (and remotely if linked)
+- `vcc db reset` — drop the local DB and re-apply all migrations
+- `vcc db seed` — reset + run `migrations/seed.sql` (or `--file <path>`)
+- `vcc db execute <sql>` — run ad-hoc SQL against the local DB (or `--file <path>`)
+- `vcc db migrate` — apply pending migrations without resetting
+- `vcc db export` — dump local DB as SQL (supports `--output`, `--no-data`, `--no-schema`, `--table`)
 
 See the [CLI reference](./cli.md#database) for details.
 
 ## Scaffolding
 
-The `vcd gen` command can scaffold a complete model (migration + CRUD routes + types) or a standalone migration:
+The `vcc gen` command can scaffold a complete model (migration + CRUD routes + types) or a standalone migration:
 
 ```sh
 # Generate a full model: migration, API routes, and regenerated db types
-vcd gen model posts title:string body:text published:boolean
+vcc gen model posts title:string body:text published:boolean
 
 # Generate just a migration file
-vcd gen migration add_avatar_to_users
+vcc gen migration add_avatar_to_users
 ```
 
-`vcd gen model <name> [columns...]` creates:
+`vcc gen model <name> [columns...]` creates:
 
 1. `migrations/NNN_create_<name>.sql` — CREATE TABLE with `id` (autoincrement), your columns, and `created_at`
 2. `routes/api/<name>/index.ts` — GET (list) + POST (insert with validation)
@@ -66,7 +66,7 @@ Column format is `name:type`, with an optional `?` suffix for nullable:
 | `blob`                       | BLOB NOT NULL    | `v.instance(Blob)` | `z.instanceof(Blob)` | `"instanceof Blob"`  |
 | any type with `?`            | (no NOT NULL)    | `v.optional(...)`  | `....optional()`     | `"... \| undefined"` |
 
-`vcd gen migration <name>` creates an empty `migrations/NNN_<name>.sql` with a comment placeholder. The number is auto-detected from the highest existing migration prefix.
+`vcc gen migration <name>` creates an empty `migrations/NNN_<name>.sql` with a comment placeholder. The number is auto-detected from the highest existing migration prefix.
 
 See the [CLI reference](./cli.md#code-generation) for the full list of generators.
 

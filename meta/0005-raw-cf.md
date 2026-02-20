@@ -50,7 +50,7 @@ Migrations use wrangler's built-in D1 migration system: `wrangler d1 migrations 
 
 ## What Changes vs. Platform Deploy
 
-| Concern       | Platform (`vcd deploy`)                  | Raw CF (`wrangler deploy`)                   |
+| Concern       | Platform (`vcc deploy`)                  | Raw CF (`wrangler deploy`)                   |
 | ------------- | ---------------------------------------- | -------------------------------------------- |
 | Worker upload | Workers for Platforms dispatch namespace | Direct `wrangler deploy`                     |
 | Static assets | R2 + dispatch worker                     | Workers Static Assets (built into CF plugin) |

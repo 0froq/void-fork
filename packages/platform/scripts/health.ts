@@ -37,7 +37,7 @@ const baseUrl = isStaging ? "https://platform.staging.vite.cloud" : "https://pla
 
 if (!token) {
   console.error(`No ${isStaging ? "stagingToken" : "token"} found in ~/.vite-cloud/config.json`);
-  console.error("Run `vcd login` first.");
+  console.error("Run `vcc login` first.");
   process.exit(1);
 }
 

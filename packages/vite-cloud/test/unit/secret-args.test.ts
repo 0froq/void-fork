@@ -30,37 +30,37 @@ describe("parseSecretArgs", () => {
 
   it("errors on extra delete positional value", () => {
     expect(() => parseSecretArgs(["delete", "API_KEY", "extra"])).toThrow(
-      "Error: Usage: vcd secret delete <name> [--project <name>]",
+      "Error: Usage: vcc secret delete <name> [--project <name>]",
     );
   });
 
   it("errors on missing put name", () => {
     expect(() => parseSecretArgs(["put"])).toThrow(
-      "Error: Usage: vcd secret put <name> [--project <name>]",
+      "Error: Usage: vcc secret put <name> [--project <name>]",
     );
   });
 
   it("errors on malformed put KEY= form", () => {
     expect(() => parseSecretArgs(["put", "API_KEY="])).toThrow(
-      "Error: Usage: vcd secret put <name> [--project <name>]",
+      "Error: Usage: vcc secret put <name> [--project <name>]",
     );
   });
 
   it("errors on extra put positional value", () => {
     expect(() => parseSecretArgs(["put", "API_KEY", "abc123"])).toThrow(
-      "Error: Usage: vcd secret put <name> [--project <name>]",
+      "Error: Usage: vcc secret put <name> [--project <name>]",
     );
   });
 
   it("errors on unknown action", () => {
     expect(() => parseSecretArgs(["list"])).toThrow(
-      "Error: Usage: vcd secret <put|delete|sync> ...",
+      "Error: Usage: vcc secret <put|delete|sync> ...",
     );
   });
 
   it("errors on unsupported set action", () => {
     expect(() => parseSecretArgs(["set", "API_KEY"])).toThrow(
-      "Error: Usage: vcd secret <put|delete|sync> ...",
+      "Error: Usage: vcc secret <put|delete|sync> ...",
     );
   });
 
@@ -82,13 +82,13 @@ describe("parseSecretArgs", () => {
 
   it("errors on missing sync file path", () => {
     expect(() => parseSecretArgs(["sync"])).toThrow(
-      "Error: Usage: vcd secret sync <file> [--project <name>]",
+      "Error: Usage: vcc secret sync <file> [--project <name>]",
     );
   });
 
   it("errors on extra sync positional", () => {
     expect(() => parseSecretArgs(["sync", ".env", "extra"])).toThrow(
-      "Error: Usage: vcd secret sync <file> [--project <name>]",
+      "Error: Usage: vcc secret sync <file> [--project <name>]",
     );
   });
 });

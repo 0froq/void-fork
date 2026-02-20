@@ -43,7 +43,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 
 ## `vite-cloud` Overview
 
-Core Vite plugin. `viteCloud()` returns `[routingPlugin, migrationPlugin, cloudflare({...inferredBindings})]`. Provides file-based routing on Hono, Standard Schema validation, typed fetch client, typed DB queries, built-in auth (auto-detected from imports + env vars), cron jobs, queues (typed via `vite-cloud/queues`), and a deploy CLI (`vcd`).
+Core Vite plugin. `viteCloud()` returns `[routingPlugin, migrationPlugin, cloudflare({...inferredBindings})]`. Provides file-based routing on Hono, Standard Schema validation, typed fetch client, typed DB queries, built-in auth (auto-detected from imports + env vars), cron jobs, queues (typed via `vite-cloud/queues`), and a deploy CLI (`vcc`).
 
 See [`packages/vite-cloud/AGENTS.md`](./packages/vite-cloud/AGENTS.md) for architecture, source layout, design decisions, package exports, and route parsing rules.
 
@@ -99,17 +99,17 @@ Verified working:
 - `cd playground/ssr && pnpm dev`
 - `cd playground/spa && pnpm typecheck` (includes typed routes via generated `.vite-cloud/routes.d.ts`)
 
-## Code Generation (`vcd gen`)
+## Code Generation (`vcc gen`)
 
 Rails/Laravel-style scaffolding commands for common boilerplate:
 
 | Command                                           | Creates                                          |
 | ------------------------------------------------- | ------------------------------------------------ |
-| `vcd gen model <name> [cols...]`                  | Migration + CRUD routes + regenerates `db.d.ts`  |
-| `vcd gen migration <name>`                        | Empty migration file with auto-numbered prefix   |
-| `vcd gen route <path> [--methods get,post,...]`   | Route file with `defineHandler` exports          |
-| `vcd gen middleware <name>`                       | Numbered middleware file with `defineMiddleware` |
-| `vcd gen ssr [--react\|--vue\|--svelte\|--solid]` | SSR entry + client entry + App component         |
+| `vcc gen model <name> [cols...]`                  | Migration + CRUD routes + regenerates `db.d.ts`  |
+| `vcc gen migration <name>`                        | Empty migration file with auto-numbered prefix   |
+| `vcc gen route <path> [--methods get,post,...]`   | Route file with `defineHandler` exports          |
+| `vcc gen middleware <name>`                       | Numbered middleware file with `defineMiddleware` |
+| `vcc gen ssr [--react\|--vue\|--svelte\|--solid]` | SSR entry + client entry + App component         |
 
 Column types for `gen model`: `string`, `text`, `datetime` → TEXT; `integer`, `boolean` → INTEGER; `real` → REAL; `blob` → BLOB. Append `?` for nullable (e.g. `bio:text?`).
 

@@ -12,7 +12,7 @@ export interface DomainArgs {
 export function parseDomainArgs(args: string[]): DomainArgs {
   const subcommand = args[0] as DomainArgs["subcommand"];
   if (!subcommand || !["add", "remove", "list", "status"].includes(subcommand)) {
-    throw new Error("Usage: vcd domain <add|remove|list|status> [hostname] [--project <name>]");
+    throw new Error("Usage: vcc domain <add|remove|list|status> [hostname] [--project <name>]");
   }
 
   let hostname: string | undefined;
@@ -28,7 +28,7 @@ export function parseDomainArgs(args: string[]): DomainArgs {
   }
 
   if ((subcommand === "add" || subcommand === "remove" || subcommand === "status") && !hostname) {
-    throw new Error(`Usage: vcd domain ${subcommand} <hostname> [--project <name>]`);
+    throw new Error(`Usage: vcc domain ${subcommand} <hostname> [--project <name>]`);
   }
 
   return { subcommand, hostname, projectSlug };
@@ -37,7 +37,7 @@ export function parseDomainArgs(args: string[]): DomainArgs {
 export async function runDomainCommand(root: string, args: DomainArgs): Promise<void> {
   const token = getToken();
   if (!token) {
-    log.error("Not logged in. Run `vcd login` first.");
+    log.error("Not logged in. Run `vcc login` first.");
     process.exit(1);
   }
 
@@ -58,7 +58,7 @@ export async function runDomainCommand(root: string, args: DomainArgs): Promise<
   } else {
     const config = readProjectConfig(root);
     if (!config) {
-      log.error("No linked project. Run `vcd link` or pass --project <name>.");
+      log.error("No linked project. Run `vcc link` or pass --project <name>.");
       process.exit(1);
     }
     projectId = config.projectId;
@@ -84,7 +84,7 @@ async function domainAdd(
   const domain = await client.addDomain(projectId, hostname);
   log.success(`Domain ${hostname} added (status: ${domain.status})`);
   note(`Add a CNAME record:\n  ${hostname} → ${domain.cname_target}`, "DNS Setup");
-  log.info("Run `vcd domain status " + hostname + "` to check verification progress.");
+  log.info("Run `vcc domain status " + hostname + "` to check verification progress.");
 }
 
 async function domainRemove(

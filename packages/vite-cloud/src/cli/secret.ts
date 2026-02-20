@@ -12,7 +12,7 @@ export async function runSecretCommand(root: string, args: SecretArgs): Promise<
 
   const token = getToken();
   if (!token) {
-    log.error("Not logged in. Run `vcd login` first.");
+    log.error("Not logged in. Run `vcc login` first.");
     process.exit(1);
   }
 
@@ -30,7 +30,7 @@ export async function runSecretCommand(root: string, args: SecretArgs): Promise<
     const config = readProjectConfig(root);
     if (!config) {
       throw new Error(
-        "No linked project found. Run `vcd link`, `vcd deploy`, or pass --project <name>.",
+        "No linked project found. Run `vcc link`, `vcc deploy`, or pass --project <name>.",
       );
     }
     projectId = config.projectId;

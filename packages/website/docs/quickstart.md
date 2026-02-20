@@ -63,7 +63,7 @@ npx vite-cloud login
 You can also use the short binary:
 
 ```bash
-npx vcd login
+npx vcc login
 ```
 
 ## 7. Deploy
@@ -71,13 +71,13 @@ npx vcd login
 Set secrets once before deploying:
 
 ```bash
-npx vcd secret put KEY=value
+npx vcc secret put KEY=value
 ```
 
 Then run:
 
 ```bash
-npx vcd deploy
+npx vcc deploy
 ```
 
 On first deploy, Vite Cloud will:
@@ -92,13 +92,13 @@ On first deploy, Vite Cloud will:
 Useful for CI or multi-project accounts:
 
 ```bash
-npx vcd deploy --project my-app
+npx vcc deploy --project my-app
 ```
 
 Or via env var:
 
 ```bash
-VITE_CLOUD_PROJECT=my-app npx vcd deploy
+VITE_CLOUD_PROJECT=my-app npx vcc deploy
 ```
 
 Precedence is:

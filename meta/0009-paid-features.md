@@ -53,7 +53,7 @@ User-defined scheduled tasks alongside API routes (e.g. `routes/cron/daily-clean
 
 #### Log Streaming
 
-Real-time `console.log` output from user workers via CLI (`vcd logs --follow`) and/or dashboard.
+Real-time `console.log` output from user workers via CLI (`vcc logs --follow`) and/or dashboard.
 
 - **Why it converts:** Developers expect this for any production workload. Hard to debug without it.
 - **CF advantage:** Workers tail API already exists. We wrap it.

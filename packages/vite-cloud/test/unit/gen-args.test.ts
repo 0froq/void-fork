@@ -4,13 +4,13 @@ import { parseGenArgs } from "../../src/cli/gen-args";
 describe("parseGenArgs", () => {
   it("errors on no subcommand", () => {
     expect(() => parseGenArgs([])).toThrow(
-      "Error: Usage: vcd gen <model|migration|route|middleware|ssr>",
+      "Error: Usage: vcc gen <model|migration|route|middleware|ssr>",
     );
   });
 
   it("errors on unknown subcommand", () => {
     expect(() => parseGenArgs(["unknown"])).toThrow(
-      "Error: Usage: vcd gen <model|migration|route|middleware|ssr>",
+      "Error: Usage: vcc gen <model|migration|route|middleware|ssr>",
     );
   });
 
@@ -58,7 +58,7 @@ describe("parseGenArgs", () => {
     });
 
     it("errors on missing name", () => {
-      expect(() => parseGenArgs(["model"])).toThrow("Error: Usage: vcd gen model <name>");
+      expect(() => parseGenArgs(["model"])).toThrow("Error: Usage: vcc gen model <name>");
     });
 
     it("errors on invalid model name", () => {
@@ -95,7 +95,7 @@ describe("parseGenArgs", () => {
     });
 
     it("errors on missing name", () => {
-      expect(() => parseGenArgs(["migration"])).toThrow("Error: Usage: vcd gen migration <name>");
+      expect(() => parseGenArgs(["migration"])).toThrow("Error: Usage: vcc gen migration <name>");
     });
 
     it("errors on extra argument", () => {
@@ -137,7 +137,7 @@ describe("parseGenArgs", () => {
     });
 
     it("errors on missing path", () => {
-      expect(() => parseGenArgs(["route"])).toThrow("Error: Usage: vcd gen route <path>");
+      expect(() => parseGenArgs(["route"])).toThrow("Error: Usage: vcc gen route <path>");
     });
 
     it("errors on extra argument", () => {
@@ -162,7 +162,7 @@ describe("parseGenArgs", () => {
     });
 
     it("errors on missing name", () => {
-      expect(() => parseGenArgs(["middleware"])).toThrow("Error: Usage: vcd gen middleware <name>");
+      expect(() => parseGenArgs(["middleware"])).toThrow("Error: Usage: vcc gen middleware <name>");
     });
 
     it("errors on extra argument", () => {

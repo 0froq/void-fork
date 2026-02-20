@@ -35,10 +35,10 @@ export function parseSecretArgs(args: string[]): SecretArgs {
 
   if (action === "put") {
     if (!name) {
-      throw new Error("Error: Usage: vcd secret put <name> [--project <name>]");
+      throw new Error("Error: Usage: vcc secret put <name> [--project <name>]");
     }
     if (value) {
-      throw new Error("Error: Usage: vcd secret put <name> [--project <name>]");
+      throw new Error("Error: Usage: vcc secret put <name> [--project <name>]");
     }
     const eqIndex = name.indexOf("=");
     if (eqIndex === -1) {
@@ -48,30 +48,30 @@ export function parseSecretArgs(args: string[]): SecretArgs {
     const key = name.slice(0, eqIndex);
     const inlineValue = name.slice(eqIndex + 1);
     if (!key || !inlineValue) {
-      throw new Error("Error: Usage: vcd secret put <name> [--project <name>]");
+      throw new Error("Error: Usage: vcc secret put <name> [--project <name>]");
     }
     return { action, name: key, value: inlineValue, projectName };
   }
 
   if (action === "delete") {
     if (!name) {
-      throw new Error("Error: Usage: vcd secret delete <name> [--project <name>]");
+      throw new Error("Error: Usage: vcc secret delete <name> [--project <name>]");
     }
     if (value) {
-      throw new Error("Error: Usage: vcd secret delete <name> [--project <name>]");
+      throw new Error("Error: Usage: vcc secret delete <name> [--project <name>]");
     }
     return { action, name, projectName };
   }
 
   if (action === "sync") {
     if (!name) {
-      throw new Error("Error: Usage: vcd secret sync <file> [--project <name>]");
+      throw new Error("Error: Usage: vcc secret sync <file> [--project <name>]");
     }
     if (value) {
-      throw new Error("Error: Usage: vcd secret sync <file> [--project <name>]");
+      throw new Error("Error: Usage: vcc secret sync <file> [--project <name>]");
     }
     return { action, file: name, projectName };
   }
 
-  throw new Error("Error: Usage: vcd secret <put|delete|sync> ...");
+  throw new Error("Error: Usage: vcc secret <put|delete|sync> ...");
 }

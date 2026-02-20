@@ -73,7 +73,7 @@ if (command === "staging") {
 } else if (command === "whoami") {
   const token = getToken();
   if (!token) {
-    log.error("Not logged in. Run `vcd login` first.");
+    log.error("Not logged in. Run `vcc login` first.");
     process.exit(1);
   }
   const client = new PlatformClient(token);
@@ -118,7 +118,7 @@ if (command === "staging") {
     }
     const token = getToken();
     if (!token) {
-      log.error("Login failed. Run `vcd login` to try again.");
+      log.error("Login failed. Run `vcc login` to try again.");
       process.exit(1);
     }
     const platform = process.platform;
@@ -231,57 +231,57 @@ if (command === "staging") {
 
   note(
     [
-      "\x1b[0mvcd init                           \x1b[2mSet up vite-cloud in an existing project",
+      "\x1b[0mvcc init                           \x1b[2mSet up vite-cloud in an existing project",
       "\x1b[0m  --tsconfig                       \x1b[2mOnly update tsconfig.json",
       "\x1b[0m  --github                         \x1b[2mOnly create GitHub Actions workflow",
       "",
-      "\x1b[0mvcd deploy                         \x1b[2mBuild and deploy to Vite Cloud",
+      "\x1b[0mvcc deploy                         \x1b[2mBuild and deploy to Vite Cloud",
       "\x1b[0m  --project <name>                 \x1b[2mDeploy target project name",
       "\x1b[0m  --dir <path>                     \x1b[2mDeploy a static directory (skip build)",
       "\x1b[0m  --spa                            \x1b[2mUse SPA mode (default: SSG)",
       "\x1b[0m  --skip-build                     \x1b[2mSkip the build step (use existing output)",
       "",
       "\x1b[0m\x1b[1m\x1b[36mauth\x1b[39m",
-      "\x1b[0mvcd login                          \x1b[2mLog in with GitHub or Google",
-      "\x1b[0mvcd logout                         \x1b[2mLog out and remove credentials",
-      "\x1b[0mvcd whoami                         \x1b[2mShow the logged-in username",
-      "\x1b[0mvcd token                          \x1b[2mCopy auth token to clipboard",
+      "\x1b[0mvcc login                          \x1b[2mLog in with GitHub or Google",
+      "\x1b[0mvcc logout                         \x1b[2mLog out and remove credentials",
+      "\x1b[0mvcc whoami                         \x1b[2mShow the logged-in username",
+      "\x1b[0mvcc token                          \x1b[2mCopy auth token to clipboard",
       "",
       "\x1b[0m\x1b[1m\x1b[36mprojects\x1b[39m",
-      "\x1b[0mvcd projects                       \x1b[2mList your projects",
-      "\x1b[0mvcd list, ls [name]                \x1b[2mList deployments for a project",
-      "\x1b[0mvcd delete [name]                  \x1b[2mDelete a project and all its resources",
-      "\x1b[0mvcd link [name]                    \x1b[2mLink to an existing project",
+      "\x1b[0mvcc projects                       \x1b[2mList your projects",
+      "\x1b[0mvcc list, ls [name]                \x1b[2mList deployments for a project",
+      "\x1b[0mvcc delete [name]                  \x1b[2mDelete a project and all its resources",
+      "\x1b[0mvcc link [name]                    \x1b[2mLink to an existing project",
       "",
       "\x1b[0m\x1b[1m\x1b[36msecrets\x1b[39m",
-      "\x1b[0mvcd secret put <name> [--project]  \x1b[2mSet a project secret",
-      "\x1b[0mvcd secret delete <name>           \x1b[2mDelete a project secret",
-      "\x1b[0mvcd secret sync <file>             \x1b[2mSync secrets from a dotenv file",
+      "\x1b[0mvcc secret put <name> [--project]  \x1b[2mSet a project secret",
+      "\x1b[0mvcc secret delete <name>           \x1b[2mDelete a project secret",
+      "\x1b[0mvcc secret sync <file>             \x1b[2mSync secrets from a dotenv file",
       "",
       "\x1b[0m\x1b[1m\x1b[36mdomains\x1b[39m",
-      "\x1b[0mvcd domain add <hostname>          \x1b[2mAdd a custom domain",
-      "\x1b[0mvcd domain remove <hostname>       \x1b[2mRemove a custom domain",
-      "\x1b[0mvcd domain list                    \x1b[2mList custom domains + status",
-      "\x1b[0mvcd domain status <hostname>       \x1b[2mCheck domain verification status",
+      "\x1b[0mvcc domain add <hostname>          \x1b[2mAdd a custom domain",
+      "\x1b[0mvcc domain remove <hostname>       \x1b[2mRemove a custom domain",
+      "\x1b[0mvcc domain list                    \x1b[2mList custom domains + status",
+      "\x1b[0mvcc domain status <hostname>       \x1b[2mCheck domain verification status",
       "",
       "\x1b[0m\x1b[1m\x1b[36mdatabase\x1b[39m",
-      "\x1b[0mvcd db status                      \x1b[2mShow migration status (local + remote)",
-      "\x1b[0mvcd db reset                       \x1b[2mReset local DB and re-run migrations",
-      "\x1b[0mvcd db seed [--file <path>]        \x1b[2mReset local DB, run migrations, and seed",
-      "\x1b[0mvcd db execute <sql>               \x1b[2mRun SQL against the local database",
+      "\x1b[0mvcc db status                      \x1b[2mShow migration status (local + remote)",
+      "\x1b[0mvcc db reset                       \x1b[2mReset local DB and re-run migrations",
+      "\x1b[0mvcc db seed [--file <path>]        \x1b[2mReset local DB, run migrations, and seed",
+      "\x1b[0mvcc db execute <sql>               \x1b[2mRun SQL against the local database",
       "\x1b[0m  --file <path>                    \x1b[2mRun SQL from a file instead",
-      "\x1b[0mvcd db migrate                     \x1b[2mApply pending migrations locally",
-      "\x1b[0mvcd db export [--output <path>]    \x1b[2mExport local database as SQL",
+      "\x1b[0mvcc db migrate                     \x1b[2mApply pending migrations locally",
+      "\x1b[0mvcc db export [--output <path>]    \x1b[2mExport local database as SQL",
       "\x1b[0m  --no-data                        \x1b[2mSchema only (no INSERT statements)",
       "\x1b[0m  --no-schema                      \x1b[2mData only (no CREATE TABLE)",
       "\x1b[0m  --table <name>                   \x1b[2mExport a single table",
       "",
       "\x1b[0m\x1b[1m\x1b[36mscaffolding\x1b[39m",
-      "\x1b[0mvcd gen model <name> [cols...]     \x1b[2mGenerate migration + CRUD routes + db types",
-      "\x1b[0mvcd gen migration <name>           \x1b[2mGenerate an empty migration file",
-      "\x1b[0mvcd gen route <path> [--methods]   \x1b[2mGenerate a route with handler exports",
-      "\x1b[0mvcd gen middleware <name>          \x1b[2mGenerate a numbered middleware file",
-      "\x1b[0mvcd gen ssr [--react|--vue|...]    \x1b[2mGenerate SSR entry + client + App component",
+      "\x1b[0mvcc gen model <name> [cols...]     \x1b[2mGenerate migration + CRUD routes + db types",
+      "\x1b[0mvcc gen migration <name>           \x1b[2mGenerate an empty migration file",
+      "\x1b[0mvcc gen route <path> [--methods]   \x1b[2mGenerate a route with handler exports",
+      "\x1b[0mvcc gen middleware <name>          \x1b[2mGenerate a numbered middleware file",
+      "\x1b[0mvcc gen ssr [--react|--vue|...]    \x1b[2mGenerate SSR entry + client + App component",
     ].join("\n"),
     "\x1b[34mCommands\x1b[0m",
   );

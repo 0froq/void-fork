@@ -11,7 +11,7 @@ Move the build step from the user's machine to Vite Cloud's infrastructure. A `g
 
 Two deploy paths:
 
-- **`vcd deploy`** — build locally, upload artifacts (existing, unchanged)
+- **`vcc deploy`** — build locally, upload artifacts (existing, unchanged)
 - **GitHub push** — build remotely on Vite Cloud infra, deploy automatically
 
 **Goal:** `git push` → build → deploy, with no local toolchain required.
@@ -177,7 +177,7 @@ CMD ["node", "/build-agent.mjs"]
 4. Detect package manager from lockfile
 5. Install dependencies (`pnpm install`, `npm install`, or `bun install`)
 6. Run `npx vite build`
-7. Package build output into the same FormData format as `vcd deploy`
+7. Package build output into the same FormData format as `vcc deploy`
 8. POST artifacts to `POST /builds/:id/artifacts` on the platform
 9. Stream stdout/stderr to the DO via periodic `POST /logs` (every 500ms)
 10. Exit 0 on success, non-zero on failure
@@ -221,7 +221,7 @@ Git clone can be added as an option later for repos needing submodules or git hi
 
 ## Artifact Flow
 
-The container produces the **exact same FormData** that `vcd deploy` produces today:
+The container produces the **exact same FormData** that `vcc deploy` produces today:
 
 | FormData key       | Content                                                       |
 | ------------------ | ------------------------------------------------------------- |
@@ -236,7 +236,7 @@ The container POSTs this to `POST /builds/:id/artifacts`, a new internal endpoin
 This means:
 
 - Zero changes to the deploy logic
-- CLI deploys (`vcd deploy`) continue working unchanged
+- CLI deploys (`vcc deploy`) continue working unchanged
 - The build service is purely additive
 
 ---
@@ -315,11 +315,11 @@ CREATE INDEX idx_builds_user_status ON builds(user_id, status);
 
 ## GitHub App Integration
 
-Builds are triggered exclusively by GitHub pushes. The GitHub repo is the source of truth for remote builds. Local builds remain available via `vcd deploy`.
+Builds are triggered exclusively by GitHub pushes. The GitHub repo is the source of truth for remote builds. Local builds remain available via `vcc deploy`.
 
 ### Setup Flow
 
-1. User installs the Vite Cloud GitHub App on their repo (via dashboard or `vcd init --github`)
+1. User installs the Vite Cloud GitHub App on their repo (via dashboard or `vcc init --github`)
 2. Platform stores the installation ID and repo mapping in D1
 3. User configures which branch triggers deploys (default: `main`)
 

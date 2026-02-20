@@ -18,10 +18,10 @@ The following features from the original roadmap have been built:
 - **Schema-derived DB types** — DDL parser replays migrations → `.vite-cloud/db.d.ts`
 - **Typed query helper** — `db.list()`, `.get()`, `.insert()`, `.update()`, `.delete()`, `.raw()`, `.count()` with `select`, `IN` arrays, multi-column `orderBy`
 - **Usage metering & tiers** — `free`/`solo`/`pro`/`sponsored`/`custom` with immediate, per-request, and async enforcement
-- **Secrets** — `vcd secret set NAME=value`
+- **Secrets** — `vcc secret set NAME=value`
 - **Admin dashboard** — Hono JSX server-rendered, user/project management, plan controls, suspend/unsuspend
 - **Staging environment** — fully isolated CF resources, auto-deploys on push to `main`
-- **Custom domains** — `vcd domain add myapp.com` via CF Custom Hostnames API, automatic SSL
+- **Custom domains** — `vcc domain add myapp.com` via CF Custom Hostnames API, automatic SSL
 
 ---
 

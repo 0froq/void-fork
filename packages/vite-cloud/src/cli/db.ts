@@ -154,7 +154,7 @@ async function runExecute(root: string, command?: string, file?: string): Promis
   const dbPath = getMiniflareDatabasePath(persistRoot, "local");
 
   if (!existsSync(dbPath)) {
-    log.error("No local database found. Run `vcd dev` first.");
+    log.error("No local database found. Run `vcc dev` first.");
     process.exit(1);
   }
 
@@ -229,7 +229,7 @@ async function runExport(
   const dbPath = getMiniflareDatabasePath(persistRoot, "local");
 
   if (!existsSync(dbPath)) {
-    log.error("No local database found. Run `vcd dev` first.");
+    log.error("No local database found. Run `vcc dev` first.");
     process.exit(1);
   }
 

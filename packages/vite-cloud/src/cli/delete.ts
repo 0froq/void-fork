@@ -10,7 +10,7 @@ export async function runDeleteCommand(root: string, slug?: string): Promise<voi
 
   const token = getToken();
   if (!token) {
-    log.error("Not logged in. Run `vcd login` first.");
+    log.error("Not logged in. Run `vcc login` first.");
     process.exit(1);
   }
 
@@ -32,7 +32,7 @@ export async function runDeleteCommand(root: string, slug?: string): Promise<voi
   } else {
     const config = readProjectConfig(root);
     if (!config) {
-      log.error("No linked project found. Pass a project name: vcd delete <name>");
+      log.error("No linked project found. Pass a project name: vcc delete <name>");
       process.exit(1);
     }
     projectId = config.projectId;

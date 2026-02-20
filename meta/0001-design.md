@@ -16,7 +16,7 @@ Progressive experience:
 1. `npm create vite-cloud` → scaffold a Vite SPA
 2. Add `routes/api/hello.ts` → serverless API endpoint
 3. Use `c.env.DB` in that handler → D1 database auto-provisioned
-4. `vcd deploy` → live on `*.vitecloud.app`
+4. `vcc deploy` → live on `*.vitecloud.app`
 
 ---
 
@@ -44,7 +44,7 @@ Progressive experience:
 │   └── plugins: [viteCloud()]                             │
 │                                                          │
 └────────────┬────────────────────────────────┬────────────┘
-             │ vite dev                       │ vcd deploy
+             │ vite dev                       │ vcc deploy
              ▼                                ▼
 ┌────────────────────────┐     ┌──────────────────────────────┐
 │     Local Dev Server    │     │     Vite Cloud Platform       │
@@ -214,7 +214,7 @@ In **framework mode** (auto-detected via `detectFramework()`): routing plugin is
 
 ## 8. Deployment
 
-### CLI Deploy Flow (`vcd deploy`)
+### CLI Deploy Flow (`vcc deploy`)
 
 1. Build (`vite build`) — client + worker bundles
 2. Authenticate — GitHub or Google OAuth, JWT cached locally
@@ -270,6 +270,6 @@ All resources live under our CF account. Isolation enforced at the binding level
 - **No h3/Nitro.** Hono is the runtime. We take patterns (file-based routing, defineHandler) but not packages.
 - **No auto-imports.** Explicit imports for type inference.
 - **SSR implemented.** `src/main.ssr.ts` convention + ISR via dispatch worker.
-- **Secrets** managed via `vcd secret set NAME=value`.
+- **Secrets** managed via `vcc secret set NAME=value`.
 - **Framework mode** auto-detected — supports TanStack Start and React Router.
 - **Auth** supports both platform-level (GitHub/Google OAuth for deployment) and app-level (built-in auth with `vite-cloud/auth` + `c.get("user")` convention).

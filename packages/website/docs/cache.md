@@ -91,7 +91,7 @@ Header rules apply to **static asset responses only** — files served from R2 (
 
 ## How it works
 
-1. `vcd deploy` reads header rules from `vite-cloud.json` and includes them in the deploy manifest.
+1. `vcc deploy` reads header rules from `vite-cloud.json` and includes them in the deploy manifest.
 2. The platform stores the rules in the KV routing entry for your project.
 3. The dispatch worker applies matching rules to static responses before edge caching.
 
