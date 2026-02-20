@@ -1,7 +1,7 @@
 <script server lang="ts">
 import { defineHandler } from "vite-cloud";
 
-export const GET = defineHandler(() => {
+export const loader = defineHandler(() => {
   return { title: "Home" };
 });
 </script>

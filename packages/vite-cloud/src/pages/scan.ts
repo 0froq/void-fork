@@ -2,14 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, dirname, basename, extname } from "node:path";
 import { glob } from "tinyglobby";
 import { parseRouteFilename } from "../router/parse-filename";
-import { detectHttpExports } from "../router/detect-exports";
 import type { PageDefinition, LayoutDefinition, PageScanResult } from "./types";
 
 const COMPONENT_EXTENSIONS = ["vue", "tsx", "jsx", "svelte"];
 const SERVER_EXTENSIONS = ["ts", "tsx", "js", "mjs", "mts"];
 const SCRIPT_SERVER_CONTENT_RE = /<script\s+server\b[^>]*>([\s\S]*?)<\/script>/;
-const HTTP_METHOD_EXPORT_RE =
-  /export\s+(?:const|function|async\s+function)\s+(GET|POST|PUT|PATCH|DELETE)\b/g;
+const PAGES_EXPORT_RE = /export\s+(?:const|function|async\s+function)\s+(loader|action)\b/g;
 
 export async function scanPages(root: string): Promise<PageScanResult> {
   const pagesDir = join(root, "pages");
@@ -55,7 +53,10 @@ export async function scanPages(root: string): Promise<PageScanResult> {
       const candidate = file.replace(ext, `.server.${serverExt}`);
       if (existsSync(join(pagesDir, candidate))) {
         serverPath = candidate;
-        methods = detectHttpExports(join(pagesDir, candidate));
+        const content = readFileSync(join(pagesDir, candidate), "utf-8");
+        for (const m of content.matchAll(PAGES_EXPORT_RE)) {
+          methods.push(m[1]);
+        }
         break;
       }
     }
@@ -67,8 +68,8 @@ export async function scanPages(root: string): Promise<PageScanResult> {
       const blockMatch = content.match(SCRIPT_SERVER_CONTENT_RE);
       if (blockMatch) {
         hasInlineServer = true;
-        // Detect HTTP method exports from the inline block
-        for (const m of blockMatch[1].matchAll(HTTP_METHOD_EXPORT_RE)) {
+        // Detect loader/action exports from the inline block
+        for (const m of blockMatch[1].matchAll(PAGES_EXPORT_RE)) {
           methods.push(m[1]);
         }
       }

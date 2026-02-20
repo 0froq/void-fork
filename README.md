@@ -60,7 +60,7 @@ Vue framework adapter for Pages mode. Provides Inertia-inspired full-stack DX: s
 - `useForm(defaults)` — Reactive form helper with `data`, `errors`, `isDirty`, `processing`, `wasSuccessful`, `recentlySuccessful`, `reset()`, `clearErrors()`, `post()`, `put()`, `patch()`, `delete()`
 - `useShared<T>()` — Access middleware-set shared data (from `c.set("shared", ...)`)
 
-**Page protocol:** Initial GET returns SSR HTML with `data-page` attribute containing the serialized page object. Subsequent navigations with `X-Inertia: true` header return JSON page objects `{ component, props, shared, url, errors }`. Mutations (POST/PUT/DELETE) that throw `ValidationError` re-render with errors; void returns re-run GET for fresh props.
+**Page protocol:** Initial GET returns SSR HTML with `data-page` attribute containing the serialized page object. Subsequent navigations with `X-Inertia: true` header return JSON page objects `{ component, props, shared, url, errors }`. Mutations (POST/PUT/DELETE) that throw `ValidationError` re-render with errors; void returns re-run the `loader` for fresh props. Server handlers use Remix-style exports: `loader` (GET) and `action` (mutations).
 
 See [`meta/0013-pages.md`](./meta/0013-pages.md) for the design doc.
 
@@ -115,7 +115,7 @@ Tests run from root with `pnpm test` (vitest). 955 tests across 75 files. See ea
 - File-based page routing from `pages/` directory (`.vue` components with `<script server>` blocks)
 - SSR with client-side hydration via `@vite-cloud/vue`
 - Inertia protocol: initial load returns SSR HTML, subsequent navigations return JSON page objects via `X-Inertia` header
-- `<script server>` blocks for co-located server handlers (GET returns props, POST handles mutations)
+- `<script server>` blocks for co-located server handlers (`loader` returns props, `action` handles mutations)
 - Layout nesting via `layout.vue` files
 - `useForm` composable with isDirty, wasSuccessful, recentlySuccessful, validation error display
 - `useShared` for middleware-set shared data (e.g. auth, app config)

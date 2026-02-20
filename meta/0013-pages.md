@@ -16,7 +16,7 @@ Pages mode adds an Inertia-style protocol on top of Vite Cloud's existing Hono-b
 | ----------------- | ----------------------------------- | --------------------------------------------------------- |
 | Initial page load | No `X-Inertia` header               | Full SSR HTML with embedded page object. Client hydrates. |
 | SPA navigation    | `X-Inertia: true` header            | JSON page object. Client swaps component.                 |
-| Form submission   | `X-Inertia: true` + POST/PUT/DELETE | Re-run GET (fresh props) or redirect.                     |
+| Form submission   | `X-Inertia: true` + POST/PUT/DELETE | Re-run loader (fresh props) or redirect.                  |
 
 **Page object shape:**
 
@@ -66,16 +66,19 @@ When pages mode is active, the adapter auto-generates the SSR entry and client h
 import { defineHandler } from "vite-cloud";
 import { db } from "vite-cloud/db";
 
-// GET handler provides props for this page
-export const GET = defineHandler(async (c) => {
+// loader provides props for this page
+export const loader = defineHandler(async (c) => {
   const users = await db.list("users");
   return { users };
 });
 
-// POST handler: returns nothing = re-run GET with fresh props
-export const POST = defineHandler.withValidator({ body: createUserSchema })(async (c, { body }) => {
+// action handles mutations — returns nothing = re-run loader with fresh props
+export const action = defineHandler.withValidator({ body: createUserSchema })(async (
+  c,
+  { body },
+) => {
   await db.insert("users", body);
-  // implicit: re-runs GET, page re-renders with updated user list
+  // implicit: re-runs loader, page re-renders with updated user list
 });
 </script>
 
@@ -119,18 +122,18 @@ function submit() {
 
 ### Server Handler Rules
 
-The `<script server lang="ts">` block is extracted by the adapter's Vite plugin before the framework's SFC compiler processes the file. It uses the existing `defineHandler` API with named method exports.
+The `<script server lang="ts">` block is extracted by the adapter's Vite plugin before the framework's SFC compiler processes the file. It uses the existing `defineHandler` API with Remix-style named exports: `loader` and `action`.
 
-**GET handler:** Returns props for the page. Required for any page that needs server data.
+**`loader`:** Handles GET requests. Returns props for the page. Required for any page that needs server data.
 
-**POST/PUT/DELETE handlers:** Mutation handlers. Two return behaviors:
+**`action`:** Handles all mutations (POST, PUT, PATCH, DELETE). Two return behaviors:
 
-| Returns               | Behavior                                                                   |
-| --------------------- | -------------------------------------------------------------------------- |
-| Nothing (void)        | Re-run the page's GET handler, re-render with fresh props. One round-trip. |
-| `c.redirect('/path')` | Navigate to another page. Two round-trips (POST + redirect GET).           |
+| Returns               | Behavior                                                              |
+| --------------------- | --------------------------------------------------------------------- |
+| Nothing (void)        | Re-run the page's loader, re-render with fresh props. One round-trip. |
+| `c.redirect('/path')` | Navigate to another page. Two round-trips (POST + redirect GET).      |
 
-**Validation errors:** Thrown via `ValidationError` or automatically by `withValidator`. The framework catches the error, re-runs GET for the current page, and attaches `errors` to the page object. `useForm().errors` picks them up automatically on the client.
+**Validation errors:** Thrown via `ValidationError` or automatically by `withValidator`. The framework catches the error, re-runs the loader for the current page, and attaches `errors` to the page object. `useForm().errors` picks them up automatically on the client.
 
 ### Type Safety
 
@@ -138,7 +141,7 @@ No type codegen needed for page props. The prop interface is defined in the same
 
 ```vue
 <script server lang="ts">
-export const GET = defineHandler(async (c) => {
+export const loader = defineHandler(async (c) => {
   return { users: await db.list("users") }; // server return type
 });
 </script>
@@ -168,16 +171,16 @@ pages/
 import { defineHandler } from "vite-cloud";
 import { db } from "vite-cloud/db";
 
-export const GET = defineHandler(async (c) => {
+export const loader = defineHandler(async (c) => {
   return { users: await db.list("users") };
 });
 
-export const POST = defineHandler(async (c) => {
+export const action = defineHandler(async (c) => {
   await db.insert("users", await c.req.json());
 });
 ```
 
-This is the **only** option for React, Svelte, and Solid pages (no SFC custom blocks). For Vue, both `<script server>` and companion `.server.ts` are supported — `<script server>` takes precedence if both exist.
+This is the **only** option for React, Svelte, and Solid pages (no SFC custom blocks). For Vue, both `<script server>` and companion `.server.ts` are supported — companion `.server.ts` takes precedence if both exist.
 
 ### React Example
 
@@ -309,7 +312,7 @@ Each framework adapter exports:
 
 1. Run middleware chain -> `c.set('shared', {...})`
 2. Resolve page: URL -> `pages/users/index.vue`
-3. Run page's GET handler -> props
+3. Run page's `loader` -> props
 4. Resolve layout chain: `layout.vue` > `users/layout.vue`
 5. SSR render: layouts wrapping page component with props + shared data
 6. Return HTML with `<div id="app" data-page='{ component, props, shared, url }'>`
@@ -318,17 +321,17 @@ Each framework adapter exports:
 ### Inertia Navigation (GET /users, X-Inertia: true)
 
 1. Run middleware chain -> shared data
-2. Run page's GET handler -> props
+2. Run page's `loader` -> props
 3. Return JSON: `{ component: "users/index", props, shared, url }`
 4. Client swaps page component, persists layouts if in same subtree
 
 ### Form Submission (POST /users, X-Inertia: true)
 
 1. Run middleware chain
-2. Run page's POST handler
-3. If `ValidationError` thrown -> re-run GET, return page object with `errors` attached
-4. If handler returns nothing -> re-run GET, return page object with fresh props
-5. If handler returns redirect -> return redirect, client follows as Inertia GET
+2. Run page's `action`
+3. If `ValidationError` thrown -> re-run `loader`, return page object with `errors` attached
+4. If action returns nothing -> re-run `loader`, return page object with fresh props
+5. If action returns redirect -> return redirect, client follows as Inertia GET
 
 ## Architecture: Core vs Adapters
 
@@ -340,7 +343,7 @@ Framework-agnostic. Handles:
 - `pages/` directory scanning and file-based route resolution
 - Companion `.server.ts` file loading
 - Middleware execution and shared data collection
-- Handler execution (props / redirect / re-run GET)
+- Handler execution (props / redirect / re-run loader)
 - Validation error catching and attachment
 - Layout tree resolution from directory structure
 - Page object serialization
