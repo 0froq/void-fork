@@ -8,7 +8,7 @@ export async function runProjectsCommand(): Promise<void> {
 
   const token = getToken();
   if (!token) {
-    log.error("Not logged in. Run `vcd login` first.");
+    log.error("Not logged in. Run `vcc login` first.");
     process.exit(1);
   }
 

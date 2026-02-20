@@ -1,6 +1,6 @@
 ---
 name: migrate-vite-cloudflare-to-vite-cloud
-description: Migrate an existing Vite app using @cloudflare/vite-plugin to Vite + vite-cloud. Use when a project already runs on Cloudflare Workers but needs Vite Cloud file-based routes, inferred bindings, and vcd deploy workflow.
+description: Migrate an existing Vite app using @cloudflare/vite-plugin to Vite + vite-cloud. Use when a project already runs on Cloudflare Workers but needs Vite Cloud file-based routes, inferred bindings, and vcc deploy workflow.
 ---
 
 # Migrate Vite + Cloudflare Plugin to Vite Cloud
@@ -83,11 +83,11 @@ export default defineConfig({
 7. Deploy workflow migration
 
 - Replace old deploy instructions with:
-  - `vcd login`
-  - `vcd deploy`
+  - `vcc login`
+  - `vcc deploy`
 - If CI must target a specific project, use:
-  - `vcd deploy --project <slug>`
-  - or `VITE_CLOUD_PROJECT=<slug> vcd deploy`
+  - `vcc deploy --project <slug>`
+  - or `VITE_CLOUD_PROJECT=<slug> vcc deploy`
 
 8. Post-migration cleanup (remove obsolete Wrangler wiring)
 
@@ -150,7 +150,7 @@ Run and validate:
 1. `npm run dev` (or project dev command)
 2. Exercise representative API routes locally.
 3. `npm run build`
-4. `vcd deploy` and verify live URL responds.
+4. `vcc deploy` and verify live URL responds.
 5. Confirm no deploy-critical scripts still depend on `wrangler`.
 
 In the Vite Cloud deploy output, verify:

@@ -10,7 +10,7 @@ export async function runListCommand(root: string, slug?: string): Promise<void>
 
   const token = getToken();
   if (!token) {
-    log.error("Not logged in. Run `vcd login` first.");
+    log.error("Not logged in. Run `vcc login` first.");
     process.exit(1);
   }
 
@@ -31,7 +31,7 @@ export async function runListCommand(root: string, slug?: string): Promise<void>
   } else {
     const linked = readProjectConfig(root);
     if (!linked) {
-      log.error("No linked project found. Pass a project name: vcd list <name>");
+      log.error("No linked project found. Pass a project name: vcc list <name>");
       process.exit(1);
     }
     projectId = linked.projectId;

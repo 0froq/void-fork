@@ -107,7 +107,7 @@ export const POST = defineHandler(async (c) => {
 This requires two env bindings:
 
 - `VITE_CLOUD_PROJECT_ID` — automatically injected by the platform on deploy
-- `VITE_CLOUD_REVALIDATE_TOKEN` — set manually via `vcd secret set VITE_CLOUD_REVALIDATE_TOKEN <token>`
+- `VITE_CLOUD_REVALIDATE_TOKEN` — set manually via `vcc secret set VITE_CLOUD_REVALIDATE_TOKEN <token>`
 
 ## Deploy behavior
 

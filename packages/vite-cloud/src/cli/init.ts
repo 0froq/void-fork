@@ -210,7 +210,7 @@ jobs:
           ${nodeVersion}
           cache: pnpm
       - run: pnpm install
-      - run: pnpm vcd deploy
+      - run: pnpm vcc deploy
         env:
           VITE_CLOUD_TOKEN: \${{ secrets.VITE_CLOUD_TOKEN }}
 `;
@@ -230,7 +230,7 @@ jobs:
           ${nodeVersion}
           cache: yarn
       - run: yarn install --immutable
-      - run: yarn vcd deploy
+      - run: yarn vcc deploy
         env:
           VITE_CLOUD_TOKEN: \${{ secrets.VITE_CLOUD_TOKEN }}
 `;
@@ -247,7 +247,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install
-      - run: bunx vcd deploy
+      - run: bunx vcc deploy
         env:
           VITE_CLOUD_TOKEN: \${{ secrets.VITE_CLOUD_TOKEN }}
 `;
@@ -267,7 +267,7 @@ jobs:
           ${nodeVersion}
           cache: npm
       - run: npm ci
-      - run: npx vcd deploy
+      - run: npx vcc deploy
         env:
           VITE_CLOUD_TOKEN: \${{ secrets.VITE_CLOUD_TOKEN }}
 `;
@@ -287,7 +287,7 @@ function setupGithubActions(root: string, state: ProjectState): void {
   log.success("Created .github/workflows/deploy.yml");
 
   note(
-    "1. Run: vcd token\n" +
+    "1. Run: vcc token\n" +
       "2. In your repo → Settings → Secrets → Actions → New secret\n" +
       "3. Name: VITE_CLOUD_TOKEN, paste the token as value",
     "Add your deploy token as a GitHub secret",

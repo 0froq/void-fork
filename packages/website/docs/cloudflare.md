@@ -139,7 +139,7 @@ Settings like `main`, `triggers`, and `assets` are always set by Vite Cloud and 
 
 ## Deploy to your own Cloudflare account
 
-Vite Cloud's default deployment path is `vcd deploy`, which uploads to the Vite Cloud platform. But the generated worker is a standard Cloudflare Worker -- you can deploy it directly to your own account with `wrangler deploy`.
+Vite Cloud's default deployment path is `vcc deploy`, which uploads to the Vite Cloud platform. But the generated worker is a standard Cloudflare Worker -- you can deploy it directly to your own account with `wrangler deploy`.
 
 ### 1. Create your resources
 

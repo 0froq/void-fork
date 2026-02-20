@@ -32,7 +32,7 @@ Vite Cloud makes it dead simple:
 - **Automatic provisioning** — import `db` from `vite-cloud/db` in a handler and a D1 database is created for you. Same for `kv` and `storage`.
 - **File-based routing** — drop a file in `routes/`, get an endpoint. Method suffixes, dynamic params, middleware, catch-alls and [Standard Schema](https://standardschema.dev/) type safety built in.
 - **Local dev parity** — `vite dev` runs your handlers in the real `workerd` runtime with local D1 (SQLite), KV, and R2. What works locally works in production.
-- **One-command deploy** — `npx vcd deploy` builds, provisions resources, runs migrations, and deploys. No intermediate steps.
+- **One-command deploy** — `npx vcc deploy` builds, provisions resources, runs migrations, and deploys. No intermediate steps.
 
 ### Flexible by design
 
@@ -51,7 +51,7 @@ import { db }           →  D1 database (auto-provisioned)
 import { kv }           →  KV namespace (auto-provisioned)
 import { storage }      →  R2 bucket (auto-provisioned)
 migrations/*.sql        →  Applied to D1 on dev startup and deploy
-npx vcd deploy          →  Live at https://<slug>.vitecloud.app
+npx vcc deploy          →  Live at https://<slug>.vitecloud.app
 ```
 
 The plugin scans your source code at build time, detects which imports you use (`vite-cloud/db`, `vite-cloud/kv`, `vite-cloud/storage`), provisions the corresponding Cloudflare bindings on deploy, and routes requests through a generated [Hono](https://hono.dev) app with lazy-loaded handlers for minimal cold starts.

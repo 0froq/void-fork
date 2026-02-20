@@ -121,7 +121,7 @@ At the edge, the resolution order is:
 
 ## Auto-Detection
 
-When running `vcd deploy` and no `mode` is set in `vite-cloud.json`, the detection logic runs in this order:
+When running `vcc deploy` and no `mode` is set in `vite-cloud.json`, the detection logic runs in this order:
 
 | Priority | Condition                                              | Type                               |
 | -------- | ------------------------------------------------------ | ---------------------------------- |

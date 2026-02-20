@@ -71,7 +71,7 @@ GOOGLE_OAUTH_ID=your-google-client-id
 GOOGLE_OAUTH_SECRET=your-google-client-secret
 ```
 
-For production, set these as secrets via `vcd secret put` or `vcd secret sync .env.local`.
+For production, set these as secrets via `vcc secret put` or `vcc secret sync .env.local`.
 
 #### OAuth callback URLs
 

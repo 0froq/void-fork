@@ -69,7 +69,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   // 1. Auth
   const token = getToken();
   if (!token) {
-    log.error("No auth token found. Run `vcd login` first.");
+    log.error("No auth token found. Run `vcc login` first.");
     process.exit(1);
   }
 

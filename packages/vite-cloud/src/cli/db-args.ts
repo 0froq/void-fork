@@ -53,7 +53,7 @@ export function parseDbArgs(args: string[]): DbArgs {
     }
     const file = typeof parsed.values.file === "string" ? parsed.values.file : undefined;
     if (!command && !file) {
-      throw new Error("Error: Usage: vcd db execute <sql> or vcd db execute --file <path>");
+      throw new Error("Error: Usage: vcc db execute <sql> or vcc db execute --file <path>");
     }
     if (command && file) {
       throw new Error("Error: Provide either SQL inline or --file, not both");
@@ -79,5 +79,5 @@ export function parseDbArgs(args: string[]): DbArgs {
     return { action, output, noData, noSchema, table };
   }
 
-  throw new Error("Error: Usage: vcd db <status|reset|seed|execute|migrate|export>");
+  throw new Error("Error: Usage: vcc db <status|reset|seed|execute|migrate|export>");
 }

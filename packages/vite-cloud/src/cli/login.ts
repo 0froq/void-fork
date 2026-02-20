@@ -8,7 +8,7 @@ export async function runLoginCommand(): Promise<void> {
   const existing = getToken();
   if (existing) {
     log.warn("Already logged in.");
-    outro("To re-login, run `vcd logout` first.");
+    outro("To re-login, run `vcc logout` first.");
     return;
   }
 

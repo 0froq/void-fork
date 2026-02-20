@@ -19,7 +19,7 @@ export async function runLink(root: string, slug?: string): Promise<void> {
   // Auth
   const token = getToken();
   if (!token) {
-    cancel("No auth token found. Run `vcd login` first.");
+    cancel("No auth token found. Run `vcc login` first.");
     process.exit(1);
   }
 
@@ -40,14 +40,14 @@ export async function runLink(root: string, slug?: string): Promise<void> {
 
   // Interactive: prompt user to select
   if (projects.length === 0) {
-    cancel("No projects found. Run `vcd deploy` to create one.");
+    cancel("No projects found. Run `vcc deploy` to create one.");
     process.exit(1);
   }
 
   const result = await promptProjectSelection(projects);
 
   if (result.action === "create") {
-    outro("Run `vcd deploy` to create a new project.");
+    outro("Run `vcc deploy` to create a new project.");
     return;
   }
 

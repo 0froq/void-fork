@@ -39,7 +39,7 @@ describe("parseDbArgs", () => {
 
   it("errors on execute with no SQL and no --file", () => {
     expect(() => parseDbArgs(["execute"])).toThrow(
-      "Error: Usage: vcd db execute <sql> or vcd db execute --file <path>",
+      "Error: Usage: vcc db execute <sql> or vcc db execute --file <path>",
     );
   });
 
@@ -125,13 +125,13 @@ describe("parseDbArgs", () => {
 
   it("errors on unknown subcommand", () => {
     expect(() => parseDbArgs(["unknown"])).toThrow(
-      "Error: Usage: vcd db <status|reset|seed|execute|migrate|export>",
+      "Error: Usage: vcc db <status|reset|seed|execute|migrate|export>",
     );
   });
 
   it("errors on no subcommand", () => {
     expect(() => parseDbArgs([])).toThrow(
-      "Error: Usage: vcd db <status|reset|seed|execute|migrate|export>",
+      "Error: Usage: vcc db <status|reset|seed|execute|migrate|export>",
     );
   });
 
