@@ -240,6 +240,47 @@ describe("dispatch static-only routing", () => {
     expect(await response.text()).toBe("<html>About</html>");
   });
 
+  it("serves SSG with .html suffix for clean URLs", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: { projectId: "proj_1", mode: "ssg" },
+      assets: {
+        "proj_1/current/bar.html": { body: "<html>Bar</html>", contentType: "text/html" },
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/bar"),
+      env,
+      createCtx(),
+    );
+
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<html>Bar</html>");
+  });
+
+  it("prefers index.html over .html suffix for clean URLs", async () => {
+    const { env } = createEnv({
+      routing: { projectId: "proj_1", mode: "ssg" },
+      assets: {
+        "proj_1/current/bar/index.html": {
+          body: "<html>Bar Index</html>",
+          contentType: "text/html",
+        },
+        "proj_1/current/bar.html": { body: "<html>Bar HTML</html>", contentType: "text/html" },
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/bar"),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<html>Bar Index</html>");
+  });
+
   it("serves SSG 404.html with status 404 for unknown paths", async () => {
     const { env, workerFetch } = createEnv({
       routing: { projectId: "proj_1", mode: "ssg" },

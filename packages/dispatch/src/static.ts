@@ -53,8 +53,9 @@ export async function serveStaticAsset(
  * Resolution order:
  * 1. Exact file path
  * 2. <path>/index.html (for clean URLs)
- * 3. 404.html with status 404
- * 4. Plain 404 response
+ * 3. <path>.html (for clean URLs, e.g. VitePress)
+ * 4. 404.html with status 404
+ * 5. Plain 404 response
  */
 export async function serveSSGAsset(
   env: Env,
@@ -69,12 +70,19 @@ export async function serveSSGAsset(
     if (object) return buildResponse(object, assetPath);
   }
 
-  // For paths without extension: try <path>/index.html
+  // For paths without extension: try <path>/index.html, then <path>.html
   if (!hasExtension(assetPath)) {
     // Root path → index.html
     const indexPath = assetPath ? `${assetPath.replace(/\/+$/, "")}/index.html` : "index.html";
     const index = await env.ASSETS.get(`${projectId}/current/${indexPath}`);
     if (index) return buildResponse(index, indexPath);
+
+    // Clean URL fallback: /bar → /bar.html (e.g. VitePress)
+    if (assetPath) {
+      const htmlPath = `${assetPath.replace(/\/+$/, "")}.html`;
+      const html = await env.ASSETS.get(`${projectId}/current/${htmlPath}`);
+      if (html) return buildResponse(html, htmlPath);
+    }
   }
 
   // Fallback: serve 404.html with 404 status
