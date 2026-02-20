@@ -205,3 +205,4 @@ export function defineQueue<T = unknown>(handler: QueueFn<T>): TypedQueueHandler
 }
 
 export type { ValidatorSlots, HandlerInput } from "./validator";
+export { ValidationError } from "../pages/validation-error";
