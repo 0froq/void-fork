@@ -9,6 +9,7 @@ import {
   compileWorkerClient,
   type CompileOptions,
   type SsrCompileOptions,
+  type PagesCompileOptions,
 } from "./router/compile";
 import { generateRouteTypes } from "./codegen/route-types";
 import { generateQueueTypes } from "./codegen/queue-types";
@@ -45,6 +46,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   const middlewareDir = join(root, "middleware");
   const jobsDir = join(root, "crons");
   const queuesDir = join(root, "queues");
+  const pagesDir = join(root, "pages");
   const srcDir = join(root, "src");
   const ssrEntryAbsPaths = new Set(
     [...SSR_SERVER_ENTRY_RELATIVE_PATHS, ...SSR_CLIENT_ENTRY_RELATIVE_PATHS].map((path) =>
@@ -109,6 +111,15 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       schemaPath: resolveFile("vite-cloud/auth/schema"),
       githubProviderPath: hasGitHub ? resolveFile("@hono/oauth-providers/github") : null,
       googleProviderPath: hasGoogle ? resolveFile("@hono/oauth-providers/google") : null,
+    };
+  }
+
+  function getPagesCompileOptions(): PagesCompileOptions | null {
+    if (!scan || scan.pages.pages.length === 0) return null;
+    return {
+      pagesDir,
+      protocolPath: resolveFile("vite-cloud/pages-protocol"),
+      clientEntryId: "virtual:vite-cloud-pages-client",
     };
   }
 
@@ -198,6 +209,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
           queuesDir,
           ssr,
           compileOptions,
+          getPagesCompileOptions(),
         );
       },
     },
@@ -213,6 +225,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
           !path.startsWith(middlewareDir) &&
           !path.startsWith(jobsDir) &&
           !path.startsWith(queuesDir) &&
+          !path.startsWith(pagesDir) &&
           !path.startsWith(srcDir)
         ) {
           return;

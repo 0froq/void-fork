@@ -4,12 +4,15 @@ import { parseRouteFilename, type RouteDefinition } from "./parse-filename";
 import { detectHttpExports } from "./detect-exports";
 import { scanJobs, type JobDefinition } from "../crons/scan";
 import { scanQueues, type QueueDefinition } from "../queues/scan";
+import { scanPages } from "../pages/scan";
+import type { PageScanResult } from "../pages/types";
 
 export interface ScanResult {
   routes: RouteDefinition[];
   middleware: MiddlewareDefinition[];
   jobs: JobDefinition[];
   queues: QueueDefinition[];
+  pages: PageScanResult;
 }
 
 export interface MiddlewareDefinition {
@@ -28,11 +31,12 @@ const HANDLER_EXTENSIONS = ["ts", "mts", "js", "mjs"];
 export async function scanRoutes(root: string): Promise<ScanResult> {
   const pattern = `**/*.{${HANDLER_EXTENSIONS.join(",")}}`;
 
-  const [routeFiles, middlewareFiles, jobs, queues] = await Promise.all([
+  const [routeFiles, middlewareFiles, jobs, queues, pages] = await Promise.all([
     glob(pattern, { cwd: `${root}/routes`, absolute: false }),
     glob(pattern, { cwd: `${root}/middleware`, absolute: false }).catch(() => [] as string[]),
     scanJobs(root),
     scanQueues(root),
+    scanPages(root),
   ]);
 
   const routesDir = `${root}/routes`;
@@ -64,5 +68,5 @@ export async function scanRoutes(root: string): Promise<ScanResult> {
     })
     .sort((a, b) => a.order - b.order);
 
-  return { routes, middleware, jobs, queues };
+  return { routes, middleware, jobs, queues, pages };
 }

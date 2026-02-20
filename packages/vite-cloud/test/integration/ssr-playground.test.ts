@@ -114,6 +114,7 @@ describe("playground/ssr", () => {
     };
     expect(wranglerConfig.assets?.run_worker_first).toEqual([
       "/**",
+      "!/assets/*",
       "!/@*",
       "!/src/*",
       "!/node_modules/*",
