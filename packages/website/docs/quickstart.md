@@ -183,6 +183,6 @@ Right now, only deploys via the CLI is supported. To setup push-to-deploy GitHub
 ## Next steps
 
 - To understand what kind of apps are supported: [App Types](./app-types)
-- [Routing](./routing) — dynamic params, middleware, and validation
+- [Server Routing](./server-routing) — dynamic params, middleware, and validation
 - [Database](./db) — queries, migrations, and generated types
 - [Type Safety](./type-safety) — end-to-end typed fetch client

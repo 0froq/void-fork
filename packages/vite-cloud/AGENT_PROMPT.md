@@ -57,7 +57,7 @@ The `extends` line pulls in generated `routes.d.ts` and `db.d.ts` automatically.
 
 ## Routing
 
-> Docs: `docs/routing.md`
+> Docs: `docs/server-routing.md`
 
 Files in `routes/` map to URL paths:
 
@@ -111,11 +111,11 @@ export const POST = defineHandler.withValidator({
 
 Supports any Standard Schema library (Zod, Valibot, ArkType). Validation errors return `400` with `{ error, issues }`.
 
-> Docs: `docs/routing.md`, `docs/hono.md`
+> Docs: `docs/server-routing.md`, `docs/hono.md`
 
 ## Middleware
 
-> Docs: `docs/routing.md`
+> Docs: `docs/server-routing.md`
 
 **Global middleware** — files in `middleware/` with numeric prefixes:
 
