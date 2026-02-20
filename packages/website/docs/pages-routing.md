@@ -507,6 +507,13 @@ Pass `viewTransitions: true` to the adapter plugin:
 
 ::: code-group
 
+```ts [React]
+// vite.config.ts
+export default defineConfig({
+  plugins: [viteCloud(), viteCloudReact({ viewTransitions: true })],
+});
+```
+
 ```ts [Vue]
 // vite.config.ts
 export default defineConfig({
@@ -522,13 +529,33 @@ This enables view transitions for all navigations — `Link` clicks, programmati
 
 Override the global setting on individual links:
 
-```vue
+::: code-group
+
+```tsx [React]
+{
+  /* Disable transition for this link */
+}
+<Link href="/settings" viewTransition={false}>
+  Settings
+</Link>;
+
+{
+  /* Enable for just this link (even if globally disabled) */
+}
+<Link href="/about" viewTransition>
+  About
+</Link>;
+```
+
+```vue [Vue]
 <!-- Disable transition for this link -->
 <Link href="/settings" :view-transition="false">Settings</Link>
 
 <!-- Enable for just this link (even if globally disabled) -->
 <Link href="/about" view-transition>About</Link>
 ```
+
+:::
 
 Or programmatically:
 
