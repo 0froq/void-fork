@@ -1,13 +1,13 @@
 # Database
 
-All `vcc db` commands operate on the **local** D1 database (Miniflare). Remote databases are managed automatically during deploy (pending migrations are applied).
+All `vite-cloud db` commands operate on the **local** D1 database (Miniflare). Remote databases are managed automatically during deploy (pending migrations are applied).
 
 ## Commands
 
 ### Status
 
 ```sh
-npx vcc db status
+npx vite-cloud db status
 ```
 
 Shows which migrations are applied or pending locally. When logged in and linked, also shows remote status.
@@ -17,7 +17,7 @@ Shows which migrations are applied or pending locally. When logged in and linked
 ### Migrate
 
 ```sh
-npx vcc db migrate
+npx vite-cloud db migrate
 ```
 
 Apply pending migrations only. **Preserves existing data.** Use this for incremental updates.
@@ -25,7 +25,7 @@ Apply pending migrations only. **Preserves existing data.** Use this for increme
 ### Reset
 
 ```sh
-npx vcc db reset
+npx vite-cloud db reset
 ```
 
 **Destructive.** Drops the local database entirely and re-applies all migrations from scratch. Use when you need a clean slate.
@@ -33,7 +33,7 @@ npx vcc db reset
 ### Seed
 
 ```sh
-npx vcc db seed [--file <path>]
+npx vite-cloud db seed [--file <path>]
 ```
 
 Reset + migrate + execute a seed file. Defaults to `migrations/seed.sql`. The seed file is excluded from migration collection — it is never deployed or applied remotely.
@@ -41,8 +41,8 @@ Reset + migrate + execute a seed file. Defaults to `migrations/seed.sql`. The se
 ### Execute
 
 ```sh
-npx vcc db execute "<sql>"
-npx vcc db execute --file <path>
+npx vite-cloud db execute "<sql>"
+npx vite-cloud db execute --file <path>
 ```
 
 Run ad-hoc SQL against the local database. SELECT queries display results as a formatted table.
@@ -50,7 +50,7 @@ Run ad-hoc SQL against the local database. SELECT queries display results as a f
 ### Export
 
 ```sh
-npx vcc db export [--output <path>] [--no-data] [--no-schema] [--table <name>]
+npx vite-cloud db export [--output <path>] [--no-data] [--no-schema] [--table <name>]
 ```
 
 Dump local database as SQL. Outputs to stdout by default.
@@ -66,4 +66,4 @@ Dump local database as SQL. Outputs to stdout by default.
 
 - `db reset` vs `db migrate`: reset is destructive, migrate preserves data. When in doubt, use `migrate`.
 - Seed files live in `migrations/` but are excluded from the migration collection.
-- Migration files must be numbered sequentially (e.g. `001_create_users.sql`, `002_add_posts.sql`). Use `npx vcc gen migration <name>` to auto-number.
+- Migration files must be numbered sequentially (e.g. `001_create_users.sql`, `002_add_posts.sql`). Use `npx vite-cloud gen migration <name>` to auto-number.

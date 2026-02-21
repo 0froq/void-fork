@@ -13,11 +13,9 @@ Examples below use `vcc`.
 
 ## Binary invocation
 
-`vcc` is a local binary from the `vite-cloud` package installed in your app, so outside of npm scripts, you will have to invoke it with `npx`, `pnpm`, `yarn`, or `bunx`.
+`vcc` is a local binary from the installed `vite-cloud` package, so outside of npm scripts, you will have to invoke it with `npx`, `pnpm`, `yarn`, or `bunx`. For brevity, you will sometimes see unprefixed `vcc` usage throughout the docs. Just remember it needs to be invoked through a binary runner.
 
 Alternatively, you can add `./node_modules/.bin` to your `PATH` so that you can invoke `vcc` directly when you are in the root directory of your app.
-
-**For brevity, we will used unprefixed `vcc` throughout the docs.**
 
 :::warning ⚠️ Prefer local install
 We do not recommend installing `vite-cloud` globally, because the CLI needs to be in sync with same version of the runtime framework. Always install `vite-cloud` locally as a dev dependency of your project.
@@ -31,22 +29,24 @@ We do not recommend installing `vite-cloud` globally, because the CLI needs to b
 vcc init [--tsconfig] [--github] [--agents]
 ```
 
-Interactive setup wizard for adding vite-cloud to an existing project. Walks through:
+Setup wizard for vite-cloud projects (new or existing). If run in an empty directory, it scaffolds a starter app first. Then it walks through:
 
 1. **TypeScript** — creates or updates `tsconfig.json` (adds `extends .vite-cloud/tsconfig.json` and `vite-cloud/env` types)
-2. **Agent instructions** — adds Vite Cloud framework instructions to `CLAUDE.md` or `AGENTS.md`
-3. **Skills** — links vite-cloud skills to detected coding agents
-4. **MCP config** — writes MCP server config for detected coding agents
+2. **Agent instructions** — detects agents once and injects instructions into `CLAUDE.md` or `AGENTS.md`
+3. **Skills** — links vite-cloud skills using the same detected/selected agent context
+4. **MCP config** — writes MCP server config using the same detected/selected agent context
 5. **Demo code** — optionally scaffolds a migration, API route, and typed fetch example
 6. **GitHub Actions** — optionally creates `.github/workflows/deploy.yml` with the correct package manager commands
 
+If no agent is detected, `vcc init` asks you to choose one from a short list (Claude, Cursor, Codex, Gemini CLI, Generic). That single choice is reused across all agent steps.
+
 Use flags to run individual steps without prompts:
 
-| Flag         | Purpose                                                               |
-| ------------ | --------------------------------------------------------------------- |
-| `--tsconfig` | Only update `tsconfig.json`                                           |
-| `--agents`   | Set up agent instructions, skills, and MCP config for detected agents |
-| `--github`   | Only create GitHub Actions workflow                                   |
+| Flag         | Purpose                                           |
+| ------------ | ------------------------------------------------- |
+| `--tsconfig` | Only update `tsconfig.json`                       |
+| `--agents`   | Set up agent instructions, skills, and MCP config |
+| `--github`   | Only create GitHub Actions workflow               |
 
 Flags can be combined. When any flag is provided, only the specified steps run and interactive prompts are skipped.
 
@@ -356,9 +356,11 @@ Project resolution for domain commands follows the same order as deploy (`--proj
 
 Runs all agent setup steps:
 
-1. **Instructions** — detects existing agent files (`.claude/`, `CLAUDE.md`, `AGENTS.md`) and injects Vite Cloud framework instructions with versioned markers
-2. **Skills** — auto-detects coding agents (Claude Code, Cursor, Windsurf, Gemini CLI, GitHub Copilot, Codex, and [many more](https://github.com/vercel-labs/skills/blob/main/src/agents.ts)) and symlinks skills from the `vite-cloud` package into each agent's skills directory
-3. **MCP config** — writes MCP server config to the appropriate project-level config file (e.g. `.claude/settings.json`, `.cursor/mcp.json`). For agents without project-level config, prints the CLI command to run instead
+1. **Instructions** — detects agents once and injects Vite Cloud framework instructions with versioned markers
+2. **Skills** — links skills for that same detected/selected agent context
+3. **MCP config** — writes MCP server config for that same detected/selected agent context (or prints generic MCP JSON for Generic mode)
+
+If no agent is detected, `vcc init --agents` asks you to choose from Claude Code, Cursor, Codex, Gemini CLI, or Generic.
 
 ## Environment variables
 

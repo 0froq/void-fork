@@ -5,28 +5,28 @@ Secrets are encrypted environment variables available to your deployed worker at
 ## Put
 
 ```sh
-npx vcc secret put <name> [--project <name>]
+npx vite-cloud secret put <name> [--project <name>]
 ```
 
 Three input modes:
 
 ```sh
-npx vcc secret put API_KEY=myvalue          # inline
-npx vcc secret put API_KEY                  # interactive prompt (masked input)
-echo -n "myvalue" | npx vcc secret put API_KEY  # stdin (for CI)
+npx vite-cloud secret put API_KEY=myvalue          # inline
+npx vite-cloud secret put API_KEY                  # interactive prompt (masked input)
+echo -n "myvalue" | npx vite-cloud secret put API_KEY  # stdin (for CI)
 ```
 
 ## Sync
 
 ```sh
-npx vcc secret sync <file> [--project <name>]
+npx vite-cloud secret sync <file> [--project <name>]
 ```
 
 Bulk upload from a dotenv file. Each `KEY=value` line is uploaded as a secret.
 
 ```sh
-npx vcc secret sync .env.local
-npx vcc secret sync .env.production
+npx vite-cloud secret sync .env.local
+npx vite-cloud secret sync .env.production
 ```
 
 Use this for initial setup instead of multiple `put` calls.
@@ -34,7 +34,7 @@ Use this for initial setup instead of multiple `put` calls.
 ## Delete
 
 ```sh
-npx vcc secret delete <name> [--project <name>]
+npx vite-cloud secret delete <name> [--project <name>]
 ```
 
 ## Project Resolution

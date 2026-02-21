@@ -144,11 +144,11 @@ Vite Cloud ships with first-class support for coding agents (Claude Code, Cursor
 
 - **`AGENT_PROMPT.md`** — compressed reference prompt shipped in the `vite-cloud` npm package. Covers project structure, routing, DB, auth, typed fetch, KV/storage/queues/cron, CLI, and deployment.
 - **`skills/`** — Claude Code skills shipped in the npm package:
-  - `vite-cloud-cli` — guides agents through CLI operations (deploy, db, gen, secrets, domains, projects) using a decision-tree pattern with lazy-loaded reference files.
+  - `vite-cloud` — unified app + CLI skill covering project architecture, runtime APIs, deployment flows, and CLI operations (deploy, db, gen, secrets, domains, projects) with lazy-loaded reference files.
   - `migrate-vite-cloudflare-to-vite-cloud` — guides migration from `@cloudflare/vite-plugin` to `vite-cloud`.
 - **`docs/`** — all 23 docs markdown files are included in the npm package at `node_modules/vite-cloud/docs/`.
-- **`vcc init --agents`** — runs all agent setup steps: detects existing agent files and injects Vite Cloud instructions with versioned markers, symlinks skills from the `vite-cloud` package into each agent's skills directory, and writes MCP server config to the appropriate project-level config file (e.g. `.claude/settings.json`, `.cursor/mcp.json`).
-- **`create-vite-cloud`** — scaffolds a new project, auto-detects and runs the preferred package manager, then runs `vcc init` interactively for agent setup, skills linking, and GitHub Actions.
+- **`vcc init --agents`** — runs all agent setup steps from a single detection/selection pass: injects Vite Cloud instructions with versioned markers, symlinks skills from the `vite-cloud` package, and writes MCP config (or prints manual commands/JSON for unsupported/generic agents).
+- **`vcc init` in an empty directory** — bootstraps starter app files from built-in CLI templates before running the same setup flow.
 
 Agent instructions use versioned markers (`<!--injected-by-vite-cloud-v0.0.1-->` / `<!--/injected-by-vite-cloud-->`) for safe update-in-place across version upgrades.
 

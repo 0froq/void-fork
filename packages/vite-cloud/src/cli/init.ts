@@ -1,9 +1,20 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { intro, outro, log, confirm, isCancel, cancel, note, select } from "@clack/prompts";
 import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
-import { detectAgents, getPackageDir, type AgentConfig, type McpConfigTarget } from "./agents";
+import {
+  SCAFFOLD_FILES,
+  SCAFFOLD_GITIGNORE_LINES,
+  SCAFFOLD_RUNTIME_DEPENDENCIES,
+} from "./template";
+import {
+  detectAgents,
+  getAgentById,
+  getPackageDir,
+  type AgentConfig,
+  type McpConfigTarget,
+} from "./agents";
 import { cliTitle } from "./output";
 
 export interface InitArgs {
@@ -34,6 +45,97 @@ export function parseInitArgs(args: string[]): InitArgs {
     github: parsed.values.github === true,
     agents: parsed.values.agents === true,
   };
+}
+
+const EMPTY_PROJECT_ALLOWED_ENTRIES = new Set([
+  ".git",
+  ".gitignore",
+  "AGENTS.md",
+  "CLAUDE.md",
+  ".node-version",
+  ".npmrc",
+  ".nvmrc",
+  ".editorconfig",
+  ".vscode",
+  ".idea",
+  ".DS_Store",
+  "node_modules",
+  "package.json",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "bun.lock",
+  "bun.lockb",
+  ".agents",
+  ".claude",
+  ".cline",
+  ".codex",
+  ".continue",
+  ".cursor",
+  ".gemini",
+  ".goose",
+  ".junie",
+  ".kilocode",
+  ".kiro",
+  ".opencode",
+  ".qwen",
+  ".roo",
+  ".trae",
+  ".windsurf",
+  ".zencoder",
+]);
+
+const VITE_CONFIG_FILES = [
+  "vite.config.ts",
+  "vite.config.js",
+  "vite.config.mts",
+  "vite.config.mjs",
+  "vite.config.cts",
+  "vite.config.cjs",
+];
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+export function isScaffoldableEmptyProject(root: string): boolean {
+  for (const dir of ["src", "routes", "migrations", "middleware", "crons", "queues", "pages"]) {
+    if (existsSync(join(root, dir))) return false;
+  }
+  if (existsSync(join(root, "index.html"))) return false;
+  for (const file of VITE_CONFIG_FILES) {
+    if (existsSync(join(root, file))) return false;
+  }
+
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (EMPTY_PROJECT_ALLOWED_ENTRIES.has(entry.name)) continue;
+    if (entry.name.startsWith("README")) continue;
+    return false;
+  }
+
+  const packageJsonPath = join(root, "package.json");
+  if (!existsSync(packageJsonPath)) return true;
+
+  let pkgRaw: unknown;
+  try {
+    pkgRaw = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+  } catch {
+    return false;
+  }
+  const pkg = asRecord(pkgRaw);
+  if (!pkg) return false;
+
+  const deps = {
+    ...(asRecord(pkg.dependencies) ?? {}),
+    ...(asRecord(pkg.devDependencies) ?? {}),
+  };
+  if (Object.keys(deps).some((dep) => dep !== "vite-cloud")) return false;
+
+  const scripts = asRecord(pkg.scripts) ?? {};
+  if (Object.keys(scripts).some((name) => name !== "test")) return false;
+
+  return true;
 }
 
 interface ProjectState {
@@ -299,6 +401,121 @@ function setupGithubActions(root: string, state: ProjectState): void {
   );
 }
 
+function writeFileIfMissing(root: string, filePath: string, content: string): void {
+  const fullPath = join(root, filePath);
+  if (existsSync(fullPath)) return;
+  mkdirSync(dirname(fullPath), { recursive: true });
+  writeFileSync(fullPath, content);
+  log.success(`Created ${filePath}`);
+}
+
+function ensureGitignore(root: string): void {
+  const gitignorePath = join(root, ".gitignore");
+  if (!existsSync(gitignorePath)) {
+    writeFileSync(gitignorePath, SCAFFOLD_GITIGNORE_LINES.join("\n") + "\n");
+    log.success("Created .gitignore");
+    return;
+  }
+
+  const content = readFileSync(gitignorePath, "utf-8");
+  const existing = new Set(
+    content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+  const missing = SCAFFOLD_GITIGNORE_LINES.filter((line) => !existing.has(line));
+  if (missing.length === 0) return;
+
+  const separator = content.endsWith("\n") ? "" : "\n";
+  writeFileSync(gitignorePath, content + separator + missing.join("\n") + "\n");
+  log.success("Updated .gitignore with Vite Cloud defaults");
+}
+
+function scaffoldBasicApp(root: string, packageManager: ProjectState["packageManager"]): void {
+  const packageJsonPath = join(root, "package.json");
+  let pkg: Record<string, any> = {};
+
+  if (existsSync(packageJsonPath)) {
+    try {
+      pkg = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+    } catch {
+      throw new Error("Could not parse package.json in empty project");
+    }
+  }
+
+  const fallbackName =
+    basename(root)
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-") || "my-app";
+  if (!pkg.name || typeof pkg.name !== "string") {
+    pkg.name = fallbackName;
+  }
+  if (pkg.private === undefined) {
+    pkg.private = true;
+  }
+  if (!pkg.type) {
+    pkg.type = "module";
+  }
+
+  if (!pkg.scripts || typeof pkg.scripts !== "object" || Array.isArray(pkg.scripts)) {
+    pkg.scripts = {};
+  }
+  if (!pkg.scripts.dev) pkg.scripts.dev = "vite";
+  if (!pkg.scripts.build) pkg.scripts.build = "vite build";
+  if (!pkg.scripts.preview) pkg.scripts.preview = "vite preview";
+
+  if (
+    !pkg.dependencies ||
+    typeof pkg.dependencies !== "object" ||
+    Array.isArray(pkg.dependencies)
+  ) {
+    pkg.dependencies = {};
+  }
+  if (
+    !pkg.devDependencies ||
+    typeof pkg.devDependencies !== "object" ||
+    Array.isArray(pkg.devDependencies)
+  ) {
+    pkg.devDependencies = {};
+  }
+
+  let dependencyAdded = false;
+  const ensureRuntimeDependency = (name: string, fallbackVersion: string) => {
+    const existing = pkg.dependencies[name] ?? pkg.devDependencies[name];
+    if (!pkg.dependencies[name]) {
+      pkg.dependencies[name] = existing ?? fallbackVersion;
+      dependencyAdded = true;
+    }
+    if (pkg.devDependencies[name]) {
+      delete pkg.devDependencies[name];
+      dependencyAdded = true;
+    }
+  };
+
+  ensureRuntimeDependency("vite-cloud", `^${getOwnVersion()}`);
+  ensureRuntimeDependency("vite", SCAFFOLD_RUNTIME_DEPENDENCIES.vite);
+  ensureRuntimeDependency("hono", SCAFFOLD_RUNTIME_DEPENDENCIES.hono);
+
+  if (!pkg.devDependencies.typescript && !pkg.dependencies.typescript) {
+    pkg.devDependencies.typescript = "^5.9.3";
+    dependencyAdded = true;
+  }
+
+  writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + "\n");
+  log.success("Updated package.json with starter scripts and dependencies");
+
+  for (const [filePath, content] of Object.entries(SCAFFOLD_FILES)) {
+    writeFileIfMissing(root, filePath, content);
+  }
+
+  ensureGitignore(root);
+
+  if (dependencyAdded) {
+    log.info(`Run \`${packageManager} install\` to install the new dependencies.`);
+  }
+}
+
 function scaffoldDemo(root: string): void {
   // Migration
   mkdirSync(join(root, "migrations"), { recursive: true });
@@ -355,25 +572,70 @@ console.log(posts);
   );
 }
 
-interface AgentDetection {
-  type: "claude" | "generic" | null;
-  filePath: string | null;
+interface AgentSetupSelection {
+  instructionFilePath: "CLAUDE.md" | "AGENTS.md";
+  agents: AgentConfig[];
 }
 
-function detectAgentForInstructions(root: string, agents: AgentConfig[]): AgentDetection {
+function detectInstructionFilePath(root: string, agents: AgentConfig[]): "CLAUDE.md" | "AGENTS.md" {
   if (agents.some((a) => a.skillsDir === ".claude/skills")) {
-    return { type: "claude", filePath: "CLAUDE.md" };
+    return "CLAUDE.md";
   }
   if (existsSync(join(root, "CLAUDE.md"))) {
-    return { type: "claude", filePath: "CLAUDE.md" };
+    return "CLAUDE.md";
   }
   if (existsSync(join(root, "AGENTS.md"))) {
-    return { type: "generic", filePath: "AGENTS.md" };
+    return "AGENTS.md";
   }
-  if (agents.length > 0) {
-    return { type: "generic", filePath: "AGENTS.md" };
+  return "AGENTS.md";
+}
+
+async function pickAgentWhenUndetected(): Promise<AgentSetupSelection> {
+  const choice = await select({
+    message: "Could not detect your coding agent. Which one are you using?",
+    options: [
+      { value: "claude-code", label: "Claude Code" },
+      { value: "cursor", label: "Cursor" },
+      { value: "codex", label: "Codex" },
+      { value: "gemini-cli", label: "Gemini CLI" },
+      { value: "generic", label: "Generic" },
+    ],
+  });
+  if (isCancel(choice)) {
+    cancel("Setup cancelled.");
+    process.exit(0);
   }
-  return { type: null, filePath: null };
+
+  if (choice === "generic") {
+    return {
+      instructionFilePath: "AGENTS.md",
+      agents: [],
+    };
+  }
+
+  const selected = getAgentById(choice);
+  if (!selected) {
+    return {
+      instructionFilePath: "AGENTS.md",
+      agents: [],
+    };
+  }
+
+  return {
+    instructionFilePath: choice === "claude-code" ? "CLAUDE.md" : "AGENTS.md",
+    agents: [selected],
+  };
+}
+
+async function resolveAgentSetup(root: string): Promise<AgentSetupSelection> {
+  const detected = detectAgents(root);
+  if (detected.length > 0) {
+    return {
+      instructionFilePath: detectInstructionFilePath(root, detected),
+      agents: detected,
+    };
+  }
+  return pickAgentWhenUndetected();
 }
 
 function readAgentPrompt(): string {
@@ -452,15 +714,22 @@ function writeMcpConfigForTarget(root: string, target: McpConfigTarget): void {
   log.success(`Added vite-cloud MCP server to ${target.filePath}`);
 }
 
-async function setupMcpConfig(
-  root: string,
-  targeted: boolean,
-  detected: AgentConfig[],
-): Promise<void> {
+function pickMcpTarget(root: string, targets: McpConfigTarget[]): McpConfigTarget {
+  if (targets.length === 1) {
+    return targets[0];
+  }
+  const existingTargets = targets.filter((t) => existsSync(join(root, t.filePath)));
+  if (existingTargets.length > 0) {
+    return existingTargets[0];
+  }
+  return targets[0];
+}
+
+function setupMcpConfig(root: string, selectedAgents: AgentConfig[]): void {
   const mcpAgents: { agent: AgentConfig; targets: McpConfigTarget[] }[] = [];
   const hintAgents: { agent: AgentConfig; hint: string }[] = [];
 
-  for (const agent of detected) {
+  for (const agent of selectedAgents) {
     if (agent.mcpConfig) {
       mcpAgents.push({ agent, targets: agent.mcpConfig });
     } else if (agent.mcpHint) {
@@ -468,7 +737,7 @@ async function setupMcpConfig(
     }
   }
 
-  if (detected.length === 0) {
+  if (selectedAgents.length === 0) {
     note(
       JSON.stringify(
         {
@@ -492,44 +761,8 @@ async function setupMcpConfig(
 
   // Write config for agents with project-level support
   for (const { agent, targets } of mcpAgents) {
-    let target: McpConfigTarget;
-
-    if (targets.length === 1) {
-      target = targets[0];
-    } else {
-      // Check which config files already exist on disk
-      const existingTargets = targets.filter((t) => existsSync(join(root, t.filePath)));
-
-      if (existingTargets.length === 1) {
-        target = existingTargets[0];
-      } else if (existingTargets.length >= 2) {
-        // Multiple exist — always prompt to disambiguate
-        const chosen = await select({
-          message: `${agent.displayName}: multiple config files found — which one?`,
-          options: existingTargets.map((t) => ({ value: t.filePath, label: t.filePath })),
-        });
-        if (isCancel(chosen)) {
-          cancel("Setup cancelled.");
-          process.exit(0);
-        }
-        target = existingTargets.find((t) => t.filePath === chosen)!;
-      } else {
-        // None exist — use first (conventional default)
-        target = targets[0];
-      }
-    }
-
-    if (!targeted) {
-      const ok = await confirm({
-        message: `Add vite-cloud MCP server to ${target.filePath}?`,
-      });
-      if (isCancel(ok)) {
-        cancel("Setup cancelled.");
-        process.exit(0);
-      }
-      if (!ok) continue;
-    }
-
+    const target = pickMcpTarget(root, targets);
+    log.info(`${agent.displayName} MCP target: ${target.filePath}`);
     writeMcpConfigForTarget(root, target);
   }
 }
@@ -538,32 +771,19 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   console.log();
   intro(cliTitle("init"));
 
+  const targeted = Boolean(initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agents));
+  const preScaffoldState = detectProjectState(root);
+  if (isScaffoldableEmptyProject(root)) {
+    log.info("Empty project detected. Scaffolding starter files...");
+    scaffoldBasicApp(root, preScaffoldState.packageManager);
+  }
+
   const state = detectProjectState(root);
-  const targeted = initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agents);
 
   // Step 1: TypeScript / tsconfig
-  if (!targeted || initArgs.tsconfig) {
-    if (targeted) {
-      // --tsconfig flag: run directly without prompting
-      state.typescriptWanted = true;
-      setupTsconfig(root, state);
-    } else if (!state.hasTsconfig && !state.hasTypescript) {
-      const useTs = await confirm({ message: "Do you want to use TypeScript?" });
-      if (isCancel(useTs)) {
-        cancel("Setup cancelled.");
-        process.exit(0);
-      }
-      if (!useTs) {
-        log.info("Skipping TypeScript setup");
-        state.typescriptWanted = false;
-      } else {
-        state.typescriptWanted = true;
-        setupTsconfig(root, state);
-      }
-    } else {
-      state.typescriptWanted = true;
-      setupTsconfig(root, state);
-    }
+  if (!targeted || initArgs?.tsconfig) {
+    state.typescriptWanted = true;
+    setupTsconfig(root, state);
   }
 
   // Generate .vite-cloud/tsconfig.json so the root tsconfig can extend it
@@ -573,66 +793,21 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   // Steps 2–4: Agent instructions, skills, MCP config
   if (!targeted || initArgs?.agents) {
-    const detectedAgents = detectAgents(root);
+    const agentSetup = await resolveAgentSetup(root);
 
     // Step 2: Agent instructions
-    const agentDetection = detectAgentForInstructions(root, detectedAgents);
-    if (targeted) {
-      // --agents flag: auto-inject to detected file or default CLAUDE.md
-      injectAgentBlock(root, agentDetection.filePath ?? "CLAUDE.md");
-    } else if (agentDetection.type) {
-      const addAgent = await confirm({
-        message: `Add Vite Cloud instructions to ${agentDetection.filePath}?`,
-      });
-      if (isCancel(addAgent)) {
-        cancel("Setup cancelled.");
-        process.exit(0);
-      }
-      if (addAgent) {
-        injectAgentBlock(root, agentDetection.filePath!);
-      }
-    } else {
-      const agentChoice = await select({
-        message: "Add coding agent instructions?",
-        options: [
-          { value: "claude", label: "Claude Code (CLAUDE.md)" },
-          { value: "generic", label: "Other agents (AGENTS.md)" },
-          { value: "skip", label: "Skip" },
-        ],
-      });
-      if (isCancel(agentChoice)) {
-        cancel("Setup cancelled.");
-        process.exit(0);
-      }
-      if (agentChoice === "claude") {
-        injectAgentBlock(root, "CLAUDE.md");
-      } else if (agentChoice === "generic") {
-        injectAgentBlock(root, "AGENTS.md");
-      }
-    }
+    injectAgentBlock(root, agentSetup.instructionFilePath);
 
     // Step 3: Link skills
-    if (detectedAgents.length > 0) {
-      const { linkSkillsForAgents } = await import("./skills");
-      const agentNames = detectedAgents.map((a) => a.displayName).join(", ");
-      if (targeted) {
-        linkSkillsForAgents(root);
-      } else {
-        const linkSkills = await confirm({
-          message: `Link vite-cloud skills for ${agentNames}?`,
-        });
-        if (isCancel(linkSkills)) {
-          cancel("Setup cancelled.");
-          process.exit(0);
-        }
-        if (linkSkills) {
-          linkSkillsForAgents(root);
-        }
-      }
+    if (agentSetup.agents.length > 0) {
+      const { linkSkillsForSpecificAgents } = await import("./skills");
+      linkSkillsForSpecificAgents(root, agentSetup.agents);
+    } else {
+      log.info("Skills linking skipped for generic agent setup");
     }
 
     // Step 4: MCP config
-    await setupMcpConfig(root, !!targeted, detectedAgents);
+    setupMcpConfig(root, agentSetup.agents);
   }
 
   // Step 5: Demo code (only in full interactive flow)
@@ -656,7 +831,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   }
 
   // Step 6: GitHub Actions
-  if (!targeted || initArgs.github) {
+  if (!targeted || initArgs?.github) {
     const deployYmlPath = join(root, ".github", "workflows", "deploy.yml");
     if (existsSync(deployYmlPath)) {
       log.warn("deploy.yml already exists, skipping");

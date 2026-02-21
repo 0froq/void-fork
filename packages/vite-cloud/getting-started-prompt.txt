@@ -1,9 +1,6 @@
-Vite Cloud is a fullstack Vite framework and deployment platform for Cloudflare. Scaffold a new app with:
+Vite Cloud is a fullstack Vite framework and deployment platform for Cloudflare. In an empty directory, set up a new app with:
 
-npm create vite-cloud@latest my-app
-cd my-app
-npm install
+npm install -D vite-cloud
+npx vcc init
 
-The scaffolded project includes a CLAUDE.md (or AGENTS.md) file with detailed framework instructions covering routing, database, auth, typed fetch, and more. Read it before building.
-
-Now ask me what I want to build and what package manager do I want to use to scaffold the project.
+Now ask me what I want to build.

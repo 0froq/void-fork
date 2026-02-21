@@ -9,7 +9,7 @@ description: Migrate an existing Vite app using @cloudflare/vite-plugin to Vite 
 
 Use this skill when the user has an existing Vite app with `@cloudflare/vite-plugin` and wants to migrate to `vite-cloud` with minimal breakage.
 
-Do not use this for greenfield apps created with `create-vite-cloud`.
+Do not use this for greenfield apps started via `npm install -D vite-cloud` + `npx vcc init`.
 
 ## Inputs to gather first
 
