@@ -1,8 +1,5 @@
 import { Link } from "@vite-cloud/react";
-
-interface Props {
-  user: { id: number; name: string; email: string };
-}
+import type { Props } from "./[id].server";
 
 export default function UserDetailPage({ user }: Props) {
   return (
