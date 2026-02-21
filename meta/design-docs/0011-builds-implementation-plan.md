@@ -2,7 +2,7 @@
 
 ## Context
 
-Vite Cloud currently requires users to build locally via `vcc deploy`. This plan implements a remote build service triggered by GitHub push webhooks, running in Cloudflare Containers orchestrated by Durable Objects. The design is documented in `meta/0010-builds.md`.
+Vite Cloud currently requires users to build locally via `vcc deploy`. This plan implements a remote build service triggered by GitHub push webhooks, running in Cloudflare Containers orchestrated by Durable Objects. The design is documented in `meta/design-docs/0010-builds.md`.
 
 Two deploy paths will coexist:
 
@@ -617,13 +617,13 @@ app.route("/admin/builds", adminBuilds);
 
 ## Step 11: Documentation
 
-- Update `meta/0010-builds.md` status from "Design" to "Implemented"
+- Update `meta/design-docs/0010-builds.md` status from "Design" to "Implemented"
 - Update `README.md` (CLAUDE.md source of truth):
   - Add builds system to platform overview
   - Add new secrets to environment docs
   - Update test counts
 - Update `packages/platform/README.md` with new routes, DOs, container config
-- Update `meta/0000-progress.md` with builds milestone
+- Update `meta/progress.md` with builds milestone
 
 ---
 
