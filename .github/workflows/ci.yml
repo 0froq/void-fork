@@ -25,7 +25,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [unit, integration]
+        include:
+          - suite: unit
+            pattern: test/unit
+          - suite: integration
+            pattern: packages/{platform,vite-cloud}/test/integration
+          - suite: integration-pages-adapters
+            pattern: packages/{react,vue}/test/integration
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -37,17 +43,14 @@ jobs:
       - run: pnpm -r --filter './packages/*' --filter '!website' build
 
       - uses: actions/cache@v4
-        if: matrix.suite == 'integration'
+        if: matrix.suite == 'integration-pages-adapters'
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm exec playwright install chromium
-        if: matrix.suite == 'integration' && steps.playwright-cache.outputs.cache-hit != 'true'
+        if: matrix.suite == 'integration-pages-adapters' && steps.playwright-cache.outputs.cache-hit != 'true'
       - run: pnpm exec playwright install-deps chromium
-        if: matrix.suite == 'integration'
+        if: matrix.suite == 'integration-pages-adapters'
 
-      - run: pnpm vitest --run 'test/unit'
-        if: matrix.suite == 'unit'
-      - run: pnpm vitest --run 'test/integration'
-        if: matrix.suite == 'integration'
+      - run: pnpm vitest --run '${{ matrix.pattern }}'
