@@ -1,31 +1,3 @@
-<script server lang="ts">
-import { defineHandler } from "vite-cloud";
-import { ValidationError } from "vite-cloud/handler";
-
-const USERS = [
-  { id: 1, name: "Alice", email: "alice@example.com" },
-  { id: 2, name: "Bob", email: "bob@example.com" },
-];
-
-export const loader = defineHandler(() => {
-  return { users: USERS };
-});
-
-export const action = defineHandler(async (c) => {
-  const body = await c.req.json<{ name: string; email: string }>();
-  const errors: Record<string, string> = {};
-
-  if (!body.name?.trim()) errors.name = "Name is required";
-  if (!body.email?.trim()) errors.email = "Email is required";
-
-  if (Object.keys(errors).length > 0) {
-    throw new ValidationError(errors);
-  }
-
-  USERS.push({ id: USERS.length + 1, name: body.name.trim(), email: body.email.trim() });
-});
-</script>
-
 <script setup lang="ts">
 import { Link, useForm } from "@vite-cloud/vue";
 

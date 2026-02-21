@@ -179,7 +179,7 @@ describe("handlePageMutation", () => {
         issues: [
           {
             slot: "body",
-            issues: [{ message: "required", path: [{ key: "name" }] }],
+            issues: [{ message: "required", path: "name" }],
           },
         ],
       },
@@ -246,8 +246,8 @@ describe("flattenValidationErrors", () => {
         {
           slot: "body",
           issues: [
-            { message: "required", path: [{ key: "name" }] },
-            { message: "invalid", path: [{ key: "email" }] },
+            { message: "required", path: "name" },
+            { message: "invalid", path: "email" },
           ],
         },
       ],
