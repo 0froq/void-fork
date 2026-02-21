@@ -1,4 +1,4 @@
-import { useContext } from "react";
+import { useContext, type JSX } from "react";
 import type { MouseEvent, AnchorHTMLAttributes, ButtonHTMLAttributes } from "react";
 import { RouterContext } from "./context";
 
@@ -22,7 +22,7 @@ export function Link({
   viewTransition,
   children,
   ...rest
-}: LinkProps) {
+}: LinkProps): JSX.Element {
   const router = useContext(RouterContext);
 
   function onClick(e: MouseEvent) {

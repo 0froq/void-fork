@@ -1,5 +1,5 @@
-import { createContext } from "react";
+import { createContext, type Context } from "react";
 
-export const SharedContext = createContext<any>(null);
-export const ErrorsContext = createContext<any>(null);
-export const RouterContext = createContext<any>(null);
+export const SharedContext: Context<any> = createContext<any>(null);
+export const ErrorsContext: Context<any> = createContext<any>(null);
+export const RouterContext: Context<any> = createContext<any>(null);

@@ -9,6 +9,7 @@
     "skipLibCheck": true,
     "outDir": "dist",
     "declaration": true,
+    "isolatedDeclarations": true,
     "jsx": "react-jsx"
   },
   "include": ["src"]
