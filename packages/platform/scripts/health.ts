@@ -140,14 +140,6 @@ const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 
-interface CheckResult {
-  method: string;
-  path: string;
-  status: number | null;
-  ms: number;
-  skipped?: string;
-}
-
 async function probe(method: string, url: string): Promise<{ status: number; ms: number }> {
   const start = performance.now();
   const res = await fetch(url, {

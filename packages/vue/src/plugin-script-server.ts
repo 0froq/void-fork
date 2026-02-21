@@ -110,6 +110,7 @@ export function scriptServerPlugin(pagesDir: string): Plugin {
     },
 
     load: {
+      // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
       filter: { id: /^\0.*\?server$/ },
       handler(id) {
         const vuePath = id.slice(1, -7);

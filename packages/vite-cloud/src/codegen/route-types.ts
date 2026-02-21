@@ -127,7 +127,6 @@ export function generateRouteTypes(
         const originalDir = dirname(page.componentPath); // e.g. "users"
         const absGeneratedDir = `${outDir}/${generatedDir}`;
         const absOriginalDir = `${pagesDir}/${originalDir}`;
-        const relToOriginal = relative(absGeneratedDir, absOriginalDir).replace(/\\/g, "/");
         // Rewrite relative import specifiers (./foo, ../bar) to resolve
         // from the generated file's location back through the original directory
         const content =

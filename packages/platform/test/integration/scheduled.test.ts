@@ -51,8 +51,7 @@ beforeEach(async () => {
 describe("scheduled()", () => {
   it("completes without error on empty database", async () => {
     mockCfApi();
-    await scheduled(mockController, makeBindings(env), mockCtx);
-    // No error thrown = pass
+    await expect(scheduled(mockController, makeBindings(env), mockCtx)).resolves.toBeUndefined();
   });
 
   it("skips unlimited plan users (no analytics calls)", async () => {
