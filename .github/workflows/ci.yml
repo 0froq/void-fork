@@ -6,22 +6,59 @@ on:
   workflow_call:
 
 jobs:
-  ci:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
           cache: pnpm
-
       - run: pnpm install --frozen-lockfile
-
-      - run: pnpm -r build
       - run: pnpm lint
+
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r --filter '!website' build
       - run: pnpm check
-      - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [unit, integration]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r --filter '!website' build
+
+      - uses: actions/cache@v4
+        if: matrix.suite == 'integration'
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm exec playwright install chromium
+        if: matrix.suite == 'integration' && steps.playwright-cache.outputs.cache-hit != 'true'
+      - run: pnpm exec playwright install-deps chromium
+        if: matrix.suite == 'integration'
+
+      - run: pnpm vitest --run 'test/unit'
+        if: matrix.suite == 'unit'
+      - run: pnpm vitest --run 'test/integration'
+        if: matrix.suite == 'integration'
