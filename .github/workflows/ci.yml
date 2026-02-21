@@ -6,7 +6,7 @@ on:
   workflow_call:
 
 jobs:
-  lint:
+  lint-and-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,19 +17,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm -r --filter '!website' build
       - run: pnpm check
+      # verify all packages build correctly
+      - run: pnpm -r --filter '!website' build
 
   test:
     runs-on: ubuntu-latest
