@@ -17,7 +17,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      - run: pnpm -r --filter '!website' build
+      # type check includes core and playground, and all needs to be built
+      # because playground typecheck relies on vite-cloud generated types
+      - run: pnpm --filter '!website' --filter '!.' build
       - run: pnpm check
 
   test:
@@ -40,7 +42,8 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -r --filter './packages/*' --filter '!website' build
+      # only need to build core and 2 adapters
+      - run: pnpm --filter './packages/*' --filter '!website' build
 
       - uses: actions/cache@v4
         if: matrix.suite == 'integration-pages-adapters'

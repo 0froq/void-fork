@@ -49,7 +49,7 @@ describe("playground/auth email flow", () => {
       },
     );
 
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr!.on("data", (chunk: Buffer) => {
       stderr += String(chunk);
     });
 
