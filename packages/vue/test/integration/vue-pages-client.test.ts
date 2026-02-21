@@ -37,7 +37,13 @@ afterAll(async () => {
 function defineClientTests(BASE: string) {
   async function newPage(): Promise<Page> {
     const context = await browser.newContext();
-    return context.newPage();
+    const page = await context.newPage();
+    page.setDefaultTimeout(10_000);
+    return page;
+  }
+
+  async function waitForHydration(page: Page) {
+    await page.waitForSelector('#app[data-hydrated="true"]');
   }
 
   it("hydrates without Vue warnings", async () => {
@@ -73,9 +79,7 @@ function defineClientTests(BASE: string) {
 
     try {
       await page.goto(BASE + "/");
-      await page.waitForFunction(() =>
-        document.querySelector("h1")?.textContent?.includes("Welcome"),
-      );
+      await waitForHydration(page);
 
       // Set a marker to detect if a full page reload happens
       await page.evaluate(() => {
@@ -105,9 +109,7 @@ function defineClientTests(BASE: string) {
 
     try {
       await page.goto(BASE + "/users");
-      await page.waitForFunction(() =>
-        document.querySelector("h1")?.textContent?.includes("Users"),
-      );
+      await waitForHydration(page);
 
       await page.click('a[href="/users/1"]');
       await page.waitForFunction(() =>
@@ -128,9 +130,7 @@ function defineClientTests(BASE: string) {
 
     try {
       await page.goto(BASE + "/");
-      await page.waitForFunction(() =>
-        document.querySelector("h1")?.textContent?.includes("Welcome"),
-      );
+      await waitForHydration(page);
 
       // Stamp the nav element
       await page.evaluate(() => {
@@ -157,9 +157,7 @@ function defineClientTests(BASE: string) {
 
     try {
       await page.goto(BASE + "/");
-      await page.waitForFunction(() =>
-        document.querySelector("h1")?.textContent?.includes("Welcome"),
-      );
+      await waitForHydration(page);
 
       await page.click('a[href="/users"]');
       await page.waitForFunction(() =>
@@ -198,9 +196,7 @@ function defineClientTests(BASE: string) {
 
     try {
       await page.goto(BASE + "/users");
-      await page.waitForFunction(() =>
-        document.querySelector("h1")?.textContent?.includes("Users"),
-      );
+      await waitForHydration(page);
 
       // Submit form without filling fields
       await page.click('button[type="submit"]');
@@ -223,9 +219,7 @@ function defineClientTests(BASE: string) {
 
     try {
       await page.goto(BASE + "/users");
-      await page.waitForFunction(() =>
-        document.querySelector("h1")?.textContent?.includes("Users"),
-      );
+      await waitForHydration(page);
 
       await page.fill('input:near(:text("Name:"))', "Charlie");
       await page.fill('input:near(:text("Email:"))', "charlie@example.com");
@@ -248,9 +242,7 @@ function defineClientTests(BASE: string) {
 
     try {
       await page.goto(BASE + "/users");
-      await page.waitForFunction(() =>
-        document.querySelector("h1")?.textContent?.includes("Users"),
-      );
+      await waitForHydration(page);
 
       // Add a new user
       await page.fill('input:near(:text("Name:"))', "Dana");

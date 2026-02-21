@@ -37,7 +37,9 @@ afterAll(async () => {
 function defineClientTests(BASE: string) {
   async function newPage(): Promise<Page> {
     const context = await browser.newContext();
-    return context.newPage();
+    const page = await context.newPage();
+    page.setDefaultTimeout(10_000);
+    return page;
   }
 
   async function waitForHydration(page: Page) {

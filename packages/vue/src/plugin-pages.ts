@@ -253,6 +253,7 @@ const app = createSSRApp({
 });
 
 app.mount("#app");
+document.getElementById("app").setAttribute("data-hydrated", "true");
 
 window.addEventListener("popstate", () => {
   router.visit(window.location.pathname + window.location.search, { preserveState: true });
