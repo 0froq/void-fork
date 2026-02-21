@@ -28,12 +28,6 @@ The fastest way to get started is to copy the prompt below and paste it into you
 
 <<< ../../vite-cloud/getting-started-prompt.txt
 
-You can also pipe it directly into Claude Code:
-
-```sh
-vcc init --prompt | claude
-```
-
 For existing projects, run `vcc init --agentsmd` to add a `CLAUDE.md` (or `AGENTS.md`) with framework instructions.
 
 ## Adding to an Existing Vite App
