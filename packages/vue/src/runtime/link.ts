@@ -1,6 +1,6 @@
-import { defineComponent, h, inject } from "vue";
+import { defineComponent, h, inject, type Component } from "vue";
 
-export const Link = defineComponent({
+export const Link: Component = defineComponent({
   name: "Link",
   props: {
     href: { type: String, required: true },
