@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { pc } from "./output";
 
 const CONFIG_DIR = join(homedir(), ".vite-cloud");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
@@ -45,7 +46,7 @@ export function getSiteDomain(): string {
 
 export function printStagingBanner(): void {
   if (isStagingMode()) {
-    console.log("\x1b[43m\x1b[30m \u26a0 STAGING MODE \x1b[0m\n");
+    console.log(pc.black(pc.bgYellow(" ⚠ STAGING MODE ")) + "\n");
   }
 }
 

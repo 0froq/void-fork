@@ -5,10 +5,11 @@ import { readProjectConfig } from "./project";
 import { getRequestedProjectSlug, resolveProjectBySlug } from "./resolve-project";
 import type { SecretArgs } from "./secret-args";
 import { intro, outro, log, cancel, isCancel, password, confirm } from "@clack/prompts";
+import { cliTitle } from "./output";
 
 export async function runSecretCommand(root: string, args: SecretArgs): Promise<void> {
   console.log();
-  intro("\x1b[34mvite-cloud secret\x1b[0m");
+  intro(cliTitle("secret"));
 
   const token = getToken();
   if (!token) {

@@ -5,15 +5,11 @@ import { getToken } from "./auth";
 import { PlatformClient } from "./client";
 import { readProjectConfig } from "./project";
 import type { DbArgs } from "./db-args";
-
-const DIM = "\x1b[2m";
-const RESET = "\x1b[0m";
-const GREEN = "\x1b[32m";
-const YELLOW = "\x1b[33m";
+import { cliTitle, dim, pc } from "./output";
 
 export async function runDbCommand(root: string, args: DbArgs): Promise<void> {
   console.log();
-  intro("\x1b[34mvite-cloud db\x1b[0m");
+  intro(cliTitle("db"));
 
   if (args.action === "status") {
     await runStatus(root);
@@ -65,19 +61,17 @@ async function runStatus(root: string): Promise<void> {
 
   const lines: string[] = [];
   for (const migration of allMigrations) {
-    const localStatus = localSet.has(migration.name)
-      ? `${GREEN}applied${RESET}`
-      : `${YELLOW}pending${RESET}`;
+    const localStatus = localSet.has(migration.name) ? pc.green("applied") : pc.yellow("pending");
 
     let remotePart = "";
     if (remoteSet !== null) {
       const remoteStatus = remoteSet.has(migration.name)
-        ? `${GREEN}applied${RESET}`
-        : `${YELLOW}pending${RESET}`;
+        ? pc.green("applied")
+        : pc.yellow("pending");
       remotePart = `  remote: ${remoteStatus}`;
     }
 
-    lines.push(`  ${migration.name}  ${DIM}local:${RESET} ${localStatus}${remotePart}`);
+    lines.push(`  ${migration.name}  ${dim("local:")} ${localStatus}${remotePart}`);
   }
 
   log.info(lines.join("\n"));
@@ -109,7 +103,7 @@ async function runReset(root: string): Promise<void> {
   const migrationsDir = join(root, "migrations");
   const applied = await runMigrations(migrationsDir, dbPath);
   log.success(`Database reset. Applied ${applied.length} migration(s).`);
-  log.info(`${DIM}Restart your dev server if it's running.${RESET}`);
+  log.info(dim("Restart your dev server if it's running."));
   outro("");
 }
 
@@ -144,7 +138,7 @@ async function runSeed(root: string, file?: string): Promise<void> {
   }
 
   log.success(`Seeded from ${file ?? "migrations/seed.sql"}.`);
-  log.info(`${DIM}Restart your dev server if it's running.${RESET}`);
+  log.info(dim("Restart your dev server if it's running."));
   outro("");
 }
 
@@ -215,7 +209,7 @@ async function runMigrate(root: string): Promise<void> {
       log.step(name);
     }
     log.success(`Applied ${applied.length} migration(s).`);
-    log.info(`${DIM}Restart your dev server if it's running.${RESET}`);
+    log.info(dim("Restart your dev server if it's running."));
   }
   outro("");
 }

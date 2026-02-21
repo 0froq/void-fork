@@ -98,7 +98,8 @@
     "@cloudflare/workers-types": "catalog:",
     "@hono/oauth-providers": "^0.8.5",
     "better-sqlite3": "^12.6.2",
-    "ofetch": "^1.5.1"
+    "ofetch": "^1.5.1",
+    "picocolors": "^1.1.1"
   },
   "devDependencies": {
     "@clack/prompts": "catalog:",

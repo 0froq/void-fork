@@ -1,9 +1,10 @@
 import { intro, outro, log, spinner, select, isCancel, cancel } from "@clack/prompts";
 import { getToken, runLogin, saveToken, isStagingMode } from "./auth";
+import { cliTitle } from "./output";
 
 export async function runLoginCommand(): Promise<void> {
   console.log();
-  intro("\x1b[34mvite-cloud login\x1b[0m");
+  intro(cliTitle("login"));
 
   const existing = getToken();
   if (existing) {
