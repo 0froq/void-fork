@@ -25,15 +25,14 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
         include:
           - suite: unit
             pattern: test/unit
           - suite: integration
-            pattern: packages/{platform,vite-cloud}/test/integration
+            pattern: packages/platform/test/integration packages/vite-cloud/test/integration
           - suite: integration-pages-adapters
-            pattern: packages/{react,vue}/test/integration
+            pattern: packages/react/test/integration packages/vue/test/integration
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -56,4 +55,4 @@ jobs:
       - run: pnpm exec playwright install-deps chromium
         if: matrix.suite == 'integration-pages-adapters'
 
-      - run: pnpm vitest --run '${{ matrix.pattern }}'
+      - run: pnpm vitest --run ${{ matrix.pattern }}
