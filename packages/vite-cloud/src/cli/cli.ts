@@ -295,7 +295,6 @@ if (command === "staging") {
       helpLine("vcc init --agentsmd", "Inject agent instructions into CLAUDE.md/AGENTS.md"),
       helpLine("vcc init --skills", "Link vite-cloud skills to your agent"),
       helpLine("vcc init --mcp", "Add MCP server config for detected agents"),
-      helpLine("vcc init --prompt", "Print the coding agent reference prompt"),
       helpLine("vcc mcp", "Start MCP server (stdio, for AI agents)"),
     ].join("\n"),
     sectionTitle("Commands"),

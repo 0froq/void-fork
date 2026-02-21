@@ -1,6 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { intro, outro, log, confirm, isCancel, cancel, note, select } from "@clack/prompts";
 import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
@@ -13,7 +12,6 @@ export interface InitArgs {
   agentsmd: boolean;
   skills: boolean;
   mcp: boolean;
-  prompt: boolean;
 }
 
 export function parseInitArgs(args: string[]): InitArgs {
@@ -27,7 +25,6 @@ export function parseInitArgs(args: string[]): InitArgs {
         agentsmd: { type: "boolean" },
         skills: { type: "boolean" },
         mcp: { type: "boolean" },
-        prompt: { type: "boolean" },
       },
       strict: true,
     });
@@ -42,7 +39,6 @@ export function parseInitArgs(args: string[]): InitArgs {
     agentsmd: parsed.values.agentsmd === true,
     skills: parsed.values.skills === true,
     mcp: parsed.values.mcp === true,
-    prompt: parsed.values.prompt === true,
   };
 }
 
@@ -546,20 +542,6 @@ async function setupMcpConfig(root: string, targeted: boolean): Promise<void> {
 export async function runInitCommand(root: string, initArgs?: InitArgs): Promise<void> {
   console.log();
   intro(cliTitle("init"));
-
-  // --prompt: print agent reference prompt to stdout and exit
-  if (initArgs?.prompt) {
-    let dir = join(fileURLToPath(import.meta.url), "..");
-    for (let i = 0; i < 5; i++) {
-      const promptPath = join(dir, "getting-started-prompt.txt");
-      if (existsSync(promptPath)) {
-        process.stdout.write(readFileSync(promptPath, "utf-8"));
-        return;
-      }
-      dir = join(dir, "..");
-    }
-    return;
-  }
 
   const state = detectProjectState(root);
   const targeted =

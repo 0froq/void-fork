@@ -352,10 +352,6 @@ Project resolution for domain commands follows the same order as deploy (`--proj
 
 ## Agent
 
-### `vcc init --prompt`
-
-Print the coding agent reference prompt to stdout. Useful for piping into agent tools or inspecting the shipped prompt.
-
 ### `vcc init --skills`
 
 Link vite-cloud skills to your coding agent's skills directory.
