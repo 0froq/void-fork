@@ -63,7 +63,7 @@ describe("playground/queues", () => {
       },
     );
 
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr!.on("data", (chunk: Buffer) => {
       stderr += String(chunk);
     });
 

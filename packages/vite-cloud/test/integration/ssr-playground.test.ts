@@ -62,7 +62,7 @@ describe("playground/ssr dev", () => {
       },
     );
 
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr!.on("data", (chunk: Buffer) => {
       stderr += String(chunk);
     });
 
@@ -126,7 +126,7 @@ describe("playground/ssr build + preview", () => {
       },
     );
 
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr!.on("data", (chunk: Buffer) => {
       stderr += String(chunk);
     });
 
