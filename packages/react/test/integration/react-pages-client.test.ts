@@ -74,11 +74,6 @@ function defineClientTests(BASE: string) {
     try {
       await page.goto(BASE + "/");
       await waitForHydration(page);
-      // Wait for Vite dev server to settle (dep optimization may trigger
-      // a full-page reload after first-loading new modules)
-      await page.waitForLoadState("networkidle");
-      // Re-check hydration in case a dep-optimization reload happened
-      await waitForHydration(page);
 
       // Set a marker to detect if a full page reload happens
       await page.evaluate(() => {
@@ -89,9 +84,6 @@ function defineClientTests(BASE: string) {
       await page.waitForFunction(() =>
         document.querySelector("h1")?.textContent?.includes("Users"),
       );
-      // Let any async work from the SPA navigation settle (dynamic imports
-      // may trigger Vite dep discovery → full reload in dev mode)
-      await page.waitForLoadState("networkidle");
 
       expect(page.url()).toBe(BASE + "/users");
 

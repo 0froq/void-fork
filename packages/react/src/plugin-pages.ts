@@ -60,7 +60,13 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
         isDev = true;
         return {
           optimizeDeps: {
+            // Exclude @vite-cloud/react so the virtual module and user
+            // components share the same React context objects (identity).
             exclude: ["@vite-cloud/react"],
+            // Pre-include React entries that are discovered late via dynamic
+            // imports during SPA navigation, avoiding a full-page reload
+            // from Vite's dep optimizer.
+            include: ["react/jsx-runtime", "react/jsx-dev-runtime", "react-dom/client"],
           },
         };
       }
