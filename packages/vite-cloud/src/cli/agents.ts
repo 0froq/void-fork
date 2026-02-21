@@ -24,7 +24,8 @@ export interface McpConfigTarget {
 }
 
 // Agent configs: project-local skillsDir and how to detect presence in the project root.
-// Based on https://github.com/vercel-labs/skills/blob/main/src/agents.ts
+// Skill directory locations are aligned with:
+// https://github.com/vercel-labs/skills/blob/main/README.md
 export interface AgentConfig {
   displayName: string;
   skillsDir: string;
@@ -54,13 +55,13 @@ const agents: Record<string, AgentConfig> = {
   },
   codex: {
     displayName: "Codex",
-    skillsDir: ".codex/skills",
+    skillsDir: ".agents/skills",
     detect: (root) => existsSync(join(root, ".codex")),
     mcpHint: "codex mcp add vite-cloud -- npx vcc mcp",
   },
   cursor: {
     displayName: "Cursor",
-    skillsDir: ".cursor/skills",
+    skillsDir: ".agents/skills",
     detect: (root) => existsSync(join(root, ".cursor")),
     mcpConfig: [{ filePath: ".cursor/mcp.json", rootKey: "mcpServers" }],
   },
@@ -72,14 +73,16 @@ const agents: Record<string, AgentConfig> = {
   },
   "gemini-cli": {
     displayName: "Gemini CLI",
-    skillsDir: ".gemini/skills",
+    skillsDir: ".agents/skills",
     detect: (root) => existsSync(join(root, ".gemini")),
     mcpHint: "gemini mcp add vite-cloud -- npx vcc mcp",
   },
   "github-copilot": {
     displayName: "GitHub Copilot",
-    skillsDir: ".github/skills",
-    detect: (root) => existsSync(join(root, ".github")),
+    skillsDir: ".agents/skills",
+    detect: (root) =>
+      existsSync(join(root, ".github", "copilot-instructions.md")) ||
+      existsSync(join(root, ".vscode", "mcp.json")),
     mcpConfig: [
       { filePath: ".vscode/mcp.json", rootKey: "servers", extraFields: { type: "stdio" } },
     ],
@@ -120,7 +123,7 @@ const agents: Record<string, AgentConfig> = {
   },
   opencode: {
     displayName: "OpenCode",
-    skillsDir: ".opencode/skills",
+    skillsDir: ".agents/skills",
     detect: (root) => existsSync(join(root, ".opencode")),
     mcpHint:
       "Run `npx vcc mcp` — this starts a stdio MCP server. See your agent's docs for how to add a local MCP server.",

@@ -10,7 +10,6 @@
     "env.d.ts",
     "schema.json",
     "skills",
-    "docs",
     "AGENT_PROMPT.md",
     "getting-started-prompt.txt",
     "README.md"
@@ -89,7 +88,7 @@
     }
   },
   "scripts": {
-    "build": "tsdown && cp -r ../website/docs docs",
+    "build": "node scripts/sync-skill-docs.mjs && tsdown",
     "dev": "tsdown --watch",
     "typecheck": "tsgo --noEmit"
   },

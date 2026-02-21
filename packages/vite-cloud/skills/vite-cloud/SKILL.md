@@ -1,502 +1,56 @@
 ---
 name: vite-cloud
-description: Unified Vite Cloud skill for app development and CLI operations. Use when building, debugging, deploying, or managing Vite Cloud apps (routing, pages mode, DB, auth, typed fetch, KV/storage, queues, cron, CLI, domains, secrets, projects).
+description: Vite Cloud skill for app development and CLI operations. Use this skill to route user requests to the appropriate bundled Vite Cloud docs.
 ---
 
-# Vite Cloud — Coding Agent Reference
+# Vite Cloud Skill
 
-Vite Cloud is a zero-config Cloudflare deployment platform and Vite plugin. Add `viteCloud()` to your Vite config and get file-based API routing (Hono), server-rendered pages with co-located data loading (Inertia-inspired), auto-provisioned D1/KV/R2 bindings, end-to-end type safety, and one-command deploys to `<slug>.vitecloud.app`.
+This skill is a router. Open the minimum relevant docs files under `docs/` and execute.
 
-> Full docs: `node_modules/vite-cloud/docs/` — each section below links to the relevant file.
+Docs in this skill are bundled from `packages/website/docs` during `vite-cloud` package build and live at:
 
-## CLI Task Routing
+- `skills/vite-cloud/docs/*.md`
 
-For CLI-heavy requests, use the companion reference files under `references/`:
+## Command Naming
 
-| Intent                              | Reference                       |
-| ----------------------------------- | ------------------------------- |
-| First-time setup, init, login       | `references/getting-started.md` |
-| Deploy, CI/CD, deployment history   | `references/deployment.md`      |
-| Database, migrations, SQL, seed     | `references/database.md`        |
-| Generate code, scaffold model/route | `references/code-generation.md` |
-| Secrets, environment variables      | `references/secrets.md`         |
-| Custom domains, DNS                 | `references/domains.md`         |
-| Projects, link, delete, whoami      | `references/projects.md`        |
+Use `vcc` in examples and commands in this skill.
 
-CLI workflow helper: `command/vite-cloud.md`
+- `vite-cloud` and `vcc` are equivalent binaries. Prefer `vcc`.
 
-## Project Structure
+## No-Args Behavior
 
-```
-pages/               # Pages mode: SSR pages with loader/action (docs/pages-routing.md)
-  layout.vue         #   Root layout (persists across navigations)
-  index.vue          #   GET / — page component
-  index.server.ts    #   Server handler (loader/action) for index
-  users/
-    layout.vue       #   Nested layout for /users/*
-    [id].vue         #   Dynamic segment
-routes/              # File-based API routes (-> URL paths)
-  api/
-    hello.get.ts
-middleware/           # Global middleware (numbered: 01.logger.ts)
-migrations/          # SQL migrations (001_create_users.sql)
-crons/               # Cron jobs (defineScheduled)
-queues/              # Queue consumers (defineQueue)
-src/                 # Frontend / app code
-vite.config.ts       # Vite config with viteCloud()
-vite-cloud.json      # Optional config (auth, bindings, headers, mode, revalidate)
-.vite-cloud/         # Generated types (routes.d.ts, db.d.ts, tsconfig.json)
-.env / .env.local    # Environment variables
-```
+If invoked without a concrete task, do a brief app status check and report:
 
-## Setup
+1. App type (`fullstack`, `framework`, `spa`, `ssg`) using `docs/app-types.md` criteria.
+2. Backend feature usage (`routes/`, `pages/`, `middleware/`, `migrations/`, `crons/`, `queues/`, SSR entries).
+3. Runtime signals (`vite-cloud/db`, `vite-cloud/kv`, `vite-cloud/storage`, queue usage).
+4. Auth signals (`vite-cloud/auth`, `auth` client imports, OAuth env vars).
+5. Project linkage (`.vite-cloud/project.json`) and config readiness (`vite-cloud.json`, tsconfig extends).
+6. Optional health checks (`vite-cloud whoami`, `vite-cloud db status` when relevant).
 
-**API-only or SPA + API:**
+Then ask what to do next.
 
-```ts
-import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
+## Task Routing
 
-export default defineConfig({
-  plugins: [viteCloud()],
-});
-```
+| User intent                               | Docs file(s)                                                      |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| CLI command syntax, flags, env vars       | `docs/cli.md`                                                     |
+| Initial setup, onboarding, first app      | `docs/quickstart.md`, `docs/cli.md`                               |
+| App type detection and mode behavior      | `docs/app-types.md`, `docs/config.md`                             |
+| Server/API routing and middleware         | `docs/server-routing.md`, `docs/hono.md`                          |
+| Pages mode, loader/action, forms, layouts | `docs/pages-routing.md`, `docs/type-safety.md`                    |
+| Database and migrations                   | `docs/db.md`, `docs/type-safety.md`                               |
+| Typed fetch and end-to-end typing         | `docs/typed-fetch.md`, `docs/type-safety.md`                      |
+| Authentication                            | `docs/auth.md`, `docs/env-vars.md`                                |
+| Cloudflare runtime bindings and config    | `docs/cloudflare.md`, `docs/config.md`, `docs/env-vars.md`        |
+| KV / storage / queues / cron jobs         | `docs/kv.md`, `docs/storage.md`, `docs/queues.md`, `docs/jobs.md` |
+| SSR and caching                           | `docs/ssr.md`, `docs/cache.md`, `docs/edge-caching.md`            |
+| Deployment and CI                         | `docs/deployment.md`, `docs/cli.md`                               |
+| MCP server usage                          | `docs/mcp.md`                                                     |
+| API surface details                       | `docs/api.md`                                                     |
 
-**Pages mode** — add a framework adapter (no SSR/client entry needed, adapter generates everything):
+## Working Rules
 
-```ts
-import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
-import { viteCloudVue } from "@vite-cloud/vue/plugin";
-
-export default defineConfig({
-  plugins: [viteCloud(), viteCloudVue()],
-});
-```
-
-**`tsconfig.json`:**
-
-```json
-{
-  "extends": "./.vite-cloud/tsconfig.json",
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ES2022",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "skipLibCheck": true,
-    "types": ["vite-cloud/env"]
-  },
-  "include": ["src", "routes", "middleware", "crons", "queues", "pages"]
-}
-```
-
-The `extends` line pulls in generated `routes.d.ts` and `db.d.ts` automatically. Run `vite dev` once to generate `.vite-cloud/`.
-
-> Docs: `docs/type-safety.md`
-
-## Pages Mode
-
-> Docs: `docs/pages-routing.md`
-
-Activates when a `pages/` directory exists. Coexists with `routes/` (use `pages/` for UI, `routes/` for APIs). Pages are server-rendered — they run in both Workers and browsers.
-
-**Server handlers** — companion `.server.ts` files export `loader` (GET -> props) and `action` (mutations):
-
-```ts
-// pages/users/index.server.ts
-export const loader = defineHandler(async (c) => {
-  return { users: await db.list("users") }; // becomes page props
-});
-
-export const action = defineHandler.withValidator({
-  body: v.object({ name: v.string(), email: v.string() }),
-})(async (c, { body }) => {
-  await db.insert("users", body);
-  // void -> re-runs loader with fresh props | c.redirect("/path") -> navigates
-});
-```
-
-**Vue `<script server>`** — colocate server logic in SFCs (alternative to `.server.ts`). Type declarations (`interface`, `type`, `import type`) are preserved for `<script setup>`. If both exist, `.server.ts` takes precedence.
-
-**Layouts** — `layout.vue`/`layout.tsx` in any `pages/` subdirectory. Auto-nest (root > nested > page). State persists within subtree. No server handlers — use `useShared()` for data.
-
-**Validation** — throw `ValidationError({ field: "message" })` or use `withValidator` (auto-caught). Errors appear on `useForm().errors`.
-
-**Client API** (from `@vite-cloud/vue` or `@vite-cloud/react`):
-
-| Export      | Purpose                                                               |
-| ----------- | --------------------------------------------------------------------- |
-| `Link`      | SPA nav component (`<a>` for GET, `<button>` for non-GET)             |
-| `useForm`   | Typed form: `data`, `errors`, `post()`, `processing`, `isDirty`, etc. |
-| `useShared` | Shared data from middleware (`c.set("shared", {...})`)                |
-| `useRouter` | Programmatic: `router.visit(url)`, `router.reload()`                  |
-
-`useForm` infers body fields and error keys from the page's action validator. For dynamic routes: `useForm("/users/:id", defaults, { params: { id } })`.
-
-**View transitions** — `viteCloudVue({ viewTransitions: true })`. Per-link: `<Link :view-transition="false">`.
-
-## Server Routing
-
-> Docs: `docs/server-routing.md`
-
-Files in `routes/` map to URL paths:
-
-| File                       | URL              |
-| -------------------------- | ---------------- |
-| `routes/index.ts`          | `/`              |
-| `routes/api/users.ts`      | `/api/users`     |
-| `routes/api/users/[id].ts` | `/api/users/:id` |
-| `routes/docs/[...slug].ts` | `/docs/*`        |
-
-- `_`-prefixed files/dirs are ignored
-- `(group)` directories are route groups (no URL effect)
-- `.dev.ts` / `.prod.ts` suffix restricts to that environment
-
-### Handlers
-
-Use named exports for HTTP methods: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`. Or use `export default` for a single-method route (method from filename suffix like `hello.get.ts`).
-
-```ts
-import { defineHandler } from "vite-cloud";
-
-export const GET = defineHandler((c) => {
-  return { users: [] }; // object -> JSON response
-});
-
-export const POST = defineHandler((c) => {
-  return { created: true };
-});
-```
-
-**Return value rules:**
-
-- Object/array -> JSON (`application/json`)
-- String -> HTML (`text/html`)
-- `null` -> 204 No Content
-- `Response` -> pass-through
-
-### Validation
-
-```ts
-import { defineHandler } from "vite-cloud";
-import * as v from "valibot"; // or zod, arktype
-
-export const POST = defineHandler.withValidator({
-  body: v.object({ title: v.string(), body: v.string() }),
-})(async (c) => {
-  const { title, body } = c.req.valid("json");
-  // title and body are typed strings
-});
-```
-
-Supports any Standard Schema library (Zod, Valibot, ArkType). Validation errors return `400` with `{ error, issues }`.
-
-> Docs: `docs/server-routing.md`, `docs/hono.md`
-
-## Middleware
-
-> Docs: `docs/server-routing.md`
-
-**Global middleware** — files in `middleware/` with numeric prefixes:
-
-```ts
-// middleware/01.logger.ts
-import { defineMiddleware } from "vite-cloud";
-
-export default defineMiddleware(async (c, next) => {
-  console.log(`${c.req.method} ${c.req.url}`);
-  await next();
-});
-```
-
-**Per-route middleware** — pass middleware before the handler:
-
-```ts
-export const GET = defineHandler(myMiddleware, (c) => {
-  return { ok: true };
-});
-```
-
-## Database
-
-> Docs: `docs/db.md`
-
-Built on Cloudflare D1 (SQLite). Auto-provisioned — just create migrations and import `db`.
-
-**Migrations** in `migrations/` with numbered prefixes:
-
-```sql
--- migrations/001_create_users.sql
-CREATE TABLE users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  email TEXT NOT NULL UNIQUE,
-  created_at TEXT DEFAULT (datetime('now'))
-);
-```
-
-Migrations run automatically on `vite dev` and `vite-cloud deploy`.
-
-**Query API:**
-
-```ts
-import { db } from "vite-cloud/db";
-
-db.list("users"); // all rows
-db.list("users", { where: { active: 1 }, orderBy: "name", limit: 10 });
-db.get("users", { where: { id: 1 } }); // single row or null
-db.insert("users", { name: "Alice", email: "alice@example.com" });
-db.update("users", { set: { name: "Bob" }, where: { id: 1 } });
-db.delete("users", { where: { id: 1 } });
-db.count("users", { where: { active: 1 } });
-db.raw<T>("SELECT * FROM users WHERE id = ?", [1]);
-```
-
-Types are auto-generated from migration DDL into `.vite-cloud/db.d.ts`. No manual type definitions needed.
-
-**Scaffolding:** `npx vite-cloud gen model users name:string email:string bio:text?` creates migration + CRUD routes + regenerated types.
-
-## Auth
-
-> Docs: `docs/auth.md`
-
-Auto-detected from imports or env vars. No config required.
-
-**Server-side:**
-
-```ts
-import { requireAuth } from "vite-cloud/auth";
-
-export const GET = defineHandler((c) => {
-  const user = requireAuth(c); // throws 401 if unauthenticated
-  return { user };
-});
-```
-
-**Client-side:**
-
-```ts
-import { auth } from "vite-cloud/client";
-
-await auth.register({ email, password, name });
-await auth.login({ email, password });
-const user = await auth.me(); // AuthUser | null
-await auth.logout();
-```
-
-For OAuth: set `GITHUB_OAUTH_ID`, `GITHUB_OAUTH_SECRET` (and/or Google equivalents) as env vars. Routes like `GET /auth/login/github` are generated automatically.
-
-Explicit config in `vite-cloud.json`: `{ "auth": ["github", "google", "email"] }`.
-
-## Typed Fetch Client
-
-> Docs: `docs/type-safety.md`, `docs/typed-fetch.md`
-
-```ts
-import { fetch } from "vite-cloud/client";
-
-const users = await fetch("/api/users");
-// Path, method, body, and response types all inferred from route handlers
-```
-
-The type pipeline: SQL migrations -> DB types -> route handler return types -> `RouteMap` -> typed fetch. Types update automatically when you change routes or migrations.
-
-## KV (Key-Value)
-
-> Docs: `docs/kv.md`
-
-```ts
-import { kv } from "vite-cloud/kv";
-
-await kv.set("key", { data: true }, { ttl: 3600 });
-const value = await kv.get<MyType>("key");
-await kv.delete("key");
-await kv.list({ prefix: "user:" });
-
-// Typed maps with auto-prefixing
-const sessions = kv.map<Session>("sessions");
-await sessions.set("abc", data); // key: "sessions:abc"
-await sessions.get("abc"); // Session | null
-```
-
-## Object Storage
-
-> Docs: `docs/storage.md`
-
-Direct R2 binding — no abstraction layer.
-
-```ts
-import { storage } from "vite-cloud/storage";
-
-await storage.put("avatar.png", file);
-const obj = await storage.get("avatar.png");
-await storage.delete("avatar.png");
-await storage.list({ prefix: "uploads/" });
-```
-
-## Queues
-
-> Docs: `docs/queues.md`
-
-**Consumer** — files in `queues/`, filename becomes queue name:
-
-```ts
-// queues/emails.ts
-import { defineQueue } from "vite-cloud";
-
-export default defineQueue<{ to: string; subject: string }>(async (batch) => {
-  for (const msg of batch.messages) {
-    console.log(msg.body.to, msg.body.subject);
-    msg.ack();
-  }
-});
-```
-
-**Producer:**
-
-```ts
-import { queues } from "vite-cloud/queues";
-
-await queues.emails.send({ to: "user@example.com", subject: "Hello" });
-// Type-safe: message shape inferred from consumer's generic parameter
-```
-
-## Cron Jobs
-
-> Docs: `docs/jobs.md`
-
-Files in `crons/`, must export `cron` schedule and `defineScheduled` handler:
-
-```ts
-// crons/cleanup.ts
-import { defineScheduled } from "vite-cloud";
-
-export const cron = "0 * * * *"; // every hour
-// or: export const cron = ["0 * * * *", "30 * * * *"];
-
-export default defineScheduled(async (controller, env, ctx) => {
-  // cleanup logic
-});
-```
-
-`_`-prefixed files are ignored. Schedules are auto-configured on deploy.
-
-## CLI Quick Reference
-
-| Command                                    | Purpose                                           |
-| ------------------------------------------ | ------------------------------------------------- |
-| `vite-cloud init`                          | Set up vite-cloud in a new or existing project    |
-| `vite-cloud init --agents`                 | Set up agent instructions, skills, and MCP config |
-| `vite-cloud deploy`                        | Build and deploy to Vite Cloud                    |
-| `vite-cloud login` / `logout` / `whoami`   | Authentication                                    |
-| `vite-cloud secret put <name[=value]>`     | Set a project secret                              |
-| `vite-cloud secret sync <file>`            | Sync secrets from .env file                       |
-| `vite-cloud db status`                     | Show migration status                             |
-| `vite-cloud db reset`                      | Reset local DB and re-run migrations              |
-| `vite-cloud db seed`                       | Reset, migrate, and run seed.sql                  |
-| `vite-cloud gen model <name> [cols...]`    | Generate migration + CRUD routes + types          |
-| `vite-cloud gen migration <name>`          | Generate empty migration                          |
-| `vite-cloud gen route <path>`              | Generate route file                               |
-| `vite-cloud gen middleware <name>`         | Generate middleware file                          |
-| `vite-cloud gen cron <name>`               | Generate cron job file                            |
-| `vite-cloud gen queue <name>`              | Generate queue consumer                           |
-| `vite-cloud gen ssr [--react\|--vue\|...]` | Generate SSR entry files                          |
-| `vite-cloud domain add <hostname>`         | Add custom domain                                 |
-| `vite-cloud link [name]`                   | Link to an existing project                       |
-
-> Docs: `docs/cli.md`
-
-## Configuration
-
-> Docs: `docs/config.md`
-
-Optional `vite-cloud.json` at project root:
-
-```json
-{
-  "auth": ["github", "google", "email"],
-  "bindings": { "db": true, "kv": true, "storage": false },
-  "headers": { "/assets/*": ["Cache-Control: public, max-age=31536000"] },
-  "mode": "spa",
-  "revalidate": 60
-}
-```
-
-All fields optional. Bindings are auto-inferred from source imports. Mode is auto-detected. `revalidate` enables edge caching (ISR) for SSR/pages.
-
-## Environment Variables
-
-> Docs: `docs/env-vars.md`
-
-- **`.env`** — committed, non-secret defaults. All vars available in worker via `c.env`. `VITE_`-prefixed vars also available on `import.meta.env` client-side.
-- **`.env.local`** — gitignored secrets for local dev. Not deployed.
-- **`vite-cloud secret put`** — production secrets. Use `vite-cloud secret sync .env.local` to sync.
-
-## Cloudflare Bindings
-
-DB, KV, and Storage bindings are auto-inferred from imports (`vite-cloud/db`, `vite-cloud/kv`, `vite-cloud/storage`). Queue bindings are inferred from `queues/` directory. No manual Cloudflare dashboard configuration needed.
-
-Access raw bindings via `c.env.DB`, `c.env.KV`, `c.env.STORAGE`, `c.env.QUEUE_*`.
-
-> Docs: `docs/cloudflare.md`
-
-## Deployment
-
-> Docs: `docs/deployment.md`
-
-```bash
-npx vite-cloud deploy
-# or with explicit project:
-npx vite-cloud deploy --project my-app
-```
-
-On first deploy, Vite Cloud auto-provisions all required resources (D1, KV, R2, queues). Migrations run before the worker is deployed — if migrations fail, the deploy is aborted.
-
-**GitHub Actions:**
-
-```yaml
-- run: npx vite-cloud deploy
-  env:
-    VITE_CLOUD_TOKEN: ${{ secrets.VITE_CLOUD_TOKEN }}
-```
-
-Generate the workflow with `vite-cloud init --github`. Get a token with `vite-cloud token`.
-
-## Custom SSR
-
-> Docs: `docs/ssr.md`
-
-For advanced SSR without pages mode. Create `src/main.ssr.ts` + `src/main.client.ts`:
-
-```ts
-import { defineRender } from "vite-cloud";
-
-export default defineRender(async (c, assetTags) => {
-  const html = renderToString(<App />);
-  return new Response(`<!doctype html><html><head>${assetTags.head}</head><body><div id="root">${html}</div>${assetTags.body}</body></html>`,
-    { headers: { "content-type": "text/html; charset=utf-8" } });
-});
-```
-
-For most apps, pages mode handles SSR automatically — no entry files needed.
-
-## Edge Caching (ISR)
-
-> Docs: `docs/edge-caching.md`
-
-Stale-while-revalidate caching for SSR/pages. Add `revalidate` to `vite-cloud.json`:
-
-```json
-{ "revalidate": 60 }
-```
-
-Per-path: `{ "revalidate": { "/docs/*": 31536000, "/user/*": 0, "*": 30 } }`. Per-page: export `revalidate` from `.server.ts`. On-demand: `import { revalidate } from "vite-cloud/isr"` -> `revalidate({ paths: ["/"] })`.
-
-Requests with `Cookie`/`Authorization` headers bypass cache. Deploys clear the cache.
-
-## Hono
-
-The runtime is built on [Hono](https://hono.dev). All `hono/*` subpaths work. Use Hono middleware, response helpers (`c.json()`, `c.text()`, `c.header()`), streaming (`hono/streaming`), and `HTTPException` for typed errors.
-
-> Docs: `docs/hono.md`
+- For CLI-heavy tasks, open `docs/cli.md` first.
+- For multi-topic tasks, combine only the needed doc files.
+- If docs and memory differ, follow docs.
