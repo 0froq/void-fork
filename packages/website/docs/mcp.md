@@ -13,7 +13,7 @@ npx vcc mcp
 ## Automatic Setup
 
 ```sh
-npx vcc init --mcp
+npx vcc init --agents
 ```
 
 Detects which coding agents are present in your project and writes the MCP server config to the appropriate file. Supports Claude Code, Cursor, Windsurf, GitHub Copilot, and Roo Code. For agents without project-level config (Codex, Gemini CLI, etc.), prints the CLI command to run instead.

@@ -9,9 +9,7 @@ import { cliTitle } from "./output";
 export interface InitArgs {
   tsconfig: boolean;
   github: boolean;
-  agentsmd: boolean;
-  skills: boolean;
-  mcp: boolean;
+  agents: boolean;
 }
 
 export function parseInitArgs(args: string[]): InitArgs {
@@ -22,9 +20,7 @@ export function parseInitArgs(args: string[]): InitArgs {
       options: {
         tsconfig: { type: "boolean" },
         github: { type: "boolean" },
-        agentsmd: { type: "boolean" },
-        skills: { type: "boolean" },
-        mcp: { type: "boolean" },
+        agents: { type: "boolean" },
       },
       strict: true,
     });
@@ -36,9 +32,7 @@ export function parseInitArgs(args: string[]): InitArgs {
   return {
     tsconfig: parsed.values.tsconfig === true,
     github: parsed.values.github === true,
-    agentsmd: parsed.values.agentsmd === true,
-    skills: parsed.values.skills === true,
-    mcp: parsed.values.mcp === true,
+    agents: parsed.values.agents === true,
   };
 }
 
@@ -366,9 +360,8 @@ interface AgentDetection {
   filePath: string | null;
 }
 
-function detectAgentForInstructions(root: string): AgentDetection {
-  const detected = detectAgents(root);
-  if (detected.some((a) => a.skillsDir === ".claude/skills")) {
+function detectAgentForInstructions(root: string, agents: AgentConfig[]): AgentDetection {
+  if (agents.some((a) => a.skillsDir === ".claude/skills")) {
     return { type: "claude", filePath: "CLAUDE.md" };
   }
   if (existsSync(join(root, "CLAUDE.md"))) {
@@ -377,7 +370,7 @@ function detectAgentForInstructions(root: string): AgentDetection {
   if (existsSync(join(root, "AGENTS.md"))) {
     return { type: "generic", filePath: "AGENTS.md" };
   }
-  if (detected.length > 0) {
+  if (agents.length > 0) {
     return { type: "generic", filePath: "AGENTS.md" };
   }
   return { type: null, filePath: null };
@@ -459,9 +452,11 @@ function writeMcpConfigForTarget(root: string, target: McpConfigTarget): void {
   log.success(`Added vite-cloud MCP server to ${target.filePath}`);
 }
 
-async function setupMcpConfig(root: string, targeted: boolean): Promise<void> {
-  const detected = detectAgents(root);
-
+async function setupMcpConfig(
+  root: string,
+  targeted: boolean,
+  detected: AgentConfig[],
+): Promise<void> {
   const mcpAgents: { agent: AgentConfig; targets: McpConfigTarget[] }[] = [];
   const hintAgents: { agent: AgentConfig; hint: string }[] = [];
 
@@ -544,9 +539,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   intro(cliTitle("init"));
 
   const state = detectProjectState(root);
-  const targeted =
-    initArgs &&
-    (initArgs.tsconfig || initArgs.github || initArgs.agentsmd || initArgs.skills || initArgs.mcp);
+  const targeted = initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agents);
 
   // Step 1: TypeScript / tsconfig
   if (!targeted || initArgs.tsconfig) {
@@ -578,22 +571,25 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     ensureProjectTsconfig(root);
   }
 
-  // Step 2: Agent instructions
-  if (!targeted || initArgs?.agentsmd) {
-    const detected = detectAgentForInstructions(root);
+  // Steps 2–4: Agent instructions, skills, MCP config
+  if (!targeted || initArgs?.agents) {
+    const detectedAgents = detectAgents(root);
+
+    // Step 2: Agent instructions
+    const agentDetection = detectAgentForInstructions(root, detectedAgents);
     if (targeted) {
-      // --agentsmd flag: auto-inject to detected file or default CLAUDE.md
-      injectAgentBlock(root, detected.filePath ?? "CLAUDE.md");
-    } else if (detected.type) {
+      // --agents flag: auto-inject to detected file or default CLAUDE.md
+      injectAgentBlock(root, agentDetection.filePath ?? "CLAUDE.md");
+    } else if (agentDetection.type) {
       const addAgent = await confirm({
-        message: `Add Vite Cloud instructions to ${detected.filePath}?`,
+        message: `Add Vite Cloud instructions to ${agentDetection.filePath}?`,
       });
       if (isCancel(addAgent)) {
         cancel("Setup cancelled.");
         process.exit(0);
       }
       if (addAgent) {
-        injectAgentBlock(root, detected.filePath!);
+        injectAgentBlock(root, agentDetection.filePath!);
       }
     } else {
       const agentChoice = await select({
@@ -614,13 +610,10 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
         injectAgentBlock(root, "AGENTS.md");
       }
     }
-  }
 
-  // Step 3: Link skills
-  if (!targeted || initArgs?.agentsmd || initArgs?.skills) {
-    const { linkSkillsForAgents } = await import("./skills");
-    const detectedAgents = detectAgents(root);
+    // Step 3: Link skills
     if (detectedAgents.length > 0) {
+      const { linkSkillsForAgents } = await import("./skills");
       const agentNames = detectedAgents.map((a) => a.displayName).join(", ");
       if (targeted) {
         linkSkillsForAgents(root);
@@ -637,11 +630,9 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
         }
       }
     }
-  }
 
-  // Step 4: MCP config
-  if (!targeted || initArgs?.mcp) {
-    await setupMcpConfig(root, !!targeted);
+    // Step 4: MCP config
+    await setupMcpConfig(root, !!targeted, detectedAgents);
   }
 
   // Step 5: Demo code (only in full interactive flow)

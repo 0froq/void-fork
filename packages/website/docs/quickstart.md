@@ -28,7 +28,7 @@ The fastest way to get started is to copy the prompt below and paste it into you
 
 <<< ../../vite-cloud/getting-started-prompt.txt
 
-For existing projects, run `vcc init --agentsmd` to add a `CLAUDE.md` (or `AGENTS.md`) with framework instructions.
+For existing projects, run `vcc init --agents` to add agent instructions, skills, and MCP config.
 
 ## Adding to an Existing Vite App
 

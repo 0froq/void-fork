@@ -35,15 +35,13 @@ Run individual steps with flags (no prompts):
 
 ```sh
 npx vcc init --tsconfig    # only tsconfig
-npx vcc init --agentsmd    # only agent instructions
-npx vcc init --skills      # only link skills to detected agents
-npx vcc init --mcp         # only add MCP server config for detected agents
+npx vcc init --agents      # agent instructions + skills + MCP config
 npx vcc init --github      # only GitHub Actions workflow
 ```
 
 Flags can be combined: `npx vcc init --tsconfig --github`.
 
-`--agentsmd` auto-detects the agent environment (Claude Code, Cursor, Codex) and creates the appropriate file.
+`--agents` runs all agent setup steps: injects instructions into the appropriate file (CLAUDE.md/AGENTS.md), links skills, and writes MCP server config for detected agents.
 
 ## Link
 
