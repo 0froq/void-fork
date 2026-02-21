@@ -36,6 +36,8 @@ Run individual steps with flags (no prompts):
 ```sh
 npx vcc init --tsconfig    # only tsconfig
 npx vcc init --agentsmd    # only agent instructions
+npx vcc init --skills      # only link skills to detected agents
+npx vcc init --mcp         # only add MCP server config for detected agents
 npx vcc init --github      # only GitHub Actions workflow
 ```
 

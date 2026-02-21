@@ -1,9 +1,10 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { intro, outro, log, confirm, isCancel, cancel, note, select } from "@clack/prompts";
 import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
+import { detectAgents, getPackageDir, type AgentConfig, type McpConfigTarget } from "./agents";
 import { cliTitle } from "./output";
 
 export interface InitArgs {
@@ -11,6 +12,7 @@ export interface InitArgs {
   github: boolean;
   agentsmd: boolean;
   skills: boolean;
+  mcp: boolean;
   prompt: boolean;
 }
 
@@ -24,6 +26,7 @@ export function parseInitArgs(args: string[]): InitArgs {
         github: { type: "boolean" },
         agentsmd: { type: "boolean" },
         skills: { type: "boolean" },
+        mcp: { type: "boolean" },
         prompt: { type: "boolean" },
       },
       strict: true,
@@ -38,6 +41,7 @@ export function parseInitArgs(args: string[]): InitArgs {
     github: parsed.values.github === true,
     agentsmd: parsed.values.agentsmd === true,
     skills: parsed.values.skills === true,
+    mcp: parsed.values.mcp === true,
     prompt: parsed.values.prompt === true,
   };
 }
@@ -366,28 +370,21 @@ interface AgentDetection {
   filePath: string | null;
 }
 
-function detectAgent(root: string): AgentDetection {
-  if (existsSync(join(root, ".claude")) || existsSync(join(root, "CLAUDE.md"))) {
+function detectAgentForInstructions(root: string): AgentDetection {
+  const detected = detectAgents(root);
+  if (detected.some((a) => a.skillsDir === ".claude/skills")) {
+    return { type: "claude", filePath: "CLAUDE.md" };
+  }
+  if (existsSync(join(root, "CLAUDE.md"))) {
     return { type: "claude", filePath: "CLAUDE.md" };
   }
   if (existsSync(join(root, "AGENTS.md"))) {
     return { type: "generic", filePath: "AGENTS.md" };
   }
-  return { type: null, filePath: null };
-}
-
-function getPackageDir(): string {
-  // Walk up from the current file to find the vite-cloud package root.
-  // tsdown bundles this as a chunk at dist/ level, so the nesting depth varies.
-  let dir = join(fileURLToPath(import.meta.url), "..");
-  for (let i = 0; i < 5; i++) {
-    if (existsSync(join(dir, "package.json"))) {
-      const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8"));
-      if (pkg.name === "vite-cloud") return dir;
-    }
-    dir = join(dir, "..");
+  if (detected.length > 0) {
+    return { type: "generic", filePath: "AGENTS.md" };
   }
-  throw new Error("Could not find vite-cloud package root");
+  return { type: null, filePath: null };
 }
 
 function readAgentPrompt(): string {
@@ -435,6 +432,117 @@ function injectAgentBlock(root: string, filePath: string): void {
   }
 }
 
+function writeMcpConfigForTarget(root: string, target: McpConfigTarget): void {
+  const fullPath = join(root, target.filePath);
+  let existing: Record<string, any> = {};
+  if (existsSync(fullPath)) {
+    try {
+      existing = JSON.parse(readFileSync(fullPath, "utf-8"));
+    } catch {
+      // unparseable — start fresh
+    }
+  }
+
+  if (!existing[target.rootKey]) {
+    existing[target.rootKey] = {};
+  }
+
+  if (existing[target.rootKey]["vite-cloud"]) {
+    log.info(`${target.filePath} already has vite-cloud MCP config`);
+    return;
+  }
+
+  existing[target.rootKey]["vite-cloud"] = {
+    command: "npx",
+    args: ["vcc", "mcp"],
+    ...target.extraFields,
+  };
+
+  mkdirSync(dirname(fullPath), { recursive: true });
+  writeFileSync(fullPath, JSON.stringify(existing, null, 2) + "\n");
+  log.success(`Added vite-cloud MCP server to ${target.filePath}`);
+}
+
+async function setupMcpConfig(root: string, targeted: boolean): Promise<void> {
+  const detected = detectAgents(root);
+
+  const mcpAgents: { agent: AgentConfig; targets: McpConfigTarget[] }[] = [];
+  const hintAgents: { agent: AgentConfig; hint: string }[] = [];
+
+  for (const agent of detected) {
+    if (agent.mcpConfig) {
+      mcpAgents.push({ agent, targets: agent.mcpConfig });
+    } else if (agent.mcpHint) {
+      hintAgents.push({ agent, hint: agent.mcpHint });
+    }
+  }
+
+  if (detected.length === 0) {
+    note(
+      JSON.stringify(
+        {
+          "vite-cloud": {
+            command: "npx",
+            args: ["vcc", "mcp"],
+          },
+        },
+        null,
+        2,
+      ),
+      "Add this MCP server config to your agent",
+    );
+    return;
+  }
+
+  // Print hints for agents without project-level config
+  for (const { agent, hint } of hintAgents) {
+    log.info(`${agent.displayName}: ${hint}`);
+  }
+
+  // Write config for agents with project-level support
+  for (const { agent, targets } of mcpAgents) {
+    let target: McpConfigTarget;
+
+    if (targets.length === 1) {
+      target = targets[0];
+    } else {
+      // Check which config files already exist on disk
+      const existingTargets = targets.filter((t) => existsSync(join(root, t.filePath)));
+
+      if (existingTargets.length === 1) {
+        target = existingTargets[0];
+      } else if (existingTargets.length >= 2) {
+        // Multiple exist — always prompt to disambiguate
+        const chosen = await select({
+          message: `${agent.displayName}: multiple config files found — which one?`,
+          options: existingTargets.map((t) => ({ value: t.filePath, label: t.filePath })),
+        });
+        if (isCancel(chosen)) {
+          cancel("Setup cancelled.");
+          process.exit(0);
+        }
+        target = existingTargets.find((t) => t.filePath === chosen)!;
+      } else {
+        // None exist — use first (conventional default)
+        target = targets[0];
+      }
+    }
+
+    if (!targeted) {
+      const ok = await confirm({
+        message: `Add vite-cloud MCP server to ${target.filePath}?`,
+      });
+      if (isCancel(ok)) {
+        cancel("Setup cancelled.");
+        process.exit(0);
+      }
+      if (!ok) continue;
+    }
+
+    writeMcpConfigForTarget(root, target);
+  }
+}
+
 export async function runInitCommand(root: string, initArgs?: InitArgs): Promise<void> {
   console.log();
   intro(cliTitle("init"));
@@ -455,7 +563,8 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   const state = detectProjectState(root);
   const targeted =
-    initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agentsmd || initArgs.skills);
+    initArgs &&
+    (initArgs.tsconfig || initArgs.github || initArgs.agentsmd || initArgs.skills || initArgs.mcp);
 
   // Step 1: TypeScript / tsconfig
   if (!targeted || initArgs.tsconfig) {
@@ -489,7 +598,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   // Step 2: Agent instructions
   if (!targeted || initArgs?.agentsmd) {
-    const detected = detectAgent(root);
+    const detected = detectAgentForInstructions(root);
     if (targeted) {
       // --agentsmd flag: auto-inject to detected file or default CLAUDE.md
       injectAgentBlock(root, detected.filePath ?? "CLAUDE.md");
@@ -527,7 +636,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   // Step 3: Link skills
   if (!targeted || initArgs?.agentsmd || initArgs?.skills) {
-    const { detectAgents, linkSkillsForAgents } = await import("./skills");
+    const { linkSkillsForAgents } = await import("./skills");
     const detectedAgents = detectAgents(root);
     if (detectedAgents.length > 0) {
       const agentNames = detectedAgents.map((a) => a.displayName).join(", ");
@@ -548,7 +657,12 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     }
   }
 
-  // Step 4: Demo code (only in full interactive flow)
+  // Step 4: MCP config
+  if (!targeted || initArgs?.mcp) {
+    await setupMcpConfig(root, !!targeted);
+  }
+
+  // Step 5: Demo code (only in full interactive flow)
   if (!targeted) {
     if (state.hasRoutes || state.hasMigrations) {
       log.info("Project already has routes or migrations, skipping demo");
@@ -568,7 +682,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     }
   }
 
-  // Step 5: GitHub Actions
+  // Step 6: GitHub Actions
   if (!targeted || initArgs.github) {
     const deployYmlPath = join(root, ".github", "workflows", "deploy.yml");
     if (existsSync(deployYmlPath)) {
