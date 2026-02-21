@@ -237,9 +237,9 @@ if (command === "staging") {
   note(
     [
       helpLine("vcc init", "Set up vite-cloud in an existing project"),
+      helpLine("  --agents", "Set up agent instructions, skills, and MCP config"),
       helpLine("  --tsconfig", "Only update tsconfig.json"),
       helpLine("  --github", "Only create GitHub Actions workflow"),
-      helpLine("  --agentsmd", "Only add coding agent instructions"),
       "",
       helpLine("vcc deploy", "Build and deploy to Vite Cloud"),
       helpLine("  --project <name>", "Deploy target project name"),
@@ -292,9 +292,7 @@ if (command === "staging") {
       helpLine("vcc gen queue <name>", "Generate a queue consumer file"),
       "",
       categoryTitle("agent"),
-      helpLine("vcc init --agentsmd", "Inject agent instructions into CLAUDE.md/AGENTS.md"),
-      helpLine("vcc init --skills", "Link vite-cloud skills to your agent"),
-      helpLine("vcc init --mcp", "Add MCP server config for detected agents"),
+      helpLine("vcc init --agents", "Set up agent instructions, skills, and MCP config"),
       helpLine("vcc mcp", "Start MCP server (stdio, for AI agents)"),
     ].join("\n"),
     sectionTitle("Commands"),

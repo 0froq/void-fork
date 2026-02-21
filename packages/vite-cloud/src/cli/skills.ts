@@ -76,7 +76,7 @@ function linkSkills(
 
 /**
  * Link skills for all detected agents. Returns total number of newly linked skills.
- * Used by `vcc init` (interactive flow and `--agentsmd`/`--skills` flags).
+ * Used by `vcc init` (interactive flow and `--agents` flag).
  */
 export function linkSkillsForAgents(root: string): number {
   const packageDir = getPackageDir();

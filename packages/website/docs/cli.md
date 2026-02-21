@@ -28,7 +28,7 @@ We do not recommend installing `vite-cloud` globally, because the CLI needs to b
 ### `vcc init`
 
 ```
-vcc init [--tsconfig] [--github] [--agentsmd] [--skills]
+vcc init [--tsconfig] [--github] [--agents]
 ```
 
 Interactive setup wizard for adding vite-cloud to an existing project. Walks through:
@@ -36,17 +36,17 @@ Interactive setup wizard for adding vite-cloud to an existing project. Walks thr
 1. **TypeScript** — creates or updates `tsconfig.json` (adds `extends .vite-cloud/tsconfig.json` and `vite-cloud/env` types)
 2. **Agent instructions** — adds Vite Cloud framework instructions to `CLAUDE.md` or `AGENTS.md`
 3. **Skills** — links vite-cloud skills to detected coding agents
-4. **Demo code** — optionally scaffolds a migration, API route, and typed fetch example
-5. **GitHub Actions** — optionally creates `.github/workflows/deploy.yml` with the correct package manager commands
+4. **MCP config** — writes MCP server config for detected coding agents
+5. **Demo code** — optionally scaffolds a migration, API route, and typed fetch example
+6. **GitHub Actions** — optionally creates `.github/workflows/deploy.yml` with the correct package manager commands
 
 Use flags to run individual steps without prompts:
 
-| Flag         | Purpose                                                  |
-| ------------ | -------------------------------------------------------- |
-| `--tsconfig` | Only update `tsconfig.json`                              |
-| `--agentsmd` | Only add coding agent instructions (CLAUDE.md/AGENTS.md) |
-| `--skills`   | Only link vite-cloud skills to detected coding agents    |
-| `--github`   | Only create GitHub Actions workflow                      |
+| Flag         | Purpose                                                               |
+| ------------ | --------------------------------------------------------------------- |
+| `--tsconfig` | Only update `tsconfig.json`                                           |
+| `--agents`   | Set up agent instructions, skills, and MCP config for detected agents |
+| `--github`   | Only create GitHub Actions workflow                                   |
 
 Flags can be combined. When any flag is provided, only the specified steps run and interactive prompts are skipped.
 
@@ -352,11 +352,13 @@ Project resolution for domain commands follows the same order as deploy (`--proj
 
 ## Agent
 
-### `vcc init --skills`
+### `vcc init --agents`
 
-Link vite-cloud skills to your coding agent's skills directory.
+Runs all agent setup steps:
 
-Auto-detects which agents are present in your project (Claude Code, Cursor, Windsurf, Gemini CLI, GitHub Copilot, Codex, and [many more](https://github.com/vercel-labs/skills/blob/main/src/agents.ts)) and creates symlinks from each agent's skills directory to the skill files shipped in the `vite-cloud` package. Re-running is safe — already-linked skills are skipped.
+1. **Instructions** — detects existing agent files (`.claude/`, `CLAUDE.md`, `AGENTS.md`) and injects Vite Cloud framework instructions with versioned markers
+2. **Skills** — auto-detects coding agents (Claude Code, Cursor, Windsurf, Gemini CLI, GitHub Copilot, Codex, and [many more](https://github.com/vercel-labs/skills/blob/main/src/agents.ts)) and symlinks skills from the `vite-cloud` package into each agent's skills directory
+3. **MCP config** — writes MCP server config to the appropriate project-level config file (e.g. `.claude/settings.json`, `.cursor/mcp.json`). For agents without project-level config, prints the CLI command to run instead
 
 ## Environment variables
 

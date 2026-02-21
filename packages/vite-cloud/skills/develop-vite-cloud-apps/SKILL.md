@@ -368,26 +368,26 @@ export default defineScheduled(async (controller, env, ctx) => {
 
 ## CLI Quick Reference
 
-| Command                             | Purpose                                             |
-| ----------------------------------- | --------------------------------------------------- |
-| `vcc init`                          | Set up vite-cloud in an existing project            |
-| `vcc init --agentsmd`               | Add coding agent instructions (CLAUDE.md/AGENTS.md) |
-| `vcc deploy`                        | Build and deploy to Vite Cloud                      |
-| `vcc login` / `logout` / `whoami`   | Authentication                                      |
-| `vcc secret put <name[=value]>`     | Set a project secret                                |
-| `vcc secret sync <file>`            | Sync secrets from .env file                         |
-| `vcc db status`                     | Show migration status                               |
-| `vcc db reset`                      | Reset local DB and re-run migrations                |
-| `vcc db seed`                       | Reset, migrate, and run seed.sql                    |
-| `vcc gen model <name> [cols...]`    | Generate migration + CRUD routes + types            |
-| `vcc gen migration <name>`          | Generate empty migration                            |
-| `vcc gen route <path>`              | Generate route file                                 |
-| `vcc gen middleware <name>`         | Generate middleware file                            |
-| `vcc gen cron <name>`               | Generate cron job file                              |
-| `vcc gen queue <name>`              | Generate queue consumer                             |
-| `vcc gen ssr [--react\|--vue\|...]` | Generate SSR entry files                            |
-| `vcc domain add <hostname>`         | Add custom domain                                   |
-| `vcc link [name]`                   | Link to an existing project                         |
+| Command                             | Purpose                                           |
+| ----------------------------------- | ------------------------------------------------- |
+| `vcc init`                          | Set up vite-cloud in an existing project          |
+| `vcc init --agents`                 | Set up agent instructions, skills, and MCP config |
+| `vcc deploy`                        | Build and deploy to Vite Cloud                    |
+| `vcc login` / `logout` / `whoami`   | Authentication                                    |
+| `vcc secret put <name[=value]>`     | Set a project secret                              |
+| `vcc secret sync <file>`            | Sync secrets from .env file                       |
+| `vcc db status`                     | Show migration status                             |
+| `vcc db reset`                      | Reset local DB and re-run migrations              |
+| `vcc db seed`                       | Reset, migrate, and run seed.sql                  |
+| `vcc gen model <name> [cols...]`    | Generate migration + CRUD routes + types          |
+| `vcc gen migration <name>`          | Generate empty migration                          |
+| `vcc gen route <path>`              | Generate route file                               |
+| `vcc gen middleware <name>`         | Generate middleware file                          |
+| `vcc gen cron <name>`               | Generate cron job file                            |
+| `vcc gen queue <name>`              | Generate queue consumer                           |
+| `vcc gen ssr [--react\|--vue\|...]` | Generate SSR entry files                          |
+| `vcc domain add <hostname>`         | Add custom domain                                 |
+| `vcc link [name]`                   | Link to an existing project                       |
 
 > Docs: `docs/cli.md`
 
