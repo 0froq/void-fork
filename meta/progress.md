@@ -2,7 +2,7 @@
 
 ## Phase 1: Local Dev ✅
 
-- [x] `create-vite-cloud` scaffolding CLI
+- [x] `vcc init` empty-directory scaffolding flow
 - [x] Vite plugin wrapping `@cloudflare/vite-plugin`
 - [x] `defineHandler` / `defineMiddleware` with type inference (Hono-based)
 - [x] File-based routing from `routes/` (compiles to Hono app)
@@ -14,7 +14,7 @@
 - [x] Hot reload for API handlers (via Environment API HMR)
 - [x] Local migration runner
 
-**Milestone:** ✅ A user can run `npm create vite-cloud`, add a route file using `defineHandler` that queries a database, and see it work locally with zero config.
+**Milestone:** ✅ A user can run `npm install -D vite-cloud` + `npx vcc init` in an empty directory, add a route file using `defineHandler` that queries a database, and see it work locally with zero config.
 
 ## Phase 2: Platform & Deploy ✅
 

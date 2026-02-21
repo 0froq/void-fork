@@ -5,13 +5,15 @@ The Vite plugin for deploying full-stack apps to [Vite Cloud](https://vite.cloud
 ## Quick Start
 
 ```bash
-npm create vite-cloud@latest
+npm install -D vite-cloud
+npx vcc init
 ```
 
 Or add to an existing Vite project:
 
 ```bash
-npm install vite-cloud hono
+npm install -D vite-cloud
+npx vcc init
 ```
 
 ```ts

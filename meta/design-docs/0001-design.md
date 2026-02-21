@@ -13,7 +13,7 @@ Vite Cloud is a deployment platform and Vite plugin that makes Cloudflare the ea
 
 Progressive experience:
 
-1. `npm create vite-cloud` → scaffold a Vite SPA
+1. `npm install -D vite-cloud` + `npx vcc init` → scaffold a Vite app in the current directory
 2. Add `routes/api/hello.ts` → serverless API endpoint
 3. Use `c.env.DB` in that handler → D1 database auto-provisioned
 4. `vcc deploy` → live on `*.vitecloud.app`

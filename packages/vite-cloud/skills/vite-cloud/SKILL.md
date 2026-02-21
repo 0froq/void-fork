@@ -1,6 +1,6 @@
 ---
-name: develop-vite-cloud-apps
-description: Use when building, modifying, or debugging a Vite Cloud app. Covers project structure, server routing, pages mode (SSR with loader/action), database, auth, typed fetch, KV, storage, queues, cron jobs, edge caching, CLI, and deployment.
+name: vite-cloud
+description: Unified Vite Cloud skill for app development and CLI operations. Use when building, debugging, deploying, or managing Vite Cloud apps (routing, pages mode, DB, auth, typed fetch, KV/storage, queues, cron, CLI, domains, secrets, projects).
 ---
 
 # Vite Cloud — Coding Agent Reference
@@ -8,6 +8,22 @@ description: Use when building, modifying, or debugging a Vite Cloud app. Covers
 Vite Cloud is a zero-config Cloudflare deployment platform and Vite plugin. Add `viteCloud()` to your Vite config and get file-based API routing (Hono), server-rendered pages with co-located data loading (Inertia-inspired), auto-provisioned D1/KV/R2 bindings, end-to-end type safety, and one-command deploys to `<slug>.vitecloud.app`.
 
 > Full docs: `node_modules/vite-cloud/docs/` — each section below links to the relevant file.
+
+## CLI Task Routing
+
+For CLI-heavy requests, use the companion reference files under `references/`:
+
+| Intent                              | Reference                       |
+| ----------------------------------- | ------------------------------- |
+| First-time setup, init, login       | `references/getting-started.md` |
+| Deploy, CI/CD, deployment history   | `references/deployment.md`      |
+| Database, migrations, SQL, seed     | `references/database.md`        |
+| Generate code, scaffold model/route | `references/code-generation.md` |
+| Secrets, environment variables      | `references/secrets.md`         |
+| Custom domains, DNS                 | `references/domains.md`         |
+| Projects, link, delete, whoami      | `references/projects.md`        |
+
+CLI workflow helper: `command/vite-cloud.md`
 
 ## Project Structure
 
@@ -220,7 +236,7 @@ CREATE TABLE users (
 );
 ```
 
-Migrations run automatically on `vite dev` and `vcc deploy`.
+Migrations run automatically on `vite dev` and `vite-cloud deploy`.
 
 **Query API:**
 
@@ -239,7 +255,7 @@ db.raw<T>("SELECT * FROM users WHERE id = ?", [1]);
 
 Types are auto-generated from migration DDL into `.vite-cloud/db.d.ts`. No manual type definitions needed.
 
-**Scaffolding:** `npx vcc gen model users name:string email:string bio:text?` creates migration + CRUD routes + regenerated types.
+**Scaffolding:** `npx vite-cloud gen model users name:string email:string bio:text?` creates migration + CRUD routes + regenerated types.
 
 ## Auth
 
@@ -368,26 +384,26 @@ export default defineScheduled(async (controller, env, ctx) => {
 
 ## CLI Quick Reference
 
-| Command                             | Purpose                                           |
-| ----------------------------------- | ------------------------------------------------- |
-| `vcc init`                          | Set up vite-cloud in an existing project          |
-| `vcc init --agents`                 | Set up agent instructions, skills, and MCP config |
-| `vcc deploy`                        | Build and deploy to Vite Cloud                    |
-| `vcc login` / `logout` / `whoami`   | Authentication                                    |
-| `vcc secret put <name[=value]>`     | Set a project secret                              |
-| `vcc secret sync <file>`            | Sync secrets from .env file                       |
-| `vcc db status`                     | Show migration status                             |
-| `vcc db reset`                      | Reset local DB and re-run migrations              |
-| `vcc db seed`                       | Reset, migrate, and run seed.sql                  |
-| `vcc gen model <name> [cols...]`    | Generate migration + CRUD routes + types          |
-| `vcc gen migration <name>`          | Generate empty migration                          |
-| `vcc gen route <path>`              | Generate route file                               |
-| `vcc gen middleware <name>`         | Generate middleware file                          |
-| `vcc gen cron <name>`               | Generate cron job file                            |
-| `vcc gen queue <name>`              | Generate queue consumer                           |
-| `vcc gen ssr [--react\|--vue\|...]` | Generate SSR entry files                          |
-| `vcc domain add <hostname>`         | Add custom domain                                 |
-| `vcc link [name]`                   | Link to an existing project                       |
+| Command                                    | Purpose                                           |
+| ------------------------------------------ | ------------------------------------------------- |
+| `vite-cloud init`                          | Set up vite-cloud in a new or existing project    |
+| `vite-cloud init --agents`                 | Set up agent instructions, skills, and MCP config |
+| `vite-cloud deploy`                        | Build and deploy to Vite Cloud                    |
+| `vite-cloud login` / `logout` / `whoami`   | Authentication                                    |
+| `vite-cloud secret put <name[=value]>`     | Set a project secret                              |
+| `vite-cloud secret sync <file>`            | Sync secrets from .env file                       |
+| `vite-cloud db status`                     | Show migration status                             |
+| `vite-cloud db reset`                      | Reset local DB and re-run migrations              |
+| `vite-cloud db seed`                       | Reset, migrate, and run seed.sql                  |
+| `vite-cloud gen model <name> [cols...]`    | Generate migration + CRUD routes + types          |
+| `vite-cloud gen migration <name>`          | Generate empty migration                          |
+| `vite-cloud gen route <path>`              | Generate route file                               |
+| `vite-cloud gen middleware <name>`         | Generate middleware file                          |
+| `vite-cloud gen cron <name>`               | Generate cron job file                            |
+| `vite-cloud gen queue <name>`              | Generate queue consumer                           |
+| `vite-cloud gen ssr [--react\|--vue\|...]` | Generate SSR entry files                          |
+| `vite-cloud domain add <hostname>`         | Add custom domain                                 |
+| `vite-cloud link [name]`                   | Link to an existing project                       |
 
 > Docs: `docs/cli.md`
 
@@ -415,7 +431,7 @@ All fields optional. Bindings are auto-inferred from source imports. Mode is aut
 
 - **`.env`** — committed, non-secret defaults. All vars available in worker via `c.env`. `VITE_`-prefixed vars also available on `import.meta.env` client-side.
 - **`.env.local`** — gitignored secrets for local dev. Not deployed.
-- **`vcc secret put`** — production secrets. Use `vcc secret sync .env.local` to sync.
+- **`vite-cloud secret put`** — production secrets. Use `vite-cloud secret sync .env.local` to sync.
 
 ## Cloudflare Bindings
 
@@ -430,9 +446,9 @@ Access raw bindings via `c.env.DB`, `c.env.KV`, `c.env.STORAGE`, `c.env.QUEUE_*`
 > Docs: `docs/deployment.md`
 
 ```bash
-npx vcc deploy
+npx vite-cloud deploy
 # or with explicit project:
-npx vcc deploy --project my-app
+npx vite-cloud deploy --project my-app
 ```
 
 On first deploy, Vite Cloud auto-provisions all required resources (D1, KV, R2, queues). Migrations run before the worker is deployed — if migrations fail, the deploy is aborted.
@@ -440,12 +456,12 @@ On first deploy, Vite Cloud auto-provisions all required resources (D1, KV, R2, 
 **GitHub Actions:**
 
 ```yaml
-- run: npx vcc deploy
+- run: npx vite-cloud deploy
   env:
     VITE_CLOUD_TOKEN: ${{ secrets.VITE_CLOUD_TOKEN }}
 ```
 
-Generate the workflow with `vcc init --github`. Get a token with `vcc token`.
+Generate the workflow with `vite-cloud init --github`. Get a token with `vite-cloud token`.
 
 ## Custom SSR
 

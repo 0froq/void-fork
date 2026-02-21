@@ -16,7 +16,11 @@ npx vcc mcp
 npx vcc init --agents
 ```
 
-Detects which coding agents are present in your project and writes the MCP server config to the appropriate file. Supports Claude Code, Cursor, Windsurf, GitHub Copilot, and Roo Code. For agents without project-level config (Codex, Gemini CLI, etc.), prints the CLI command to run instead.
+Detects your coding agent once and writes MCP config using that same context. If auto-detection fails, it asks you to choose from Claude Code, Cursor, Codex, Gemini CLI, or Generic.
+
+- Agents with project-level config support (Claude, Cursor, etc.): `vcc init --agents` writes the config file for you.
+- Agents without project-level config support (Codex, Gemini CLI, etc.): it prints the CLI command to register `npx vcc mcp`.
+- Generic mode: it prints MCP JSON you can paste into your agent config.
 
 ## Manual Setup
 

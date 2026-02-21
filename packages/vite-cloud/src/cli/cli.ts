@@ -236,7 +236,7 @@ if (command === "staging") {
 
   note(
     [
-      helpLine("vcc init", "Set up vite-cloud in an existing project"),
+      helpLine("vcc init", "Set up vite-cloud in a new or existing project"),
       helpLine("  --agents", "Set up agent instructions, skills, and MCP config"),
       helpLine("  --tsconfig", "Only update tsconfig.json"),
       helpLine("  --github", "Only create GitHub Actions workflow"),

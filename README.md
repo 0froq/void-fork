@@ -12,6 +12,7 @@ This is the development repo of Vite Cloud.
 
 - **Never** commit without asking for confirmation.
 - When writing design docs or implementation plans to disk, place them in `meta/design-docs` and follow existing file name and frontmatter conventions.
+- When adding new dependencies to the project, always run `npm view [package] version` to get the latest version.
 - Every implementation plan should include the following:
   - During plan generation: ask clarifying questions when necessary, especially around developer-experience defining design decisions.
   - Verification: run `pnpm lint`, `pnpm fmt`, and `pnpm check`. Run `pnpm test` on tests relevant to the current feature only during feature development. Only run the full test suite when everything is done for final verification. If there are tests hanging or running particularly slow, investigate right there and attempt to fix. Testing velocity is something that should be maintained or improved at every opportunity.
@@ -19,7 +20,7 @@ This is the development repo of Vite Cloud.
     - `README.md` (this file)
     - affected packages's `README.md` or `AGENTS.md`
     - relevant docs md files in `packages/website/docs`
-    - `packages/vite-cloud/skills/vite-cloud-cli` (if change affects CLI)
+    - `packages/vite-cloud/skills/vite-cloud` (if change affects skill/CLI guidance)
     - `packages/vite-cloud/AGENT_PROMPT.md`
     - `packages/vite-cloud/getting-started-prompt.txt`
   - Progress tracking: tick off relevant steps in `meta/progress.md` when applicable.
@@ -51,7 +52,6 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | [`packages/vue`](./packages/vue/README.md)               | `@vite-cloud/vue`                | Vue framework adapter for Pages mode (SSR, Link, useForm) |
 | [`packages/platform`](./packages/platform/README.md)     | `@vite-cloud/platform` (private) | Control Plane API + Admin Dashboard                       |
 | [`packages/dispatch`](./packages/dispatch/README.md)     | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets      |
-| `packages/create-vite-cloud`                             | `create-vite-cloud`              | `npm create vite-cloud` scaffolding CLI                   |
 | `playground/*`                                           | (private)                        | local apps for testing                                    |
 
 ## `vite-cloud` Overview
@@ -157,6 +157,7 @@ See [`meta/operations.md`](./meta/operations.md) for the full operations referen
 - **ArkType `ArkErrors.map()` returns `ArkErrors`** (not a plain array), causing `Response.json()` serialization to crash via its custom `toJSON()`. Use `Array.from(issues, mapper)` instead of `issues.map(mapper)` when flattening Standard Schema issues.
 - **tsconfig `extends` does NOT merge `include`/`files`** — the child completely replaces the parent's. To make generated types discoverable, the `.vite-cloud/tsconfig.json` uses `"files"` (inherited when the child doesn't specify `files`) rather than `"include"` (overridden by the child's `include`).
 - **`declare module` augmentation requires `export {}`** at the top of the generated file. Without a top-level export/import, TypeScript treats it as an ambient module declaration (replaces the module entirely) rather than an augmentation (merges with existing exports). This hides runtime exports like `db` and `createDb`. Both `routes.d.ts` and `db.d.ts` use `export {}` to ensure augmentation semantics.
-- **tsconfig `lib` must be explicit** for CF Workers packages. Without `"lib": ["ES2022"]`, TS defaults to including `lib.dom.d.ts` which shadows `@cloudflare/workers-types` globals (e.g. `CacheStorage.default`). Applied to `dispatch`, `vite-cloud`, `create-vite-cloud`. Not applied to `platform` (its tests use Miniflare/Node which needs DOM-compatible `URL` types).
+- **tsconfig `lib` must be explicit** for CF Workers packages. Without `"lib": ["ES2022"]`, TS defaults to including `lib.dom.d.ts` which shadows `@cloudflare/workers-types` globals (e.g. `CacheStorage.default`). Applied to `dispatch` and `vite-cloud`. Not applied to `platform` (its tests use Miniflare/Node which needs DOM-compatible `URL` types).
 - **OAuth env vars use `_OAUTH_` prefix** (`GITHUB_OAUTH_ID`, `GITHUB_OAUTH_SECRET`, `GOOGLE_OAUTH_ID`, `GOOGLE_OAUTH_SECRET`). These are passed explicitly to `@hono/oauth-providers` middleware, overriding its default `GITHUB_ID`/`GOOGLE_ID` convention, to avoid naming collisions and make the purpose clear.
 - **D1 does not allow `PRAGMA foreign_keys=OFF`** — D1 enforces `foreign_keys=ON` always. Drizzle-generated migrations that do table rebuilds (e.g. adding NOT NULL to an existing column) use `PRAGMA foreign_keys=OFF/ON`, which silently fails on D1. Hand-edit these to `PRAGMA defer_foreign_keys=on/off` instead, which defers FK checks to the end of the current transaction.
+- **Vite config plugins option accepts array of plugins by default** - there is no need to spread plugins that export an array of plugins.

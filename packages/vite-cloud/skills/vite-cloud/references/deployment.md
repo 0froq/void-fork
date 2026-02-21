@@ -3,7 +3,7 @@
 ## Deploy
 
 ```sh
-npx vcc deploy [--project <name>] [--dir <path>] [--spa] [--skip-build]
+npx vite-cloud deploy [--project <name>] [--dir <path>] [--spa] [--skip-build]
 ```
 
 Auto-detects project type (fullstack or static) and runs the appropriate pipeline: build → package → upload.
@@ -28,8 +28,8 @@ If none found, CLI prompts to link or create a project.
 ## Deployment History
 
 ```sh
-npx vcc list [name]    # last 5 deployments
-npx vcc ls [name]      # alias
+npx vite-cloud list [name]    # last 5 deployments
+npx vite-cloud ls [name]      # alias
 ```
 
 If `[name]` is omitted, uses the linked project.
@@ -38,14 +38,14 @@ If `[name]` is omitted, uses the linked project.
 
 ```sh
 # In CI environment:
-export VITE_CLOUD_TOKEN="..."           # auth token (from `npx vcc token`)
-npx vcc deploy --project my-app        # always specify project in CI
+export VITE_CLOUD_TOKEN="..."           # auth token (from `npx vite-cloud token`)
+npx vite-cloud deploy --project my-app        # always specify project in CI
 ```
 
 To scaffold a GitHub Actions workflow:
 
 ```sh
-npx vcc init --github
+npx vite-cloud init --github
 ```
 
 This creates `.github/workflows/deploy.yml` with the correct package manager commands for your project.

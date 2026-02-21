@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { join, relative } from "node:path";
 import { log } from "@clack/prompts";
-import { detectAgents, getPackageDir } from "./agents";
+import { detectAgents, getPackageDir, type AgentConfig } from "./agents";
 
 interface SkillInfo {
   dirName: string;
@@ -89,6 +89,22 @@ export function linkSkillsForAgents(root: string): number {
 
   let totalLinked = 0;
   for (const agent of detected) {
+    log.info(`${agent.displayName} → ${agent.skillsDir}`);
+    totalLinked += linkSkills(root, skillsDir, skills, agent.skillsDir);
+  }
+  return totalLinked;
+}
+
+export function linkSkillsForSpecificAgents(root: string, agents: AgentConfig[]): number {
+  const packageDir = getPackageDir();
+  const skillsDir = join(packageDir, "skills");
+  const skills = parseSkills(skillsDir);
+  if (skills.length === 0) return 0;
+
+  if (agents.length === 0) return 0;
+
+  let totalLinked = 0;
+  for (const agent of agents) {
     log.info(`${agent.displayName} → ${agent.skillsDir}`);
     totalLinked += linkSkills(root, skillsDir, skills, agent.skillsDir);
   }

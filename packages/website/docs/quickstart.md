@@ -1,34 +1,55 @@
 # Vite Cloud Quickstart
 
-## Create a new Project
+## Start in an Empty Directory
 
 ::: code-group
 
 ```sh [npm]
-npm create vite-cloud
+npm install -D vite-cloud
+npx vcc init
 ```
 
 ```sh [pnpm]
-pnpm create vite-cloud
+pnpm add -D vite-cloud
+pnpm vcc init
 ```
 
 ```sh [yarn]
-yarn create vite-cloud
+yarn add -D vite-cloud
+yarn vcc init
 ```
 
 ```sh [bun]
-bun create vite-cloud
+bun add -D vite-cloud
+bunx vcc init
 ```
 
 :::
 
+This scaffolds a starter Vite Cloud app with an interactive setup flow.
+
+<details>
+<summary style="cursor:pointer">
+💡 <b>Notes on <code>vcc</code> binary usage</b>
+</summary>
+
+`vcc` is a local binary from the installed `vite-cloud` package, so outside of npm scripts, you will have to invoke it with `npx`, `pnpm`, `yarn`, or `bunx`. For brevity, you will sometimes see unprefixed `vcc` usage throughout the docs. Just remember it needs to be invoked through a binary runner.
+
+Alternatively, you can add `./node_modules/.bin` to your `PATH` so that you can invoke `vcc` directly when you are in the root directory of your app.
+
+:::warning ⚠️ Prefer local install
+We do not recommend installing `vite-cloud` globally, because the CLI needs to be in sync with same version of the runtime framework. Always install `vite-cloud` locally as a dev dependency of your project.
+:::
+
+</details>
+
 ## Using with Coding Agents
 
-The fastest way to get started is to copy the prompt below and paste it into your coding agent (Claude Code, Cursor, Codex, etc.):
+`vcc init` detects your agent once and reuses that choice for instructions, skills linking, and MCP config.
 
-<<< ../../vite-cloud/getting-started-prompt.txt
+If auto-detection fails, `vcc init` asks you to choose from a short list (Claude, Cursor, Codex, Gemini CLI, Generic).
 
-For existing projects, run `vcc init --agents` to add agent instructions, skills, and MCP config.
+In supported agents such as Claude Code, you can invoke the `/vite-cloud` skill to turn your agent into a Vite Cloud export. Then, simply ask the agent to build an app with Vite Cloud.
 
 ## Adding to an Existing Vite App
 
@@ -67,7 +88,7 @@ export default defineConfig({
 });
 ```
 
-Then run the interactive setup guide via `vcc` (Vite Cloud CLI):
+Then run the setup guide via `vcc` (Vite Cloud CLI):
 
 ::: code-group
 
@@ -87,14 +108,6 @@ yarn vcc init
 bunx vcc init
 ```
 
-:::
-
-::: tip Tip: `vcc` binary invocation
-`vcc` is a local binary from the installed `vite-cloud` package, so outside of npm scripts, you will have to invoke it with `npx`, `pnpm`, `yarn`, or `bunx`.
-
-Alternatively, you can add `./node_modules/.bin` to your `PATH` so that you can invoke `vcc` directly when you are in the root directory of your app.
-
-**For brevity, we will used unprefixed `vcc` throughout the docs.**
 :::
 
 ## Once You Have a Working App
