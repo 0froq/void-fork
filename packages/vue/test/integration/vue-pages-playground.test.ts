@@ -163,6 +163,19 @@ describe("playground/vue-pages", () => {
       };
       expect(userPage.component).toBe("users/[id]");
       expect(userPage.props.user.name).toBe("Alice");
+
+      // 11. Newly added user is accessible via detail page
+      const inertiaCharlie = await fetch(`${BASE}/users/3`, {
+        headers: { "X-Inertia": "true" },
+      });
+      expect(inertiaCharlie.status).toBe(200);
+      const charliePage = (await inertiaCharlie.json()) as {
+        component: string;
+        props: { user: { id: number; name: string; email: string } };
+      };
+      expect(charliePage.component).toBe("users/[id]");
+      expect(charliePage.props.user.name).toBe("Charlie");
+      expect(charliePage.props.user.email).toBe("charlie@example.com");
     } catch (err) {
       startupError = err instanceof Error ? err : new Error(String(err));
     } finally {
