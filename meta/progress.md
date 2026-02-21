@@ -1,4 +1,4 @@
-Implementation Progress
+# Implementation Progress
 
 ## Phase 1: Local Dev ✅
 
@@ -6,7 +6,7 @@ Implementation Progress
 - [x] Vite plugin wrapping `@cloudflare/vite-plugin`
 - [x] `defineHandler` / `defineMiddleware` with type inference (Hono-based)
 - [x] File-based routing from `routes/` (compiles to Hono app)
-- [x] HTTP method routing via filename suffix (`.get.ts`, `.post.ts`)
+- [x] HTTP method routing via named exports (`export const GET/POST/...` per file)
 - [x] Dynamic params, catch-all, and route groups
 - [x] Middleware from `middleware/` directory with ordering
 - [x] Binding inference via oxc `parseSync` (imported from `vite`) + estree-walker
@@ -21,52 +21,81 @@ Implementation Progress
 - [x] Control Plane API (projects, deploy endpoint) — `packages/platform/`
 - [x] Dispatch worker + `*.vitecloud.app` routing — `packages/dispatch/`
 - [x] Static asset serving via R2 (SPA fallback, cache headers)
-- [x] `vite-cloud deploy` CLI command — `packages/vite-cloud/src/deploy/`
-- [x] D1 schema for users, projects, deployments, resources
+- [x] `vcc deploy` CLI command
+- [x] D1 schema for users, projects, deployments, resources (Drizzle ORM)
 - [x] Worker upload to CF dispatch namespace via API
 - [x] KV-based routing table (`slug → { workerName, projectId }`)
-- [x] Auth (GitHub OAuth → JWT, `vite-cloud login` CLI command)
+- [x] Auth (GitHub OAuth → JWT, `vcc login` CLI command)
 - [x] Provisioning engine (D1, KV, R2 creation via CF API)
 - [x] Zero-downtime remote migration execution
+- [x] Staging environment with auto-deploy on push to `main`
 
-**Milestone:** ✅ Full deploy pipeline complete. Stateless deploy, provisioning, auth, and remote migrations all working. Migrations run before worker deploy (zero-downtime guarantee). Destructive-op detection with pragma override.
+**Milestone:** ✅ Full deploy pipeline complete. Stateless deploy, provisioning, auth, and remote migrations all working.
 
-### Phase 3: Developer facing features (in progress)
+## Phase 3: Developer-Facing Features (in progress)
 
-- [x] Secrets management
-- [x] Cron & background jobs (file convention)
-- [x] Queues (file-based consumers in `queues/`, relay via dispatch worker)
-- [x] SSR support (minimal `src/main.ssr.ts` convention)
-- [x] Zero config auth (via `hono/basic-auth` and `@hono/oauth-providers`)
-- [x] Named method exports (`export const GET/POST/...` per file, replaces method-in-filename)
+### Completed
+
+- [x] Secrets management (`vcc secrets`)
+- [x] Cron jobs (`crons/` directory, `defineScheduled`)
+- [x] Queues (`queues/` directory, `defineQueue`, typed producers/consumers)
+- [x] SSR support (`defineRender` in `src/main.ssr.ts`)
+- [x] Zero-config auth (email/password + OAuth, auto-detected from imports)
 - [x] `defineHandler.withValidator()` — Standard Schema input validation (body/query/params)
-- [x] Standard Schema V1 types inlined (no `@standard-schema/spec` dependency required)
 - [x] Route type codegen (`.vite-cloud/routes.d.ts` with `Serialize<T>` + `ExtractInput<V>`)
-- [x] Typed `fetch` client (`vite-cloud/client`) with path/method/input/output inference from `RouteMap`
-- [x] Seamless tsconfig (`.vite-cloud/tsconfig.json` generated, user extends it — no manual `include`)
-- [x] Raw Cloudflare deployment (`vite build && wrangler deploy`) — `mergeBindings` config function preserves user's `wrangler.json` bindings, only adds placeholders for missing inferred bindings
+- [x] Typed `fetch` client (`vite-cloud/client`) with path/method/input/output inference
+- [x] Schema-derived DB types (SQL DDL parser → `.vite-cloud/db.d.ts`)
+- [x] Typed query helper (`vite-cloud/db`) — `db.list/get/insert/update/delete/raw`
+- [x] Seamless tsconfig (`.vite-cloud/tsconfig.json` generated, user extends it)
+- [x] Raw Cloudflare deployment (`vite build && wrangler deploy`)
 - [x] Static deployment (`--dir`, `--spa`, VitePress/Vite auto-detection, SSG 404.html fallback)
-- [x] Schema-derived DB types (SQL DDL parser → `.vite-cloud/db.d.ts` codegen with `DbTables`/`DbInsertTables`)
-- [x] Typed query helper (`vite-cloud/db`) — `db.list/get/insert/update/delete/raw` with compile-time table/column safety
+- [x] Code generation (`vcc gen` — model, route, middleware, ssr, cron, queue)
+- [x] `vcc db` commands (migrations, inspect)
+- [x] `vcc init` — agent instructions, skills linking, prompt output
+- [x] CLI skills for coding agents (Claude Code, Cursor, Codex, etc.)
+- [x] MCP server shipped in-package (`vcc mcp`)
+- [x] CLI lazy loading for startup performance
 - [x] Pages mode — Inertia-inspired full-stack DX with Vue adapter (`@vite-cloud/vue`)
-- [ ] More `vcc db` commands to match wrangler and backend frameworks, e.g. CRUD resource generation
+- [x] Meta-framework adapters (TanStack Start — framework mode)
 
-**Milestone:** Fully typed API routes end-to-end. Route handlers with validators produce typed `RouteMap` via codegen. Client `fetch()` infers path, method, input, and output types automatically. Typed DB query helper with schema-derived types from migration SQL files. Users can deploy to their own Cloudflare account without the Vite Cloud platform.
+### Remaining
 
-### Phase 4: Production Readiness + Polish
+- [ ] Pages mode: React adapter
+- [ ] Pages mode: update agent prompts for pages
+- [ ] Pre-rendering (bring back with new architecture)
+- [ ] AI binding (tier limit / pricing TBD)
+- [ ] Drizzle integration
+- [ ] Better-auth integration
+- [ ] More framework adapters (React Router, Astro, SvelteKit, Nuxt, SolidStart)
+  - [ ] Make backend features (queues, crons, ISR) work alongside these
 
-- [x] Custom domains
+**Milestone:** Fully typed API routes end-to-end. Route handlers with validators produce typed `RouteMap` via codegen. Client `fetch()` infers path, method, input, and output types automatically.
+
+## Phase 4: Production Readiness
+
+### Completed
+
+- [x] Custom domains (`vcc domains`)
 - [x] Usage tiers, metering and limits enforcement
-- [x] Admin dashboard (`packages/admin/` — Hono JSX dashboard, admin API endpoints)
-- [x] Staging environment
+- [x] Admin dashboard (Hono JSX, merged into platform worker)
+- [x] Staging environment with isolated CF resources
+- [x] Staging sign-up allowlist (VoidZero Google accounts only)
+
+### Remaining
+
+- [ ] Move platform DB to PlanetScale Postgres via Hyperdrive
+- [ ] System monitoring / health pings
 - [ ] User dashboard
+- [ ] Improve sign-up page
+- [ ] User token management (CF Secret Store?)
+- [ ] Terms of Service
+- [ ] Sign-up whitelist (public)
 - [ ] Billing integration (Stripe)
-- [ ] Email & webhooks notifications (e.g. for failed project builds or billing issues)
-- [ ] AI code generation (`vite generate route` scaffolding)
+- [ ] Email & webhook notifications (failed deploys, billing)
 
 **Milestone:** Ready for public beta.
 
-### Phase 5: GitHub + Build Containers
+## Phase 5: GitHub + Build Containers
 
 - [ ] GitHub App for webhook-based deploys
 - [ ] Build infrastructure (CF containers)
@@ -74,34 +103,54 @@ Implementation Progress
 
 **Milestone:** Vercel / Netlify core DX parity.
 
-### Phase 6: Growth (Post-Launch)
+## Phase 6: Growth (Post-Launch)
 
-#### v1.1 — Full-Stack & Observability
+### Developer Tools
 
-- [x] Meta-framework adapters (TanStack Start, React Router — framework mode)
-- [ ] SolidStart adapter
-- [ ] better-auth plugin (`@vite-cloud/better-auth`)
-- [ ] Per-route observability (request volume, latency, error rates per route)
+- [ ] `vcc devtools` — route visualization, local DB inspector, log tailing, remote project status
+- [ ] Edge cache auto-warming after deploy
+- [ ] Instant preview without deploying (CF tunnel)
+- [ ] AI-powered codegen
+- [ ] More MCP capabilities
+
+### Observability
+
+- [ ] Per-route observability (request volume, latency, error rates)
 - [ ] Core Web Vitals monitoring (injected `web-vitals` → Analytics Engine)
 - [ ] Privacy-first SPA analytics (no cookies, GDPR-compliant)
 - [ ] Server-side error tracking (unhandled exceptions with route context)
 - [ ] Client-side error tracking (with Rolldown source map advantage)
 
-#### v1.2 — Ecosystem & Power Users
+### Platform
 
+- [ ] Email binding
+- [ ] Durable Object session abstraction
 - [ ] Preview environments with database forks (cloned D1 per PR)
 - [ ] Integration marketplace (Resend, Stripe plugin architecture)
-- [ ] Escape hatches — Tier 1: Workers AI, Vectorize, Hyperdrive (one-line config)
-- [ ] Escape hatches — Tier 2: Durable Objects (`src/objects/` convention)
+- [ ] Workers AI, Vectorize, Hyperdrive (one-line config)
+- [ ] Durable Objects (`src/objects/` convention)
 - [ ] D1 → Hyperdrive upgrade path
-- [ ] Edge WebSockets via `defineWebSocket` (if demand signals)
+- [ ] Edge WebSockets via `defineWebSocket`
 
-#### v2.0 — Team & Enterprise
+### Team & Enterprise
 
 - [ ] Environment promotion (staging → production with migration validation)
 - [ ] Team RBAC & audit logs
 - [ ] Managed auth SSO (SAML/OIDC via better-auth enterprise plugin)
 - [ ] AI dashboard assistant (query analysis, performance insights)
-- [ ] Team plan launch ($50 base + $15/seat)
+- [ ] Team plan launch
 
-See [Roadmap](./roadmap.md) for detailed feature specs and prioritization.
+### Documentation
+
+- [ ] Restructure docs (Nuxt-like)
+- [ ] Testing guide
+- [ ] Security guide
+- [ ] Guide: Framework SSR examples / templates
+- [ ] Guide: Building a blog
+- [ ] Guide: Building an AI chat app
+- [ ] Guide: Using Drizzle with D1
+- [ ] Guide: External DB usage
+- [ ] Guide: Using the Hono ecosystem
+- [ ] Guide: Using raw CF bindings
+- [ ] Guide: Migrating from raw CF to Vite Cloud
+- [ ] Guide: Deploying to raw CF
