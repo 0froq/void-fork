@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, readFileSync, rmSync } from "node:fs";
@@ -24,9 +24,22 @@ async function waitForServer(url: string, timeoutMs: number): Promise<void> {
   throw new Error(`Timed out waiting for server at ${url}`);
 }
 
-describe("playground/ssr", () => {
-  it("dev: serves SSR output for / and non-root paths", async () => {
-    const child = spawn(
+async function killChild(child: ReturnType<typeof spawn>) {
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGTERM");
+    await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
+  }
+}
+
+describe("playground/ssr dev", () => {
+  let child: ReturnType<typeof spawn>;
+  let stderr = "";
+
+  beforeAll(async () => {
+    child = spawn(
       "pnpm",
       [
         "--dir",
@@ -49,60 +62,85 @@ describe("playground/ssr", () => {
       },
     );
 
-    let stderr = "";
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += String(chunk);
     });
 
-    let startupError: Error | null = null;
-    try {
-      await waitForServer(DEV_BASE, 20_000);
+    await waitForServer(DEV_BASE, 20_000);
+  }, 30_000);
 
-      const rootResponse = await fetch(`${DEV_BASE}/`);
-      expect(rootResponse.status).toBe(200);
-      const rootHtml = await rootResponse.text();
-      expect(rootHtml).toContain("Vite Cloud SSR Playground");
-      expect(rootHtml).toContain("Rendered URL: <!-- -->/");
-      expect(rootHtml).toContain('<script type="module" src="/@vite/client"></script>');
-      expect(rootHtml).toContain('<script type="module" src="/src/main.client.tsx"></script>');
-      expect(rootHtml).toContain("__vite_plugin_react_preamble_installed__ = true");
-
-      const nestedResponse = await fetch(`${DEV_BASE}/dashboard`);
-      expect(nestedResponse.status).toBe(200);
-      const nestedHtml = await nestedResponse.text();
-      expect(nestedHtml).toContain("Rendered URL: <!-- -->/dashboard");
-
-      const clientEntryResponse = await fetch(`${DEV_BASE}/src/main.client.tsx`);
-      expect(clientEntryResponse.status).toBe(200);
-      const contentType = clientEntryResponse.headers.get("content-type") ?? "";
-      expect(contentType).toContain("javascript");
-    } catch (err) {
-      startupError = err instanceof Error ? err : new Error(String(err));
-    } finally {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGTERM");
-        await Promise.race([
-          once(child, "exit"),
-          new Promise((resolve) => setTimeout(resolve, 5_000)),
-        ]);
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGKILL");
-        }
-      }
-    }
-
+  afterAll(async () => {
+    if (child) await killChild(child);
     if (stderr.includes("error when starting dev server")) {
       throw new Error(stderr);
     }
-    if (startupError) {
-      throw startupError;
-    }
-  }, 60_000);
+  });
 
-  it("build: emits worker entry and client manifest, and preview serves SSR pages", async () => {
+  it("serves SSR output for / and non-root paths", async () => {
+    const rootResponse = await fetch(`${DEV_BASE}/`);
+    expect(rootResponse.status).toBe(200);
+    const rootHtml = await rootResponse.text();
+    expect(rootHtml).toContain("Vite Cloud SSR Playground");
+    expect(rootHtml).toContain("Rendered URL: <!-- -->/");
+    expect(rootHtml).toContain('<script type="module" src="/@vite/client"></script>');
+    expect(rootHtml).toContain('<script type="module" src="/src/main.client.tsx"></script>');
+    expect(rootHtml).toContain("__vite_plugin_react_preamble_installed__ = true");
+
+    const nestedResponse = await fetch(`${DEV_BASE}/dashboard`);
+    expect(nestedResponse.status).toBe(200);
+    const nestedHtml = await nestedResponse.text();
+    expect(nestedHtml).toContain("Rendered URL: <!-- -->/dashboard");
+
+    const clientEntryResponse = await fetch(`${DEV_BASE}/src/main.client.tsx`);
+    expect(clientEntryResponse.status).toBe(200);
+    const contentType = clientEntryResponse.headers.get("content-type") ?? "";
+    expect(contentType).toContain("javascript");
+  });
+}, 60_000);
+
+describe("playground/ssr build + preview", () => {
+  let child: ReturnType<typeof spawn>;
+  let stderr = "";
+
+  beforeAll(async () => {
     rmSync(join(ROOT, "playground/ssr/dist"), { recursive: true, force: true });
     execSync("pnpm --dir playground/ssr build", { cwd: ROOT, stdio: "pipe" });
 
+    child = spawn(
+      "pnpm",
+      [
+        "--dir",
+        "playground/ssr",
+        "exec",
+        "vite",
+        "preview",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(PREVIEW_PORT),
+        "--strictPort",
+      ],
+      {
+        cwd: ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += String(chunk);
+    });
+
+    await waitForServer(PREVIEW_BASE, 20_000);
+  }, 60_000);
+
+  afterAll(async () => {
+    if (child) await killChild(child);
+    if (stderr.includes("error when starting preview server")) {
+      throw new Error(stderr);
+    }
+  });
+
+  it("emits worker entry and client manifest", () => {
     const workerEntry = join(ROOT, "playground/ssr/dist/playground_ssr/index.js");
     const clientManifest = join(ROOT, "playground/ssr/dist/client/.vite/manifest.json");
 
@@ -128,63 +166,15 @@ describe("playground/ssr", () => {
       "!/node_modules/*",
     ]);
     expect(wranglerConfig.kv_namespaces?.some((b) => b.binding === "KV")).toBe(true);
+  });
 
-    const child = spawn(
-      "pnpm",
-      [
-        "--dir",
-        "playground/ssr",
-        "exec",
-        "vite",
-        "preview",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        String(PREVIEW_PORT),
-        "--strictPort",
-      ],
-      {
-        cwd: ROOT,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+  it("preview serves SSR pages", async () => {
+    const rootFirst = await (await fetch(`${PREVIEW_BASE}/`)).text();
+    const rootSecond = await (await fetch(`${PREVIEW_BASE}/`)).text();
+    expect(rootFirst).toContain("Rendered URL: <!-- -->/");
+    expect(rootSecond).toContain("Rendered URL: <!-- -->/");
 
-    let stderr = "";
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += String(chunk);
-    });
-
-    let startupError: Error | null = null;
-    try {
-      await waitForServer(PREVIEW_BASE, 20_000);
-
-      const rootFirst = await (await fetch(`${PREVIEW_BASE}/`)).text();
-      const rootSecond = await (await fetch(`${PREVIEW_BASE}/`)).text();
-      expect(rootFirst).toContain("Rendered URL: <!-- -->/");
-      expect(rootSecond).toContain("Rendered URL: <!-- -->/");
-
-      const previewAboutHtml = await (await fetch(`${PREVIEW_BASE}/about`)).text();
-      expect(previewAboutHtml).toContain("Rendered URL: <!-- -->/about");
-    } catch (err) {
-      startupError = err instanceof Error ? err : new Error(String(err));
-    } finally {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGTERM");
-        await Promise.race([
-          once(child, "exit"),
-          new Promise((resolve) => setTimeout(resolve, 5_000)),
-        ]);
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGKILL");
-        }
-      }
-    }
-
-    if (stderr.includes("error when starting preview server")) {
-      throw new Error(stderr);
-    }
-    if (startupError) {
-      throw startupError;
-    }
-  }, 60_000);
-});
+    const previewAboutHtml = await (await fetch(`${PREVIEW_BASE}/about`)).text();
+    expect(previewAboutHtml).toContain("Rendered URL: <!-- -->/about");
+  });
+}, 60_000);

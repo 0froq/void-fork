@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { join } from "node:path";
@@ -36,8 +36,11 @@ async function pollForResult(
 }
 
 describe("playground/queues", () => {
-  it("send → consumer → KV round-trip", async () => {
-    const child = spawn(
+  let child: ReturnType<typeof spawn>;
+  let stderr = "";
+
+  beforeAll(async () => {
+    child = spawn(
       "pnpm",
       [
         "--dir",
@@ -60,35 +63,15 @@ describe("playground/queues", () => {
       },
     );
 
-    let stderr = "";
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += String(chunk);
     });
 
-    let startupError: Error | null = null;
-    try {
-      await waitForServer(BASE, 20_000);
+    await waitForServer(BASE, 20_000);
+  }, 30_000);
 
-      const key = `test-${Date.now()}`;
-      const value = "hello";
-
-      // Send a message to the queue
-      const sendRes = await fetch(`${BASE}/api/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key, value }),
-      });
-      expect(sendRes.status).toBe(200);
-      const sendBody = (await sendRes.json()) as { sent: boolean };
-      expect(sendBody.sent).toBe(true);
-
-      // Poll for the consumer to write the result to KV
-      const result = await pollForResult(`${BASE}/api/result?key=queue-result:${key}`, 15_000);
-      expect(result.found).toBe(true);
-      expect(result.value).toBe(value);
-    } catch (err) {
-      startupError = err instanceof Error ? err : new Error(String(err));
-    } finally {
+  afterAll(async () => {
+    if (child) {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill("SIGTERM");
         await Promise.race([
@@ -100,12 +83,28 @@ describe("playground/queues", () => {
         }
       }
     }
-
     if (stderr.includes("error when starting dev server")) {
       throw new Error(stderr);
     }
-    if (startupError) {
-      throw startupError;
-    }
-  }, 60_000);
-});
+  });
+
+  it("send → consumer → KV round-trip", async () => {
+    const key = `test-${Date.now()}`;
+    const value = "hello";
+
+    // Send a message to the queue
+    const sendRes = await fetch(`${BASE}/api/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, value }),
+    });
+    expect(sendRes.status).toBe(200);
+    const sendBody = (await sendRes.json()) as { sent: boolean };
+    expect(sendBody.sent).toBe(true);
+
+    // Poll for the consumer to write the result to KV
+    const result = await pollForResult(`${BASE}/api/result?key=queue-result:${key}`, 15_000);
+    expect(result.found).toBe(true);
+    expect(result.value).toBe(value);
+  });
+}, 60_000);
