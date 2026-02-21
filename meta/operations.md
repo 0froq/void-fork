@@ -68,16 +68,35 @@ All secrets are stored in a dedicated 1Password vault.
 
 Set via `wrangler secret put <NAME>` (separate values per environment):
 
-| Secret                 | Purpose                                                                                                    |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `CF_API_TOKEN`         | Cloudflare API token for managing user workers, DNS, R2 (broad scope — separate token from GitHub Actions) |
-| `CF_ACCOUNT_ID`        | Cloudflare account ID                                                                                      |
-| `CF_ZONE_ID`           | DNS zone ID                                                                                                |
-| `JWT_SECRET`           | Signs auth JWTs                                                                                            |
-| `GITHUB_CLIENT_ID`     | GitHub OAuth app client ID                                                                                 |
-| `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret                                                                             |
-| `GOOGLE_CLIENT_ID`     | Google OAuth app client ID                                                                                 |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth app client secret                                                                             |
+| Secret                 | Purpose                                      |
+| ---------------------- | -------------------------------------------- |
+| `CF_API_TOKEN`         | Cloudflare API token (see permissions below) |
+| `CF_ACCOUNT_ID`        | Cloudflare account ID                        |
+| `CF_ZONE_ID`           | DNS zone ID (`vitecloud.app` zone)           |
+| `JWT_SECRET`           | Signs auth JWTs                              |
+| `GITHUB_CLIENT_ID`     | GitHub OAuth app client ID                   |
+| `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret               |
+| `GOOGLE_CLIENT_ID`     | Google OAuth app client ID                   |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth app client secret               |
+
+**Platform worker `CF_API_TOKEN` permissions** — this is the broad-scope token used at runtime to provision and manage user resources. Separate from the GitHub Actions deploy token.
+
+Account-level:
+
+| Permission         | Access | Operations                                             |
+| ------------------ | ------ | ------------------------------------------------------ |
+| Workers Scripts    | Edit   | Upload/delete user workers in dispatch namespace       |
+| D1                 | Edit   | Create databases, execute migrations, delete databases |
+| Workers KV Storage | Edit   | Create/delete KV namespaces                            |
+| Workers R2 Storage | Edit   | Create/delete R2 buckets                               |
+| Queues             | Edit   | Create/delete queues, manage queue consumers           |
+| Account Analytics  | Read   | Query Analytics Engine SQL API for usage metering      |
+
+Zone-level (on `vitecloud.app`):
+
+| Permission           | Access | Operations                                  |
+| -------------------- | ------ | ------------------------------------------- |
+| SSL and Certificates | Edit   | Custom hostname DV certificate provisioning |
 
 ### Configurable Environment Variables
 
@@ -94,11 +113,29 @@ Set via `vars` in `wrangler.jsonc` (production uses defaults, staging overrides)
 
 ### GitHub Actions Secrets
 
-| Secret             | Purpose                                                                                    |
-| ------------------ | ------------------------------------------------------------------------------------------ |
-| `CF_API_TOKEN`     | Cloudflare API token scoped to wrangler deploys only (separate token from platform worker) |
-| `CF_ACCOUNT_ID`    | Cloudflare account ID (passed as `CLOUDFLARE_ACCOUNT_ID`)                                  |
-| `VITE_CLOUD_TOKEN` | Auth token for deploying docs via `vcc deploy`                                             |
+| Secret             | Purpose                                                   |
+| ------------------ | --------------------------------------------------------- |
+| `CF_API_TOKEN`     | Cloudflare API token (see permissions below)              |
+| `CF_ACCOUNT_ID`    | Cloudflare account ID (passed as `CLOUDFLARE_ACCOUNT_ID`) |
+| `VITE_CLOUD_TOKEN` | Auth token for deploying docs via `vcc deploy`            |
+
+**GitHub Actions `CF_API_TOKEN` permissions** — narrower-scope token used only for wrangler deploys. Separate from the platform worker runtime token.
+
+Account-level:
+
+| Permission         | Access | Operations                                             |
+| ------------------ | ------ | ------------------------------------------------------ |
+| Workers Scripts    | Edit   | Deploy platform and dispatch workers                   |
+| D1                 | Edit   | Run remote migrations (`wrangler d1 migrations apply`) |
+| Workers KV Storage | Edit   | Bind KV namespaces during deploy                       |
+| Workers R2 Storage | Edit   | Bind R2 buckets during deploy                          |
+
+Zone-level (on `vitecloud.app`):
+
+| Permission     | Access | Operations                                               |
+| -------------- | ------ | -------------------------------------------------------- |
+| Workers Routes | Edit   | Set dispatch worker route patterns (`*.vitecloud.app/*`) |
+| DNS            | Read   | Zone lookup for route binding                            |
 
 ### CLI Staging Mode
 
