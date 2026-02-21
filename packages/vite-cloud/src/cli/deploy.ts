@@ -18,6 +18,7 @@ import { scanPages } from "../pages/scan";
 import { detectPreset, type StaticPreset } from "./preset";
 import { readConfig, convertHeadersConfig } from "../config";
 import { getRequestedProjectSlug, resolveProjectBySlug, inferDefaultSlug } from "./resolve-project";
+import { cliTitle } from "./output";
 
 export interface RunDeployOptions {
   projectSlug?: string;
@@ -37,7 +38,7 @@ export interface RunDeployOptions {
  */
 export async function runDeploy(root: string, options?: RunDeployOptions): Promise<void> {
   console.log();
-  intro("\x1b[34mvite-cloud deploy\x1b[0m");
+  intro(cliTitle("deploy"));
 
   // 1. Auth
   const token = getToken();

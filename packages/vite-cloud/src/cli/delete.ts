@@ -3,10 +3,11 @@ import { getToken } from "./auth";
 import { PlatformClient } from "./client";
 import { readProjectConfig, removeProjectConfig } from "./project";
 import { resolveProjectBySlug } from "./resolve-project";
+import { cliTitle } from "./output";
 
 export async function runDeleteCommand(root: string, slug?: string): Promise<void> {
   console.log();
-  intro("\x1b[34mvite-cloud delete\x1b[0m");
+  intro(cliTitle("delete"));
 
   const token = getToken();
   if (!token) {

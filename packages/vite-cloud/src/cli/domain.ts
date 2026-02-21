@@ -2,6 +2,7 @@ import { log, note } from "@clack/prompts";
 import { getToken } from "./auth";
 import { PlatformClient } from "./client";
 import { readProjectConfig } from "./project";
+import { pc } from "./output";
 
 export interface DomainArgs {
   subcommand: "add" | "remove" | "list" | "status";
@@ -112,7 +113,7 @@ async function domainList(client: PlatformClient, projectId: string): Promise<vo
   }
 
   const lines = domains.map((d) => {
-    const status = d.status === "active" ? "\x1b[32mactive\x1b[0m" : `\x1b[33m${d.status}\x1b[0m`;
+    const status = d.status === "active" ? pc.green("active") : pc.yellow(d.status);
     return `  ${d.hostname}  ${status}`;
   });
   note(lines.join("\n"), "Custom Domains");

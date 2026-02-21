@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { intro, outro, log, confirm, isCancel, cancel, note, select } from "@clack/prompts";
 import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
+import { cliTitle } from "./output";
 
 export interface InitArgs {
   tsconfig: boolean;
@@ -436,7 +437,7 @@ function injectAgentBlock(root: string, filePath: string): void {
 
 export async function runInitCommand(root: string, initArgs?: InitArgs): Promise<void> {
   console.log();
-  intro("\x1b[34mvite-cloud init\x1b[0m");
+  intro(cliTitle("init"));
 
   // --prompt: print agent reference prompt to stdout and exit
   if (initArgs?.prompt) {

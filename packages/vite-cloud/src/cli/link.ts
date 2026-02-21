@@ -3,10 +3,11 @@ import { getToken, getSiteDomain } from "./auth";
 import { PlatformClient } from "./client";
 import { readProjectConfig, writeProjectConfig } from "./project";
 import { promptProjectSelection } from "./prompt";
+import { cliTitle } from "./output";
 
 export async function runLink(root: string, slug?: string): Promise<void> {
   console.log();
-  intro("\x1b[34mvite-cloud link\x1b[0m");
+  intro(cliTitle("link"));
 
   // Check if already linked
   const existing = readProjectConfig(root);

@@ -3,10 +3,11 @@ import { getToken } from "./auth";
 import { PlatformClient, type DeploymentResponse } from "./client";
 import { readProjectConfig } from "./project";
 import { resolveProjectBySlug } from "./resolve-project";
+import { cliTitle, dim, pc, tablePrefix } from "./output";
 
 export async function runListCommand(root: string, slug?: string): Promise<void> {
   console.log();
-  intro("\x1b[34mvite-cloud list\x1b[0m");
+  intro(cliTitle("list"));
 
   const token = getToken();
   if (!token) {
@@ -62,8 +63,8 @@ async function showDeployments(
   const commitWidth = Math.max("commit".length, ...rows.map((r) => r.commit.length));
   const isrWidth = Math.max("isr".length, ...rows.map((r) => r.isr.length));
 
-  const prefix = "\x1b[90m│\x1b[0m  ";
-  const header = `${prefix}\x1b[2m${"id".padEnd(idWidth)}  ${"mode".padEnd(modeWidth)}  ${"status".padEnd(statusWidth)}  ${"source".padEnd(sourceWidth)}  ${"commit".padEnd(commitWidth)}  ${"isr".padEnd(isrWidth)}  deployed\x1b[0m`;
+  const prefix = tablePrefix();
+  const header = `${prefix}${dim(`${"id".padEnd(idWidth)}  ${"mode".padEnd(modeWidth)}  ${"status".padEnd(statusWidth)}  ${"source".padEnd(sourceWidth)}  ${"commit".padEnd(commitWidth)}  ${"isr".padEnd(isrWidth)}  deployed`)}`;
 
   const lines = rows.map(
     (row) =>
@@ -105,9 +106,9 @@ function formatDeploymentRow(d: DeploymentResponse): DeploymentRow {
   const statusRaw = d.status;
   let statusColored = statusRaw;
   if (d.status === "live") {
-    statusColored = `\x1b[32m${statusRaw}\x1b[0m`;
+    statusColored = pc.green(statusRaw);
   } else if (d.status === "failed") {
-    statusColored = `\x1b[31m${statusRaw}\x1b[0m`;
+    statusColored = pc.red(statusRaw);
   }
 
   const deployed = d.deployed_at ? formatRelativeTime(d.deployed_at) : "-";

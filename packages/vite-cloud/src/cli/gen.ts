@@ -3,10 +3,11 @@ import { join, dirname } from "node:path";
 import { intro, outro, log, select, isCancel, cancel } from "@clack/prompts";
 import type { GenArgs } from "./gen-args";
 import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
+import { cliTitle } from "./output";
 
 export async function runGenCommand(root: string, args: GenArgs): Promise<void> {
   console.log();
-  intro("\x1b[34mvite-cloud gen\x1b[0m");
+  intro(cliTitle("gen"));
 
   if (args.subcommand === "model") {
     await runModel(root, args.name, args.columns);

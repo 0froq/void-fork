@@ -12,6 +12,7 @@ import { parseSecretArgs } from "./secret-args";
 import { parseDbArgs } from "./db-args";
 import { parseGenArgs } from "./gen-args";
 import { parseDomainArgs } from "./domain";
+import { categoryTitle, helpLine, pc, sectionTitle } from "./output";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -218,18 +219,14 @@ if (command === "staging") {
     runMcp();
   });
 } else {
-  const BLUE = "\x1b[34m";
-  const RESET = "\x1b[0m";
   console.log(
-    BLUE +
-      `
+    pc.blue(`
         _ __                __                __
  _   __(_) /____     _____/ /___  __  ______/ /
 | | / / / __/ _ \\   / ___/ / __ \\/ / / / __  /
 | |/ / / /_/  __/  / /__/ / /_/ / /_/ / /_/ /
 |___/_/\\__/\\___/   \\___/_/\\____/\\__,_/\\__,_/
-` +
-      RESET,
+`),
   );
 
   if (command && command !== "help" && command !== "--help" && command !== "-h") {
@@ -239,76 +236,76 @@ if (command === "staging") {
 
   note(
     [
-      "\x1b[0mvcc init                           \x1b[2mSet up vite-cloud in an existing project",
-      "\x1b[0m  --tsconfig                       \x1b[2mOnly update tsconfig.json",
-      "\x1b[0m  --github                         \x1b[2mOnly create GitHub Actions workflow",
-      "\x1b[0m  --agentsmd                       \x1b[2mOnly add coding agent instructions",
+      helpLine("vcc init", "Set up vite-cloud in an existing project"),
+      helpLine("  --tsconfig", "Only update tsconfig.json"),
+      helpLine("  --github", "Only create GitHub Actions workflow"),
+      helpLine("  --agentsmd", "Only add coding agent instructions"),
       "",
-      "\x1b[0mvcc deploy                         \x1b[2mBuild and deploy to Vite Cloud",
-      "\x1b[0m  --project <name>                 \x1b[2mDeploy target project name",
-      "\x1b[0m  --dir <path>                     \x1b[2mDeploy a static directory (skip build)",
-      "\x1b[0m  --spa                            \x1b[2mUse SPA mode (default: SSG)",
-      "\x1b[0m  --skip-build                     \x1b[2mSkip the build step (use existing output)",
+      helpLine("vcc deploy", "Build and deploy to Vite Cloud"),
+      helpLine("  --project <name>", "Deploy target project name"),
+      helpLine("  --dir <path>", "Deploy a static directory (skip build)"),
+      helpLine("  --spa", "Use SPA mode (default: SSG)"),
+      helpLine("  --skip-build", "Skip the build step (use existing output)"),
       "",
-      "\x1b[0m\x1b[1m\x1b[36mauth\x1b[39m",
-      "\x1b[0mvcc login                          \x1b[2mLog in with GitHub or Google",
-      "\x1b[0mvcc logout                         \x1b[2mLog out and remove credentials",
-      "\x1b[0mvcc whoami                         \x1b[2mShow the logged-in username",
-      "\x1b[0mvcc token                          \x1b[2mCopy auth token to clipboard",
+      categoryTitle("auth"),
+      helpLine("vcc login", "Log in with GitHub or Google"),
+      helpLine("vcc logout", "Log out and remove credentials"),
+      helpLine("vcc whoami", "Show the logged-in username"),
+      helpLine("vcc token", "Copy auth token to clipboard"),
       "",
-      "\x1b[0m\x1b[1m\x1b[36mprojects\x1b[39m",
-      "\x1b[0mvcc projects                       \x1b[2mList your projects",
-      "\x1b[0mvcc list, ls [name]                \x1b[2mList deployments for a project",
-      "\x1b[0mvcc delete [name]                  \x1b[2mDelete a project and all its resources",
-      "\x1b[0mvcc link [name]                    \x1b[2mLink to an existing project",
+      categoryTitle("projects"),
+      helpLine("vcc projects", "List your projects"),
+      helpLine("vcc list, ls [name]", "List deployments for a project"),
+      helpLine("vcc delete [name]", "Delete a project and all its resources"),
+      helpLine("vcc link [name]", "Link to an existing project"),
       "",
-      "\x1b[0m\x1b[1m\x1b[36msecrets\x1b[39m",
-      "\x1b[0mvcc secret put <name> [--project]  \x1b[2mSet a project secret",
-      "\x1b[0mvcc secret delete <name>           \x1b[2mDelete a project secret",
-      "\x1b[0mvcc secret sync <file>             \x1b[2mSync secrets from a dotenv file",
+      categoryTitle("secrets"),
+      helpLine("vcc secret put <name> [--project]", "Set a project secret"),
+      helpLine("vcc secret delete <name>", "Delete a project secret"),
+      helpLine("vcc secret sync <file>", "Sync secrets from a dotenv file"),
       "",
-      "\x1b[0m\x1b[1m\x1b[36mdomains\x1b[39m",
-      "\x1b[0mvcc domain add <hostname>          \x1b[2mAdd a custom domain",
-      "\x1b[0mvcc domain remove <hostname>       \x1b[2mRemove a custom domain",
-      "\x1b[0mvcc domain list                    \x1b[2mList custom domains + status",
-      "\x1b[0mvcc domain status <hostname>       \x1b[2mCheck domain verification status",
+      categoryTitle("domains"),
+      helpLine("vcc domain add <hostname>", "Add a custom domain"),
+      helpLine("vcc domain remove <hostname>", "Remove a custom domain"),
+      helpLine("vcc domain list", "List custom domains + status"),
+      helpLine("vcc domain status <hostname>", "Check domain verification status"),
       "",
-      "\x1b[0m\x1b[1m\x1b[36mdatabase\x1b[39m",
-      "\x1b[0mvcc db status                      \x1b[2mShow migration status (local + remote)",
-      "\x1b[0mvcc db reset                       \x1b[2mReset local DB and re-run migrations",
-      "\x1b[0mvcc db seed [--file <path>]        \x1b[2mReset local DB, run migrations, and seed",
-      "\x1b[0mvcc db execute <sql>               \x1b[2mRun SQL against the local database",
-      "\x1b[0m  --file <path>                    \x1b[2mRun SQL from a file instead",
-      "\x1b[0mvcc db migrate                     \x1b[2mApply pending migrations locally",
-      "\x1b[0mvcc db export [--output <path>]    \x1b[2mExport local database as SQL",
-      "\x1b[0m  --no-data                        \x1b[2mSchema only (no INSERT statements)",
-      "\x1b[0m  --no-schema                      \x1b[2mData only (no CREATE TABLE)",
-      "\x1b[0m  --table <name>                   \x1b[2mExport a single table",
+      categoryTitle("database"),
+      helpLine("vcc db status", "Show migration status (local + remote)"),
+      helpLine("vcc db reset", "Reset local DB and re-run migrations"),
+      helpLine("vcc db seed [--file <path>]", "Reset local DB, run migrations, and seed"),
+      helpLine("vcc db execute <sql>", "Run SQL against the local database"),
+      helpLine("  --file <path>", "Run SQL from a file instead"),
+      helpLine("vcc db migrate", "Apply pending migrations locally"),
+      helpLine("vcc db export [--output <path>]", "Export local database as SQL"),
+      helpLine("  --no-data", "Schema only (no INSERT statements)"),
+      helpLine("  --no-schema", "Data only (no CREATE TABLE)"),
+      helpLine("  --table <name>", "Export a single table"),
       "",
-      "\x1b[0m\x1b[1m\x1b[36mscaffolding\x1b[39m",
-      "\x1b[0mvcc gen model <name> [cols...]     \x1b[2mGenerate migration + CRUD routes + db types",
-      "\x1b[0mvcc gen migration <name>           \x1b[2mGenerate an empty migration file",
-      "\x1b[0mvcc gen route <path> [--methods]   \x1b[2mGenerate a route with handler exports",
-      "\x1b[0mvcc gen middleware <name>          \x1b[2mGenerate a numbered middleware file",
-      "\x1b[0mvcc gen ssr [--react|--vue|...]    \x1b[2mGenerate SSR entry + client + App component",
-      "\x1b[0mvcc gen cron <name>               \x1b[2mGenerate a cron job file",
-      "\x1b[0mvcc gen queue <name>              \x1b[2mGenerate a queue consumer file",
+      categoryTitle("codegen"),
+      helpLine("vcc gen model <name> [cols...]", "Generate migration + CRUD routes + db types"),
+      helpLine("vcc gen migration <name>", "Generate an empty migration file"),
+      helpLine("vcc gen route <path> [--methods]", "Generate a route with handler exports"),
+      helpLine("vcc gen middleware <name>", "Generate a numbered middleware file"),
+      helpLine("vcc gen ssr [--react|--vue|...]", "Generate SSR entry + client + App component"),
+      helpLine("vcc gen cron <name>", "Generate a cron job file"),
+      helpLine("vcc gen queue <name>", "Generate a queue consumer file"),
       "",
-      "\x1b[0m\x1b[1m\x1b[36magent\x1b[39m",
-      "\x1b[0mvcc init --agentsmd                \x1b[2mInject agent instructions into CLAUDE.md/AGENTS.md",
-      "\x1b[0mvcc init --skills                  \x1b[2mLink vite-cloud skills to your agent",
-      "\x1b[0mvcc init --prompt                  \x1b[2mPrint the coding agent reference prompt",
-      "\x1b[0mvcc mcp                            \x1b[2mStart MCP server (stdio, for AI agents)",
+      categoryTitle("agent"),
+      helpLine("vcc init --agentsmd", "Inject agent instructions into CLAUDE.md/AGENTS.md"),
+      helpLine("vcc init --skills", "Link vite-cloud skills to your agent"),
+      helpLine("vcc init --prompt", "Print the coding agent reference prompt"),
+      helpLine("vcc mcp", "Start MCP server (stdio, for AI agents)"),
     ].join("\n"),
-    "\x1b[34mCommands\x1b[0m",
+    sectionTitle("Commands"),
   );
 
   note(
     [
-      "\x1b[0mVITE_CLOUD_TOKEN     \x1b[2mAuth token (or use ~/.vite-cloud/config.json)",
-      "\x1b[0mVITE_CLOUD_PROJECT   \x1b[2mDeploy target project name override",
+      helpLine("VITE_CLOUD_TOKEN", "Auth token (or use ~/.vite-cloud/config.json)"),
+      helpLine("VITE_CLOUD_PROJECT", "Deploy target project name override"),
     ].join("\n"),
-    "\x1b[34mEnvironment\x1b[0m",
+    sectionTitle("Environment"),
   );
 
   outro("https://vite.cloud");
