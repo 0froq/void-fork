@@ -2,7 +2,11 @@ import { defineHandler } from "vite-cloud";
 import * as v from "valibot";
 import { USERS } from "./_data";
 
-export const loader = defineHandler(() => {
+export interface Props {
+  users: typeof USERS;
+}
+
+export const loader = defineHandler<Props>(() => {
   return { users: USERS };
 });
 

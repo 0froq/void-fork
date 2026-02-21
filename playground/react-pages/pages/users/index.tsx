@@ -1,8 +1,5 @@
 import { Link, useForm } from "@vite-cloud/react";
-
-interface Props {
-  users: Array<{ id: number; name: string; email: string }>;
-}
+import type { Props } from "./index.server";
 
 export default function UsersPage({ users }: Props) {
   const form = useForm("/users", {

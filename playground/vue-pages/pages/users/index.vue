@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { Link, useForm } from "@vite-cloud/vue";
+import type { Props } from "./index.server";
 
-const props = defineProps<{
-  users: Array<{ id: number; name: string; email: string }>;
-}>();
+const props = defineProps<Props>();
 
 const form = useForm("/users", {
   name: "",
