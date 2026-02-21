@@ -371,7 +371,7 @@ export default defineScheduled(async (controller, env, ctx) => {
 | Command                             | Purpose                                             |
 | ----------------------------------- | --------------------------------------------------- |
 | `vcc init`                          | Set up vite-cloud in an existing project            |
-| `vcc init --agent`                  | Add coding agent instructions (CLAUDE.md/AGENTS.md) |
+| `vcc init --agentsmd`               | Add coding agent instructions (CLAUDE.md/AGENTS.md) |
 | `vcc deploy`                        | Build and deploy to Vite Cloud                      |
 | `vcc login` / `logout` / `whoami`   | Authentication                                      |
 | `vcc secret put <name[=value]>`     | Set a project secret                                |

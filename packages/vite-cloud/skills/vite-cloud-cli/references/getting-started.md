@@ -35,13 +35,13 @@ Run individual steps with flags (no prompts):
 
 ```sh
 npx vcc init --tsconfig    # only tsconfig
-npx vcc init --agent       # only agent instructions
+npx vcc init --agentsmd    # only agent instructions
 npx vcc init --github      # only GitHub Actions workflow
 ```
 
 Flags can be combined: `npx vcc init --tsconfig --github`.
 
-`--agent` auto-detects the agent environment (Claude Code, Cursor, Codex) and creates the appropriate file.
+`--agentsmd` auto-detects the agent environment (Claude Code, Cursor, Codex) and creates the appropriate file.
 
 ## Link
 

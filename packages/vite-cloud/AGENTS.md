@@ -146,7 +146,7 @@ Vite Cloud ships with first-class support for coding agents (Claude Code, Cursor
   - `vite-cloud-cli` — guides agents through CLI operations (deploy, db, gen, secrets, domains, projects) using a decision-tree pattern with lazy-loaded reference files.
   - `migrate-vite-cloudflare-to-vite-cloud` — guides migration from `@cloudflare/vite-plugin` to `vite-cloud`.
 - **`docs/`** — all 23 docs markdown files are included in the npm package at `node_modules/vite-cloud/docs/`.
-- **`vcc init --agent`** — detects existing agent files (`.claude/`, `CLAUDE.md`, `AGENTS.md`) and injects Vite Cloud instructions with versioned markers. Supports update-in-place when the version changes.
+- **`vcc init --agentsmd`** — detects existing agent files (`.claude/`, `CLAUDE.md`, `AGENTS.md`) and injects Vite Cloud instructions with versioned markers. Supports update-in-place when the version changes.
 - **`vcc init --prompt`** — prints the agent reference prompt to stdout.
 - **`vcc init --skills`** — auto-detects coding agents in the project (Claude Code, Cursor, Windsurf, Gemini CLI, Copilot, Codex, etc.) and symlinks skills from the `vite-cloud` package into each agent's skills directory.
 - **`create-vite-cloud`** — scaffolds a new project, auto-detects and runs the preferred package manager, then runs `vcc init` interactively for agent setup, skills linking, and GitHub Actions.
