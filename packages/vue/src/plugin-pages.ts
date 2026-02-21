@@ -50,7 +50,17 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
 
     config(_, env) {
       if (!existsSync(pagesDir)) return;
-      if (env.command !== "build") return;
+
+      if (env.command === "serve") {
+        return {
+          optimizeDeps: {
+            // Pre-include Vue so it's not discovered late via dynamic
+            // imports during SPA navigation, avoiding a full-page reload
+            // from Vite's dep optimizer.
+            include: ["vue"],
+          },
+        };
+      }
 
       return {
         build: {
