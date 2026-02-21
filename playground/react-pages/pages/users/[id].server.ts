@@ -5,7 +5,7 @@ export interface Props {
   user: (typeof USERS)[number];
 }
 
-export const loader = defineHandler((c) => {
+export const loader = defineHandler<Props>((c) => {
   const id = Number(c.req.param("id"));
   const user = USERS.find((u) => u.id === id);
 

@@ -69,13 +69,15 @@ export async function scanPages(root: string): Promise<PageScanResult> {
 
     // Check for inline <script server> (only .vue files)
     let hasInlineServer = false;
+    let inlineServerContent: string | undefined;
     if (file.endsWith(".vue") && !serverPath) {
       const content = readFileSync(join(pagesDir, file), "utf-8");
       const blockMatch = content.match(SCRIPT_SERVER_CONTENT_RE);
       if (blockMatch) {
         hasInlineServer = true;
+        inlineServerContent = blockMatch[1];
         // Detect loader/action exports from the inline block
-        for (const m of blockMatch[1].matchAll(PAGES_EXPORT_RE)) {
+        for (const m of inlineServerContent.matchAll(PAGES_EXPORT_RE)) {
           methods.push(m[1]);
         }
       }
@@ -88,6 +90,7 @@ export async function scanPages(root: string): Promise<PageScanResult> {
       componentPath: file,
       serverPath,
       hasInlineServer,
+      inlineServerContent,
       methods,
       componentId,
       revalidate,
