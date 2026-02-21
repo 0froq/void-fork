@@ -70,15 +70,21 @@ export async function scanPages(root: string): Promise<PageScanResult> {
     // Check for inline <script server> (only .vue files)
     let hasInlineServer = false;
     let inlineServerContent: string | undefined;
-    if (file.endsWith(".vue") && !serverPath) {
+    if (file.endsWith(".vue")) {
       const content = readFileSync(join(pagesDir, file), "utf-8");
       const blockMatch = content.match(SCRIPT_SERVER_CONTENT_RE);
       if (blockMatch) {
-        hasInlineServer = true;
-        inlineServerContent = blockMatch[1];
-        // Detect loader/action exports from the inline block
-        for (const m of inlineServerContent.matchAll(PAGES_EXPORT_RE)) {
-          methods.push(m[1]);
+        if (serverPath) {
+          console.warn(
+            `[vite-cloud] ${file} has both <script server> and companion ${serverPath} — the companion file takes precedence, <script server> will be ignored`,
+          );
+        } else {
+          hasInlineServer = true;
+          inlineServerContent = blockMatch[1];
+          // Detect loader/action exports from the inline block
+          for (const m of inlineServerContent.matchAll(PAGES_EXPORT_RE)) {
+            methods.push(m[1]);
+          }
         }
       }
     }
