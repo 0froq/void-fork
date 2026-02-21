@@ -49,7 +49,7 @@ describe("playground/react-pages", () => {
       },
     );
 
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr!.on("data", (chunk: Buffer) => {
       stderr += String(chunk);
     });
 
