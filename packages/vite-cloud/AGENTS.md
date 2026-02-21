@@ -63,6 +63,7 @@ src/
     auth.ts                 # Token read/save + runLogin() (local server + browser OAuth)
     login.ts                # Login command UI (@clack/prompts)
     package.ts              # Packages dist/ into FormData (worker + assets + migrations + manifest)
+    agents.ts               # Shared agent configs, detection, MCP config targets
     client.ts               # HTTP client for platform API
     types.ts                # DeployManifest, MigrationMeta types
 ```
@@ -149,6 +150,7 @@ Vite Cloud ships with first-class support for coding agents (Claude Code, Cursor
 - **`vcc init --agentsmd`** — detects existing agent files (`.claude/`, `CLAUDE.md`, `AGENTS.md`) and injects Vite Cloud instructions with versioned markers. Supports update-in-place when the version changes.
 - **`vcc init --prompt`** — prints the agent reference prompt to stdout.
 - **`vcc init --skills`** — auto-detects coding agents in the project (Claude Code, Cursor, Windsurf, Gemini CLI, Copilot, Codex, etc.) and symlinks skills from the `vite-cloud` package into each agent's skills directory.
+- **`vcc init --mcp`** — auto-detects coding agents and writes MCP server config to the appropriate project-level config file (e.g. `.claude/settings.json`, `.cursor/mcp.json`). Agents without project-level config support get a CLI hint printed instead.
 - **`create-vite-cloud`** — scaffolds a new project, auto-detects and runs the preferred package manager, then runs `vcc init` interactively for agent setup, skills linking, and GitHub Actions.
 
 Agent instructions use versioned markers (`<!--injected-by-vite-cloud-v0.0.1-->` / `<!--/injected-by-vite-cloud-->`) for safe update-in-place across version upgrades.

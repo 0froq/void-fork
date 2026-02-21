@@ -10,7 +10,15 @@ Vite Cloud ships with a built-in [MCP](https://modelcontextprotocol.io/) server 
 npx vcc mcp
 ```
 
-## Setup
+## Automatic Setup
+
+```sh
+npx vcc init --mcp
+```
+
+Detects which coding agents are present in your project and writes the MCP server config to the appropriate file. Supports Claude Code, Cursor, Windsurf, GitHub Copilot, and Roo Code. For agents without project-level config (Codex, Gemini CLI, etc.), prints the CLI command to run instead.
+
+## Manual Setup
 
 ### Claude Code
 
