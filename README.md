@@ -4,15 +4,17 @@ This is the development repo of Vite Cloud.
 
 - **Important**: The source of truth of this file on disk is `README.md`. Both `AGENTS.md` and `CLAUDE.md` are symlinks to this file. When asked to update any of these, always update `README.md` (the actual file).
 - This file describes the current state of the codebase. To understand Vite Cloud as a product, read the [Introduction](./docs/index.md).
-- Refer to the [Design Doc](./meta/0001-design.md) for the high-level vision and architecture.
-- Refer to the [Progress Doc](./meta/0000-progress.md) for tracking progress.
+- Refer to the [Design Doc](./meta/design-docs/0001-design.md) for the high-level vision and architecture.
+- Refer to the [Progress Doc](./meta/progress.md) for tracking progress.
 - Documentation source lives in `packages/website/docs/`. A root-level `docs/` symlink points there for convenience.
 
 ## Best Practices That Must Be Followed
 
 - **Never** commit without asking for confirmation.
+- When writing design docs or implementation plans to disk, place them in `meta/design-docs` and follow existing file name and frontmatter conventions.
 - Every implementation plan should include the following:
-  - Verification: run `pnpm lint`, `pnpm fmt`, and `pnpm check`. Run `pnpm test` on tests relevant to the current feature first, then run the full test suite.
+  - During plan generation: ask clarifying questions when necessary, especially around developer-experience defining design decisions.
+  - Verification: run `pnpm lint`, `pnpm fmt`, and `pnpm check`. Run `pnpm test` on tests relevant to the current feature only during feature development. Only run the full test suite when everything is done for final verification. If there are tests hanging or running particularly slow, investigate right there and attempt to fix. Testing velocity is something that should be maintained or improved at every opportunity.
   - Documentation: after verification, update all docs if relevant and applicable:
     - `README.md` (this file)
     - affected packages's `README.md` or `AGENTS.md`
@@ -20,24 +22,28 @@ This is the development repo of Vite Cloud.
     - `packages/vite-cloud/skills/vite-cloud-cli` (if change affects CLI)
     - `packages/vite-cloud/AGENT_PROMPT.md`
     - `packages/vite-cloud/getting-started-prompt.txt`
-  - Progress tracking: tick off relevant steps in `meta/0000-progress.md` when applicable.
-  - Design decision log (optional): for particularly substantial changes, ask the user if they want to create a numbered design decision doc in `meta` following existing file format.
+  - Progress tracking: tick off relevant steps in `meta/progress.md` when applicable.
 
 ## Quick Reference
 
 ```
-pnpm -r build        # Build all packages
-pnpm test            # Run vitest (unit + integration tests)
-pnpm lint            # oxlint
-pnpm fmt             # oxfmt --write .
-pnpm check           # Typecheck all packages (tsc --noEmit)
-pnpm run deploy      # Build all + deploy platform & dispatch workers (production)
-pnpm run deploy:staging  # Deploy all workers to staging environment
+pnpm -r build                       # Build all packages
+pnpn -C packages/vite-cloud build   # Build only the core plugin
+pnpm test                           # Run vitest (unit + integration tests)
+pnpm test packages/vite-cloud.      # Only test the core plugin
+pnpm lint                           # oxlint
+pnpm fmt                            # oxfmt --write .
+pnpm check                          # Typecheck all packages (tsc --noEmit)
+pnpm -C packages/vue typecheck.     # Typecheck a specific package
+pnpm run deploy                     # Build all + deploy platform & dispatch workers (production)
+pnpm run deploy:staging             # Deploy all workers to staging environment
 ```
+
+**Manual deploys only. Do not ask to push or deploy.**
 
 ## Monorepo Structure
 
-pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-workspace.yaml` (typescript, tsdown, vite, @cloudflare/workers-types, wrangler).
+pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-workspace.yaml` (typescript, tsdown, vite, @cloudflare/workers-types, wrangler). Make sure to run `pnpm install` after making package structure changes.
 
 | Package                                                  | npm name                         | Purpose                                                   |
 | -------------------------------------------------------- | -------------------------------- | --------------------------------------------------------- |
@@ -50,9 +56,32 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 
 ## `vite-cloud` Overview
 
-Core Vite plugin. `viteCloud()` returns `[routingPlugin, migrationPlugin, cloudflare({...inferredBindings})]`. Provides file-based routing on Hono, Standard Schema validation, typed fetch client, typed DB queries, built-in auth (auto-detected from imports + env vars), cron jobs, queues (typed via `vite-cloud/queues`), and a deploy CLI (`vcc`).
+The `vite-cloud` package contains two parts:
 
-See [`packages/vite-cloud/AGENTS.md`](./packages/vite-cloud/AGENTS.md) for architecture, source layout, design decisions, package exports, and route parsing rules.
+**Vite plugin** — `viteCloud()` returns `[routingPlugin, migrationPlugin, cloudflare({...inferredBindings})]`. Depends on `@cloudflare/vite-plugin` and transitively on wrangler/miniflare.
+
+- **Routing** — file-based API routing on Hono with named HTTP method exports
+- **Validation** — request body/query/params validation via any Standard Schema library
+- **Typed fetch client** — fully-inferred client from route definitions
+- **Typed DB** — auto-generated types from SQL migrations
+- **Auth** — built-in email/password + OAuth, auto-detected from imports and env vars
+- **Cron jobs** — scheduled handlers via `defineScheduled`
+- **Queues** — typed producers and consumers via `defineQueue`
+- **Binding inference** — auto-detects D1, KV, R2, queues from source code
+- **Migration runner** — applies SQL migrations to local D1 on dev startup
+
+**CLI (`vcc`)** — commands for local development DX and deployment:
+
+- **`deploy`** — builds, validates migrations, packages, and uploads to Vite Cloud
+- **`gen`** — scaffolds models, routes, middleware, SSR entries, cron jobs, and queue consumers
+- **`init`** — sets up agent instructions, skills, and reference prompts for coding agents
+- **`db`** — manages migrations and inspects the local D1 database
+- **`auth`** — login, logout, and token management
+- **`projects`** — link, create, and manage Vite Cloud projects
+- **`domains`** — configure custom domains for deployed projects
+- **`secrets`** — manage production environment variables
+
+See [`packages/vite-cloud/AGENTS.md`](./packages/vite-cloud/AGENTS.md) for architecture, source layout, design decisions, package exports, route parsing rules, code generation, and agent integration.
 
 ## `@vite-cloud/vue` Overview
 
@@ -62,7 +91,7 @@ Vue framework adapter for Pages mode — Inertia-inspired full-stack DX with SSR
 - **Runtime** (`@vite-cloud/vue`): `Link`, `useForm`, `useShared` composables
 - **Server handlers**: Remix-style `loader` (GET → props) and `action` (mutations) exports in `<script server>` or companion `.server.ts` files
 
-See [`packages/vue/README.md`](./packages/vue/README.md) for architecture and [`meta/0013-pages.md`](./meta/0013-pages.md) for the design doc.
+See [`packages/vue/README.md`](./packages/vue/README.md) for architecture and [`meta/design-docs/0013-pages.md`](./meta/design-docs/0013-pages.md) for the design doc.
 
 ## `platform` Overview
 
@@ -96,119 +125,27 @@ Tests run from root with `pnpm test` (vitest). 955 tests across 75 files. See ea
 
 ## Playground
 
-`playground/spa` is a React SPA with API routes demonstrating:
+Local apps for testing features end-to-end. Run scripts with `pnpm -C playground/<app> <script>` (e.g. `pnpm -C playground/spa dev`).
 
-- Named method exports: `routes/api/hello.ts` (GET), `routes/api/users/index.ts` (GET + POST), `routes/api/users/[id].ts` (GET)
-- Input validation: POST users uses `defineHandler.withValidator()` with valibot schemas
-- Typed fetch client: `src/App.tsx` uses `fetch` from `vite-cloud/client` with full type inference
-- Typed DB queries: Route handlers use `db.list("users")`, `db.get("users")`, `db.insert("users")` from `vite-cloud/db` — fully typed via generated `db.d.ts`
-- Middleware: `middleware/01.logger.ts` (uses `defineMiddleware`)
-- Migration: `migrations/001_create_users.sql` (creates users table + seeds data)
-- Seamless tsconfig: `tsconfig.json` extends `.vite-cloud/tsconfig.json` for auto type discovery
+| App                                                       | Description                                                                                       |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [`spa`](./playground/spa/README.md)                       | React SPA — API routes, valibot validation, typed DB, typed fetch client, middleware, cron jobs   |
+| [`ssr`](./playground/ssr/README.md)                       | React SSR — `defineRender()`, client hydration, KV storage, dynamic markdown blog                 |
+| [`vue-pages`](./playground/vue-pages/README.md)           | Vue Pages mode — `<script server>` blocks, Inertia protocol, SSR, layouts, `useForm`, `useShared` |
+| [`queues`](./playground/queues/README.md)                 | API-only — typed queue producer/consumer with KV bridge                                           |
+| [`auth`](./playground/auth/README.md)                     | React SPA — email/password + OAuth (GitHub/Google) auth flows, protected routes                   |
+| [`tanstack-start`](./playground/tanstack-start/README.md) | TanStack Start meta-framework — server functions, D1 queries, SSR via TanStack                    |
 
-`playground/ssr` is a minimal React SSR app demonstrating `src/main.ssr.ts` render fallback plus API routes.
+## Operations
 
-`playground/queues` is a minimal API-only app demonstrating typed queues: a `queues/test-queue.ts` consumer writes to KV, `routes/api/send.ts` produces messages via `queues["test-queue"].send()`, and `routes/api/result.ts` reads the result back. Integration-tested end-to-end (send → consumer → KV round-trip).
-
-`playground/vue-pages` is a Vue full-stack app demonstrating Inertia-inspired Pages mode:
-
-- File-based page routing from `pages/` directory (`.vue` components with `<script server>` blocks)
-- SSR with client-side hydration via `@vite-cloud/vue`
-- Inertia protocol: initial load returns SSR HTML, subsequent navigations return JSON page objects via `X-Inertia` header
-- `<script server>` blocks for co-located server handlers (`loader` returns props, `action` handles mutations) with type declarations (`interface`, `type`, `import type`) preserved for `<script setup>`
-- Layout nesting via `layout.vue` files
-- `useForm` composable with isDirty, wasSuccessful, recentlySuccessful, validation error display
-- `useShared` for middleware-set shared data (e.g. auth, app config)
-- `Link` component for SPA navigation (renders `<a>` for GET, `<button>` for non-GET)
-- `ValidationError` class for form validation with automatic error display
-- API route coexistence (`routes/api/` alongside `pages/`)
-- Integration-tested end-to-end (SSR, Inertia JSON, form submission, validation errors, shared data)
-
-Verified working:
-
-- `cd playground/spa && pnpm dev`
-- `cd playground/ssr && pnpm dev`
-- `cd playground/vue-pages && pnpm dev`
-- `cd playground/spa && pnpm typecheck` (includes typed routes via generated `.vite-cloud/routes.d.ts`)
-
-## Coding Agent Integration
-
-Vite Cloud ships with first-class support for coding agents (Claude Code, Cursor, Codex, etc.):
-
-- **`AGENT_PROMPT.md`** — compressed reference prompt shipped in the `vite-cloud` npm package. Covers project structure, routing, DB, auth, typed fetch, KV/storage/queues/cron, CLI, and deployment.
-- **`skills/`** — Claude Code skills shipped in the npm package:
-  - `vite-cloud-cli` — guides agents through CLI operations (deploy, db, gen, secrets, domains, projects) using a decision-tree pattern with lazy-loaded reference files.
-  - `migrate-vite-cloudflare-to-vite-cloud` — guides migration from `@cloudflare/vite-plugin` to `vite-cloud`.
-- **`docs/`** — all 23 docs markdown files are included in the npm package at `node_modules/vite-cloud/docs/`.
-- **`vcc init --agent`** — detects existing agent files (`.claude/`, `CLAUDE.md`, `AGENTS.md`) and injects Vite Cloud instructions with versioned markers. Supports update-in-place when the version changes.
-- **`vcc init --prompt`** — prints the agent reference prompt to stdout.
-- **`vcc init --skills`** — auto-detects coding agents in the project (Claude Code, Cursor, Windsurf, Gemini CLI, Copilot, Codex, etc.) and symlinks skills from the `vite-cloud` package into each agent's skills directory.
-- **`create-vite-cloud`** — scaffolds a new project, auto-detects and runs the preferred package manager, then runs `vcc init` interactively for agent setup, skills linking, and GitHub Actions.
-
-Agent instructions use versioned markers (`<!--injected-by-vite-cloud-v0.0.1-->` / `<!--/injected-by-vite-cloud-->`) for safe update-in-place across version upgrades.
-
-## Code Generation (`vcc gen`)
-
-Rails/Laravel-style scaffolding commands for common boilerplate:
-
-| Command                                           | Creates                                          |
-| ------------------------------------------------- | ------------------------------------------------ |
-| `vcc gen model <name> [cols...]`                  | Migration + CRUD routes + regenerates `db.d.ts`  |
-| `vcc gen migration <name>`                        | Empty migration file with auto-numbered prefix   |
-| `vcc gen route <path> [--methods get,post,...]`   | Route file with `defineHandler` exports          |
-| `vcc gen middleware <name>`                       | Numbered middleware file with `defineMiddleware` |
-| `vcc gen ssr [--react\|--vue\|--svelte\|--solid]` | SSR entry + client entry + App component         |
-| `vcc gen cron <name>`                             | Cron job file with `defineScheduled` in `crons/` |
-| `vcc gen queue <name>`                            | Queue consumer file with `defineQueue`           |
-
-Column types for `gen model`: `string`, `text`, `datetime` → TEXT; `integer`, `boolean` → INTEGER; `real` → REAL; `blob` → BLOB. Append `?` for nullable (e.g. `bio:text?`).
-
-`gen model` auto-detects your validation library (valibot, zod, or arktype) from `package.json`. If none is found, prompts to choose one or skip validation.
-
-Source: `src/cli/gen-args.ts` (arg parsing), `src/cli/gen.ts` (command runner). Tests: `test/unit/gen-args.test.ts`, `test/unit/gen.test.ts`.
-
-## Environments
-
-Two deployment environments: **production** and **staging**. Each has fully isolated CF resources (D1, KV, R2, dispatch namespace, analytics engine).
-
-| Environment | Platform (API + Admin)        | User Sites                |
-| ----------- | ----------------------------- | ------------------------- |
-| Production  | `platform.vite.cloud`         | `*.vitecloud.app`         |
-| Staging     | `platform.staging.vite.cloud` | `*.staging.vitecloud.app` |
-
-`api.vite.cloud` is kept as a CNAME alias for backwards compatibility with older CLI versions.
-
-To use the CLI against staging, set `"api"` in `~/.vite-cloud/config.json` or the `VITE_CLOUD_API_URL` env var. These are internal-only — not documented in public-facing docs (`docs/cli.md`).
-
-### Configurable Environment Variables
-
-Previously hardcoded values are now configurable via `vars` in wrangler config (defaulting to production values):
-
-| Worker   | Variable             | Default            | Purpose                                               |
-| -------- | -------------------- | ------------------ | ----------------------------------------------------- |
-| platform | `DISPATCH_NAMESPACE` | `vite-cloud-users` | CF dispatch namespace name for API calls              |
-| platform | `SITE_DOMAIN`        | `vitecloud.app`    | Base domain for deploy URL output                     |
-| platform | `SIGNUP_ALLOWLIST`   | (unset)            | Comma-separated emails/domains for new Google signups |
-| platform | `DEV_AUTH_BYPASS`    | (unset)            | Skip admin OAuth for local dev                        |
-| dispatch | `BASE_HOSTNAME`      | `vitecloud.app`    | Base hostname for slug extraction                     |
-
-### Deploying
+Two environments: **production** (`*.vitecloud.app`, manual deploy via `prod` branch) and **staging** (`*.staging.vitecloud.app`, auto-deploys on push to `main`). Each has fully isolated CF resources (D1, KV, R2, dispatch namespace, analytics engine).
 
 ```
-pnpm run deploy           # Production (manual)
-pnpm run deploy:staging   # Staging (auto on push to main via GitHub Actions)
+pnpm run deploy           # Production
+pnpm run deploy:staging   # Staging
 ```
 
-Staging auto-deploys on push to `main` via `.github/workflows/deploy-staging.yml`. Production deploys remain manual.
-
-### One-Time Setup (Staging)
-
-1. Create CF resources: D1 database, KV namespace, R2 bucket, dispatch namespace, analytics engine dataset (all with `-staging` suffix)
-2. Replace `PLACEHOLDER_*` IDs in wrangler configs (`packages/{platform,dispatch}/wrangler.jsonc` → `env.staging`)
-3. Set worker secrets: `wrangler secret put <NAME> --env staging` for the platform worker (use different values from production; OAuth creds can be shared)
-4. DNS: `*.staging` CNAME on `vitecloud.app` zone; `platform.staging` CNAME on `vite.cloud` zone
-5. Add staging callback URLs to GitHub/Google OAuth apps (`https://platform.staging.vite.cloud/auth/callback`, `https://platform.staging.vite.cloud/admin/callback`)
-6. Set GitHub repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
+See [`meta/operations.md`](./meta/operations.md) for the full operations reference — CF resources, secrets, environment variables, DNS setup, GitHub Actions, and fresh environment provisioning.
 
 ## Pitfalls / Things That Broke
 

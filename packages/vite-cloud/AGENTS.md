@@ -117,6 +117,42 @@ Applied in order to a path relative to `routes/`:
 
 HTTP methods are determined by **named exports** in each file (detected by `detect-exports.ts` via `parseSync`), not by filename suffixes. Files/dirs starting with `_` are ignored by the scanner.
 
+## Code Generation (`vcc gen`)
+
+Rails/Laravel-style scaffolding commands for common boilerplate:
+
+| Command                                           | Creates                                          |
+| ------------------------------------------------- | ------------------------------------------------ |
+| `vcc gen model <name> [cols...]`                  | Migration + CRUD routes + regenerates `db.d.ts`  |
+| `vcc gen migration <name>`                        | Empty migration file with auto-numbered prefix   |
+| `vcc gen route <path> [--methods get,post,...]`   | Route file with `defineHandler` exports          |
+| `vcc gen middleware <name>`                       | Numbered middleware file with `defineMiddleware` |
+| `vcc gen ssr [--react\|--vue\|--svelte\|--solid]` | SSR entry + client entry + App component         |
+| `vcc gen cron <name>`                             | Cron job file with `defineScheduled` in `crons/` |
+| `vcc gen queue <name>`                            | Queue consumer file with `defineQueue`           |
+
+Column types for `gen model`: `string`, `text`, `datetime` → TEXT; `integer`, `boolean` → INTEGER; `real` → REAL; `blob` → BLOB. Append `?` for nullable (e.g. `bio:text?`).
+
+`gen model` auto-detects your validation library (valibot, zod, or arktype) from `package.json`. If none is found, prompts to choose one or skip validation.
+
+Source: `src/cli/gen-args.ts` (arg parsing), `src/cli/gen.ts` (command runner). Tests: `test/unit/gen-args.test.ts`, `test/unit/gen.test.ts`.
+
+## Coding Agent Integration
+
+Vite Cloud ships with first-class support for coding agents (Claude Code, Cursor, Codex, etc.):
+
+- **`AGENT_PROMPT.md`** — compressed reference prompt shipped in the `vite-cloud` npm package. Covers project structure, routing, DB, auth, typed fetch, KV/storage/queues/cron, CLI, and deployment.
+- **`skills/`** — Claude Code skills shipped in the npm package:
+  - `vite-cloud-cli` — guides agents through CLI operations (deploy, db, gen, secrets, domains, projects) using a decision-tree pattern with lazy-loaded reference files.
+  - `migrate-vite-cloudflare-to-vite-cloud` — guides migration from `@cloudflare/vite-plugin` to `vite-cloud`.
+- **`docs/`** — all 23 docs markdown files are included in the npm package at `node_modules/vite-cloud/docs/`.
+- **`vcc init --agent`** — detects existing agent files (`.claude/`, `CLAUDE.md`, `AGENTS.md`) and injects Vite Cloud instructions with versioned markers. Supports update-in-place when the version changes.
+- **`vcc init --prompt`** — prints the agent reference prompt to stdout.
+- **`vcc init --skills`** — auto-detects coding agents in the project (Claude Code, Cursor, Windsurf, Gemini CLI, Copilot, Codex, etc.) and symlinks skills from the `vite-cloud` package into each agent's skills directory.
+- **`create-vite-cloud`** — scaffolds a new project, auto-detects and runs the preferred package manager, then runs `vcc init` interactively for agent setup, skills linking, and GitHub Actions.
+
+Agent instructions use versioned markers (`<!--injected-by-vite-cloud-v0.0.1-->` / `<!--/injected-by-vite-cloud-->`) for safe update-in-place across version upgrades.
+
 ## Tests
 
 | Test file                                   | Covers                                                         |
