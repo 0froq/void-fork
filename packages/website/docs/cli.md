@@ -28,7 +28,7 @@ We do not recommend installing `vite-cloud` globally, because the CLI needs to b
 ### `vcc init`
 
 ```
-vcc init [--tsconfig] [--github] [--agent] [--skills]
+vcc init [--tsconfig] [--github] [--agentsmd] [--skills]
 ```
 
 Interactive setup wizard for adding vite-cloud to an existing project. Walks through:
@@ -44,7 +44,7 @@ Use flags to run individual steps without prompts:
 | Flag         | Purpose                                                  |
 | ------------ | -------------------------------------------------------- |
 | `--tsconfig` | Only update `tsconfig.json`                              |
-| `--agent`    | Only add coding agent instructions (CLAUDE.md/AGENTS.md) |
+| `--agentsmd` | Only add coding agent instructions (CLAUDE.md/AGENTS.md) |
 | `--skills`   | Only link vite-cloud skills to detected coding agents    |
 | `--github`   | Only create GitHub Actions workflow                      |
 

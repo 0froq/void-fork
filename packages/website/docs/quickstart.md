@@ -34,7 +34,7 @@ You can also pipe it directly into Claude Code:
 vcc init --prompt | claude
 ```
 
-For existing projects, run `vcc init --agent` to add a `CLAUDE.md` (or `AGENTS.md`) with framework instructions.
+For existing projects, run `vcc init --agentsmd` to add a `CLAUDE.md` (or `AGENTS.md`) with framework instructions.
 
 ## Adding to an Existing Vite App
 

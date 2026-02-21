@@ -8,7 +8,7 @@ import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
 export interface InitArgs {
   tsconfig: boolean;
   github: boolean;
-  agent: boolean;
+  agentsmd: boolean;
   skills: boolean;
   prompt: boolean;
 }
@@ -21,7 +21,7 @@ export function parseInitArgs(args: string[]): InitArgs {
       options: {
         tsconfig: { type: "boolean" },
         github: { type: "boolean" },
-        agent: { type: "boolean" },
+        agentsmd: { type: "boolean" },
         skills: { type: "boolean" },
         prompt: { type: "boolean" },
       },
@@ -35,7 +35,7 @@ export function parseInitArgs(args: string[]): InitArgs {
   return {
     tsconfig: parsed.values.tsconfig === true,
     github: parsed.values.github === true,
-    agent: parsed.values.agent === true,
+    agentsmd: parsed.values.agentsmd === true,
     skills: parsed.values.skills === true,
     prompt: parsed.values.prompt === true,
   };
@@ -454,7 +454,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   const state = detectProjectState(root);
   const targeted =
-    initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agent || initArgs.skills);
+    initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agentsmd || initArgs.skills);
 
   // Step 1: TypeScript / tsconfig
   if (!targeted || initArgs.tsconfig) {
@@ -487,10 +487,10 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   }
 
   // Step 2: Agent instructions
-  if (!targeted || initArgs?.agent) {
+  if (!targeted || initArgs?.agentsmd) {
     const detected = detectAgent(root);
     if (targeted) {
-      // --agent flag: auto-inject to detected file or default CLAUDE.md
+      // --agentsmd flag: auto-inject to detected file or default CLAUDE.md
       injectAgentBlock(root, detected.filePath ?? "CLAUDE.md");
     } else if (detected.type) {
       const addAgent = await confirm({
@@ -525,7 +525,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   }
 
   // Step 3: Link skills
-  if (!targeted || initArgs?.agent || initArgs?.skills) {
+  if (!targeted || initArgs?.agentsmd || initArgs?.skills) {
     const { detectAgents, linkSkillsForAgents } = await import("./skills");
     const detectedAgents = detectAgents(root);
     if (detectedAgents.length > 0) {
