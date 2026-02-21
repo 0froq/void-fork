@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,18 +27,26 @@ interface JsonRpcRequest {
 
 // --- Doc loading ---
 
-function loadDocs(): DocPage[] {
-  let docsDir = join(fileURLToPath(import.meta.url), "..");
-  for (let i = 0; i < 5; i++) {
-    try {
-      const candidate = join(docsDir, "docs");
-      readdirSync(candidate);
-      docsDir = candidate;
-      break;
-    } catch {
-      docsDir = join(docsDir, "..");
-    }
+function resolveDocsDir(): string {
+  const moduleDir = join(fileURLToPath(import.meta.url), "..");
+  const bundledDocsDir = join(moduleDir, "..", "..", "skills", "vite-cloud", "docs");
+  if (existsSync(bundledDocsDir)) {
+    return bundledDocsDir;
   }
+
+  // Monorepo fallback for local development before package build.
+  const workspaceDocsDir = join(moduleDir, "..", "..", "..", "website", "docs");
+  if (existsSync(workspaceDocsDir)) {
+    return workspaceDocsDir;
+  }
+
+  throw new Error(
+    `Vite Cloud docs directory not found. Expected bundled docs at: ${bundledDocsDir}`,
+  );
+}
+
+function loadDocs(): DocPage[] {
+  const docsDir = resolveDocsDir();
 
   const files = readdirSync(docsDir)
     .filter((f) => f.endsWith(".md"))

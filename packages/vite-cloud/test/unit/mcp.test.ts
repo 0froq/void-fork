@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { searchDocs } from "../../src/cli/mcp";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Replicate loadDocs logic for tests (reads from docs/ in package root)
+// Replicate loadDocs logic for tests.
 function loadDocs() {
-  const docsDir = join(import.meta.dirname, "../../docs");
+  const bundledDocsDir = join(import.meta.dirname, "../../skills/vite-cloud/docs");
+  const docsDir = existsSync(bundledDocsDir)
+    ? bundledDocsDir
+    : join(import.meta.dirname, "../../../website/docs");
   const files = readdirSync(docsDir)
     .filter((f) => f.endsWith(".md"))
     .sort();
