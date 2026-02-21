@@ -56,8 +56,14 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
 
   function writeRouteTypes() {
     if (!scan) return;
-    const dts = generateRouteTypes(scan, routesDir, outDir, pagesDir);
+    const { dts, serverFiles } = generateRouteTypes(scan, routesDir, outDir, pagesDir);
     writeFileSync(join(outDir, "routes.d.ts"), dts);
+    // Write extracted <script server> blocks as real .ts files for type resolution
+    for (const file of serverFiles) {
+      const absPath = join(outDir, file.relativePath);
+      mkdirSync(dirname(absPath), { recursive: true });
+      writeFileSync(absPath, file.content);
+    }
   }
 
   function writeQueueTypes() {

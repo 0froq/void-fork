@@ -1,11 +1,11 @@
 import { defineHandler } from "vite-cloud";
+import { USERS } from "./_data";
 
-const USERS = [
-  { id: 1, name: "Alice", email: "alice@example.com", created_at: "2025-01-01" },
-  { id: 2, name: "Bob", email: "bob@example.com", created_at: "2025-01-02" },
-];
+export interface Props {
+  user: (typeof USERS)[number];
+}
 
-export const loader = defineHandler((c) => {
+export const loader = defineHandler<Props>((c) => {
   const id = Number(c.req.param("id"));
   const user = USERS.find((u) => u.id === id);
 

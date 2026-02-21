@@ -242,6 +242,34 @@ function defineClientTests(BASE: string) {
       await page.context().close();
     }
   });
+
+  it("navigate to newly added user detail", async () => {
+    const page = await newPage();
+
+    try {
+      await page.goto(BASE + "/users");
+      await page.waitForFunction(() =>
+        document.querySelector("h1")?.textContent?.includes("Users"),
+      );
+
+      // Add a new user
+      await page.fill('input:near(:text("Name:"))', "Dana");
+      await page.fill('input:near(:text("Email:"))', "dana@example.com");
+      await page.click('button[type="submit"]');
+      await page.waitForFunction(() => document.body.textContent?.includes("Dana"));
+
+      // Click the link to the newly added user's detail page
+      await page.click('a:has-text("Dana")');
+      await page.waitForFunction(() => document.querySelector("h1")?.textContent?.includes("Dana"));
+
+      expect(page.url()).toMatch(/\/users\/\d+$/);
+      const text = await page.textContent("body");
+      expect(text).toContain("Dana");
+      expect(text).toContain("dana@example.com");
+    } finally {
+      await page.context().close();
+    }
+  });
 }
 
 describe("vue-pages client (dev)", () => {
@@ -277,7 +305,7 @@ describe("vue-pages client (dev)", () => {
     });
 
     await waitForServer(DEV_BASE, 20_000);
-  });
+  }, 30_000);
 
   afterAll(async () => {
     if (child) {

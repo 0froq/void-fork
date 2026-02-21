@@ -137,21 +137,68 @@ The `<script server lang="ts">` block is extracted by the adapter's Vite plugin 
 
 ### Type Safety
 
-No type codegen needed for page props. The prop interface is defined in the same file:
+#### Vue: `<script server>` Props Sharing
+
+In Vue SFCs, `<script server>` and `<script setup>` share module scope in `vue-tsc`. This means a `Props` interface exported from `<script server>` is directly available in `<script setup>` — no import needed:
 
 ```vue
 <script server lang="ts">
-export const loader = defineHandler(async (c) => {
-  return { users: await db.list("users") }; // server return type
+export interface Props {
+  users: User[];
+}
+export const loader = defineHandler<Props>(async (c) => {
+  return { users: await db.list("users") };
 });
 </script>
 
 <script setup lang="ts">
-defineProps<{ users: User[] }>(); // client prop type
+const props = defineProps<Props>(); // Props is in scope from <script server>
 </script>
 ```
 
-The type contract is explicit and colocated. The tradeoff is that server return type and client prop type are not statically linked across the two script blocks — but they live in the same file, making drift easy to spot.
+The `defineHandler<Props>` generic constrains the handler return type, and the same `Props` type flows to `defineProps<Props>()` with zero duplication.
+
+#### Companion `.server.ts` Props Pattern
+
+For companion `.server.ts` files (React, or Vue without `<script server>`), the server file exports a `Props` interface that the client component imports:
+
+```ts
+// pages/users/index.server.ts
+export interface Props {
+  users: User[];
+}
+export const loader = defineHandler<Props>(async (c) => {
+  return { users: await db.list("users") };
+});
+```
+
+```tsx
+// pages/users/index.tsx
+import type { Props } from "./index.server";
+export default function UsersPage({ users }: Props) { ... }
+```
+
+This is the minimum viable pattern — one `import type` line. Generating a `PagePropsMap` was considered but rejected as it trades a direct import for string-literal indirection, which is arguably worse.
+
+#### `defineHandler<R>` Accepts Response Returns
+
+Handlers often need to return `Response` as an escape hatch (e.g. `c.notFound()`, `c.redirect(...)`). The `defineHandler<R>` signature accepts `R | Response | Promise<R | Response>`, but `__output` carries `Exclude<Awaited<R>, Response>` — Response is stripped from the phantom type so it doesn't pollute typed props:
+
+```ts
+export const loader = defineHandler<Props>((c) => {
+  const user = findUser(c.req.param("id"));
+  if (!user) return c.notFound(); // Response — allowed, stripped from Props
+  return { user }; // Props — this is what __output carries
+});
+```
+
+#### Inline `<script server>` Type Extraction for `PageActionMap`
+
+TypeScript cannot resolve `typeof import(...)` for virtual modules or inline SFC blocks. To enable typed `useForm()` body inference for inline `<script server>` actions, the codegen extracts the block content to a real `.ts` file under `.vite-cloud/server/` and generates `typeof import(...)` pointing to it.
+
+Relative imports in the extracted content must be rewritten since the generated file lives in a different directory. For example, `import { USERS } from "./_data"` in `pages/users/index.vue` becomes `import { USERS } from "../../../pages/users/_data"` in `.vite-cloud/server/users/index.server.ts`. The rewriting uses `path.relative()` to compute the correct path from the generated file's location back through the original `pages/` directory.
+
+The generated server files are not listed in `.vite-cloud/tsconfig.json` — they are resolved transitively via `typeof import(...)` references in `routes.d.ts`.
 
 ## Server Handler Files
 
@@ -361,7 +408,9 @@ Each adapter is a Vite plugin + runtime library. The adapter:
 
 ### Plugin Ordering
 
-The adapter's Vite plugin must extract `<script server>` **before** the framework plugin compiles the SFC:
+#### Vue: 3 Plugins
+
+The Vue adapter's Vite plugin must extract `<script server>` **before** the framework plugin compiles the SFC:
 
 ```ts
 // @vite-cloud/vue/plugin internals
@@ -371,6 +420,22 @@ export function viteCloudVue(options?) {
   return [
     scriptServerPlugin(), // extract <script server> first
     vue(options?.vue), // then compile the remaining SFC
+    pagesPlugin(), // generate SSR + hydration entries
+  ];
+}
+```
+
+#### React: 2 Plugins
+
+React has no SFC custom blocks, so no `scriptServerPlugin` is needed. Only companion `.server.ts` files are supported:
+
+```ts
+// @vite-cloud/react/plugin internals
+import react from "@vitejs/plugin-react";
+
+export function viteCloudReact(options?) {
+  return [
+    react(options?.react), // JSX transform
     pagesPlugin(), // generate SSR + hydration entries
   ];
 }
@@ -480,11 +545,80 @@ currentComponent.value = comp;
 
 **Fix:** Exclude `/assets/*` from `run_worker_first` so Cloudflare serves hashed assets directly from the edge. Additionally, the `notFound` handler calls `env.ASSETS.fetch(c.req.raw)` for any remaining file-extension paths as a fallback.
 
+### No JSX in Virtual Modules
+
+**Problem:** Virtual modules with `\0`-prefixed IDs (e.g. `\0virtual:vite-cloud-pages-renderer`) are not processed by `@vitejs/plugin-react`. Writing JSX in the generated code produces syntax errors at runtime.
+
+**Fix:** Use `React.createElement()` calls instead of JSX in all generated virtual module code. For example:
+
+```js
+// BAD — JSX is not transformed in virtual modules
+return (
+  <Layout>
+    <Page {...props} />
+  </Layout>
+);
+
+// GOOD — explicit createElement calls
+return createElement(Layout, null, createElement(Page, props));
+```
+
+This applies to both the SSR renderer and client hydration entry virtual modules.
+
+### React Client State: `useSyncExternalStore`
+
+The React client entry uses a module-level store with `useSyncExternalStore` for page state management (current component, props, layouts, shared, errors). This is cleaner than `useState` for state that lives outside the React tree and integrates properly with React's concurrent features. The pattern:
+
+```js
+let state = { component, props, layouts, shared, errors };
+const listeners = new Set();
+function subscribe(listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+function getSnapshot() {
+  return state;
+}
+function setState(partial) {
+  state = { ...state, ...partial };
+  listeners.forEach((l) => l());
+}
+
+// In App component:
+const snap = useSyncExternalStore(subscribe, getSnapshot);
+```
+
+### React View Transitions Require `flushSync`
+
+**Problem:** `document.startViewTransition(callback)` expects the DOM to update synchronously within the callback. React batches state updates by default, so calling `setState` inside the callback doesn't immediately flush to the DOM.
+
+**Fix:** Wrap state updates in `flushSync` from `react-dom`:
+
+```js
+document.startViewTransition(() => {
+  flushSync(() => setState({ component, props, layouts, shared, errors }));
+});
+```
+
+Vue uses `nextTick()` instead — different mechanism, same purpose.
+
 ### Bare Module Specifiers in Inline `<script>` Tags
 
 **Problem:** Inline `<script type="module">import "virtual:foo";</script>` in SSR-generated HTML doesn't work — browsers don't resolve bare module specifiers, and Vite's import rewriting only processes files served through its module pipeline.
 
 **Fix:** Either use `<script type="module" src="/@id/__x00__virtual:foo">` (served through Vite) or don't inject inline module scripts in SSR HTML.
+
+### Extracted Server Files Need Import Rewriting
+
+**Problem:** When extracting `<script server>` content to `.vite-cloud/server/<path>.server.ts`, relative imports like `from "./_data"` resolve incorrectly because the generated file is in a different directory than the original SFC.
+
+**Fix:** Rewrite all relative import specifiers (`./foo`, `../bar`) using `path.relative()` to compute the correct path from the generated file's location (`<outDir>/server/<dir>/`) back to the original source directory (`<pagesDir>/<dir>/`). Non-relative imports (bare specifiers like `"vite-cloud"`) are left untouched.
+
+### `defineHandler<R>` Must Allow Response Without Polluting Output
+
+**Problem:** Handlers that conditionally return `Response` (via `c.notFound()`, `c.redirect()`) alongside the typed return `R` cause `__output` to include `Response`, making the inferred props type `Props | Response`.
+
+**Fix:** The handler signature is `(c: CloudContext) => R | Response | Promise<R | Response>`, but `__output` is `Exclude<Awaited<R>, Response>`. Response is always allowed as an escape hatch but is stripped from the type-level output that flows to page props and `PageActionMap`.
 
 ## Debugging Techniques
 
@@ -529,6 +663,6 @@ If something works in `vite preview` but breaks in `vite dev`:
 
 - **Partial reloads** (Inertia's `only` / `except` for selective prop fetching) — can be added later
 - **Link prefetching** (prefetch on hover) — can be added later
-- **View transitions API** integration — can be added later
+- **View transitions API** integration — implemented via `viewTransitions` option in adapter config and `viewTransition` prop on `Link`
 - **Asset versioning** (409 + full reload on bundle changes) — can be added later
 - **Flash data helpers** — flash messages work via shared data, no special API needed initially

@@ -1,27 +1,22 @@
 <script server lang="ts">
 import { defineHandler } from "vite-cloud";
-import { ValidationError } from "vite-cloud/handler";
+import * as v from "valibot";
+import { USERS } from "./_data";
 
-const USERS = [
-  { id: 1, name: "Alice", email: "alice@example.com" },
-  { id: 2, name: "Bob", email: "bob@example.com" },
-];
+export interface Props {
+  users: typeof USERS;
+}
 
-export const loader = defineHandler(() => {
+export const loader = defineHandler<Props>(() => {
   return { users: USERS };
 });
 
-export const action = defineHandler(async (c) => {
-  const body = await c.req.json<{ name: string; email: string }>();
-  const errors: Record<string, string> = {};
-
-  if (!body.name?.trim()) errors.name = "Name is required";
-  if (!body.email?.trim()) errors.email = "Email is required";
-
-  if (Object.keys(errors).length > 0) {
-    throw new ValidationError(errors);
-  }
-
+export const action = defineHandler.withValidator({
+  body: v.object({
+    name: v.pipe(v.string(), v.minLength(1, "Name is required")),
+    email: v.pipe(v.string(), v.minLength(1, "Email is required")),
+  }),
+})(async (c, { body }) => {
   USERS.push({ id: USERS.length + 1, name: body.name.trim(), email: body.email.trim() });
 });
 </script>
@@ -29,9 +24,7 @@ export const action = defineHandler(async (c) => {
 <script setup lang="ts">
 import { Link, useForm } from "@vite-cloud/vue";
 
-const props = defineProps<{
-  users: Array<{ id: number; name: string; email: string }>;
-}>();
+const props = defineProps<Props>();
 
 const form = useForm("/users", {
   name: "",

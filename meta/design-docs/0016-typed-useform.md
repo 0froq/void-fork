@@ -118,6 +118,27 @@ This is consistent with the typed `fetch()` client which uses the same `params` 
 
 The `params` option is required (via conditional types) when the route has dynamic segments, and omitted/forbidden for static routes.
 
+## React Adapter
+
+React's `useForm` follows the same URL-first typed overload pattern, with React-specific idioms:
+
+```tsx
+const form = useForm("/users", { name: "", email: "" });
+
+// React: explicit setData (no reactive proxy)
+<input value={form.data.name} onChange={(e) => form.setData("name", e.target.value)} />
+
+// Vue: reactive proxy, direct v-model
+<input v-model="form.name" />
+```
+
+Key differences:
+
+- `form.data.field` for reads + `form.setData("field", value)` for writes (React has no Vue-style reactive proxy)
+- `isDirty` computed via `useMemo` comparing current data to defaults
+- Submit methods (`post`, `put`, `patch`, `delete`) call `router.visit()` from `RouterContext`
+- Same `recentlySuccessful` 2-second timeout pattern as Vue
+
 ## Files Changed
 
 | File                                             | Change                                                     |
@@ -126,10 +147,29 @@ The `params` option is required (via conditional types) when the route has dynam
 | `packages/vite-cloud/src/runtime/routes-stub.ts` | Add empty `PageActionMap` interface stub                   |
 | `packages/vue/src/runtime/use-form.ts`           | Add URL-first overload, runtime param resolution           |
 | `packages/vue/src/index.ts`                      | Re-export updated `useForm` types                          |
+| `packages/react/src/runtime/use-form.ts`         | React useForm with URL-first overload + setData API        |
 
 ## Edge Cases
 
 - **No `pages/` directory**: `PageActionMap` is empty — typed overload has no valid URLs, untyped overload still works
 - **Action without validator**: Entry generated with `body: Record<string, unknown>` — URL autocompletes, body/errors unnarrowed
 - **Multiple validators** (body + query): Only `body` extracted for `PageActionMap`
-- **`<script server>` vs `.server.ts`**: Both go through same handler loading — type extraction works identically
+- **`defineHandler<R>` with Response returns**: `__output` carries `Exclude<Awaited<R>, Response>` — Response is stripped so it doesn't pollute `PageActionMap` body types
+
+## Pitfalls
+
+### Inline `<script server>` Requires Server File Extraction
+
+**Problem:** `typeof import(...)` in `PageActionMap` entries cannot resolve inline `<script server>` blocks — TypeScript needs a real file on disk to resolve imports.
+
+**Previous behavior:** Inline `<script server>` actions fell back to `body: Record<string, unknown>`, losing all type inference for `useForm()`.
+
+**Fix:** During `generateRouteTypes`, the codegen extracts inline `<script server>` content to real `.ts` files under `.vite-cloud/server/` (e.g. `.vite-cloud/server/users/index.server.ts`). The `PageActionMap` entry then uses `typeof import("./server/users/index.server")["action"]` which TypeScript can resolve.
+
+**Relative import rewriting:** The extracted files live in a different directory than the original SFC. Relative imports (e.g. `from "./_data"`) must be rewritten using `path.relative()` to resolve from the generated file's location back through the original `pages/` directory. Non-relative imports (bare specifiers like `"vite-cloud"`) are left untouched.
+
+**Result:** Both `<script server>` and `.server.ts` now produce fully typed `PageActionMap` entries — the codegen handles both uniformly via `typeof import(...)`.
+
+### Companion `.server.ts` Takes Precedence
+
+If both a companion `.server.ts` file and an inline `<script server>` block exist, the companion file takes precedence (consistent with page scanning behavior). The codegen only extracts inline content when no companion file exists.

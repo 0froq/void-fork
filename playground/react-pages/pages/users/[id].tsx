@@ -1,0 +1,12 @@
+import { Link } from "@vite-cloud/react";
+import type { Props } from "./[id].server";
+
+export default function UserDetailPage({ user }: Props) {
+  return (
+    <div>
+      <h1>{user.name}</h1>
+      <p>Email: {user.email}</p>
+      <Link href="/users">&larr; Back to Users</Link>
+    </div>
+  );
+}
