@@ -38,7 +38,8 @@ export function flattenValidationErrors(body: any): Record<string, string> {
   if (body?.issues) {
     for (const slotIssue of body.issues) {
       for (const issue of slotIssue.issues) {
-        const key = issue.path?.[0]?.key ?? issue.path?.[0] ?? slotIssue.slot;
+        // path is a dot-joined string from flattenIssues (e.g. "name", "address.city")
+        const key = typeof issue.path === "string" ? issue.path : slotIssue.slot;
         if (typeof key === "string") errors[key] = issue.message;
       }
     }

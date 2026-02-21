@@ -99,7 +99,9 @@ export interface TypedHandler<V extends ValidatorSlots = {}, R = unknown> {
  * Single argument: identity wrapper (backwards compatible).
  * Multiple arguments: middleware chain + final handler, composed at runtime.
  */
-export function defineHandler<R>(handler: (c: CloudContext) => R): TypedHandler<{}, R>;
+export function defineHandler<R>(
+  handler: (c: CloudContext) => R | Response | Promise<R | Response>,
+): TypedHandler<{}, Exclude<Awaited<R>, Response>>;
 export function defineHandler(m1: MiddlewareFn, handler: HandlerFn): TypedHandler;
 export function defineHandler(m1: MiddlewareFn, m2: MiddlewareFn, handler: HandlerFn): TypedHandler;
 export function defineHandler(
