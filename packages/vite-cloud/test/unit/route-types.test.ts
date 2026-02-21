@@ -165,7 +165,7 @@ describe("generateRouteTypes", () => {
       },
     };
 
-    const { dts, serverFiles } = generateRouteTypes(
+    const { dts } = generateRouteTypes(
       scan,
       "/project/routes",
       "/project/.vite-cloud",
@@ -201,7 +201,7 @@ describe("generateRouteTypes", () => {
       },
     };
 
-    const { dts, serverFiles } = generateRouteTypes(
+    const { dts } = generateRouteTypes(
       scan,
       "/project/routes",
       "/project/.vite-cloud",
@@ -365,7 +365,7 @@ export const action = defineHandler(() => {});
       },
     };
 
-    const { dts, serverFiles } = generateRouteTypes(
+    const { dts } = generateRouteTypes(
       scan,
       "/project/routes",
       "/project/.vite-cloud",
