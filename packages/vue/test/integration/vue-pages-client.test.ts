@@ -292,7 +292,7 @@ describe("vue-pages client (dev)", () => {
       },
     );
 
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr!.on("data", (chunk: Buffer) => {
       stderr += String(chunk);
     });
 
@@ -354,7 +354,7 @@ describe("vue-pages client (preview)", () => {
       },
     );
 
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr!.on("data", (chunk: Buffer) => {
       stderr += String(chunk);
     });
 

@@ -24,6 +24,7 @@
     "@vitejs/plugin-vue": "^5.0.0"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "tsdown": "catalog:",
     "vite": "catalog:",
     "vite-cloud": "workspace:*",
