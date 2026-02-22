@@ -301,7 +301,17 @@ export default function viteCloud(): Plugin[] {
   const envPlugin: Plugin = {
     name: "vite-cloud:env",
     config(_, { mode }) {
-      const env = loadEnv(mode, root, "");
+      // loadEnv with prefix "" returns .env file vars AND all process.env vars.
+      // Filter out shell env pollution (MANPATH, PATH, HOME, etc.) by keeping only
+      // vars that are new or have a different value than the shell environment.
+      const shellKeys = new Set(Object.keys(process.env));
+      const loaded = loadEnv(mode, root, "");
+      const env: Record<string, string> = {};
+      for (const [key, value] of Object.entries(loaded)) {
+        if (!shellKeys.has(key) || process.env[key] !== value) {
+          env[key] = value;
+        }
+      }
       workerConfig.vars = { ...(workerConfig.vars as Record<string, string> | undefined), ...env };
 
       // Auto-detect OAuth providers from env vars (only if not explicitly configured)
