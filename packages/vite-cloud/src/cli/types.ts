@@ -32,6 +32,7 @@ export interface DeployManifest {
   ssr?: boolean;
   framework?: boolean;
   revalidate?: number | Record<string, number>;
+  prerender?: string[];
   static?: "spa" | "ssg";
   assetsDir?: string;
   assetHashes?: Record<string, string>;

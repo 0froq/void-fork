@@ -141,3 +141,25 @@ export function validateSsrEntries(root: string): SsrEntries | null {
 export function validateSsrEntry(root: string): string | null {
   return validateSsrEntries(root)?.server.absolutePath ?? null;
 }
+
+const PRERENDER_RE = /export\s+const\s+prerender\s*=\s*true\s*;/;
+const GET_PRERENDER_PATHS_RE = /export\s+(?:async\s+)?function\s+getPrerenderPaths\b/;
+
+/**
+ * Detect prerender exports in the SSR server entry file.
+ * Returns null when SSR mode is not used.
+ */
+export function detectSsrPrerender(
+  root: string,
+): { prerender: boolean; hasGetPrerenderPaths: boolean } | null {
+  const entryPath = getSsrServerEntryPath(root);
+  if (!entryPath) return null;
+
+  const content = readFileSync(entryPath, "utf-8");
+  const prerender = PRERENDER_RE.test(content);
+  const hasGetPrerenderPaths = GET_PRERENDER_PATHS_RE.test(content);
+
+  if (!prerender && !hasGetPrerenderPaths) return null;
+
+  return { prerender, hasGetPrerenderPaths };
+}

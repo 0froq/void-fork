@@ -185,6 +185,78 @@ export const loader = () => [];
     expect(page).toBeDefined();
     expect(page!.revalidate).toBeUndefined();
   });
+
+  it("detects prerender = true from .server.ts", async () => {
+    writeFile("products/index.vue", "<template><div>Products</div></template>");
+    writeFile(
+      "products/index.server.ts",
+      "export const prerender = true;\nexport const loader = () => [];",
+    );
+
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "products");
+    expect(page).toBeDefined();
+    expect(page!.prerender).toBe(true);
+  });
+
+  it("detects getPrerenderPaths from .server.ts", async () => {
+    writeFile("blog/[slug].vue", "<template><div>Blog</div></template>");
+    writeFile(
+      "blog/[slug].server.ts",
+      "export const prerender = true;\nexport async function getPrerenderPaths() { return [{ slug: 'hello' }]; }\nexport const loader = () => [];",
+    );
+
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "blog/[slug]");
+    expect(page).toBeDefined();
+    expect(page!.prerender).toBe(true);
+    expect(page!.hasGetPrerenderPaths).toBe(true);
+  });
+
+  it("detects prerender = true from <script server> block", async () => {
+    writeFile(
+      "about.vue",
+      `<script server>
+export const prerender = true;
+export const loader = () => ({ title: "About" });
+</script>
+<template><div>About</div></template>`,
+    );
+
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "about");
+    expect(page).toBeDefined();
+    expect(page!.prerender).toBe(true);
+  });
+
+  it("detects getPrerenderPaths from <script server> block", async () => {
+    writeFile(
+      "posts/[id].vue",
+      `<script server>
+export const prerender = true;
+export async function getPrerenderPaths() { return [{ id: "1" }]; }
+export const loader = () => ({});
+</script>
+<template><div>Post</div></template>`,
+    );
+
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "posts/[id]");
+    expect(page).toBeDefined();
+    expect(page!.prerender).toBe(true);
+    expect(page!.hasGetPrerenderPaths).toBe(true);
+  });
+
+  it("returns undefined prerender when not exported", async () => {
+    writeFile("about.vue", "<template><div>About</div></template>");
+    writeFile("about.server.ts", "export const loader = () => [];");
+
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "about");
+    expect(page).toBeDefined();
+    expect(page!.prerender).toBeUndefined();
+    expect(page!.hasGetPrerenderPaths).toBeUndefined();
+  });
 });
 
 describe("resolveLayoutChain", () => {

@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { intro, outro, log, note, spinner, confirm, isCancel } from "@clack/prompts";
-import { build, loadEnv, resolveConfig } from "vite";
+import { build, createServer, loadEnv, resolveConfig } from "vite";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
 import { computeAssetHashes, packageBuild, packageStaticBuild } from "./package";
@@ -13,7 +13,7 @@ import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
 import { scanJobsSync } from "../crons/scan";
 import { scanQueuesSync } from "../queues/scan";
-import { validateSsrEntry } from "../ssr/entry";
+import { validateSsrEntry, detectSsrPrerender, getSsrServerEntryPath } from "../ssr/entry";
 import { scanPages } from "../pages/scan";
 import { detectPreset, type StaticPreset } from "./preset";
 import { readConfig, convertHeadersConfig } from "../config";
@@ -251,7 +251,7 @@ async function runFullDeploy(
   const isSsr = isFrameworkMode ? true : Boolean(validateSsrEntry(root));
 
   // Resolve revalidate config from vite-cloud.json + per-page .server.ts exports
-  const vcRevalidate = readConfig(root).revalidate;
+  const vcRevalidate = readConfig(root).cache?.revalidate;
   let revalidate: number | Record<string, number> | undefined;
   if (vcRevalidate != null) {
     revalidate = vcRevalidate;
@@ -280,6 +280,87 @@ async function runFullDeploy(
       }
     }
   }
+
+  // Resolve prerender paths
+  const prerenderPaths: string[] = [];
+  if (pageScan) {
+    // Static pages: no params, prerender = true
+    for (const page of pageScan.pages) {
+      if (page.prerender && page.params.length === 0 && !page.catchAll) {
+        prerenderPaths.push(page.pattern);
+      }
+    }
+    // Dynamic pages: prerender = true + getPrerenderPaths
+    const dynamicPrerenderPages = pageScan.pages.filter(
+      (p) => p.prerender && p.hasGetPrerenderPaths && (p.params.length > 0 || p.catchAll),
+    );
+    if (dynamicPrerenderPages.length > 0) {
+      const viteServer = await createServer({
+        root,
+        server: { middlewareMode: true },
+        logLevel: "silent",
+      });
+      try {
+        for (const page of dynamicPrerenderPages) {
+          try {
+            const serverFile = page.serverPath
+              ? join(root, "pages", page.serverPath)
+              : join(root, "pages", page.componentPath);
+            const mod = await viteServer.ssrLoadModule(serverFile);
+            if (typeof mod.getPrerenderPaths === "function") {
+              const paramSets = await mod.getPrerenderPaths();
+              if (Array.isArray(paramSets)) {
+                for (const params of paramSets) {
+                  let path = page.pattern;
+                  for (const [key, value] of Object.entries(params as Record<string, string>)) {
+                    path = path.replace(`:${key}`, value);
+                  }
+                  prerenderPaths.push(path);
+                }
+              }
+            }
+          } catch (err) {
+            log.warn(
+              `Failed to resolve prerender paths for ${page.pattern}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+      } finally {
+        await viteServer.close();
+      }
+    }
+  }
+
+  // Custom SSR: getPrerenderPaths() in src/main.ssr.ts
+  const ssrPrerender = detectSsrPrerender(root);
+  if (ssrPrerender?.hasGetPrerenderPaths) {
+    const viteServer = await createServer({
+      root,
+      server: { middlewareMode: true },
+      logLevel: "silent",
+    });
+    try {
+      const entryPath = getSsrServerEntryPath(root)!;
+      const mod = await viteServer.ssrLoadModule(entryPath);
+      if (typeof mod.getPrerenderPaths === "function") {
+        const paths = await mod.getPrerenderPaths();
+        if (Array.isArray(paths)) {
+          for (const p of paths) {
+            if (typeof p === "string") prerenderPaths.push(p);
+          }
+        }
+      }
+    } catch (err) {
+      log.warn(
+        `Failed to resolve SSR prerender paths: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      await viteServer.close();
+    }
+  }
+
+  // Dedupe prerender paths
+  const uniquePrerenderPaths = [...new Set(prerenderPaths)];
 
   // 8. Load .env vars for production
   const envVars = loadEnv("production", root, "");
@@ -319,6 +400,7 @@ async function runFullDeploy(
     envVars,
     queues,
     assetsDir,
+    uniquePrerenderPaths,
   );
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
@@ -336,6 +418,9 @@ async function runFullDeploy(
   }
   if (queues.length > 0) {
     summary.push(`${queues.length} queue(s) configured`);
+  }
+  if (uniquePrerenderPaths.length > 0) {
+    summary.push(`${uniquePrerenderPaths.length} page(s) prerendered`);
   }
   if (isSsr) {
     summary.push("SSR enabled");

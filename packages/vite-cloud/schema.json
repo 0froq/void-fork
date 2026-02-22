@@ -62,24 +62,31 @@
       "type": "string",
       "description": "Output directory for static deploys. Relative to project root."
     },
-    "revalidate": {
-      "description": "Edge caching TTL in seconds. A number sets a global TTL for all SSR pages. An object maps URL patterns to TTLs (first match wins). Set to 0 to disable caching for a path.",
-      "oneOf": [
-        {
-          "type": "number",
-          "minimum": 0
-        },
-        {
-          "type": "object",
-          "patternProperties": {
-            "^(/|\\*)": {
+    "cache": {
+      "type": "object",
+      "description": "Caching configuration.",
+      "properties": {
+        "revalidate": {
+          "description": "Edge caching TTL in seconds. A number sets a global TTL for all SSR pages. An object maps URL patterns to TTLs (first match wins). Set to 0 to disable caching for a path.",
+          "oneOf": [
+            {
               "type": "number",
               "minimum": 0
+            },
+            {
+              "type": "object",
+              "patternProperties": {
+                "^(/|\\*)": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
             }
-          },
-          "additionalProperties": false
+          ]
         }
-      ]
+      },
+      "additionalProperties": false
     },
     "wrangler": {
       "type": "object",

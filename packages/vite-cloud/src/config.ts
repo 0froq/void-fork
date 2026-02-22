@@ -11,6 +11,11 @@ export interface WranglerConfig {
   compatibility_flags?: string[];
 }
 
+/** Caching configuration. */
+export interface CacheConfig {
+  revalidate?: number | Record<string, number>;
+}
+
 /** Shape of the `vite-cloud.json` config file. All fields optional. */
 export interface ViteCloudConfig {
   $schema?: string;
@@ -20,10 +25,10 @@ export interface ViteCloudConfig {
     kv?: boolean;
     storage?: boolean;
   };
+  cache?: CacheConfig;
   headers?: Record<string, string[]>;
   mode?: "spa" | "ssg" | "fullstack" | "framework";
   outputDir?: string;
-  revalidate?: number | Record<string, number>;
   wrangler?: WranglerConfig;
 }
 
@@ -117,34 +122,47 @@ export function readConfig(root: string): ViteCloudConfig {
     throw new Error(`"outputDir" in ${CONFIG_FILE} must be a string`);
   }
 
-  // Validate revalidate
+  // Migration error for old top-level revalidate
   if (obj.revalidate !== undefined) {
-    if (typeof obj.revalidate === "number") {
-      if (!Number.isFinite(obj.revalidate) || obj.revalidate < 0) {
-        throw new Error(`"revalidate" in ${CONFIG_FILE} must be a non-negative finite number`);
-      }
-    } else if (
-      typeof obj.revalidate === "object" &&
-      obj.revalidate !== null &&
-      !Array.isArray(obj.revalidate)
-    ) {
-      const r = obj.revalidate as Record<string, unknown>;
-      for (const [pattern, value] of Object.entries(r)) {
-        if (pattern !== "*" && !pattern.startsWith("/")) {
+    throw new Error(`"revalidate" has moved to "cache.revalidate" in ${CONFIG_FILE}`);
+  }
+
+  // Validate cache
+  if (obj.cache !== undefined) {
+    if (typeof obj.cache !== "object" || obj.cache === null || Array.isArray(obj.cache)) {
+      throw new Error(`"cache" in ${CONFIG_FILE} must be an object`);
+    }
+    const cache = obj.cache as Record<string, unknown>;
+    if (cache.revalidate !== undefined) {
+      if (typeof cache.revalidate === "number") {
+        if (!Number.isFinite(cache.revalidate) || cache.revalidate < 0) {
           throw new Error(
-            `"revalidate" key "${pattern}" in ${CONFIG_FILE} must start with "/" or be "*"`,
+            `"cache.revalidate" in ${CONFIG_FILE} must be a non-negative finite number`,
           );
         }
-        if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-          throw new Error(
-            `"revalidate" value for "${pattern}" in ${CONFIG_FILE} must be a non-negative finite number`,
-          );
+      } else if (
+        typeof cache.revalidate === "object" &&
+        cache.revalidate !== null &&
+        !Array.isArray(cache.revalidate)
+      ) {
+        const r = cache.revalidate as Record<string, unknown>;
+        for (const [pattern, value] of Object.entries(r)) {
+          if (pattern !== "*" && !pattern.startsWith("/")) {
+            throw new Error(
+              `"cache.revalidate" key "${pattern}" in ${CONFIG_FILE} must start with "/" or be "*"`,
+            );
+          }
+          if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+            throw new Error(
+              `"cache.revalidate" value for "${pattern}" in ${CONFIG_FILE} must be a non-negative finite number`,
+            );
+          }
         }
+      } else {
+        throw new Error(
+          `"cache.revalidate" in ${CONFIG_FILE} must be a number or an object of path patterns to numbers`,
+        );
       }
-    } else {
-      throw new Error(
-        `"revalidate" in ${CONFIG_FILE} must be a number or an object of path patterns to numbers`,
-      );
     }
   }
 
