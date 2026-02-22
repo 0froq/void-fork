@@ -316,13 +316,6 @@ export default function viteCloud(): Plugin[] {
         }
       }
     },
-    configResolved(resolved) {
-      if (resolved.build.outDir !== "dist") {
-        resolved.logger.warn(
-          `[vite-cloud] build.outDir must be "dist" for deploy to work correctly (found "${resolved.build.outDir}")`,
-        );
-      }
-    },
     configureServer(server) {
       // AI onboarding: detect missing credentials early and guide users
       if (bindings.needsAI) {

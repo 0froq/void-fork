@@ -1,0 +1,21 @@
+{
+  "name": "vite-cloud-dashboard",
+  "compatibility_date": "2026-02-12",
+  // main, no_bundle, and assets.directory are for `wrangler deploy` (after `vite build`).
+  // The CF vite plugin overrides main/assets during build — these are only read by wrangler CLI.
+  "main": "dist/vite_cloud_dashboard/index.js",
+  "no_bundle": true,
+  "assets": {
+    "directory": "dist/client",
+  },
+  "routes": [{ "pattern": "dash.vite.cloud", "custom_domain": true }],
+  "env": {
+    "staging": {
+      "name": "vite-cloud-dashboard-staging",
+      "routes": [{ "pattern": "dash.staging.vite.cloud", "custom_domain": true }],
+      "vars": {
+        "PLATFORM_API_URL": "https://platform.staging.vite.cloud",
+      },
+    },
+  },
+}
