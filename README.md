@@ -49,17 +49,18 @@ pnpm run deploy:staging             # Deploy all workers to staging environment
 
 pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-workspace.yaml` (typescript, tsdown, vite, @cloudflare/workers-types, wrangler). Make sure to run `pnpm install` after making package structure changes.
 
-| Package                                                  | npm name                         | Purpose                                                        |
-| -------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------- |
-| [`packages/vite-cloud`](./packages/vite-cloud/AGENTS.md) | `vite-cloud`                     | Core Vite plugin — routing, inference, migrations, CLI         |
-| [`packages/react`](./packages/react/README.md)           | `@vite-cloud/react`              | React framework adapter for Pages mode (SSR, Link, useForm)    |
-| [`packages/vue`](./packages/vue/README.md)               | `@vite-cloud/vue`                | Vue framework adapter for Pages mode (SSR, Link, useForm)      |
-| [`packages/svelte`](./packages/svelte/README.md)         | `@vite-cloud/svelte`             | Svelte 5 framework adapter for Pages mode (SSR, Link, useForm) |
-| [`packages/solid`](./packages/solid/README.md)           | `@vite-cloud/solid`              | SolidJS framework adapter for Pages mode (SSR, Link, useForm)  |
-| [`packages/platform`](./packages/platform/README.md)     | `@vite-cloud/platform` (private) | Control Plane API + Admin Dashboard                            |
-| [`packages/dispatch`](./packages/dispatch/README.md)     | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets           |
-| [`packages/ai-proxy`](./packages/ai-proxy/README.md)     | `@vite-cloud/ai-proxy` (private) | AI inference proxy — metered Workers AI via AI Gateway         |
-| `playground/*`                                           | (private)                        | local apps for testing                                         |
+| Package                                                  | npm name                          | Purpose                                                        |
+| -------------------------------------------------------- | --------------------------------- | -------------------------------------------------------------- |
+| [`packages/vite-cloud`](./packages/vite-cloud/AGENTS.md) | `vite-cloud`                      | Core Vite plugin — routing, inference, migrations, CLI         |
+| [`packages/react`](./packages/react/README.md)           | `@vite-cloud/react`               | React framework adapter for Pages mode (SSR, Link, useForm)    |
+| [`packages/vue`](./packages/vue/README.md)               | `@vite-cloud/vue`                 | Vue framework adapter for Pages mode (SSR, Link, useForm)      |
+| [`packages/svelte`](./packages/svelte/README.md)         | `@vite-cloud/svelte`              | Svelte 5 framework adapter for Pages mode (SSR, Link, useForm) |
+| [`packages/solid`](./packages/solid/README.md)           | `@vite-cloud/solid`               | SolidJS framework adapter for Pages mode (SSR, Link, useForm)  |
+| [`packages/dashboard`](./packages/dashboard/README.md)   | `@vite-cloud/dashboard` (private) | User-facing dashboard — project management, deployments, usage |
+| [`packages/platform`](./packages/platform/README.md)     | `@vite-cloud/platform` (private)  | Control Plane API + Admin Dashboard                            |
+| [`packages/dispatch`](./packages/dispatch/README.md)     | `@vite-cloud/dispatch` (private)  | Routes `*.vitecloud.app` to user workers + R2 assets           |
+| [`packages/ai-proxy`](./packages/ai-proxy/README.md)     | `@vite-cloud/ai-proxy` (private)  | AI inference proxy — metered Workers AI via AI Gateway         |
+| `playground/*`                                           | (private)                         | local apps for testing                                         |
 
 ## `vite-cloud` Overview
 
@@ -122,6 +123,16 @@ SolidJS framework adapter for Pages mode — same Inertia-inspired DX as Vue/Rea
 - **Server handlers**: companion `.server.ts` files with `loader` and `action` exports (same as React/Svelte adapter)
 
 See [`packages/solid/README.md`](./packages/solid/README.md) for details.
+
+## `dashboard` Overview
+
+Vue Pages mode app serving the user-facing Vite Cloud dashboard at `dash.vite.cloud`. Built with `@vite-cloud/vue` (SSR + `<script server>` blocks), Hono, and Tailwind CSS v4 with shared design tokens from `@vite-cloud/ui`. Uses a BFF pattern — server-side loaders call the platform API with the user's JWT (stored in an httpOnly cookie), so the client never talks to the platform API directly.
+
+- **Auth**: OAuth (GitHub/Google) via platform API, JWT in httpOnly `vc_token` cookie
+- **Pages**: login, project list with aggregate usage, project detail (deployments, domains, secrets, usage metrics), settings
+- **Deployment**: CF Worker — production at `dash.vite.cloud`, staging at `dash.staging.vite.cloud`
+
+See [`packages/dashboard/README.md`](./packages/dashboard/README.md) for details.
 
 ## `platform` Overview
 
