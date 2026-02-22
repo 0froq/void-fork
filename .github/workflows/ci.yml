@@ -31,8 +31,10 @@ jobs:
             pattern: test/unit
           - suite: integration
             pattern: platform/test/integration vite-cloud/test/integration
-          - suite: integration-pages-adapters
-            pattern: react/test/integration vue/test/integration svelte/test/integration
+          - suite: pages-adapters-react-vue
+            pattern: react/test/integration vue/test/integration
+          - suite: pages-adapters-svlete-solid
+            pattern: svelte/test/integration solid/test/integration
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

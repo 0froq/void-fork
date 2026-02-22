@@ -24,6 +24,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # build the CLI first and link it as the deploy relies on it
+      - run: pnpm build:cli && pnpm i
+
       # deploy platform and dispatch workers
       - run: pnpm run deploy
         env:
@@ -32,8 +35,6 @@ jobs:
 
       # deploy docs (static vitepress hosted on the platform itself)
       # only do this after platform deploy succeeds
-      # build the CLI first and link it as the docs deploy relies on it
-      - run: pnpm build:cli && pnpm i
       - run: pnpm deploy:docs
         env:
           VITE_CLOUD_TOKEN: ${{ secrets.VITE_CLOUD_TOKEN }}
