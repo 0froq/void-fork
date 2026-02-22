@@ -16,3 +16,4 @@ playground/*/.node-version
 .tanstack
 .worktrees
 .playwright-mcp
+playground-local
