@@ -25,7 +25,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # build the CLI first and link it as the deploy relies on it
-      - run: pnpm build:cli && pnpm i
+      - run: pnpm -F vue -F vite-cloud build && pnpm i
 
       # deploy platform and dispatch workers
       - run: pnpm run deploy
