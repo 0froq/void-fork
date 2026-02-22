@@ -40,7 +40,7 @@ onMounted(() => {
 
 # Pages Routing
 
-Pages routing provides the server-rendered, components-as-pages, collocated-data-loading routing system that is seen in many existing JavaScript meta frameworks. However, pages routing in Vite Cloud is different from most in that it is **rendering framework agnostic.** It is built on patterns inspired by [Inertia.js](https://inertiajs.com/): The server returns the data, and the component receives it as props. The client-side routing logic is minimal, allowing Vite Cloud to support any rendering framework Vite can support. Today, only React and Vue have first-party adapters, but more will come in the future.
+Pages routing provides the server-rendered, components-as-pages, collocated-data-loading routing system that is seen in many existing JavaScript meta frameworks. However, pages routing in Vite Cloud is different from most in that it is **rendering framework agnostic.** It is built on patterns inspired by [Inertia.js](https://inertiajs.com/): The server returns the data, and the component receives it as props. The client-side routing logic is minimal, allowing Vite Cloud to support any rendering framework Vite can support. Today, React, Vue, Svelte, and SolidJS have first-party adapters.
 
 Pages mode activates when a `pages/` directory exists. It coexists with `routes/` — use `pages/` for UI pages and `routes/` for APIs. Components in `pages/` will be server-rendered, which means **they will run in both Cloudflare Workers and browsers**.
 
@@ -62,6 +62,10 @@ npm install @vite-cloud/vue
 
 ```sh [Svelte]
 npm install @vite-cloud/svelte
+```
+
+```sh [SolidJS]
+npm install @vite-cloud/solid
 ```
 
 :::
@@ -103,11 +107,22 @@ export default defineConfig({
 });
 ```
 
+```ts [SolidJS]
+// vite.config.ts
+import { defineConfig } from "vite";
+import viteCloud from "vite-cloud";
+import { viteCloudSolid } from "@vite-cloud/solid/plugin";
+
+export default defineConfig({
+  plugins: [viteCloud(), viteCloudSolid()],
+});
+```
+
 :::
 
 That's it — no SSR entry, no client entry, no hydration boilerplate. The adapter generates everything.
 
-Each adapter plugin includes the framework's Vite plugin (`@vitejs/plugin-react`, `@vitejs/plugin-vue`, `@sveltejs/vite-plugin-svelte`) so you don't need to install or configure it separately. Pass framework plugin options via `viteCloudReact({ react: { ... } })`, `viteCloudVue({ vue: { ... } })`, or `viteCloudSvelte({ svelte: { ... } })` if needed.
+Each adapter plugin includes the framework's Vite plugin (`@vitejs/plugin-react`, `@vitejs/plugin-vue`, `@sveltejs/vite-plugin-svelte`, `vite-plugin-solid`) so you don't need to install or configure it separately. Pass framework plugin options via `viteCloudReact({ react: { ... } })`, `viteCloudVue({ vue: { ... } })`, `viteCloudSvelte({ svelte: { ... } })`, or `viteCloudSolid({ solid: { ... } })` if needed.
 
 ## How Navigation Works
 
@@ -152,12 +167,19 @@ import { Link } from "@vite-cloud/vue";
 <Link href={`/users/${id}`}>View</Link>
 ```
 
+```tsx [SolidJS]
+import { Link } from "@vite-cloud/solid";
+
+<Link href="/users">Users</Link>
+<Link href={`/users/${id}`}>View</Link>
+```
+
 :::
 
 For programmatic navigation, use `useRouter()`:
 
 ```ts
-import { useRouter } from "@vite-cloud/vue"; // or "@vite-cloud/react" or "@vite-cloud/svelte"
+import { useRouter } from "@vite-cloud/vue"; // or "@vite-cloud/react", "@vite-cloud/svelte", "@vite-cloud/solid"
 
 const router = useRouter();
 router.visit("/users");
@@ -308,6 +330,23 @@ defineProps<Props>();
 </ul>
 ```
 
+```tsx [SolidJS]
+// pages/users/index.tsx
+import type { Props } from "./index.server";
+import { For } from "solid-js";
+
+export default function UsersPage(props: Props) {
+  return (
+    <>
+      <h1>Users</h1>
+      <ul>
+        <For each={props.users}>{(u) => <li>{u.name}</li>}</For>
+      </ul>
+    </>
+  );
+}
+```
+
 Aside from the loader, the component can also use the [typed fetch]()
 
 :::
@@ -443,6 +482,26 @@ const { auth } = useShared();
 </main>
 ```
 
+```tsx [SolidJS]
+// pages/layout.tsx
+import { useShared, Link } from "@vite-cloud/solid";
+import type { JSX } from "solid-js";
+
+export default function Layout(props: { children: JSX.Element }) {
+  const shared = useShared<{ auth: { user: { name: string } | null } }>();
+  return (
+    <>
+      <nav>
+        <Link href="/">Home</Link>
+        <Link href="/users">Users</Link>
+        {shared.auth?.user && <span>{shared.auth.user.name}</span>}
+      </nav>
+      <main>{props.children}</main>
+    </>
+  );
+}
+```
+
 :::
 
 Layouts nest automatically (e.g. root layout wraps `users/layout` wraps page component) and persist across navigations within their subtree — component state is preserved.
@@ -493,6 +552,15 @@ const { auth } = useShared(); // { auth: { user: { name: string } | null } }
   import { useShared } from "@vite-cloud/svelte";
   const { auth } = useShared(); // { auth: { user: { name: string } | null } }
 </script>
+```
+
+```tsx [SolidJS]
+import { useShared } from "@vite-cloud/solid";
+
+export default function Page() {
+  const shared = useShared(); // { auth: { user: { name: string } | null } }
+  return <p>Hello, {shared.auth?.user?.name}</p>;
+}
 ```
 
 :::
@@ -616,6 +684,33 @@ const form = useForm("/users/create", { name: "", email: "" });
 </form>
 ```
 
+```tsx [SolidJS]
+// pages/users/create.tsx
+import { useForm } from "@vite-cloud/solid";
+
+export default function CreateUser() {
+  // "/users/create" autocompletes; { name, email } is typed from the action's validator
+  const form = useForm("/users/create", { name: "", email: "" });
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        form.post();
+      }}
+    >
+      <input value={form.data.name} onInput={(e) => form.setData("name", e.target.value)} />
+      {form.errors.name && <span>{form.errors.name}</span>}
+
+      <input value={form.data.email} onInput={(e) => form.setData("email", e.target.value)} />
+      {form.errors.email && <span>{form.errors.email}</span>}
+
+      <button disabled={form.processing}>Create</button>
+    </form>
+  );
+}
+```
+
 :::
 
 The types are inferred from your action's `withValidator()` schema in the companion `.server.ts` file. If no validator is defined, the body type falls back to `Record<string, unknown>` — you still get URL autocomplete either way.
@@ -691,6 +786,13 @@ export default defineConfig({
 });
 ```
 
+```ts [SolidJS]
+// vite.config.ts
+export default defineConfig({
+  plugins: [viteCloud(), viteCloudSolid({ viewTransitions: true })],
+});
+```
+
 :::
 
 This enables view transitions for all navigations — `Link` clicks, programmatic `router.visit()` calls, and browser back/forward.
@@ -731,6 +833,22 @@ Override the global setting on individual links:
 
 <!-- Enable for just this link (even if globally disabled) -->
 <Link href="/about" viewTransition>About</Link>
+```
+
+```tsx [SolidJS]
+{
+  /* Disable transition for this link */
+}
+<Link href="/settings" viewTransition={false}>
+  Settings
+</Link>;
+
+{
+  /* Enable for just this link (even if globally disabled) */
+}
+<Link href="/about" viewTransition>
+  About
+</Link>;
 ```
 
 :::
