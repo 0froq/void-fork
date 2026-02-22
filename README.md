@@ -49,14 +49,15 @@ pnpm run deploy:staging             # Deploy all workers to staging environment
 
 pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-workspace.yaml` (typescript, tsdown, vite, @cloudflare/workers-types, wrangler). Make sure to run `pnpm install` after making package structure changes.
 
-| Package                                                  | npm name                         | Purpose                                                   |
-| -------------------------------------------------------- | -------------------------------- | --------------------------------------------------------- |
-| [`packages/vite-cloud`](./packages/vite-cloud/AGENTS.md) | `vite-cloud`                     | Core Vite plugin — routing, inference, migrations, CLI    |
-| [`packages/vue`](./packages/vue/README.md)               | `@vite-cloud/vue`                | Vue framework adapter for Pages mode (SSR, Link, useForm) |
-| [`packages/platform`](./packages/platform/README.md)     | `@vite-cloud/platform` (private) | Control Plane API + Admin Dashboard                       |
-| [`packages/dispatch`](./packages/dispatch/README.md)     | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets      |
-| [`packages/ai-proxy`](./packages/ai-proxy/README.md)     | `@vite-cloud/ai-proxy` (private) | AI inference proxy — metered Workers AI via AI Gateway    |
-| `playground/*`                                           | (private)                        | local apps for testing                                    |
+| Package                                                  | npm name                         | Purpose                                                        |
+| -------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------- |
+| [`packages/vite-cloud`](./packages/vite-cloud/AGENTS.md) | `vite-cloud`                     | Core Vite plugin — routing, inference, migrations, CLI         |
+| [`packages/vue`](./packages/vue/README.md)               | `@vite-cloud/vue`                | Vue framework adapter for Pages mode (SSR, Link, useForm)      |
+| [`packages/svelte`](./packages/svelte/README.md)         | `@vite-cloud/svelte`             | Svelte 5 framework adapter for Pages mode (SSR, Link, useForm) |
+| [`packages/platform`](./packages/platform/README.md)     | `@vite-cloud/platform` (private) | Control Plane API + Admin Dashboard                            |
+| [`packages/dispatch`](./packages/dispatch/README.md)     | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets           |
+| [`packages/ai-proxy`](./packages/ai-proxy/README.md)     | `@vite-cloud/ai-proxy` (private) | AI inference proxy — metered Workers AI via AI Gateway         |
+| `playground/*`                                           | (private)                        | local apps for testing                                         |
 
 ## `vite-cloud` Overview
 
@@ -99,6 +100,16 @@ Vue framework adapter for Pages mode — Inertia-inspired full-stack DX with SSR
 - **Server handlers**: Remix-style `loader` (GET → props) and `action` (mutations) exports in `<script server>` or companion `.server.ts` files
 
 See [`packages/vue/README.md`](./packages/vue/README.md) for architecture and [`meta/design-docs/0013-pages.md`](./meta/design-docs/0013-pages.md) for the design doc.
+
+## `@vite-cloud/svelte` Overview
+
+Svelte 5 framework adapter for Pages mode — same Inertia-inspired DX as Vue/React.
+
+- **Plugin** (`@vite-cloud/svelte/plugin`): `viteCloudSvelte()` — wraps `@sveltejs/vite-plugin-svelte`, generates SSR + client hydration entries
+- **Runtime** (`@vite-cloud/svelte`): `Link`, `useForm`, `useShared`, `useRouter` — uses Svelte 5 runes (`$state`, `$derived`) and `getContext`
+- **Server handlers**: companion `.server.ts` files with `loader` and `action` exports (same as React adapter)
+
+See [`packages/svelte/README.md`](./packages/svelte/README.md) for details.
 
 ## `platform` Overview
 
@@ -145,6 +156,7 @@ Local apps for testing features end-to-end. Run scripts with `pnpm -C playground
 | [`spa`](./playground/spa/README.md)                       | React SPA — API routes, valibot validation, typed DB, typed fetch client, middleware, cron jobs   |
 | [`ssr`](./playground/ssr/README.md)                       | React SSR — `defineRender()`, client hydration, KV storage, dynamic markdown blog                 |
 | [`vue-pages`](./playground/vue-pages/README.md)           | Vue Pages mode — `<script server>` blocks, Inertia protocol, SSR, layouts, `useForm`, `useShared` |
+| [`svelte-pages`](./playground/svelte-pages)               | Svelte 5 Pages mode — companion `.server.ts` files, Inertia protocol, SSR, layouts, `useForm`     |
 | [`queues`](./playground/queues/README.md)                 | API-only — typed queue producer/consumer with KV bridge                                           |
 | [`auth`](./playground/auth/README.md)                     | React SPA — email/password + OAuth (GitHub/Google) auth flows, protected routes                   |
 | [`tanstack-start`](./playground/tanstack-start/README.md) | TanStack Start meta-framework — server functions, D1 queries, SSR via TanStack                    |
