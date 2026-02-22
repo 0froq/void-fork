@@ -18,16 +18,24 @@ app.get("/:id/usage", async (c) => {
 
   const user = await getUser(c.get("db"), c.get("userId"));
   const since = getCurrentBillingPeriodStart(user!.billing_cycle_start);
-  const usage = await queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since);
+  const [usage, aiUsage] = await Promise.all([
+    queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since),
+    queryProjectAiUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since),
+  ]);
 
-  return c.json({ projectId, billingPeriodStart: since.toISOString(), ...usage });
+  return c.json({
+    projectId,
+    billingPeriodStart: since.toISOString(),
+    ...usage,
+    aiNeurons: aiUsage.neurons,
+  });
 });
 
 // Aggregate usage across all user's projects
 app.get("/", async (c) => {
   const projects = await getProjectsByUserId(c.get("db"), c.get("userId"));
   if (projects.length === 0) {
-    return c.json({ requests: 0, bandwidthBytes: 0, projects: [] });
+    return c.json({ requests: 0, bandwidthBytes: 0, aiNeurons: 0, projects: [] });
   }
 
   const user = await getUser(c.get("db"), c.get("userId"));
@@ -35,8 +43,11 @@ app.get("/", async (c) => {
 
   const projectUsages = await Promise.all(
     projects.map(async (p) => {
-      const usage = await queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since);
-      return { projectId: p.id, slug: p.slug, ...usage };
+      const [usage, aiUsage] = await Promise.all([
+        queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since),
+        queryProjectAiUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since),
+      ]);
+      return { projectId: p.id, slug: p.slug, ...usage, aiNeurons: aiUsage.neurons };
     }),
   );
 
@@ -44,8 +55,9 @@ app.get("/", async (c) => {
     (acc, u) => ({
       requests: acc.requests + u.requests,
       bandwidthBytes: acc.bandwidthBytes + u.bandwidthBytes,
+      aiNeurons: acc.aiNeurons + u.aiNeurons,
     }),
-    { requests: 0, bandwidthBytes: 0 },
+    { requests: 0, bandwidthBytes: 0, aiNeurons: 0 },
   );
 
   return c.json({ billingPeriodStart: since.toISOString(), ...totals, projects: projectUsages });
@@ -96,5 +108,58 @@ async function queryProjectUsage(
   };
 }
 
-export { queryProjectUsage };
+interface AiGatewayResponse {
+  data: {
+    viewer: {
+      accounts: {
+        aiGatewayRequests: { sum: { cost: number } }[];
+      }[];
+    };
+  };
+}
+
+const COST_PER_NEURON = 0.000011;
+
+async function queryProjectAiUsage(
+  accountId: string,
+  apiToken: string,
+  projectId: string,
+  since: Date,
+): Promise<{ neurons: number }> {
+  const query = `query {
+  viewer {
+    accounts(filter: { accountTag: "${accountId}" }) {
+      aiGatewayRequests(
+        filter: {
+          gatewayId: "vite-cloud"
+          metadata_projectId: "${projectId}"
+          datetime_geq: "${since.toISOString()}"
+        }
+      ) {
+        sum { cost }
+      }
+    }
+  }
+}`;
+
+  const response = await fetch("https://api.cloudflare.com/client/v4/graphql", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ query }),
+  });
+
+  if (!response.ok) {
+    return { neurons: 0 };
+  }
+
+  const result = (await response.json()) as AiGatewayResponse;
+  const requests = result.data?.viewer?.accounts?.[0]?.aiGatewayRequests;
+  const cost = requests?.[0]?.sum?.cost ?? 0;
+  return { neurons: Math.round(cost / COST_PER_NEURON) };
+}
+
+export { queryProjectUsage, queryProjectAiUsage };
 export default app;

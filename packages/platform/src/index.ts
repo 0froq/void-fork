@@ -17,7 +17,7 @@ import adminProjects from "./admin/routes/projects";
 import adminDeployments from "./admin/routes/deployments";
 import { createDb, getUsersWithProjectsBatch, suspendUser, unsuspendUserIfReason } from "./db";
 import type { Db } from "./db";
-import { queryProjectUsage } from "./routes/usage";
+import { queryProjectUsage, queryProjectAiUsage } from "./routes/usage";
 import { getCurrentBillingPeriodStart, getPlanLimits, isWithinLimit } from "./tiers";
 
 const app = new Hono<PlatformEnv>();
@@ -119,6 +119,29 @@ async function processUserUsage(
     await suspendUser(db, user.id, "requests_exceeded");
   } else {
     await unsuspendUserIfReason(db, user.id, "requests_exceeded");
+  }
+
+  // --- AI neuron limit enforcement (free tier only) ---
+  if (limits.aiNeuronsPerMonth !== 0 && user.plan === "free") {
+    const aiUsages = await asyncPool(userProjects, ANALYTICS_CONCURRENCY, (project) =>
+      queryProjectAiUsage(env.CF_ACCOUNT_ID, env.CF_API_TOKEN, project.id, since),
+    );
+
+    let totalNeurons = 0;
+    for (const usage of aiUsages) {
+      totalNeurons += usage.neurons;
+    }
+
+    const aiExceeded = !isWithinLimit(limits.aiNeuronsPerMonth, totalNeurons);
+
+    for (const project of userProjects) {
+      const key = `ai-block:${project.id}`;
+      if (aiExceeded) {
+        await env.ROUTING.put(key, "1");
+      } else {
+        await env.ROUTING.delete(key);
+      }
+    }
   }
 }
 

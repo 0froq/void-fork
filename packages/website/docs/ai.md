@@ -86,3 +86,19 @@ At runtime, the `ai` client resolves its backend in priority order:
 3. **Direct AI binding** (self-hosted) — falls back to `env.AI` if you're running with your own Cloudflare account and `wrangler.json`
 
 All inference is routed through [AI Gateway](https://developers.cloudflare.com/ai-gateway/) for tamper-proof token counting and usage tracking. This is what powers per-project metering on the Vite Cloud dashboard.
+
+## Usage Limits
+
+AI usage is metered in **neurons** — Cloudflare's unit for Workers AI inference cost. Usage resets at the start of each billing cycle. For reference, a Llama 3.1 8B chat completion costs ~40 neurons.
+
+| Plan | Included      | At limit                           |
+| ---- | ------------- | ---------------------------------- |
+| Free | 100,000/month | Blocked until billing cycle resets |
+| Solo | 300,000/month | Overage billed                     |
+| Pro  | 500,000/month | Overage billed                     |
+
+Paid plans include the same free neuron allowance as Cloudflare's Workers AI free tier (10,000 neurons/day).
+
+On the **free tier**, AI requests return a `429` error once the limit is reached. Usage resets automatically at the start of the next billing cycle.
+
+On **paid tiers** (Solo, Pro), there is no hard block — usage beyond the included allowance is tracked as overage on your monthly bill.

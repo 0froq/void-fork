@@ -1,6 +1,7 @@
 interface Env {
   AI: Ai;
   JWT_SECRET: string;
+  ROUTING: KVNamespace;
 }
 
 interface ProxyRequest {
@@ -54,6 +55,13 @@ export default {
       }
       projectId = body.projectId;
 
+      if (await env.ROUTING.get(`ai-block:${projectId}`)) {
+        return Response.json(
+          { error: "AI usage limit exceeded" },
+          { status: 429, headers: CORS_HEADERS },
+        );
+      }
+
       return handleAction(env, body, projectId);
     }
 
@@ -63,6 +71,13 @@ export default {
       return Response.json({ error: "projectId required" }, { status: 400 });
     }
     projectId = body.projectId;
+
+    if (await env.ROUTING.get(`ai-block:${projectId}`)) {
+      return Response.json(
+        { error: "AI usage limit exceeded" },
+        { status: 429, headers: CORS_HEADERS },
+      );
+    }
 
     return handleAction(env, body, projectId);
   },

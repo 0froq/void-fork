@@ -4,6 +4,12 @@
   "compatibility_date": "2026-02-12",
   "compatibility_flags": ["nodejs_compat"],
   "ai": { "binding": "AI" },
+  "kv_namespaces": [
+    {
+      "binding": "ROUTING",
+      "id": "9250c33f3db6494ebe8ad6272812c8c0",
+    },
+  ],
   "routes": [
     { "pattern": "ai-proxy.vitecloud.app", "zone_name": "vitecloud.app" },
     { "pattern": "ai-proxy.vitecloud.app/*", "zone_name": "vitecloud.app" },
@@ -13,6 +19,12 @@
     "staging": {
       "name": "vite-cloud-ai-proxy-staging",
       "ai": { "binding": "AI" },
+      "kv_namespaces": [
+        {
+          "binding": "ROUTING",
+          "id": "60240eecea804f39bf8b7395cd6c6b08",
+        },
+      ],
       "routes": [
         { "pattern": "ai-proxy.staging.vitecloud.app", "zone_name": "vitecloud.app" },
         { "pattern": "ai-proxy.staging.vitecloud.app/*", "zone_name": "vitecloud.app" },

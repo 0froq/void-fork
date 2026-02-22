@@ -49,7 +49,15 @@ interface MockAi {
   toMarkdown: ReturnType<typeof vi.fn>;
 }
 
-function createEnv(aiOverrides?: Partial<MockAi>) {
+function createMockKv(data: Record<string, string> = {}) {
+  return {
+    get: vi.fn(async (key: string) => data[key] ?? null),
+    put: vi.fn(async () => {}),
+    delete: vi.fn(async () => {}),
+  };
+}
+
+function createEnv(aiOverrides?: Partial<MockAi>, kvData?: Record<string, string>) {
   return {
     AI: {
       run: vi.fn(async () => ({ response: "hello" })),
@@ -58,6 +66,7 @@ function createEnv(aiOverrides?: Partial<MockAi>) {
       ...aiOverrides,
     },
     JWT_SECRET,
+    ROUTING: createMockKv(kvData),
   };
 }
 
@@ -208,6 +217,45 @@ describe("ai-proxy worker", () => {
 
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "projectId required" });
+    });
+  });
+
+  describe("AI usage limit (KV block)", () => {
+    it("returns 429 when ai-block key exists (service binding path)", async () => {
+      const env = createEnv({}, { "ai-block:proj_1": "1" });
+      const res = await worker.fetch(
+        post("/run", { action: "run", model: "m", inputs: {}, projectId: "proj_1" }),
+        env,
+      );
+
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({ error: "AI usage limit exceeded" });
+      expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    });
+
+    it("returns 429 when ai-block key exists (JWT path)", async () => {
+      const env = createEnv({}, { "ai-block:proj_1": "1" });
+      const res = await worker.fetch(
+        post(
+          "/run",
+          { action: "run", model: "m", inputs: {}, projectId: "proj_1" },
+          { authorization: `Bearer ${validToken}` },
+        ),
+        env,
+      );
+
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({ error: "AI usage limit exceeded" });
+    });
+
+    it("allows request when ai-block key does not exist", async () => {
+      const env = createEnv({}, {});
+      const res = await worker.fetch(
+        post("/run", { action: "run", model: "m", inputs: {}, projectId: "proj_1" }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
     });
   });
 
