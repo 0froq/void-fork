@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "deploy": "pnpm build && wrangler deploy",
-    "deploy:staging": "pnpm build && node scripts/deploy-staging.ts"
+    "deploy:staging": "CLOUDFLARE_ENV=staging pnpm build && wrangler deploy"
   },
   "dependencies": {
     "hono": "^4.11.9",
