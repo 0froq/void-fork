@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Custom SSR
 
 Vite Cloud supports framework-agnostic SSR via explicit server and client entries. This is for advanced use cases where you want full control over rendering and hydration.

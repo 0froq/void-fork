@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Vite Cloud Quickstart
 
 ## Start in an Empty Directory

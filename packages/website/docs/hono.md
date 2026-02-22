@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Hono
 
 Vite Cloud handlers run on [Hono](https://hono.dev), and `hono` is a direct dependency of your project. You can import from any `hono/*` subpath — built-in middleware, helpers, and third-party Hono packages all work out of the box.

@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Cloudflare
 
 Vite Cloud runs on Cloudflare Workers. This page covers how bindings work, how the plugin merges your wrangler config, and how to deploy directly to your own Cloudflare account.

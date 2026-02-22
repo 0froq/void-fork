@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Cron Jobs
 
 Vite Cloud supports cron-triggered jobs from a top-level `crons/` directory.

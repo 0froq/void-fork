@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Database
 
 Vite Cloud provides automated migration application and a typed query helper for [Cloudflare D1](https://developers.cloudflare.com/d1/) (SQLite) that covers common CRUD operations without writing SQL. Import `db` from `vite-cloud/db` and start querying.

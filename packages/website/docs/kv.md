@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Key-Value Storage
 
 Vite Cloud provides a typed KV client with automatic JSON serialization for [Cloudflare Workers KV](https://developers.cloudflare.com/kv/). Import `kv` from `vite-cloud/kv` and start reading and writing data.

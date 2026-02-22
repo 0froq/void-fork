@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Authentication
 
 Vite Cloud includes built-in authentication with cookie-based sessions, email/password login, and OAuth providers. Auth is auto-detected from your code — when you import `auth` from `vite-cloud/client` or `requireAuth` from `vite-cloud/auth`, auth routes and session middleware are generated automatically.

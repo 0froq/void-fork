@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Queues
 
 Vite Cloud supports Cloudflare Queues for asynchronous message processing from a top-level `queues/` directory.
