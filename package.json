@@ -19,7 +19,7 @@
     "deploy:staging:ai-proxy": "pnpm -F ai-proxy run deploy --env staging",
     "deploy:staging:dispatch": "pnpm -F dispatch run deploy --env staging",
     "deploy:staging:platform": "pnpm -F platform migrate:staging && pnpm -F platform run deploy --env staging",
-    "deploy:staging:dashboard": "pnpm -F dashboard run deploy --env staging",
+    "deploy:staging:dashboard": "pnpm -F dashboard run deploy:staging",
     "deploy:docs": "pnpm -F website run deploy",
     "deploy:staging:docs": "pnpm -F website run deploy --project vite-cloud-staging",
     "health": "node packages/platform/scripts/health.ts",
