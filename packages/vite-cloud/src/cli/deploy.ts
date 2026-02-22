@@ -82,7 +82,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
 
     if (projects.length > 0) {
       // User has existing projects — let them choose
-      const result = await promptProjectSelection(projects);
+      const result = await promptProjectSelection(projects, "Select a project to deploy to:");
 
       if (result.action === "select") {
         config = { projectId: result.project.id, slug: result.project.slug };

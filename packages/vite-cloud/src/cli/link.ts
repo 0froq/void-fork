@@ -2,7 +2,8 @@ import { intro, outro, log, cancel } from "@clack/prompts";
 import { getToken, getSiteDomain } from "./auth";
 import { PlatformClient } from "./client";
 import { readProjectConfig, writeProjectConfig } from "./project";
-import { promptProjectSelection } from "./prompt";
+import { promptProjectSelection, promptProjectSlug } from "./prompt";
+import { inferDefaultSlug } from "./resolve-project";
 import { cliTitle } from "./output";
 
 export async function runLink(root: string, slug?: string): Promise<void> {
@@ -39,16 +40,15 @@ export async function runLink(root: string, slug?: string): Promise<void> {
     return;
   }
 
-  // Interactive: prompt user to select
-  if (projects.length === 0) {
-    cancel("No projects found. Run `vcc deploy` to create one.");
-    process.exit(1);
-  }
-
+  // Interactive: prompt user to select or create
   const result = await promptProjectSelection(projects);
 
   if (result.action === "create") {
-    outro("Run `vcc deploy` to create a new project.");
+    const slug = await promptProjectSlug(inferDefaultSlug(root));
+    log.step(`Creating project "${slug}"...`);
+    const created = await client.createProject(slug);
+    writeProjectConfig(root, { projectId: created.id, slug: created.slug });
+    outro(`Created and linked to ${created.slug} (${created.slug}.${getSiteDomain()})`);
     return;
   }
 
