@@ -196,7 +196,7 @@ async function runFullDeploy(
   commit?: string | null,
 ): Promise<void> {
   // 3. Resolve Vite config for outDir + assetsDir
-  const resolved = await resolveConfig({ root }, "build");
+  const resolved = await resolveConfig({ root }, "build", "production", "production");
   const distDir = resolve(resolved.root, resolved.build.outDir);
   const assetsDir = resolved.build.assetsDir !== "assets" ? resolved.build.assetsDir : undefined;
 
