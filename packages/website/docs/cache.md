@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Caching and Headers
 
 Vite Cloud serves static assets through Cloudflare's global edge network with sensible cache defaults. This page covers how static assets and dynamically rendered pages are cached, and how to customize response headers.
@@ -57,11 +61,13 @@ This requires [SSR](./ssr.md) or [Pages mode](./pages-routing.md) to be configur
 
 ### Enabling revalidation
 
-Add a `revalidate` field to `vite-cloud.json` with a TTL in seconds:
+Add a `cache.revalidate` field to `vite-cloud.json` with a TTL in seconds:
 
 ```json
 {
-  "revalidate": 60
+  "cache": {
+    "revalidate": 60
+  }
 }
 ```
 
@@ -73,11 +79,13 @@ You can set different TTLs for different URL patterns using an object:
 
 ```json
 {
-  "revalidate": {
-    "/": 60,
-    "/docs/*": 31536000,
-    "/user/*": 0,
-    "*": 30
+  "cache": {
+    "revalidate": {
+      "/": 60,
+      "/docs/*": 31536000,
+      "/user/*": 0,
+      "*": 30
+    }
   }
 }
 ```
@@ -110,8 +118,8 @@ When multiple sources set a revalidate TTL, the most specific wins:
 
 1. `x-revalidate` response header (per-response)
 2. `.server.ts` export (per-page, Pages mode only)
-3. `vite-cloud.json` path pattern match
-4. `vite-cloud.json` global number or `"*"` fallback
+3. `vite-cloud.json` `cache.revalidate` path pattern match
+4. `vite-cloud.json` `cache.revalidate` global number or `"*"` fallback
 
 ### How revalidation works
 
@@ -170,9 +178,72 @@ This requires two env bindings:
 - `VITE_CLOUD_PROJECT_ID` — automatically injected by the platform on deploy
 - `VITE_CLOUD_REVALIDATE_TOKEN` — set manually via `vcc secret set VITE_CLOUD_REVALIDATE_TOKEN <token>`
 
+## Prerendering
+
+Pages with long revalidate TTLs (e.g. 1 year) are effectively static, but the first visitor after a deploy hits a cold cache. You can opt pages into **prerendering** — the platform renders them at deploy time and writes the result to the ISR cache so the first visitor gets an instant response.
+
+### Static pages (no params)
+
+Export `prerender = true` from a `.server.ts` file or `<script server>` block:
+
+```ts
+// pages/about.server.ts
+export const prerender = true;
+export const revalidate = 31536000; // 1 year
+
+export const loader = defineHandler(async (c) => {
+  // ...
+});
+```
+
+Pages with no dynamic params are automatically prerendered at their URL pattern (e.g. `/about`).
+
+### Dynamic pages (with params)
+
+For pages with URL params, also export `getPrerenderPaths()` to specify which param combinations to prerender:
+
+```ts
+// pages/blog/[slug].server.ts
+export const prerender = true;
+export const revalidate = 31536000;
+
+export async function getPrerenderPaths() {
+  // Return param objects matching the URL pattern
+  return [{ slug: "hello-world" }, { slug: "getting-started" }];
+}
+
+export const loader = defineHandler(async (c) => {
+  // ...
+});
+```
+
+### Custom SSR
+
+In custom SSR mode (`src/main.ssr.ts`), export `getPrerenderPaths()` at the top level. Since there's no file-based routing, return full path strings:
+
+```ts
+// src/main.ssr.ts
+export const prerender = true;
+
+export async function getPrerenderPaths() {
+  return ["/", "/about", "/blog/hello-world"];
+}
+
+export default defineRender(async (c, assetTags) => {
+  // ...
+});
+```
+
+### Behavior
+
+- Only paths with a positive revalidate TTL are prerendered (TTL `0` is skipped)
+- Prerender failures are logged but never block the deploy — the page will be rendered on the first request as usual
+- The deployment status shows `"prerendering"` during this phase
+- Prerendering happens after the worker is uploaded but before the routing entry goes live
+
 ### Deploy behavior
 
-Each deploy clears the ISR cache for the project. This ensures stale content from a previous deploy is never served. Hashed static assets are unaffected.
+Each deploy clears the ISR cache for the project. This ensures stale content from a previous deploy is never served. Prerendered pages are written to the cache after clearing, so they're ready for the first request. Hashed static assets are unaffected.
 
 ## Custom headers
 
@@ -239,7 +310,7 @@ Because rules are evaluated at the edge, there is no latency cost — headers ar
 
 1. `/api/*` requests go to worker API routes (not cached at the edge)
 2. Static asset requests are served from R2 (hashed assets immutable, others versioned)
-3. SSR `GET` requests without `Cookie`/`Authorization` (when `revalidate` is configured):
+3. SSR `GET` requests without `Cookie`/`Authorization` (when `cache.revalidate` is configured):
    - Cache hit (fresh) — served from R2
    - Cache hit (stale) — served from R2, worker re-renders in background
    - Cache miss — worker renders (blocking), cached in R2

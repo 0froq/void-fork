@@ -56,6 +56,26 @@ Explicitly control inferred Cloudflare bindings. If omitted, bindings are inferr
 | `kv`      | `KV`      | `KVNamespace` |
 | `storage` | `STORAGE` | `R2Bucket`    |
 
+### `cache`
+
+Caching configuration. See [Caching and Headers](./cache.md) for details.
+
+| Sub-field    | Type                               | Description                                         |
+| ------------ | ---------------------------------- | --------------------------------------------------- |
+| `revalidate` | `number \| Record<string, number>` | ISR revalidation TTL in seconds, global or per-path |
+
+```json
+{
+  "cache": {
+    "revalidate": {
+      "/": 60,
+      "/docs/*": 31536000,
+      "*": 30
+    }
+  }
+}
+```
+
 ### `headers`
 
 Custom response headers for static assets. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Caching and Headers](./cache.md) for details.

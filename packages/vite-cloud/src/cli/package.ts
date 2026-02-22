@@ -40,6 +40,7 @@ export function packageBuild(
   vars?: Record<string, string>,
   queues?: QueueMeta[],
   assetsDir?: string,
+  prerender?: string[],
 ): FormData {
   const formData = new FormData();
 
@@ -86,6 +87,10 @@ export function packageBuild(
 
   if (revalidate != null && revalidate !== 0) {
     manifest.revalidate = revalidate;
+  }
+
+  if (prerender && prerender.length > 0) {
+    manifest.prerender = prerender;
   }
 
   if (headers) {

@@ -1145,3 +1145,179 @@ describe("Deploy with assetHashes (manifest management)", () => {
     expect(stored).toEqual({ "index.html": "ccc" });
   });
 });
+
+describe("Deploy with prerendering", () => {
+  it("prerenders pages and writes ISR cache entries to R2", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "prerender-app");
+
+    // Mock DISPATCH.get() to return a fetchable worker
+    const dispatchGet = vi.fn().mockReturnValue({
+      fetch: vi.fn().mockImplementation(
+        () =>
+          new Response("<html>Prerendered</html>", {
+            status: 200,
+            headers: { "content-type": "text/html" },
+          }),
+      ),
+    });
+    env.DISPATCH = { get: dispatchGet } as unknown as DispatchNamespace;
+
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            bindings: {},
+            revalidate: 3600,
+            prerender: ["/", "/about"],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    // Verify ISR cache entries were written to R2
+    const homeEntry = await env.ASSETS.get(`${project.id}/isr/__index__`);
+    expect(homeEntry).not.toBeNull();
+    expect(await homeEntry!.text()).toBe("<html>Prerendered</html>");
+    const homeMeta = homeEntry!.customMetadata;
+    expect(homeMeta?.status).toBe("200");
+    expect(homeMeta?.ttl).toBe("3600");
+
+    const aboutEntry = await env.ASSETS.get(`${project.id}/isr/about`);
+    expect(aboutEntry).not.toBeNull();
+    expect(await aboutEntry!.text()).toBe("<html>Prerendered</html>");
+
+    // Verify deployment is live
+    const dpl = await env.db
+      .select({ status: deployments.status })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id))
+      .get();
+    expect(dpl?.status).toBe("live");
+  });
+
+  it("skips prerender paths with TTL <= 0", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "prerender-skip");
+
+    const dispatchFetch = vi.fn().mockImplementation(
+      () =>
+        new Response("<html>Prerendered</html>", {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        }),
+    );
+    const dispatchGet = vi.fn().mockReturnValue({ fetch: dispatchFetch });
+    env.DISPATCH = { get: dispatchGet } as unknown as DispatchNamespace;
+
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            bindings: {},
+            revalidate: { "/about": 3600, "/private": 0, "*": 0 },
+            prerender: ["/about", "/private"],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    // Only /about should have been fetched (TTL > 0)
+    expect(dispatchFetch).toHaveBeenCalledTimes(1);
+
+    // /about should have ISR entry
+    const aboutEntry = await env.ASSETS.get(`${project.id}/isr/about`);
+    expect(aboutEntry).not.toBeNull();
+
+    // /private should NOT have ISR entry
+    const privateEntry = await env.ASSETS.get(`${project.id}/isr/private`);
+    expect(privateEntry).toBeNull();
+  });
+
+  it("does not block deploy when prerender fails", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "prerender-fail");
+
+    const dispatchGet = vi.fn().mockReturnValue({
+      fetch: vi.fn().mockRejectedValue(new Error("Worker crashed")),
+    });
+    env.DISPATCH = { get: dispatchGet } as unknown as DispatchNamespace;
+
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            bindings: {},
+            revalidate: 3600,
+            prerender: ["/"],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    // Deployment should still be live despite prerender failure
+    const dpl = await env.db
+      .select({ status: deployments.status })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id))
+      .get();
+    expect(dpl?.status).toBe("live");
+  });
+
+  it("sets prerendering status during prerender phase", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "prerender-status");
+
+    let statusDuringPrerender: string | undefined;
+    const dispatchGet = vi.fn().mockReturnValue({
+      fetch: vi.fn().mockImplementation(async () => {
+        // Check deployment status during prerender
+        const dpl = await env.db
+          .select({ status: deployments.status })
+          .from(deployments)
+          .where(eq(deployments.project_id, project.id))
+          .get();
+        statusDuringPrerender = dpl?.status;
+        return new Response("<html>ok</html>", { status: 200 });
+      }),
+    });
+    env.DISPATCH = { get: dispatchGet } as unknown as DispatchNamespace;
+
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            bindings: {},
+            revalidate: 3600,
+            prerender: ["/"],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(statusDuringPrerender).toBe("prerendering");
+  });
+});

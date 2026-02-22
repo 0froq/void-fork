@@ -19,6 +19,10 @@ export interface PageDefinition {
   componentId: string;
   /** Edge caching revalidate TTL in seconds, from .server.ts export */
   revalidate?: number;
+  /** Whether `export const prerender = true` is set in server handler */
+  prerender?: boolean;
+  /** Whether `export function getPrerenderPaths` is defined in server handler */
+  hasGetPrerenderPaths?: boolean;
 }
 
 export interface LayoutDefinition {

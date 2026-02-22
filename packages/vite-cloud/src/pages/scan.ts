@@ -9,6 +9,8 @@ const SERVER_EXTENSIONS = ["ts", "tsx", "js", "mjs", "mts"];
 const SCRIPT_SERVER_CONTENT_RE = /<script\s+server\b[^>]*>([\s\S]*?)<\/script>/;
 const PAGES_EXPORT_RE = /export\s+(?:const|function|async\s+function)\s+(loader|action)\b/g;
 const REVALIDATE_RE = /export\s+const\s+revalidate\s*=\s*(\d+)\s*;/;
+const PRERENDER_RE = /export\s+const\s+prerender\s*=\s*true\s*;/;
+const GET_PRERENDER_PATHS_RE = /export\s+(?:async\s+)?function\s+getPrerenderPaths\b/;
 
 export async function scanPages(root: string): Promise<PageScanResult> {
   const pagesDir = join(root, "pages");
@@ -51,6 +53,8 @@ export async function scanPages(root: string): Promise<PageScanResult> {
     let serverPath: string | null = null;
     let methods: string[] = [];
     let revalidate: number | undefined;
+    let prerender: boolean | undefined;
+    let hasGetPrerenderPaths: boolean | undefined;
     for (const serverExt of SERVER_EXTENSIONS) {
       const candidate = file.replace(ext, `.server.${serverExt}`);
       if (existsSync(join(pagesDir, candidate))) {
@@ -62,6 +66,12 @@ export async function scanPages(root: string): Promise<PageScanResult> {
         const revalidateMatch = content.match(REVALIDATE_RE);
         if (revalidateMatch) {
           revalidate = Number(revalidateMatch[1]);
+        }
+        if (PRERENDER_RE.test(content)) {
+          prerender = true;
+        }
+        if (GET_PRERENDER_PATHS_RE.test(content)) {
+          hasGetPrerenderPaths = true;
         }
         break;
       }
@@ -85,6 +95,12 @@ export async function scanPages(root: string): Promise<PageScanResult> {
           for (const m of inlineServerContent.matchAll(PAGES_EXPORT_RE)) {
             methods.push(m[1]);
           }
+          if (PRERENDER_RE.test(inlineServerContent)) {
+            prerender = true;
+          }
+          if (GET_PRERENDER_PATHS_RE.test(inlineServerContent)) {
+            hasGetPrerenderPaths = true;
+          }
         }
       }
     }
@@ -100,6 +116,8 @@ export async function scanPages(root: string): Promise<PageScanResult> {
       methods,
       componentId,
       revalidate,
+      prerender,
+      hasGetPrerenderPaths,
     });
   }
 

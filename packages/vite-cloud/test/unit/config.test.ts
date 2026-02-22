@@ -158,54 +158,73 @@ describe("readConfig", () => {
     cleanup();
   });
 
-  it("accepts revalidate as a number", () => {
+  it("accepts cache.revalidate as a number", () => {
+    setup(JSON.stringify({ cache: { revalidate: 60 } }));
+    const config = readConfig(tmpDir);
+    expect(config.cache?.revalidate).toBe(60);
+    cleanup();
+  });
+
+  it("accepts cache.revalidate as zero", () => {
+    setup(JSON.stringify({ cache: { revalidate: 0 } }));
+    const config = readConfig(tmpDir);
+    expect(config.cache?.revalidate).toBe(0);
+    cleanup();
+  });
+
+  it("accepts cache.revalidate as a path map", () => {
+    setup(JSON.stringify({ cache: { revalidate: { "/": 60, "/docs/*": 31536000, "*": 30 } } }));
+    const config = readConfig(tmpDir);
+    expect(config.cache?.revalidate).toEqual({ "/": 60, "/docs/*": 31536000, "*": 30 });
+    cleanup();
+  });
+
+  it("throws on negative cache.revalidate number", () => {
+    setup(JSON.stringify({ cache: { revalidate: -1 } }));
+    expect(() => readConfig(tmpDir)).toThrow('"cache.revalidate"');
+    cleanup();
+  });
+
+  it("throws on string cache.revalidate", () => {
+    setup(JSON.stringify({ cache: { revalidate: "60" } }));
+    expect(() => readConfig(tmpDir)).toThrow('"cache.revalidate"');
+    cleanup();
+  });
+
+  it("throws on non-numeric cache.revalidate path map value", () => {
+    setup(JSON.stringify({ cache: { revalidate: { "/": "60" } } }));
+    expect(() => readConfig(tmpDir)).toThrow('"cache.revalidate"');
+    cleanup();
+  });
+
+  it("throws on negative cache.revalidate path map value", () => {
+    setup(JSON.stringify({ cache: { revalidate: { "/": -10 } } }));
+    expect(() => readConfig(tmpDir)).toThrow('"cache.revalidate"');
+    cleanup();
+  });
+
+  it("throws on cache.revalidate path map key not starting with / or *", () => {
+    setup(JSON.stringify({ cache: { revalidate: { docs: 60 } } }));
+    expect(() => readConfig(tmpDir)).toThrow('"cache.revalidate"');
+    cleanup();
+  });
+
+  it("throws migration error when top-level revalidate is used", () => {
     setup(JSON.stringify({ revalidate: 60 }));
+    expect(() => readConfig(tmpDir)).toThrow('"revalidate" has moved to "cache.revalidate"');
+    cleanup();
+  });
+
+  it("throws on invalid cache type", () => {
+    setup(JSON.stringify({ cache: "invalid" }));
+    expect(() => readConfig(tmpDir)).toThrow('"cache" in vite-cloud.json must be an object');
+    cleanup();
+  });
+
+  it("accepts empty cache object", () => {
+    setup(JSON.stringify({ cache: {} }));
     const config = readConfig(tmpDir);
-    expect(config.revalidate).toBe(60);
-    cleanup();
-  });
-
-  it("accepts revalidate as zero", () => {
-    setup(JSON.stringify({ revalidate: 0 }));
-    const config = readConfig(tmpDir);
-    expect(config.revalidate).toBe(0);
-    cleanup();
-  });
-
-  it("accepts revalidate as a path map", () => {
-    setup(JSON.stringify({ revalidate: { "/": 60, "/docs/*": 31536000, "*": 30 } }));
-    const config = readConfig(tmpDir);
-    expect(config.revalidate).toEqual({ "/": 60, "/docs/*": 31536000, "*": 30 });
-    cleanup();
-  });
-
-  it("throws on negative revalidate number", () => {
-    setup(JSON.stringify({ revalidate: -1 }));
-    expect(() => readConfig(tmpDir)).toThrow('"revalidate"');
-    cleanup();
-  });
-
-  it("throws on string revalidate", () => {
-    setup(JSON.stringify({ revalidate: "60" }));
-    expect(() => readConfig(tmpDir)).toThrow('"revalidate"');
-    cleanup();
-  });
-
-  it("throws on non-numeric path map value", () => {
-    setup(JSON.stringify({ revalidate: { "/": "60" } }));
-    expect(() => readConfig(tmpDir)).toThrow('"revalidate"');
-    cleanup();
-  });
-
-  it("throws on negative path map value", () => {
-    setup(JSON.stringify({ revalidate: { "/": -10 } }));
-    expect(() => readConfig(tmpDir)).toThrow('"revalidate"');
-    cleanup();
-  });
-
-  it("throws on path map key not starting with / or *", () => {
-    setup(JSON.stringify({ revalidate: { docs: 60 } }));
-    expect(() => readConfig(tmpDir)).toThrow('"revalidate"');
+    expect(config.cache).toEqual({});
     cleanup();
   });
 });

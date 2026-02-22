@@ -348,6 +348,41 @@ app.post("/:id/deploy", async (c) => {
       await clearIsrCache(c.env.ASSETS, projectId);
     }
 
+    // 5b. Prerender pages (write ISR cache entries before going live)
+    if (manifest.prerender && manifest.prerender.length > 0 && manifest.revalidate) {
+      await updateDeploymentStatus(c.get("db"), deployment.id, "prerendering");
+      const siteDomain = c.env.SITE_DOMAIN ?? DEFAULT_SITE_DOMAIN;
+
+      await uploadPool(manifest.prerender, 3, async (pathname) => {
+        const ttl = resolvePathTtl(manifest.revalidate, pathname);
+        if (ttl <= 0) return;
+
+        try {
+          // Invoke the user worker directly via dispatch namespace
+          const userWorker = c.env.DISPATCH.get(workerName);
+          const url = `https://${project.slug}.${siteDomain}${pathname}`;
+          const response = await userWorker.fetch(new Request(url));
+
+          if (response.ok) {
+            const r2Key = isrR2Key(projectId, pathname);
+            const headers = serializePrerenderHeaders(response);
+            const body = await response.arrayBuffer();
+
+            await c.env.ASSETS.put(r2Key, body, {
+              customMetadata: {
+                status: String(response.status),
+                createdAt: String(Date.now()),
+                ttl: String(ttl),
+                headers: JSON.stringify(headers),
+              },
+            });
+          }
+        } catch {
+          // Prerender failures are non-blocking — page will be rendered on first request
+        }
+      });
+    }
+
     // 6. Update KV routing table
     // Carry forward suspended flag from current KV entry
     const existingRouting = await c.env.ROUTING.get(project.slug);
@@ -471,6 +506,66 @@ function guessContentType(path: string): string {
     txt: "text/plain",
   };
   return types[ext ?? ""] ?? "application/octet-stream";
+}
+
+// --- ISR prerender helpers (inlined from dispatch to avoid cross-package dependency) ---
+
+/**
+ * Build the R2 key for an ISR-cached page.
+ * Root path `/` maps to `__index__` to avoid trailing-slash ambiguity.
+ */
+function isrR2Key(projectId: string, pathname: string): string {
+  let normalized = pathname;
+  if (normalized === "/") {
+    normalized = "__index__";
+  } else {
+    normalized = normalized.startsWith("/") ? normalized.slice(1) : normalized;
+    if (normalized.endsWith("/")) {
+      normalized = normalized.slice(0, -1);
+    }
+  }
+  return `${projectId}/isr/${normalized}`;
+}
+
+/**
+ * Resolve the ISR TTL for a given pathname.
+ * For object form, first matching pattern wins.
+ */
+function resolvePathTtl(
+  revalidate: number | Record<string, number> | undefined,
+  pathname: string,
+): number {
+  if (revalidate == null) return 0;
+  if (typeof revalidate === "number") return revalidate;
+  for (const [pattern, ttl] of Object.entries(revalidate)) {
+    if (matchPattern(pattern, pathname)) return ttl;
+  }
+  return 0;
+}
+
+/**
+ * Match a pattern against a pathname.
+ * `*` matches any characters including `/`.
+ */
+function matchPattern(pattern: string, pathname: string): boolean {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*");
+  return new RegExp(`^${escaped}$`).test(pathname);
+}
+
+/**
+ * Extract response headers as a plain object, skipping ISR-managed headers.
+ */
+function serializePrerenderHeaders(response: Response): Record<string, string> {
+  const result: Record<string, string> = {};
+  const skip = new Set(["cache-control", "x-isr-cache"]);
+
+  response.headers.forEach((value, key) => {
+    if (!skip.has(key.toLowerCase())) {
+      result[key] = value;
+    }
+  });
+
+  return result;
 }
 
 export default app;
