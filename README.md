@@ -54,6 +54,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | [`packages/vite-cloud`](./packages/vite-cloud/AGENTS.md) | `vite-cloud`                     | Core Vite plugin — routing, inference, migrations, CLI         |
 | [`packages/vue`](./packages/vue/README.md)               | `@vite-cloud/vue`                | Vue framework adapter for Pages mode (SSR, Link, useForm)      |
 | [`packages/svelte`](./packages/svelte/README.md)         | `@vite-cloud/svelte`             | Svelte 5 framework adapter for Pages mode (SSR, Link, useForm) |
+| [`packages/solid`](./packages/solid/README.md)           | `@vite-cloud/solid`              | SolidJS framework adapter for Pages mode (SSR, Link, useForm)  |
 | [`packages/platform`](./packages/platform/README.md)     | `@vite-cloud/platform` (private) | Control Plane API + Admin Dashboard                            |
 | [`packages/dispatch`](./packages/dispatch/README.md)     | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets           |
 | [`packages/ai-proxy`](./packages/ai-proxy/README.md)     | `@vite-cloud/ai-proxy` (private) | AI inference proxy — metered Workers AI via AI Gateway         |
@@ -111,6 +112,16 @@ Svelte 5 framework adapter for Pages mode — same Inertia-inspired DX as Vue/Re
 
 See [`packages/svelte/README.md`](./packages/svelte/README.md) for details.
 
+## `@vite-cloud/solid` Overview
+
+SolidJS framework adapter for Pages mode — same Inertia-inspired DX as Vue/React/Svelte.
+
+- **Plugin** (`@vite-cloud/solid/plugin`): `viteCloudSolid()` — wraps `vite-plugin-solid`, generates SSR + client hydration entries
+- **Runtime** (`@vite-cloud/solid`): `Link`, `useForm`, `useShared`, `useRouter` — uses Solid signals (`createSignal`, `createStore`) and `createContext`/`useContext`
+- **Server handlers**: companion `.server.ts` files with `loader` and `action` exports (same as React/Svelte adapter)
+
+See [`packages/solid/README.md`](./packages/solid/README.md) for details.
+
 ## `platform` Overview
 
 CF Worker serving the Control Plane API + Admin Dashboard. Handles OAuth (GitHub/Google), project CRUD, deploy pipeline (migrations → assets → worker upload), usage metering via Analytics Engine, and plan tier enforcement. Admin dashboard uses Hono JSX with cookie-based auth. Uses Drizzle ORM with D1 for type-safe database queries — schema defined in `src/schema.ts`, types inferred via `InferSelectModel`.
@@ -157,6 +168,7 @@ Local apps for testing features end-to-end. Run scripts with `pnpm -C playground
 | [`ssr`](./playground/ssr/README.md)                       | React SSR — `defineRender()`, client hydration, KV storage, dynamic markdown blog                 |
 | [`vue-pages`](./playground/vue-pages/README.md)           | Vue Pages mode — `<script server>` blocks, Inertia protocol, SSR, layouts, `useForm`, `useShared` |
 | [`svelte-pages`](./playground/svelte-pages)               | Svelte 5 Pages mode — companion `.server.ts` files, Inertia protocol, SSR, layouts, `useForm`     |
+| [`solid-pages`](./playground/solid-pages)                 | SolidJS Pages mode — companion `.server.ts` files, Inertia protocol, SSR, layouts, `useForm`      |
 | [`queues`](./playground/queues/README.md)                 | API-only — typed queue producer/consumer with KV bridge                                           |
 | [`auth`](./playground/auth/README.md)                     | React SPA — email/password + OAuth (GitHub/Google) auth flows, protected routes                   |
 | [`tanstack-start`](./playground/tanstack-start/README.md) | TanStack Start meta-framework — server functions, D1 queries, SSR via TanStack                    |
@@ -188,3 +200,4 @@ See [`meta/operations.md`](./meta/operations.md) for the full operations referen
 - **OAuth env vars use `_OAUTH_` prefix** (`GITHUB_OAUTH_ID`, `GITHUB_OAUTH_SECRET`, `GOOGLE_OAUTH_ID`, `GOOGLE_OAUTH_SECRET`). These are passed explicitly to `@hono/oauth-providers` middleware, overriding its default `GITHUB_ID`/`GOOGLE_ID` convention, to avoid naming collisions and make the purpose clear.
 - **D1 does not allow `PRAGMA foreign_keys=OFF`** — D1 enforces `foreign_keys=ON` always. Drizzle-generated migrations that do table rebuilds (e.g. adding NOT NULL to an existing column) use `PRAGMA foreign_keys=OFF/ON`, which silently fails on D1. Hand-edit these to `PRAGMA defer_foreign_keys=on/off` instead, which defers FK checks to the end of the current transaction.
 - **Vite config plugins option accepts array of plugins by default** - there is no need to spread plugins that export an array of plugins.
+- **Solid `createComponent()` evaluates immediately** — unlike React's JSX (which creates lazy descriptors), Solid's `createComponent(Fn, props)` calls `Fn` right away. Context providers must wrap the _evaluation_ of child components, not the evaluated result. Build layout chains inside provider `children` getters, not before wrapping in providers.
