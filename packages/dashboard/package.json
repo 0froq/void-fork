@@ -23,6 +23,7 @@
     "typescript": "~5.8.3",
     "vite": "catalog:",
     "vite-cloud": "workspace:*",
-    "vue-tsc": "^3.2.5"
+    "vue-tsc": "^3.2.5",
+    "wrangler": "catalog:"
   }
 }

@@ -102,6 +102,9 @@ importers:
       vue-tsc:
         specifier: ^3.2.5
         version: 3.2.5(typescript@5.8.3)
+      wrangler:
+        specifier: 'catalog:'
+        version: 4.65.0(@cloudflare/workers-types@4.20260214.0)
 
   packages/dispatch:
     devDependencies:
