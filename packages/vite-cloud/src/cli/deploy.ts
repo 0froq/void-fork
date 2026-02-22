@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { join, resolve } from "node:path";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { intro, outro, log, note, spinner, confirm, isCancel } from "@clack/prompts";
 import { build, createServer, loadEnv, resolveConfig } from "vite";
 import { getToken, getTokenSource } from "./auth";
@@ -230,6 +230,17 @@ async function runFullDeploy(
     }
   }
   const workerDirName = detectWorkerDir(root, distDir);
+
+  // Inject client manifest into worker entry so SSR/Pages asset tags work
+  // in production. The worker has no ASSETS binding in Workers for Platforms,
+  // so the generated code checks globalThis.__VITE_MANIFEST__ at runtime.
+  const clientManifestPath = join(distDir, "client", ".vite", "manifest.json");
+  const workerEntryPath = join(distDir, workerDirName, "index.js");
+  if (existsSync(clientManifestPath) && existsSync(workerEntryPath)) {
+    const manifestJson = readFileSync(clientManifestPath, "utf-8");
+    const workerCode = readFileSync(workerEntryPath, "utf-8");
+    writeFileSync(workerEntryPath, `globalThis.__VITE_MANIFEST__=${manifestJson};\n${workerCode}`);
+  }
 
   // In framework mode: skip job/queue scanning, SSR is always true
   const schedules = isFrameworkMode
