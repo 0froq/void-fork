@@ -117,6 +117,7 @@ describe("packageBuild", () => {
       needsR2: false,
       needsAuth: false,
       needsQueues: false,
+      needsAI: false,
     });
 
     const workerKeys: string[] = [];

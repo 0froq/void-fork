@@ -20,6 +20,7 @@ export interface CloudEnv extends Env {
     DB: D1Database;
     KV: KVNamespace;
     STORAGE: R2Bucket;
+    AI: Ai;
     AUTH_KV: KVNamespace;
     [key: string]: unknown;
   };

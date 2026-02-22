@@ -1,6 +1,7 @@
 packages:
   - packages/*
   - playground/*
+  - playground-local/*
 
 catalog:
   "@clack/prompts": ^1.0.1

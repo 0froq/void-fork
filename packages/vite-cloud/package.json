@@ -75,6 +75,10 @@
       "types": "./dist/runtime/isr.d.mts",
       "import": "./dist/runtime/isr.mjs"
     },
+    "./ai": {
+      "types": "./dist/runtime/ai.d.mts",
+      "import": "./dist/runtime/ai.mjs"
+    },
     "./pages": {
       "types": "./dist/pages/index.d.mts",
       "import": "./dist/pages/index.mjs"

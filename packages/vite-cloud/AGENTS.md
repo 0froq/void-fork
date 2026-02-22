@@ -48,6 +48,8 @@ src/
     validator.ts            # runValidation() — Standard Schema body/query/params validation
     response.ts             # convertReturnValue() — return → Response
     fetch.ts                # Typed fetch client for vite-cloud/client
+    fetch-stream.ts         # SSE stream consumer (fetchStream) for vite-cloud/client
+    ai.ts                   # AI proxy — auto-detects backend (service binding / HTTPS / direct binding)
     db.ts                   # Typed query client (db.list/get/insert/update/delete/raw) + DbTables/DbInsertTables stubs
   inference/
     walk.ts                 # AST walking with vite's parseSync + estree-walker
@@ -77,17 +79,18 @@ src/
 
 ### Package Exports
 
-| Subpath                | What                                                                                                      |
-| ---------------------- | --------------------------------------------------------------------------------------------------------- |
-| `vite-cloud`           | `viteCloud()` default export + `defineHandler` + `defineMiddleware` + `defineQueue` + `CloudContext` type |
-| `vite-cloud/handler`   | `defineHandler()`, `defineHandler.withValidator()`, `defineMiddleware()`, types                           |
-| `vite-cloud/response`  | `convertReturnValue()`                                                                                    |
-| `vite-cloud/validator` | `runValidation()`, `ValidatorSlots`, `HandlerInput` types                                                 |
-| `vite-cloud/routes`    | Empty `RouteMap` stub interface (augmented by generated `routes.d.ts`)                                    |
-| `vite-cloud/client`    | Typed `fetch()` client + `FetchError`                                                                     |
-| `vite-cloud/db`        | `db` query client + `createDb()` + `DbTables`/`DbInsertTables` stubs (augmented by generated `db.d.ts`)   |
-| `vite-cloud/queues`    | `queues` typed proxy + `QueueMap` stub interface (augmented by generated `queues.d.ts`)                   |
-| `vite-cloud/env`       | Global Cloudflare env types (`D1Database`, `KVNamespace`, `R2Bucket`)                                     |
+| Subpath                | What                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `vite-cloud`           | `viteCloud()` default export + `defineHandler` + `defineMiddleware` + `defineQueue` + `CloudContext` type           |
+| `vite-cloud/handler`   | `defineHandler()`, `defineHandler.withValidator()`, `defineMiddleware()`, types                                     |
+| `vite-cloud/response`  | `convertReturnValue()`                                                                                              |
+| `vite-cloud/validator` | `runValidation()`, `ValidatorSlots`, `HandlerInput` types                                                           |
+| `vite-cloud/routes`    | Empty `RouteMap` stub interface (augmented by generated `routes.d.ts`)                                              |
+| `vite-cloud/client`    | Typed `fetch()` client + `fetchStream()` SSE consumer + `FetchError`                                                |
+| `vite-cloud/db`        | `db` query client + `createDb()` + `DbTables`/`DbInsertTables` stubs (augmented by generated `db.d.ts`)             |
+| `vite-cloud/queues`    | `queues` typed proxy + `QueueMap` stub interface (augmented by generated `queues.d.ts`)                             |
+| `vite-cloud/ai`        | `ai` proxy — `ai.run()`, `ai.stream()`, `ai.models()` with auto-detected backend (service binding / HTTPS / direct) |
+| `vite-cloud/env`       | Global Cloudflare env types (`D1Database`, `KVNamespace`, `R2Bucket`, `Ai`)                                         |
 
 The CLI binary is at `dist/cli/cli.mjs` (declared in `bin` field of package.json).
 
@@ -161,7 +164,8 @@ Agent instructions use versioned markers (`<!--injected-by-vite-cloud-v0.0.1-->`
 | `test/unit/detect-exports.test.ts`          | Named HTTP method export detection (8 tests)                   |
 | `test/unit/compile.test.ts`                 | Code generation + queue routes (10 tests)                      |
 | `test/unit/response.test.ts`                | Return value → Response (8 tests)                              |
-| `test/unit/inference.test.ts`               | AST-based binding inference + queues (15 tests)                |
+| `test/unit/inference.test.ts`               | AST-based binding inference + queues + AI (19 tests)           |
+| `test/unit/fetch-stream.test.ts`            | SSE stream consumer (fetchStream) (5 tests)                    |
 | `test/unit/validate-migrations.test.ts`     | Destructive-op detection + pragma (12 tests)                   |
 | `test/unit/collect-migrations.test.ts`      | Migration file collection (4 tests)                            |
 | `test/unit/validator.test.ts`               | Standard Schema validation runtime (8 tests)                   |

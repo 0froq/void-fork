@@ -25,6 +25,7 @@ export interface DeployManifest {
     d1?: string[];
     kv?: string[];
     r2?: string[];
+    ai?: boolean;
   };
   migrations?: MigrationMeta[];
   schedules?: ScheduleMeta[];
