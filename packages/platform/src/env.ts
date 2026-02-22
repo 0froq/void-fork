@@ -20,6 +20,7 @@ export interface PlatformEnv extends Env {
     DISPATCH_NAMESPACE?: string;
     DISPATCH_WORKER_NAME?: string;
     SITE_DOMAIN?: string;
+    DASHBOARD_URL?: string;
     SIGNUP_ALLOWLIST?: string;
   };
   Variables: {

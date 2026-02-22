@@ -72,6 +72,7 @@
       "vars": {
         "DISPATCH_NAMESPACE": "vite-cloud-users-staging",
         "SITE_DOMAIN": "staging.vitecloud.app",
+        "DASHBOARD_URL": "https://dash.staging.vite.cloud",
         "AUTH_REDIRECT_URI": "https://platform.staging.vite.cloud/auth/callback",
         "SIGNUP_ALLOWLIST": "@voidzero.dev",
       },

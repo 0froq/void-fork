@@ -14,15 +14,13 @@ const DEFAULT_REDIRECT_URI = "https://platform.vite.cloud/auth/callback";
 
 const app = new Hono<PlatformEnv>();
 
-function isAllowedRedirect(url: string, siteDomain?: string): boolean {
+function isAllowedRedirect(url: string, dashboardUrl?: string): boolean {
   if (url.startsWith("http://localhost:") || url.startsWith("http://127.0.0.1:")) {
     return true;
   }
-  if (siteDomain) {
-    const dashboardOrigin = `https://dashboard.${siteDomain}`;
-    if (url.startsWith(dashboardOrigin)) {
-      return true;
-    }
+  const origin = dashboardUrl ?? "https://dash.vite.cloud";
+  if (url.startsWith(origin)) {
+    return true;
   }
   return false;
 }
@@ -34,8 +32,7 @@ app.get("/login", async (c) => {
     return c.json({ error: "redirect parameter is required" }, 400);
   }
 
-  const siteDomain = c.env.SITE_DOMAIN ?? "vitecloud.app";
-  if (!isAllowedRedirect(redirect, siteDomain)) {
+  if (!isAllowedRedirect(redirect, c.env.DASHBOARD_URL)) {
     return c.json({ error: "redirect must be a localhost or dashboard URL" }, 400);
   }
 
@@ -91,8 +88,7 @@ app.get("/callback", async (c) => {
   };
 
   // Re-validate redirect after decoding
-  const siteDomain = c.env.SITE_DOMAIN ?? "vitecloud.app";
-  if (!isAllowedRedirect(redirect, siteDomain)) {
+  if (!isAllowedRedirect(redirect, c.env.DASHBOARD_URL)) {
     return c.json({ error: "invalid redirect" }, 400);
   }
 
