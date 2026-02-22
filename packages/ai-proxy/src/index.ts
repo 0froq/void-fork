@@ -33,6 +33,18 @@ export default {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
+    // Health check
+    if (req.method === "GET" && new URL(req.url).pathname === "/health") {
+      return Response.json({
+        ok: true,
+        bindings: {
+          ai: !!env.AI,
+          kv: !!env.ROUTING,
+          jwt: !!env.JWT_SECRET,
+        },
+      });
+    }
+
     if (req.method !== "POST") {
       return Response.json({ error: "method not allowed" }, { status: 405 });
     }

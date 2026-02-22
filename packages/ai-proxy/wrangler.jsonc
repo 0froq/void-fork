@@ -10,6 +10,12 @@
       "id": "9250c33f3db6494ebe8ad6272812c8c0",
     },
   ],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+    },
+  },
   "routes": [{ "pattern": "ai-proxy.vite.cloud", "custom_domain": true }],
   "env": {
     "staging": {
