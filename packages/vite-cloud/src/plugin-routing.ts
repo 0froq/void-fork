@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
 import { scanRoutes, type ScanResult } from "./router/scan";
@@ -42,6 +42,8 @@ interface RoutingPluginOptions {
 export function routingPlugin(root: string, options: RoutingPluginOptions): Plugin {
   let scan: ScanResult | null = null;
   let ssr: SsrCompileOptions | null = null;
+  let isBuild = false;
+  let clientOutDir: string | null = null;
   const routesDir = join(root, "routes");
   const middlewareDir = join(root, "middleware");
   const jobsDir = join(root, "crons");
@@ -149,6 +151,11 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
           plugin.name === "vite:react-refresh" ||
           plugin.name === "vite:react-swc",
       );
+      if (config.command === "build") {
+        isBuild = true;
+        // CF plugin puts client output at <outDir>/client
+        clientOutDir = resolve(root, config.build.outDir, "client");
+      }
     },
     config(_, env) {
       const entries = validateSsrEntries(root);
@@ -207,6 +214,22 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         }
         if (id !== VIRTUAL_ROUTES_ID) return;
         if (!scan) await rescan();
+
+        // During build, inline the client manifest so SSR/Pages asset tags
+        // work in production without needing the env.ASSETS binding.
+        // The client build runs before the worker build, so the manifest
+        // is already on disk at this point.
+        if (isBuild && clientOutDir) {
+          try {
+            compileOptions.manifestJson = readFileSync(
+              join(clientOutDir, ".vite", "manifest.json"),
+              "utf-8",
+            );
+          } catch {
+            // Manifest not available (e.g. API-only project) — dev tags fallback
+          }
+        }
+
         return compileRouteTable(
           scan!,
           routesDir,
