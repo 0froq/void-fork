@@ -339,14 +339,10 @@ app.post("/:id/deploy", async (c) => {
       );
     }
 
-    // 5. Clear previous ISR cache on deploy
-    const hasIsr =
-      typeof manifest.revalidate === "object"
-        ? Object.keys(manifest.revalidate).length > 0
-        : Boolean(manifest.revalidate && manifest.revalidate > 0);
-    if (hasIsr) {
-      await clearIsrCache(c.env.ASSETS, projectId);
-    }
+    // 5. Clear previous ISR cache on deploy.
+    // Always clear — handles both "new deploy has ISR" and "previous deploy had ISR
+    // but new one doesn't" (avoids orphaned R2 entries). No-op for empty prefixes.
+    await clearIsrCache(c.env.ASSETS, projectId);
 
     // 5b. Prerender pages (write ISR cache entries before going live)
     if (manifest.prerender && manifest.prerender.length > 0 && manifest.revalidate) {

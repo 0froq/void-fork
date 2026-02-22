@@ -4,6 +4,7 @@ import { extractSlug } from "./hostname";
 import {
   readIsrCache,
   writeIsrCache,
+  deleteIsrCache,
   isStale,
   isrCacheResponse,
   resolveRevalidateTtl,
@@ -168,7 +169,9 @@ export default {
             ctx.waitUntil(revalidateInBackground(env, routing, request, pathname, isrTtl));
           }
           requestType = "isr";
-          return meter(isrCacheResponse(cached, stale));
+          return meter(
+            cacheResponse(request, ctx, cache, cacheKey, isrCacheResponse(cached, stale)),
+          );
         }
 
         // Cache miss: render via worker, cache in background
@@ -178,6 +181,15 @@ export default {
         const ttl = resolveRevalidateTtl(workerResponse, isrTtl);
         if (ttl > 0 && workerResponse.ok) {
           ctx.waitUntil(writeIsrCache(env, routing.projectId, pathname, workerResponse, ttl));
+          // Wrap with ISR-managed Cache-Control for correct edge caching
+          const headers = new Headers(workerResponse.headers);
+          headers.set("Cache-Control", `public, s-maxage=${ttl}, max-age=0, must-revalidate`);
+          headers.set("x-isr-cache", "MISS");
+          const edgeResponse = new Response(workerResponse.body, {
+            status: workerResponse.status,
+            headers,
+          });
+          return meter(cacheResponse(request, ctx, cache, cacheKey, edgeResponse));
         }
         return meter(workerResponse);
       }
@@ -289,6 +301,9 @@ async function revalidateInBackground(
     const ttl = resolveRevalidateTtl(response, defaultTtl);
     if (ttl > 0 && response.ok) {
       await writeIsrCache(env, routing.projectId, pathname, response, ttl);
+    } else if (ttl === 0) {
+      // Worker permanently opted out — remove stale R2 entry
+      await deleteIsrCache(env, routing.projectId, pathname);
     }
   } catch (err) {
     console.error("ISR revalidation failed:", err);

@@ -165,7 +165,7 @@ describe("shouldBypassIsr", () => {
 });
 
 describe("isrCacheResponse", () => {
-  it("sets x-isr-cache: HIT for fresh entry", () => {
+  it("sets x-isr-cache: HIT with edge-cacheable headers for fresh entry", () => {
     const entry: IsrCacheEntry = {
       body: new ReadableStream(),
       status: 200,
@@ -177,10 +177,13 @@ describe("isrCacheResponse", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("x-isr-cache")).toBe("HIT");
     expect(response.headers.get("Content-Type")).toBe("text/html");
-    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    const cc = response.headers.get("Cache-Control")!;
+    expect(cc).toContain("public");
+    expect(cc).toContain("s-maxage=");
+    expect(cc).toContain("must-revalidate");
   });
 
-  it("sets x-isr-cache: STALE for stale entry", () => {
+  it("sets x-isr-cache: STALE with short edge TTL for stale entry", () => {
     const entry: IsrCacheEntry = {
       body: new ReadableStream(),
       status: 200,
@@ -190,5 +193,22 @@ describe("isrCacheResponse", () => {
     };
     const response = isrCacheResponse(entry, true);
     expect(response.headers.get("x-isr-cache")).toBe("STALE");
+    expect(response.headers.get("Cache-Control")).toBe(
+      "public, s-maxage=10, max-age=0, must-revalidate",
+    );
+  });
+
+  it("caps stale edge TTL at entry.ttl for short ISR windows", () => {
+    const entry: IsrCacheEntry = {
+      body: new ReadableStream(),
+      status: 200,
+      headers: {},
+      createdAt: Date.now() - 10000,
+      ttl: 5,
+    };
+    const response = isrCacheResponse(entry, true);
+    expect(response.headers.get("Cache-Control")).toBe(
+      "public, s-maxage=5, max-age=0, must-revalidate",
+    );
   });
 });

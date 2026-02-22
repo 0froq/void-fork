@@ -65,6 +65,15 @@ export async function readIsrCache(
 }
 
 /**
+ * Delete an ISR cache entry from R2.
+ * Used when a worker permanently opts out via x-revalidate: 0.
+ */
+export async function deleteIsrCache(env: Env, projectId: string, pathname: string): Promise<void> {
+  const key = isrR2Key(projectId, pathname);
+  await env.ASSETS.delete(key);
+}
+
+/**
  * Write an ISR cache entry to R2.
  */
 export async function writeIsrCache(
@@ -100,8 +109,24 @@ export function isStale(entry: IsrCacheEntry): boolean {
 export function isrCacheResponse(entry: IsrCacheEntry, stale: boolean): Response {
   const headers = new Headers(entry.headers);
   headers.set("x-isr-cache", stale ? "STALE" : "HIT");
-  // Prevent edge cache from caching ISR responses
-  headers.set("Cache-Control", "private, no-store");
+
+  // Edge-cacheable: s-maxage controls CDN TTL based on remaining ISR freshness.
+  // Browser always revalidates (max-age=0) so users see updates after edge expiry.
+  if (stale) {
+    // Stale: short edge TTL while background revalidation runs.
+    // Cap at entry.ttl so short-TTL configs don't serve stale longer than their ISR window.
+    const staleTtl = Math.min(10, entry.ttl);
+    headers.set("Cache-Control", `public, s-maxage=${staleTtl}, max-age=0, must-revalidate`);
+  } else {
+    const remainingSeconds = Math.max(
+      0,
+      Math.floor((entry.createdAt + entry.ttl * 1000 - Date.now()) / 1000),
+    );
+    headers.set(
+      "Cache-Control",
+      `public, s-maxage=${remainingSeconds}, max-age=0, must-revalidate`,
+    );
+  }
 
   return new Response(entry.body, {
     status: entry.status,

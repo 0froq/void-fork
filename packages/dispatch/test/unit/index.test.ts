@@ -100,6 +100,9 @@ function createEnv(options: {
           customMetadata: opts?.customMetadata,
         });
       },
+      delete: async (key: string) => {
+        r2Store.delete(key);
+      },
     },
     ANALYTICS: {
       writeDataPoint: (data: unknown) => analyticsWrites.push(data),
@@ -1031,6 +1034,75 @@ describe("ISR (stale-while-revalidate)", () => {
     expect(await response.text()).toBe("<html>ssr</html>");
   });
 
+  it("sets ISR-managed headers on cache-miss response", async () => {
+    const { env } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+        revalidate: 60,
+      },
+      workerResponse: new Response("<html>rendered</html>", {
+        headers: {
+          "Content-Type": "text/html",
+          "Cache-Control": "private, no-store", // Worker's raw header should be overridden
+        },
+      }),
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/dashboard"),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-isr-cache")).toBe("MISS");
+    expect(response.headers.get("Cache-Control")).toBe(
+      "public, s-maxage=60, max-age=0, must-revalidate",
+    );
+  });
+
+  it("deletes R2 entry when background revalidation gets x-revalidate: 0", async () => {
+    const { env, workerFetch, r2Store } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+        revalidate: 60,
+      },
+      assets: {
+        "proj_1/isr/dashboard": {
+          body: "<html>stale</html>",
+          customMetadata: {
+            status: "200",
+            createdAt: String(Date.now() - 120 * 1000),
+            ttl: "60",
+            headers: JSON.stringify({ "Content-Type": "text/html" }),
+          },
+        },
+      },
+      workerResponse: new Response("<html>opt-out</html>", {
+        headers: { "x-revalidate": "0" },
+      }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(
+      new Request("https://my-app.vitecloud.app/dashboard"),
+      env,
+      ctx,
+    );
+
+    expect(response.headers.get("x-isr-cache")).toBe("STALE");
+
+    // Wait for background revalidation
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalledOnce();
+    // R2 entry should be deleted after x-revalidate: 0
+    expect(r2Store.has("proj_1/isr/dashboard")).toBe(false);
+  });
+
   it("revalidates stale entry in background and returns stale content", async () => {
     const { env, workerFetch } = createEnv({
       routing: {
@@ -1066,8 +1138,8 @@ describe("ISR (stale-while-revalidate)", () => {
     expect(response.headers.get("x-isr-cache")).toBe("STALE");
     expect(await response.text()).toBe("<html>stale</html>");
 
-    // Background revalidation + metering should have been scheduled
-    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
+    // Background revalidation + edge cache write + metering should have been scheduled
+    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(3);
 
     // Wait for background write
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
