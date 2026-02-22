@@ -77,7 +77,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
 
 function generateRendererModule(scan: PageScanResult, pagesDir: string): string {
   return `
-import { renderToStringAsync } from "solid-js/web";
+import { renderToStringAsync, generateHydrationScript } from "solid-js/web";
 import { createComponent } from "solid-js";
 import { SharedContext, ErrorsContext, RouterContext } from "@vite-cloud/solid";
 
@@ -94,10 +94,7 @@ export async function renderPage(pageObj, assetTags) {
     layoutIds.map(async (id) => (await components[id]()).default)
   );
 
-  const html = await renderToStringAsync(() => {
-    // Context providers must wrap component evaluation because Solid's
-    // createComponent() immediately invokes the function. Layouts that
-    // call useShared()/useRouter() need the providers already established.
+  function ServerApp() {
     return createComponent(SharedContext.Provider, {
       value: pageObj.shared || {},
       get children() {
@@ -121,13 +118,16 @@ export async function renderPage(pageObj, assetTags) {
         });
       }
     });
-  });
+  }
+
+  // Use createComponent to match the client's hydration tree structure
+  const html = await renderToStringAsync(() => createComponent(ServerApp, {}));
 
   const pageData = escapeAttr(JSON.stringify(pageObj));
 
   return \`<!doctype html>
 <html>
-<head>\${assetTags.head}</head>
+<head>\${assetTags.head}\${generateHydrationScript()}</head>
 <body>
   <div id="app" data-page="\${pageData}">\${html}</div>
   \${assetTags.body}
@@ -242,19 +242,19 @@ const router = {
 
 // --- Root App component ---
 function App() {
-  const Comp = component();
-  if (!Comp) return null;
-
   return createComponent(SharedContext.Provider, {
     get value() { return shared(); },
     get children() {
       return createComponent(ErrorsContext.Provider, {
-        get value() { return errors(); },
+        value: errors,
         get children() {
           return createComponent(RouterContext.Provider, {
             value: router,
             get children() {
-              // Build layout chain inside providers so contexts are available
+              // All signal reads must be inside this reactive getter so Solid
+              // re-evaluates when navigation updates component/props/layouts.
+              const Comp = component();
+              if (!Comp) return null;
               let element = createComponent(Comp, pageProps());
               const layoutList = layouts();
               for (let i = layoutList.length - 1; i >= 0; i--) {

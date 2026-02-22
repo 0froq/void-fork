@@ -1,6 +1,6 @@
 import { createSignal, createMemo, useContext } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
-import { RouterContext } from "./context";
+import { RouterContext, ErrorsContext } from "./context";
 import type { PageActionMap } from "vite-cloud/routes";
 
 type HasParams<U extends keyof PageActionMap> = PageActionMap[U] extends { params: infer P }
@@ -72,8 +72,22 @@ export function useForm(
   }
 
   const router = useContext(RouterContext);
+  // ErrorsContext provides the errors signal accessor — a reactive function
+  // that returns the current global errors object. This allows useForm to
+  // derive errors from the global state, surviving component re-creation
+  // during Solid's reactive tree rebuild after router.visit().
+  const globalErrors: (() => Record<string, string>) | null = useContext(ErrorsContext);
   const [data, setDataStore] = createStore<Record<string, unknown>>({ ...defaults });
-  const [errors, setErrors] = createSignal<Record<string, string>>({});
+  const [localErrors, setLocalErrors] = createSignal<Record<string, string>>({});
+  const errors = createMemo(() => {
+    const local = localErrors();
+    if (Object.keys(local).length > 0) return local;
+    // globalErrors is a signal accessor (function) on the client, or a plain
+    // object on the server. Handle both cases.
+    if (!globalErrors) return {};
+    if (typeof globalErrors === "function") return globalErrors();
+    return globalErrors as unknown as Record<string, string>;
+  });
   const [processing, setProcessing] = createSignal(false);
   const [wasSuccessful, setWasSuccessful] = createSignal(false);
   const [recentlySuccessful, setRecentlySuccessful] = createSignal(false);
@@ -103,9 +117,9 @@ export function useForm(
 
   function clearErrors(...fields: string[]) {
     if (fields.length === 0) {
-      setErrors({});
+      setLocalErrors({});
     } else {
-      setErrors((prev) => {
+      setLocalErrors((prev) => {
         const next = { ...prev };
         for (const field of fields) {
           delete next[field];
@@ -120,7 +134,7 @@ export function useForm(
     setWasSuccessful(false);
     setRecentlySuccessful(false);
     if (successTimeout) clearTimeout(successTimeout);
-    setErrors({});
+    setLocalErrors({});
 
     try {
       const pageData = await router?.visit(resolvedUrl, {
@@ -130,7 +144,7 @@ export function useForm(
       });
 
       if (pageData?.errors) {
-        setErrors(pageData.errors as Record<string, string>);
+        setLocalErrors(pageData.errors as Record<string, string>);
         return;
       }
 
