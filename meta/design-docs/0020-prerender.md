@@ -1,7 +1,7 @@
 # ISR Prerendering at Deploy Time
 
 **Date:** 2026-02-22
-**Status:** Draft
+**Status:** Implemented
 
 ---
 
