@@ -55,7 +55,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | [`packages/vue`](./packages/vue/README.md)               | `@vite-cloud/vue`                | Vue framework adapter for Pages mode (SSR, Link, useForm) |
 | [`packages/platform`](./packages/platform/README.md)     | `@vite-cloud/platform` (private) | Control Plane API + Admin Dashboard                       |
 | [`packages/dispatch`](./packages/dispatch/README.md)     | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets      |
-| `packages/ai-proxy`                                      | `@vite-cloud/ai-proxy` (private) | AI inference proxy — metered Workers AI via AI Gateway    |
+| [`packages/ai-proxy`](./packages/ai-proxy/README.md)     | `@vite-cloud/ai-proxy` (private) | AI inference proxy — metered Workers AI via AI Gateway    |
 | `playground/*`                                           | (private)                        | local apps for testing                                    |
 
 ## `vite-cloud` Overview
@@ -105,6 +105,12 @@ See [`packages/vue/README.md`](./packages/vue/README.md) for architecture and [`
 CF Worker serving the Control Plane API + Admin Dashboard. Handles OAuth (GitHub/Google), project CRUD, deploy pipeline (migrations → assets → worker upload), usage metering via Analytics Engine, and plan tier enforcement. Admin dashboard uses Hono JSX with cookie-based auth. Uses Drizzle ORM with D1 for type-safe database queries — schema defined in `src/schema.ts`, types inferred via `InferSelectModel`.
 
 See [`packages/platform/README.md`](./packages/platform/README.md) for API endpoints, auth flow, deploy flow, tiers, secrets, and CF API token permissions.
+
+## `ai-proxy` Overview
+
+CF Worker proxying all Workers AI inference for metered billing. User workers never receive the `AI` binding directly — all calls route through this proxy, which injects AI Gateway metadata (`projectId`) for tamper-proof token counting and cost tracking. Two auth paths: service binding (production, trusted) and HTTPS with JWT (local dev).
+
+See [`packages/ai-proxy/README.md`](./packages/ai-proxy/README.md) for request format, authentication, and deployment.
 
 ## `dispatch` Overview
 
