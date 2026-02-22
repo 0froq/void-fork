@@ -20,6 +20,7 @@ interface RoutingEntry {
   revalidate?: number | Record<string, number>;
   mode?: "spa" | "ssg";
   version?: string;
+  assetsDir?: string;
   headers?: HeaderRule[];
   limits?: Record<string, number>;
   suspended?: string;
@@ -56,10 +57,15 @@ export default {
 
     // Versioned cache key: each deploy writes a new version to KV,
     // so old cache entries are instantly bypassed without purging.
+    // Hashed assets use unversioned keys — their content is
+    // guaranteed by the filename hash, so they survive across deploys.
     const cache = caches.default;
-    const cacheKey = routing.version
-      ? new Request(`${request.url}?_v=${routing.version}`)
-      : request;
+    const hashedDir = routing.assetsDir ?? "assets";
+    const isHashedPath = hashedDir !== "" && url.pathname.startsWith("/" + hashedDir + "/");
+    const cacheKey =
+      routing.version && !isHashedPath
+        ? new Request(`${request.url}?_v=${routing.version}`)
+        : request;
 
     if (request.method === "GET") {
       const cached = await cache.match(cacheKey);
@@ -96,7 +102,7 @@ export default {
             cache,
             cacheKey,
             applyHeaderRules(
-              await serveSSGAsset(env, routing.projectId, pathname),
+              await serveSSGAsset(env, routing.projectId, pathname, routing.assetsDir),
               pathname,
               routing.headers,
             ),
@@ -110,7 +116,7 @@ export default {
           cache,
           cacheKey,
           applyHeaderRules(
-            await serveStaticAssetWithFallback(env, routing.projectId, pathname),
+            await serveStaticAssetWithFallback(env, routing.projectId, pathname, routing.assetsDir),
             pathname,
             routing.headers,
           ),
@@ -137,6 +143,7 @@ export default {
     if (routing.ssr) {
       const staticResponse = await serveStaticAsset(env, routing.projectId, pathname, {
         spaFallback: false,
+        assetsDir: routing.assetsDir,
       });
       if (staticResponse) {
         return meter(
@@ -187,7 +194,7 @@ export default {
         cache,
         cacheKey,
         applyHeaderRules(
-          await serveStaticAssetWithFallback(env, routing.projectId, pathname),
+          await serveStaticAssetWithFallback(env, routing.projectId, pathname, routing.assetsDir),
           pathname,
           routing.headers,
         ),
@@ -244,6 +251,8 @@ function getWorker(env: Env, routing: RoutingEntry): Fetcher {
 /**
  * Store successful static responses in the edge cache.
  * Uses a versioned cache key so deploys instantly invalidate old entries.
+ * Hashed assets (`/assets/*`) use unversioned keys — their content is
+ * guaranteed by the filename hash, so they survive across deploys.
  * TTL is controlled by the Cache-Control headers already set on the response:
  * - Hashed assets: `immutable` (cached ~1 year)
  * - Non-hashed (index.html etc): `s-maxage=60` (cached 60s at edge)

@@ -39,6 +39,7 @@ export function packageBuild(
   revalidate?: number | Record<string, number>,
   vars?: Record<string, string>,
   queues?: QueueMeta[],
+  assetsDir?: string,
 ): FormData {
   const formData = new FormData();
 
@@ -73,6 +74,10 @@ export function packageBuild(
 
   if (framework) {
     manifest.framework = true;
+  }
+
+  if (assetsDir) {
+    manifest.assetsDir = assetsDir;
   }
 
   if (assetHashes) {

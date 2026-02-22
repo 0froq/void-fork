@@ -42,6 +42,7 @@ export interface DeployManifest {
   framework?: boolean;
   revalidate?: number | Record<string, number>;
   static?: "spa" | "ssg";
+  assetsDir?: string;
   assetHashes?: Record<string, string>;
   headers?: HeaderRule[];
   vars?: Record<string, string>;

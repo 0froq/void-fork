@@ -13,9 +13,10 @@ export async function serveStaticAsset(
   env: Env,
   projectId: string,
   pathname: string,
-  options?: { spaFallback?: boolean },
+  options?: { spaFallback?: boolean; assetsDir?: string },
 ): Promise<Response | null> {
   const spaFallback = options?.spaFallback ?? true;
+  const assetsDir = options?.assetsDir;
 
   // Normalize pathname
   let assetPath = pathname.startsWith("/") ? pathname.slice(1) : pathname;
@@ -33,18 +34,18 @@ export async function serveStaticAsset(
     if (!hasExtension(assetPath) && assetPath !== "" && assetPath !== "index.html") {
       const nestedIndexPath = `${assetPath.replace(/\/+$/, "")}/index.html`;
       const nested = await env.ASSETS.get(`${projectId}/current/${nestedIndexPath}`);
-      if (nested) return buildResponse(nested, nestedIndexPath);
+      if (nested) return buildResponse(nested, nestedIndexPath, assetsDir);
     }
 
     // Try index.html as final fallback
     if (assetPath !== "index.html") {
       const fallback = await env.ASSETS.get(`${projectId}/current/index.html`);
-      if (fallback) return buildResponse(fallback, "index.html");
+      if (fallback) return buildResponse(fallback, "index.html", assetsDir);
     }
     return null;
   }
 
-  return buildResponse(object, assetPath);
+  return buildResponse(object, assetPath, assetsDir);
 }
 
 /**
@@ -61,13 +62,14 @@ export async function serveSSGAsset(
   env: Env,
   projectId: string,
   pathname: string,
+  assetsDir?: string,
 ): Promise<Response> {
   let assetPath = pathname.startsWith("/") ? pathname.slice(1) : pathname;
 
   // Try exact path (e.g. /styles.css, /about.html)
   if (assetPath && hasExtension(assetPath)) {
     const object = await env.ASSETS.get(`${projectId}/current/${assetPath}`);
-    if (object) return buildResponse(object, assetPath);
+    if (object) return buildResponse(object, assetPath, assetsDir);
   }
 
   // For paths without extension: try <path>/index.html, then <path>.html
@@ -75,13 +77,13 @@ export async function serveSSGAsset(
     // Root path → index.html
     const indexPath = assetPath ? `${assetPath.replace(/\/+$/, "")}/index.html` : "index.html";
     const index = await env.ASSETS.get(`${projectId}/current/${indexPath}`);
-    if (index) return buildResponse(index, indexPath);
+    if (index) return buildResponse(index, indexPath, assetsDir);
 
     // Clean URL fallback: /bar → /bar.html (e.g. VitePress)
     if (assetPath) {
       const htmlPath = `${assetPath.replace(/\/+$/, "")}.html`;
       const html = await env.ASSETS.get(`${projectId}/current/${htmlPath}`);
-      if (html) return buildResponse(html, htmlPath);
+      if (html) return buildResponse(html, htmlPath, assetsDir);
     }
   }
 
@@ -104,12 +106,16 @@ export async function serveStaticAssetWithFallback(
   env: Env,
   projectId: string,
   pathname: string,
+  assetsDir?: string,
 ): Promise<Response> {
-  const response = await serveStaticAsset(env, projectId, pathname, { spaFallback: true });
+  const response = await serveStaticAsset(env, projectId, pathname, {
+    spaFallback: true,
+    assetsDir,
+  });
   return response ?? new Response("Not Found", { status: 404 });
 }
 
-function buildResponse(object: R2ObjectBody, path: string): Response {
+function buildResponse(object: R2ObjectBody, path: string, assetsDir?: string): Response {
   const headers = new Headers();
 
   // Content type from R2 metadata or guess from extension
@@ -122,7 +128,7 @@ function buildResponse(object: R2ObjectBody, path: string): Response {
   }
 
   // Cache control: hashed assets are immutable, everything else is revalidated
-  if (isHashedAsset(path)) {
+  if (isHashedAsset(path, assetsDir)) {
     headers.set("Cache-Control", "public, max-age=31536000, immutable");
   } else {
     headers.set("Cache-Control", "public, s-maxage=60, max-age=0, must-revalidate");
@@ -136,9 +142,11 @@ function hasExtension(path: string): boolean {
   return lastSegment.includes(".");
 }
 
-function isHashedAsset(path: string): boolean {
-  // Vite/Rolldown only puts content-hashed files in assets/
-  return path.startsWith("assets/");
+function isHashedAsset(path: string, assetsDir?: string): boolean {
+  const dir = assetsDir ?? "assets";
+  // Empty assetsDir means hashed files are at root — no directory-based detection
+  if (dir === "") return false;
+  return path.startsWith(dir + "/");
 }
 
 function guessContentType(path: string): string {

@@ -49,10 +49,10 @@ Request types: `"api"`, `"static"`, `"ssr"`, `"isr"`. Usage queries multiply by 
 
 ## Edge Caching
 
-Static asset responses are cached at the CF edge via `caches.default`. Cache keys include a `version` from the KV routing entry (set to the deployment ID on each deploy), so new deploys instantly invalidate stale entries without purge APIs.
+Static asset responses are cached at the CF edge via `caches.default`. Cache keys include a `version` from the KV routing entry (set to the deployment ID on each deploy), so new deploys instantly invalidate stale entries without purge APIs. Hashed assets (`/assets/*`) use version-independent cache keys — their content is guaranteed by the filename hash, so they survive across deploys and avoid unnecessary R2 reads after redeployment.
 
-- Hashed assets (`assets/*-<hash>.js`) get `Cache-Control: public, max-age=31536000, immutable` — cached at edge ~1 year
-- Non-hashed assets (`index.html` etc.) get `Cache-Control: public, s-maxage=60, max-age=0, must-revalidate` — cached at edge 60s, browser always revalidates
+- Hashed assets (`assets/*-<hash>.js`) get `Cache-Control: public, max-age=31536000, immutable` — cached at edge ~1 year, cache key is unversioned
+- Non-hashed assets (`index.html` etc.) get `Cache-Control: public, s-maxage=60, max-age=0, must-revalidate` — cached at edge 60s, cache key includes deploy version
 - API routes and SSR-rendered responses are **not** edge-cached
 - Non-file paths fall back to `index.html` (SPA routing)
 

@@ -112,6 +112,7 @@ app.post("/:id/deploy", async (c) => {
         projectId,
         mode: manifest.static,
         version: deployment.id,
+        ...(manifest.assetsDir ? { assetsDir: manifest.assetsDir } : {}),
         ...(manifest.headers ? { headers: manifest.headers } : {}),
         ...(existingStaticEntry?.suspended ? { suspended: existingStaticEntry.suspended } : {}),
       });
@@ -369,6 +370,7 @@ app.post("/:id/deploy", async (c) => {
       ...(manifest.ssr ? { ssr: true } : {}),
       ...(manifest.revalidate ? { revalidate: manifest.revalidate } : {}),
       version: deployment.id,
+      ...(manifest.assetsDir ? { assetsDir: manifest.assetsDir } : {}),
       ...(manifest.headers ? { headers: manifest.headers } : {}),
       ...dispatchLimits,
       ...(existingEntry?.suspended ? { suspended: existingEntry.suspended } : {}),

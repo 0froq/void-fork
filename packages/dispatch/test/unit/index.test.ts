@@ -10,6 +10,7 @@ interface RoutingEntry {
   revalidate?: number;
   mode?: "spa" | "ssg";
   version?: string;
+  assetsDir?: string;
   headers?: HeaderRule[];
   limits?: Record<string, number>;
   suspended?: string;
@@ -651,6 +652,147 @@ describe("edge cache versioning", () => {
     const res3 = await app.fetch(new Request("https://my-app.vitecloud.app/"), env3, createCtx());
     expect(res3.status).toBe(200);
     expect(await res3.text()).toBe("<html>v2</html>");
+  });
+
+  it("preserves cache for hashed assets across version changes", async () => {
+    const assets = {
+      "proj_1/current/assets/app-abc123.js": { body: "console.log('v1')" },
+    };
+
+    // First request with version "dpl_1" — cache miss, populates cache
+    const { env: env1 } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa", version: "dpl_1" },
+      assets,
+    });
+    const res1 = await app.fetch(
+      new Request("https://my-app.vitecloud.app/assets/app-abc123.js"),
+      env1,
+      createCtx(),
+    );
+    expect(res1.status).toBe(200);
+    expect(await res1.text()).toBe("console.log('v1')");
+
+    // Second request with new version "dpl_2" — cache HIT (hashed asset, unversioned key)
+    const r2Get = vi.fn(async () => null);
+    const env2 = {
+      ROUTING: {
+        get: async () => JSON.stringify({ projectId: "proj_1", mode: "spa", version: "dpl_2" }),
+      },
+      DISPATCH: { get: () => ({ fetch: vi.fn() }) },
+      ASSETS: { get: r2Get },
+      ANALYTICS: { writeDataPoint: () => {} },
+    } as unknown as Env;
+    const res2 = await app.fetch(
+      new Request("https://my-app.vitecloud.app/assets/app-abc123.js"),
+      env2,
+      createCtx(),
+    );
+    expect(res2.status).toBe(200);
+    expect(await res2.text()).toBe("console.log('v1')");
+    expect(r2Get).not.toHaveBeenCalled();
+  });
+
+  it("preserves cache for hashed assets in custom assetsDir across version changes", async () => {
+    const assets = {
+      "proj_1/current/static/app-abc123.js": { body: "console.log('v1')" },
+    };
+
+    // First request with version "dpl_1" — cache miss, populates cache
+    const { env: env1 } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa", version: "dpl_1", assetsDir: "static" },
+      assets,
+    });
+    const res1 = await app.fetch(
+      new Request("https://my-app.vitecloud.app/static/app-abc123.js"),
+      env1,
+      createCtx(),
+    );
+    expect(res1.status).toBe(200);
+    expect(await res1.text()).toBe("console.log('v1')");
+
+    // Second request with new version "dpl_2" — cache HIT (hashed asset in custom dir)
+    const r2Get = vi.fn(async () => null);
+    const env2 = {
+      ROUTING: {
+        get: async () =>
+          JSON.stringify({
+            projectId: "proj_1",
+            mode: "spa",
+            version: "dpl_2",
+            assetsDir: "static",
+          }),
+      },
+      DISPATCH: { get: () => ({ fetch: vi.fn() }) },
+      ASSETS: { get: r2Get },
+      ANALYTICS: { writeDataPoint: () => {} },
+    } as unknown as Env;
+    const res2 = await app.fetch(
+      new Request("https://my-app.vitecloud.app/static/app-abc123.js"),
+      env2,
+      createCtx(),
+    );
+    expect(res2.status).toBe(200);
+    expect(await res2.text()).toBe("console.log('v1')");
+    expect(r2Get).not.toHaveBeenCalled();
+
+    // Request to /assets/ with custom assetsDir — NOT treated as hashed, cache MISS on version change
+    const { env: env3 } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa", version: "dpl_1", assetsDir: "static" },
+      assets: {
+        "proj_1/current/assets/foo.js": { body: "console.log('assets-v1')" },
+        "proj_1/current/index.html": { body: "<html>SPA</html>", contentType: "text/html" },
+      },
+    });
+    await app.fetch(new Request("https://my-app.vitecloud.app/assets/foo.js"), env3, createCtx());
+
+    const { env: env4 } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa", version: "dpl_2", assetsDir: "static" },
+      assets: {
+        "proj_1/current/assets/foo.js": { body: "console.log('assets-v2')" },
+        "proj_1/current/index.html": { body: "<html>SPA</html>", contentType: "text/html" },
+      },
+    });
+    const res4 = await app.fetch(
+      new Request("https://my-app.vitecloud.app/assets/foo.js"),
+      env4,
+      createCtx(),
+    );
+    expect(res4.status).toBe(200);
+    expect(await res4.text()).toBe("console.log('assets-v2')");
+  });
+
+  it("invalidates cache for non-hashed assets when version changes", async () => {
+    // First request with version "dpl_1" — cache miss, populates cache
+    const { env: env1 } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa", version: "dpl_1" },
+      assets: {
+        "proj_1/current/favicon.ico": { body: "icon-v1", contentType: "image/x-icon" },
+        "proj_1/current/index.html": { body: "<html>SPA</html>", contentType: "text/html" },
+      },
+    });
+    const res1 = await app.fetch(
+      new Request("https://my-app.vitecloud.app/favicon.ico"),
+      env1,
+      createCtx(),
+    );
+    expect(res1.status).toBe(200);
+    expect(await res1.text()).toBe("icon-v1");
+
+    // Second request with new version "dpl_2" — cache MISS (versioned key changed)
+    const { env: env2 } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa", version: "dpl_2" },
+      assets: {
+        "proj_1/current/favicon.ico": { body: "icon-v2", contentType: "image/x-icon" },
+        "proj_1/current/index.html": { body: "<html>SPA</html>", contentType: "text/html" },
+      },
+    });
+    const res2 = await app.fetch(
+      new Request("https://my-app.vitecloud.app/favicon.ico"),
+      env2,
+      createCtx(),
+    );
+    expect(res2.status).toBe(200);
+    expect(await res2.text()).toBe("icon-v2");
   });
 });
 

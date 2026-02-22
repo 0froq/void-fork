@@ -44,7 +44,7 @@ Then ask what to do next.
 | Authentication                            | `docs/auth.md`, `docs/env-vars.md`                                |
 | Cloudflare runtime bindings and config    | `docs/cloudflare.md`, `docs/config.md`, `docs/env-vars.md`        |
 | KV / storage / queues / cron jobs         | `docs/kv.md`, `docs/storage.md`, `docs/queues.md`, `docs/jobs.md` |
-| SSR and caching                           | `docs/ssr.md`, `docs/cache.md`, `docs/edge-caching.md`            |
+| SSR and caching                           | `docs/ssr.md`, `docs/cache.md`                                    |
 | Deployment and CI                         | `docs/deployment.md`, `docs/cli.md`                               |
 | MCP server usage                          | `docs/mcp.md`                                                     |
 | API surface details                       | `docs/api.md`                                                     |

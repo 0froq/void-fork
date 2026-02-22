@@ -76,11 +76,10 @@ export default extendConfig(
               { text: "Blob Storage", link: "/docs/storage" },
               { text: "Authentication", link: "/docs/auth" },
               { text: "Custom SSR", link: "/docs/ssr" },
-              { text: "Edge Caching", link: "/docs/edge-caching" },
+              { text: "Caching and Headers", link: "/docs/cache" },
               { text: "Cron Jobs", link: "/docs/jobs" },
               { text: "Queues", link: "/docs/queues" },
               { text: "Environment Variables", link: "/docs/env-vars" },
-              { text: "Caching and Headers", link: "/docs/cache" },
             ],
           },
           {

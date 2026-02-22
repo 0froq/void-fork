@@ -195,9 +195,10 @@ async function runFullDeploy(
   skipBuild?: boolean,
   commit?: string | null,
 ): Promise<void> {
-  // 3. Resolve Vite config for outDir
+  // 3. Resolve Vite config for outDir + assetsDir
   const resolved = await resolveConfig({ root }, "build");
   const distDir = resolve(resolved.root, resolved.build.outDir);
+  const assetsDir = resolved.build.assetsDir !== "assets" ? resolved.build.assetsDir : undefined;
 
   // 4. Build
   if (!skipBuild) {
@@ -317,6 +318,7 @@ async function runFullDeploy(
     revalidate,
     envVars,
     queues,
+    assetsDir,
   );
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);

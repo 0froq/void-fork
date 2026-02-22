@@ -67,6 +67,59 @@ describe("serveStaticAsset", () => {
   });
 });
 
+describe("custom assetsDir", () => {
+  it("sets immutable cache headers for assets in custom assetsDir", async () => {
+    const env = createEnv({
+      "proj/current/static/app-abc12345.js": createObject(
+        "console.log('ok')",
+        "application/javascript",
+      ),
+    });
+
+    const response = await serveStaticAsset(env, "proj", "/static/app-abc12345.js", {
+      spaFallback: false,
+      assetsDir: "static",
+    });
+
+    expect(response).not.toBeNull();
+    expect(response!.headers.get("Cache-Control")).toContain("immutable");
+  });
+
+  it("does not set immutable for default assets/ path when custom assetsDir is set", async () => {
+    const env = createEnv({
+      "proj/current/assets/app-abc12345.js": createObject(
+        "console.log('ok')",
+        "application/javascript",
+      ),
+    });
+
+    const response = await serveStaticAsset(env, "proj", "/assets/app-abc12345.js", {
+      spaFallback: false,
+      assetsDir: "static",
+    });
+
+    expect(response).not.toBeNull();
+    expect(response!.headers.get("Cache-Control")).not.toContain("immutable");
+  });
+
+  it("skips hashed-asset optimization when assetsDir is empty string", async () => {
+    const env = createEnv({
+      "proj/current/assets/app-abc12345.js": createObject(
+        "console.log('ok')",
+        "application/javascript",
+      ),
+    });
+
+    const response = await serveStaticAsset(env, "proj", "/assets/app-abc12345.js", {
+      spaFallback: false,
+      assetsDir: "",
+    });
+
+    expect(response).not.toBeNull();
+    expect(response!.headers.get("Cache-Control")).not.toContain("immutable");
+  });
+});
+
 describe("serveStaticAssetWithFallback", () => {
   it("falls back to index.html for non-file paths", async () => {
     const env = createEnv({
