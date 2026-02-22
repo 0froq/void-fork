@@ -6,7 +6,7 @@ outline: deep
 
 Vite Cloud is a deployment platform and fullstack Vite plugin that turns any Vite app into a globally distributed, edge-first application on Cloudflare — without requiring a Cloudflare account, config files, or infrastructure knowledge.
 
-Add a single plugin to your `vite.config.ts` and you get file-based API routing, full-stack [pages mode](./pages-routing.md) with server-rendered components, a D1 database, KV storage, R2 object storage, and one-command deploys. Just import `db`, `kv`, or `storage` from `vite-cloud` and everything is provisioned automatically based on what your code actually uses.
+Add a single plugin to your `vite.config.ts` and you get file-based API routing, full-stack [pages mode](./pages-routing.md) with server-rendered components, a D1 database, KV storage, R2 object storage, AI inference, and one-command deploys. Just import `db`, `kv`, `storage`, or `ai` from `vite-cloud` and everything is provisioned automatically based on what your code actually uses.
 
 ```sh
 npm install -D vite vite-cloud
@@ -56,11 +56,12 @@ pages/index.vue         →  Server-rendered page at /
 import { db }           →  D1 database (auto-provisioned)
 import { kv }           →  KV namespace (auto-provisioned)
 import { storage }      →  R2 bucket (auto-provisioned)
+import { ai }           →  Workers AI inference (metered)
 migrations/*.sql        →  Applied to D1 on dev startup and deploy
 vcc deploy              →  Live at https://<slug>.vitecloud.app
 ```
 
-The plugin scans your source code at build time, detects which imports you use (`vite-cloud/db`, `vite-cloud/kv`, `vite-cloud/storage`), provisions the corresponding Cloudflare bindings on deploy, and routes requests through a generated [Hono](https://hono.dev) app with lazy-loaded handlers for minimal cold starts.
+The plugin scans your source code at build time, detects which imports you use (`vite-cloud/db`, `vite-cloud/kv`, `vite-cloud/storage`, `vite-cloud/ai`), provisions the corresponding Cloudflare bindings on deploy, and routes requests through a generated [Hono](https://hono.dev) app with lazy-loaded handlers for minimal cold starts.
 
 ## Next steps
 

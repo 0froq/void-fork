@@ -79,6 +79,7 @@ export default extendConfig(
               { text: "Caching and Headers", link: "/docs/cache" },
               { text: "Cron Jobs", link: "/docs/jobs" },
               { text: "Queues", link: "/docs/queues" },
+              { text: "AI", link: "/docs/ai" },
               { text: "Environment Variables", link: "/docs/env-vars" },
             ],
           },
