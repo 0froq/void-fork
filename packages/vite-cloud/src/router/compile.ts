@@ -20,6 +20,8 @@ export interface CompileOptions {
   reactRefresh: boolean;
   /** Auth configuration (null = disabled) */
   auth: AuthCompileOptions | null;
+  /** Inlined Vite manifest JSON (production build only). */
+  manifestJson?: string;
 }
 
 export interface SsrCompileOptions {
@@ -181,7 +183,7 @@ export function compileRouteTable(
 
   // Pages mode — generate page route handlers
   if (pages && scan.pages.pages.length > 0) {
-    compilePageRoutes(lines, scan, pages);
+    compilePageRoutes(lines, scan, pages, options.manifestJson);
   }
 
   if (ssr) {
@@ -189,6 +191,9 @@ export function compileRouteTable(
     lines.push(`const SSR_CLIENT_ENTRY_ID = ${JSON.stringify(ssr.clientEntryRelativePath)};`);
     lines.push(`const SSR_CLIENT_ENTRY_URL = ${JSON.stringify(clientEntryUrl)};`);
     lines.push(`let cachedSsrManifest = null;`);
+    if (options.manifestJson) {
+      lines.push(`const __INLINE_MANIFEST__ = ${options.manifestJson};`);
+    }
     lines.push("");
     lines.push(`function escapeHtml(value) {`);
     lines.push(`  return String(value).replace(/"/g, "&quot;");`);
@@ -227,13 +232,18 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push("");
     lines.push(`async function loadSsrManifest(request, env) {`);
     lines.push(`  if (cachedSsrManifest) return cachedSsrManifest;`);
-    lines.push(`  const assets = env?.ASSETS;`);
-    lines.push(`  if (!assets || typeof assets.fetch !== "function") return null;`);
-    lines.push(`  const manifestUrl = new URL("/.vite/manifest.json", request.url);`);
-    lines.push(`  const response = await assets.fetch(new Request(manifestUrl.toString()));`);
-    lines.push(`  if (!response.ok) return null;`);
-    lines.push(`  cachedSsrManifest = await response.json();`);
-    lines.push(`  return cachedSsrManifest;`);
+    if (options.manifestJson) {
+      lines.push(`  cachedSsrManifest = __INLINE_MANIFEST__;`);
+      lines.push(`  return cachedSsrManifest;`);
+    } else {
+      lines.push(`  const assets = env?.ASSETS;`);
+      lines.push(`  if (!assets || typeof assets.fetch !== "function") return null;`);
+      lines.push(`  const manifestUrl = new URL("/.vite/manifest.json", request.url);`);
+      lines.push(`  const response = await assets.fetch(new Request(manifestUrl.toString()));`);
+      lines.push(`  if (!response.ok) return null;`);
+      lines.push(`  cachedSsrManifest = await response.json();`);
+      lines.push(`  return cachedSsrManifest;`);
+    }
     lines.push(`}`);
     lines.push("");
     lines.push(`async function getClientAssetTags(request, env) {`);
@@ -557,7 +567,12 @@ function compileAuthRoutes(lines: string[], auth: AuthCompileOptions): void {
   lines.push("");
 }
 
-function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompileOptions): void {
+function compilePageRoutes(
+  lines: string[],
+  scan: ScanResult,
+  pages: PagesCompileOptions,
+  manifestJson?: string,
+): void {
   // Import protocol helpers and renderer
   lines.push(
     `import { handlePageGet, handlePageMutation } from ${JSON.stringify(pages.protocolPath)};`,
@@ -570,6 +585,9 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`const PAGES_CLIENT_ENTRY_ID = ${JSON.stringify(clientEntryId)};`);
   lines.push(`const PAGES_CLIENT_ENTRY_URL = ${JSON.stringify("/@id/__x00__" + clientEntryId)};`);
   lines.push(`let cachedPagesManifest = null;`);
+  if (manifestJson) {
+    lines.push(`const __INLINE_PAGES_MANIFEST__ = ${manifestJson};`);
+  }
   lines.push("");
   lines.push(`function escapeHtmlAttr(value) {`);
   lines.push(`  return String(value).replace(/"/g, "&quot;");`);
@@ -599,13 +617,18 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push("");
   lines.push(`async function loadPagesManifest(request, env) {`);
   lines.push(`  if (cachedPagesManifest) return cachedPagesManifest;`);
-  lines.push(`  const assets = env?.ASSETS;`);
-  lines.push(`  if (!assets || typeof assets.fetch !== "function") return null;`);
-  lines.push(`  const manifestUrl = new URL("/.vite/manifest.json", request.url);`);
-  lines.push(`  const response = await assets.fetch(new Request(manifestUrl.toString()));`);
-  lines.push(`  if (!response.ok) return null;`);
-  lines.push(`  cachedPagesManifest = await response.json();`);
-  lines.push(`  return cachedPagesManifest;`);
+  if (manifestJson) {
+    lines.push(`  cachedPagesManifest = __INLINE_PAGES_MANIFEST__;`);
+    lines.push(`  return cachedPagesManifest;`);
+  } else {
+    lines.push(`  const assets = env?.ASSETS;`);
+    lines.push(`  if (!assets || typeof assets.fetch !== "function") return null;`);
+    lines.push(`  const manifestUrl = new URL("/.vite/manifest.json", request.url);`);
+    lines.push(`  const response = await assets.fetch(new Request(manifestUrl.toString()));`);
+    lines.push(`  if (!response.ok) return null;`);
+    lines.push(`  cachedPagesManifest = await response.json();`);
+    lines.push(`  return cachedPagesManifest;`);
+  }
   lines.push(`}`);
   lines.push("");
   lines.push(`async function getPagesAssetTags(request, env) {`);
