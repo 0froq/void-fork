@@ -86,6 +86,8 @@ The `vite-cloud` package contains two parts:
 
 See [`packages/vite-cloud/AGENTS.md`](./packages/vite-cloud/AGENTS.md) for architecture, source layout, design decisions, package exports, route parsing rules, code generation, and agent integration.
 
+**Note:** `packages/vite-cloud/skills/vite-cloud/docs` is ignored from git and is auto copied during build. Ignore files in this directory.
+
 ## `@vite-cloud/vue` Overview
 
 Vue framework adapter for Pages mode — Inertia-inspired full-stack DX with SSR.
