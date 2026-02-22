@@ -23,8 +23,10 @@ Split the Vite Cloud monorepo into two repos: an open-source **framework repo** 
 - `packages/vite-cloud` — core Vite plugin + CLI (routing, inference, migrations, codegen, deploy command, all runtime exports)
 - `packages/vue` — Vue framework adapter
 - `packages/react` — React framework adapter
+- `packages/svelte` — Svelte framework adapter
+- `packages/solid` — SolidJS framework adapter
 - `packages/website` — documentation site (VitePress)
-- `playground/*` — all 7 test apps
+- `playground/*` — all 8 test apps
 - `docs` symlink
 
 **Platform repo (private, current repo):**
@@ -37,7 +39,7 @@ Split the Vite Cloud monorepo into two repos: an open-source **framework repo** 
 
 The split is architecturally clean — confirmed by code analysis:
 
-- **Platform and dispatch have zero imports from `vite-cloud`**. No `from "vite-cloud"` or `from "@vite-cloud/vue"` anywhere in platform/dispatch source code.
+- **Platform and dispatch have zero imports from `vite-cloud`**. No `from "vite-cloud"` or `from "@vite-cloud/{vue,react,svelte,solid}"` anywhere in platform/dispatch source code.
 - **The only cross-boundary coupling is the HTTP deploy protocol** — the CLI sends a deploy manifest to the platform API. This is a network boundary, not a code dependency.
 - **No shared test utilities** between framework and platform packages.
 - **Runtime subpaths are hermetic** — `handler`, `db`, `fetch`, `queues`, `auth` have zero imports from CLI or plugin code.
@@ -62,6 +64,8 @@ The framework repo lives inside the platform repo directory, gitignored. This en
     ├── packages/vite-cloud/
     ├── packages/vue/
     ├── packages/react/
+    ├── packages/svelte/
+    ├── packages/solid/
     ├── packages/website/
     └── playground/
 ```
@@ -94,7 +98,7 @@ No `pnpm overrides` or cross-workspace linking — the platform repo never impor
 - lint + typecheck
 - Unit tests
 - Integration tests (vite-cloud)
-- Integration tests — pages adapters (react + vue, requires playwright)
+- Integration tests — pages adapters (react + vue + svelte + solid, requires playwright)
 
 **Platform repo CI** (simplified):
 
@@ -109,4 +113,4 @@ No `pnpm overrides` or cross-workspace linking — the platform repo never impor
 
 - **Framework repo GitHub org/name**: e.g. `vitejs/vite-cloud`, `voidzero/vite-cloud`, or `vite-cloud/vite-cloud`?
 - **Docs deployment**: Currently the platform deploy workflow deploys docs via `vcc deploy`. Post-split, the framework repo needs its own docs deploy workflow (or the platform deploy clones the framework repo).
-- **npm publishing**: The framework repo will need its own publish workflow for `vite-cloud`, `@vite-cloud/vue`, `@vite-cloud/react`.
+- **npm publishing**: The framework repo will need its own publish workflow for `vite-cloud`, `@vite-cloud/vue`, `@vite-cloud/react`, `@vite-cloud/svelte`, `@vite-cloud/solid`.
