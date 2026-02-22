@@ -10,11 +10,7 @@
       "id": "9250c33f3db6494ebe8ad6272812c8c0",
     },
   ],
-  "routes": [
-    { "pattern": "ai-proxy.vitecloud.app", "zone_name": "vitecloud.app" },
-    { "pattern": "ai-proxy.vitecloud.app/*", "zone_name": "vitecloud.app" },
-  ],
-
+  "routes": [{ "pattern": "ai-proxy.vite.cloud", "custom_domain": true }],
   "env": {
     "staging": {
       "name": "vite-cloud-ai-proxy-staging",
@@ -25,10 +21,7 @@
           "id": "60240eecea804f39bf8b7395cd6c6b08",
         },
       ],
-      "routes": [
-        { "pattern": "ai-proxy.staging.vitecloud.app", "zone_name": "vitecloud.app" },
-        { "pattern": "ai-proxy.staging.vitecloud.app/*", "zone_name": "vitecloud.app" },
-      ],
+      "routes": [{ "pattern": "ai-proxy.staging.vite.cloud", "custom_domain": true }],
     },
   },
 }

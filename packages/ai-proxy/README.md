@@ -86,8 +86,8 @@ test/
 ## Deployment
 
 ```
-pnpm -C packages/ai-proxy deploy              # Production (ai-proxy.vitecloud.app)
-pnpm -C packages/ai-proxy deploy --env staging # Staging (ai-proxy.staging.vitecloud.app)
+pnpm -C packages/ai-proxy deploy              # Production (ai-proxy.vite.cloud)
+pnpm -C packages/ai-proxy deploy --env staging # Staging (ai-proxy.staging.vite.cloud)
 ```
 
 Deployed as part of the root `pnpm run deploy` / `pnpm run deploy:staging` scripts. Must deploy before dispatch/platform since user workers depend on the `__AI_PROXY` service binding.
