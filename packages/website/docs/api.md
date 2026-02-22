@@ -657,7 +657,7 @@ Importing `"vite-cloud/env"` provides global Cloudflare environment types:
 
 Declares the `Cloudflare.Env` namespace with `DB: D1Database`, `KV: KVNamespace`, and `STORAGE: R2Bucket`.
 
-For handler context variables (`c.set()` / `c.get()`), augment [`CloudContextVariables`](#cloudcontextvariables) — this is separate from `Cloudflare.Env`, which types the worker bindings. Framework adaptors (`@vite-cloud/vue`, `@vite-cloud/react`) also augment `CloudContextVariables` to add the `shared` key used by `useShared()`.
+For handler context variables (`c.set()` / `c.get()`), augment [`CloudContextVariables`](#cloudcontextvariables) — this is separate from `Cloudflare.Env`, which types the worker bindings. Framework adaptors (`@vite-cloud/vue`, `@vite-cloud/react`, `@vite-cloud/svelte`) also augment `CloudContextVariables` to add the `shared` key used by `useShared()`.
 
 ## Framework Adaptors
 
@@ -739,6 +739,46 @@ Imported from `"@vite-cloud/react"`.
 | `Link`              | React component for SPA navigation. Renders `<a>` for GET, `<button>` for non-GET methods. Props: `href`, `method`, `data`, `preserveScroll`. |
 | `useForm(defaults)` | Form helper hook. Returns `{ data, setData, post, put, patch, delete, processing, errors, isDirty, reset, clearErrors }`.                     |
 | `useShared()`       | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                      |
+
+### `@vite-cloud/svelte`
+
+#### `viteCloudSvelte(options?)`
+
+Imported from `"@vite-cloud/svelte/plugin"`. Returns an array of Vite plugins that handle SSR/hydration entry generation for Svelte 5. Includes `@sveltejs/vite-plugin-svelte` — no need to install or configure it separately.
+
+```ts
+import { viteCloudSvelte } from "@vite-cloud/svelte/plugin";
+
+export default defineConfig({
+  plugins: [viteCloud(), viteCloudSvelte()],
+});
+```
+
+**Signature:**
+
+```ts
+function viteCloudSvelte(options?: ViteCloudSvelteOptions): Plugin[];
+```
+
+**Options:**
+
+```ts
+interface ViteCloudSvelteOptions {
+  svelte?: SveltePluginOptions; // passed through to @sveltejs/vite-plugin-svelte
+  viewTransitions?: boolean; // enable View Transitions API
+}
+```
+
+#### Svelte Runtime
+
+Imported from `"@vite-cloud/svelte"`.
+
+| Export              | Description                                                                                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Link`              | Svelte component for SPA navigation. Renders `<a>` for GET, `<button>` for non-GET methods. Props: `href`, `method`, `data`, `preserveScroll`. |
+| `useForm(defaults)` | Form helper using Svelte 5 runes. Returns `{ data, post, put, patch, delete, processing, errors, isDirty, reset, clearErrors }`.               |
+| `useShared()`       | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                       |
+| `useRouter()`       | Returns the page router for programmatic navigation: `visit`, `reload`, `post`, `put`, `patch`, `delete`.                                      |
 
 ## Subpath Exports
 

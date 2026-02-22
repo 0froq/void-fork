@@ -60,6 +60,10 @@ npm install @vite-cloud/react
 npm install @vite-cloud/vue
 ```
 
+```sh [Svelte]
+npm install @vite-cloud/svelte
+```
+
 :::
 
 Add both plugins to your Vite config:
@@ -88,11 +92,22 @@ export default defineConfig({
 });
 ```
 
+```ts [Svelte]
+// vite.config.ts
+import { defineConfig } from "vite";
+import viteCloud from "vite-cloud";
+import { viteCloudSvelte } from "@vite-cloud/svelte/plugin";
+
+export default defineConfig({
+  plugins: [viteCloud(), viteCloudSvelte()],
+});
+```
+
 :::
 
 That's it — no SSR entry, no client entry, no hydration boilerplate. The adapter generates everything.
 
-Each adapter plugin includes the framework's Vite plugin (`@vitejs/plugin-react`, `@vitejs/plugin-vue`) so you don't need to install or configure it separately. Pass framework plugin options via `viteCloudReact({ react: { ... } })` or `viteCloudVue({ vue: { ... } })` if needed.
+Each adapter plugin includes the framework's Vite plugin (`@vitejs/plugin-react`, `@vitejs/plugin-vue`, `@sveltejs/vite-plugin-svelte`) so you don't need to install or configure it separately. Pass framework plugin options via `viteCloudReact({ react: { ... } })`, `viteCloudVue({ vue: { ... } })`, or `viteCloudSvelte({ svelte: { ... } })` if needed.
 
 ## How Navigation Works
 
@@ -128,12 +143,21 @@ import { Link } from "@vite-cloud/vue";
 </template>
 ```
 
+```svelte [Svelte]
+<script>
+  import { Link } from "@vite-cloud/svelte";
+</script>
+
+<Link href="/users">Users</Link>
+<Link href={`/users/${id}`}>View</Link>
+```
+
 :::
 
 For programmatic navigation, use `useRouter()`:
 
 ```ts
-import { useRouter } from "@vite-cloud/vue"; // or "@vite-cloud/react"
+import { useRouter } from "@vite-cloud/vue"; // or "@vite-cloud/react" or "@vite-cloud/svelte"
 
 const router = useRouter();
 router.visit("/users");
@@ -268,6 +292,22 @@ defineProps<Props>();
 </template>
 ```
 
+```svelte [Svelte]
+<!-- pages/users/index.svelte -->
+<script lang="ts">
+  import type { Props } from "./index.server";
+
+  let { users }: Props = $props();
+</script>
+
+<h1>Users</h1>
+<ul>
+  {#each users as u (u.id)}
+    <li>{u.name}</li>
+  {/each}
+</ul>
+```
+
 Aside from the loader, the component can also use the [typed fetch]()
 
 :::
@@ -333,6 +373,16 @@ pages/
     [id].vue
 ```
 
+```[Svelte]
+pages/
+  layout.svelte           # Root layout (nav, footer)
+  index.svelte
+  users/
+    layout.svelte         # Nested layout for /users/*
+    index.svelte
+    [id].svelte
+```
+
 :::
 
 ::: code-group
@@ -373,6 +423,24 @@ const { auth } = useShared();
     <slot />
   </main>
 </template>
+```
+
+```svelte [Svelte]
+<!-- pages/layout.svelte -->
+<script>
+  import { useShared, Link } from "@vite-cloud/svelte";
+  let { children } = $props();
+  const { auth } = useShared();
+</script>
+
+<nav>
+  <Link href="/">Home</Link>
+  <Link href="/users">Users</Link>
+  {#if auth?.user}<span>{auth.user.name}</span>{/if}
+</nav>
+<main>
+  {@render children()}
+</main>
 ```
 
 :::
@@ -417,6 +485,13 @@ export default function Page() {
 <script setup lang="ts">
 import { useShared } from "@vite-cloud/vue";
 const { auth } = useShared(); // { auth: { user: { name: string } | null } }
+</script>
+```
+
+```svelte [Svelte]
+<script>
+  import { useShared } from "@vite-cloud/svelte";
+  const { auth } = useShared(); // { auth: { user: { name: string } | null } }
 </script>
 ```
 
@@ -521,6 +596,26 @@ const form = useForm("/users/create", { name: "", email: "" });
 </template>
 ```
 
+```svelte [Svelte]
+<!-- pages/users/create.svelte -->
+<script>
+  import { useForm } from "@vite-cloud/svelte";
+
+  // "/users/create" autocompletes; { name, email } is typed from the action's validator
+  const form = useForm("/users/create", { name: "", email: "" });
+</script>
+
+<form onsubmit={(e) => { e.preventDefault(); form.post(); }}>
+  <input bind:value={form.data.name} />
+  {#if form.errors.name}<span>{form.errors.name}</span>{/if}
+
+  <input bind:value={form.data.email} />
+  {#if form.errors.email}<span>{form.errors.email}</span>{/if}
+
+  <button disabled={form.processing}>Create</button>
+</form>
+```
+
 :::
 
 The types are inferred from your action's `withValidator()` schema in the companion `.server.ts` file. If no validator is defined, the body type falls back to `Record<string, unknown>` — you still get URL autocomplete either way.
@@ -589,6 +684,13 @@ export default defineConfig({
 });
 ```
 
+```ts [Svelte]
+// vite.config.ts
+export default defineConfig({
+  plugins: [viteCloud(), viteCloudSvelte({ viewTransitions: true })],
+});
+```
+
 :::
 
 This enables view transitions for all navigations — `Link` clicks, programmatic `router.visit()` calls, and browser back/forward.
@@ -621,6 +723,14 @@ Override the global setting on individual links:
 
 <!-- Enable for just this link (even if globally disabled) -->
 <Link href="/about" view-transition>About</Link>
+```
+
+```svelte [Svelte]
+<!-- Disable transition for this link -->
+<Link href="/settings" viewTransition={false}>Settings</Link>
+
+<!-- Enable for just this link (even if globally disabled) -->
+<Link href="/about" viewTransition>About</Link>
 ```
 
 :::

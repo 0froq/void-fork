@@ -112,7 +112,7 @@ export const action = defineHandler.withValidator({
 ```
 
 ```ts
-import { useForm } from "@vite-cloud/vue"; // or "@vite-cloud/react"
+import { useForm } from "@vite-cloud/vue"; // or "@vite-cloud/react" or "@vite-cloud/svelte"
 
 const form = useForm("/users/create", { name: "", email: "" });
 //                    ^ autocompletes     ^ must match body schema
