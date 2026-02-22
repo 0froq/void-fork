@@ -102,12 +102,12 @@ describe("playground/solid-pages", () => {
     expect(userHtml).toContain("Alice");
     expect(userHtml).toContain("alice@example.com");
 
-    // 5. Inertia navigation — GET / with X-Inertia header returns JSON page object
+    // 5. Inertia navigation — GET / with X-ViteCloudPages header returns JSON page object
     const inertiaRoot = await fetch(`${BASE}/`, {
-      headers: { "X-Inertia": "true" },
+      headers: { "X-ViteCloudPages": "true" },
     });
     expect(inertiaRoot.status).toBe(200);
-    expect(inertiaRoot.headers.get("X-Inertia")).toBe("true");
+    expect(inertiaRoot.headers.get("X-ViteCloudPages")).toBe("true");
     const rootPage = (await inertiaRoot.json()) as {
       component: string;
       props: Record<string, unknown>;
@@ -121,7 +121,7 @@ describe("playground/solid-pages", () => {
 
     // 6. Inertia navigation — GET /users returns user list in props
     const inertiaUsers = await fetch(`${BASE}/users`, {
-      headers: { "X-Inertia": "true" },
+      headers: { "X-ViteCloudPages": "true" },
     });
     expect(inertiaUsers.status).toBe(200);
     const usersPage = (await inertiaUsers.json()) as {
@@ -141,7 +141,7 @@ describe("playground/solid-pages", () => {
     // 8. Form submission — POST /users with valid data
     const postValid = await fetch(`${BASE}/users`, {
       method: "POST",
-      headers: { "X-Inertia": "true", "Content-Type": "application/json" },
+      headers: { "X-ViteCloudPages": "true", "Content-Type": "application/json" },
       body: JSON.stringify({ name: "Charlie", email: "charlie@example.com" }),
     });
     expect(postValid.status).toBe(200);
@@ -157,7 +157,7 @@ describe("playground/solid-pages", () => {
     // 9. Form submission — POST /users with invalid data returns validation errors
     const postInvalid = await fetch(`${BASE}/users`, {
       method: "POST",
-      headers: { "X-Inertia": "true", "Content-Type": "application/json" },
+      headers: { "X-ViteCloudPages": "true", "Content-Type": "application/json" },
       body: JSON.stringify({ name: "", email: "" }),
     });
     expect(postInvalid.status).toBe(200);
@@ -174,7 +174,7 @@ describe("playground/solid-pages", () => {
 
     // 10. User detail via Inertia
     const inertiaUser = await fetch(`${BASE}/users/1`, {
-      headers: { "X-Inertia": "true" },
+      headers: { "X-ViteCloudPages": "true" },
     });
     expect(inertiaUser.status).toBe(200);
     const userPage = (await inertiaUser.json()) as {
@@ -186,7 +186,7 @@ describe("playground/solid-pages", () => {
 
     // 11. Newly added user is accessible via detail page
     const inertiaCharlie = await fetch(`${BASE}/users/3`, {
-      headers: { "X-Inertia": "true" },
+      headers: { "X-ViteCloudPages": "true" },
     });
     expect(inertiaCharlie.status).toBe(200);
     const charliePage = (await inertiaCharlie.json()) as {
