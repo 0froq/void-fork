@@ -16,6 +16,17 @@ app.get("/:id/usage", async (c) => {
     return c.json({ error: "forbidden" }, 403);
   }
 
+  // Dev bypass — skip slow CF Analytics Engine API calls
+  if (c.env.DEV_AUTH_BYPASS) {
+    return c.json({
+      projectId,
+      billingPeriodStart: new Date().toISOString(),
+      requests: 0,
+      bandwidthBytes: 0,
+      aiNeurons: 0,
+    });
+  }
+
   const user = await getUser(c.get("db"), c.get("userId"));
   const since = getCurrentBillingPeriodStart(user!.billing_cycle_start);
   const [usage, aiUsage] = await Promise.all([
@@ -36,6 +47,23 @@ app.get("/", async (c) => {
   const projects = await getProjectsByUserId(c.get("db"), c.get("userId"));
   if (projects.length === 0) {
     return c.json({ requests: 0, bandwidthBytes: 0, aiNeurons: 0, projects: [] });
+  }
+
+  // Dev bypass — skip slow CF Analytics Engine API calls
+  if (c.env.DEV_AUTH_BYPASS) {
+    return c.json({
+      billingPeriodStart: new Date().toISOString(),
+      requests: 0,
+      bandwidthBytes: 0,
+      aiNeurons: 0,
+      projects: projects.map((p) => ({
+        projectId: p.id,
+        slug: p.slug,
+        requests: 0,
+        bandwidthBytes: 0,
+        aiNeurons: 0,
+      })),
+    });
   }
 
   const user = await getUser(c.get("db"), c.get("userId"));

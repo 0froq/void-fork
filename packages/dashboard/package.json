@@ -1,0 +1,26 @@
+{
+  "name": "@vite-cloud/dashboard",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "PLATFORM_API_URL=http://localhost:8787 vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.11.9",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.0",
+    "@vite-cloud/ui": "workspace:*",
+    "@vite-cloud/vue": "workspace:*",
+    "tailwindcss": "^4.2.0",
+    "typescript": "~5.8.3",
+    "vite": "catalog:",
+    "vite-cloud": "workspace:*",
+    "vue-tsc": "^3.2.5"
+  }
+}

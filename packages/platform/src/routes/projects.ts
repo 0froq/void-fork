@@ -110,4 +110,17 @@ app.get("/:id/migrations", async (c) => {
   }
 });
 
+// List resources for a project
+app.get("/:id/resources", async (c) => {
+  const project = await getProject(c.get("db"), c.req.param("id"));
+  if (!project) {
+    return c.json({ error: "project not found" }, 404);
+  }
+  if (project.user_id !== c.get("userId")) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+  const resources = await getProjectResources(c.get("db"), project.id);
+  return c.json(resources);
+});
+
 export default app;

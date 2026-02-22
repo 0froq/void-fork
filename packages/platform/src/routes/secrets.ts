@@ -10,6 +10,44 @@ function isValidSecretName(name: string): boolean {
   return /^[A-Z][A-Z0-9_]*$/.test(name);
 }
 
+app.get("/:id/secrets", async (c) => {
+  const projectId = c.req.param("id");
+  const project = await getProject(c.get("db"), projectId);
+  if (!project) {
+    return c.json({ error: "project not found" }, 404);
+  }
+  if (project.user_id !== c.get("userId")) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+
+  // Dev bypass — skip CF API call for secrets listing
+  if (c.env.DEV_AUTH_BYPASS) {
+    return c.json([]);
+  }
+
+  const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
+  const workerName = `user-${project.slug}`;
+  const cfRes = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}/secrets`,
+    {
+      headers: {
+        Authorization: `Bearer ${c.env.CF_API_TOKEN}`,
+      },
+    },
+  );
+
+  if (!cfRes.ok) {
+    if (cfRes.status === 404) {
+      return c.json([]);
+    }
+    const details = await cfRes.text();
+    return c.json({ error: "failed to list secrets", details }, 502);
+  }
+
+  const result = await cfRes.json<{ result: { name: string; type: string }[] }>();
+  return c.json(result.result.map((s) => ({ name: s.name })));
+});
+
 app.put("/:id/secrets/:name", async (c) => {
   const projectId = c.req.param("id");
   const secretName = c.req.param("name");
