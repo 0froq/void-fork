@@ -14,6 +14,19 @@ const DEFAULT_REDIRECT_URI = "https://platform.vite.cloud/auth/callback";
 
 const app = new Hono<PlatformEnv>();
 
+function isAllowedRedirect(url: string, siteDomain?: string): boolean {
+  if (url.startsWith("http://localhost:") || url.startsWith("http://127.0.0.1:")) {
+    return true;
+  }
+  if (siteDomain) {
+    const dashboardOrigin = `https://dashboard.${siteDomain}`;
+    if (url.startsWith(dashboardOrigin)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // GET /auth/login?redirect=http://localhost:PORT/callback&provider=github|google
 app.get("/login", async (c) => {
   const redirect = c.req.query("redirect");
@@ -21,9 +34,9 @@ app.get("/login", async (c) => {
     return c.json({ error: "redirect parameter is required" }, 400);
   }
 
-  // Security: only allow localhost redirects (CLI use case)
-  if (!redirect.startsWith("http://localhost:") && !redirect.startsWith("http://127.0.0.1:")) {
-    return c.json({ error: "redirect must be a localhost URL" }, 400);
+  const siteDomain = c.env.SITE_DOMAIN ?? "vitecloud.app";
+  if (!isAllowedRedirect(redirect, siteDomain)) {
+    return c.json({ error: "redirect must be a localhost or dashboard URL" }, 400);
   }
 
   const provider = c.req.query("provider") ?? "github";
@@ -78,7 +91,8 @@ app.get("/callback", async (c) => {
   };
 
   // Re-validate redirect after decoding
-  if (!redirect.startsWith("http://localhost:") && !redirect.startsWith("http://127.0.0.1:")) {
+  const siteDomain = c.env.SITE_DOMAIN ?? "vitecloud.app";
+  if (!isAllowedRedirect(redirect, siteDomain)) {
     return c.json({ error: "invalid redirect" }, 400);
   }
 

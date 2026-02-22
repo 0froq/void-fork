@@ -81,6 +81,11 @@ describe("GET /me", () => {
       env,
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ login: "alice" });
+    const body = await res.json();
+    expect(body.login).toBe("alice");
+    expect(body.plan).toBe("free");
+    expect(body.provider).toBe("github");
+    expect(body.limits).toBeDefined();
+    expect(body.limits.requestsPerMonth).toBe(3_000_000);
   });
 });
