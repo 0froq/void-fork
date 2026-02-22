@@ -283,34 +283,6 @@ importers:
         specifier: ^1.7.1
         version: 1.7.1(vite@8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
 
-  playground-local/prerender:
-    dependencies:
-      hono:
-        specifier: ^4.11.9
-        version: 4.11.9
-      react:
-        specifier: ^19.2.4
-        version: 19.2.4
-      react-dom:
-        specifier: ^19.2.4
-        version: 19.2.4(react@19.2.4)
-    devDependencies:
-      '@types/react':
-        specifier: ^19.2.14
-        version: 19.2.14
-      '@types/react-dom':
-        specifier: ^19.2.3
-        version: 19.2.3(@types/react@19.2.14)
-      '@vitejs/plugin-react':
-        specifier: ^5.1.4
-        version: 5.1.4(vite@8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
-      vite:
-        specifier: 8.0.0-beta.14
-        version: 8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)
-      vite-cloud:
-        specifier: workspace:*
-        version: link:../../packages/vite-cloud
-
   playground/auth:
     dependencies:
       hono:
