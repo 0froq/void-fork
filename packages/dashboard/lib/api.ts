@@ -1,6 +1,24 @@
+import { hc, type InferResponseType } from "hono/client";
+import type { ApiRoutes } from "@vite-cloud/platform/api";
 import type { Context } from "hono";
 
+export type Client = ReturnType<typeof hc<ApiRoutes>>;
+
+/** Extract the 200 JSON response type from an hc client route key. */
+export type API<K extends keyof B, B = Client> = InferResponseType<
+  B[K] extends { $get: infer G } ? G : B[K],
+  200
+>;
+
 const PLATFORM_API_URL = "https://platform.vite.cloud";
+
+export function createClient(c: Context) {
+  const token = c.get("token") as string | undefined;
+  const baseUrl = (c.env as Record<string, string>).PLATFORM_API_URL ?? PLATFORM_API_URL;
+  return hc<ApiRoutes>(baseUrl, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
 
 export class ApiError extends Error {
   constructor(
@@ -11,7 +29,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(c: Context, path: string, options?: RequestInit): Promise<T> {
+export async function api(c: Context, path: string, options?: RequestInit): Promise<Response> {
   const token = c.get("token") as string | undefined;
   const baseUrl = (c.env as Record<string, string>).PLATFORM_API_URL ?? PLATFORM_API_URL;
 
@@ -29,5 +47,5 @@ export async function api<T>(c: Context, path: string, options?: RequestInit): P
     throw new ApiError(res.status, body);
   }
 
-  return res.json() as Promise<T>;
+  return res;
 }

@@ -1,31 +1,15 @@
 import { defineHandler } from "vite-cloud";
-import { api } from "../lib/api";
+import { createClient, type API } from "../lib/api";
 
-interface Project {
-  id: string;
-  slug: string;
-  mode: string;
-  custom_domain: string | null;
-  created_at: string;
-}
-
-interface Usage {
-  billingPeriodStart: string;
-  requests: number;
-  bandwidthBytes: number;
-  aiNeurons: number;
-  projects: { projectId: string; slug: string; requests: number }[];
-}
-
-export interface Props {
-  projects: Project[];
-  usage: Usage;
-}
+export type Props = {
+  projects: API<"projects">;
+  usage: API<"usage">;
+};
 
 export const loader = defineHandler<Props>(async (c) => {
-  const [projects, usage] = await Promise.all([
-    api<Project[]>(c, "/projects"),
-    api<Usage>(c, "/usage"),
-  ]);
+  const client = createClient(c);
+  const [projectsRes, usageRes] = await Promise.all([client.projects.$get(), client.usage.$get()]);
+  const projects = await projectsRes.json();
+  const usage = await usageRes.json();
   return { projects, usage };
 });

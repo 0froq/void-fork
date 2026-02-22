@@ -3,93 +3,95 @@ import type { PlatformEnv } from "../env";
 import { getProject, getProjectsByUserId, getUser } from "../db";
 import { getCurrentBillingPeriodStart } from "../tiers";
 
-const app = new Hono<PlatformEnv>();
+const projectUsage = new Hono<PlatformEnv>()
 
-// Project usage for current billing period
-app.get("/:id/usage", async (c) => {
-  const projectId = c.req.param("id");
-  const project = await getProject(c.get("db"), projectId);
-  if (!project) {
-    return c.json({ error: "project not found" }, 404);
-  }
-  if (project.user_id !== c.get("userId")) {
-    return c.json({ error: "forbidden" }, 403);
-  }
+  // Project usage for current billing period
+  .get("/:id/usage", async (c) => {
+    const projectId = c.req.param("id");
+    const project = await getProject(c.get("db"), projectId);
+    if (!project) {
+      return c.json({ error: "project not found" }, 404);
+    }
+    if (project.user_id !== c.get("userId")) {
+      return c.json({ error: "forbidden" }, 403);
+    }
 
-  // Dev bypass — skip slow CF Analytics Engine API calls
-  if (c.env.DEV_AUTH_BYPASS) {
-    return c.json({
-      projectId,
-      billingPeriodStart: new Date().toISOString(),
-      requests: 0,
-      bandwidthBytes: 0,
-      aiNeurons: 0,
-    });
-  }
-
-  const user = await getUser(c.get("db"), c.get("userId"));
-  const since = getCurrentBillingPeriodStart(user!.billing_cycle_start);
-  const [usage, aiUsage] = await Promise.all([
-    queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since),
-    queryProjectAiUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since),
-  ]);
-
-  return c.json({
-    projectId,
-    billingPeriodStart: since.toISOString(),
-    ...usage,
-    aiNeurons: aiUsage.neurons,
-  });
-});
-
-// Aggregate usage across all user's projects
-app.get("/", async (c) => {
-  const projects = await getProjectsByUserId(c.get("db"), c.get("userId"));
-  if (projects.length === 0) {
-    return c.json({ requests: 0, bandwidthBytes: 0, aiNeurons: 0, projects: [] });
-  }
-
-  // Dev bypass — skip slow CF Analytics Engine API calls
-  if (c.env.DEV_AUTH_BYPASS) {
-    return c.json({
-      billingPeriodStart: new Date().toISOString(),
-      requests: 0,
-      bandwidthBytes: 0,
-      aiNeurons: 0,
-      projects: projects.map((p) => ({
-        projectId: p.id,
-        slug: p.slug,
+    // Dev bypass — skip slow CF Analytics Engine API calls
+    if (c.env.DEV_AUTH_BYPASS) {
+      return c.json({
+        projectId,
+        billingPeriodStart: new Date().toISOString(),
         requests: 0,
         bandwidthBytes: 0,
         aiNeurons: 0,
-      })),
+      });
+    }
+
+    const user = await getUser(c.get("db"), c.get("userId"));
+    const since = getCurrentBillingPeriodStart(user!.billing_cycle_start);
+    const [usage, aiUsage] = await Promise.all([
+      queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since),
+      queryProjectAiUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since),
+    ]);
+
+    return c.json({
+      projectId,
+      billingPeriodStart: since.toISOString(),
+      ...usage,
+      aiNeurons: aiUsage.neurons,
     });
-  }
+  });
 
-  const user = await getUser(c.get("db"), c.get("userId"));
-  const since = getCurrentBillingPeriodStart(user!.billing_cycle_start);
+const accountUsage = new Hono<PlatformEnv>()
 
-  const projectUsages = await Promise.all(
-    projects.map(async (p) => {
-      const [usage, aiUsage] = await Promise.all([
-        queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since),
-        queryProjectAiUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since),
-      ]);
-      return { projectId: p.id, slug: p.slug, ...usage, aiNeurons: aiUsage.neurons };
-    }),
-  );
+  // Aggregate usage across all user's projects
+  .get("/", async (c) => {
+    const projects = await getProjectsByUserId(c.get("db"), c.get("userId"));
+    if (projects.length === 0) {
+      return c.json({ requests: 0, bandwidthBytes: 0, aiNeurons: 0, projects: [] });
+    }
 
-  const totals = projectUsages.reduce(
-    (acc, u) => ({
-      requests: acc.requests + u.requests,
-      bandwidthBytes: acc.bandwidthBytes + u.bandwidthBytes,
-      aiNeurons: acc.aiNeurons + u.aiNeurons,
-    }),
-    { requests: 0, bandwidthBytes: 0, aiNeurons: 0 },
-  );
+    // Dev bypass — skip slow CF Analytics Engine API calls
+    if (c.env.DEV_AUTH_BYPASS) {
+      return c.json({
+        billingPeriodStart: new Date().toISOString(),
+        requests: 0,
+        bandwidthBytes: 0,
+        aiNeurons: 0,
+        projects: projects.map((p) => ({
+          projectId: p.id,
+          slug: p.slug,
+          requests: 0,
+          bandwidthBytes: 0,
+          aiNeurons: 0,
+        })),
+      });
+    }
 
-  return c.json({ billingPeriodStart: since.toISOString(), ...totals, projects: projectUsages });
-});
+    const user = await getUser(c.get("db"), c.get("userId"));
+    const since = getCurrentBillingPeriodStart(user!.billing_cycle_start);
+
+    const projectUsages = await Promise.all(
+      projects.map(async (p) => {
+        const [usage, aiUsage] = await Promise.all([
+          queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since),
+          queryProjectAiUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since),
+        ]);
+        return { projectId: p.id, slug: p.slug, ...usage, aiNeurons: aiUsage.neurons };
+      }),
+    );
+
+    const totals = projectUsages.reduce(
+      (acc, u) => ({
+        requests: acc.requests + u.requests,
+        bandwidthBytes: acc.bandwidthBytes + u.bandwidthBytes,
+        aiNeurons: acc.aiNeurons + u.aiNeurons,
+      }),
+      { requests: 0, bandwidthBytes: 0, aiNeurons: 0 },
+    );
+
+    return c.json({ billingPeriodStart: since.toISOString(), ...totals, projects: projectUsages });
+  });
 
 interface AnalyticsRow {
   requests: number;
@@ -189,5 +191,4 @@ async function queryProjectAiUsage(
   return { neurons: Math.round(cost / COST_PER_NEURON) };
 }
 
-export { queryProjectUsage, queryProjectAiUsage };
-export default app;
+export { queryProjectUsage, queryProjectAiUsage, projectUsage, accountUsage };

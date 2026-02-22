@@ -7,7 +7,7 @@ import deleteRoute from "./routes/delete";
 import revalidate from "./routes/revalidate";
 import secrets from "./routes/secrets";
 import domains from "./routes/domains";
-import usage from "./routes/usage";
+import { projectUsage, accountUsage } from "./routes/usage";
 import { authMiddleware } from "./middleware/auth";
 import adminLogin from "./admin/routes/login";
 import { adminAuthMiddleware } from "./admin/middleware/auth";
@@ -15,54 +15,35 @@ import { dashboardHandler } from "./admin/routes/system";
 import adminUsers from "./admin/routes/users";
 import adminProjects from "./admin/routes/projects";
 import adminDeployments from "./admin/routes/deployments";
-import {
-  createDb,
-  getUser,
-  getUsersWithProjectsBatch,
-  suspendUser,
-  unsuspendUserIfReason,
-} from "./db";
+import me from "./routes/me";
+import { createDb, getUsersWithProjectsBatch, suspendUser, unsuspendUserIfReason } from "./db";
 import type { Db } from "./db";
 import { queryProjectUsage, queryProjectAiUsage } from "./routes/usage";
 import { getCurrentBillingPeriodStart, getPlanLimits, isWithinLimit } from "./tiers";
 
-const app = new Hono<PlatformEnv>();
+const app = new Hono<PlatformEnv>()
 
-// Drizzle middleware — creates a Db instance per request
-app.use("*", async (c, next) => {
-  c.set("db", createDb(c.env.DB));
-  await next();
-});
+  // Drizzle middleware — creates a Db instance per request
+  .use("*", async (c, next) => {
+    c.set("db", createDb(c.env.DB));
+    await next();
+  })
 
-app.get("/health", (c) => c.json({ status: "ok" }));
-app.route("/auth", auth);
-app.use("/me", authMiddleware);
-app.get("/me", async (c) => {
-  const user = await getUser(c.get("db"), c.get("userId"));
-  if (!user) {
-    return c.json({ error: "user not found" }, 404);
-  }
-  const limits = getPlanLimits(user.plan);
-  return c.json({
-    id: user.id,
-    login: user.login,
-    email: user.email,
-    provider: user.provider,
-    plan: user.plan,
-    billing_cycle_start: user.billing_cycle_start,
-    limits,
-  });
-});
-app.use("/projects/*", authMiddleware);
-app.route("/projects", projects);
-app.route("/projects", deploy);
-app.route("/projects", deleteRoute);
-app.route("/projects", revalidate);
-app.route("/projects", secrets);
-app.route("/projects", domains);
-app.route("/projects", usage);
-app.use("/usage", authMiddleware);
-app.route("/usage", usage);
+  .get("/health", (c) => c.json({ status: "ok" }))
+  .route("/auth", auth)
+  .use("/me", authMiddleware)
+  .route("/me", me)
+  .use("/projects/*", authMiddleware)
+  .route("/projects", projects)
+  .route("/projects", deploy)
+  .route("/projects", deleteRoute)
+  .route("/projects", revalidate)
+  .route("/projects", secrets)
+  .route("/projects", domains)
+  .route("/projects", projectUsage)
+  .use("/usage", authMiddleware)
+  .route("/usage", accountUsage);
+
 // Admin dashboard (HTML, cookie-based auth)
 app.route("/admin", adminLogin);
 app.use("/admin/*", adminAuthMiddleware);
@@ -186,6 +167,7 @@ async function asyncPool<T, R>(
   return results;
 }
 
+export type AppType = typeof app;
 export { app, scheduled };
 
 export default {

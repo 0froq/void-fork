@@ -10,7 +10,8 @@
     "./auth/jwt": "./src/auth/jwt.ts",
     "./auth/github": "./src/auth/github.ts",
     "./auth/google": "./src/auth/google.ts",
-    "./usage": "./src/routes/usage.ts"
+    "./usage": "./src/routes/usage.ts",
+    "./api": "./src/api.ts"
   },
   "scripts": {
     "dev": "wrangler dev",

@@ -1,86 +1,61 @@
 import { defineHandler } from "vite-cloud";
-import { api, ApiError } from "../../lib/api";
+import { createClient, api, type API, type Client } from "../../lib/api";
 
-interface Project {
-  id: string;
-  slug: string;
-  mode: string;
-  custom_domain: string | null;
-  created_at: string;
-}
+type P = Client["projects"][":id"];
 
-interface Deployment {
-  id: string;
-  status: "pending" | "uploading" | "migrating" | "prerendering" | "live" | "failed";
-  source: string | null;
-  commit: string | null;
-  error_message: string | null;
-  created_at: string;
-  deployed_at: string | null;
-}
-
-interface Usage {
-  projectId: string;
-  billingPeriodStart: string;
-  requests: number;
-  bandwidthBytes: number;
-  aiNeurons: number;
-}
-
-interface Domain {
-  id: string;
-  hostname: string;
-  status: "pending" | "active";
-  created_at: string;
-}
-
-interface Secret {
-  name: string;
-}
-
-interface Resource {
-  id: string;
-  type: "d1" | "kv" | "r2" | "queue";
-  binding_name: string;
-}
-
-export interface Props {
-  project: Project;
-  deployments: Deployment[];
-  usage: Usage;
-  domains: Domain[];
-  secrets: Secret[];
-  resources: Resource[];
-}
+export type Props = {
+  project: API<"$get", P> & { custom_domain: string | null };
+  deployments: API<"deployments", P>;
+  usage: API<"usage", P>;
+  domains: API<"domains", P>;
+  secrets: API<"secrets", P>;
+  resources: API<"resources", P>;
+};
 
 export const loader = defineHandler<Props>(async (c) => {
   const id = c.req.param("id");
+  const client = createClient(c);
 
-  let project: Project;
-  try {
-    project = await api<Project>(c, `/projects/${id}`);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) {
-      return c.notFound();
-    }
-    throw e;
+  const projectRes = await client.projects[":id"].$get({ param: { id } });
+  if (!projectRes.ok) {
+    if (projectRes.status === 404) return c.notFound();
+    throw new Error(await projectRes.text());
   }
+  const project = (await projectRes.json()) as API<"$get", P>;
 
-  const [deployments, usage, domains, secrets, resources] = await Promise.all([
-    api<Deployment[]>(c, `/projects/${id}/deployments`),
-    api<Usage>(c, `/projects/${id}/usage`).catch(() => ({
-      projectId: id,
-      billingPeriodStart: new Date().toISOString(),
-      requests: 0,
-      bandwidthBytes: 0,
-      aiNeurons: 0,
-    })),
-    api<Domain[]>(c, `/projects/${id}/domains`),
-    api<Secret[]>(c, `/projects/${id}/secrets`).catch(() => []),
-    api<Resource[]>(c, `/projects/${id}/resources`).catch(() => []),
+  const [deploymentsRes, usageRes, domainsRes, secretsRes, resourcesRes] = await Promise.all([
+    client.projects[":id"].deployments.$get({ param: { id } }),
+    client.projects[":id"].usage.$get({ param: { id } }),
+    client.projects[":id"].domains.$get({ param: { id } }),
+    client.projects[":id"].secrets.$get({ param: { id } }),
+    client.projects[":id"].resources.$get({ param: { id } }),
   ]);
 
-  return { project, deployments, usage, domains, secrets, resources };
+  const [deployments, usage, domains, secrets, resources] = await Promise.all([
+    deploymentsRes.json() as Promise<Props["deployments"]>,
+    usageRes.ok
+      ? (usageRes.json() as Promise<Props["usage"]>)
+      : {
+          projectId: id,
+          billingPeriodStart: new Date().toISOString(),
+          requests: 0,
+          bandwidthBytes: 0,
+          aiNeurons: 0,
+        },
+    domainsRes.json() as Promise<Props["domains"]>,
+    secretsRes.ok ? (secretsRes.json() as Promise<Props["secrets"]>) : [],
+    resourcesRes.ok ? (resourcesRes.json() as Promise<Props["resources"]>) : [],
+  ]);
+
+  const activeDomain = domains.find((d) => d.status === "active") ?? domains[0];
+  return {
+    project: { ...project, custom_domain: activeDomain?.hostname ?? null },
+    deployments,
+    usage,
+    domains,
+    secrets,
+    resources,
+  };
 });
 
 export const action = defineHandler(async (c) => {
@@ -91,19 +66,19 @@ export const action = defineHandler(async (c) => {
   if (intent === "add-domain") {
     await api(c, `/projects/${id}/domains`, {
       method: "POST",
-      body: JSON.stringify({ hostname: form.hostname }),
+      body: JSON.stringify({ hostname: form.hostname as string }),
     });
   } else if (intent === "remove-domain") {
-    await api(c, `/projects/${id}/domains/${form.domainId}`, {
+    await api(c, `/projects/${id}/domains/${form.domainId as string}`, {
       method: "DELETE",
     });
   } else if (intent === "add-secret") {
-    await api(c, `/projects/${id}/secrets/${form.name}`, {
+    await api(c, `/projects/${id}/secrets/${form.name as string}`, {
       method: "PUT",
-      body: JSON.stringify({ value: form.value }),
+      body: JSON.stringify({ value: form.value as string }),
     });
   } else if (intent === "remove-secret") {
-    await api(c, `/projects/${id}/secrets/${form.name}`, {
+    await api(c, `/projects/${id}/secrets/${form.name as string}`, {
       method: "DELETE",
     });
   }

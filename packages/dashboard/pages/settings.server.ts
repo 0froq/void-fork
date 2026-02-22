@@ -1,28 +1,13 @@
 import { defineHandler } from "vite-cloud";
-import { api } from "../lib/api";
+import { createClient, type API } from "../lib/api";
 
-interface UserProfile {
-  id: string;
-  login: string;
-  email: string | null;
-  provider: string;
-  plan: string;
-  billing_cycle_start: string;
-  limits: {
-    requestsPerMonth: number;
-    deploysPerDay: number;
-    d1StorageBytes: number;
-    r2StorageBytes: number;
-    kvStorageBytes: number;
-    aiNeuronsPerMonth: number;
-  };
-}
-
-export interface Props {
-  user: UserProfile;
-}
+export type Props = {
+  user: API<"me">;
+};
 
 export const loader = defineHandler<Props>(async (c) => {
-  const user = await api<UserProfile>(c, "/me");
+  const client = createClient(c);
+  const res = await client.me.$get();
+  const user = (await res.json()) as Props["user"];
   return { user };
 });
