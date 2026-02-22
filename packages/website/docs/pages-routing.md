@@ -40,7 +40,7 @@ onMounted(() => {
 
 # Pages Routing
 
-Pages routing provides the server-rendered, components-as-pages, collocated-data-loading routing system that is seen in many existing JavaScript meta frameworks. However, pages routing in Vite Cloud is different from most in that it is **rendering framework agnostic.** It is built on patterns inspired by [Inertia.js](https://inertiajs.com/): The server returns the data, and the component receives it as props. The client-side routing logic is minimal, allowing Vite Cloud to support any rendering framework Vite can support. Today, React, Vue, Svelte, and SolidJS have first-party adapters.
+Pages routing provides the server-rendered, components-as-pages, collocated-data-loading routing system that is seen in many existing JavaScript meta frameworks. However, pages routing in Vite Cloud is different from most in that it is **rendering framework agnostic.** It is built on patterns inspired by [Inertia.js](https://inertiajs.com/): The server returns the data, and the component receives it as props. The client-side routing logic is minimal, allowing Vite Cloud to support any rendering framework Vite can support. Today, React, Vue, Svelte, and Solid have first-party adapters.
 
 Pages mode activates when a `pages/` directory exists. It coexists with `routes/` — use `pages/` for UI pages and `routes/` for APIs. Components in `pages/` will be server-rendered, which means **they will run in both Cloudflare Workers and browsers**.
 
@@ -64,7 +64,7 @@ npm install @vite-cloud/vue
 npm install @vite-cloud/svelte
 ```
 
-```sh [SolidJS]
+```sh [Solid]
 npm install @vite-cloud/solid
 ```
 
@@ -107,7 +107,7 @@ export default defineConfig({
 });
 ```
 
-```ts [SolidJS]
+```ts [Solid]
 // vite.config.ts
 import { defineConfig } from "vite";
 import viteCloud from "vite-cloud";
@@ -167,7 +167,7 @@ import { Link } from "@vite-cloud/vue";
 <Link href={`/users/${id}`}>View</Link>
 ```
 
-```tsx [SolidJS]
+```tsx [Solid]
 import { Link } from "@vite-cloud/solid";
 
 <Link href="/users">Users</Link>
@@ -330,7 +330,7 @@ defineProps<Props>();
 </ul>
 ```
 
-```tsx [SolidJS]
+```tsx [Solid]
 // pages/users/index.tsx
 import type { Props } from "./index.server";
 import { For } from "solid-js";
@@ -422,6 +422,16 @@ pages/
     [id].svelte
 ```
 
+```[Solid]
+pages/
+  layout.tsx              # Root layout (nav, footer)
+  index.tsx
+  users/
+    layout.tsx            # Nested layout for /users/*
+    index.tsx
+    [id].tsx
+```
+
 :::
 
 ::: code-group
@@ -482,7 +492,7 @@ const { auth } = useShared();
 </main>
 ```
 
-```tsx [SolidJS]
+```tsx [Solid]
 // pages/layout.tsx
 import { useShared, Link } from "@vite-cloud/solid";
 import type { JSX } from "solid-js";
@@ -554,7 +564,7 @@ const { auth } = useShared(); // { auth: { user: { name: string } | null } }
 </script>
 ```
 
-```tsx [SolidJS]
+```tsx [Solid]
 import { useShared } from "@vite-cloud/solid";
 
 export default function Page() {
@@ -684,7 +694,7 @@ const form = useForm("/users/create", { name: "", email: "" });
 </form>
 ```
 
-```tsx [SolidJS]
+```tsx [Solid]
 // pages/users/create.tsx
 import { useForm } from "@vite-cloud/solid";
 
@@ -786,7 +796,7 @@ export default defineConfig({
 });
 ```
 
-```ts [SolidJS]
+```ts [Solid]
 // vite.config.ts
 export default defineConfig({
   plugins: [viteCloud(), viteCloudSolid({ viewTransitions: true })],
@@ -835,7 +845,7 @@ Override the global setting on individual links:
 <Link href="/about" viewTransition>About</Link>
 ```
 
-```tsx [SolidJS]
+```tsx [Solid]
 {
   /* Disable transition for this link */
 }
