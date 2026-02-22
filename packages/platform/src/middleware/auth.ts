@@ -1,8 +1,23 @@
 import type { MiddlewareHandler } from "hono";
 import type { PlatformEnv } from "../env";
 import { verifyJwt } from "../auth/jwt";
+import { users } from "../schema";
 
 export const authMiddleware: MiddlewareHandler<PlatformEnv> = async (c, next) => {
+  if (c.env.DEV_AUTH_BYPASS) {
+    const first = await c
+      .get("db")
+      .select({ id: users.id, login: users.login })
+      .from(users)
+      .limit(1)
+      .then((r) => r[0]);
+    if (first) {
+      c.set("userId", first.id);
+      c.set("userLogin", first.login);
+      return next();
+    }
+  }
+
   const header = c.req.header("Authorization");
   if (!header?.startsWith("Bearer ")) {
     return c.json({ error: "unauthorized" }, 401);

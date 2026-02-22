@@ -20,6 +20,11 @@ app.get("/:id/secrets", async (c) => {
     return c.json({ error: "forbidden" }, 403);
   }
 
+  // Dev bypass — skip CF API call for secrets listing
+  if (c.env.DEV_AUTH_BYPASS) {
+    return c.json([]);
+  }
+
   const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
   const workerName = `user-${project.slug}`;
   const cfRes = await fetch(

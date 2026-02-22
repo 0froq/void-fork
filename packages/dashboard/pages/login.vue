@@ -1,11 +1,7 @@
 <script setup lang="ts">
-const siteDomain = "vitecloud.app";
-const platformUrl = `https://platform.${siteDomain}`;
-const dashboardUrl = `https://dashboard.${siteDomain}`;
-const callbackUrl = `${dashboardUrl}/auth/callback`;
+import type { Props } from "./login.server";
 
-const githubUrl = `${platformUrl}/auth/login?provider=github&redirect=${encodeURIComponent(callbackUrl)}`;
-const googleUrl = `${platformUrl}/auth/login?provider=google&redirect=${encodeURIComponent(callbackUrl)}`;
+const { githubUrl, googleUrl } = defineProps<Props>();
 </script>
 
 <template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import "../app.css";
 import { Link, useShared } from "@vite-cloud/vue";
 
 const shared = useShared<{ user: { login: string } | null }>();

@@ -9,7 +9,22 @@ declare module "vite-cloud" {
 }
 
 export default defineMiddleware(async (c, next) => {
-  const path = new URL(c.req.url).pathname;
+  const url = new URL(c.req.url);
+  const path = url.pathname;
+
+  // Skip non-navigation requests (Vite module fetches, assets, HMR)
+  const accept = c.req.header("Accept") ?? "";
+  if (!accept.includes("text/html")) {
+    return next();
+  }
+
+  // Dev bypass — skip auth entirely, platform also bypasses when DEV_AUTH_BYPASS is set
+  const devBypass = (c.env as Record<string, string>).DEV_AUTH_BYPASS;
+  if (devBypass) {
+    c.set("token", "dev-bypass");
+    c.set("shared", { user: { login: "dev" } });
+    return next();
+  }
 
   // Public routes — no auth required
   if (path === "/login" || path.startsWith("/auth/")) {

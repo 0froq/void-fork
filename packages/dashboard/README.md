@@ -34,13 +34,20 @@ pnpm -C packages/vue build
 pnpm -C packages/platform dev
 ```
 
-3. **Start the dashboard dev server:**
+3. **Create `.dev.vars`** in `packages/dashboard/`:
+
+```
+DEV_AUTH_BYPASS=true
+PLATFORM_API_URL=http://localhost:8787
+```
+
+This skips OAuth entirely — the dashboard sends a dummy token and the platform resolves to the first user in the DB.
+
+4. **Start the dashboard dev server:**
 
 ```sh
 pnpm -C packages/dashboard dev
 ```
-
-The dashboard loaders call the platform API at `PLATFORM_API_URL` (defaults to `https://platform.vite.cloud`). For local dev, set this in your wrangler config or environment to point at `http://localhost:8787`.
 
 ## Source Layout
 
