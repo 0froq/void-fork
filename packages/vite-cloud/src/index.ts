@@ -30,34 +30,128 @@ function hasBinding(list: readonly { binding: string }[] | undefined, name: stri
   return Array.isArray(list) && list.some((b) => b.binding === name);
 }
 
+type CredentialStatus =
+  | { status: "ok"; token: string; projectId: string; staging?: boolean }
+  | { status: "no-token" }
+  | { status: "no-project"; token: string; staging?: boolean };
+
 /**
  * Read Vite Cloud auth credentials for local dev AI proxy access.
- * Returns null if credentials are not available.
+ * Returns a discriminated union so callers can distinguish
+ * "no token" from "no project" for targeted onboarding guidance.
  */
-function readViteCloudDevCredentials(
-  root: string,
-): { token: string; projectId: string; staging?: boolean } | null {
+function readViteCloudDevCredentials(root: string): CredentialStatus {
   const configPath = join(homedir(), ".vite-cloud", "config.json");
   let config: { token?: string; stagingToken?: string; staging?: boolean };
   try {
     config = JSON.parse(readFileSync(configPath, "utf-8"));
   } catch {
-    return null;
+    return { status: "no-token" };
   }
   const staging = config.staging === true;
   const token = staging ? config.stagingToken : config.token;
-  if (!token) return null;
+  if (!token) return { status: "no-token" };
 
   const projectPath = join(root, ".vite-cloud", "project.json");
   let project: { projectId?: string };
   try {
     project = JSON.parse(readFileSync(projectPath, "utf-8"));
   } catch {
-    return null;
+    return { status: "no-project", token, staging: staging || undefined };
   }
-  if (!project.projectId) return null;
+  if (!project.projectId) {
+    return { status: "no-project", token, staging: staging || undefined };
+  }
 
-  return { token, projectId: project.projectId, staging: staging || undefined };
+  return { status: "ok", token, projectId: project.projectId, staging: staging || undefined };
+}
+
+const DEFAULT_API_URL = "https://platform.vite.cloud";
+const STAGING_API_URL = "https://platform.staging.vite.cloud";
+
+/**
+ * Interactive AI setup prompt shown during dev server startup when the user
+ * has a token but no linked project. Runs as fire-and-forget so it doesn't
+ * block the server. On completion, writes project.json and restarts the server.
+ */
+async function runAiSetupPrompt(
+  root: string,
+  token: string,
+  staging: boolean | undefined,
+  server: import("vite").ViteDevServer,
+): Promise<void> {
+  const { select, text, isCancel, log } = await import("@clack/prompts");
+  const { PlatformClient } = await import("./cli/client");
+  const { writeProjectConfig } = await import("./cli/project");
+  const { inferDefaultSlug } = await import("./cli/resolve-project");
+
+  const apiUrl = staging ? STAGING_API_URL : DEFAULT_API_URL;
+  const client = new PlatformClient(token, apiUrl);
+
+  let projects: import("./cli/client").ProjectResponse[];
+  try {
+    projects = await client.listProjects();
+  } catch {
+    server.config.logger.warn(
+      "[vite-cloud] Failed to fetch projects. Run `vcc link` to link a project manually.",
+    );
+    return;
+  }
+
+  const options = [
+    { value: "__create__" as const, label: "Create new project" },
+    ...projects.map((p: import("./cli/client").ProjectResponse) => ({
+      value: p.id,
+      label: p.slug,
+    })),
+  ];
+
+  console.log();
+  log.info("[vite-cloud] AI requires a linked project. Let's set one up:");
+
+  const result = await select({ message: "Select a project:", options });
+  if (isCancel(result)) return;
+
+  let projectId: string;
+  let slug: string;
+
+  if (result === "__create__") {
+    const defaultSlug = inferDefaultSlug(root);
+    const slugResult = await text({
+      message: "Choose a slug for your new Vite Cloud project:",
+      placeholder: "my-app",
+      initialValue: defaultSlug,
+      validate(value) {
+        const s = (value ?? "").trim();
+        if (s.length === 0) return "Project slug is required.";
+        const valid =
+          s.length === 1 ? /^[a-z0-9]$/.test(s) : /^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(s);
+        if (!valid) return "Slug must be lowercase alphanumeric with dashes.";
+        return undefined;
+      },
+    });
+    if (isCancel(slugResult)) return;
+
+    try {
+      const created = await client.createProject(slugResult.trim());
+      projectId = created.id;
+      slug = created.slug;
+    } catch (err: any) {
+      server.config.logger.error(`[vite-cloud] Failed to create project: ${err.message}`);
+      return;
+    }
+    log.success(`Project created: ${slug}`);
+  } else {
+    const project = projects.find((p: import("./cli/client").ProjectResponse) => p.id === result)!;
+    projectId = project.id;
+    slug = project.slug;
+  }
+
+  writeProjectConfig(root, { projectId, slug });
+  log.success(`Linked to ${slug}`);
+
+  // Restart the dev server so mergeBindings picks up fresh credentials
+  await server.restart();
 }
 
 /**
@@ -185,7 +279,7 @@ export default function viteCloud(): Plugin[] {
     // In production, the platform adds a __AI_PROXY service binding instead.
     if (bindings.needsAI) {
       const credentials = readViteCloudDevCredentials(root);
-      if (credentials) {
+      if (credentials.status === "ok") {
         // Prefer HTTPS proxy — inject credentials, skip direct AI binding
         const vars = (result.vars as Record<string, string>) ?? {};
         vars.__VITE_CLOUD_TOKEN = credentials.token;
@@ -223,6 +317,25 @@ export default function viteCloud(): Plugin[] {
       }
     },
     configureServer(server) {
+      // AI onboarding: detect missing credentials early and guide users
+      if (bindings.needsAI) {
+        const credentials = readViteCloudDevCredentials(root);
+        if (credentials.status === "no-token") {
+          server.config.logger.warn(
+            "[vite-cloud] AI requires authentication. Run `vcc login`, then restart the dev server.",
+          );
+        } else if (credentials.status === "no-project") {
+          if (process.stdin.isTTY) {
+            // Fire-and-forget interactive setup
+            runAiSetupPrompt(root, credentials.token, credentials.staging, server);
+          } else {
+            server.config.logger.warn(
+              "[vite-cloud] AI requires a linked project. Run `vcc link` to set one up.",
+            );
+          }
+        }
+      }
+
       if (config.auth !== undefined) return;
       let envHintShown = false;
       const check = (path: string) => {

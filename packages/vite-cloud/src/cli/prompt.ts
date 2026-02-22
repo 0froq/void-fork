@@ -13,7 +13,10 @@ interface CreateResult {
 
 export type PromptResult = SelectResult | CreateResult;
 
-export async function promptProjectSelection(projects: ProjectResponse[]): Promise<PromptResult> {
+export async function promptProjectSelection(
+  projects: ProjectResponse[],
+  message = "Select a project:",
+): Promise<PromptResult> {
   const options = [
     { value: "__create__", label: "Create new project" },
     ...projects.map((p) => ({
@@ -23,7 +26,7 @@ export async function promptProjectSelection(projects: ProjectResponse[]): Promi
   ];
 
   const result = await select({
-    message: "Select a project to deploy to:",
+    message,
     options,
   });
 

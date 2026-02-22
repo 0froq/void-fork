@@ -35,10 +35,7 @@ function resolveBackend(): AiBackend {
     };
   }
 
-  throw new Error(
-    "AI not available. Run `vcc auth login` and `vcc projects link`, " +
-      "or add an [ai] binding to your wrangler.json to use your own Cloudflare account.",
-  );
+  throw new Error("AI not available. Run `vcc login` and `vcc link` to get started.");
 }
 
 function unsupported(method: string): () => never {
