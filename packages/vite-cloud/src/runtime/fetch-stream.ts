@@ -103,6 +103,8 @@ export async function* fetchStream<
               yield parsed.response;
               continue;
             }
+            // Parsed JSON with non-string response (e.g. null + usage metadata) — skip
+            if ("response" in parsed) continue;
           } catch {
             // Not JSON — yield as plain text
           }
@@ -122,7 +124,7 @@ export async function* fetchStream<
             const parsed = JSON.parse(data);
             if (typeof parsed.response === "string") {
               yield parsed.response;
-            } else {
+            } else if (!("response" in parsed)) {
               yield data;
             }
           } catch {
