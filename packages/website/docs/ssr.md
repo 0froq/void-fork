@@ -86,9 +86,9 @@ The `assetTags` values are computed by Vite Cloud:
 - In production: from `dist/client/.vite/manifest.json` (entry script, CSS, modulepreload)
 - In dev: includes Vite HMR client and React refresh preamble (when React plugin is active), plus the client entry script
 
-## Edge Caching
+## Caching
 
-See [Edge Caching](./edge-caching.md#per-response-ttl-override) for stale-while-revalidate caching of SSR pages.
+See [Caching](./cache.md#per-response-ttl-override) for stale-while-revalidate caching of SSR pages.
 
 ## Request flow
 
