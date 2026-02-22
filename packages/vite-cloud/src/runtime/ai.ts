@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 
-const PROXY_URL = "https://ai-proxy.vitecloud.app";
-const STAGING_PROXY_URL = "https://ai-proxy.staging.vitecloud.app";
+const PROXY_URL = "https://ai-proxy.vite.cloud";
+const STAGING_PROXY_URL = "https://ai-proxy.staging.vite.cloud";
 
 interface AiBackend {
   run(model: string, inputs: unknown, options?: unknown): Promise<unknown>;
