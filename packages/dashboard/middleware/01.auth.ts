@@ -9,8 +9,7 @@ declare module "vite-cloud" {
 }
 
 export default defineMiddleware(async (c, next) => {
-  const url = new URL(c.req.url);
-  const path = url.pathname;
+  const path = c.req.path;
 
   // Skip non-navigation requests (Vite module fetches, assets, HMR)
   const accept = c.req.header("Accept") ?? "";
