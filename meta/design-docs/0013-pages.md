@@ -1,5 +1,7 @@
 # Pages: Inertia-Inspired Full-Stack DX for Vite Cloud
 
+**Status:** Implemented, but more adapters needed
+
 ## Overview
 
 Pages is a new rendering mode for Vite Cloud that provides an Inertia.js-inspired developer experience: server-driven routing with SPA-like navigation, automatic prop passing from server handlers to page components, form helpers with built-in validation error handling, and full SSR.

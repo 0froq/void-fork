@@ -1,7 +1,7 @@
 # Platform: Migrate from D1 to PlanetScale Postgres
 
 **Date:** 2026-02-20
-**Status:** Draft
+**Status:** Proposed
 
 ---
 

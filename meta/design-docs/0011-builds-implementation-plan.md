@@ -1,5 +1,7 @@
 # Implementation Plan: Vite Cloud Builds Service
 
+**Status:** Not started yet
+
 ## Context
 
 Vite Cloud currently requires users to build locally via `vcc deploy`. This plan implements a remote build service triggered by GitHub push webhooks, running in Cloudflare Containers orchestrated by Durable Objects. The design is documented in `meta/design-docs/0010-builds.md`.

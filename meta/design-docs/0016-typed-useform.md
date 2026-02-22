@@ -1,5 +1,7 @@
 # Typed `useForm()` via Generated Route Types
 
+**Status:** Implemented
+
 ## Overview
 
 Make `useForm()` type-safe by generating a `PageActionMap` from page action validators and adding a URL-first overload that provides autocomplete, body validation, and typed errors.

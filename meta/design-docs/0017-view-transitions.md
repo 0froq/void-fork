@@ -1,5 +1,7 @@
 # View Transitions for Pages Mode
 
+**Status:** Implemented
+
 ## Summary
 
 Add browser-native [View Transition API](https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API) support to `@vite-cloud/vue` Pages mode client-side navigation. Wraps the DOM mutation inside `document.startViewTransition()` so the browser cross-fades between old and new page snapshots automatically.

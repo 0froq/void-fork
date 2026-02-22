@@ -1,7 +1,7 @@
 # Drizzle ORM Support + Postgres Migration Path
 
 **Date:** 2026-02-20
-**Status:** Draft
+**Status:** Proposed
 
 ---
 
