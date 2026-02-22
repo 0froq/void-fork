@@ -33,7 +33,7 @@ jobs:
             pattern: platform/test/integration vite-cloud/test/integration
           - suite: pages-adapters-react-vue
             pattern: react/test/integration vue/test/integration
-          - suite: pages-adapters-svlete-solid
+          - suite: pages-adapters-svelte-solid
             pattern: svelte/test/integration solid/test/integration
     steps:
       - uses: actions/checkout@v4
@@ -47,14 +47,14 @@ jobs:
       - run: pnpm --filter './packages/*' --filter '!website' build
 
       - uses: actions/cache@v4
-        if: matrix.suite == 'integration-pages-adapters'
+        if: matrix.suite == 'pages-adapters-react-vue' || matrix.suite == 'pages-adapters-svelte-solid'
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm exec playwright install chromium
-        if: matrix.suite == 'integration-pages-adapters' && steps.playwright-cache.outputs.cache-hit != 'true'
+        if: (matrix.suite == 'pages-adapters-react-vue' || matrix.suite == 'pages-adapters-svelte-solid') && steps.playwright-cache.outputs.cache-hit != 'true'
       - run: pnpm exec playwright install-deps chromium
-        if: matrix.suite == 'integration-pages-adapters'
+        if: matrix.suite == 'pages-adapters-react-vue' || matrix.suite == 'pages-adapters-svelte-solid'
 
       - run: pnpm vitest --run ${{ matrix.pattern }}
