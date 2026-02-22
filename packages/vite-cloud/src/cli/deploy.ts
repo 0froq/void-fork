@@ -1,8 +1,9 @@
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { intro, outro, log, note, spinner, confirm, isCancel } from "@clack/prompts";
-import { build, createServer, loadEnv, resolveConfig } from "vite";
+import { createServer, loadEnv } from "vite";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
 import { computeAssetHashes, packageBuild, packageStaticBuild } from "./package";
@@ -195,15 +196,37 @@ async function runFullDeploy(
   skipBuild?: boolean,
   commit?: string | null,
 ): Promise<void> {
-  // 3. Resolve Vite config for outDir + assetsDir
-  const resolved = await resolveConfig({ root }, "build");
-  const distDir = resolve(resolved.root, resolved.build.outDir);
-  const assetsDir = resolved.build.assetsDir !== "assets" ? resolved.build.assetsDir : undefined;
-
-  // 4. Build
+  // 3. Build (child process to avoid Vite API side effects on bundle output)
   if (!skipBuild) {
     log.step("Building...");
-    await build({ root });
+    const viteBin = fileURLToPath(
+      new URL("bin/vite.js", import.meta.resolve("vite/package.json")).href,
+    );
+    try {
+      execFileSync(process.execPath, [viteBin, "build"], { cwd: root, stdio: "inherit" });
+    } catch (err: any) {
+      process.exit(err.status ?? 1);
+    }
+  }
+
+  // 4. Resolve build output paths from build artifacts (avoids re-resolving
+  // Vite config in the main process — plugins only run once inside the build)
+  const distDir = join(root, "dist");
+
+  // Detect non-default assetsDir from Vite client manifest
+  let assetsDir: string | undefined;
+  const clientManifestPath = join(distDir, "client", ".vite", "manifest.json");
+  if (existsSync(clientManifestPath)) {
+    const manifest: Record<string, { file?: string }> = JSON.parse(
+      readFileSync(clientManifestPath, "utf-8"),
+    );
+    for (const entry of Object.values(manifest)) {
+      if (entry.file?.includes("/")) {
+        const dir = entry.file.slice(0, entry.file.indexOf("/"));
+        if (dir !== "assets") assetsDir = dir;
+        break;
+      }
+    }
   }
 
   // 5. Detect framework mode
@@ -234,7 +257,6 @@ async function runFullDeploy(
   // Inject client manifest into worker entry so SSR/Pages asset tags work
   // in production. The worker has no ASSETS binding in Workers for Platforms,
   // so the generated code checks globalThis.__VITE_MANIFEST__ at runtime.
-  const clientManifestPath = join(distDir, "client", ".vite", "manifest.json");
   const workerEntryPath = join(distDir, workerDirName, "index.js");
   if (existsSync(clientManifestPath) && existsSync(workerEntryPath)) {
     const manifestJson = readFileSync(clientManifestPath, "utf-8");
