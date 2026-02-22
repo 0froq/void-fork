@@ -14,11 +14,11 @@ The architecture separates a **framework-agnostic core** (protocol, server handl
 
 Pages mode adds an Inertia-style protocol on top of Vite Cloud's existing Hono-based server:
 
-| Request type      | How detected                        | Server response                                           |
-| ----------------- | ----------------------------------- | --------------------------------------------------------- |
-| Initial page load | No `X-Inertia` header               | Full SSR HTML with embedded page object. Client hydrates. |
-| SPA navigation    | `X-Inertia: true` header            | JSON page object. Client swaps component.                 |
-| Form submission   | `X-Inertia: true` + POST/PUT/DELETE | Re-run loader (fresh props) or redirect.                  |
+| Request type      | How detected                               | Server response                                           |
+| ----------------- | ------------------------------------------ | --------------------------------------------------------- |
+| Initial page load | No `X-ViteCloudPages` header               | Full SSR HTML with embedded page object. Client hydrates. |
+| SPA navigation    | `X-ViteCloudPages: true` header            | JSON page object. Client swaps component.                 |
+| Form submission   | `X-ViteCloudPages: true` + POST/PUT/DELETE | Re-run loader (fresh props) or redirect.                  |
 
 **Page object shape:**
 
@@ -357,7 +357,7 @@ Each framework adapter exports:
 
 ## Server-Side Flow
 
-### Initial Request (GET /users, no X-Inertia header)
+### Initial Request (GET /users, no X-ViteCloudPages header)
 
 1. Run middleware chain -> `c.set('shared', {...})`
 2. Resolve page: URL -> `pages/users/index.vue`
@@ -367,14 +367,14 @@ Each framework adapter exports:
 6. Return HTML with `<div id="app" data-page='{ component, props, shared, url }'>`
 7. Client hydrates
 
-### Inertia Navigation (GET /users, X-Inertia: true)
+### Inertia Navigation (GET /users, X-ViteCloudPages: true)
 
 1. Run middleware chain -> shared data
 2. Run page's `loader` -> props
 3. Return JSON: `{ component: "users/index", props, shared, url }`
 4. Client swaps page component, persists layouts if in same subtree
 
-### Form Submission (POST /users, X-Inertia: true)
+### Form Submission (POST /users, X-ViteCloudPages: true)
 
 1. Run middleware chain
 2. Run page's `action`

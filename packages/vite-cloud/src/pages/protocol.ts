@@ -10,13 +10,13 @@ export interface PageObject {
   errors: Record<string, string> | null;
 }
 
-function isInertiaRequest(c: any): boolean {
-  return c.req.header("x-inertia") === "true";
+function isPagesRequest(c: any): boolean {
+  return c.req.header("x-vitecloudpages") === "true";
 }
 
 function pageJsonResponse(pageObj: PageObject): Response {
   return Response.json(pageObj, {
-    headers: { "X-Inertia": "true", Vary: "X-Inertia" },
+    headers: { "X-ViteCloudPages": "true", Vary: "X-ViteCloudPages" },
   });
 }
 
@@ -65,7 +65,7 @@ export async function handlePageGet(
     errors: null,
   };
 
-  if (isInertiaRequest(c)) {
+  if (isPagesRequest(c)) {
     return pageJsonResponse(pageObj);
   }
 
@@ -100,7 +100,7 @@ export async function handlePageMutation(
         url: c.req.path,
         errors: e.errors,
       };
-      if (isInertiaRequest(c)) return pageJsonResponse(pageObj);
+      if (isPagesRequest(c)) return pageJsonResponse(pageObj);
       const assetTags = await getAssetTags(c.req.raw, c.env);
       return new Response(await renderFn(pageObj, assetTags), {
         headers: { "content-type": "text/html; charset=utf-8" },
@@ -126,7 +126,7 @@ export async function handlePageMutation(
         url: c.req.path,
         errors,
       };
-      if (isInertiaRequest(c)) return pageJsonResponse(pageObj);
+      if (isPagesRequest(c)) return pageJsonResponse(pageObj);
       const assetTags = await getAssetTags(c.req.raw, c.env);
       return new Response(await renderFn(pageObj, assetTags), {
         headers: { "content-type": "text/html; charset=utf-8" },
@@ -145,7 +145,7 @@ export async function handlePageMutation(
     url: c.req.path,
     errors: null,
   };
-  if (isInertiaRequest(c)) return pageJsonResponse(pageObj);
+  if (isPagesRequest(c)) return pageJsonResponse(pageObj);
   const assetTags = await getAssetTags(c.req.raw, c.env);
   return new Response(await renderFn(pageObj, assetTags), {
     headers: { "content-type": "text/html; charset=utf-8" },

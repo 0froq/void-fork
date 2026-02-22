@@ -28,7 +28,7 @@ migrations/
   - `action()` handles mutations on POST/PUT (form submissions)
   - type declarations (`interface`, `type`, `import type`) are preserved for `<script setup>`
 - **Companion `.server.ts` files** — alternative to `<script server>` for co-located handlers (see `users/[id].server.ts`)
-- **SSR + client hydration** — initial load returns SSR HTML; subsequent navigations return JSON via Inertia protocol (`X-Inertia` header)
+- **SSR + client hydration** — initial load returns SSR HTML; subsequent navigations return JSON via Pages protocol (`X-ViteCloudPages` header)
 - **Layout nesting** — `layout.vue` wraps child pages with shared nav using `<slot />`
 - **`useForm` composable** — form state management with `isDirty`, `processing`, `wasSuccessful`, `recentlySuccessful`, `errors`, `form.post()` / `form.put()`
 - **`useShared` composable** — accesses middleware-set shared data (e.g. `appName` set in `01.shared.ts`)

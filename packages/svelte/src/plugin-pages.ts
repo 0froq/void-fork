@@ -158,7 +158,7 @@ const errorsStore = writable({});
 const router = {
   async visit(url, options = {}) {
     const method = (options.method || "GET").toUpperCase();
-    const headers = { "X-Inertia": "true", "Accept": "application/json" };
+    const headers = { "X-ViteCloudPages": "true", "Accept": "application/json" };
     const fetchOptions = { method, headers };
 
     if (options.data && method !== "GET") {

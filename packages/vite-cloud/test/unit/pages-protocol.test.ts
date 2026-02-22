@@ -45,16 +45,16 @@ const mockRenderFn = vi.fn(async (pageObj: any) => `<html>${pageObj.component}</
 const mockGetAssetTags = vi.fn(async () => ({ head: "", body: "" }));
 
 describe("handlePageGet", () => {
-  it("returns JSON page object when X-Inertia header present", async () => {
+  it("returns JSON page object when X-ViteCloudPages header present", async () => {
     const c = await createTestContext("GET", "/users", {
-      headers: { "x-inertia": "true" },
+      headers: { "x-vitecloudpages": "true" },
     });
 
     const handler = vi.fn(() => ({ users: [1, 2, 3] }));
     const response = await handlePageGet(handler, c, "users", mockRenderFn, mockGetAssetTags);
 
-    expect(response.headers.get("X-Inertia")).toBe("true");
-    expect(response.headers.get("Vary")).toBe("X-Inertia");
+    expect(response.headers.get("X-ViteCloudPages")).toBe("true");
+    expect(response.headers.get("Vary")).toBe("X-ViteCloudPages");
     const body = (await response.json()) as any;
     expect(body.component).toBe("users");
     expect(body.props).toEqual({ users: [1, 2, 3] });
@@ -62,7 +62,7 @@ describe("handlePageGet", () => {
     expect(body.errors).toBeNull();
   });
 
-  it("calls renderFn and returns HTML when no X-Inertia header", async () => {
+  it("calls renderFn and returns HTML when no X-ViteCloudPages header", async () => {
     const c = await createTestContext("GET", "/users");
 
     const handler = vi.fn(() => ({ users: [] }));
@@ -75,7 +75,7 @@ describe("handlePageGet", () => {
 
   it("handles undefined handler (empty props)", async () => {
     const c = await createTestContext("GET", "/", {
-      headers: { "x-inertia": "true" },
+      headers: { "x-vitecloudpages": "true" },
     });
 
     const response = await handlePageGet(undefined, c, "index", mockRenderFn, mockGetAssetTags);
@@ -87,7 +87,7 @@ describe("handlePageGet", () => {
 
   it("includes shared data from context", async () => {
     const c = await createTestContext("GET", "/", {
-      headers: { "x-inertia": "true" },
+      headers: { "x-vitecloudpages": "true" },
       shared: { auth: { user: { name: "Test" } } },
     });
 
@@ -101,7 +101,7 @@ describe("handlePageGet", () => {
 describe("handlePageMutation", () => {
   it("void return — re-runs GET, returns fresh props", async () => {
     const c = await createTestContext("POST", "/users", {
-      headers: { "x-inertia": "true" },
+      headers: { "x-vitecloudpages": "true" },
     });
 
     const mutationHandler = vi.fn(() => undefined);
@@ -123,7 +123,7 @@ describe("handlePageMutation", () => {
 
   it("Response redirect — passes through", async () => {
     const c = await createTestContext("POST", "/users", {
-      headers: { "x-inertia": "true" },
+      headers: { "x-vitecloudpages": "true" },
     });
 
     const redirect = new Response(null, {
@@ -147,7 +147,7 @@ describe("handlePageMutation", () => {
 
   it("ValidationError thrown — re-runs GET with errors", async () => {
     const c = await createTestContext("POST", "/users", {
-      headers: { "x-inertia": "true" },
+      headers: { "x-vitecloudpages": "true" },
     });
 
     const mutationHandler = vi.fn(() => {
@@ -171,7 +171,7 @@ describe("handlePageMutation", () => {
 
   it("Response 400 (withValidator) — extracts errors, re-runs GET", async () => {
     const c = await createTestContext("POST", "/users", {
-      headers: { "x-inertia": "true" },
+      headers: { "x-vitecloudpages": "true" },
     });
 
     const validationResponse = Response.json(
@@ -203,7 +203,7 @@ describe("handlePageMutation", () => {
 
   it("Response 204 (void from withValidator) — re-runs GET", async () => {
     const c = await createTestContext("POST", "/users", {
-      headers: { "x-inertia": "true" },
+      headers: { "x-vitecloudpages": "true" },
     });
 
     const voidResponse = new Response(null, { status: 204 });
@@ -226,7 +226,7 @@ describe("handlePageMutation", () => {
 
   it("re-throws non-ValidationError errors", async () => {
     const c = await createTestContext("POST", "/users", {
-      headers: { "x-inertia": "true" },
+      headers: { "x-vitecloudpages": "true" },
     });
 
     const mutationHandler = vi.fn(() => {
