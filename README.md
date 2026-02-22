@@ -52,6 +52,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | Package                                                  | npm name                         | Purpose                                                        |
 | -------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------- |
 | [`packages/vite-cloud`](./packages/vite-cloud/AGENTS.md) | `vite-cloud`                     | Core Vite plugin — routing, inference, migrations, CLI         |
+| [`packages/react`](./packages/react/README.md)           | `@vite-cloud/react`              | React framework adapter for Pages mode (SSR, Link, useForm)    |
 | [`packages/vue`](./packages/vue/README.md)               | `@vite-cloud/vue`                | Vue framework adapter for Pages mode (SSR, Link, useForm)      |
 | [`packages/svelte`](./packages/svelte/README.md)         | `@vite-cloud/svelte`             | Svelte 5 framework adapter for Pages mode (SSR, Link, useForm) |
 | [`packages/solid`](./packages/solid/README.md)           | `@vite-cloud/solid`              | SolidJS framework adapter for Pages mode (SSR, Link, useForm)  |
