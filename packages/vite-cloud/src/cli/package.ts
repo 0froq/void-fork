@@ -49,6 +49,7 @@ export function packageBuild(
   if (bindings.needsD1) manifest.bindings.d1 = ["DB"];
   if (bindings.needsKV) manifest.bindings.kv = ["KV"];
   if (bindings.needsR2) manifest.bindings.r2 = ["STORAGE"];
+  if (bindings.needsAI) manifest.bindings.ai = true;
 
   // Add migration metadata to manifest + SQL content as FormData entries
   if (migrations && migrations.length > 0) {

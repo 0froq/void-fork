@@ -131,16 +131,23 @@ app.get("/:id", async (c) => {
                 </tr>
               )}
               {manifest.bindings &&
-                Object.entries(manifest.bindings).map(([type, names]) =>
-                  names && names.length > 0 ? (
+                Object.entries(manifest.bindings).map(([type, value]) =>
+                  Array.isArray(value) && value.length > 0 ? (
                     <tr key={type}>
                       <th>{type.toUpperCase()}</th>
                       <td>
-                        {names.map((n) => (
+                        {value.map((n: string) => (
                           <span key={n} class="badge badge-blue" style="margin-right: 0.25rem">
                             {n}
                           </span>
                         ))}
+                      </td>
+                    </tr>
+                  ) : value === true ? (
+                    <tr key={type}>
+                      <th>{type.toUpperCase()}</th>
+                      <td>
+                        <span class="badge badge-blue">enabled</span>
                       </td>
                     </tr>
                   ) : null,

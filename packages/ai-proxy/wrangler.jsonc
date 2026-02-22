@@ -1,0 +1,22 @@
+{
+  "name": "vite-cloud-ai-proxy",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-02-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "ai": { "binding": "AI" },
+  "routes": [
+    { "pattern": "ai-proxy.vitecloud.app", "zone_name": "vitecloud.app" },
+    { "pattern": "ai-proxy.vitecloud.app/*", "zone_name": "vitecloud.app" },
+  ],
+
+  "env": {
+    "staging": {
+      "name": "vite-cloud-ai-proxy-staging",
+      "ai": { "binding": "AI" },
+      "routes": [
+        { "pattern": "ai-proxy.staging.vitecloud.app", "zone_name": "vitecloud.app" },
+        { "pattern": "ai-proxy.staging.vitecloud.app/*", "zone_name": "vitecloud.app" },
+      ],
+    },
+  },
+}

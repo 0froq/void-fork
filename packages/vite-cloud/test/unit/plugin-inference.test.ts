@@ -39,6 +39,7 @@ describe("inferProjectBindings", () => {
       needsR2: false,
       needsAuth: false,
       needsQueues: false,
+      needsAI: false,
     });
   });
 

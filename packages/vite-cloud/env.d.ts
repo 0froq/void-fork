@@ -5,5 +5,6 @@ declare namespace Cloudflare {
     DB: D1Database;
     KV: KVNamespace;
     STORAGE: R2Bucket;
+    AI: Ai;
   }
 }

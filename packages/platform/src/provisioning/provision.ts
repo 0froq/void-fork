@@ -3,12 +3,14 @@ import { getProjectResources, createResource, type Db } from "../db";
 import { createD1Database, createKVNamespace, createR2Bucket, createQueue } from "./cloudflare-api";
 
 export interface WorkerBinding {
-  type: "d1" | "kv_namespace" | "r2_bucket" | "queue";
+  type: "d1" | "kv_namespace" | "r2_bucket" | "queue" | "service" | "plain_text";
   name: string;
   id?: string;
   namespace_id?: string;
   bucket_name?: string;
   queue_name?: string;
+  service?: string;
+  text?: string;
 }
 
 export async function provisionBindings(
@@ -37,6 +39,12 @@ export async function provisionBindings(
   for (const name of manifest.bindings.r2 ?? []) {
     const binding = await ensureResource(db, accountId, apiToken, projectId, "r2", name, existing);
     bindings.push({ type: "r2_bucket", name, bucket_name: binding.cf_id });
+  }
+
+  // AI — add service binding to proxy + project ID
+  if (manifest.bindings.ai) {
+    bindings.push({ type: "service", name: "__AI_PROXY", service: "vite-cloud-ai-proxy" });
+    bindings.push({ type: "plain_text", name: "__PROJECT_ID", text: projectId });
   }
 
   // Queues — provision CF queues and add producer bindings

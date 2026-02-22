@@ -39,7 +39,7 @@ pnpm lint                           # oxlint
 pnpm fmt                            # oxfmt --write .
 pnpm check                          # Typecheck all packages (tsc --noEmit)
 pnpm -C packages/vue typecheck.     # Typecheck a specific package
-pnpm run deploy                     # Build all + deploy platform & dispatch workers (production)
+pnpm run deploy                     # Build all + deploy ai-proxy, dispatch & platform workers (production)
 pnpm run deploy:staging             # Deploy all workers to staging environment
 ```
 
@@ -55,6 +55,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | [`packages/vue`](./packages/vue/README.md)               | `@vite-cloud/vue`                | Vue framework adapter for Pages mode (SSR, Link, useForm) |
 | [`packages/platform`](./packages/platform/README.md)     | `@vite-cloud/platform` (private) | Control Plane API + Admin Dashboard                       |
 | [`packages/dispatch`](./packages/dispatch/README.md)     | `@vite-cloud/dispatch` (private) | Routes `*.vitecloud.app` to user workers + R2 assets      |
+| `packages/ai-proxy`                                      | `@vite-cloud/ai-proxy` (private) | AI inference proxy — metered Workers AI via AI Gateway    |
 | `playground/*`                                           | (private)                        | local apps for testing                                    |
 
 ## `vite-cloud` Overview
@@ -70,7 +71,8 @@ The `vite-cloud` package contains two parts:
 - **Auth** — built-in email/password + OAuth, auto-detected from imports and env vars
 - **Cron jobs** — scheduled handlers via `defineScheduled`
 - **Queues** — typed producers and consumers via `defineQueue`
-- **Binding inference** — auto-detects D1, KV, R2, queues from source code
+- **AI** — `import { ai } from "vite-cloud/ai"` for Workers AI inference, metered via AI Gateway proxy
+- **Binding inference** — auto-detects D1, KV, R2, AI, queues from source code
 - **Migration runner** — applies SQL migrations to local D1 on dev startup
 
 **CLI (`vcc`)** — commands for local development DX and deployment:
@@ -140,6 +142,8 @@ Local apps for testing features end-to-end. Run scripts with `pnpm -C playground
 | [`queues`](./playground/queues/README.md)                 | API-only — typed queue producer/consumer with KV bridge                                           |
 | [`auth`](./playground/auth/README.md)                     | React SPA — email/password + OAuth (GitHub/Google) auth flows, protected routes                   |
 | [`tanstack-start`](./playground/tanstack-start/README.md) | TanStack Start meta-framework — server functions, D1 queries, SSR via TanStack                    |
+
+`playground-local/` is gitignored and used for ad-hoc local testing apps that are not part of the codebase.
 
 ## Operations
 

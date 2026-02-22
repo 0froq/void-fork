@@ -1,7 +1,7 @@
 # Workers AI
 
 **Date:** 2026-02-22
-**Status:** Draft
+**Status:** Implemented
 
 ---
 

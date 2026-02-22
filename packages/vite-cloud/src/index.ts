@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { loadEnv, type Plugin } from "vite";
 import { cloudflare, type WorkerConfig } from "@cloudflare/vite-plugin";
 import { routingPlugin } from "./plugin-routing";
@@ -27,6 +28,36 @@ const FRAMEWORK_ENTRIES: Record<Framework, string> = {
 /** Check whether a binding name already exists in a resolved bindings array. */
 function hasBinding(list: readonly { binding: string }[] | undefined, name: string): boolean {
   return Array.isArray(list) && list.some((b) => b.binding === name);
+}
+
+/**
+ * Read Vite Cloud auth credentials for local dev AI proxy access.
+ * Returns null if credentials are not available.
+ */
+function readViteCloudDevCredentials(
+  root: string,
+): { token: string; projectId: string; staging?: boolean } | null {
+  const configPath = join(homedir(), ".vite-cloud", "config.json");
+  let config: { token?: string; stagingToken?: string; staging?: boolean };
+  try {
+    config = JSON.parse(readFileSync(configPath, "utf-8"));
+  } catch {
+    return null;
+  }
+  const staging = config.staging === true;
+  const token = staging ? config.stagingToken : config.token;
+  if (!token) return null;
+
+  const projectPath = join(root, ".vite-cloud", "project.json");
+  let project: { projectId?: string };
+  try {
+    project = JSON.parse(readFileSync(projectPath, "utf-8"));
+  } catch {
+    return null;
+  }
+  if (!project.projectId) return null;
+
+  return { token, projectId: project.projectId, staging: staging || undefined };
 }
 
 /**
@@ -148,6 +179,23 @@ export default function viteCloud(): Plugin[] {
           ...(q.maxBatchTimeout != null && { max_batch_timeout: q.maxBatchTimeout }),
         })),
       };
+    }
+
+    // AI — in local dev, inject VC credentials for HTTPS proxy path.
+    // In production, the platform adds a __AI_PROXY service binding instead.
+    if (bindings.needsAI) {
+      const credentials = readViteCloudDevCredentials(root);
+      if (credentials) {
+        // Prefer HTTPS proxy — inject credentials, skip direct AI binding
+        const vars = (result.vars as Record<string, string>) ?? {};
+        vars.__VITE_CLOUD_TOKEN = credentials.token;
+        vars.__VITE_CLOUD_PROJECT_ID = credentials.projectId;
+        if (credentials.staging) vars.__VITE_CLOUD_STAGING = "1";
+        result.vars = vars;
+      } else if (!resolved.ai) {
+        // Fallback: set direct AI binding (requires user's own CF auth)
+        result.ai = { binding: "AI" };
+      }
     }
 
     return result as Partial<WorkerConfig>;

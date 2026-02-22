@@ -4,10 +4,11 @@ How we deploy, what we provision, and how the system is configured.
 
 ## What We Deploy
 
-Two Cloudflare Workers plus a static docs site:
+Three Cloudflare Workers plus a static docs site:
 
 | Worker                | Package             | Purpose                                                                                                        |
 | --------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `vite-cloud-ai-proxy` | `packages/ai-proxy` | AI inference proxy — holds the real `AI` binding, injects AI Gateway metadata for metering                     |
 | `vite-cloud-platform` | `packages/platform` | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering                     |
 | `vite-cloud-dispatch` | `packages/dispatch` | Edge router — routes `*.vitecloud.app` traffic to user workers (via Workers for Platforms) or R2 static assets |
 | Docs (VitePress)      | `packages/website`  | Static site deployed as a Vite Cloud project via `vcc deploy`                                                  |
@@ -45,20 +46,29 @@ Two fully isolated environments. Each has its own CF resources (D1, KV, R2, disp
 | Analytics Engine   | `ANALYTICS` | `vite_cloud_requests`                                          |
 | Routes             | —           | `*.vitecloud.app/*`, `*.vitecloud.app` (zone: `vitecloud.app`) |
 
-Both workers: `compatibility_date: 2026-02-12`, `compatibility_flags: ["nodejs_compat"]`, `observability: enabled`.
+**AI proxy worker** (`vite-cloud-ai-proxy`):
+
+| Resource   | Binding | Name / ID                                                                    |
+| ---------- | ------- | ---------------------------------------------------------------------------- |
+| Workers AI | `AI`    | (account-level)                                                              |
+| AI Gateway | —       | `vite-cloud` (shared, account-level)                                         |
+| Routes     | —       | `ai-proxy.vitecloud.app/*`, `ai-proxy.vitecloud.app` (zone: `vitecloud.app`) |
+
+All workers: `compatibility_date: 2026-02-12`, `compatibility_flags: ["nodejs_compat"]`, `observability: enabled`.
 
 ### Staging
 
 Same resource types with `-staging` suffixes:
 
-| Resource    | Platform                                                               | Dispatch                                               |
-| ----------- | ---------------------------------------------------------------------- | ------------------------------------------------------ |
-| D1          | `vite-cloud-platform-staging` (`e78b32c1-497a-40ad-8f83-7049e139983e`) | —                                                      |
-| R2          | `vite-cloud-assets-staging`                                            | `vite-cloud-assets-staging`                            |
-| KV          | `60240eecea804f39bf8b7395cd6c6b08`                                     | `60240eecea804f39bf8b7395cd6c6b08`                     |
-| Dispatch NS | `vite-cloud-users-staging`                                             | `vite-cloud-users-staging`                             |
-| Analytics   | —                                                                      | `vite_cloud_requests_staging`                          |
-| Routes      | —                                                                      | `*.staging.vitecloud.app/*`, `*.staging.vitecloud.app` |
+| Resource    | Platform                                                               | Dispatch                                               | AI Proxy                                                             |
+| ----------- | ---------------------------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------- |
+| D1          | `vite-cloud-platform-staging` (`e78b32c1-497a-40ad-8f83-7049e139983e`) | —                                                      | —                                                                    |
+| R2          | `vite-cloud-assets-staging`                                            | `vite-cloud-assets-staging`                            | —                                                                    |
+| KV          | `60240eecea804f39bf8b7395cd6c6b08`                                     | `60240eecea804f39bf8b7395cd6c6b08`                     | —                                                                    |
+| Dispatch NS | `vite-cloud-users-staging`                                             | `vite-cloud-users-staging`                             | —                                                                    |
+| Analytics   | —                                                                      | `vite_cloud_requests_staging`                          | —                                                                    |
+| Workers AI  | —                                                                      | —                                                      | `AI` (account-level)                                                 |
+| Routes      | —                                                                      | `*.staging.vitecloud.app/*`, `*.staging.vitecloud.app` | `ai-proxy.staging.vitecloud.app/*`, `ai-proxy.staging.vitecloud.app` |
 
 ## Secrets and Environment Variables
 
@@ -97,6 +107,14 @@ Zone-level (on `vitecloud.app`):
 | Permission           | Access | Operations                                  |
 | -------------------- | ------ | ------------------------------------------- |
 | SSL and Certificates | Edit   | Custom hostname DV certificate provisioning |
+
+### AI Proxy Worker Secrets
+
+Set via `wrangler secret put <NAME>` (same value as platform's `JWT_SECRET`):
+
+| Secret       | Purpose                                   |
+| ------------ | ----------------------------------------- |
+| `JWT_SECRET` | Verifies auth JWTs from local dev clients |
 
 ### Configurable Environment Variables
 
@@ -153,7 +171,7 @@ Internal-only toggle for pointing the CLI at staging. Not documented in public d
 Root `package.json` orchestrates deployment:
 
 ```
-pnpm run deploy           # Production: deploy dispatch, then migrate + deploy platform
+pnpm run deploy           # Production: deploy ai-proxy, dispatch, then migrate + deploy platform
 pnpm run deploy:staging   # Staging: same with --env staging
 ```
 
@@ -161,17 +179,19 @@ Broken down:
 
 ```
 deploy
-├── deploy:dispatch         → pnpm -F dispatch run deploy          (wrangler deploy)
-└── deploy:platform         → pnpm -F platform migrate             (wrangler d1 migrations apply --remote)
-                            → pnpm -F platform run deploy          (wrangler deploy)
+├── deploy:ai-proxy         → pnpm -F @vite-cloud/ai-proxy run deploy  (wrangler deploy)
+├── deploy:dispatch         → pnpm -F dispatch run deploy               (wrangler deploy)
+└── deploy:platform         → pnpm -F platform migrate                  (wrangler d1 migrations apply --remote)
+                            → pnpm -F platform run deploy               (wrangler deploy)
 
 deploy:staging
+├── deploy:staging:ai-proxy → pnpm -F @vite-cloud/ai-proxy run deploy --env staging
 ├── deploy:staging:dispatch → pnpm -F dispatch run deploy --env staging
-└── deploy:staging:platform → pnpm -F platform migrate:staging     (wrangler d1 migrations apply --env staging --remote)
+└── deploy:staging:platform → pnpm -F platform migrate:staging          (wrangler d1 migrations apply --env staging --remote)
                             → pnpm -F platform run deploy --env staging
 ```
 
-Deploy order matters: dispatch deploys first (stateless router), then platform runs D1 migrations before deploying (ensures schema is ready for new code).
+Deploy order matters: ai-proxy deploys first (user workers depend on it via service binding), dispatch deploys next (stateless router), then platform runs D1 migrations before deploying (ensures schema is ready for new code).
 
 ### GitHub Actions
 
@@ -212,12 +232,14 @@ pnpm health:staging    # Check staging platform health
 
 ## DNS Setup
 
-| Record                        | Zone            | Points To                                |
-| ----------------------------- | --------------- | ---------------------------------------- |
-| `platform.vite.cloud`         | `vite.cloud`    | Platform worker                          |
-| `*.vitecloud.app`             | `vitecloud.app` | Dispatch worker (wildcard route)         |
-| `platform.staging.vite.cloud` | `vite.cloud`    | Staging platform worker                  |
-| `*.staging.vitecloud.app`     | `vitecloud.app` | Staging dispatch worker (wildcard route) |
+| Record                           | Zone            | Points To                                |
+| -------------------------------- | --------------- | ---------------------------------------- |
+| `platform.vite.cloud`            | `vite.cloud`    | Platform worker                          |
+| `*.vitecloud.app`                | `vitecloud.app` | Dispatch worker (wildcard route)         |
+| `ai-proxy.vitecloud.app`         | `vitecloud.app` | AI proxy worker                          |
+| `platform.staging.vite.cloud`    | `vite.cloud`    | Staging platform worker                  |
+| `*.staging.vitecloud.app`        | `vitecloud.app` | Staging dispatch worker (wildcard route) |
+| `ai-proxy.staging.vitecloud.app` | `vitecloud.app` | Staging AI proxy worker                  |
 
 ## Fresh Environment Setup
 
@@ -229,8 +251,9 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    - R2 bucket
    - Dispatch namespace (Workers for Platforms)
    - Analytics Engine dataset
+   - AI Gateway named `vite-cloud`
 
-2. **Update wrangler configs** — add an `env.<name>` section in both `packages/platform/wrangler.jsonc` and `packages/dispatch/wrangler.jsonc` with the new resource IDs.
+2. **Update wrangler configs** — add an `env.<name>` section in `packages/platform/wrangler.jsonc`, `packages/dispatch/wrangler.jsonc`, and `packages/ai-proxy/wrangler.jsonc` with the new resource IDs.
 
 3. **Set worker secrets** — for the platform worker:
 

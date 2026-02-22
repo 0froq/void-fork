@@ -48,6 +48,7 @@ export interface InferenceOptions {
     db?: boolean;
     kv?: boolean;
     storage?: boolean;
+    ai?: boolean;
   };
 }
 
@@ -73,6 +74,7 @@ export function inferProjectBindings(
       needsR2: options.bindings.storage ?? false,
       needsAuth: false,
       needsQueues: false,
+      needsAI: options.bindings.ai ?? false,
     };
   }
 

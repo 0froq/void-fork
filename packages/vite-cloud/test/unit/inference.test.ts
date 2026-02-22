@@ -232,19 +232,78 @@ describe("inferBindingsFromSource", () => {
     const result = inferBindingsFromSource(code, "test.ts");
     expect(result.needsQueues).toBe(false);
   });
+
+  it("detects import { ai } from 'vite-cloud/ai'", () => {
+    const code = `
+      import { ai } from "vite-cloud/ai";
+      export const POST = defineHandler(async () => {
+        const result = await ai.run("@cf/meta/llama-3.1-8b-instruct", {
+          messages: [{ role: "user", content: "Hello" }],
+        });
+        return result;
+      })
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsAI).toBe(true);
+    expect(result.needsD1).toBe(false);
+  });
+
+  it("detects c.env.AI access", () => {
+    const code = `
+      export const POST = defineHandler(async (c) => {
+        const result = await c.env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+          messages: [{ role: "user", content: "Hello" }],
+        });
+        return c.json(result);
+      })
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsAI).toBe(true);
+  });
+
+  it("detects env.AI access", () => {
+    const code = `
+      export async function handler(request, env) {
+        return Response.json(await env.AI.run("@cf/meta/llama-3.1-8b-instruct", { prompt: "Hi" }))
+      }
+    `;
+    const result = inferBindingsFromSource(code, "main.ssr.ts");
+    expect(result.needsAI).toBe(true);
+  });
+
+  it("does not detect needsAI from unrelated identifiers", () => {
+    const code = `
+      const AI = someLibrary;
+      export const GET = defineHandler(() => {
+        return { status: 'ok' }
+      })
+    `;
+    const result = inferBindingsFromSource(code, "test.ts");
+    expect(result.needsAI).toBe(false);
+  });
 });
 
 describe("mergeBindings", () => {
+  const empty = {
+    needsD1: false,
+    needsKV: false,
+    needsR2: false,
+    needsAuth: false,
+    needsQueues: false,
+    needsAI: false,
+  };
+
   it("merges multiple binding results (union)", () => {
     const result = mergeBindings([
-      { needsD1: true, needsKV: false, needsR2: false, needsAuth: false, needsQueues: false },
-      { needsD1: false, needsKV: true, needsR2: false, needsAuth: false, needsQueues: false },
-      { needsD1: false, needsKV: false, needsR2: true, needsAuth: false, needsQueues: false },
+      { ...empty, needsD1: true },
+      { ...empty, needsKV: true },
+      { ...empty, needsR2: true },
     ]);
     expect(result.needsD1).toBe(true);
     expect(result.needsKV).toBe(true);
     expect(result.needsR2).toBe(true);
     expect(result.needsAuth).toBe(false);
+    expect(result.needsAI).toBe(false);
   });
 
   it("handles empty array", () => {
@@ -253,21 +312,31 @@ describe("mergeBindings", () => {
     expect(result.needsKV).toBe(false);
     expect(result.needsR2).toBe(false);
     expect(result.needsAuth).toBe(false);
+    expect(result.needsAI).toBe(false);
   });
 
   it("merges auth flag", () => {
-    const result = mergeBindings([
-      { needsD1: false, needsKV: false, needsR2: false, needsAuth: false, needsQueues: false },
-      { needsD1: false, needsKV: false, needsR2: false, needsAuth: true, needsQueues: false },
-    ]);
+    const result = mergeBindings([empty, { ...empty, needsAuth: true }]);
     expect(result.needsAuth).toBe(true);
   });
 
   it("merges queues flag", () => {
-    const result = mergeBindings([
-      { needsD1: false, needsKV: false, needsR2: false, needsAuth: false, needsQueues: false },
-      { needsD1: false, needsKV: false, needsR2: false, needsAuth: false, needsQueues: true },
-    ]);
+    const result = mergeBindings([empty, { ...empty, needsQueues: true }]);
     expect(result.needsQueues).toBe(true);
+  });
+
+  it("merges AI flag", () => {
+    const result = mergeBindings([empty, { ...empty, needsAI: true }]);
+    expect(result.needsAI).toBe(true);
+  });
+
+  it("merges AI with other bindings", () => {
+    const result = mergeBindings([
+      { ...empty, needsD1: true },
+      { ...empty, needsAI: true },
+    ]);
+    expect(result.needsD1).toBe(true);
+    expect(result.needsAI).toBe(true);
+    expect(result.needsKV).toBe(false);
   });
 });

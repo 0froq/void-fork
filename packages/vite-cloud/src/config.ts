@@ -24,6 +24,7 @@ export interface ViteCloudConfig {
     db?: boolean;
     kv?: boolean;
     storage?: boolean;
+    ai?: boolean;
   };
   cache?: CacheConfig;
   headers?: Record<string, string[]>;
@@ -85,8 +86,8 @@ export function readConfig(root: string): ViteCloudConfig {
     }
     const b = obj.bindings as Record<string, unknown>;
     for (const key of Object.keys(b)) {
-      if (!["db", "kv", "storage"].includes(key)) {
-        throw new Error(`Unknown binding "${key}" in ${CONFIG_FILE}. Valid: db, kv, storage`);
+      if (!["db", "kv", "storage", "ai"].includes(key)) {
+        throw new Error(`Unknown binding "${key}" in ${CONFIG_FILE}. Valid: db, kv, storage, ai`);
       }
       if (typeof b[key] !== "boolean") {
         throw new Error(`"bindings.${key}" in ${CONFIG_FILE} must be a boolean`);
