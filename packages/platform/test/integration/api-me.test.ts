@@ -81,7 +81,7 @@ describe("GET /me", () => {
       env,
     );
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body: any = await res.json();
     expect(body.login).toBe("alice");
     expect(body.plan).toBe("free");
     expect(body.provider).toBe("github");
