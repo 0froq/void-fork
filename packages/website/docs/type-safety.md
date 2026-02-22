@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Type Safety
 
 Vite Cloud provides end-to-end type safety across your entire stack — from database queries, through route handlers, to frontend fetch calls. Types are derived from your source code and SQL migrations. Nothing is manually written or duplicated.

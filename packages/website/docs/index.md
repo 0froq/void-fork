@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # What is Vite Cloud?
 
 Vite Cloud is a deployment platform and fullstack Vite plugin that turns any Vite app into a globally distributed, edge-first application on Cloudflare — without requiring a Cloudflare account, config files, or infrastructure knowledge.

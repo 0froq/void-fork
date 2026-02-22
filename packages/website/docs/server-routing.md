@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # Server Routing
 
 Full-stack Vite Cloud apps uses file-based routing powered by [Hono](https://hono.dev). Drop files in `routes/` and they become endpoints. Add global middleware in `middleware/`.

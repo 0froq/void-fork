@@ -1,3 +1,7 @@
+---
+outline: deep
+---
+
 # App Types
 
 Vite Cloud supports three types of apps:
