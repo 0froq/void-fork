@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { log, outro, note } from "@clack/prompts";
 import { runLink } from "./link";
 import { runLoginCommand } from "./login";
@@ -13,6 +15,7 @@ import { parseDbArgs } from "./db-args";
 import { parseGenArgs } from "./gen-args";
 import { parseDomainArgs } from "./domain";
 import { categoryTitle, helpLine, pc, sectionTitle } from "./output";
+import { getPackageDir } from "./agents";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -216,21 +219,23 @@ if (command === "staging") {
   import("./mcp").then(({ runMcp }) => {
     runMcp();
   });
+} else if (command === "-v" || command === "--version") {
+  const version = JSON.parse(readFileSync(join(getPackageDir(), "package.json"), "utf-8")).version;
+  console.log(version);
+} else if (command && command !== "help" && command !== "--help" && command !== "-h") {
+  log.error(`Unknown command: ${command}. Run \`void --help\` for usage.`);
+  process.exit(1);
 } else {
+  const version = JSON.parse(readFileSync(join(getPackageDir(), "package.json"), "utf-8")).version;
   console.log(
     pc.blue(`
               _     __
  _   ______ (__)___/ /
 | | / / __ \\/ / __  /
 | |/ / /_/ / / /_/ /
-|___/\\____/_/\\__,_/
+|___/\\____/_/\\__,_/  v${version}
 `),
   );
-
-  if (command && command !== "help" && command !== "--help" && command !== "-h") {
-    log.error(`Unknown command: ${command}`);
-    process.exit(1);
-  }
 
   note(
     [
