@@ -657,7 +657,7 @@ Importing `"void/env"` provides global Cloudflare environment types:
 
 Declares the `Cloudflare.Env` namespace with `DB: D1Database`, `KV: KVNamespace`, and `STORAGE: R2Bucket`.
 
-For handler context variables (`c.set()` / `c.get()`), augment [`CloudContextVariables`](#cloudcontextvariables) — this is separate from `Cloudflare.Env`, which types the worker bindings. Framework adaptors (`@void-x/vue`, `@void-x/react`, `@void-x/svelte`) also augment `CloudContextVariables` to add the `shared` key used by `useShared()`.
+For handler context variables (`c.set()` / `c.get()`), augment [`CloudContextVariables`](#cloudcontextvariables) — this is separate from `Cloudflare.Env`, which types the worker bindings. Framework adaptors (`void/vue`, `void/react`, `void/svelte`) also augment `CloudContextVariables` to add the `shared` key used by `useShared()`.
 
 ## Framework Adaptors
 
@@ -667,10 +667,10 @@ Framework adaptors for [Pages Routing](./pages-routing.md). Each adaptor provide
 
 #### `voidVue(options?)`
 
-Imported from `"@void-x/vue/plugin"`. Returns an array of Vite plugins that handle `<script server>` extraction, Vue SFC compilation, and SSR/hydration entry generation. Includes `@vitejs/plugin-vue` — no need to install or configure it separately.
+Imported from `"@void-x/vue"`. Returns an array of Vite plugins that handle `<script server>` extraction, Vue SFC compilation, and SSR/hydration entry generation. Includes `@vitejs/plugin-vue` — no need to install or configure it separately.
 
 ```ts
-import { voidVue } from "@void-x/vue/plugin";
+import { voidVue } from "@void-x/vue";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue()],
@@ -693,7 +693,7 @@ interface VoidVueOptions {
 
 #### Vue Runtime
 
-Imported from `"@void-x/vue"`.
+Imported from `"void/vue"`.
 
 | Export                             | Description                                                                                                                                           |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -706,10 +706,10 @@ Imported from `"@void-x/vue"`.
 
 #### `voidReact(options?)`
 
-Imported from `"@void-x/react/plugin"`. Returns an array of Vite plugins that handle SSR/hydration entry generation. Includes `@vitejs/plugin-react` — no need to install or configure it separately.
+Imported from `"@void-x/react"`. Returns an array of Vite plugins that handle SSR/hydration entry generation. Includes `@vitejs/plugin-react` — no need to install or configure it separately.
 
 ```ts
-import { voidReact } from "@void-x/react/plugin";
+import { voidReact } from "@void-x/react";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidReact()],
@@ -732,7 +732,7 @@ interface VoidReactOptions {
 
 #### React Runtime
 
-Imported from `"@void-x/react"`.
+Imported from `"void/react"`.
 
 | Export              | Description                                                                                                                                   |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -744,10 +744,10 @@ Imported from `"@void-x/react"`.
 
 #### `voidSvelte(options?)`
 
-Imported from `"@void-x/svelte/plugin"`. Returns an array of Vite plugins that handle SSR/hydration entry generation for Svelte 5. Includes `@sveltejs/vite-plugin-svelte` — no need to install or configure it separately.
+Imported from `"@void-x/svelte"`. Returns an array of Vite plugins that handle SSR/hydration entry generation for Svelte 5. Includes `@sveltejs/vite-plugin-svelte` — no need to install or configure it separately.
 
 ```ts
-import { voidSvelte } from "@void-x/svelte/plugin";
+import { voidSvelte } from "@void-x/svelte";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSvelte()],
@@ -771,7 +771,7 @@ interface VoidSvelteOptions {
 
 #### Svelte Runtime
 
-Imported from `"@void-x/svelte"`.
+Imported from `"void/svelte"`.
 
 | Export              | Description                                                                                                                                    |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |

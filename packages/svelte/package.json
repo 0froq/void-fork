@@ -6,15 +6,14 @@
     "src/runtime"
   ],
   "type": "module",
-  "svelte": "./src/runtime/index.ts",
   "exports": {
     ".": {
-      "svelte": "./src/runtime/index.ts",
-      "default": "./src/runtime/index.ts"
-    },
-    "./plugin": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
+    },
+    "./runtime": {
+      "svelte": "./src/runtime/index.ts",
+      "default": "./src/runtime/index.ts"
     },
     "./App.svelte": {
       "svelte": "./src/runtime/App.svelte",

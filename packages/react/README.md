@@ -8,7 +8,7 @@ React framework adapter for Void Pages mode — Inertia-inspired full-stack DX w
 // vite.config.ts
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidReact } from "@void-x/react/plugin";
+import { voidReact } from "@void-x/react";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidReact()],
@@ -31,7 +31,7 @@ The pages plugin generates two virtual modules:
 
 ## Runtime
 
-Import from `@void-x/react`:
+Import from `void/react`:
 
 - **`Link`** — SPA navigation component. Renders `<a>` for GET, `<button>` otherwise. Intercepts clicks for client-side navigation.
 - **`useForm(url, defaults, options?)`** — Form state management using `useState`. Methods: `post`, `put`, `patch`, `delete`, `reset`, `clearErrors`.

@@ -79,7 +79,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string): string 
   return `
 import { renderToStringAsync, generateHydrationScript } from "solid-js/web";
 import { createComponent } from "solid-js";
-import { SharedContext, ErrorsContext, RouterContext } from "@void-x/solid";
+import { SharedContext, ErrorsContext, RouterContext } from "@void-x/solid/runtime";
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -145,7 +145,7 @@ function generateClientEntry(
   return `
 import { createSignal, createComponent, batch } from "solid-js";
 import { hydrate } from "solid-js/web";
-import { SharedContext, ErrorsContext, RouterContext } from "@void-x/solid";
+import { SharedContext, ErrorsContext, RouterContext } from "@void-x/solid/runtime";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 

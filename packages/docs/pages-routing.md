@@ -78,7 +78,7 @@ Add both plugins to your Vite config:
 // vite.config.ts
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidReact } from "@void-x/react/plugin";
+import { voidReact } from "@void-x/react";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidReact()],
@@ -89,7 +89,7 @@ export default defineConfig({
 // vite.config.ts
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidVue } from "@void-x/vue/plugin";
+import { voidVue } from "@void-x/vue";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue()],
@@ -100,7 +100,7 @@ export default defineConfig({
 // vite.config.ts
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidSvelte } from "@void-x/svelte/plugin";
+import { voidSvelte } from "@void-x/svelte";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSvelte()],
@@ -111,7 +111,7 @@ export default defineConfig({
 // vite.config.ts
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidSolid } from "@void-x/solid/plugin";
+import { voidSolid } from "@void-x/solid";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSolid()],
@@ -141,7 +141,7 @@ Use the `Link` component for SPA navigation between pages. It renders an `<a>` t
 ::: code-group
 
 ```tsx [React]
-import { Link } from "@void-x/react";
+import { Link } from "void/react";
 
 <Link href="/users">Users</Link>
 <Link href={`/users/${id}`}>View</Link>
@@ -149,7 +149,7 @@ import { Link } from "@void-x/react";
 
 ```vue [Vue]
 <script setup lang="ts">
-import { Link } from "@void-x/vue";
+import { Link } from "void/vue";
 </script>
 
 <template>
@@ -160,7 +160,7 @@ import { Link } from "@void-x/vue";
 
 ```svelte [Svelte]
 <script>
-  import { Link } from "@void-x/svelte";
+  import { Link } from "void/svelte";
 </script>
 
 <Link href="/users">Users</Link>
@@ -168,7 +168,7 @@ import { Link } from "@void-x/vue";
 ```
 
 ```tsx [Solid]
-import { Link } from "@void-x/solid";
+import { Link } from "void/solid";
 
 <Link href="/users">Users</Link>
 <Link href={`/users/${id}`}>View</Link>
@@ -179,7 +179,7 @@ import { Link } from "@void-x/solid";
 For programmatic navigation, use `useRouter()`:
 
 ```ts
-import { useRouter } from "@void-x/vue"; // or "@void-x/react", "@void-x/svelte", "@void-x/solid"
+import { useRouter } from "void/vue"; // or "void/react", "void/svelte", "void/solid"
 
 const router = useRouter();
 router.visit("/users");
@@ -191,51 +191,26 @@ router.post("/logout"); // non-GET navigation
 
 Each page is a component file paired with a `.server.ts` file that provides server-side data loading. Pages can be flat files (`about.vue`) or use directory-based routing (`about/index.vue`) — both map to the same route:
 
-::: code-group
-
-```[React]
+```
 project/
-  pages/                    # UI pages (SSR + SPA navigation)
-    layout.tsx              # Root layout
-    index.tsx               # GET /
-    index.server.ts         # Server handler for /
-    about.tsx               # GET /about (flat file)
-    about.server.ts         # Server handler for /about
+  pages/                      # UI pages (SSR + SPA navigation)
+    layout.(tsx|vue|svelte)   # Root layout
+    index.(tsx|vue|svelte)    # GET /
+    index.server.ts           # Server handler for /
+    about.(tsx|vue|svelte)    # GET /about (flat file)
+    about.server.ts           # Server handler for /about
     users/
-      layout.tsx            # Nested layout for /users/*
-      index.tsx             # GET /users (directory-based)
-      index.server.ts       # Server handler for /users
-      [id].tsx              # GET /users/:id
-      [id].server.ts        # Server handler for /users/:id
-  routes/                   # Pure JSON API endpoints
+      layout.(tsx|vue|svelte) # Nested layout for /users/*
+      index.(tsx|vue|svelte)  # GET /users (directory-based)
+      index.server.ts         # Server handler for /users
+      [id].(tsx|vue|svelte)   # GET /users/:id
+      [id].server.ts          # Server handler for /users/:id
+  routes/                     # Pure JSON API endpoints
     api/
-      health.ts             # GET /api/health -> JSON
-  middleware/                # Shared across pages and routes
+      health.ts               # GET /api/health -> JSON
+  middleware/                 # Shared across pages and routes
     01.auth.ts
 ```
-
-```[Vue]
-project/
-  pages/                    # UI pages (SSR + SPA navigation)
-    layout.vue              # Root layout
-    index.vue               # GET /
-    index.server.ts         # Server handler for /
-    about.vue               # GET /about (flat file)
-    about.server.ts         # Server handler for /about
-    users/
-      layout.vue            # Nested layout for /users/*
-      index.vue             # GET /users (directory-based)
-      index.server.ts       # Server handler for /users
-      [id].vue              # GET /users/:id
-      [id].server.ts        # Server handler for /users/:id
-  routes/                   # Pure JSON API endpoints
-    api/
-      health.ts             # GET /api/health -> JSON
-  middleware/                # Shared across pages and routes
-    01.auth.ts
-```
-
-:::
 
 File-based routing rules are the same as [server routing](./server-routing.md): `[param]` for dynamic segments, `[...param]` for catch-all, `(group)/` for route groups.
 
@@ -390,55 +365,21 @@ If both `<script server>` and a `.server.ts` file exist, the `.server.ts` file t
 
 Place a layout file in any `pages/` directory to wrap all pages in that subtree:
 
-::: code-group
-
-```[React]
-pages/
-  layout.tsx              # Root layout (nav, footer)
-  index.tsx
-  users/
-    layout.tsx            # Nested layout for /users/*
-    index.tsx
-    [id].tsx
 ```
-
-```[Vue]
 pages/
-  layout.vue              # Root layout (nav, footer)
-  index.vue
+  layout.(tsx|vue|svelte)     # Root layout (nav, footer)
+  index.(tsx|vue|svelte)
   users/
-    layout.vue            # Nested layout for /users/*
-    index.vue
-    [id].vue
+    layout.(tsx|vue|svelte)   # Nested layout for /users/*
+    index.(tsx|vue|svelte)
+    [id].(tsx|vue|svelte)
 ```
-
-```[Svelte]
-pages/
-  layout.svelte           # Root layout (nav, footer)
-  index.svelte
-  users/
-    layout.svelte         # Nested layout for /users/*
-    index.svelte
-    [id].svelte
-```
-
-```[Solid]
-pages/
-  layout.tsx              # Root layout (nav, footer)
-  index.tsx
-  users/
-    layout.tsx            # Nested layout for /users/*
-    index.tsx
-    [id].tsx
-```
-
-:::
 
 ::: code-group
 
 ```tsx [React]
 // pages/layout.tsx
-import { useShared, Link } from "@void-x/react";
+import { useShared, Link } from "void/react";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { auth } = useShared();
@@ -458,7 +399,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 ```vue [Vue]
 <!-- pages/layout.vue -->
 <script setup lang="ts">
-import { useShared, Link } from "@void-x/vue";
+import { useShared, Link } from "void/vue";
 const { auth } = useShared();
 </script>
 
@@ -477,7 +418,7 @@ const { auth } = useShared();
 ```svelte [Svelte]
 <!-- pages/layout.svelte -->
 <script>
-  import { useShared, Link } from "@void-x/svelte";
+  import { useShared, Link } from "void/svelte";
   let { children } = $props();
   const { auth } = useShared();
 </script>
@@ -494,7 +435,7 @@ const { auth } = useShared();
 
 ```tsx [Solid]
 // pages/layout.tsx
-import { useShared, Link } from "@void-x/solid";
+import { useShared, Link } from "void/solid";
 import type { JSX } from "solid-js";
 
 export default function Layout(props: { children: JSX.Element }) {
@@ -542,7 +483,7 @@ Access it on the client with `useShared()` — the return type is inferred from 
 ::: code-group
 
 ```tsx [React]
-import { useShared } from "@void-x/react";
+import { useShared } from "void/react";
 
 export default function Page() {
   const { auth } = useShared(); // { auth: { user: { name: string } | null } }
@@ -552,20 +493,20 @@ export default function Page() {
 
 ```vue [Vue]
 <script setup lang="ts">
-import { useShared } from "@void-x/vue";
+import { useShared } from "void/vue";
 const { auth } = useShared(); // { auth: { user: { name: string } | null } }
 </script>
 ```
 
 ```svelte [Svelte]
 <script>
-  import { useShared } from "@void-x/svelte";
+  import { useShared } from "void/svelte";
   const { auth } = useShared(); // { auth: { user: { name: string } | null } }
 </script>
 ```
 
 ```tsx [Solid]
-import { useShared } from "@void-x/solid";
+import { useShared } from "void/solid";
 
 export default function Page() {
   const shared = useShared(); // { auth: { user: { name: string } | null } }
@@ -627,7 +568,7 @@ Then, use `useForm` in the page component to submit to this action:
 
 ```tsx [React]
 // pages/users/create.tsx
-import { useForm } from "@void-x/react";
+import { useForm } from "void/react";
 
 export default function CreateUser() {
   // "/users/create" autocompletes; { name, email } is typed from the action's validator
@@ -655,7 +596,7 @@ export default function CreateUser() {
 ```vue [Vue]
 <!-- pages/users/create.vue -->
 <script setup lang="ts">
-import { useForm } from "@void-x/vue";
+import { useForm } from "void/vue";
 
 // "/users/create" autocompletes; { name, email } is typed from the action's validator
 const form = useForm("/users/create", { name: "", email: "" });
@@ -677,7 +618,7 @@ const form = useForm("/users/create", { name: "", email: "" });
 ```svelte [Svelte]
 <!-- pages/users/create.svelte -->
 <script>
-  import { useForm } from "@void-x/svelte";
+  import { useForm } from "void/svelte";
 
   // "/users/create" autocompletes; { name, email } is typed from the action's validator
   const form = useForm("/users/create", { name: "", email: "" });
@@ -696,7 +637,7 @@ const form = useForm("/users/create", { name: "", email: "" });
 
 ```tsx [Solid]
 // pages/users/create.tsx
-import { useForm } from "@void-x/solid";
+import { useForm } from "void/solid";
 
 export default function CreateUser() {
   // "/users/create" autocompletes; { name, email } is typed from the action's validator

@@ -155,6 +155,18 @@ importers:
       '@hono/oauth-providers':
         specifier: ^0.8.5
         version: 0.8.5(hono@4.11.9)
+      '@void-x/react':
+        specifier: workspace:*
+        version: link:../react
+      '@void-x/solid':
+        specifier: workspace:*
+        version: link:../solid
+      '@void-x/svelte':
+        specifier: workspace:*
+        version: link:../svelte
+      '@void-x/vue':
+        specifier: workspace:*
+        version: link:../vue
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.6.2

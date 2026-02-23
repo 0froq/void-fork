@@ -8,15 +8,15 @@
   "type": "module",
   "exports": {
     ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./runtime": {
       "solid": "./src/runtime/index.ts",
       "default": "./src/runtime/index.ts"
     },
     "./context": {
       "default": "./src/runtime/context.ts"
-    },
-    "./plugin": {
-      "types": "./dist/index.d.mts",
-      "import": "./dist/index.mjs"
     }
   },
   "scripts": {

@@ -88,8 +88,8 @@ See [`packages/void/AGENTS.md`](./packages/void/AGENTS.md) for architecture, sou
 
 Vue framework adapter for Pages mode — Inertia-inspired full-stack DX with SSR.
 
-- **Plugin** (`@void-x/vue/plugin`): `voidVue()` — extracts `<script server>` blocks, compiles Vue SFCs, generates SSR + client hydration entries
-- **Runtime** (`@void-x/vue`): `Link`, `useForm`, `useShared` composables
+- **Plugin** (`@void-x/vue`): `voidVue()` — extracts `<script server>` blocks, compiles Vue SFCs, generates SSR + client hydration entries
+- **Runtime** (`void/vue`): `Link`, `useForm`, `useShared` composables
 - **Server handlers**: Remix-style `loader` (GET → props) and `action` (mutations) exports in `<script server>` or companion `.server.ts` files
 
 See [`packages/vue/README.md`](./packages/vue/README.md) for architecture.
@@ -98,8 +98,8 @@ See [`packages/vue/README.md`](./packages/vue/README.md) for architecture.
 
 Svelte 5 framework adapter for Pages mode — same Inertia-inspired DX as Vue/React.
 
-- **Plugin** (`@void-x/svelte/plugin`): `voidSvelte()` — wraps `@sveltejs/vite-plugin-svelte`, generates SSR + client hydration entries
-- **Runtime** (`@void-x/svelte`): `Link`, `useForm`, `useShared`, `useRouter` — uses Svelte 5 runes (`$state`, `$derived`) and `getContext`
+- **Plugin** (`@void-x/svelte`): `voidSvelte()` — wraps `@sveltejs/vite-plugin-svelte`, generates SSR + client hydration entries
+- **Runtime** (`void/svelte`): `Link`, `useForm`, `useShared`, `useRouter` — uses Svelte 5 runes (`$state`, `$derived`) and `getContext`
 - **Server handlers**: companion `.server.ts` files with `loader` and `action` exports (same as React adapter)
 
 See [`packages/svelte/README.md`](./packages/svelte/README.md) for details.
@@ -108,8 +108,8 @@ See [`packages/svelte/README.md`](./packages/svelte/README.md) for details.
 
 SolidJS framework adapter for Pages mode — same Inertia-inspired DX as Vue/React/Svelte.
 
-- **Plugin** (`@void-x/solid/plugin`): `voidSolid()` — wraps `vite-plugin-solid`, generates SSR + client hydration entries
-- **Runtime** (`@void-x/solid`): `Link`, `useForm`, `useShared`, `useRouter` — uses Solid signals (`createSignal`, `createStore`) and `createContext`/`useContext`
+- **Plugin** (`@void-x/solid`): `voidSolid()` — wraps `vite-plugin-solid`, generates SSR + client hydration entries
+- **Runtime** (`void/solid`): `Link`, `useForm`, `useShared`, `useRouter` — uses Solid signals (`createSignal`, `createStore`) and `createContext`/`useContext`
 - **Server handlers**: companion `.server.ts` files with `loader` and `action` exports (same as React/Svelte adapter)
 
 See [`packages/solid/README.md`](./packages/solid/README.md) for details.

@@ -1,4 +1,4 @@
-import { Link, useShared } from "@void-x/solid";
+import { Link, useShared } from "void/solid";
 import type { JSX } from "solid-js";
 
 export default function Layout(props: { children: JSX.Element }) {

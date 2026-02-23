@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Link, useShared } from "@void-x/svelte";
+  import { Link, useShared } from "void/svelte";
   import type { Snippet } from "svelte";
 
   let { children }: { children: Snippet } = $props();

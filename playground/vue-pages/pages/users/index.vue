@@ -22,7 +22,7 @@ export const action = defineHandler.withValidator({
 </script>
 
 <script setup lang="ts">
-import { Link, useForm } from "@void-x/vue";
+import { Link, useForm } from "void/vue";
 
 const props = defineProps<Props>();
 

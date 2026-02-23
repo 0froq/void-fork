@@ -88,6 +88,22 @@
     },
     "./env": {
       "types": "./env.d.ts"
+    },
+    "./vue": {
+      "types": "./dist/runtime/vue.d.mts",
+      "import": "./dist/runtime/vue.mjs"
+    },
+    "./react": {
+      "types": "./dist/runtime/react.d.mts",
+      "import": "./dist/runtime/react.mjs"
+    },
+    "./svelte": {
+      "types": "./dist/runtime/svelte.d.mts",
+      "import": "./dist/runtime/svelte.mjs"
+    },
+    "./solid": {
+      "types": "./dist/runtime/solid.d.mts",
+      "import": "./dist/runtime/solid.mjs"
     }
   },
   "scripts": {
@@ -118,8 +134,25 @@
     "zod": "^4.3.6"
   },
   "peerDependencies": {
+    "@void-x/react": "workspace:*",
+    "@void-x/solid": "workspace:*",
+    "@void-x/svelte": "workspace:*",
+    "@void-x/vue": "workspace:*",
     "hono": "^4.0.0",
     "vite": "^8.0.0-beta.14"
   },
-  "peerDependenciesMeta": {}
+  "peerDependenciesMeta": {
+    "@void-x/vue": {
+      "optional": true
+    },
+    "@void-x/react": {
+      "optional": true
+    },
+    "@void-x/svelte": {
+      "optional": true
+    },
+    "@void-x/solid": {
+      "optional": true
+    }
+  }
 }

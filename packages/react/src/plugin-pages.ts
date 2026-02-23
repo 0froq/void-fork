@@ -102,7 +102,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string, isDev: b
   return `
 import React from "react";
 import { renderToString } from "react-dom/server";
-import { SharedContext, ErrorsContext, RouterContext } from "@void-x/react";
+import { SharedContext, ErrorsContext, RouterContext } from "@void-x/react/runtime";
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -164,7 +164,7 @@ function generateClientEntry(
 import React, { useSyncExternalStore } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { SharedContext, ErrorsContext, RouterContext } from "@void-x/react";
+import { SharedContext, ErrorsContext, RouterContext } from "@void-x/react/runtime";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 

@@ -8,7 +8,7 @@ Svelte 5 framework adapter for Void Pages mode — Inertia-inspired full-stack D
 // vite.config.ts
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidSvelte } from "@void-x/svelte/plugin";
+import { voidSvelte } from "@void-x/svelte";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSvelte()],
@@ -31,7 +31,7 @@ The pages plugin generates two virtual modules:
 
 ## Runtime
 
-Import from `@void-x/svelte`:
+Import from `void/svelte`:
 
 - **`Link`** — SPA navigation component. Renders `<a>` for GET, `<button>` otherwise. Intercepts clicks for client-side navigation.
 - **`useForm(url, defaults, options?)`** — Form state management using Svelte 5 runes (`$state`, `$derived`). Supports `bind:value` directly on `form.data.name`. Methods: `post`, `put`, `patch`, `delete`, `reset`, `clearErrors`.

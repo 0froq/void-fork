@@ -13,5 +13,11 @@
     "types": ["node", "@cloudflare/workers-types"],
     "isolatedDeclarations": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test"],
+  "exclude": [
+    "src/runtime/vue.ts",
+    "src/runtime/react.ts",
+    "src/runtime/svelte.ts",
+    "src/runtime/solid.ts"
+  ]
 }

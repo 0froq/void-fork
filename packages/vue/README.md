@@ -8,7 +8,7 @@ Vue framework adapter for Void Pages mode — Inertia-inspired full-stack DX wit
 // vite.config.ts
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidVue } from "@void-x/vue/plugin";
+import { voidVue } from "@void-x/vue";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue()],
@@ -33,7 +33,7 @@ An additional `scriptServerPlugin` extracts `<script server>` blocks from Vue SF
 
 ## Runtime
 
-Import from `@void-x/vue`:
+Import from `void/vue`:
 
 - **`Link`** — SPA navigation component. Renders `<a>` for GET, `<button>` otherwise. Intercepts clicks for client-side navigation.
 - **`useForm(url, defaults, options?)`** — Form state management using Vue `reactive()` and `ref()`. Supports `v-model` directly on `form.data.name`. Methods: `post`, `put`, `patch`, `delete`, `reset`, `clearErrors`.

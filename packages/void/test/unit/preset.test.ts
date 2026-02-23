@@ -60,7 +60,7 @@ describe("detectPreset", () => {
     });
     const result = detectPreset(root);
     expect(result).toEqual({
-      buildCommand: "npx vitepress build",
+      buildCommand: "vitepress build",
       outputDir: resolve(root, ".vitepress/dist"),
       mode: "ssg",
     });
@@ -73,7 +73,7 @@ describe("detectPreset", () => {
     });
     const result = detectPreset(root);
     expect(result).toEqual({
-      buildCommand: "npx vitepress build docs",
+      buildCommand: "vitepress build docs",
       outputDir: resolve(root, "docs/.vitepress/dist"),
       mode: "ssg",
     });
@@ -130,7 +130,7 @@ describe("detectPreset", () => {
     });
     const result = detectPreset(root);
     expect(result).toEqual({
-      buildCommand: "npx vite build",
+      buildCommand: "vite build",
       outputDir: resolve(root, "dist"),
       mode: "spa",
     });
