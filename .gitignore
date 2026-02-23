@@ -11,9 +11,6 @@ TODOs.md
 *.local
 .pnpm-store
 .codex
-.vitepress/cache
-playground/*/.node-version
-.tanstack
 .worktrees
 .playwright-mcp
-playground-local
+framework

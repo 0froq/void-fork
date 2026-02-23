@@ -1,13 +1,7 @@
 packages:
   - packages/*
-  - playground/*
-  - playground-local/*
 
 catalog:
-  "@clack/prompts": ^1.0.1
   "@cloudflare/workers-types": ^4.20260214.0
-  "@types/node": ^24.10.0
   "@typescript/native-preview": latest
-  tsdown: ^0.20.3
-  vite: 8.0.0-beta.14
   wrangler: ^4.65.0

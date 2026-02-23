@@ -1,7 +1,7 @@
 # Open Source Split
 
 **Date:** 2026-02-22
-**Status:** Proposed
+**Status:** Implemented
 
 ---
 
@@ -35,7 +35,7 @@ Split the Vite Cloud monorepo into two repos: an open-source **framework repo** 
 - `packages/dispatch` — edge router worker
 - `packages/ai-proxy` — AI inference proxy worker
 - `packages/dashboard` — user-facing dashboard (Vue Pages app)
-- `packages/ui` — shared CSS/design tokens (used by dashboard and website)
+- `packages/ui` — shared CSS/design tokens (used by dashboard)
 - `meta/` — design docs, operations, progress tracking
 
 ## Architecture Validation
@@ -107,6 +107,21 @@ Each repo is a fully self-contained pnpm workspace with its own:
 
 No `pnpm overrides` or cross-workspace linking — the platform repo never imports from `vite-cloud` at code level, so there is no need for local linking.
 
+## Deploy Protocol Versioning
+
+The `DeployManifest` interface is the only cross-repo coupling — the CLI sends it to the platform API over HTTP. After the split, independent releases could break this contract silently.
+
+**Strategy:**
+
+- Add a `version: number` field to `DeployManifest` in both repos (CLI types and platform types)
+- The CLI always sets `manifest.version` to the current protocol version when sending
+- The platform deploy endpoint validates the version field:
+  - Known version → proceed
+  - Missing/unknown version → return a clear error: `"Unsupported deploy manifest version. Please update vite-cloud."`
+- Contract tests in both repos assert the expected shape of `DeployManifest`
+
+**Versioning policy:** The CLI must be backward-compatible with the current and previous manifest version. The platform must accept the current and previous version. Bumping the version is a coordinated change.
+
 ## CI Changes
 
 **Framework repo CI** (new):
@@ -124,12 +139,31 @@ No `pnpm overrides` or cross-workspace linking — the platform repo never impor
 - Remove pages adapter suite, remove `--filter '!website'` exclusions
 - Playwright may still be needed for dashboard E2E tests
 
-**Platform deploy workflows**: Remove docs deploy steps (`build:cli && pnpm i`, `deploy:docs`). Docs deployment will be handled from the framework repo once it has its own GitHub remote. Dashboard deploy stays in the platform workflow.
+**Platform deploy workflows**: Remove the `pnpm -F vue -F vite-cloud build && pnpm i` pre-build step and `deploy:docs`/`deploy:staging:docs` steps. Post-split, the dashboard gets `vite-cloud` and `@vite-cloud/vue` from npm during `pnpm install --frozen-lockfile`, so the pre-build is no longer needed. Docs deployment moves to the framework repo via a dedicated `deploy-docs.yml` workflow. Dashboard deploy stays in the platform workflow.
+
+**Cross-repo compatibility gate (canary CI):**
+
+A daily canary workflow in the platform repo updates the dashboard's `vite-cloud` and `@vite-cloud/vue` dependencies to latest, then runs build + typecheck + tests. If a new framework release breaks the dashboard, it fails here before reaching production. The framework repo also runs a deploy manifest contract test as part of its CI to ensure the CLI still produces a valid manifest.
+
+## Dashboard `workspace:*` → npm Cutover
+
+Post-split, the dashboard's `vite-cloud` and `@vite-cloud/vue` dependencies change from `workspace:*` to published npm versions. During the transition (before first npm publish), use `file:` protocol overrides in the root `package.json`:
+
+```json
+"pnpm": {
+  "overrides": {
+    "vite-cloud": "file:framework/packages/vite-cloud",
+    "@vite-cloud/vue": "file:framework/packages/vue"
+  }
+}
+```
+
+These are removed once packages are published to npm. The `vite` catalog entry is also removed from the platform catalog (moved to framework only), so the dashboard pins `vite` directly in its `package.json`.
 
 ## Open Questions
 
 - **Framework repo GitHub org/name**: e.g. `vitejs/vite-cloud`, `voidzero/vite-cloud`, or `vite-cloud/vite-cloud`?
 - **Docs deployment**: Currently the platform deploy workflow deploys docs via `vcc deploy`. Post-split, the framework repo needs its own docs deploy workflow (or the platform deploy clones the framework repo).
 - **npm publishing**: The framework repo will need its own publish workflow for `vite-cloud`, `@vite-cloud/vue`, `@vite-cloud/react`, `@vite-cloud/svelte`, `@vite-cloud/solid`.
-- **`@vite-cloud/ui` placement**: Currently only CSS exports (theme.css, base.css). If the website also needs it, it may belong in the framework repo. If it stays platform-only (dashboard styling), it stays private. Currently only consumed by `dashboard`.
+- **`@vite-cloud/ui` placement**: Stays in the platform repo — only consumed by `dashboard`.
 - **Dashboard framework dependency versioning**: Post-split, the dashboard will depend on published `vite-cloud` and `@vite-cloud/vue` from npm. Need to decide whether to pin versions or track latest. During active development, tracking latest with a lockfile update CI step is likely sufficient.

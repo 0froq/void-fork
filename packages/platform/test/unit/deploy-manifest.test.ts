@@ -1,0 +1,51 @@
+import { describe, it, expect } from "vitest";
+import { SUPPORTED_MANIFEST_VERSIONS } from "../../src/types";
+import type { DeployManifest } from "../../src/types";
+
+describe("DeployManifest contract", () => {
+  it("has a version field", () => {
+    const manifest: DeployManifest = {
+      version: 1,
+      bindings: {},
+    };
+    expect(manifest.version).toBe(1);
+  });
+
+  it("supports version 1", () => {
+    expect(SUPPORTED_MANIFEST_VERSIONS).toContain(1);
+  });
+
+  it("accepts a full manifest shape", () => {
+    const manifest: DeployManifest = {
+      version: 1,
+      bindings: {
+        d1: ["DB"],
+        kv: ["KV"],
+        r2: ["STORAGE"],
+        ai: true,
+      },
+      migrations: [{ name: "0001_init.sql", destructive: false }],
+      schedules: [{ name: "cleanup", cron: "0 * * * *" }],
+      queues: [{ name: "emails", bindingName: "EMAIL_QUEUE" }],
+      ssr: true,
+      framework: true,
+      revalidate: 60,
+      prerender: ["/", "/about"],
+      static: undefined,
+      assetsDir: "assets",
+      assetHashes: { "index.html": "abc123" },
+      headers: [{ pattern: "/*", headers: [["X-Custom", "value"]] }],
+      vars: { NODE_ENV: "production" },
+    };
+
+    expect(manifest.version).toBe(1);
+    expect(manifest.bindings.d1).toEqual(["DB"]);
+    expect(manifest.migrations).toHaveLength(1);
+    expect(manifest.schedules).toHaveLength(1);
+    expect(manifest.queues).toHaveLength(1);
+  });
+
+  it("rejects unknown manifest versions", () => {
+    expect(SUPPORTED_MANIFEST_VERSIONS.includes(999)).toBe(false);
+  });
+});

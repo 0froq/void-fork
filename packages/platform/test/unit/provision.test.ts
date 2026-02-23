@@ -47,7 +47,7 @@ beforeEach(() => {
 
 describe("provisionBindings", () => {
   it("provisions D1 when manifest requires it and no resource exists", async () => {
-    const manifest: DeployManifest = { bindings: { d1: ["DB"] } };
+    const manifest: DeployManifest = { version: 1, bindings: { d1: ["DB"] } };
 
     const bindings = await provisionBindings(mockDb, ACCOUNT_ID, API_TOKEN, PROJECT_ID, manifest);
 
@@ -57,7 +57,7 @@ describe("provisionBindings", () => {
   });
 
   it("provisions KV when manifest requires it", async () => {
-    const manifest: DeployManifest = { bindings: { kv: ["KV"] } };
+    const manifest: DeployManifest = { version: 1, bindings: { kv: ["KV"] } };
 
     const bindings = await provisionBindings(mockDb, ACCOUNT_ID, API_TOKEN, PROJECT_ID, manifest);
 
@@ -67,7 +67,7 @@ describe("provisionBindings", () => {
   });
 
   it("provisions R2 when manifest requires it", async () => {
-    const manifest: DeployManifest = { bindings: { r2: ["STORAGE"] } };
+    const manifest: DeployManifest = { version: 1, bindings: { r2: ["STORAGE"] } };
 
     const bindings = await provisionBindings(mockDb, ACCOUNT_ID, API_TOKEN, PROJECT_ID, manifest);
 
@@ -95,7 +95,7 @@ describe("provisionBindings", () => {
     ];
     vi.mocked(getProjectResources).mockResolvedValue(existingResources);
 
-    const manifest: DeployManifest = { bindings: { d1: ["DB"] } };
+    const manifest: DeployManifest = { version: 1, bindings: { d1: ["DB"] } };
     const bindings = await provisionBindings(mockDb, ACCOUNT_ID, API_TOKEN, PROJECT_ID, manifest);
 
     expect(createD1Database).not.toHaveBeenCalled();
@@ -105,6 +105,7 @@ describe("provisionBindings", () => {
 
   it("handles multiple bindings in one deploy", async () => {
     const manifest: DeployManifest = {
+      version: 1,
       bindings: { d1: ["DB"], kv: ["KV"], r2: ["STORAGE"] },
     };
 
@@ -124,7 +125,7 @@ describe("provisionBindings", () => {
   });
 
   it("handles empty manifest (no bindings needed)", async () => {
-    const manifest: DeployManifest = { bindings: {} };
+    const manifest: DeployManifest = { version: 1, bindings: {} };
 
     const bindings = await provisionBindings(mockDb, ACCOUNT_ID, API_TOKEN, PROJECT_ID, manifest);
 
@@ -149,6 +150,7 @@ describe("provisionBindings", () => {
     vi.mocked(getProjectResources).mockResolvedValue(existingResources);
 
     const manifest: DeployManifest = {
+      version: 1,
       bindings: { d1: ["DB"], kv: ["KV"] },
     };
 

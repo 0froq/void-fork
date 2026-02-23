@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { PlatformEnv } from "../env";
-import type { DeployManifest } from "../types";
+import { SUPPORTED_MANIFEST_VERSIONS, type DeployManifest } from "../types";
 import {
   getProject,
   getUser,
@@ -67,7 +67,20 @@ app.post("/:id/deploy", async (c) => {
   const manifestRaw = formData.get("manifest") as string | null;
   const manifest: DeployManifest = manifestRaw
     ? (JSON.parse(manifestRaw) as DeployManifest)
-    : { bindings: {} };
+    : { version: 1, bindings: {} };
+
+  // Validate deploy manifest version
+  if (manifest.version == null || !SUPPORTED_MANIFEST_VERSIONS.includes(manifest.version)) {
+    return c.json(
+      {
+        error: "Unsupported deploy manifest version. Please update vite-cloud.",
+        version: manifest.version ?? null,
+        supported: SUPPORTED_MANIFEST_VERSIONS,
+      },
+      400,
+    );
+  }
+
   const source = (formData.get("source") as string | null) ?? null;
   const commit = (formData.get("commit") as string | null) ?? null;
 

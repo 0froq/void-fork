@@ -19,11 +19,11 @@
     "@tailwindcss/vite": "^4.2.0",
     "@vite-cloud/platform": "workspace:*",
     "@vite-cloud/ui": "workspace:*",
-    "@vite-cloud/vue": "workspace:*",
+    "@vite-cloud/vue": "^0.0.1",
     "tailwindcss": "^4.2.0",
     "typescript": "~5.8.3",
-    "vite": "catalog:",
-    "vite-cloud": "workspace:*",
+    "vite": "8.0.0-beta.14",
+    "vite-cloud": "^0.0.1",
     "vue-tsc": "^3.2.5",
     "wrangler": "catalog:"
   }

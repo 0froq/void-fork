@@ -24,17 +24,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # build the CLI & vue plugin first and link it as the deploy relies on them
-      - run: pnpm -F vue -F vite-cloud build && pnpm i
-
-      # deploy platform and dispatch workers
       - run: pnpm run deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-
-      # deploy docs (static vitepress hosted on the platform itself)
-      # only do this after platform deploy succeeds
-      - run: pnpm deploy:docs
-        env:
-          VITE_CLOUD_TOKEN: ${{ secrets.VITE_CLOUD_TOKEN }}

@@ -1,6 +1,0 @@
-Vite Cloud is a fullstack Vite framework and deployment platform for Cloudflare. In an empty directory, set up a new app with:
-
-npm install -D vite-cloud
-npx vcc init
-
-Now ask me what I want to build.

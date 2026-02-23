@@ -39,7 +39,7 @@ function buildDeployForm(opts?: {
   migrations?: Record<string, string>;
 }): FormData {
   const form = new FormData();
-  form.append("manifest", JSON.stringify(opts?.manifest ?? { bindings: {} }));
+  form.append("manifest", JSON.stringify(opts?.manifest ?? { version: 1, bindings: {} }));
   // Default: include at least one worker file
   const workers = opts?.workers ?? {
     "index.js": "export default { fetch() { return new Response('ok'); } }",
@@ -206,7 +206,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { bindings: {}, headers },
+          manifest: { version: 1, bindings: {}, headers },
         }),
       }),
       env,
@@ -233,7 +233,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { bindings: {}, ssr: true },
+          manifest: { version: 1, bindings: {}, ssr: true },
         }),
       }),
       env,
@@ -289,6 +289,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
+            version: 1,
             bindings: {},
             schedules: [{ name: "sync", cron: "0 * * * *" }],
           },
@@ -324,7 +325,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { bindings: { d1: ["DB"] } },
+          manifest: { version: 1, bindings: { d1: ["DB"] } },
         }),
       }),
       env,
@@ -361,7 +362,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { bindings: { d1: ["DB"] } },
+          manifest: { version: 1, bindings: { d1: ["DB"] } },
         }),
       }),
       env,
@@ -405,7 +406,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { bindings: { d1: ["DB"] } },
+          manifest: { version: 1, bindings: { d1: ["DB"] } },
           migrations: {
             "001_create_table.sql": "CREATE TABLE items (id TEXT PRIMARY KEY)",
           },
@@ -433,7 +434,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { bindings: { d1: ["DB"] } },
+          manifest: { version: 1, bindings: { d1: ["DB"] } },
           migrations: {
             "002_drop.sql": "DROP TABLE users",
           },
@@ -612,6 +613,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
+            version: 1,
             bindings: {},
             vars: { API_URL: "https://api.example.com", NODE_ENV: "production" },
           },
@@ -683,6 +685,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
+            version: 1,
             bindings: {},
             queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
           },
@@ -721,6 +724,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
+            version: 1,
             bindings: {},
             queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
           },
@@ -760,6 +764,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
+            version: 1,
             bindings: {},
             queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
           },
@@ -786,7 +791,7 @@ function buildStaticDeployForm(opts: {
   headers?: { pattern: string; headers: [string, string][] }[];
 }): FormData {
   const form = new FormData();
-  const manifest: Record<string, unknown> = { bindings: {}, static: opts.mode };
+  const manifest: Record<string, unknown> = { version: 1, bindings: {}, static: opts.mode };
   if (opts.assetHashes) {
     manifest.assetHashes = opts.assetHashes;
   }
@@ -1171,6 +1176,7 @@ describe("Deploy with prerendering", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
+            version: 1,
             bindings: {},
             revalidate: 3600,
             prerender: ["/", "/about"],
@@ -1224,6 +1230,7 @@ describe("Deploy with prerendering", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
+            version: 1,
             bindings: {},
             revalidate: { "/about": 3600, "/private": 0, "*": 0 },
             prerender: ["/about", "/private"],
@@ -1263,6 +1270,7 @@ describe("Deploy with prerendering", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
+            version: 1,
             bindings: {},
             revalidate: 3600,
             prerender: ["/"],
@@ -1309,6 +1317,7 @@ describe("Deploy with prerendering", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
+            version: 1,
             bindings: {},
             revalidate: 3600,
             prerender: ["/"],
