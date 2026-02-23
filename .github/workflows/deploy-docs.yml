@@ -1,0 +1,23 @@
+name: Deploy Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/website/**
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:cli
+      - run: pnpm deploy:docs
+        env:
+          VITE_CLOUD_TOKEN: ${{ secrets.VITE_CLOUD_TOKEN }}

@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+jobs:
+  lint-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm -r build
+      - run: pnpm check
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - suite: unit
+            pattern: test/unit
+          - suite: integration
+            pattern: vite-cloud/test/integration
+          - suite: pages-adapters-react-vue
+            pattern: react/test/integration vue/test/integration
+          - suite: pages-adapters-svelte-solid
+            pattern: svelte/test/integration solid/test/integration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+
+      - uses: actions/cache@v4
+        if: matrix.suite == 'pages-adapters-react-vue' || matrix.suite == 'pages-adapters-svelte-solid'
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm exec playwright install chromium
+        if: (matrix.suite == 'pages-adapters-react-vue' || matrix.suite == 'pages-adapters-svelte-solid') && steps.playwright-cache.outputs.cache-hit != 'true'
+      - run: pnpm exec playwright install-deps chromium
+        if: matrix.suite == 'pages-adapters-react-vue' || matrix.suite == 'pages-adapters-svelte-solid'
+
+      - run: pnpm vitest --run ${{ matrix.pattern }}
