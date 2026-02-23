@@ -67,11 +67,11 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | [`packages/dashboard`](./packages/dashboard/README.md) | `@voidcloud/dashboard` (private) | User-facing dashboard — project management, deployments, usage |
 | [`packages/ui`](./packages/ui)                         | `@voidcloud/ui` (private)        | Shared CSS/design tokens (used by dashboard)                   |
 
-The dashboard depends on `void` and `@voidcloud/vue`, resolved via `pnpm.overrides` to `link:framework/...` (the git submodule). CI checks out the submodule and builds it before `pnpm install`.
+The dashboard depends on `void` and `@void-x/vue`, resolved via `pnpm.overrides` to `link:framework/...` (the git submodule). CI checks out the submodule and builds it before `pnpm install`.
 
 ## `dashboard` Overview
 
-Vue Pages mode app serving the user-facing Void dashboard at `dash.void.cloud`. Built with `@voidcloud/vue` (SSR + `<script server>` blocks), Hono, and Tailwind CSS v4 with shared design tokens from `@voidcloud/ui`. Uses a BFF pattern — server-side loaders call the API with the user's JWT (stored in an httpOnly cookie), so the client never talks to the API directly.
+Vue Pages mode app serving the user-facing Void dashboard at `dash.void.cloud`. Built with `@void-x/vue` (SSR + `<script server>` blocks), Hono, and Tailwind CSS v4 with shared design tokens from `@voidcloud/ui`. Uses a BFF pattern — server-side loaders call the API with the user's JWT (stored in an httpOnly cookie), so the client never talks to the API directly.
 
 - **Auth**: OAuth (GitHub/Google) via API, JWT in httpOnly `void_token` cookie
 - **Pages**: login, project list with aggregate usage, project detail (deployments, domains, secrets, usage metrics), settings

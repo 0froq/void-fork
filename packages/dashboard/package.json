@@ -17,9 +17,9 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.0",
+    "@void-x/vue": "^0.0.1",
     "@voidcloud/api": "workspace:*",
     "@voidcloud/ui": "workspace:*",
-    "@voidcloud/vue": "^0.0.1",
     "tailwindcss": "^4.2.0",
     "typescript": "~5.8.3",
     "vite": "8.0.0-beta.14",

@@ -55,7 +55,7 @@
 - [x] CLI skills for coding agents (Claude Code, Cursor, Codex, etc.)
 - [x] MCP server shipped in-package (`void mcp`)
 - [x] CLI lazy loading for startup performance
-- [x] Pages mode — Inertia-inspired full-stack DX with Vue adapter (`@voidcloud/vue`)
+- [x] Pages mode — Inertia-inspired full-stack DX with Vue adapter (`@void-x/vue`)
 - [x] Meta-framework adapters (TanStack Start — framework mode)
 
 ### Remaining
