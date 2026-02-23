@@ -2,7 +2,7 @@
 
 ## Phase 1: Local Dev ✅
 
-- [x] `vcc init` empty-directory scaffolding flow
+- [x] `void init` empty-directory scaffolding flow
 - [x] Vite plugin wrapping `@cloudflare/vite-plugin`
 - [x] `defineHandler` / `defineMiddleware` with type inference (Hono-based)
 - [x] File-based routing from `routes/` (compiles to Hono app)
@@ -14,18 +14,18 @@
 - [x] Hot reload for API handlers (via Environment API HMR)
 - [x] Local migration runner
 
-**Milestone:** ✅ A user can run `npm install -D vite-cloud` + `npx vcc init` in an empty directory, add a route file using `defineHandler` that queries a database, and see it work locally with zero config.
+**Milestone:** ✅ A user can run `npm install -D void` + `npx void init` in an empty directory, add a route file using `defineHandler` that queries a database, and see it work locally with zero config.
 
 ## Phase 2: Platform & Deploy ✅
 
-- [x] Control Plane API (projects, deploy endpoint) — `packages/platform/`
-- [x] Dispatch worker + `*.vitecloud.app` routing — `packages/dispatch/`
+- [x] Control Plane API (projects, deploy endpoint) — `packages/api/`
+- [x] Dispatch worker + `*.void.app` routing — `packages/dispatch/`
 - [x] Static asset serving via R2 (SPA fallback, cache headers)
-- [x] `vcc deploy` CLI command
+- [x] `void deploy` CLI command
 - [x] D1 schema for users, projects, deployments, resources (Drizzle ORM)
 - [x] Worker upload to CF dispatch namespace via API
 - [x] KV-based routing table (`slug → { workerName, projectId }`)
-- [x] Auth (GitHub OAuth → JWT, `vcc login` CLI command)
+- [x] Auth (GitHub OAuth → JWT, `void login` CLI command)
 - [x] Provisioning engine (D1, KV, R2 creation via CF API)
 - [x] Zero-downtime remote migration execution
 - [x] Staging environment with auto-deploy on push to `main`
@@ -36,26 +36,26 @@
 
 ### Completed
 
-- [x] Secrets management (`vcc secrets`)
+- [x] Secrets management (`void secrets`)
 - [x] Cron jobs (`crons/` directory, `defineScheduled`)
 - [x] Queues (`queues/` directory, `defineQueue`, typed producers/consumers)
 - [x] SSR support (`defineRender` in `src/main.ssr.ts`)
 - [x] Zero-config auth (email/password + OAuth, auto-detected from imports)
 - [x] `defineHandler.withValidator()` — Standard Schema input validation (body/query/params)
-- [x] Route type codegen (`.vite-cloud/routes.d.ts` with `Serialize<T>` + `ExtractInput<V>`)
-- [x] Typed `fetch` client (`vite-cloud/client`) with path/method/input/output inference
-- [x] Schema-derived DB types (SQL DDL parser → `.vite-cloud/db.d.ts`)
-- [x] Typed query helper (`vite-cloud/db`) — `db.list/get/insert/update/delete/raw`
-- [x] Seamless tsconfig (`.vite-cloud/tsconfig.json` generated, user extends it)
+- [x] Route type codegen (`.void/routes.d.ts` with `Serialize<T>` + `ExtractInput<V>`)
+- [x] Typed `fetch` client (`void/client`) with path/method/input/output inference
+- [x] Schema-derived DB types (SQL DDL parser → `.void/db.d.ts`)
+- [x] Typed query helper (`void/db`) — `db.list/get/insert/update/delete/raw`
+- [x] Seamless tsconfig (`.void/tsconfig.json` generated, user extends it)
 - [x] Raw Cloudflare deployment (`vite build && wrangler deploy`)
 - [x] Static deployment (`--dir`, `--spa`, VitePress/Vite auto-detection, SSG 404.html fallback)
-- [x] Code generation (`vcc gen` — model, route, middleware, ssr, cron, queue)
-- [x] `vcc db` commands (migrations, inspect)
-- [x] `vcc init` — agent instructions, skills linking, prompt output
+- [x] Code generation (`void gen` — model, route, middleware, ssr, cron, queue)
+- [x] `void db` commands (migrations, inspect)
+- [x] `void init` — agent instructions, skills linking, prompt output
 - [x] CLI skills for coding agents (Claude Code, Cursor, Codex, etc.)
-- [x] MCP server shipped in-package (`vcc mcp`)
+- [x] MCP server shipped in-package (`void mcp`)
 - [x] CLI lazy loading for startup performance
-- [x] Pages mode — Inertia-inspired full-stack DX with Vue adapter (`@vite-cloud/vue`)
+- [x] Pages mode — Inertia-inspired full-stack DX with Vue adapter (`@voidcloud/vue`)
 - [x] Meta-framework adapters (TanStack Start — framework mode)
 
 ### Remaining
@@ -75,7 +75,7 @@
 
 ### Completed
 
-- [x] Custom domains (`vcc domains`)
+- [x] Custom domains (`void domains`)
 - [x] Usage tiers, metering and limits enforcement
 - [x] Admin dashboard (Hono JSX, merged into platform worker)
 - [x] Staging environment with isolated CF resources
@@ -107,7 +107,7 @@
 
 ### Developer Tools
 
-- [ ] `vcc devtools` — route visualization, local DB inspector, log tailing, remote project status
+- [ ] `void devtools` — route visualization, local DB inspector, log tailing, remote project status
 - [ ] Edge cache auto-warming after deploy
 - [ ] Instant preview without deploying (CF tunnel)
 - [ ] AI-powered codegen
@@ -152,5 +152,5 @@
 - [ ] Guide: External DB usage
 - [ ] Guide: Using the Hono ecosystem
 - [ ] Guide: Using raw CF bindings
-- [ ] Guide: Migrating from raw CF to Vite Cloud
+- [ ] Guide: Migrating from raw CF to Void
 - [ ] Guide: Deploying to raw CF

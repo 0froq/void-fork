@@ -16,7 +16,7 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       # Update framework deps to latest
-      - run: pnpm -F dashboard up vite-cloud @vite-cloud/vue
+      - run: pnpm -F dashboard up void @voidcloud/vue
       - run: pnpm install
       - run: pnpm -r build
       - run: pnpm check

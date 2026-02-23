@@ -28,7 +28,7 @@ jobs:
           - suite: unit
             pattern: test/unit
           - suite: integration
-            pattern: platform/test/integration
+            pattern: api/test/integration
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

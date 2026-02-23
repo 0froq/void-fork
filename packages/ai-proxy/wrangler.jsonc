@@ -1,5 +1,5 @@
 {
-  "name": "vite-cloud-ai-proxy",
+  "name": "void-ai-proxy",
   "main": "src/index.ts",
   "compatibility_date": "2026-02-12",
   "compatibility_flags": ["nodejs_compat"],
@@ -16,10 +16,10 @@
       "invocation_logs": true,
     },
   },
-  "routes": [{ "pattern": "ai-proxy.vite.cloud", "custom_domain": true }],
+  "routes": [{ "pattern": "ai-proxy.void.cloud", "custom_domain": true }],
   "env": {
     "staging": {
-      "name": "vite-cloud-ai-proxy-staging",
+      "name": "void-ai-proxy-staging",
       "ai": { "binding": "AI" },
       "kv_namespaces": [
         {
@@ -27,7 +27,7 @@
           "id": "60240eecea804f39bf8b7395cd6c6b08",
         },
       ],
-      "routes": [{ "pattern": "ai-proxy.staging.vite.cloud", "custom_domain": true }],
+      "routes": [{ "pattern": "ai-proxy.staging.void.cloud", "custom_domain": true }],
     },
   },
 }

@@ -128,10 +128,10 @@ This is a manual one-time step required before deploying the Drizzle-migrated co
 Mark the baseline migration as applied on the staging D1:
 
 ```bash
-wrangler d1 execute vite-cloud-platform-staging --env staging --command \
+wrangler d1 execute void-api-staging --env staging --command \
   "CREATE TABLE IF NOT EXISTS __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, created_at INTEGER NOT NULL)"
 
-wrangler d1 execute vite-cloud-platform-staging --env staging --command \
+wrangler d1 execute void-api-staging --env staging --command \
   "INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('0000_messy_patriot', 1771545874568)"
 ```
 
@@ -146,10 +146,10 @@ pnpm run deploy:staging
 Repeat the same `wrangler d1 execute` commands against the production D1:
 
 ```bash
-wrangler d1 execute vite-cloud-platform --command \
+wrangler d1 execute void-api --command \
   "CREATE TABLE IF NOT EXISTS __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, created_at INTEGER NOT NULL)"
 
-wrangler d1 execute vite-cloud-platform --command \
+wrangler d1 execute void-api --command \
   "INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('0000_messy_patriot', 1771545874568)"
 ```
 

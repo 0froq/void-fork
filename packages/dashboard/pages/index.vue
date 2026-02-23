@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link } from "@vite-cloud/vue";
+import { Link } from "@voidcloud/vue";
 import type { Props } from "./index.server";
 
 const { projects, usage } = defineProps<Props>();
@@ -44,7 +44,7 @@ function formatBytes(bytes: number): string {
     <div v-if="projects.length === 0" class="border border-border p-8 text-center">
       <p class="mb-2 text-sm text-text-secondary">No projects yet</p>
       <p class="font-mono text-xs text-text-muted">
-        Run <code class="text-accent">vcc projects create</code> to get started
+        Run <code class="text-accent">void projects create</code> to get started
       </p>
     </div>
 
@@ -62,7 +62,7 @@ function formatBytes(bytes: number): string {
           </span>
         </div>
         <div class="flex items-center gap-4 font-mono text-xs text-text-muted">
-          <span>{{ project.custom_domain ?? `${project.slug}.vitecloud.app` }}</span>
+          <span>{{ project.custom_domain ?? `${project.slug}.void.app` }}</span>
           <span>
             {{
               formatNumber(usage.projects.find((u) => u.projectId === project.id)?.requests ?? 0)

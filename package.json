@@ -7,18 +7,18 @@
     "lint": "oxlint",
     "fmt": "oxfmt --write .",
     "check": "pnpm -r --parallel typecheck",
-    "deploy": "pnpm deploy:ai-proxy && pnpm deploy:dispatch && pnpm deploy:platform && pnpm deploy:dashboard",
+    "deploy": "pnpm deploy:ai-proxy && pnpm deploy:dispatch && pnpm deploy:api && pnpm deploy:dashboard",
     "deploy:ai-proxy": "pnpm -F /ai-proxy run deploy",
     "deploy:dispatch": "pnpm -F dispatch run deploy",
-    "deploy:platform": "pnpm -F platform migrate && pnpm -F platform run deploy",
+    "deploy:api": "pnpm -F api migrate && pnpm -F api run deploy",
     "deploy:dashboard": "pnpm -F dashboard run deploy",
-    "deploy:staging": "pnpm deploy:staging:ai-proxy && pnpm deploy:staging:dispatch && pnpm deploy:staging:platform && pnpm deploy:staging:dashboard",
+    "deploy:staging": "pnpm deploy:staging:ai-proxy && pnpm deploy:staging:dispatch && pnpm deploy:staging:api && pnpm deploy:staging:dashboard",
     "deploy:staging:ai-proxy": "pnpm -F ai-proxy run deploy --env staging",
     "deploy:staging:dispatch": "pnpm -F dispatch run deploy --env staging",
-    "deploy:staging:platform": "pnpm -F platform migrate:staging && pnpm -F platform run deploy --env staging",
+    "deploy:staging:api": "pnpm -F api migrate:staging && pnpm -F api run deploy --env staging",
     "deploy:staging:dashboard": "pnpm -F dashboard run deploy:staging",
-    "health": "node packages/platform/scripts/health.ts",
-    "health:staging": "node packages/platform/scripts/health.ts --staging",
+    "health": "node packages/api/scripts/health.ts",
+    "health:staging": "node packages/api/scripts/health.ts --staging",
     "prepare": "husky"
   },
   "devDependencies": {
@@ -41,8 +41,8 @@
       "workerd"
     ],
     "overrides": {
-      "vite-cloud": "link:framework/packages/vite-cloud",
-      "@vite-cloud/vue": "link:framework/packages/vue"
+      "void": "link:framework/packages/void",
+      "@voidcloud/vue": "link:framework/packages/vue"
     }
   }
 }

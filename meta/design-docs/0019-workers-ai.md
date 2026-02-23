@@ -7,7 +7,7 @@
 
 ## Summary
 
-Add Workers AI as an inferred binding with a zero-config DX matching the existing D1/KV/R2 pattern. Users `import { ai } from "vite-cloud/ai"` and get full type-safe access to Cloudflare's AI inference models — no Cloudflare account required, no wrangler config to write.
+Add Workers AI as an inferred binding with a zero-config DX matching the existing D1/KV/R2 pattern. Users `import { ai } from "void/ai"` and get full type-safe access to Cloudflare's AI inference models — no Cloudflare account required, no wrangler config to write.
 
 The core design challenge is **metering**: Cloudflare charges us (the platform account) for all AI inference across Workers for Platforms. We must track per-project usage for billing and prevent users from bypassing metering by modifying their deployed worker code.
 
@@ -15,10 +15,10 @@ The solution: user workers never receive the `AI` binding directly. All inferenc
 
 ## User-Facing API
 
-### Server — `vite-cloud/ai`
+### Server — `void/ai`
 
 ```ts
-import { ai } from "vite-cloud/ai";
+import { ai } from "void/ai";
 
 // Text generation
 const result = await ai.run("@cf/meta/llama-3.1-8b-instruct", {
@@ -89,7 +89,7 @@ Note: in production, `c.env.AI` is not the raw Cloudflare binding — it's the p
 General-purpose SSE stream consumer for the typed fetch client. Not AI-specific — works with any route that returns SSE.
 
 ```ts
-import { fetchStream } from "vite-cloud/client";
+import { fetchStream } from "void/client";
 
 const stream = fetchStream("/api/ai/chat", {
   method: "POST",
@@ -109,8 +109,8 @@ for await (const chunk of stream) {
 Server route (`routes/ai/chat.ts`):
 
 ```ts
-import { ai } from "vite-cloud/ai";
-import { defineHandler } from "vite-cloud";
+import { ai } from "void/ai";
+import { defineHandler } from "void";
 import * as v from "valibot";
 
 export const POST = defineHandler
@@ -135,7 +135,7 @@ export const POST = defineHandler
 Client (`src/components/Chat.tsx`):
 
 ```tsx
-import { fetchStream } from "vite-cloud/client";
+import { fetchStream } from "void/client";
 import { useState } from "react";
 
 function Chat() {
@@ -206,7 +206,7 @@ AI Gateway gives us capabilities that would be expensive to build ourselves:
 | **Logging**         | Full request/response logs with Logpush to external storage               |
 | **Analytics**       | Dashboard + GraphQL API for requests, tokens, costs, errors               |
 
-We provision a single AI Gateway (`vite-cloud`) at the account level. All projects share it. Per-project segmentation is via custom metadata, queryable through the GraphQL analytics API.
+We provision a single AI Gateway (`void`) at the account level. All projects share it. Per-project segmentation is via custom metadata, queryable through the GraphQL analytics API.
 
 ### The proxy worker
 
@@ -222,7 +222,7 @@ export default {
       const result = await env.AI.run(model, inputs, {
         ...options,
         gateway: {
-          id: "vite-cloud",
+          id: "void",
           metadata: { projectId },
         },
       });
@@ -251,7 +251,7 @@ export default {
 The proxy authenticates requests differently based on source:
 
 - **Service binding (production):** Trusted. Project ID comes from `__PROJECT_ID` plain text binding on the user worker, passed in the request body.
-- **HTTPS (local dev):** Validates the Vite Cloud auth token from the `Authorization` header. Resolves project ID from the token's session.
+- **HTTPS (local dev):** Validates the Void auth token from the `Authorization` header. Resolves project ID from the token's session.
 
 ### Local dev flow
 
@@ -263,28 +263,28 @@ Rather than requiring users to have a Cloudflare account and configure `wrangler
 pnpm dev
   │
   ▼
-vite-cloud plugin detects `import { ai }`
+void plugin detects `import { ai }`
   │
   ▼
-Reads Vite Cloud credentials (~/.vite-cloud or vcc auth login)
+Reads Void credentials (~/.void or void auth login)
   │
   ▼
-Injects __VITE_CLOUD_TOKEN and __VITE_CLOUD_PROJECT_ID as env vars
+Injects __VOID_TOKEN and __VOID_PROJECT_ID as env vars
   │
   ▼
-ai.run() → HTTPS POST to ai-proxy.vitecloud.app
+ai.run() → HTTPS POST to ai-proxy.void.app
   │         (with Bearer token auth)
   ▼
 Proxy → AI Gateway → CF Inference
 ```
 
-**No Cloudflare account needed.** The user authenticates with Vite Cloud (which they already need for deploys). AI usage during dev is billed through Vite Cloud, same as production.
+**No Cloudflare account needed.** The user authenticates with Void (which they already need for deploys). AI usage during dev is billed through Void, same as production.
 
 The HTTPS overhead (vs. service binding) is negligible compared to AI inference latency (100ms–10s).
 
 ### Runtime detection order
 
-The `vite-cloud/ai` runtime module detects the environment and routes accordingly:
+The `void/ai` runtime module detects the environment and routes accordingly:
 
 ```ts
 function resolveBackend(): AiBackend {
@@ -294,21 +294,21 @@ function resolveBackend(): AiBackend {
   const directAi = (env as any).AI;
   if (directAi) return { type: "direct", ai: directAi };
 
-  const token = (env as any).__VITE_CLOUD_TOKEN;
-  const projectId = (env as any).__VITE_CLOUD_PROJECT_ID;
+  const token = (env as any).__VOID_TOKEN;
+  const projectId = (env as any).__VOID_PROJECT_ID;
   if (token) return { type: "http", token, projectId };
 
   throw new Error(
-    "AI not available. Run `vcc auth login` and link a project with `vcc projects link`.",
+    "AI not available. Run `void auth login` and link a project with `void projects link`.",
   );
 }
 ```
 
 | Priority | Backend         | When                                                     | Transport             |
 | -------- | --------------- | -------------------------------------------------------- | --------------------- |
-| 1        | Service binding | Production (deployed to Vite Cloud)                      | Intra-CF, sub-ms      |
+| 1        | Service binding | Production (deployed to Void)                            | Intra-CF, sub-ms      |
 | 2        | Direct binding  | User has own CF account + manual `[ai]` in wrangler.json | Direct to CF API      |
-| 3        | HTTPS proxy     | Local dev with Vite Cloud auth                           | HTTPS to proxy worker |
+| 3        | HTTPS proxy     | Local dev with Void auth                                 | HTTPS to proxy worker |
 | 4        | Error           | No auth available                                        | Helpful error message |
 
 Priority 2 is the escape hatch for power users who want to use their own CF account and skip our billing.
@@ -321,9 +321,9 @@ Follows the existing three-tier detection pattern in `src/inference/walk.ts`.
 
 **Tier 1 — `es-module-lexer` (fast path):**
 
-| Import source   | Flag             |
-| --------------- | ---------------- |
-| `vite-cloud/ai` | `needsAI = true` |
+| Import source | Flag             |
+| ------------- | ---------------- |
+| `void/ai`     | `needsAI = true` |
 
 **Tier 2 — Regex gate:**
 
@@ -377,7 +377,7 @@ if (manifest.bindings.ai) {
   workerBindings.push({
     type: "service",
     name: "__AI_PROXY",
-    service: "vite-cloud-ai-proxy",
+    service: "void-ai-proxy",
   });
   workerBindings.push({
     type: "plain_text",
@@ -396,13 +396,13 @@ In the Vite plugin's `mergeBindings()`, AI is handled differently from other bin
 ```ts
 if (needsAI) {
   // Don't add ai: { binding: "AI" } — user may not have CF auth
-  // Inject Vite Cloud credentials for HTTPS proxy path
-  const credentials = readViteCloudCredentials(root);
+  // Inject Void credentials for HTTPS proxy path
+  const credentials = readVoidCredentials(root);
   if (credentials) {
     resolved.vars = {
       ...resolved.vars,
-      __VITE_CLOUD_TOKEN: credentials.token,
-      __VITE_CLOUD_PROJECT_ID: credentials.projectId,
+      __VOID_TOKEN: credentials.token,
+      __VOID_PROJECT_ID: credentials.projectId,
     };
   }
 }
@@ -429,11 +429,11 @@ Add `AI: Ai` so `c.env.AI` is typed in route handlers.
 
 ### No custom type generation
 
-Unlike D1 (which generates `DbTables` from migrations) or queues (which generate `QueueMap` from consumer files), AI needs no custom type generation. The `Ai` type from `@cloudflare/workers-types` already has full model/input/output type maps. No `.vite-cloud/ai.d.ts` file.
+Unlike D1 (which generates `DbTables` from migrations) or queues (which generate `QueueMap` from consumer files), AI needs no custom type generation. The `Ai` type from `@cloudflare/workers-types` already has full model/input/output type maps. No `.void/ai.d.ts` file.
 
 ## Package Exports
 
-Add `./ai` to `packages/vite-cloud/package.json`:
+Add `./ai` to `packages/void/package.json`:
 
 ```json
 {
@@ -458,7 +458,7 @@ query {
     accounts(filter: { accountTag: $accountId }) {
       aiGatewayRequests(
         filter: {
-          gatewayId: "vite-cloud"
+          gatewayId: "void"
           metadata_projectId: $projectId
           datetime_geq: $periodStart
           datetime_leq: $periodEnd
@@ -499,28 +499,28 @@ Enforcement happens in the proxy worker — it can check usage against limits be
 
 ### New files
 
-| File                                              | Purpose                                                       |
-| ------------------------------------------------- | ------------------------------------------------------------- |
-| `packages/vite-cloud/src/runtime/ai.ts`           | Runtime module — `ai` proxy, `ai.stream()`, backend detection |
-| `packages/vite-cloud/src/runtime/fetch-stream.ts` | `fetchStream()` SSE consumer for the client                   |
-| `packages/ai-proxy/`                              | New package — the AI proxy worker                             |
+| File                                        | Purpose                                                       |
+| ------------------------------------------- | ------------------------------------------------------------- |
+| `packages/void/src/runtime/ai.ts`           | Runtime module — `ai` proxy, `ai.stream()`, backend detection |
+| `packages/void/src/runtime/fetch-stream.ts` | `fetchStream()` SSE consumer for the client                   |
+| `packages/ai-proxy/`                        | New package — the AI proxy worker                             |
 
 ### Modified files
 
-| File                                              | Change                                                                     |
-| ------------------------------------------------- | -------------------------------------------------------------------------- |
-| `packages/vite-cloud/src/inference/walk.ts`       | Add `needsAI` to `InferredBindings`, detection in all 3 tiers              |
-| `packages/vite-cloud/src/index.ts`                | Handle `needsAI` in `mergeBindings()` (inject credentials, not AI binding) |
-| `packages/vite-cloud/src/plugin-inference.ts`     | Add `bindings.ai` override support                                         |
-| `packages/vite-cloud/src/runtime/handler.ts`      | Add `AI: Ai` to `CloudEnv.Bindings`                                        |
-| `packages/vite-cloud/src/runtime/client.ts`       | Re-export `fetchStream`                                                    |
-| `packages/vite-cloud/env.d.ts`                    | Add `AI: Ai` to `Cloudflare.Env`                                           |
-| `packages/vite-cloud/package.json`                | Add `./ai` export                                                          |
-| `packages/vite-cloud/src/cli/types.ts`            | Add `ai?: boolean` to `DeployManifest.bindings`                            |
-| `packages/vite-cloud/src/cli/package.ts`          | Serialize `needsAI` into manifest                                          |
-| `packages/platform/src/types.ts`                  | Add `ai?: boolean` to `DeployManifest.bindings`                            |
-| `packages/platform/src/routes/deploy.ts`          | Add service binding + project ID when `ai` is true                         |
-| `packages/platform/src/provisioning/provision.ts` | Handle `ai` binding type (service binding, not CF resource)                |
+| File                                         | Change                                                                     |
+| -------------------------------------------- | -------------------------------------------------------------------------- |
+| `packages/void/src/inference/walk.ts`        | Add `needsAI` to `InferredBindings`, detection in all 3 tiers              |
+| `packages/void/src/index.ts`                 | Handle `needsAI` in `mergeBindings()` (inject credentials, not AI binding) |
+| `packages/void/src/plugin-inference.ts`      | Add `bindings.ai` override support                                         |
+| `packages/void/src/runtime/handler.ts`       | Add `AI: Ai` to `CloudEnv.Bindings`                                        |
+| `packages/void/src/runtime/client.ts`        | Re-export `fetchStream`                                                    |
+| `packages/void/env.d.ts`                     | Add `AI: Ai` to `Cloudflare.Env`                                           |
+| `packages/void/package.json`                 | Add `./ai` export                                                          |
+| `packages/void/src/cli/types.ts`             | Add `ai?: boolean` to `DeployManifest.bindings`                            |
+| `packages/void/src/cli/package.ts`           | Serialize `needsAI` into manifest                                          |
+| `packages/api/src/types.ts`                  | Add `ai?: boolean` to `DeployManifest.bindings`                            |
+| `packages/api/src/routes/deploy.ts`          | Add service binding + project ID when `ai` is true                         |
+| `packages/api/src/provisioning/provision.ts` | Handle `ai` binding type (service binding, not CF resource)                |
 
 ## Open Questions
 

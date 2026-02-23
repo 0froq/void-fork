@@ -1,7 +1,7 @@
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 import { deleteCookie } from "hono/cookie";
 
 export const loader = defineHandler((c) => {
-  deleteCookie(c, "vc_token", { path: "/" });
+  deleteCookie(c, "void_token", { path: "/" });
   return c.redirect("/login");
 });

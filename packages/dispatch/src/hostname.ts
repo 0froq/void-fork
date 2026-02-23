@@ -3,15 +3,12 @@
  * Returns null if the hostname doesn't match the expected pattern.
  *
  * Examples:
- *   "my-app.vitecloud.app" → "my-app"
- *   "vitecloud.app" → null
- *   "foo.bar.vitecloud.app" → null (no subdomains)
+ *   "my-app.void.app" → "my-app"
+ *   "void.app" → null
+ *   "foo.bar.void.app" → null (no subdomains)
  *   "example.com" → null
  */
-export function extractSlug(
-  hostname: string,
-  baseHostname: string = "vitecloud.app",
-): string | null {
+export function extractSlug(hostname: string, baseHostname: string = "void.app"): string | null {
   const suffix = `.${baseHostname}`;
   if (!hostname.endsWith(suffix)) {
     return null;

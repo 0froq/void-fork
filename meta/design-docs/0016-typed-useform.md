@@ -13,9 +13,9 @@ Make `useForm()` type-safe by generating a `PageActionMap` from page action vali
 Extend `routes.d.ts` generation to include a `PageActionMap` interface alongside the existing `RouteMap`. All pages with actions get entries — not just those with validators.
 
 ```typescript
-// .vite-cloud/routes.d.ts (generated)
+// .void/routes.d.ts (generated)
 export {};
-declare module "vite-cloud/routes" {
+declare module "void/routes" {
   // Existing — API routes
   interface RouteMap {
     "/api/users": { GET: { input: {}; output: User[] } };
@@ -143,13 +143,13 @@ Key differences:
 
 ## Files Changed
 
-| File                                             | Change                                                     |
-| ------------------------------------------------ | ---------------------------------------------------------- |
-| `packages/vite-cloud/src/codegen/route-types.ts` | Generate `PageActionMap` entries from page action handlers |
-| `packages/vite-cloud/src/runtime/routes-stub.ts` | Add empty `PageActionMap` interface stub                   |
-| `packages/vue/src/runtime/use-form.ts`           | Add URL-first overload, runtime param resolution           |
-| `packages/vue/src/index.ts`                      | Re-export updated `useForm` types                          |
-| `packages/react/src/runtime/use-form.ts`         | React useForm with URL-first overload + setData API        |
+| File                                       | Change                                                     |
+| ------------------------------------------ | ---------------------------------------------------------- |
+| `packages/void/src/codegen/route-types.ts` | Generate `PageActionMap` entries from page action handlers |
+| `packages/void/src/runtime/routes-stub.ts` | Add empty `PageActionMap` interface stub                   |
+| `packages/vue/src/runtime/use-form.ts`     | Add URL-first overload, runtime param resolution           |
+| `packages/vue/src/index.ts`                | Re-export updated `useForm` types                          |
+| `packages/react/src/runtime/use-form.ts`   | React useForm with URL-first overload + setData API        |
 
 ## Edge Cases
 
@@ -166,9 +166,9 @@ Key differences:
 
 **Previous behavior:** Inline `<script server>` actions fell back to `body: Record<string, unknown>`, losing all type inference for `useForm()`.
 
-**Fix:** During `generateRouteTypes`, the codegen extracts inline `<script server>` content to real `.ts` files under `.vite-cloud/server/` (e.g. `.vite-cloud/server/users/index.server.ts`). The `PageActionMap` entry then uses `typeof import("./server/users/index.server")["action"]` which TypeScript can resolve.
+**Fix:** During `generateRouteTypes`, the codegen extracts inline `<script server>` content to real `.ts` files under `.void/server/` (e.g. `.void/server/users/index.server.ts`). The `PageActionMap` entry then uses `typeof import("./server/users/index.server")["action"]` which TypeScript can resolve.
 
-**Relative import rewriting:** The extracted files live in a different directory than the original SFC. Relative imports (e.g. `from "./_data"`) must be rewritten using `path.relative()` to resolve from the generated file's location back through the original `pages/` directory. Non-relative imports (bare specifiers like `"vite-cloud"`) are left untouched.
+**Relative import rewriting:** The extracted files live in a different directory than the original SFC. Relative imports (e.g. `from "./_data"`) must be rewritten using `path.relative()` to resolve from the generated file's location back through the original `pages/` directory. Non-relative imports (bare specifiers like `"void"`) are left untouched.
 
 **Result:** Both `<script server>` and `.server.ts` now produce fully typed `PageActionMap` entries — the codegen handles both uniformly via `typeof import(...)`.
 

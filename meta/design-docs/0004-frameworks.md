@@ -7,7 +7,7 @@
 
 ## Overview
 
-Vite Cloud supports two modes: **default mode** (Hono-based routing, full feature set) and **framework mode** (framework handles routing/SSR, Vite Cloud handles bindings, migrations, deployment).
+Void supports two modes: **default mode** (Hono-based routing, full feature set) and **framework mode** (framework handles routing/SSR, Void handles bindings, migrations, deployment).
 
 Framework mode is **auto-detected** via `detectFramework()` — no manual `framework` option needed. Detection looks for framework-specific dependencies in `package.json`.
 
@@ -17,10 +17,10 @@ Framework mode is **auto-detected** via `detectFramework()` — no manual `frame
 
 ```
 Default Mode:
-  viteCloud() → [routingPlugin, dbTypesPlugin, migrationPlugin, ...cloudflare({ config: { main, bindings } })]
+  voidPlugin() → [routingPlugin, dbTypesPlugin, migrationPlugin, ...cloudflare({ config: { main, bindings } })]
 
 Framework Mode:
-  viteCloud() → [dbTypesPlugin, migrationPlugin, ...cloudflare({ viteEnvironment: { name: "ssr" }, config: { bindings } })]
+  voidPlugin() → [dbTypesPlugin, migrationPlugin, ...cloudflare({ viteEnvironment: { name: "ssr" }, config: { bindings } })]
 ```
 
 Key differences in framework mode:
@@ -75,10 +75,10 @@ The binding inference AST walker detects `env.DB`, `env.KV`, `env.STORAGE` from 
 import { defineConfig } from "vite";
 import { tanstackStart } from "@tanstack/react-start/plugin";
 import react from "@vitejs/plugin-react";
-import viteCloud from "vite-cloud";
+import voidPlugin from "void";
 
 export default defineConfig({
-  plugins: [tanstackStart(), react(), viteCloud()],
+  plugins: [tanstackStart(), react(), voidPlugin()],
   // framework mode auto-detected — no explicit option needed
 });
 ```

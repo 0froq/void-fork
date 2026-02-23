@@ -1,4 +1,4 @@
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 import { createClient, type API } from "../lib/api";
 
 export type Props = {

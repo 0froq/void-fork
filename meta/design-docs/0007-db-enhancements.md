@@ -5,7 +5,7 @@
 
 ---
 
-All four proposed enhancements have been implemented in `packages/vite-cloud/src/runtime/db.ts`:
+All four proposed enhancements have been implemented in `packages/void/src/runtime/db.ts`:
 
 1. **Column selection** — `select?: (keyof Row<T> & string)[]` on `list` and `get`. Return type narrows to `Pick<Row<T>, K>`.
 

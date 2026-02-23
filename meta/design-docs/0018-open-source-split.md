@@ -7,7 +7,7 @@
 
 ## Summary
 
-Split the Vite Cloud monorepo into two repos: an open-source **framework repo** (vite-cloud plugin, CLI, framework adapters, docs) and a private **platform repo** (control plane, edge dispatch). The goal is to open-source the entire client-side DX layer while keeping the server infrastructure closed.
+Split the Void monorepo into two repos: an open-source **framework repo** (void plugin, CLI, framework adapters, docs) and a private **platform repo** (control plane, edge dispatch). The goal is to open-source the entire client-side DX layer while keeping the server infrastructure closed.
 
 ## Motivation
 
@@ -20,7 +20,7 @@ Split the Vite Cloud monorepo into two repos: an open-source **framework repo** 
 
 **Framework repo (open source):**
 
-- `packages/vite-cloud` — core Vite plugin + CLI (routing, inference, migrations, codegen, deploy command, all runtime exports)
+- `packages/void` — core Vite plugin + CLI (routing, inference, migrations, codegen, deploy command, all runtime exports)
 - `packages/vue` — Vue framework adapter
 - `packages/react` — React framework adapter
 - `packages/svelte` — Svelte framework adapter
@@ -31,7 +31,7 @@ Split the Vite Cloud monorepo into two repos: an open-source **framework repo** 
 
 **Platform repo (private, current repo):**
 
-- `packages/platform` — control plane API
+- `packages/api` — control plane API
 - `packages/dispatch` — edge router worker
 - `packages/ai-proxy` — AI inference proxy worker
 - `packages/dashboard` — user-facing dashboard (Vue Pages app)
@@ -42,7 +42,7 @@ Split the Vite Cloud monorepo into two repos: an open-source **framework repo** 
 
 The split is architecturally clean — confirmed by code analysis:
 
-- **Platform, dispatch, and ai-proxy have zero imports from `vite-cloud`**. No `from "vite-cloud"` or `from "@vite-cloud/{vue,react,svelte,solid}"` anywhere in platform/dispatch/ai-proxy source code.
+- **Platform, dispatch, and ai-proxy have zero imports from `void`**. No `from "void"` or `from "@voidcloud/{vue,react,svelte,solid}"` anywhere in platform/dispatch/ai-proxy source code.
 - **The only cross-boundary coupling is the HTTP deploy protocol** — the CLI sends a deploy manifest to the platform API. This is a network boundary, not a code dependency.
 - **No shared test utilities** between framework and platform packages.
 - **Runtime subpaths are hermetic** — `handler`, `db`, `fetch`, `queues`, `auth` have zero imports from CLI or plugin code.
@@ -53,21 +53,21 @@ The split is architecturally clean — confirmed by code analysis:
 
 The `dashboard` package is a special case — it lives in the platform repo but depends on framework packages:
 
-- **`vite-cloud`** (core plugin) — used as the build tool
-- **`@vite-cloud/vue`** (Vue adapter) — SSR, `Link`, `useShared`, `useRouter`
-- **`@vite-cloud/platform/api`** — type-only import for API route types (BFF pattern)
+- **`void`** (core plugin) — used as the build tool
+- **`@voidcloud/vue`** (Vue adapter) — SSR, `Link`, `useShared`, `useRouter`
+- **`@voidcloud/api/api`** — type-only import for API route types (BFF pattern)
 
-Post-split, the dashboard will consume the framework packages as **published npm dependencies** rather than workspace links. This is clean — the dashboard is a consumer of the framework, not a co-dependent. The `@vite-cloud/platform/api` type import stays internal to the platform repo.
+Post-split, the dashboard will consume the framework packages as **published npm dependencies** rather than workspace links. This is clean — the dashboard is a consumer of the framework, not a co-dependent. The `@voidcloud/api/api` type import stays internal to the platform repo.
 
 ## Physical Layout
 
 The framework repo lives inside the platform repo directory, gitignored. This enables unified local development (single Claude/editor context for cross-cutting changes) while the framework repo remains independently cloneable.
 
 ```
-~/VoidZero/vite-cloud/              # platform repo (private)
+~/VoidZero/void/              # platform repo (private)
 ├── .gitignore                      # includes framework/
 ├── pnpm-workspace.yaml             # platform + dispatch + ai-proxy + dashboard + ui
-├── packages/platform/
+├── packages/api/
 ├── packages/dispatch/
 ├── packages/ai-proxy/
 ├── packages/dashboard/
@@ -77,7 +77,7 @@ The framework repo lives inside the platform repo directory, gitignored. This en
     ├── .git/                       # independent git history
     ├── pnpm-workspace.yaml         # self-contained workspace
     ├── pnpm-lock.yaml              # own lockfile
-    ├── packages/vite-cloud/
+    ├── packages/void/
     ├── packages/vue/
     ├── packages/react/
     ├── packages/svelte/
@@ -105,7 +105,7 @@ Each repo is a fully self-contained pnpm workspace with its own:
 - `.oxlintrc.json`, `.node-version`, `.gitignore`, `.husky/`
 - `.github/workflows/ci.yml`
 
-No `pnpm overrides` or cross-workspace linking — the platform repo never imports from `vite-cloud` at code level, so there is no need for local linking.
+No `pnpm overrides` or cross-workspace linking — the platform repo never imports from `void` at code level, so there is no need for local linking.
 
 ## Deploy Protocol Versioning
 
@@ -117,7 +117,7 @@ The `DeployManifest` interface is the only cross-repo coupling — the CLI sends
 - The CLI always sets `manifest.version` to the current protocol version when sending
 - The platform deploy endpoint validates the version field:
   - Known version → proceed
-  - Missing/unknown version → return a clear error: `"Unsupported deploy manifest version. Please update vite-cloud."`
+  - Missing/unknown version → return a clear error: `"Unsupported deploy manifest version. Please update void."`
 - Contract tests in both repos assert the expected shape of `DeployManifest`
 
 **Versioning policy:** The CLI must be backward-compatible with the current and previous manifest version. The platform must accept the current and previous version. Bumping the version is a coordinated change.
@@ -128,7 +128,7 @@ The `DeployManifest` interface is the only cross-repo coupling — the CLI sends
 
 - lint + typecheck
 - Unit tests
-- Integration tests (vite-cloud)
+- Integration tests (void)
 - Integration tests — pages adapters (react + vue + svelte + solid, requires playwright)
 
 **Platform repo CI** (simplified):
@@ -139,21 +139,21 @@ The `DeployManifest` interface is the only cross-repo coupling — the CLI sends
 - Remove pages adapter suite, remove `--filter '!website'` exclusions
 - Playwright may still be needed for dashboard E2E tests
 
-**Platform deploy workflows**: Remove the `pnpm -F vue -F vite-cloud build && pnpm i` pre-build step and `deploy:docs`/`deploy:staging:docs` steps. Post-split, the dashboard gets `vite-cloud` and `@vite-cloud/vue` from npm during `pnpm install --frozen-lockfile`, so the pre-build is no longer needed. Docs deployment moves to the framework repo via a dedicated `deploy-docs.yml` workflow. Dashboard deploy stays in the platform workflow.
+**Platform deploy workflows**: Remove the `pnpm -F vue -F void build && pnpm i` pre-build step and `deploy:docs`/`deploy:staging:docs` steps. Post-split, the dashboard gets `void` and `@voidcloud/vue` from npm during `pnpm install --frozen-lockfile`, so the pre-build is no longer needed. Docs deployment moves to the framework repo via a dedicated `deploy-docs.yml` workflow. Dashboard deploy stays in the platform workflow.
 
 **Cross-repo compatibility gate (canary CI):**
 
-A daily canary workflow in the platform repo updates the dashboard's `vite-cloud` and `@vite-cloud/vue` dependencies to latest, then runs build + typecheck + tests. If a new framework release breaks the dashboard, it fails here before reaching production. The framework repo also runs a deploy manifest contract test as part of its CI to ensure the CLI still produces a valid manifest.
+A daily canary workflow in the platform repo updates the dashboard's `void` and `@voidcloud/vue` dependencies to latest, then runs build + typecheck + tests. If a new framework release breaks the dashboard, it fails here before reaching production. The framework repo also runs a deploy manifest contract test as part of its CI to ensure the CLI still produces a valid manifest.
 
 ## Dashboard `workspace:*` → npm Cutover
 
-Post-split, the dashboard's `vite-cloud` and `@vite-cloud/vue` dependencies change from `workspace:*` to published npm versions. During the transition (before first npm publish), use `file:` protocol overrides in the root `package.json`:
+Post-split, the dashboard's `void` and `@voidcloud/vue` dependencies change from `workspace:*` to published npm versions. During the transition (before first npm publish), use `file:` protocol overrides in the root `package.json`:
 
 ```json
 "pnpm": {
   "overrides": {
-    "vite-cloud": "file:framework/packages/vite-cloud",
-    "@vite-cloud/vue": "file:framework/packages/vue"
+    "void": "file:framework/packages/void",
+    "@voidcloud/vue": "file:framework/packages/vue"
   }
 }
 ```
@@ -162,8 +162,8 @@ These are removed once packages are published to npm. The `vite` catalog entry i
 
 ## Open Questions
 
-- **Framework repo GitHub org/name**: e.g. `vitejs/vite-cloud`, `voidzero/vite-cloud`, or `vite-cloud/vite-cloud`?
-- **Docs deployment**: Currently the platform deploy workflow deploys docs via `vcc deploy`. Post-split, the framework repo needs its own docs deploy workflow (or the platform deploy clones the framework repo).
-- **npm publishing**: The framework repo will need its own publish workflow for `vite-cloud`, `@vite-cloud/vue`, `@vite-cloud/react`, `@vite-cloud/svelte`, `@vite-cloud/solid`.
-- **`@vite-cloud/ui` placement**: Stays in the platform repo — only consumed by `dashboard`.
-- **Dashboard framework dependency versioning**: Post-split, the dashboard will depend on published `vite-cloud` and `@vite-cloud/vue` from npm. Need to decide whether to pin versions or track latest. During active development, tracking latest with a lockfile update CI step is likely sufficient.
+- **Framework repo GitHub org/name**: e.g. `vitejs/void`, `voidzero/void`, or `void/void`?
+- **Docs deployment**: Currently the platform deploy workflow deploys docs via `void deploy`. Post-split, the framework repo needs its own docs deploy workflow (or the platform deploy clones the framework repo).
+- **npm publishing**: The framework repo will need its own publish workflow for `void`, `@voidcloud/vue`, `@voidcloud/react`, `@voidcloud/svelte`, `@voidcloud/solid`.
+- **`@voidcloud/ui` placement**: Stays in the platform repo — only consumed by `dashboard`.
+- **Dashboard framework dependency versioning**: Post-split, the dashboard will depend on published `void` and `@voidcloud/vue` from npm. Need to decide whether to pin versions or track latest. During active development, tracking latest with a lockfile update CI step is likely sufficient.

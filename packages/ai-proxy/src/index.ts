@@ -19,7 +19,7 @@ interface JwtPayload {
   exp: number;
 }
 
-const GATEWAY_ID = "vite-cloud";
+const GATEWAY_ID = "void";
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "POST, OPTIONS",

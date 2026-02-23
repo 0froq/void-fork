@@ -1,30 +1,30 @@
-# Implementation Plan: Vite Cloud Builds Service
+# Implementation Plan: Void Builds Service
 
 **Status:** Not started yet
 
 ## Context
 
-Vite Cloud currently requires users to build locally via `vcc deploy`. This plan implements a remote build service triggered by GitHub push webhooks, running in Cloudflare Containers orchestrated by Durable Objects. The design is documented in `meta/design-docs/0010-builds.md`.
+Void currently requires users to build locally via `void deploy`. This plan implements a remote build service triggered by GitHub push webhooks, running in Cloudflare Containers orchestrated by Durable Objects. The design is documented in `meta/design-docs/0010-builds.md`.
 
 Two deploy paths will coexist:
 
-- **`vcc deploy`** — build locally, upload artifacts (existing, unchanged)
-- **GitHub push** — build remotely on Vite Cloud infra, deploy automatically
+- **`void deploy`** — build locally, upload artifacts (existing, unchanged)
+- **GitHub push** — build remotely on Void infra, deploy automatically
 
 ## Critical Files (Existing)
 
-| File                                       | Purpose                                                                         |
-| ------------------------------------------ | ------------------------------------------------------------------------------- |
-| `packages/platform/src/routes/deploy.ts`   | Deploy pipeline (provision → migrate → R2 → WfP → KV) — must refactor for reuse |
-| `packages/platform/src/index.ts`           | Hono app entry, route mounting, `scheduled()` handler                           |
-| `packages/platform/src/env.ts`             | `PlatformEnv` type with all bindings                                            |
-| `packages/platform/src/types.ts`           | `User`, `Project`, `Deployment`, `DeployManifest`, etc.                         |
-| `packages/platform/src/db.ts`              | All D1 query helpers (`generateId`, CRUD functions)                             |
-| `packages/platform/src/id.ts`              | `generateId(prefix)` — reuse for `bld_` and `ghc_` prefixes                     |
-| `packages/platform/src/tiers.ts`           | `PlanLimits`, `PLAN_LIMITS`, `getPlanLimits()`                                  |
-| `packages/platform/src/middleware/auth.ts` | JWT Bearer auth middleware                                                      |
-| `packages/platform/wrangler.jsonc`         | Worker config (D1, KV, R2, dispatch, crons) — no DOs currently                  |
-| `packages/vite-cloud/src/cli/package.ts`   | `packageBuild()`, `computeAssetHashes()`, `collectFiles()`                      |
+| File                                  | Purpose                                                                         |
+| ------------------------------------- | ------------------------------------------------------------------------------- |
+| `packages/api/src/routes/deploy.ts`   | Deploy pipeline (provision → migrate → R2 → WfP → KV) — must refactor for reuse |
+| `packages/api/src/index.ts`           | Hono app entry, route mounting, `scheduled()` handler                           |
+| `packages/api/src/env.ts`             | `ApiEnv` type with all bindings                                                 |
+| `packages/api/src/types.ts`           | `User`, `Project`, `Deployment`, `DeployManifest`, etc.                         |
+| `packages/api/src/db.ts`              | All D1 query helpers (`generateId`, CRUD functions)                             |
+| `packages/api/src/id.ts`              | `generateId(prefix)` — reuse for `bld_` and `ghc_` prefixes                     |
+| `packages/api/src/tiers.ts`           | `PlanLimits`, `PLAN_LIMITS`, `getPlanLimits()`                                  |
+| `packages/api/src/middleware/auth.ts` | JWT Bearer auth middleware                                                      |
+| `packages/api/wrangler.jsonc`         | Worker config (D1, KV, R2, dispatch, crons) — no DOs currently                  |
+| `packages/void/src/cli/package.ts`    | `packageBuild()`, `computeAssetHashes()`, `collectFiles()`                      |
 
 ---
 
@@ -32,7 +32,7 @@ Two deploy paths will coexist:
 
 ### 1a. D1 migrations
 
-**Create `packages/platform/migrations/0011_builds.sql`:**
+**Create `packages/api/migrations/0011_builds.sql`:**
 
 ```sql
 CREATE TABLE builds (
@@ -56,7 +56,7 @@ CREATE INDEX idx_builds_status ON builds(status);
 CREATE INDEX idx_builds_user_status ON builds(user_id, status);
 ```
 
-**Create `packages/platform/migrations/0012_github_connections.sql`:**
+**Create `packages/api/migrations/0012_github_connections.sql`:**
 
 ```sql
 CREATE TABLE github_connections (
@@ -73,7 +73,7 @@ CREATE INDEX idx_github_repo ON github_connections(installation_id, repo_full_na
 
 ### 1b. TypeScript interfaces
 
-**Edit `packages/platform/src/types.ts`** — add:
+**Edit `packages/api/src/types.ts`** — add:
 
 ```typescript
 export interface Build {
@@ -104,7 +104,7 @@ export interface GitHubConnection {
 
 ### 1c. DB query helpers
 
-**Edit `packages/platform/src/db.ts`** — add build + github_connection CRUD:
+**Edit `packages/api/src/db.ts`** — add build + github_connection CRUD:
 
 - `createBuild(db, projectId, userId, commitSha, branch): Build` — uses `generateId("bld")`
 - `getBuild(db, id): Build | null`
@@ -126,13 +126,13 @@ Admin queries (for dashboard):
 ### Verify
 
 - `pnpm check` (types compile)
-- Write unit tests for the new DB functions in `packages/platform/test/`
+- Write unit tests for the new DB functions in `packages/api/test/`
 
 ---
 
 ## Step 2: Tier System Update
 
-**Edit `packages/platform/src/tiers.ts`:**
+**Edit `packages/api/src/tiers.ts`:**
 
 Add to `PlanLimits`:
 
@@ -176,14 +176,14 @@ export function getBuildInstanceType(plan: string): string {
 
 Extract the core deploy logic from the 408-line `POST /:id/deploy` handler into a reusable function so both the existing CLI deploy endpoint and the new internal build artifacts endpoint can call it.
 
-**Create `packages/platform/src/deploy-pipeline.ts`:**
+**Create `packages/api/src/deploy-pipeline.ts`:**
 
 Extract from `deploy.ts`:
 
 - `runDeployPipeline(env, project, user, formData, manifest, source): Promise<DeployResult>` — the full pipeline from "create deployment record" through "mark live"
 - Move helper functions: `collectAssetEntries`, `uploadPool`, `clearIsrCache`, `guessContentType`
 
-**Edit `packages/platform/src/routes/deploy.ts`:**
+**Edit `packages/api/src/routes/deploy.ts`:**
 
 - `POST /:id/deploy` becomes: auth check → rate limit check → parse FormData → call `runDeployPipeline()`
 - All the extracted helpers are imported from `deploy-pipeline.ts`
@@ -191,7 +191,7 @@ Extract from `deploy.ts`:
 ### Verify
 
 - `pnpm check`
-- Deploy a playground app with `vcc deploy` — must still work identically
+- Deploy a playground app with `void deploy` — must still work identically
 - Run existing platform tests
 
 ---
@@ -200,7 +200,7 @@ Extract from `deploy.ts`:
 
 ### 4a. GitHub webhook handler
 
-**Create `packages/platform/src/routes/webhooks.ts`:**
+**Create `packages/api/src/routes/webhooks.ts`:**
 
 `POST /webhooks/github`:
 
@@ -223,7 +223,7 @@ app.route("/webhooks", webhooks); // No auth middleware — uses webhook signatu
 
 ### 4b. Build management routes
 
-**Create `packages/platform/src/routes/builds.ts`:**
+**Create `packages/api/src/routes/builds.ts`:**
 
 All routes use `authMiddleware` and ownership checks.
 
@@ -251,7 +251,7 @@ app.post("/builds/:buildId/artifacts", buildArtifactsHandler);
 
 ### 4c. GitHub connection management routes
 
-Add to `packages/platform/src/routes/builds.ts` (or a separate `github.ts`):
+Add to `packages/api/src/routes/builds.ts` (or a separate `github.ts`):
 
 - `POST /:id/github` — connect a GitHub repo to a project (stores connection)
 - `GET /:id/github` — get current GitHub connection
@@ -259,7 +259,7 @@ Add to `packages/platform/src/routes/builds.ts` (or a separate `github.ts`):
 
 ### 4d. Environment updates
 
-**Edit `packages/platform/src/env.ts`:**
+**Edit `packages/api/src/env.ts`:**
 
 ```typescript
 // Add to Bindings:
@@ -280,12 +280,12 @@ GITHUB_WEBHOOK_SECRET?: string;
 
 ## Step 5: BuildScheduler Durable Object
 
-**Create `packages/platform/src/durable-objects/build-scheduler.ts`:**
+**Create `packages/api/src/durable-objects/build-scheduler.ts`:**
 
 ```typescript
 import { DurableObject } from "cloudflare:workers";
 
-export class BuildScheduler extends DurableObject<PlatformEnv["Bindings"]> {
+export class BuildScheduler extends DurableObject<ApiEnv["Bindings"]> {
   constructor(ctx, env) {
     super(ctx, env);
   }
@@ -322,14 +322,14 @@ The scheduler only reschedules its alarm when there are queued builds. When the 
 
 ## Step 6: BuildManager Durable Object + Container
 
-**Create `packages/platform/src/durable-objects/build-manager.ts`:**
+**Create `packages/api/src/durable-objects/build-manager.ts`:**
 
 This is the most complex component. It extends `Container` from `@cloudflare/containers`.
 
 ```typescript
 import { Container } from "@cloudflare/containers";
 
-export class BuildManager extends Container<PlatformEnv["Bindings"]> {
+export class BuildManager extends Container<ApiEnv["Bindings"]> {
   defaultPort = 4000;
   enableInternet = true;
 
@@ -384,14 +384,14 @@ export class BuildManager extends Container<PlatformEnv["Bindings"]> {
 
 ### GitHub App token generation
 
-**Create `packages/platform/src/github/token.ts`:**
+**Create `packages/api/src/github/token.ts`:**
 
 - `generateInstallationToken(appId, privateKey, installationId): string` — Creates JWT signed with app private key, calls `POST /app/installations/{id}/access_tokens`
 - `generateSourceUrl(repoFullName, commitSha): string` — Returns `https://api.github.com/repos/{owner}/{repo}/tarball/{sha}`
 
 ### Build token generation
 
-**Create `packages/platform/src/auth/build-token.ts`:**
+**Create `packages/api/src/auth/build-token.ts`:**
 
 - `generateBuildToken(buildId, secret): string` — HMAC-SHA256 of build ID
 - `verifyBuildToken(buildId, token, secret): boolean`
@@ -406,7 +406,7 @@ export class BuildManager extends Container<PlatformEnv["Bindings"]> {
 
 ## Step 7: Wrangler Configuration
 
-**Edit `packages/platform/wrangler.jsonc`:**
+**Edit `packages/api/wrangler.jsonc`:**
 
 ```jsonc
 {
@@ -447,7 +447,7 @@ export class BuildManager extends Container<PlatformEnv["Bindings"]> {
 }
 ```
 
-**Update exports in `packages/platform/src/index.ts`:**
+**Update exports in `packages/api/src/index.ts`:**
 
 ```typescript
 export { BuildScheduler } from "./durable-objects/build-scheduler";
@@ -469,7 +469,7 @@ Add new secrets (via `wrangler secret put`):
 
 ## Step 8: Build Container Image
 
-**Create `packages/platform/container/Dockerfile`:**
+**Create `packages/api/container/Dockerfile`:**
 
 ```dockerfile
 FROM node:24-slim
@@ -480,7 +480,7 @@ EXPOSE 4000
 CMD ["node", "/build-agent.mjs"]
 ```
 
-**Create `packages/platform/container/build-agent.mjs`:**
+**Create `packages/api/container/build-agent.mjs`:**
 
 The agent script handles the full build lifecycle inside the container:
 
@@ -516,7 +516,7 @@ The agent script handles the full build lifecycle inside the container:
 
 ### Verify
 
-- Build the Docker image locally: `docker build -t vite-cloud-builder packages/platform/container/`
+- Build the Docker image locally: `docker build -t void-builder packages/api/container/`
 - Test the agent with a mock project (mount a test project as volume)
 
 ---
@@ -535,14 +535,14 @@ Add a Builds section to the admin dashboard, following the existing pattern of s
 
 ### New files
 
-**Create `packages/platform/src/admin/views/builds-list.tsx`:**
+**Create `packages/api/src/admin/views/builds-list.tsx`:**
 
 - Paginated table of builds with columns: ID, Project, Branch, Commit, Status, Error, Duration, Created
 - Status badges: `complete` → green, `failed` → red, `building`/`deploying` → blue, `queued`/`starting` → gray, `cancelled` → gray
 - Commit SHA truncated to 7 chars, links to GitHub commit (if github_connection exists)
 - Duration column: `completedAt - startedAt` formatted as "Xs" or "Xm Ys"
 
-**Create `packages/platform/src/admin/routes/builds.tsx`:**
+**Create `packages/api/src/admin/routes/builds.tsx`:**
 
 `GET /builds` — list page:
 
@@ -559,22 +559,22 @@ Add a Builds section to the admin dashboard, following the existing pattern of s
 
 ### Modify existing views
 
-**Edit `packages/platform/src/admin/views/layout.tsx`:**
+**Edit `packages/api/src/admin/views/layout.tsx`:**
 
 - Add `<a href="/admin/builds">Builds</a>` to nav bar after Deployments link
 
-**Edit `packages/platform/src/admin/routes/deployments.tsx`:**
+**Edit `packages/api/src/admin/routes/deployments.tsx`:**
 
 - In `GET /deployments/:id` detail view, add a row to the table:
   - "Build" row: query `getBuildByDeploymentId(db, deployment.id)` — if found, render link to `/admin/builds/:buildId` with build status badge
-  - If no build found, show "-" (deploy was via `vcc deploy`, not a remote build)
+  - If no build found, show "-" (deploy was via `void deploy`, not a remote build)
 
-**Edit `packages/platform/src/admin/views/deployments-list.tsx`:**
+**Edit `packages/api/src/admin/views/deployments-list.tsx`:**
 
 - Add "Build" column to the table — shows build ID link if the deployment has an associated build, "-" otherwise
 - Requires the list query to join builds: `getAllDeploymentsWithProject()` → also LEFT JOIN builds ON `builds.deployment_id = deployments.id`
 
-**Edit `packages/platform/src/admin/views/dashboard.tsx`:**
+**Edit `packages/api/src/admin/views/dashboard.tsx`:**
 
 - Add build count stat card to the system dashboard (alongside existing users/projects/deployments counts)
 
@@ -624,41 +624,41 @@ app.route("/admin/builds", adminBuilds);
   - Add builds system to platform overview
   - Add new secrets to environment docs
   - Update test counts
-- Update `packages/platform/README.md` with new routes, DOs, container config
+- Update `packages/api/README.md` with new routes, DOs, container config
 - Update `meta/progress.md` with builds milestone
 
 ---
 
 ## New Files Summary
 
-| File                                                       | Purpose                                                            |
-| ---------------------------------------------------------- | ------------------------------------------------------------------ |
-| `packages/platform/migrations/0011_builds.sql`             | Builds table                                                       |
-| `packages/platform/migrations/0012_github_connections.sql` | GitHub repo connections table                                      |
-| `packages/platform/src/deploy-pipeline.ts`                 | Extracted deploy pipeline (shared by deploy + artifacts endpoints) |
-| `packages/platform/src/routes/webhooks.ts`                 | GitHub webhook handler                                             |
-| `packages/platform/src/routes/builds.ts`                   | Build status, cancel, logs, artifacts, GitHub connection routes    |
-| `packages/platform/src/durable-objects/build-scheduler.ts` | BuildScheduler DO                                                  |
-| `packages/platform/src/durable-objects/build-manager.ts`   | BuildManager DO + Container                                        |
-| `packages/platform/src/github/token.ts`                    | GitHub App JWT + installation token generation                     |
-| `packages/platform/src/auth/build-token.ts`                | Build token generation/verification                                |
-| `packages/platform/container/Dockerfile`                   | Build container image                                              |
-| `packages/platform/container/build-agent.mjs`              | Build agent script                                                 |
-| `packages/platform/src/admin/views/builds-list.tsx`        | Admin builds list view                                             |
-| `packages/platform/src/admin/routes/builds.tsx`            | Admin builds routes                                                |
+| File                                                  | Purpose                                                            |
+| ----------------------------------------------------- | ------------------------------------------------------------------ |
+| `packages/api/migrations/0011_builds.sql`             | Builds table                                                       |
+| `packages/api/migrations/0012_github_connections.sql` | GitHub repo connections table                                      |
+| `packages/api/src/deploy-pipeline.ts`                 | Extracted deploy pipeline (shared by deploy + artifacts endpoints) |
+| `packages/api/src/routes/webhooks.ts`                 | GitHub webhook handler                                             |
+| `packages/api/src/routes/builds.ts`                   | Build status, cancel, logs, artifacts, GitHub connection routes    |
+| `packages/api/src/durable-objects/build-scheduler.ts` | BuildScheduler DO                                                  |
+| `packages/api/src/durable-objects/build-manager.ts`   | BuildManager DO + Container                                        |
+| `packages/api/src/github/token.ts`                    | GitHub App JWT + installation token generation                     |
+| `packages/api/src/auth/build-token.ts`                | Build token generation/verification                                |
+| `packages/api/container/Dockerfile`                   | Build container image                                              |
+| `packages/api/container/build-agent.mjs`              | Build agent script                                                 |
+| `packages/api/src/admin/views/builds-list.tsx`        | Admin builds list view                                             |
+| `packages/api/src/admin/routes/builds.tsx`            | Admin builds routes                                                |
 
 ## Modified Files Summary
 
-| File                                                     | Changes                                                                 |
-| -------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `packages/platform/src/types.ts`                         | Add `Build`, `GitHubConnection` interfaces                              |
-| `packages/platform/src/db.ts`                            | Add build + github_connection CRUD functions                            |
-| `packages/platform/src/tiers.ts`                         | Add `concurrentBuilds`, `buildTimeoutMinutes`, `getBuildInstanceType()` |
-| `packages/platform/src/env.ts`                           | Add DO bindings, GitHub App secrets to `PlatformEnv`                    |
-| `packages/platform/src/index.ts`                         | Mount webhook/build routes, export DO classes                           |
-| `packages/platform/src/routes/deploy.ts`                 | Refactor to use `runDeployPipeline()` from deploy-pipeline.ts           |
-| `packages/platform/wrangler.jsonc`                       | Add containers, durable_objects, migrations (prod + staging)            |
-| `packages/platform/src/admin/views/layout.tsx`           | Add Builds nav link                                                     |
-| `packages/platform/src/admin/routes/deployments.tsx`     | Add build link to deployment detail                                     |
-| `packages/platform/src/admin/views/deployments-list.tsx` | Add Build column                                                        |
-| `packages/platform/src/admin/views/dashboard.tsx`        | Add build count stat card                                               |
+| File                                                | Changes                                                                 |
+| --------------------------------------------------- | ----------------------------------------------------------------------- |
+| `packages/api/src/types.ts`                         | Add `Build`, `GitHubConnection` interfaces                              |
+| `packages/api/src/db.ts`                            | Add build + github_connection CRUD functions                            |
+| `packages/api/src/tiers.ts`                         | Add `concurrentBuilds`, `buildTimeoutMinutes`, `getBuildInstanceType()` |
+| `packages/api/src/env.ts`                           | Add DO bindings, GitHub App secrets to `ApiEnv`                         |
+| `packages/api/src/index.ts`                         | Mount webhook/build routes, export DO classes                           |
+| `packages/api/src/routes/deploy.ts`                 | Refactor to use `runDeployPipeline()` from deploy-pipeline.ts           |
+| `packages/api/wrangler.jsonc`                       | Add containers, durable_objects, migrations (prod + staging)            |
+| `packages/api/src/admin/views/layout.tsx`           | Add Builds nav link                                                     |
+| `packages/api/src/admin/routes/deployments.tsx`     | Add build link to deployment detail                                     |
+| `packages/api/src/admin/views/deployments-list.tsx` | Add Build column                                                        |
+| `packages/api/src/admin/views/dashboard.tsx`        | Add build count stat card                                               |

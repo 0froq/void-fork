@@ -1,10 +1,10 @@
-# Pages: Inertia-Inspired Full-Stack DX for Vite Cloud
+# Pages: Inertia-Inspired Full-Stack DX for Void
 
 **Status:** Implemented, but more adapters needed
 
 ## Overview
 
-Pages is a new rendering mode for Vite Cloud that provides an Inertia.js-inspired developer experience: server-driven routing with SPA-like navigation, automatic prop passing from server handlers to page components, form helpers with built-in validation error handling, and full SSR.
+Pages is a new rendering mode for Void that provides an Inertia.js-inspired developer experience: server-driven routing with SPA-like navigation, automatic prop passing from server handlers to page components, form helpers with built-in validation error handling, and full SSR.
 
 The architecture separates a **framework-agnostic core** (protocol, server handling, page resolution) from **framework-specific adapters** (rendering, hydration, client components). Vue is the first adapter; React, Svelte, and Solid follow the same adapter interface.
 
@@ -12,13 +12,13 @@ The architecture separates a **framework-agnostic core** (protocol, server handl
 
 ### The Protocol
 
-Pages mode adds an Inertia-style protocol on top of Vite Cloud's existing Hono-based server:
+Pages mode adds an Inertia-style protocol on top of Void's existing Hono-based server:
 
-| Request type      | How detected                               | Server response                                           |
-| ----------------- | ------------------------------------------ | --------------------------------------------------------- |
-| Initial page load | No `X-ViteCloudPages` header               | Full SSR HTML with embedded page object. Client hydrates. |
-| SPA navigation    | `X-ViteCloudPages: true` header            | JSON page object. Client swaps component.                 |
-| Form submission   | `X-ViteCloudPages: true` + POST/PUT/DELETE | Re-run loader (fresh props) or redirect.                  |
+| Request type      | How detected                          | Server response                                           |
+| ----------------- | ------------------------------------- | --------------------------------------------------------- |
+| Initial page load | No `X-VoidPages` header               | Full SSR HTML with embedded page object. Client hydrates. |
+| SPA navigation    | `X-VoidPages: true` header            | JSON page object. Client swaps component.                 |
+| Form submission   | `X-VoidPages: true` + POST/PUT/DELETE | Re-run loader (fresh props) or redirect.                  |
 
 **Page object shape:**
 
@@ -65,8 +65,8 @@ When pages mode is active, the adapter auto-generates the SSR entry and client h
 ```vue
 <!-- pages/users/index.vue -->
 <script server lang="ts">
-import { defineHandler } from "vite-cloud";
-import { db } from "vite-cloud/db";
+import { defineHandler } from "void";
+import { db } from "void/db";
 
 // loader provides props for this page
 export const loader = defineHandler(async (c) => {
@@ -85,7 +85,7 @@ export const action = defineHandler.withValidator({ body: createUserSchema })(as
 </script>
 
 <script setup lang="ts">
-import { useForm, useShared, Link } from "@vite-cloud/vue";
+import { useForm, useShared, Link } from "@voidcloud/vue";
 
 interface User {
   id: number;
@@ -196,11 +196,11 @@ export const loader = defineHandler<Props>((c) => {
 
 #### Inline `<script server>` Type Extraction for `PageActionMap`
 
-TypeScript cannot resolve `typeof import(...)` for virtual modules or inline SFC blocks. To enable typed `useForm()` body inference for inline `<script server>` actions, the codegen extracts the block content to a real `.ts` file under `.vite-cloud/server/` and generates `typeof import(...)` pointing to it.
+TypeScript cannot resolve `typeof import(...)` for virtual modules or inline SFC blocks. To enable typed `useForm()` body inference for inline `<script server>` actions, the codegen extracts the block content to a real `.ts` file under `.void/server/` and generates `typeof import(...)` pointing to it.
 
-Relative imports in the extracted content must be rewritten since the generated file lives in a different directory. For example, `import { USERS } from "./_data"` in `pages/users/index.vue` becomes `import { USERS } from "../../../pages/users/_data"` in `.vite-cloud/server/users/index.server.ts`. The rewriting uses `path.relative()` to compute the correct path from the generated file's location back through the original `pages/` directory.
+Relative imports in the extracted content must be rewritten since the generated file lives in a different directory. For example, `import { USERS } from "./_data"` in `pages/users/index.vue` becomes `import { USERS } from "../../../pages/users/_data"` in `.void/server/users/index.server.ts`. The rewriting uses `path.relative()` to compute the correct path from the generated file's location back through the original `pages/` directory.
 
-The generated server files are not listed in `.vite-cloud/tsconfig.json` — they are resolved transitively via `typeof import(...)` references in `routes.d.ts`.
+The generated server files are not listed in `.void/tsconfig.json` — they are resolved transitively via `typeof import(...)` references in `routes.d.ts`.
 
 ## Server Handler Files
 
@@ -217,8 +217,8 @@ pages/
 
 ```ts
 // pages/users/index.server.ts
-import { defineHandler } from "vite-cloud";
-import { db } from "vite-cloud/db";
+import { defineHandler } from "void";
+import { db } from "void/db";
 
 export const loader = defineHandler(async (c) => {
   return { users: await db.list("users") };
@@ -242,7 +242,7 @@ pages/
 
 ```tsx
 // pages/users/index.tsx
-import { useForm, useShared, Link } from "@vite-cloud/react";
+import { useForm, useShared, Link } from "@voidcloud/react";
 
 export default function UsersPage({ users }: { users: User[] }) {
   const { auth } = useShared();
@@ -292,7 +292,7 @@ pages/
 ```vue
 <!-- pages/layout.vue -->
 <script setup>
-import { useShared, Link } from "@vite-cloud/vue";
+import { useShared, Link } from "@voidcloud/vue";
 const { auth } = useShared();
 </script>
 
@@ -321,7 +321,7 @@ Middleware injects shared data available on every page via `c.set('shared', {...
 
 ```ts
 // middleware/01.auth.ts
-import { defineMiddleware } from "vite-cloud";
+import { defineMiddleware } from "void";
 
 export default defineMiddleware(async (c, next) => {
   const user = await getSessionUser(c);
@@ -337,7 +337,7 @@ Client-side access via `useShared()`:
 
 ```vue
 <script setup>
-import { useShared } from "@vite-cloud/vue";
+import { useShared } from "@voidcloud/vue";
 const { auth, flash } = useShared();
 </script>
 ```
@@ -357,7 +357,7 @@ Each framework adapter exports:
 
 ## Server-Side Flow
 
-### Initial Request (GET /users, no X-ViteCloudPages header)
+### Initial Request (GET /users, no X-VoidPages header)
 
 1. Run middleware chain -> `c.set('shared', {...})`
 2. Resolve page: URL -> `pages/users/index.vue`
@@ -367,14 +367,14 @@ Each framework adapter exports:
 6. Return HTML with `<div id="app" data-page='{ component, props, shared, url }'>`
 7. Client hydrates
 
-### Inertia Navigation (GET /users, X-ViteCloudPages: true)
+### Inertia Navigation (GET /users, X-VoidPages: true)
 
 1. Run middleware chain -> shared data
 2. Run page's `loader` -> props
 3. Return JSON: `{ component: "users/index", props, shared, url }`
 4. Client swaps page component, persists layouts if in same subtree
 
-### Form Submission (POST /users, X-ViteCloudPages: true)
+### Form Submission (POST /users, X-VoidPages: true)
 
 1. Run middleware chain
 2. Run page's `action`
@@ -384,7 +384,7 @@ Each framework adapter exports:
 
 ## Architecture: Core vs Adapters
 
-### Core (`vite-cloud` package)
+### Core (`void` package)
 
 Framework-agnostic. Handles:
 
@@ -397,7 +397,7 @@ Framework-agnostic. Handles:
 - Layout tree resolution from directory structure
 - Page object serialization
 
-### Framework Adapter (separate package, e.g. `@vite-cloud/vue`)
+### Framework Adapter (separate package, e.g. `@voidcloud/vue`)
 
 Each adapter is a Vite plugin + runtime library. The adapter:
 
@@ -415,10 +415,10 @@ Each adapter is a Vite plugin + runtime library. The adapter:
 The Vue adapter's Vite plugin must extract `<script server>` **before** the framework plugin compiles the SFC:
 
 ```ts
-// @vite-cloud/vue/plugin internals
+// @voidcloud/vue/plugin internals
 import vue from "@vitejs/plugin-vue";
 
-export function viteCloudVue(options?) {
+export function voidVue(options?) {
   return [
     scriptServerPlugin(), // extract <script server> first
     vue(options?.vue), // then compile the remaining SFC
@@ -432,10 +432,10 @@ export function viteCloudVue(options?) {
 React has no SFC custom blocks, so no `scriptServerPlugin` is needed. Only companion `.server.ts` files are supported:
 
 ```ts
-// @vite-cloud/react/plugin internals
+// @voidcloud/react/plugin internals
 import react from "@vitejs/plugin-react";
 
-export function viteCloudReact(options?) {
+export function voidReact(options?) {
   return [
     react(options?.react), // JSX transform
     pagesPlugin(), // generate SSR + hydration entries
@@ -448,23 +448,23 @@ export function viteCloudReact(options?) {
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
-import { viteCloudVue } from "@vite-cloud/vue/plugin";
+import voidPlugin from "void";
+import { voidVue } from "@voidcloud/vue/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), ...viteCloudVue()],
+  plugins: [voidPlugin(), ...voidVue()],
 });
 ```
 
-`viteCloudVue()` returns an array of three plugins (scriptServer, vue, pages) — spread it into the plugins array.
+`voidVue()` returns an array of three plugins (scriptServer, vue, pages) — spread it into the plugins array.
 
 ### Adapter Interface (As Implemented)
 
 Each framework adapter provides:
 
-1. **Vite plugins** via a factory function (e.g. `viteCloudVue()`) returning an array of plugins
-2. **SSR renderer** via `virtual:vite-cloud-pages-renderer` — exports `renderPage(pageObj, assetTags)` that SSR-renders the page with layout wrapping and returns full HTML
-3. **Client hydration entry** via `virtual:vite-cloud-pages-client` — hydrates the SSR HTML, sets up the client router, and handles SPA navigation
+1. **Vite plugins** via a factory function (e.g. `voidVue()`) returning an array of plugins
+2. **SSR renderer** via `virtual:void-pages-renderer` — exports `renderPage(pageObj, assetTags)` that SSR-renders the page with layout wrapping and returns full HTML
+3. **Client hydration entry** via `virtual:void-pages-client` — hydrates the SSR HTML, sets up the client router, and handles SPA navigation
 4. **Runtime exports** via the `/runtime` subpath — `Link`, `useForm`, `useShared` composables/components
 
 The SSR renderer and client entry are generated as virtual modules by the adapter's `pagesPlugin`. They use a component manifest (mapping component IDs to dynamic imports) and a layout tree (mapping component IDs to their ancestor layout IDs) generated from the page scan results.
@@ -493,7 +493,7 @@ When stripping the `<script server>` block, the adapter plugin replaces the matc
 
 ### Client Entry: Virtual Module URL in `<script>` Tags
 
-Browser-facing `<script src>` tags cannot use Vite's `\0`-prefixed virtual module IDs directly. The client entry script tag uses `/@id/__x00__virtual:vite-cloud-pages-client` — Vite's URL-based virtual module resolution format.
+Browser-facing `<script src>` tags cannot use Vite's `\0`-prefixed virtual module IDs directly. The client entry script tag uses `/@id/__x00__virtual:void-pages-client` — Vite's URL-based virtual module resolution format.
 
 ### Client-Side Page Updates Must Be Atomic
 
@@ -549,7 +549,7 @@ currentComponent.value = comp;
 
 ### No JSX in Virtual Modules
 
-**Problem:** Virtual modules with `\0`-prefixed IDs (e.g. `\0virtual:vite-cloud-pages-renderer`) are not processed by `@vitejs/plugin-react`. Writing JSX in the generated code produces syntax errors at runtime.
+**Problem:** Virtual modules with `\0`-prefixed IDs (e.g. `\0virtual:void-pages-renderer`) are not processed by `@vitejs/plugin-react`. Writing JSX in the generated code produces syntax errors at runtime.
 
 **Fix:** Use `React.createElement()` calls instead of JSX in all generated virtual module code. For example:
 
@@ -612,9 +612,9 @@ Vue uses `nextTick()` instead — different mechanism, same purpose.
 
 ### Extracted Server Files Need Import Rewriting
 
-**Problem:** When extracting `<script server>` content to `.vite-cloud/server/<path>.server.ts`, relative imports like `from "./_data"` resolve incorrectly because the generated file is in a different directory than the original SFC.
+**Problem:** When extracting `<script server>` content to `.void/server/<path>.server.ts`, relative imports like `from "./_data"` resolve incorrectly because the generated file is in a different directory than the original SFC.
 
-**Fix:** Rewrite all relative import specifiers (`./foo`, `../bar`) using `path.relative()` to compute the correct path from the generated file's location (`<outDir>/server/<dir>/`) back to the original source directory (`<pagesDir>/<dir>/`). Non-relative imports (bare specifiers like `"vite-cloud"`) are left untouched.
+**Fix:** Rewrite all relative import specifiers (`./foo`, `../bar`) using `path.relative()` to compute the correct path from the generated file's location (`<outDir>/server/<dir>/`) back to the original source directory (`<pagesDir>/<dir>/`). Non-relative imports (bare specifiers like `"void"`) are left untouched.
 
 ### `defineHandler<R>` Must Allow Response Without Polluting Output
 

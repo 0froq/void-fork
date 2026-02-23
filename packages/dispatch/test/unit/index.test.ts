@@ -120,7 +120,7 @@ describe("dispatch fetch handler", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/api/hello", { method: "GET" }),
+      new Request("https://my-app.void.app/api/hello", { method: "GET" }),
       env,
       createCtx(),
     );
@@ -138,7 +138,7 @@ describe("dispatch fetch handler", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/assets/app-abc12345.js"),
+      new Request("https://my-app.void.app/assets/app-abc12345.js"),
       env,
       createCtx(),
     );
@@ -156,7 +156,7 @@ describe("dispatch fetch handler", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/dashboard"),
+      new Request("https://my-app.void.app/dashboard"),
       env,
       createCtx(),
     );
@@ -177,7 +177,7 @@ describe("dispatch fetch handler", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/about"),
+      new Request("https://my-app.void.app/about"),
       env,
       createCtx(),
     );
@@ -195,7 +195,7 @@ describe("dispatch fetch handler", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/dashboard"),
+      new Request("https://my-app.void.app/dashboard"),
       env,
       createCtx(),
     );
@@ -215,7 +215,7 @@ describe("dispatch static-only routing", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/dashboard/settings"),
+      new Request("https://my-app.void.app/dashboard/settings"),
       env,
       createCtx(),
     );
@@ -234,7 +234,7 @@ describe("dispatch static-only routing", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/about"),
+      new Request("https://my-app.void.app/about"),
       env,
       createCtx(),
     );
@@ -252,11 +252,7 @@ describe("dispatch static-only routing", () => {
       },
     });
 
-    const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/bar"),
-      env,
-      createCtx(),
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/bar"), env, createCtx());
 
     expect(workerFetch).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
@@ -275,11 +271,7 @@ describe("dispatch static-only routing", () => {
       },
     });
 
-    const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/bar"),
-      env,
-      createCtx(),
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/bar"), env, createCtx());
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("<html>Bar Index</html>");
@@ -294,7 +286,7 @@ describe("dispatch static-only routing", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/nonexistent"),
+      new Request("https://my-app.void.app/nonexistent"),
       env,
       createCtx(),
     );
@@ -311,7 +303,7 @@ describe("dispatch static-only routing", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/nonexistent"),
+      new Request("https://my-app.void.app/nonexistent"),
       env,
       createCtx(),
     );
@@ -329,11 +321,7 @@ describe("dispatch static-only routing", () => {
       },
     });
 
-    const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/"),
-      env,
-      createCtx(),
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/"), env, createCtx());
 
     expect(workerFetch).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
@@ -349,7 +337,7 @@ describe("dispatch static-only routing", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/styles.css"),
+      new Request("https://my-app.void.app/styles.css"),
       env,
       createCtx(),
     );
@@ -368,7 +356,7 @@ describe("dispatch static-only routing", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/api/hello"),
+      new Request("https://my-app.void.app/api/hello"),
       env,
       createCtx(),
     );
@@ -393,11 +381,7 @@ describe("custom header rules", () => {
       },
     });
 
-    const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/"),
-      env,
-      createCtx(),
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/"), env, createCtx());
 
     expect(response.status).toBe(200);
     expect(response.headers.get("X-Frame-Options")).toBe("DENY");
@@ -415,11 +399,7 @@ describe("custom header rules", () => {
       },
     });
 
-    const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/"),
-      env,
-      createCtx(),
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/"), env, createCtx());
 
     expect(response.status).toBe(200);
     expect(response.headers.get("X-Custom")).toBe("ssg-value");
@@ -443,7 +423,7 @@ describe("custom header rules", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/assets/app.js"),
+      new Request("https://my-app.void.app/assets/app.js"),
       env,
       createCtx(),
     );
@@ -462,7 +442,7 @@ describe("custom header rules", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/api/hello"),
+      new Request("https://my-app.void.app/api/hello"),
       env,
       createCtx(),
     );
@@ -485,7 +465,7 @@ describe("custom header rules", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/assets/style.css"),
+      new Request("https://my-app.void.app/assets/style.css"),
       env,
       createCtx(),
     );
@@ -506,7 +486,7 @@ describe("custom header rules", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/dashboard"),
+      new Request("https://my-app.void.app/dashboard"),
       env,
       createCtx(),
     );
@@ -530,7 +510,7 @@ describe("conditional requests (304)", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/", {
+      new Request("https://my-app.void.app/", {
         headers: { "If-None-Match": '"abc123"' },
       }),
       env,
@@ -554,7 +534,7 @@ describe("conditional requests (304)", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/", {
+      new Request("https://my-app.void.app/", {
         headers: { "If-None-Match": '"old-etag"' },
       }),
       env,
@@ -578,11 +558,11 @@ describe("conditional requests (304)", () => {
     });
 
     // First request populates the edge cache
-    await app.fetch(new Request("https://my-app.vitecloud.app/"), env, createCtx());
+    await app.fetch(new Request("https://my-app.void.app/"), env, createCtx());
 
     // Second request with If-None-Match should return 304 from cache
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/", {
+      new Request("https://my-app.void.app/", {
         headers: { "If-None-Match": '"abc123"' },
       }),
       env,
@@ -604,11 +584,7 @@ describe("conditional requests (304)", () => {
       },
     });
 
-    const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/"),
-      env,
-      createCtx(),
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/"), env, createCtx());
 
     expect(response.status).toBe(200);
     expect(response.headers.get("ETag")).toBe('"my-etag"');
@@ -626,7 +602,7 @@ describe("edge cache versioning", () => {
       routing: { projectId: "proj_1", mode: "spa", version: "dpl_1" },
       assets,
     });
-    const res1 = await app.fetch(new Request("https://my-app.vitecloud.app/"), env1, createCtx());
+    const res1 = await app.fetch(new Request("https://my-app.void.app/"), env1, createCtx());
     expect(res1.status).toBe(200);
     expect(await res1.text()).toBe("<html>v1</html>");
 
@@ -640,7 +616,7 @@ describe("edge cache versioning", () => {
       ASSETS: { get: r2Get },
       ANALYTICS: { writeDataPoint: () => {} },
     } as unknown as Env;
-    const res2 = await app.fetch(new Request("https://my-app.vitecloud.app/"), env2, createCtx());
+    const res2 = await app.fetch(new Request("https://my-app.void.app/"), env2, createCtx());
     expect(res2.status).toBe(200);
     expect(await res2.text()).toBe("<html>v1</html>");
     expect(r2Get).not.toHaveBeenCalled();
@@ -652,7 +628,7 @@ describe("edge cache versioning", () => {
         "proj_1/current/index.html": { body: "<html>v2</html>", contentType: "text/html" },
       },
     });
-    const res3 = await app.fetch(new Request("https://my-app.vitecloud.app/"), env3, createCtx());
+    const res3 = await app.fetch(new Request("https://my-app.void.app/"), env3, createCtx());
     expect(res3.status).toBe(200);
     expect(await res3.text()).toBe("<html>v2</html>");
   });
@@ -668,7 +644,7 @@ describe("edge cache versioning", () => {
       assets,
     });
     const res1 = await app.fetch(
-      new Request("https://my-app.vitecloud.app/assets/app-abc123.js"),
+      new Request("https://my-app.void.app/assets/app-abc123.js"),
       env1,
       createCtx(),
     );
@@ -686,7 +662,7 @@ describe("edge cache versioning", () => {
       ANALYTICS: { writeDataPoint: () => {} },
     } as unknown as Env;
     const res2 = await app.fetch(
-      new Request("https://my-app.vitecloud.app/assets/app-abc123.js"),
+      new Request("https://my-app.void.app/assets/app-abc123.js"),
       env2,
       createCtx(),
     );
@@ -706,7 +682,7 @@ describe("edge cache versioning", () => {
       assets,
     });
     const res1 = await app.fetch(
-      new Request("https://my-app.vitecloud.app/static/app-abc123.js"),
+      new Request("https://my-app.void.app/static/app-abc123.js"),
       env1,
       createCtx(),
     );
@@ -730,7 +706,7 @@ describe("edge cache versioning", () => {
       ANALYTICS: { writeDataPoint: () => {} },
     } as unknown as Env;
     const res2 = await app.fetch(
-      new Request("https://my-app.vitecloud.app/static/app-abc123.js"),
+      new Request("https://my-app.void.app/static/app-abc123.js"),
       env2,
       createCtx(),
     );
@@ -746,7 +722,7 @@ describe("edge cache versioning", () => {
         "proj_1/current/index.html": { body: "<html>SPA</html>", contentType: "text/html" },
       },
     });
-    await app.fetch(new Request("https://my-app.vitecloud.app/assets/foo.js"), env3, createCtx());
+    await app.fetch(new Request("https://my-app.void.app/assets/foo.js"), env3, createCtx());
 
     const { env: env4 } = createEnv({
       routing: { projectId: "proj_1", mode: "spa", version: "dpl_2", assetsDir: "static" },
@@ -756,7 +732,7 @@ describe("edge cache versioning", () => {
       },
     });
     const res4 = await app.fetch(
-      new Request("https://my-app.vitecloud.app/assets/foo.js"),
+      new Request("https://my-app.void.app/assets/foo.js"),
       env4,
       createCtx(),
     );
@@ -774,7 +750,7 @@ describe("edge cache versioning", () => {
       },
     });
     const res1 = await app.fetch(
-      new Request("https://my-app.vitecloud.app/favicon.ico"),
+      new Request("https://my-app.void.app/favicon.ico"),
       env1,
       createCtx(),
     );
@@ -790,7 +766,7 @@ describe("edge cache versioning", () => {
       },
     });
     const res2 = await app.fetch(
-      new Request("https://my-app.vitecloud.app/favicon.ico"),
+      new Request("https://my-app.void.app/favicon.ico"),
       env2,
       createCtx(),
     );
@@ -903,11 +879,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const ctx = createCtx();
-    const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/dashboard"),
-      env,
-      ctx,
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
 
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(response.status).toBe(200);
@@ -940,7 +912,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/dashboard"),
+      new Request("https://my-app.void.app/dashboard"),
       env,
       createCtx(),
     );
@@ -974,7 +946,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/dashboard", {
+      new Request("https://my-app.void.app/dashboard", {
         headers: { Cookie: "session=abc" },
       }),
       env,
@@ -1000,11 +972,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const ctx = createCtx();
-    const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/dashboard"),
-      env,
-      ctx,
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
 
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(await response.text()).toBe("<html>no-cache</html>");
@@ -1024,7 +992,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/dashboard"),
+      new Request("https://my-app.void.app/dashboard"),
       env,
       createCtx(),
     );
@@ -1051,7 +1019,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/dashboard"),
+      new Request("https://my-app.void.app/dashboard"),
       env,
       createCtx(),
     );
@@ -1088,11 +1056,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const ctx = createCtx();
-    const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/dashboard"),
-      env,
-      ctx,
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
 
     expect(response.headers.get("x-isr-cache")).toBe("STALE");
 
@@ -1128,11 +1092,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const ctx = createCtx();
-    const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/dashboard"),
-      env,
-      ctx,
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
 
     // Should return stale content immediately
     expect(response.headers.get("x-isr-cache")).toBe("STALE");
@@ -1158,7 +1118,7 @@ describe("suspension check", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/api/hello"),
+      new Request("https://my-app.void.app/api/hello"),
       env,
       createCtx(),
     );
@@ -1181,11 +1141,7 @@ describe("suspension check", () => {
       },
     });
 
-    const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/"),
-      env,
-      createCtx(),
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/"), env, createCtx());
 
     expect(response.status).toBe(429);
   });
@@ -1202,7 +1158,7 @@ describe("custom limits", () => {
       workerResponse: new Response("api"),
     });
 
-    await app.fetch(new Request("https://my-app.vitecloud.app/api/hello"), env, createCtx());
+    await app.fetch(new Request("https://my-app.void.app/api/hello"), env, createCtx());
 
     expect(dispatchGet).toHaveBeenCalledWith(
       "user-app",
@@ -1217,7 +1173,7 @@ describe("custom limits", () => {
       workerResponse: new Response("api"),
     });
 
-    await app.fetch(new Request("https://my-app.vitecloud.app/api/hello"), env, createCtx());
+    await app.fetch(new Request("https://my-app.void.app/api/hello"), env, createCtx());
 
     expect(dispatchGet).toHaveBeenCalledWith("user-app");
   });
@@ -1243,7 +1199,7 @@ describe("custom limits", () => {
     } as unknown as Env;
 
     const response = await app.fetch(
-      new Request("https://my-app.vitecloud.app/api/hello"),
+      new Request("https://my-app.void.app/api/hello"),
       env,
       createCtx(),
     );
@@ -1264,7 +1220,7 @@ describe("custom limits", () => {
       workerResponse: new Response("<html>ssr</html>"),
     });
 
-    await app.fetch(new Request("https://my-app.vitecloud.app/dashboard"), env, createCtx());
+    await app.fetch(new Request("https://my-app.void.app/dashboard"), env, createCtx());
 
     expect(dispatchGet).toHaveBeenCalledWith(
       "user-app",

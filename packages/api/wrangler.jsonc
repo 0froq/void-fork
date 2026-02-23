@@ -1,0 +1,81 @@
+{
+  "name": "void-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-02-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "void-api",
+      "database_id": "f85c1d7d-7b41-4f85-88e5-ad37966825e7",
+      "migrations_dir": "drizzle",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "void-assets",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "ROUTING",
+      "id": "9250c33f3db6494ebe8ad6272812c8c0",
+    },
+  ],
+  "dispatch_namespaces": [
+    {
+      "binding": "DISPATCH",
+      "namespace": "void-users",
+    },
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
+  "routes": [{ "pattern": "api.void.cloud", "custom_domain": true }],
+  // Secrets (via `wrangler secret put`): CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID, JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+  // Optional env var: AUTH_REDIRECT_URI (defaults to https://api.void.cloud/auth/callback)
+  // For local dev, set AUTH_REDIRECT_URI=http://localhost:8787/auth/callback and DEV_AUTH_BYPASS=true in .dev.vars
+  "env": {
+    "staging": {
+      "name": "void-api-staging",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "void-api-staging",
+          "database_id": "e78b32c1-497a-40ad-8f83-7049e139983e",
+          "migrations_dir": "drizzle",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "ASSETS",
+          "bucket_name": "void-assets-staging",
+        },
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "ROUTING",
+          "id": "60240eecea804f39bf8b7395cd6c6b08",
+        },
+      ],
+      "dispatch_namespaces": [
+        {
+          "binding": "DISPATCH",
+          "namespace": "void-users-staging",
+        },
+      ],
+      "routes": [{ "pattern": "api.staging.void.cloud", "custom_domain": true }],
+      "vars": {
+        "DISPATCH_NAMESPACE": "void-users-staging",
+        "SITE_DOMAIN": "staging.void.app",
+        "DASHBOARD_URL": "https://dash.staging.void.cloud",
+        "AUTH_REDIRECT_URI": "https://api.staging.void.cloud/auth/callback",
+        "SIGNUP_ALLOWLIST": "@voidzero.dev",
+      },
+    },
+  },
+}

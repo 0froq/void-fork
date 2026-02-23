@@ -11,13 +11,13 @@ SSR pages with long `revalidate` values (e.g. 1 year) are effectively static, bu
 
 Since we control the full stack, we can prerender these pages on the platform side: after uploading the worker but before flipping the routing entry live, the platform renders each prerender path and writes the result to R2 as an ISR cache entry. By the time the deploy goes live, the cache is already warm.
 
-This also restructures `vite-cloud.json` to group caching concerns under a `cache` key (breaking: top-level `revalidate` removed, no backwards compat).
+This also restructures `void.json` to group caching concerns under a `cache` key (breaking: top-level `revalidate` removed, no backwards compat).
 
 ---
 
 ## User-Facing API
 
-### Config — `vite-cloud.json`
+### Config — `void.json`
 
 ```json
 {
@@ -109,7 +109,7 @@ Prerendering happens on the platform side, after the worker is uploaded but befo
 
 ### CLI-side: path resolution
 
-During `vcc deploy`, the CLI:
+During `void deploy`, the CLI:
 
 1. Scans pages for `export const prerender = true` and `export function getPrerenderPaths` (regex detection, same as `revalidate`)
 2. Checks the SSR entry for the same exports

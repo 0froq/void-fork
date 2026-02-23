@@ -1,13 +1,13 @@
-# @vite-cloud/dashboard
+# @voidcloud/dashboard
 
-User-facing dashboard for Vite Cloud. Built as a Vue Pages mode app, dogfooding the platform.
+User-facing dashboard for Void. Built as a Vue Pages mode app, dogfooding the platform.
 
 ## Architecture
 
-- **Vue Pages mode** — `viteCloud()` + `viteCloudVue()`, SSR with client hydration
+- **Vue Pages mode** — `voidPlugin()` + `voidVue()`, SSR with client hydration
 - **BFF pattern** — server-side loaders call the platform API over HTTP using the user's JWT. No direct D1 or Analytics Engine access.
-- **Auth** — OAuth (GitHub/Google) via the platform's `/auth/login` flow. JWT stored in an httpOnly cookie (`vc_token`), forwarded as Bearer token in loaders.
-- **Styling** — Tailwind CSS v4 with shared design tokens from `@vite-cloud/ui`. Dark TUI aesthetic.
+- **Auth** — OAuth (GitHub/Google) via the platform's `/auth/login` flow. JWT stored in an httpOnly cookie (`void_token`), forwarded as Bearer token in loaders.
+- **Styling** — Tailwind CSS v4 with shared design tokens from `@voidcloud/ui`. Dark TUI aesthetic.
 
 ## Pages
 
@@ -24,21 +24,21 @@ User-facing dashboard for Vite Cloud. Built as a Vue Pages mode app, dogfooding 
 1. **Build dependencies** (from repo root):
 
 ```sh
-pnpm -C packages/vite-cloud build
+pnpm -C packages/void build
 pnpm -C packages/vue build
 ```
 
 2. **Start the platform API** (separate terminal):
 
 ```sh
-pnpm -C packages/platform dev
+pnpm -C packages/api dev
 ```
 
 3. **Create `.dev.vars`** in `packages/dashboard/`:
 
 ```
 DEV_AUTH_BYPASS=true
-PLATFORM_API_URL=http://localhost:8787
+API_URL=http://localhost:8787
 ```
 
 This skips OAuth entirely — the dashboard sends a dummy token and the platform resolves to the first user in the DB.

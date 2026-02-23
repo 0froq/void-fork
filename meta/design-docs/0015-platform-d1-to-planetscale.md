@@ -25,7 +25,7 @@ Migrate the platform worker's database from Cloudflare D1 (SQLite) to PlanetScal
 
 ## Step 1: Schema Conversion
 
-**File:** `packages/platform/src/schema.ts`
+**File:** `packages/api/src/schema.ts`
 
 Convert from SQLite to Postgres dialect. This is the most mechanical step.
 
@@ -106,7 +106,7 @@ Same API. The default `ON DELETE no action ON UPDATE no action` is the same in b
 ```diff
  async function scheduled(
    _controller: ScheduledController,
-   env: PlatformEnv["Bindings"],
+   env: ApiEnv["Bindings"],
    _ctx: ExecutionContext,
  ): Promise<void> {
 -  const db = createDb(env.DB);
@@ -115,7 +115,7 @@ Same API. The default `ON DELETE no action ON UPDATE no action` is the same in b
 
 ### Env type
 
-In `env.ts` (or wherever `PlatformEnv` is defined):
+In `env.ts` (or wherever `ApiEnv` is defined):
 
 ```diff
  Bindings: {
@@ -179,7 +179,7 @@ These manually set `new Date().toISOString()` for returned objects. With `timest
 
 ## Step 5: Drizzle Kit Config
 
-**File:** `packages/platform/drizzle.config.ts`
+**File:** `packages/api/drizzle.config.ts`
 
 ```diff
  export default defineConfig({
@@ -198,10 +198,10 @@ Since we're changing database engines entirely, the existing SQLite migrations a
 
 ```bash
 # Archive old migrations
-mv packages/platform/drizzle packages/platform/drizzle-d1-archive
+mv packages/api/drizzle packages/api/drizzle-d1-archive
 
 # Generate new Postgres migration from schema
-cd packages/platform
+cd packages/api
 npx drizzle-kit generate
 ```
 
@@ -211,7 +211,7 @@ This produces a single baseline migration that creates all 5 tables with Postgre
 
 ## Step 7: Wrangler Config
 
-**File:** `packages/platform/wrangler.jsonc`
+**File:** `packages/api/wrangler.jsonc`
 
 ### Production
 
@@ -219,7 +219,7 @@ This produces a single baseline migration that creates all 5 tables with Postgre
 -  "d1_databases": [
 -    {
 -      "binding": "DB",
--      "database_name": "vite-cloud-platform",
+-      "database_name": "void-api",
 -      "database_id": "f85c1d7d-7b41-4f85-88e5-ad37966825e7",
 -      "migrations_dir": "drizzle"
 -    }
@@ -240,11 +240,11 @@ Same change, different Hyperdrive config ID.
 
 ```bash
 # Production
-npx wrangler hyperdrive create vite-cloud-platform \
+npx wrangler hyperdrive create void-api \
   --connection-string="postgres://user:pass@host:6432/postgres?sslmode=verify-full"
 
 # Staging
-npx wrangler hyperdrive create vite-cloud-platform-staging \
+npx wrangler hyperdrive create void-api-staging \
   --connection-string="postgres://user:pass@staging-host:6432/postgres?sslmode=verify-full"
 ```
 
@@ -325,7 +325,7 @@ The existing `clearTables` helper uses `db.delete(table)`. This works identicall
 
 ```bash
 # Against the staging branch
-cd packages/platform
+cd packages/api
 DATABASE_URL="postgres://..." npx drizzle-kit migrate
 
 # Against the production branch
@@ -343,7 +343,7 @@ If there's existing data in D1 that needs to move:
 1. Export from D1:
 
    ```bash
-   wrangler d1 export vite-cloud-platform --output=d1-export.sql
+   wrangler d1 export void-api --output=d1-export.sql
    ```
 
 2. Transform the SQL dump:
@@ -408,7 +408,7 @@ After stable on Postgres:
 2. Delete `drizzle-d1-archive/` (the old SQLite migrations)
 3. Remove `D1Database` from env types
 4. Remove `@cloudflare/workers-types` D1 type references if no longer needed
-5. Update `packages/platform/README.md` to reflect Postgres
+5. Update `packages/api/README.md` to reflect Postgres
 6. Update `CLAUDE.md` / `README.md` monorepo docs
 
 ---

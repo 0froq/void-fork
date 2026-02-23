@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import "../app.css";
-import { Link, useShared } from "@vite-cloud/vue";
+import { Link, useShared } from "@voidcloud/vue";
 
 const shared = useShared<{ user: { login: string } | null }>();
 </script>
@@ -13,7 +13,7 @@ const shared = useShared<{ user: { login: string } | null }>();
       class="flex items-center justify-between border-b border-border px-6 py-3"
     >
       <div class="flex items-center gap-6">
-        <Link href="/" class="font-mono text-sm text-accent">vite-cloud</Link>
+        <Link href="/" class="font-mono text-sm text-accent">void</Link>
         <Link href="/" class="text-sm text-text-secondary transition-colors hover:text-text">
           Projects
         </Link>

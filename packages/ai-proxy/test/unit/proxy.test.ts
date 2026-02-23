@@ -71,7 +71,7 @@ function createEnv(aiOverrides?: Partial<MockAi>, kvData?: Record<string, string
 }
 
 function post(path: string, body: unknown, headers?: Record<string, string>): Request {
-  return new Request(`https://ai-proxy.vitecloud.app${path}`, {
+  return new Request(`https://ai-proxy.void.app${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
@@ -89,7 +89,7 @@ describe("ai-proxy worker", () => {
 
   describe("CORS", () => {
     it("returns 204 with CORS headers on OPTIONS", async () => {
-      const req = new Request("https://ai-proxy.vitecloud.app/run", { method: "OPTIONS" });
+      const req = new Request("https://ai-proxy.void.app/run", { method: "OPTIONS" });
       const res = await worker.fetch(req, createEnv());
 
       expect(res.status).toBe(204);
@@ -101,7 +101,7 @@ describe("ai-proxy worker", () => {
 
   describe("method validation", () => {
     it("rejects non-POST requests with 405", async () => {
-      const req = new Request("https://ai-proxy.vitecloud.app/run", { method: "GET" });
+      const req = new Request("https://ai-proxy.void.app/run", { method: "GET" });
       const res = await worker.fetch(req, createEnv());
 
       expect(res.status).toBe(405);
@@ -279,7 +279,7 @@ describe("ai-proxy worker", () => {
         { prompt: "hi" },
         {
           max_tokens: 100,
-          gateway: { id: "vite-cloud", metadata: { projectId: "proj_42" } },
+          gateway: { id: "void", metadata: { projectId: "proj_42" } },
         },
       );
     });
@@ -344,7 +344,7 @@ describe("ai-proxy worker", () => {
         "m",
         {},
         {
-          gateway: { id: "vite-cloud", metadata: { projectId: "proj_99" } },
+          gateway: { id: "void", metadata: { projectId: "proj_99" } },
         },
       );
     });

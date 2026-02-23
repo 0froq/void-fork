@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link, useRouter } from "@vite-cloud/vue";
+import { Link, useRouter } from "@voidcloud/vue";
 import type { Props } from "./[id].server";
 import { ref } from "vue";
 
@@ -46,7 +46,7 @@ function timeAgo(dateStr: string): string {
 
 const liveUrl = project.custom_domain
   ? `https://${project.custom_domain}`
-  : `https://${project.slug}.vitecloud.app`;
+  : `https://${project.slug}.void.app`;
 
 // Domain form
 const newDomain = ref("");
@@ -175,9 +175,7 @@ function removeSecret(name: string) {
       <h2 class="mb-3 font-mono text-xs uppercase tracking-wider text-text-muted">Domains</h2>
       <div class="border border-border p-4">
         <div class="mb-2 flex items-center justify-between">
-          <span class="font-mono text-xs text-text-secondary">
-            {{ project.slug }}.vitecloud.app
-          </span>
+          <span class="font-mono text-xs text-text-secondary"> {{ project.slug }}.void.app </span>
           <span class="text-xs text-status-live">default</span>
         </div>
         <div

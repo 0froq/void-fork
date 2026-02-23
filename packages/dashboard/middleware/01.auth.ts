@@ -1,7 +1,7 @@
-import { defineMiddleware } from "vite-cloud";
+import { defineMiddleware } from "void";
 import { getCookie } from "hono/cookie";
 
-declare module "vite-cloud" {
+declare module "void" {
   interface CloudContextVariables {
     token: string;
     shared: { user: { login: string } | null };
@@ -25,7 +25,7 @@ export default defineMiddleware(async (c, next) => {
     return next();
   }
 
-  const token = getCookie(c, "vc_token");
+  const token = getCookie(c, "void_token");
   if (!token) {
     return c.redirect("/login");
   }

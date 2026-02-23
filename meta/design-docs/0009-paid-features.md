@@ -7,13 +7,13 @@
 
 ## Context
 
-Vite Cloud runs on Cloudflare Workers. We control the full stack: build toolchain (Vite plugin), framework layer (routing, codegen, migrations), and runtime (dispatch worker, platform API). This vertical integration — plus CF's cost structure (no egress fees, included DDoS, global edge by default) — shapes what we can offer cheaply and what's worth charging for.
+Void runs on Cloudflare Workers. We control the full stack: build toolchain (Vite plugin), framework layer (routing, codegen, migrations), and runtime (dispatch worker, platform API). This vertical integration — plus CF's cost structure (no egress fees, included DDoS, global edge by default) — shapes what we can offer cheaply and what's worth charging for.
 
 Current tier system: `free`, `solo`, `pro`, `sponsored`, `custom`. Enforcement already exists for deploys/day, CPU time, sub-requests, and monthly request count.
 
 ## Competitive Landscape
 
-| Feature         | Vercel                     | Netlify                    | Vite Cloud                      |
+| Feature         | Vercel                     | Netlify                    | Void                            |
 | --------------- | -------------------------- | -------------------------- | ------------------------------- |
 | Custom domains  | Free                       | Free                       | **Must be free**                |
 | Preview deploys | Free (hobby) / Pro (teams) | Free                       | Not yet                         |
@@ -37,7 +37,7 @@ Deploy per branch/PR with isolated URL and its own D1 database clone.
 
 - **Why it converts:** The #1 feature teams pay Vercel for. Gateway to multi-user/team plans.
 - **CF advantage:** Workers for Platforms makes spinning up isolated workers cheap. D1 databases are free to create.
-- **Implementation:** Extend deploy flow with branch-based naming (`{branch}-{slug}.vitecloud.app`), D1 snapshot for preview isolation, auto-cleanup on merge/close.
+- **Implementation:** Extend deploy flow with branch-based naming (`{branch}-{slug}.void.app`), D1 snapshot for preview isolation, auto-cleanup on merge/close.
 - **Effort:** Medium. Deploy pipeline exists; need branch routing + DB cloning + lifecycle management.
 - **Tier:** Pro (or Team).
 
@@ -53,7 +53,7 @@ User-defined scheduled tasks alongside API routes (e.g. `routes/cron/daily-clean
 
 #### Log Streaming
 
-Real-time `console.log` output from user workers via CLI (`vcc logs --follow`) and/or dashboard.
+Real-time `console.log` output from user workers via CLI (`void logs --follow`) and/or dashboard.
 
 - **Why it converts:** Developers expect this for any production workload. Hard to debug without it.
 - **CF advantage:** Workers tail API already exists. We wrap it.
@@ -168,4 +168,4 @@ Prioritized by impact-to-effort ratio:
 
 ## Key Principle
 
-CF's cost structure means most of these features have near-zero marginal cost. The value is in the **DX layer** — making powerful CF primitives accessible through the Vite Cloud framework with zero configuration. We're not reselling compute; we're selling developer experience.
+CF's cost structure means most of these features have near-zero marginal cost. The value is in the **DX layer** — making powerful CF primitives accessible through the Void framework with zero configuration. We're not reselling compute; we're selling developer experience.

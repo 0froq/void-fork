@@ -1,4 +1,4 @@
-# @vite-cloud/ai-proxy
+# @voidcloud/ai-proxy
 
 AI inference proxy for metered Workers AI billing. CF Worker using plain `fetch` handler (no framework). Holds the real `AI` binding — user workers never get it directly.
 
@@ -29,16 +29,16 @@ interface ProxyRequest {
 }
 ```
 
-The proxy injects `gateway: { id: "vite-cloud", metadata: { projectId } }` into every `AI.run()` call. User-supplied `options` are merged (gateway config cannot be overridden).
+The proxy injects `gateway: { id: "void", metadata: { projectId } }` into every `AI.run()` call. User-supplied `options` are merged (gateway config cannot be overridden).
 
 ## Authentication
 
 Two paths, determined by the presence of an `Authorization` header:
 
-| Path                | When                                | Auth                                                                                                                                  |
-| ------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| **Service binding** | Production (deployed to Vite Cloud) | Trusted — no auth check. Project ID from request body.                                                                                |
-| **HTTPS**           | Local dev (`pnpm dev`)              | `Authorization: Bearer <jwt>` — JWT validated with shared `JWT_SECRET` (HMAC-SHA256, same as platform). Project ID from request body. |
+| Path                | When                          | Auth                                                                                                                                  |
+| ------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| **Service binding** | Production (deployed to Void) | Trusted — no auth check. Project ID from request body.                                                                                |
+| **HTTPS**           | Local dev (`pnpm dev`)        | `Authorization: Bearer <jwt>` — JWT validated with shared `JWT_SECRET` (HMAC-SHA256, same as platform). Project ID from request body. |
 
 JWT payload: `{ sub: string, login: string, iat: number, exp: number }`
 
@@ -86,8 +86,8 @@ test/
 ## Deployment
 
 ```
-pnpm -C packages/ai-proxy deploy              # Production (ai-proxy.vite.cloud)
-pnpm -C packages/ai-proxy deploy --env staging # Staging (ai-proxy.staging.vite.cloud)
+pnpm -C packages/ai-proxy deploy              # Production (ai-proxy.void.cloud)
+pnpm -C packages/ai-proxy deploy --env staging # Staging (ai-proxy.staging.void.cloud)
 ```
 
 Deployed as part of the root `pnpm run deploy` / `pnpm run deploy:staging` scripts. Must deploy before dispatch/platform since user workers depend on the `__AI_PROXY` service binding.

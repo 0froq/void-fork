@@ -1,4 +1,4 @@
-# Vite Cloud — Design Document
+# Void — Design Document
 
 **Date:** 2026-02-15
 **Status:** Implemented (living document)
@@ -7,16 +7,16 @@
 
 ## 1. Vision
 
-Vite Cloud is a deployment platform and Vite plugin that makes Cloudflare the easiest place to ship a web app. The user writes a Vite app, adds API routes, uses a database / KV / object storage — and the framework provisions everything automatically. They deploy with one command. No Cloudflare account needed.
+Void is a deployment platform and Vite plugin that makes Cloudflare the easiest place to ship a web app. The user writes a Vite app, adds API routes, uses a database / KV / object storage — and the framework provisions everything automatically. They deploy with one command. No Cloudflare account needed.
 
-**Mental model:** Vite is your framework. Cloudflare is the runtime. Vite Cloud is the invisible bridge.
+**Mental model:** Vite is your framework. Cloudflare is the runtime. Void is the invisible bridge.
 
 Progressive experience:
 
-1. `npm install -D vite-cloud` + `npx vcc init` → scaffold a Vite app in the current directory
+1. `npm install -D void` + `npx void init` → scaffold a Vite app in the current directory
 2. Add `routes/api/hello.ts` → serverless API endpoint
 3. Use `c.env.DB` in that handler → D1 database auto-provisioned
-4. `vcc deploy` → live on `*.vitecloud.app`
+4. `void deploy` → live on `*.void.app`
 
 ---
 
@@ -41,13 +41,13 @@ Progressive experience:
 │   └── auth.ts             (runs on every request)        │
 │                                                          │
 │   vite.config.ts                                         │
-│   └── plugins: [viteCloud()]                             │
+│   └── plugins: [voidPlugin()]                             │
 │                                                          │
 └────────────┬────────────────────────────────┬────────────┘
-             │ vite dev                       │ vcc deploy
+             │ vite dev                       │ void deploy
              ▼                                ▼
 ┌────────────────────────┐     ┌──────────────────────────────┐
-│     Local Dev Server    │     │     Vite Cloud Platform       │
+│     Local Dev Server    │     │     Void Platform       │
 │                         │     │                               │
 │  Vite Dev Server        │     │  ┌─────────────────────────┐  │
 │    ├── Static assets    │     │  │    Control Plane API     │  │
@@ -75,13 +75,13 @@ Progressive experience:
 
 ### Core Components
 
-**Vite Plugin (`vite-cloud`):** User-facing package. `viteCloud()` takes zero arguments — config comes from `vite-cloud.json`. Returns routing plugin + migration plugin + `@cloudflare/vite-plugin`. In framework mode (TanStack Start, React Router), the routing plugin is omitted and the CF plugin hooks into the framework's SSR environment.
+**Vite Plugin (`void`):** User-facing package. `voidPlugin()` takes zero arguments — config comes from `void.json`. Returns routing plugin + migration plugin + `@cloudflare/vite-plugin`. In framework mode (TanStack Start, React Router), the routing plugin is omitted and the CF plugin hooks into the framework's SSR environment.
 
-**Local Runtime:** `@cloudflare/vite-plugin` runs Worker code in `workerd` via the Vite Environment API. D1 backed by local SQLite, KV and R2 by filesystem. All state in `.vite-cloud/` (gitignored).
+**Local Runtime:** `@cloudflare/vite-plugin` runs Worker code in `workerd` via the Vite Environment API. D1 backed by local SQLite, KV and R2 by filesystem. All state in `.void/` (gitignored).
 
-**Control Plane (`packages/platform`):** Hono app on CF Workers. Manages users, projects, deploys, usage metering. Uses D1, R2, KV, Workers for Platforms.
+**Control Plane (`packages/api`):** Hono app on CF Workers. Manages users, projects, deploys, usage metering. Uses D1, R2, KV, Workers for Platforms.
 
-**Dispatch Worker (`packages/dispatch`):** Routes `*.vitecloud.app` traffic to user workers and R2 static assets. Handles edge caching, ISR, usage metering via Analytics Engine. Suspension enforcement for usage limit violations.
+**Dispatch Worker (`packages/dispatch`):** Routes `*.void.app` traffic to user workers and R2 static assets. Handles edge caching, ISR, usage metering via Analytics Engine. Suspension enforcement for usage limit violations.
 
 **Admin Dashboard (`packages/admin`):** Hono JSX server-rendered dashboard for user management, plan changes, suspension controls.
 
@@ -116,7 +116,7 @@ Defined with `defineMiddleware` in `middleware/` directory. Execute in filename 
 
 ```ts
 // middleware/02.auth.ts
-import { defineMiddleware } from "vite-cloud";
+import { defineMiddleware } from "void";
 
 export default defineMiddleware(async (c, next) => {
   const token = c.req.header("Authorization")?.replace("Bearer ", "");
@@ -131,7 +131,7 @@ Files in `jobs/` directory with an exported `cron` string are registered as Cron
 
 ```ts
 // jobs/cleanup.ts
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 export const cron = "0 * * * *";
 export default defineHandler(async (c) => {
   await c.env.DB.prepare("DELETE FROM sessions WHERE expires < ?").bind(Date.now()).run();
@@ -154,8 +154,8 @@ Thin identity function at runtime. Provides typed Hono `Context` (pre-typed with
 
 ```ts
 import * as v from "valibot";
-import { defineHandler } from "vite-cloud";
-import { db } from "vite-cloud/db";
+import { defineHandler } from "void";
+import { db } from "void/db";
 
 export const POST = defineHandler.withValidator({
   body: v.object({
@@ -178,11 +178,11 @@ Return values auto-convert: objects → JSON, strings → text/html, `null` → 
 
 Five-part system providing end-to-end type safety:
 
-1. **Route type codegen** — generates `.vite-cloud/routes.d.ts` using `typeof import(...)`. Inlines `Serialize<T>` and `ExtractInput<V>` helper types.
-2. **`RouteMap` declaration merging** — `declare module "vite-cloud/routes"` augments the stub interface.
-3. **Typed `fetch` client** — `vite-cloud/client` exports `fetch()` constrained by `RouteMap`.
-4. **Seamless tsconfig** — `.vite-cloud/tsconfig.json` with `files` entry (inherited by child).
-5. **Schema-derived DB types** — DDL parser replays migrations → `.vite-cloud/db.d.ts` augments `vite-cloud/db` with `DbTables`/`DbInsertTables`.
+1. **Route type codegen** — generates `.void/routes.d.ts` using `typeof import(...)`. Inlines `Serialize<T>` and `ExtractInput<V>` helper types.
+2. **`RouteMap` declaration merging** — `declare module "void/routes"` augments the stub interface.
+3. **Typed `fetch` client** — `void/client` exports `fetch()` constrained by `RouteMap`.
+4. **Seamless tsconfig** — `.void/tsconfig.json` with `files` entry (inherited by child).
+5. **Schema-derived DB types** — DDL parser replays migrations → `.void/db.d.ts` augments `void/db` with `DbTables`/`DbInsertTables`.
 
 Standard Schema V1 types are inlined — no `@standard-schema/spec` dependency needed.
 
@@ -192,7 +192,7 @@ Standard Schema V1 types are inlined — no `@standard-schema/spec` dependency n
 
 **Static analysis only** (runtime JIT inference was considered but not implemented). Uses Vite's `parseSync` (oxc-powered) + `estree-walker` to scan `routes/`, `middleware/`, and `jobs/` for `*.env.DB`, `*.env.KV`, `*.env.STORAGE` member expressions.
 
-Explicit override via `vite-cloud.json`:
+Explicit override via `void.json`:
 
 ```json
 { "bindings": { "db": true, "kv": true } }
@@ -204,7 +204,7 @@ Explicit override via `vite-cloud.json`:
 
 We build on top of `@cloudflare/vite-plugin`, not replace it. It provides workerd integration, HMR, build output, and Environment API. We add file-based routing, binding inference, auto-provisioning, typed codegen, and managed deployment.
 
-In **default mode**: `viteCloud()` → `[routingPlugin, dbTypesPlugin, migrationPlugin, ...cloudflare({ config: mergeBindings })]`
+In **default mode**: `voidPlugin()` → `[routingPlugin, dbTypesPlugin, migrationPlugin, ...cloudflare({ config: mergeBindings })]`
 
 In **framework mode** (auto-detected via `detectFramework()`): routing plugin is omitted, CF plugin uses `viteEnvironment: { name: "ssr" }` to hook into the framework's environment.
 
@@ -214,7 +214,7 @@ In **framework mode** (auto-detected via `detectFramework()`): routing plugin is
 
 ## 8. Deployment
 
-### CLI Deploy Flow (`vcc deploy`)
+### CLI Deploy Flow (`void deploy`)
 
 1. Build (`vite build`) — client + worker bundles
 2. Authenticate — GitHub or Google OAuth, JWT cached locally
@@ -222,7 +222,7 @@ In **framework mode** (auto-detected via `detectFramework()`): routing plugin is
 4. Platform provisions D1/KV/R2 resources as needed
 5. Platform runs migrations on remote D1 via CF REST API
 6. Static assets uploaded to R2, worker deployed to dispatch namespace
-7. KV routing entry updated → `{slug}.vitecloud.app` is live
+7. KV routing entry updated → `{slug}.void.app` is live
 
 **Key invariant:** Worker never deploys unless all migrations succeed.
 
@@ -248,7 +248,7 @@ SSR is supported via `src/main.ssr.ts` render entry. ISR (Incremental Static Reg
 
 ### Authentication
 
-Users sign in via GitHub or Google OAuth. Provider-agnostic user model (`provider`, `provider_id`, `login`, `plan`). JWT tokens, cached at `~/.vite-cloud/config.json`.
+Users sign in via GitHub or Google OAuth. Provider-agnostic user model (`provider`, `provider_id`, `login`, `plan`). JWT tokens, cached at `~/.void/config.json`.
 
 ### Usage Metering & Tiers
 
@@ -266,10 +266,10 @@ All resources live under our CF account. Isolation enforced at the binding level
 
 ## 10. Key Decisions & Resolved Questions
 
-- **No unstorage.** KV and R2 are accessed via native CF APIs (`c.env.KV`, `c.env.STORAGE`). Typed wrappers available at `vite-cloud/kv` and `vite-cloud/storage`.
+- **No unstorage.** KV and R2 are accessed via native CF APIs (`c.env.KV`, `c.env.STORAGE`). Typed wrappers available at `void/kv` and `void/storage`.
 - **No h3/Nitro.** Hono is the runtime. We take patterns (file-based routing, defineHandler) but not packages.
 - **No auto-imports.** Explicit imports for type inference.
 - **SSR implemented.** `src/main.ssr.ts` convention + ISR via dispatch worker.
-- **Secrets** managed via `vcc secret set NAME=value`.
+- **Secrets** managed via `void secret set NAME=value`.
 - **Framework mode** auto-detected — supports TanStack Start and React Router.
-- **Auth** supports both platform-level (GitHub/Google OAuth for deployment) and app-level (built-in auth with `vite-cloud/auth` + `c.get("user")` convention).
+- **Auth** supports both platform-level (GitHub/Google OAuth for deployment) and app-level (built-in auth with `void/auth` + `c.get("user")` convention).

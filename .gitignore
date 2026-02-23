@@ -1,6 +1,6 @@
 node_modules
 dist
-.vite-cloud
+.void
 *.tsbuildinfo
 .DS_Store
 .wrangler

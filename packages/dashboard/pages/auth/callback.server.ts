@@ -1,4 +1,4 @@
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 import { setCookie } from "hono/cookie";
 
 export const loader = defineHandler((c) => {
@@ -7,7 +7,7 @@ export const loader = defineHandler((c) => {
     return c.redirect("/login");
   }
 
-  setCookie(c, "vc_token", token, {
+  setCookie(c, "void_token", token, {
     httpOnly: true,
     secure: true,
     sameSite: "Lax",

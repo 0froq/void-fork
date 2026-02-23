@@ -1,4 +1,4 @@
-This is the private platform repo for Vite Cloud. The open-source framework code lives in `framework/` (gitignored, independent git repo).
+This is the private platform repo for Void. The open-source framework code lives in `framework/` (gitignored, independent git repo).
 
 ## Context Overview
 
@@ -31,7 +31,7 @@ pnpm test                           # Run vitest (unit + integration tests)
 pnpm lint                           # oxlint
 pnpm fmt                            # oxfmt --write .
 pnpm check                          # Typecheck all packages (tsc --noEmit)
-pnpm run deploy                     # Build all + deploy ai-proxy, dispatch, platform & dashboard (production)
+pnpm run deploy                     # Build all + deploy ai-proxy, dispatch, api & dashboard (production)
 pnpm run deploy:staging             # Deploy all workers to staging environment
 ```
 
@@ -41,31 +41,31 @@ pnpm run deploy:staging             # Deploy all workers to staging environment
 
 pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-workspace.yaml` (@cloudflare/workers-types, wrangler). Make sure to run `pnpm install` after making package structure changes.
 
-| Package                                                | npm name                          | Purpose                                                        |
-| ------------------------------------------------------ | --------------------------------- | -------------------------------------------------------------- |
-| [`packages/platform`](./packages/platform/README.md)   | `@vite-cloud/platform` (private)  | Control Plane API + Admin Dashboard                            |
-| [`packages/dispatch`](./packages/dispatch/README.md)   | `@vite-cloud/dispatch` (private)  | Routes `*.vitecloud.app` to user workers + R2 assets           |
-| [`packages/ai-proxy`](./packages/ai-proxy/README.md)   | `@vite-cloud/ai-proxy` (private)  | AI inference proxy — metered Workers AI via AI Gateway         |
-| [`packages/dashboard`](./packages/dashboard/README.md) | `@vite-cloud/dashboard` (private) | User-facing dashboard — project management, deployments, usage |
-| [`packages/ui`](./packages/ui)                         | `@vite-cloud/ui` (private)        | Shared CSS/design tokens (used by dashboard)                   |
+| Package                                                | npm name                         | Purpose                                                        |
+| ------------------------------------------------------ | -------------------------------- | -------------------------------------------------------------- |
+| [`packages/api`](./packages/api/README.md)             | `@voidcloud/api` (private)       | Control Plane API + Admin Dashboard                            |
+| [`packages/dispatch`](./packages/dispatch/README.md)   | `@voidcloud/dispatch` (private)  | Routes `*.void.app` to user workers + R2 assets                |
+| [`packages/ai-proxy`](./packages/ai-proxy/README.md)   | `@voidcloud/ai-proxy` (private)  | AI inference proxy — metered Workers AI via AI Gateway         |
+| [`packages/dashboard`](./packages/dashboard/README.md) | `@voidcloud/dashboard` (private) | User-facing dashboard — project management, deployments, usage |
+| [`packages/ui`](./packages/ui)                         | `@voidcloud/ui` (private)        | Shared CSS/design tokens (used by dashboard)                   |
 
-The dashboard depends on `vite-cloud` and `@vite-cloud/vue` from npm (resolved via `file:` overrides to `framework/` during local development).
+The dashboard depends on `void` and `@voidcloud/vue` from npm (resolved via `file:` overrides to `framework/` during local development).
 
 ## `dashboard` Overview
 
-Vue Pages mode app serving the user-facing Vite Cloud dashboard at `dash.vite.cloud`. Built with `@vite-cloud/vue` (SSR + `<script server>` blocks), Hono, and Tailwind CSS v4 with shared design tokens from `@vite-cloud/ui`. Uses a BFF pattern — server-side loaders call the platform API with the user's JWT (stored in an httpOnly cookie), so the client never talks to the platform API directly.
+Vue Pages mode app serving the user-facing Void dashboard at `dash.void.cloud`. Built with `@voidcloud/vue` (SSR + `<script server>` blocks), Hono, and Tailwind CSS v4 with shared design tokens from `@voidcloud/ui`. Uses a BFF pattern — server-side loaders call the API with the user's JWT (stored in an httpOnly cookie), so the client never talks to the API directly.
 
-- **Auth**: OAuth (GitHub/Google) via platform API, JWT in httpOnly `vc_token` cookie
+- **Auth**: OAuth (GitHub/Google) via API, JWT in httpOnly `void_token` cookie
 - **Pages**: login, project list with aggregate usage, project detail (deployments, domains, secrets, usage metrics), settings
-- **Deployment**: CF Worker — production at `dash.vite.cloud`, staging at `dash.staging.vite.cloud`
+- **Deployment**: CF Worker — production at `dash.void.cloud`, staging at `dash.staging.void.cloud`
 
 See [`packages/dashboard/README.md`](./packages/dashboard/README.md) for details.
 
-## `platform` Overview
+## `api` Overview
 
 CF Worker serving the Control Plane API + Admin Dashboard. Handles OAuth (GitHub/Google), project CRUD, deploy pipeline (migrations → assets → worker upload), usage metering via Analytics Engine, and plan tier enforcement. Admin dashboard uses Hono JSX with cookie-based auth. Uses Drizzle ORM with D1 for type-safe database queries — schema defined in `src/schema.ts`, types inferred via `InferSelectModel`.
 
-See [`packages/platform/README.md`](./packages/platform/README.md) for API endpoints, auth flow, deploy flow, tiers, secrets, and CF API token permissions.
+See [`packages/api/README.md`](./packages/api/README.md) for API endpoints, auth flow, deploy flow, tiers, secrets, and CF API token permissions.
 
 ## `ai-proxy` Overview
 
@@ -75,7 +75,7 @@ See [`packages/ai-proxy/README.md`](./packages/ai-proxy/README.md) for request f
 
 ## `dispatch` Overview
 
-CF Worker routing `*.vitecloud.app` traffic. Extracts slug from hostname → KV lookup → serves API routes via Workers for Platforms (with custom CPU/subrequest limits) or static assets from R2 (with edge caching). Records every request to Analytics Engine for usage metering. Also relays Cloudflare Queue batches to user workers via KV-based routing.
+CF Worker routing `*.void.app` traffic. Extracts slug from hostname → KV lookup → serves API routes via Workers for Platforms (with custom CPU/subrequest limits) or static assets from R2 (with edge caching). Records every request to Analytics Engine for usage metering. Also relays Cloudflare Queue batches to user workers via KV-based routing.
 
 See [`packages/dispatch/README.md`](./packages/dispatch/README.md) for request flow, metering schema, and edge caching strategy.
 
@@ -85,8 +85,8 @@ See [`packages/dispatch/README.md`](./packages/dispatch/README.md) for request f
 | -------- | ------------- | ---------------------------------------------------------------------------------------------- |
 | Node.js  | 24.13.1       | Runtime (TS type stripping enabled natively — no `tsx` or `--experimental-strip-types` needed) |
 | pnpm     | 10.x          | Package manager with workspaces + catalog                                                      |
-| wrangler | 4.x           | CF Worker dev/deploy (platform, dispatch)                                                      |
-| drizzle  | 0.45.x        | Type-safe ORM for platform D1 (schema + queries + migrations)                                  |
+| wrangler | 4.x           | CF Worker dev/deploy (api, dispatch)                                                           |
+| drizzle  | 0.45.x        | Type-safe ORM for API D1 (schema + queries + migrations)                                       |
 | vitest   | 4.x           | Unit + integration tests                                                                       |
 | oxlint   | 1.47.x        | Linting                                                                                        |
 | oxfmt    | 0.32.x        | Formatting (double quotes, semis)                                                              |
@@ -98,7 +98,7 @@ Tests run from root with `pnpm test` (vitest). See each package README for detai
 
 ## Operations
 
-Two environments: **production** (`*.vitecloud.app`, manual deploy via `prod` branch) and **staging** (`*.staging.vitecloud.app`, auto-deploys on push to `main`). Each has fully isolated CF resources (D1, KV, R2, dispatch namespace, analytics engine).
+Two environments: **production** (`*.void.app`, manual deploy via `prod` branch) and **staging** (`*.staging.void.app`, auto-deploys on push to `main`). Each has fully isolated CF resources (D1, KV, R2, dispatch namespace, analytics engine).
 
 ```
 pnpm run deploy           # Production
@@ -109,8 +109,8 @@ See [`meta/operations.md`](./meta/operations.md) for the full operations referen
 
 ## Pitfalls / Things That Broke
 
-- **Platform DB uses Drizzle ORM** — schema is the source of truth in `src/schema.ts`. To add columns or tables: update schema → `pnpm db:generate` → apply migration. Types are inferred via `InferSelectModel`, not hand-maintained. Use `.$type<T>()` on text columns to narrow to union types (e.g., `PlanId`, deployment status).
-- **tsconfig `lib` must be explicit** for CF Workers packages. Without `"lib": ["ES2022"]`, TS defaults to including `lib.dom.d.ts` which shadows `@cloudflare/workers-types` globals (e.g. `CacheStorage.default`). Applied to `dispatch`. Not applied to `platform` (its tests use Miniflare/Node which needs DOM-compatible `URL` types).
+- **API DB uses Drizzle ORM** — schema is the source of truth in `src/schema.ts`. To add columns or tables: update schema → `pnpm db:generate` → apply migration. Types are inferred via `InferSelectModel`, not hand-maintained. Use `.$type<T>()` on text columns to narrow to union types (e.g., `PlanId`, deployment status).
+- **tsconfig `lib` must be explicit** for CF Workers packages. Without `"lib": ["ES2022"]`, TS defaults to including `lib.dom.d.ts` which shadows `@cloudflare/workers-types` globals (e.g. `CacheStorage.default`). Applied to `dispatch`. Not applied to `api` (its tests use Miniflare/Node which needs DOM-compatible `URL` types).
 - **OAuth env vars use `_OAUTH_` prefix** (`GITHUB_OAUTH_ID`, `GITHUB_OAUTH_SECRET`, `GOOGLE_OAUTH_ID`, `GOOGLE_OAUTH_SECRET`). These are passed explicitly to `@hono/oauth-providers` middleware, overriding its default `GITHUB_ID`/`GOOGLE_ID` convention, to avoid naming collisions and make the purpose clear.
 - **D1 does not allow `PRAGMA foreign_keys=OFF`** — D1 enforces `foreign_keys=ON` always. Drizzle-generated migrations that do table rebuilds (e.g. adding NOT NULL to an existing column) use `PRAGMA foreign_keys=OFF/ON`, which silently fails on D1. Hand-edit these to `PRAGMA defer_foreign_keys=on/off` instead, which defers FK checks to the end of the current transaction.
-- **Deploy protocol versioning** — The `DeployManifest` interface has a `version` field. The platform validates it and rejects unknown versions with a clear error. See `meta/design-docs/0018-open-source-split.md` for the versioning policy.
+- **Deploy protocol versioning** — The `DeployManifest` interface has a `version` field. The API validates it and rejects unknown versions with a clear error. See `meta/design-docs/0018-open-source-split.md` for the versioning policy.

@@ -1,17 +1,17 @@
 {
-  "name": "vite-cloud-dashboard",
+  "name": "void-dashboard",
   "compatibility_date": "2026-02-12",
   "no_bundle": true,
   "assets": {
     "directory": "dist/client",
   },
-  "routes": [{ "pattern": "dash.vite.cloud", "custom_domain": true }],
+  "routes": [{ "pattern": "dash.void.cloud", "custom_domain": true }],
   "env": {
     "staging": {
-      "name": "vite-cloud-dashboard-staging",
-      "routes": [{ "pattern": "dash.staging.vite.cloud", "custom_domain": true }],
+      "name": "void-dashboard-staging",
+      "routes": [{ "pattern": "dash.staging.void.cloud", "custom_domain": true }],
       "vars": {
-        "PLATFORM_API_URL": "https://platform.staging.vite.cloud",
+        "API_URL": "https://api.staging.void.cloud",
       },
     },
   },

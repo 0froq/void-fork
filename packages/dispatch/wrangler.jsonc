@@ -1,10 +1,10 @@
 {
-  "name": "vite-cloud-dispatch",
+  "name": "void-dispatch",
   "main": "src/index.ts",
   "compatibility_date": "2026-02-12",
   "routes": [
-    { "pattern": "*.vitecloud.app/*", "zone_name": "vitecloud.app" },
-    { "pattern": "*.vitecloud.app", "zone_name": "vitecloud.app" },
+    { "pattern": "*.void.app/*", "zone_name": "void.app" },
+    { "pattern": "*.void.app", "zone_name": "void.app" },
   ],
   "observability": {
     "enabled": true,
@@ -13,13 +13,13 @@
   "dispatch_namespaces": [
     {
       "binding": "DISPATCH",
-      "namespace": "vite-cloud-users",
+      "namespace": "void-users",
     },
   ],
   "r2_buckets": [
     {
       "binding": "ASSETS",
-      "bucket_name": "vite-cloud-assets",
+      "bucket_name": "void-assets",
     },
   ],
   "kv_namespaces": [
@@ -36,24 +36,24 @@
   ],
   "env": {
     "staging": {
-      "name": "vite-cloud-dispatch-staging",
+      "name": "void-dispatch-staging",
       "routes": [
-        { "pattern": "*.staging.vitecloud.app/*", "zone_name": "vitecloud.app" },
-        { "pattern": "*.staging.vitecloud.app", "zone_name": "vitecloud.app" },
+        { "pattern": "*.staging.void.app/*", "zone_name": "void.app" },
+        { "pattern": "*.staging.void.app", "zone_name": "void.app" },
       ],
       "vars": {
-        "BASE_HOSTNAME": "staging.vitecloud.app",
+        "BASE_HOSTNAME": "staging.void.app",
       },
       "dispatch_namespaces": [
         {
           "binding": "DISPATCH",
-          "namespace": "vite-cloud-users-staging",
+          "namespace": "void-users-staging",
         },
       ],
       "r2_buckets": [
         {
           "binding": "ASSETS",
-          "bucket_name": "vite-cloud-assets-staging",
+          "bucket_name": "void-assets-staging",
         },
       ],
       "kv_namespaces": [

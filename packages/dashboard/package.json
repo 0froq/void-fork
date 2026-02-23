@@ -1,10 +1,10 @@
 {
-  "name": "@vite-cloud/dashboard",
+  "name": "@voidcloud/dashboard",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "PLATFORM_API_URL=http://localhost:8787 vite",
+    "dev": "API_URL=http://localhost:8787 vite",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
@@ -17,13 +17,13 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.0",
-    "@vite-cloud/platform": "workspace:*",
-    "@vite-cloud/ui": "workspace:*",
-    "@vite-cloud/vue": "^0.0.1",
+    "@voidcloud/api": "workspace:*",
+    "@voidcloud/ui": "workspace:*",
+    "@voidcloud/vue": "^0.0.1",
     "tailwindcss": "^4.2.0",
     "typescript": "~5.8.3",
     "vite": "8.0.0-beta.14",
-    "vite-cloud": "^0.0.1",
+    "void": "^0.0.1",
     "vue-tsc": "^3.2.5",
     "wrangler": "catalog:"
   }

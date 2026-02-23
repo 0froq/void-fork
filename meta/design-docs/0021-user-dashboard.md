@@ -7,14 +7,14 @@
 
 ## Summary
 
-A user-facing dashboard for Vite Cloud, built as a Vue Pages mode app that dogfoods the platform. Provides project management, deployment history, usage monitoring, domain/secrets management, and account settings.
+A user-facing dashboard for Void, built as a Vue Pages mode app that dogfoods the platform. Provides project management, deployment history, usage monitoring, domain/secrets management, and account settings.
 
 ## Architecture
 
 ### Package: `packages/dashboard`
 
-- Vue Pages mode app using `viteCloud()` + `viteCloudVue()`
-- Deploys as its own Vite Cloud project at `dashboard.vitecloud.app`
+- Vue Pages mode app using `voidPlugin()` + `voidVue()`
+- Deploys as its own Void project at `dashboard.void.app`
 - Tailwind CSS with custom theme from shared preset
 
 ### Data Access: BFF via Platform API
@@ -43,7 +43,7 @@ Starts as a Tailwind preset package exporting design tokens. Dashboard component
 
 - Project cards grid: name/slug, live URL, mode badge, last deploy timestamp + status, request count
 - Aggregate usage bar: total requests / limit, bandwidth, AI neurons with progress toward plan limits
-- "New project" CTA linking to CLI docs (`vcc projects create`)
+- "New project" CTA linking to CLI docs (`void projects create`)
 
 ### Project Detail (`pages/projects/[id].vue`)
 
@@ -113,7 +113,7 @@ packages/dashboard/
     01.auth.ts               # JWT cookie check, redirect to login
   components/                # Dashboard UI components
   vite.config.ts
-  tailwind.config.ts         # Imports preset from @vite-cloud/ui
+  tailwind.config.ts         # Imports preset from @voidcloud/ui
   package.json
 ```
 

@@ -1,4 +1,4 @@
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 import { createClient, api, type API, type Client } from "../../lib/api";
 
 type P = Client["projects"][":id"];

@@ -1,5 +1,5 @@
 import { hc, type InferResponseType } from "hono/client";
-import type { ApiRoutes } from "@vite-cloud/platform/api";
+import type { ApiRoutes } from "@voidcloud/api/api";
 import type { Context } from "hono";
 
 export type Client = ReturnType<typeof hc<ApiRoutes>>;
@@ -10,11 +10,11 @@ export type API<K extends keyof B, B = Client> = InferResponseType<
   200
 >;
 
-const PLATFORM_API_URL = "https://platform.vite.cloud";
+const API_URL = "https://api.void.cloud";
 
 export function createClient(c: Context) {
   const token = c.get("token") as string | undefined;
-  const baseUrl = (c.env as Record<string, string>).PLATFORM_API_URL ?? PLATFORM_API_URL;
+  const baseUrl = (c.env as Record<string, string>).API_URL ?? API_URL;
   return hc<ApiRoutes>(baseUrl, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
@@ -31,7 +31,7 @@ export class ApiError extends Error {
 
 export async function api(c: Context, path: string, options?: RequestInit): Promise<Response> {
   const token = c.get("token") as string | undefined;
-  const baseUrl = (c.env as Record<string, string>).PLATFORM_API_URL ?? PLATFORM_API_URL;
+  const baseUrl = (c.env as Record<string, string>).API_URL ?? API_URL;
 
   const res = await fetch(`${baseUrl}${path}`, {
     ...options,

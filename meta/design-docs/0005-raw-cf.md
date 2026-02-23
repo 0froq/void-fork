@@ -7,9 +7,9 @@
 
 ## Summary
 
-Users can deploy directly to their own Cloudflare account (bypassing the Vite Cloud platform) by adding a `wrangler.json` with real binding IDs and running `vite build && wrangler deploy`.
+Users can deploy directly to their own Cloudflare account (bypassing the Void platform) by adding a `wrangler.json` with real binding IDs and running `vite build && wrangler deploy`.
 
-The vite-cloud framework generates a **platform-agnostic** Worker: standard `{ fetch, scheduled }` export (Hono app) with standard CF bindings (`c.env.DB`, `c.env.KV`, `c.env.STORAGE`). No runtime dependency on the platform.
+The void framework generates a **platform-agnostic** Worker: standard `{ fetch, scheduled }` export (Hono app) with standard CF bindings (`c.env.DB`, `c.env.KV`, `c.env.STORAGE`). No runtime dependency on the platform.
 
 ---
 
@@ -50,13 +50,13 @@ Migrations use wrangler's built-in D1 migration system: `wrangler d1 migrations 
 
 ## What Changes vs. Platform Deploy
 
-| Concern       | Platform (`vcc deploy`)                  | Raw CF (`wrangler deploy`)                   |
+| Concern       | Platform (`void deploy`)                 | Raw CF (`wrangler deploy`)                   |
 | ------------- | ---------------------------------------- | -------------------------------------------- |
 | Worker upload | Workers for Platforms dispatch namespace | Direct `wrangler deploy`                     |
 | Static assets | R2 + dispatch worker                     | Workers Static Assets (built into CF plugin) |
 | Provisioning  | Auto-create resources via CF API         | User creates manually                        |
 | Migrations    | Platform runs via CF REST API            | `wrangler d1 migrations apply`               |
 | Auth          | OAuth + JWT via platform API             | N/A (user's own CF account)                  |
-| Routing       | `{slug}.vitecloud.app` via KV            | User's own domain / `workers.dev`            |
+| Routing       | `{slug}.void.app` via KV                 | User's own domain / `workers.dev`            |
 
 **What doesn't change:** routing plugin, code generation, type generation, runtime (`defineHandler`, `defineMiddleware`, `convertReturnValue`), typed fetch client, DB query helper — all work identically.

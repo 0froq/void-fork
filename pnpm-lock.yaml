@@ -17,8 +17,8 @@ catalogs:
       version: 4.65.0
 
 overrides:
-  vite-cloud: link:framework/packages/vite-cloud
-  '@vite-cloud/vue': link:framework/packages/vue
+  void: link:framework/packages/void
+  '@voidcloud/vue': link:framework/packages/vue
 
 importers:
 
@@ -55,6 +55,35 @@ importers:
         specifier: 'catalog:'
         version: 4.65.0(@cloudflare/workers-types@4.20260214.0)
 
+  packages/api:
+    dependencies:
+      drizzle-orm:
+        specifier: ^0.45.1
+        version: 0.45.1(@cloudflare/workers-types@4.20260214.0)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.6.2)
+      hono:
+        specifier: ^4.11.9
+        version: 4.11.9
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 4.20260214.0
+      '@typescript/native-preview':
+        specifier: 'catalog:'
+        version: 7.0.0-dev.20260222.1
+      drizzle-kit:
+        specifier: ^0.31.9
+        version: 0.31.9
+      miniflare:
+        specifier: ^4
+        version: 4.20260212.0
+      wrangler:
+        specifier: 'catalog:'
+        version: 4.65.0(@cloudflare/workers-types@4.20260214.0)
+    optionalDependencies:
+      '@clack/prompts':
+        specifier: ^0.10.0
+        version: 0.10.1
+
   packages/dashboard:
     dependencies:
       hono:
@@ -67,13 +96,13 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.2.0
         version: 4.2.0(vite@8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
-      '@vite-cloud/platform':
+      '@voidcloud/api':
         specifier: workspace:*
-        version: link:../platform
-      '@vite-cloud/ui':
+        version: link:../api
+      '@voidcloud/ui':
         specifier: workspace:*
         version: link:../ui
-      '@vite-cloud/vue':
+      '@voidcloud/vue':
         specifier: link:../../framework/packages/vue
         version: link:../../framework/packages/vue
       tailwindcss:
@@ -85,9 +114,9 @@ importers:
       vite:
         specifier: 8.0.0-beta.14
         version: 8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)
-      vite-cloud:
-        specifier: link:../../framework/packages/vite-cloud
-        version: link:../../framework/packages/vite-cloud
+      void:
+        specifier: link:../../framework/packages/void
+        version: link:../../framework/packages/void
       vue-tsc:
         specifier: ^3.2.5
         version: 3.2.5(typescript@5.8.3)
@@ -106,35 +135,6 @@ importers:
       wrangler:
         specifier: 'catalog:'
         version: 4.65.0(@cloudflare/workers-types@4.20260214.0)
-
-  packages/platform:
-    dependencies:
-      drizzle-orm:
-        specifier: ^0.45.1
-        version: 0.45.1(@cloudflare/workers-types@4.20260214.0)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.6.2)
-      hono:
-        specifier: ^4.11.9
-        version: 4.11.9
-    devDependencies:
-      '@cloudflare/workers-types':
-        specifier: 'catalog:'
-        version: 4.20260214.0
-      '@typescript/native-preview':
-        specifier: 'catalog:'
-        version: 7.0.0-dev.20260218.1
-      drizzle-kit:
-        specifier: ^0.31.9
-        version: 0.31.9
-      miniflare:
-        specifier: ^4
-        version: 4.20260212.0
-      wrangler:
-        specifier: 'catalog:'
-        version: 4.65.0(@cloudflare/workers-types@4.20260214.0)
-    optionalDependencies:
-      '@clack/prompts':
-        specifier: ^0.10.0
-        version: 0.10.1
 
   packages/ui: {}
 
@@ -1470,6 +1470,11 @@ packages:
     cpu: [arm64]
     os: [darwin]
 
+  '@typescript/native-preview-darwin-arm64@7.0.0-dev.20260222.1':
+    resolution: {integrity: sha512-aXfK/s3QlbzXvZoFQ07KJDNx86q61nCITSreqLytnqjhjsXUUuMACsxjy/YsReLG2bdii+mHTA2WB2IB0LKKGA==}
+    cpu: [arm64]
+    os: [darwin]
+
   '@typescript/native-preview-darwin-x64@7.0.0-dev.20260218.1':
     resolution: {integrity: sha512-n9Ki8WTW82w6PlBTlrAQAjEUQB2V7C2oXrkN5U7ElwUH4FOostSFzZHuAdnPMbdzMx76P0pEw9FteYrLDA4m9g==}
     cpu: [x64]
@@ -1477,6 +1482,11 @@ packages:
 
   '@typescript/native-preview-darwin-x64@7.0.0-dev.20260221.1':
     resolution: {integrity: sha512-BNaNe3rox2rpkh5sWcnZZob6sDA/at9KK55/WSRAH4W+9dFReOLFAR9YXhKxrLGZ1QpleuIBahKbV8o037S+pA==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@typescript/native-preview-darwin-x64@7.0.0-dev.20260222.1':
+    resolution: {integrity: sha512-+bHnCeONX47pmVXTt6kuwxiLayDVqkLtshjqpqthXMWFFGk+1K/5ASbFEb2FumSABgB9hQ/xqkjj5QHUgGmbPg==}
     cpu: [x64]
     os: [darwin]
 
@@ -1490,6 +1500,11 @@ packages:
     cpu: [arm64]
     os: [linux]
 
+  '@typescript/native-preview-linux-arm64@7.0.0-dev.20260222.1':
+    resolution: {integrity: sha512-Usm9oJzLPqK7Z7echSSaHnmTXhr3knLXycoyVZwRrmWC33aX2efZb+XrdaV/SMhdYjYHCZ6mE60qcK4nEaXdng==}
+    cpu: [arm64]
+    os: [linux]
+
   '@typescript/native-preview-linux-arm@7.0.0-dev.20260218.1':
     resolution: {integrity: sha512-WRPMvTztPatQ91UzYWSp82NT45JmjMgo/pVgZjXYEWdF2rwS4ejzR6DnHq30jXhEPnMah1bTeOzSWFF2kvXUmg==}
     cpu: [arm]
@@ -1497,6 +1512,11 @@ packages:
 
   '@typescript/native-preview-linux-arm@7.0.0-dev.20260221.1':
     resolution: {integrity: sha512-+/uyIw7vg4FyAnNpsCJHmSOhMiR2m56lqaEo1J5pMAstJmfLTTKQdJ1muIWCDCqc24k2U30IStHOaCqUerp/nQ==}
+    cpu: [arm]
+    os: [linux]
+
+  '@typescript/native-preview-linux-arm@7.0.0-dev.20260222.1':
+    resolution: {integrity: sha512-bavfJlI3JNH2F/7BX0drZ4JCSjLsCc2Dy5e2s6pc2wuLIzJ6hIjFaXIeB9TDbVYJE+MlLf6rtQF9nP9iSsgk9g==}
     cpu: [arm]
     os: [linux]
 
@@ -1510,6 +1530,11 @@ packages:
     cpu: [x64]
     os: [linux]
 
+  '@typescript/native-preview-linux-x64@7.0.0-dev.20260222.1':
+    resolution: {integrity: sha512-JaOwNBJ2nA0C/MBfMXilrVNv+hUpIzs7JtpSgpOsXa3Hq7BL2rnoO6WMuCo8IHz7v8+Lr+MPJufXVEHfrOtf5A==}
+    cpu: [x64]
+    os: [linux]
+
   '@typescript/native-preview-win32-arm64@7.0.0-dev.20260218.1':
     resolution: {integrity: sha512-VmWvJ+TEuTPmZrhWe+buvvUvHbMyiD4ZLgxYPdYcJ3kRQlk2mD5lOq63ZISx1pDB8kYz5/R5xYKy/8gSIU5MgQ==}
     cpu: [arm64]
@@ -1517,6 +1542,11 @@ packages:
 
   '@typescript/native-preview-win32-arm64@7.0.0-dev.20260221.1':
     resolution: {integrity: sha512-lXbsy5vDzS//oE0evX+QwZBwpKselXTd8H18lT42CBQo2hL2r0+w9YBguaYXrnGkAoHjDXEfKA2xii8yVZKVUg==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@typescript/native-preview-win32-arm64@7.0.0-dev.20260222.1':
+    resolution: {integrity: sha512-Mngr3qdeO7Ey3DtsHe4oqIghXYcjOr9pVQtKXbijfT0slRtVPeF1TmEb/eH+Z+LsY1SOW8c/Cig1G4NDXZnghw==}
     cpu: [arm64]
     os: [win32]
 
@@ -1530,12 +1560,21 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@typescript/native-preview-win32-x64@7.0.0-dev.20260222.1':
+    resolution: {integrity: sha512-8Gps/FPcQiyoHeDhRY3RXhJSJwQQuUIP5lepYO3+2xvCPPeeNBoOueiLoGKxno4CYbS4O2fPdVmymboX0ApjZA==}
+    cpu: [x64]
+    os: [win32]
+
   '@typescript/native-preview@7.0.0-dev.20260218.1':
     resolution: {integrity: sha512-hbGRXBk7abFvOQJk/7mc8K9q1kPkiyziyUsS8r8Hc1sLxrDFUbGgsW9p8qg67Xe1K6NUv/9UU2cdeIitUDexIQ==}
     hasBin: true
 
   '@typescript/native-preview@7.0.0-dev.20260221.1':
     resolution: {integrity: sha512-tEUzcnj6pD+z1vANchRzhpPl+3RMD+xQRvIN//0+qjtP5zyYB5T+MIaAWycpKDwlHP9C13JnQgcgYnC+LlNkrg==}
+    hasBin: true
+
+  '@typescript/native-preview@7.0.0-dev.20260222.1':
+    resolution: {integrity: sha512-Uxon0iNhNqH/HkWvKmTmr7d5TJp6yomoyFHNpLIEghy91/DNWEtKMuLjNDYPFcoNxWpuJW9vuWTWeu3mcqT94Q==}
     hasBin: true
 
   '@vitest/expect@4.0.18':
@@ -3272,10 +3311,16 @@ snapshots:
   '@typescript/native-preview-darwin-arm64@7.0.0-dev.20260221.1':
     optional: true
 
+  '@typescript/native-preview-darwin-arm64@7.0.0-dev.20260222.1':
+    optional: true
+
   '@typescript/native-preview-darwin-x64@7.0.0-dev.20260218.1':
     optional: true
 
   '@typescript/native-preview-darwin-x64@7.0.0-dev.20260221.1':
+    optional: true
+
+  '@typescript/native-preview-darwin-x64@7.0.0-dev.20260222.1':
     optional: true
 
   '@typescript/native-preview-linux-arm64@7.0.0-dev.20260218.1':
@@ -3284,10 +3329,16 @@ snapshots:
   '@typescript/native-preview-linux-arm64@7.0.0-dev.20260221.1':
     optional: true
 
+  '@typescript/native-preview-linux-arm64@7.0.0-dev.20260222.1':
+    optional: true
+
   '@typescript/native-preview-linux-arm@7.0.0-dev.20260218.1':
     optional: true
 
   '@typescript/native-preview-linux-arm@7.0.0-dev.20260221.1':
+    optional: true
+
+  '@typescript/native-preview-linux-arm@7.0.0-dev.20260222.1':
     optional: true
 
   '@typescript/native-preview-linux-x64@7.0.0-dev.20260218.1':
@@ -3296,16 +3347,25 @@ snapshots:
   '@typescript/native-preview-linux-x64@7.0.0-dev.20260221.1':
     optional: true
 
+  '@typescript/native-preview-linux-x64@7.0.0-dev.20260222.1':
+    optional: true
+
   '@typescript/native-preview-win32-arm64@7.0.0-dev.20260218.1':
     optional: true
 
   '@typescript/native-preview-win32-arm64@7.0.0-dev.20260221.1':
     optional: true
 
+  '@typescript/native-preview-win32-arm64@7.0.0-dev.20260222.1':
+    optional: true
+
   '@typescript/native-preview-win32-x64@7.0.0-dev.20260218.1':
     optional: true
 
   '@typescript/native-preview-win32-x64@7.0.0-dev.20260221.1':
+    optional: true
+
+  '@typescript/native-preview-win32-x64@7.0.0-dev.20260222.1':
     optional: true
 
   '@typescript/native-preview@7.0.0-dev.20260218.1':
@@ -3327,6 +3387,16 @@ snapshots:
       '@typescript/native-preview-linux-x64': 7.0.0-dev.20260221.1
       '@typescript/native-preview-win32-arm64': 7.0.0-dev.20260221.1
       '@typescript/native-preview-win32-x64': 7.0.0-dev.20260221.1
+
+  '@typescript/native-preview@7.0.0-dev.20260222.1':
+    optionalDependencies:
+      '@typescript/native-preview-darwin-arm64': 7.0.0-dev.20260222.1
+      '@typescript/native-preview-darwin-x64': 7.0.0-dev.20260222.1
+      '@typescript/native-preview-linux-arm': 7.0.0-dev.20260222.1
+      '@typescript/native-preview-linux-arm64': 7.0.0-dev.20260222.1
+      '@typescript/native-preview-linux-x64': 7.0.0-dev.20260222.1
+      '@typescript/native-preview-win32-arm64': 7.0.0-dev.20260222.1
+      '@typescript/native-preview-win32-x64': 7.0.0-dev.20260222.1
 
   '@vitest/expect@4.0.18':
     dependencies:

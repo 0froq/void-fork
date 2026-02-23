@@ -24,9 +24,9 @@ Route files (defineHandler + withValidator)
   │
   ├── Runtime: Hono app with registered routes
   │
-  └── Codegen: .vite-cloud/routes.d.ts (typeof import(...))
+  └── Codegen: .void/routes.d.ts (typeof import(...))
         │
-        └── Typed fetch client (vite-cloud/client)
+        └── Typed fetch client (void/client)
 ```
 
 ---
@@ -53,7 +53,7 @@ Models JSON serialization boundary: `Date` → `string`, `undefined` stripped, f
 
 `withValidator` accepts `StandardSchemaV1` — works with Zod, Valibot, ArkType, etc. with zero adapters. Uses `InferInput` for client-facing types (can omit fields with defaults) and `InferOutput` for handler parameter types (defaults applied).
 
-Standard Schema V1 types are **inlined** in both the vite-cloud source and the generated `routes.d.ts` — no `@standard-schema/spec` dependency needed.
+Standard Schema V1 types are **inlined** in both the void source and the generated `routes.d.ts` — no `@standard-schema/spec` dependency needed.
 
 ### Type extraction via `typeof import(...)`
 
@@ -63,11 +63,11 @@ The codegen emits `typeof import("../../routes/api/users").GET` references. Type
 
 ## Implementation Details
 
-### Generated output (`.vite-cloud/routes.d.ts`)
+### Generated output (`.void/routes.d.ts`)
 
 ```typescript
 export {};
-declare module "vite-cloud/routes" {
+declare module "void/routes" {
   interface RouteMap {
     "/api/users": {
       GET: {
@@ -91,10 +91,10 @@ Uses Standard Schema's `~standard.validate()` method. On failure, returns 400 wi
 
 **ArkType caveat:** `ArkErrors.map()` returns `ArkErrors` (not a plain array), causing `Response.json()` to crash via its custom `toJSON()`. Use `Array.from(issues, mapper)` instead.
 
-### Typed `fetch` client (`vite-cloud/client`)
+### Typed `fetch` client (`void/client`)
 
 ```typescript
-import { fetch } from "vite-cloud/client";
+import { fetch } from "void/client";
 
 const users = await fetch("/api/users"); // typed output
 await fetch("/api/users", {

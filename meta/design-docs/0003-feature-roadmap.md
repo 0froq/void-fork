@@ -1,4 +1,4 @@
-# Vite Cloud — Feature Roadmap
+# Void — Feature Roadmap
 
 **Date:** 2026-02-15
 **Status:** Post-v1.0 planning (partially implemented)
@@ -12,16 +12,16 @@ The following features from the original roadmap have been built:
 - **SSR support** — `src/main.ssr.ts` render entry convention
 - **ISR (Incremental Static Regeneration)** — two-layer cache (edge + R2) in dispatch worker, `x-revalidate` response header, on-demand revalidation
 - **Cron jobs** — `jobs/` directory convention, exported `cron` string, auto-registration
-- **Built-in auth** — `vite-cloud/auth` subpath with `AuthUser`, `requireAuth()`, session management, password hashing; configured via `auth` in `vite-cloud.json`
+- **Built-in auth** — `void/auth` subpath with `AuthUser`, `requireAuth()`, session management, password hashing; configured via `auth` in `void.json`
 - **Framework mode** — auto-detected TanStack Start / React Router integration via `detectFramework()`
 - **Raw CF deployment** — `wrangler.json` respected; `mergeBindings` only adds missing placeholders
-- **Schema-derived DB types** — DDL parser replays migrations → `.vite-cloud/db.d.ts`
+- **Schema-derived DB types** — DDL parser replays migrations → `.void/db.d.ts`
 - **Typed query helper** — `db.list()`, `.get()`, `.insert()`, `.update()`, `.delete()`, `.raw()`, `.count()` with `select`, `IN` arrays, multi-column `orderBy`
 - **Usage metering & tiers** — `free`/`solo`/`pro`/`sponsored`/`custom` with immediate, per-request, and async enforcement
-- **Secrets** — `vcc secret set NAME=value`
+- **Secrets** — `void secret set NAME=value`
 - **Admin dashboard** — Hono JSX server-rendered, user/project management, plan controls, suspend/unsuspend
 - **Staging environment** — fully isolated CF resources, auto-deploys on push to `main`
-- **Custom domains** — `vcc domain add myapp.com` via CF Custom Hostnames API, automatic SSL
+- **Custom domains** — `void domain add myapp.com` via CF Custom Hostnames API, automatic SSL
 
 ---
 
@@ -51,7 +51,7 @@ All four share one infrastructure pattern: injected script → beacon → Analyt
 
 #### GitHub Integration (Push to Deploy)
 
-GitHub App webhook on push → build → provision → deploy. Preview deployments per PR at `{pr-num}--{project}.vitecloud.app`. Build infrastructure TBD (Cloudflare Containers or equivalent).
+GitHub App webhook on push → build → provision → deploy. Preview deployments per PR at `{pr-num}--{project}.void.app`. Build infrastructure TBD (Cloudflare Containers or equivalent).
 
 #### Preview Environments with Database Forks
 
@@ -63,7 +63,7 @@ Clone production D1 for preview deploys. Cleanup on PR close. Unique differentia
 
 Plugin architecture for typed binding adapters: Resend (email), Stripe (payments), etc. Start with 3-4 first-party, open spec for third-party.
 
-#### `@vite-cloud/plugin-better-auth`
+#### `@voidcloud/plugin-better-auth`
 
 Advanced auth (2FA, passkeys, orgs, multiple linked accounts, password reset). Populates `c.get("user")` — route handler code unchanged.
 

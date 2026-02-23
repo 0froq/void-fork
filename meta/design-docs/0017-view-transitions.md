@@ -4,13 +4,13 @@
 
 ## Summary
 
-Add browser-native [View Transition API](https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API) support to `@vite-cloud/vue` Pages mode client-side navigation. Wraps the DOM mutation inside `document.startViewTransition()` so the browser cross-fades between old and new page snapshots automatically.
+Add browser-native [View Transition API](https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API) support to `@voidcloud/vue` Pages mode client-side navigation. Wraps the DOM mutation inside `document.startViewTransition()` so the browser cross-fades between old and new page snapshots automatically.
 
 ## Decision Record
 
 - **Opt-in only** — no transitions by default, zero behavior change for existing users.
 - **Router-level integration** — wrap the synchronous state swap inside `router.visit()` rather than at the Link component or Vue render layer. All navigation types (Link clicks, programmatic calls, popstate) go through this single point.
-- **Plugin config + per-link/per-call override** — global toggle via `viteCloudVue({ viewTransitions: true })`, overridable per-`<Link>` or per-`router.visit()` call.
+- **Plugin config + per-link/per-call override** — global toggle via `voidVue({ viewTransitions: true })`, overridable per-`<Link>` or per-`router.visit()` call.
 - **Includes popstate** — back/forward navigations also get transitions when the feature is enabled.
 - **No lifecycle hooks for now** — users customize via CSS (`view-transition-name`, `::view-transition-old/new`). Hooks can be added later if demanded.
 - **Progressive enhancement** — feature-detected via `document.startViewTransition`. Unsupported browsers fall through to instant update.
@@ -20,7 +20,7 @@ Add browser-native [View Transition API](https://developer.mozilla.org/en-US/doc
 ### Plugin Config
 
 ```ts
-export interface ViteCloudVueOptions {
+export interface VoidVueOptions {
   vue?: Parameters<typeof vue>[0];
   viewTransitions?: boolean; // default: false
 }
@@ -80,7 +80,7 @@ Key details:
 
 ### Config Flow
 
-`viteCloudVue({ viewTransitions })` → `pagesPlugin(pagesDir, { viewTransitions })` → codegen emits `const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};`
+`voidVue({ viewTransitions })` → `pagesPlugin(pagesDir, { viewTransitions })` → codegen emits `const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};`
 
 ### Link Component
 
