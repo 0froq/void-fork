@@ -11,8 +11,8 @@
     "fmt": "oxfmt --write .",
     "check": "pnpm -r --parallel typecheck",
     "docs": "cd packages/docs && vitepress dev",
-    "deploy:docs": "pnpm -F docs run deploy",
-    "deploy:staging:docs": "pnpm -F docs run deploy --project void-staging",
+    "deploy:docs": "pnpm -F docs run deploy --project void-docs",
+    "deploy:staging:docs": "pnpm -F docs run deploy --project void-docs-staging",
     "prepare": "husky"
   },
   "devDependencies": {
