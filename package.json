@@ -4,14 +4,14 @@
   "scripts": {
     "build": "pnpm -r build",
     "build:cli": "pnpm -F vite-cloud build",
-    "build:docs": "pnpm -F website build",
+    "build:docs": "pnpm -F docs build",
     "test": "vitest --run",
     "lint": "oxlint",
     "fmt": "oxfmt --write .",
     "check": "pnpm -r --parallel typecheck",
-    "docs": "cd packages/website && vitepress dev",
-    "deploy:docs": "pnpm -F website run deploy",
-    "deploy:staging:docs": "pnpm -F website run deploy --project vite-cloud-staging",
+    "docs": "cd packages/docs && vitepress dev",
+    "deploy:docs": "pnpm -F docs run deploy",
+    "deploy:staging:docs": "pnpm -F docs run deploy --project vite-cloud-staging",
     "prepare": "husky"
   },
   "devDependencies": {

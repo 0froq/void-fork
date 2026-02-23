@@ -5,7 +5,7 @@ Full-stack framework for Cloudflare Workers, powered by Vite.
 ## Context Overview
 
 - **Important**: The source of truth for agent instructions is `CLAUDE.md` (this file). `AGENTS.md` is a symlink to this file. `README.md` is a separate public-facing file. When asked to update agent instructions, always update `CLAUDE.md`.
-- Documentation source lives in `packages/website/docs/`. A root-level `docs/` symlink points there for convenience.
+- Documentation source lives in `packages/docs/`. A root-level `docs/` symlink points there for convenience.
 
 ## Best Practices That Must Be Followed
 
@@ -20,7 +20,7 @@ Full-stack framework for Cloudflare Workers, powered by Vite.
   - Documentation: after verification, update all docs if relevant and applicable:
     - `README.md` (this file)
     - affected packages's `README.md` or `AGENTS.md`
-    - relevant docs md files in `packages/website/docs`
+    - relevant docs md files in `packages/docs`
     - `packages/vite-cloud/skills/vite-cloud` (if change affects skill/CLI guidance)
     - `packages/vite-cloud/AGENT_PROMPT.md`
     - `packages/vite-cloud/getting-started-prompt.txt`
@@ -49,7 +49,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | [`packages/vue`](./packages/vue/README.md)               | `@vite-cloud/vue`    | Vue framework adapter for Pages mode (SSR, Link, useForm)      |
 | [`packages/svelte`](./packages/svelte/README.md)         | `@vite-cloud/svelte` | Svelte 5 framework adapter for Pages mode (SSR, Link, useForm) |
 | [`packages/solid`](./packages/solid/README.md)           | `@vite-cloud/solid`  | SolidJS framework adapter for Pages mode (SSR, Link, useForm)  |
-| [`packages/website`](./packages/website)                 | (private)            | Documentation site (VitePress)                                 |
+| [`packages/docs`](./packages/docs)                       | (private)            | Documentation site (VitePress)                                 |
 | `playground/*`                                           | (private)            | local apps for testing                                         |
 
 ## `vite-cloud` Overview

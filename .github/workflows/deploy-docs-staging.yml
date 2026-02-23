@@ -1,0 +1,24 @@
+name: Deploy Docs Staging
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/docs/**
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: Staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:cli
+      - run: pnpm deploy:staging:docs
+        env:
+          VITE_CLOUD_TOKEN: ${{ secrets.VITE_CLOUD_TOKEN }}

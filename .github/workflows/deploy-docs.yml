@@ -1,14 +1,15 @@
-name: Deploy Docs
+name: Deploy Docs Production
 
 on:
   push:
-    branches: [main]
+    branches: [prod]
     paths:
-      - packages/website/**
+      - packages/docs/**
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: Prod
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

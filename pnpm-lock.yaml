@@ -51,6 +51,24 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)
 
+  packages/docs:
+    devDependencies:
+      '@voidzero-dev/vitepress-theme':
+        specifier: ^4.5.0
+        version: 4.5.0(focus-trap@7.8.0)(vite@8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))(vitepress@2.0.0-alpha.16(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(oxc-minify@0.114.0)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2))(vue@3.5.28(typescript@5.9.3))
+      oxc-minify:
+        specifier: ^0.114.0
+        version: 0.114.0
+      vite-cloud:
+        specifier: workspace:*
+        version: link:../vite-cloud
+      vitepress:
+        specifier: 2.0.0-alpha.16
+        version: 2.0.0-alpha.16(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(oxc-minify@0.114.0)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
+      vitepress-plugin-group-icons:
+        specifier: ^1.7.1
+        version: 1.7.1(vite@8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
+
   packages/react:
     dependencies:
       '@vitejs/plugin-react':
@@ -208,24 +226,6 @@ importers:
       vue:
         specifier: ^3.5.0
         version: 3.5.28(typescript@5.9.3)
-
-  packages/website:
-    devDependencies:
-      '@voidzero-dev/vitepress-theme':
-        specifier: ^4.5.0
-        version: 4.5.0(focus-trap@7.8.0)(vite@8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))(vitepress@2.0.0-alpha.16(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(oxc-minify@0.114.0)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2))(vue@3.5.28(typescript@5.9.3))
-      oxc-minify:
-        specifier: ^0.114.0
-        version: 0.114.0
-      vite-cloud:
-        specifier: workspace:*
-        version: link:../vite-cloud
-      vitepress:
-        specifier: 2.0.0-alpha.16
-        version: 2.0.0-alpha.16(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(oxc-minify@0.114.0)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
-      vitepress-plugin-group-icons:
-        specifier: ^1.7.1
-        version: 1.7.1(vite@8.0.0-beta.14(@types/node@25.2.3)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
 
   playground/ai:
     dependencies:

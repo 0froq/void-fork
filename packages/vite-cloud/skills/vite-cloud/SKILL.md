@@ -7,7 +7,7 @@ description: Vite Cloud skill for app development and CLI operations. Use this s
 
 This skill is a router. Open the minimum relevant docs files under `docs/` and execute.
 
-Docs in this skill are bundled from `packages/website/docs` during `vite-cloud` package build and live at:
+Docs in this skill are bundled from `packages/docs` during `vite-cloud` package build and live at:
 
 - `skills/vite-cloud/docs/*.md`
 

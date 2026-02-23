@@ -1,10 +1,10 @@
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(scriptsDir, "..");
-const sourceDir = resolve(packageDir, "../website/docs");
+const sourceDir = resolve(packageDir, "../docs");
 const targetDir = resolve(packageDir, "skills/vite-cloud/docs");
 
 if (!existsSync(sourceDir)) {
@@ -12,5 +12,10 @@ if (!existsSync(sourceDir)) {
 }
 
 rmSync(targetDir, { recursive: true, force: true });
-mkdirSync(resolve(targetDir, ".."), { recursive: true });
-cpSync(sourceDir, targetDir, { recursive: true });
+mkdirSync(targetDir, { recursive: true });
+
+for (const file of readdirSync(sourceDir)) {
+  if (file.endsWith(".md")) {
+    cpSync(resolve(sourceDir, file), resolve(targetDir, file));
+  }
+}
