@@ -41,7 +41,7 @@ export function setStagingMode(on: boolean): void {
 }
 
 export function getSiteDomain(): string {
-  return isStagingMode() ? "staging.void.app" : "void.app";
+  return isStagingMode() ? "staging.vitecloud.app" : "vitecloud.app";
 }
 
 export function printStagingBanner(): void {
