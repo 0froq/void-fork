@@ -98,7 +98,7 @@ Tests run from root with `pnpm test` (vitest). See each package README for detai
 
 ## Operations
 
-Two environments: **production** (`*.void.app`, manual deploy via `prod` branch) and **staging** (`*.staging.void.app`, auto-deploys on push to `main`). Each has fully isolated CF resources (D1, KV, R2, dispatch namespace, analytics engine).
+Four workers: `void-api`, `void-dashboard`, `void-dispatch`, `void-ai-proxy`. Two environments: **production** (`api.void.cloud`, `dash.void.cloud`, `*.void.app`) and **staging** (`api.staging.void.cloud`, `dash.staging.void.cloud`, `*.staging.void.app`). Each has fully isolated CF resources (D1, KV, R2, dispatch namespace, analytics engine).
 
 ```
 pnpm run deploy           # Production
@@ -111,6 +111,6 @@ See [`meta/operations.md`](./meta/operations.md) for the full operations referen
 
 - **API DB uses Drizzle ORM** — schema is the source of truth in `src/schema.ts`. To add columns or tables: update schema → `pnpm db:generate` → apply migration. Types are inferred via `InferSelectModel`, not hand-maintained. Use `.$type<T>()` on text columns to narrow to union types (e.g., `PlanId`, deployment status).
 - **tsconfig `lib` must be explicit** for CF Workers packages. Without `"lib": ["ES2022"]`, TS defaults to including `lib.dom.d.ts` which shadows `@cloudflare/workers-types` globals (e.g. `CacheStorage.default`). Applied to `dispatch`. Not applied to `api` (its tests use Miniflare/Node which needs DOM-compatible `URL` types).
-- **OAuth env vars use `_OAUTH_` prefix** (`GITHUB_OAUTH_ID`, `GITHUB_OAUTH_SECRET`, `GOOGLE_OAUTH_ID`, `GOOGLE_OAUTH_SECRET`). These are passed explicitly to `@hono/oauth-providers` middleware, overriding its default `GITHUB_ID`/`GOOGLE_ID` convention, to avoid naming collisions and make the purpose clear.
+- **OAuth env vars use `_CLIENT_` prefix** (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`). These are passed explicitly to `@hono/oauth-providers` middleware, overriding its default `GITHUB_ID`/`GOOGLE_ID` convention, to avoid naming collisions and make the purpose clear.
 - **D1 does not allow `PRAGMA foreign_keys=OFF`** — D1 enforces `foreign_keys=ON` always. Drizzle-generated migrations that do table rebuilds (e.g. adding NOT NULL to an existing column) use `PRAGMA foreign_keys=OFF/ON`, which silently fails on D1. Hand-edit these to `PRAGMA defer_foreign_keys=on/off` instead, which defers FK checks to the end of the current transaction.
 - **Deploy protocol versioning** — The `DeployManifest` interface has a `version` field. The API validates it and rejects unknown versions with a clear error. See `meta/design-docs/0018-open-source-split.md` for the versioning policy.

@@ -2,25 +2,33 @@
 
 How we deploy, what we provision, and how the system is configured.
 
+## Access Levels
+
+| System                         | Who                      | What                                                                                             |
+| ------------------------------ | ------------------------ | ------------------------------------------------------------------------------------------------ |
+| Cloudflare account super admin | Evan (evan@voidzero.dev) | Full account access — Workers, D1, KV, R2, DNS, Analytics Engine, **token generation / refresh** |
+| 1Password tokens vault         | Evan (evan@voidzero.dev) | API tokens, OAuth secrets, JWT secrets for all environments                                      |
+| API admin panel                | Evan (evan@voidzero.dev) | `api.void.cloud/admin` — project management, user management, deploys                            |
+
 ## What We Deploy
 
-Three Cloudflare Workers plus a static docs site:
+Four Cloudflare Workers:
 
-| Worker           | Package             | Purpose                                                                                                   |
-| ---------------- | ------------------- | --------------------------------------------------------------------------------------------------------- |
-| `void-ai-proxy`  | `packages/ai-proxy` | AI inference proxy — holds the real `AI` binding, injects AI Gateway metadata for metering                |
-| `void-api`       | `packages/api`      | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering                |
-| `void-dispatch`  | `packages/dispatch` | Edge router — routes `*.void.app` traffic to user workers (via Workers for Platforms) or R2 static assets |
-| Docs (VitePress) | `packages/website`  | Static site deployed as a Void project via `void deploy`                                                  |
+| Worker           | Package              | Purpose                                                                                                   |
+| ---------------- | -------------------- | --------------------------------------------------------------------------------------------------------- |
+| `void-ai-proxy`  | `packages/ai-proxy`  | AI inference proxy — holds the real `AI` binding, injects AI Gateway metadata for metering                |
+| `void-api`       | `packages/api`       | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering                |
+| `void-dashboard` | `packages/dashboard` | User-facing dashboard — project management, deployments, usage                                            |
+| `void-dispatch`  | `packages/dispatch`  | Edge router — routes `*.void.app` traffic to user workers (via Workers for Platforms) or R2 static assets |
 
 ## Environments
 
 Two fully isolated environments. Each has its own CF resources (D1, KV, R2, dispatch namespace, analytics engine).
 
-| Environment    | API URL                  | User Sites           | Trigger                      |
-| -------------- | ------------------------ | -------------------- | ---------------------------- |
-| **Production** | `api.void.cloud`         | `*.void.app`         | Push to `prod` branch        |
-| **Staging**    | `api.staging.void.cloud` | `*.staging.void.app` | Push to `main` branch (auto) |
+| Environment    | API URL                  | Dashboard                 | User Sites           | Trigger                      |
+| -------------- | ------------------------ | ------------------------- | -------------------- | ---------------------------- |
+| **Production** | `api.void.cloud`         | `dash.void.cloud`         | `*.void.app`         | Push to `prod` branch        |
+| **Staging**    | `api.staging.void.cloud` | `dash.staging.void.cloud` | `*.staging.void.app` | Push to `main` branch (auto) |
 
 ## Cloudflare Resources
 
@@ -54,21 +62,30 @@ Two fully isolated environments. Each has its own CF resources (D1, KV, R2, disp
 | AI Gateway | —       | `void` (shared, account-level)                                |
 | Routes     | —       | `ai-proxy.void.app/*`, `ai-proxy.void.app` (zone: `void.app`) |
 
+**Dashboard worker** (`void-dashboard`):
+
+| Resource | Binding | Name / ID                    |
+| -------- | ------- | ---------------------------- |
+| Assets   | —       | `dist/client` (static files) |
+| Routes   | —       | `dash.void.cloud`            |
+
+No bindings — the dashboard talks to the API via HTTP (BFF pattern with server-side loaders).
+
 All workers: `compatibility_date: 2026-02-12`, `compatibility_flags: ["nodejs_compat"]`, `observability: enabled`.
 
 ### Staging
 
 Same resource types with `-staging` suffixes:
 
-| Resource    | API                                                         | Dispatch                                     | AI Proxy                                                   |
-| ----------- | ----------------------------------------------------------- | -------------------------------------------- | ---------------------------------------------------------- |
-| D1          | `void-api-staging` (`e78b32c1-497a-40ad-8f83-7049e139983e`) | —                                            | —                                                          |
-| R2          | `void-assets-staging`                                       | `void-assets-staging`                        | —                                                          |
-| KV          | `60240eecea804f39bf8b7395cd6c6b08`                          | `60240eecea804f39bf8b7395cd6c6b08`           | —                                                          |
-| Dispatch NS | `void-users-staging`                                        | `void-users-staging`                         | —                                                          |
-| Analytics   | —                                                           | `vite_cloud_requests_staging`                | —                                                          |
-| Workers AI  | —                                                           | —                                            | `AI` (account-level)                                       |
-| Routes      | —                                                           | `*.staging.void.app/*`, `*.staging.void.app` | `ai-proxy.staging.void.app/*`, `ai-proxy.staging.void.app` |
+| Resource    | API                                                         | Dashboard                 | Dispatch                                     | AI Proxy                                                   |
+| ----------- | ----------------------------------------------------------- | ------------------------- | -------------------------------------------- | ---------------------------------------------------------- |
+| D1          | `void-api-staging` (`e78b32c1-497a-40ad-8f83-7049e139983e`) | —                         | —                                            | —                                                          |
+| R2          | `void-assets-staging`                                       | —                         | `void-assets-staging`                        | —                                                          |
+| KV          | `60240eecea804f39bf8b7395cd6c6b08`                          | —                         | `60240eecea804f39bf8b7395cd6c6b08`           | —                                                          |
+| Dispatch NS | `void-users-staging`                                        | —                         | `void-users-staging`                         | —                                                          |
+| Analytics   | —                                                           | —                         | `vite_cloud_requests_staging`                | —                                                          |
+| Workers AI  | —                                                           | —                         | —                                            | `AI` (account-level)                                       |
+| Routes      | —                                                           | `dash.staging.void.cloud` | `*.staging.void.app/*`, `*.staging.void.app` | `ai-proxy.staging.void.app/*`, `ai-proxy.staging.void.app` |
 
 ## Secrets and Environment Variables
 
@@ -120,22 +137,26 @@ Set via `wrangler secret put <NAME>` (same value as API worker's `JWT_SECRET`):
 
 Set via `vars` in `wrangler.jsonc` (production uses defaults, staging overrides):
 
-| Worker   | Variable             | Default                                | Staging Override                               | Purpose                                           |
-| -------- | -------------------- | -------------------------------------- | ---------------------------------------------- | ------------------------------------------------- |
-| api      | `DISPATCH_NAMESPACE` | `void-users`                           | `void-users-staging`                           | CF dispatch namespace name                        |
-| api      | `SITE_DOMAIN`        | `void.app`                             | `staging.void.app`                             | Base domain for deploy URL output                 |
-| api      | `AUTH_REDIRECT_URI`  | `https://api.void.cloud/auth/callback` | `https://api.staging.void.cloud/auth/callback` | OAuth callback URL                                |
-| api      | `SIGNUP_ALLOWLIST`   | (unset)                                | `@voidzero.dev`                                | Comma-separated emails/domains for new signups    |
-| api      | `DEV_AUTH_BYPASS`    | (unset)                                | —                                              | Skip admin OAuth for local dev (`.dev.vars` only) |
-| dispatch | `BASE_HOSTNAME`      | `void.app`                             | `staging.void.app`                             | Base hostname for slug extraction                 |
+| Worker    | Variable             | Default                                | Staging Override                               | Purpose                                           |
+| --------- | -------------------- | -------------------------------------- | ---------------------------------------------- | ------------------------------------------------- |
+| api       | `DISPATCH_NAMESPACE` | `void-users`                           | `void-users-staging`                           | CF dispatch namespace name                        |
+| api       | `SITE_DOMAIN`        | `void.app`                             | `staging.void.app`                             | Base domain for deploy URL output                 |
+| api       | `AUTH_REDIRECT_URI`  | `https://api.void.cloud/auth/callback` | `https://api.staging.void.cloud/auth/callback` | OAuth callback URL                                |
+| api       | `SIGNUP_ALLOWLIST`   | (unset)                                | `@voidzero.dev`                                | Comma-separated emails/domains for new signups    |
+| api       | `DEV_AUTH_BYPASS`    | (unset)                                | —                                              | Skip admin OAuth for local dev (`.dev.vars` only) |
+| dashboard | `API_URL`            | (unset, defaults to production)        | `https://api.staging.void.cloud`               | API base URL for BFF server-side loaders          |
+| dispatch  | `BASE_HOSTNAME`      | `void.app`                             | `staging.void.app`                             | Base hostname for slug extraction                 |
 
 ### GitHub Actions Secrets
+
+Two GitHub environments (`Prod` and `Staging`) each hold the same secrets (values are **the same** for both environments, we only use one API token):
 
 | Secret          | Purpose                                                   |
 | --------------- | --------------------------------------------------------- |
 | `CF_API_TOKEN`  | Cloudflare API token (see permissions below)              |
 | `CF_ACCOUNT_ID` | Cloudflare account ID (passed as `CLOUDFLARE_ACCOUNT_ID`) |
-| `VOID_TOKEN`    | Auth token for deploying docs via `void deploy`           |
+
+`deploy.yml` (push to `prod`) uses the `Prod` environment; `deploy-staging.yml` (push to `main`) uses `Staging`.
 
 **GitHub Actions `CF_API_TOKEN` permissions** — narrower-scope token used only for wrangler deploys. Separate from the API worker runtime token.
 
@@ -179,19 +200,21 @@ Broken down:
 
 ```
 deploy
-├── deploy:ai-proxy     → pnpm -F @voidcloud/ai-proxy run deploy  (wrangler deploy)
-├── deploy:dispatch     → pnpm -F dispatch run deploy               (wrangler deploy)
-└── deploy:api          → pnpm -F api migrate                       (wrangler d1 migrations apply --remote)
-                        → pnpm -F api run deploy                    (wrangler deploy)
+├── deploy:ai-proxy     → pnpm -F ai-proxy run deploy    (wrangler deploy)
+├── deploy:dispatch     → pnpm -F dispatch run deploy     (wrangler deploy)
+├── deploy:api          → pnpm -F api migrate             (wrangler d1 migrations apply --remote)
+│                       → pnpm -F api run deploy          (wrangler deploy)
+└── deploy:dashboard    → pnpm -F dashboard run deploy    (wrangler deploy)
 
 deploy:staging
-├── deploy:staging:ai-proxy → pnpm -F @voidcloud/ai-proxy run deploy --env staging
-├── deploy:staging:dispatch → pnpm -F dispatch run deploy --env staging
-└── deploy:staging:api      → pnpm -F api migrate:staging            (wrangler d1 migrations apply --env staging --remote)
-                            → pnpm -F api run deploy --env staging
+├── deploy:staging:ai-proxy  → pnpm -F ai-proxy run deploy --env staging
+├── deploy:staging:dispatch  → pnpm -F dispatch run deploy --env staging
+├── deploy:staging:api       → pnpm -F api migrate:staging  (wrangler d1 migrations apply --env staging --remote)
+│                            → pnpm -F api run deploy --env staging
+└── deploy:staging:dashboard → pnpm -F dashboard run deploy:staging
 ```
 
-Deploy order matters: ai-proxy deploys first (user workers depend on it via service binding), dispatch deploys next (stateless router), then api runs D1 migrations before deploying (ensures schema is ready for new code).
+Deploy order matters: ai-proxy deploys first (user workers depend on it via service binding), dispatch deploys next (stateless router), then api runs D1 migrations before deploying (ensures schema is ready for new code), and dashboard deploys last.
 
 ### GitHub Actions
 
@@ -204,24 +227,17 @@ Three workflows in `.github/workflows/`:
 3. `pnpm -r build` (build all packages)
 4. `pnpm lint` (oxlint)
 5. `pnpm check` (typecheck all packages)
-6. Install Playwright Chromium
-7. `pnpm test` (full test suite)
+6. `pnpm test` (full test suite)
 
-**`deploy.yml`** — runs on push to `prod` (production):
-
-1. Runs CI workflow first
-2. `pnpm run deploy` (dispatch + api workers)
-3. `pnpm build:cli && pnpm i` (build CLI — docs deploy depends on it)
-4. `pnpm deploy:docs` (deploy VitePress docs as a Void project)
-
-**`deploy-staging.yml`** — runs on push to `main` (staging):
+**`deploy.yml`** — runs on push to `prod` (production, environment: `Prod`):
 
 1. Runs CI workflow first
-2. `pnpm run deploy:staging` (dispatch + api workers to staging)
-3. `pnpm build:cli && pnpm i`
-4. `pnpm deploy:staging:docs` (deploy docs to staging project)
+2. `pnpm run deploy` (ai-proxy, dispatch, api, dashboard workers)
 
-Note: staging docs are hosted on the production API (as a separate Void project `void-staging`), not on the staging API.
+**`deploy-staging.yml`** — runs on push to `main` (staging, environment: `Staging`):
+
+1. Runs CI workflow first
+2. `pnpm run deploy:staging` (all workers to staging)
 
 ### Health Checks
 
@@ -235,9 +251,11 @@ pnpm health:staging    # Check staging API health
 | Record                      | Zone         | Points To                                |
 | --------------------------- | ------------ | ---------------------------------------- |
 | `api.void.cloud`            | `void.cloud` | API worker                               |
+| `dash.void.cloud`           | `void.cloud` | Dashboard worker                         |
 | `*.void.app`                | `void.app`   | Dispatch worker (wildcard route)         |
 | `ai-proxy.void.app`         | `void.app`   | AI proxy worker                          |
 | `api.staging.void.cloud`    | `void.cloud` | Staging API worker                       |
+| `dash.staging.void.cloud`   | `void.cloud` | Staging dashboard worker                 |
 | `*.staging.void.app`        | `void.app`   | Staging dispatch worker (wildcard route) |
 | `ai-proxy.staging.void.app` | `void.app`   | Staging AI proxy worker                  |
 
@@ -253,7 +271,7 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    - Analytics Engine dataset
    - AI Gateway named `void`
 
-2. **Update wrangler configs** — add an `env.<name>` section in `packages/api/wrangler.jsonc`, `packages/dispatch/wrangler.jsonc`, and `packages/ai-proxy/wrangler.jsonc` with the new resource IDs.
+2. **Update wrangler configs** — add an `env.<name>` section in `packages/api/wrangler.jsonc`, `packages/dashboard/wrangler.jsonc`, `packages/dispatch/wrangler.jsonc`, and `packages/ai-proxy/wrangler.jsonc` with the new resource IDs.
 
 3. **Set worker secrets** — for the API worker:
 
@@ -268,12 +286,12 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    wrangler secret put GOOGLE_CLIENT_SECRET --env <name>
    ```
 
-4. **DNS records** — on the `void.app` zone, add a wildcard CNAME for user sites. On the `void.cloud` zone, add a CNAME for the API.
+4. **DNS records** — on the `void.app` zone, add a wildcard CNAME for user sites. On the `void.cloud` zone, add CNAMEs for the API and dashboard.
 
 5. **OAuth callback URLs** — add the new API URL as an authorized redirect in both the GitHub OAuth App and Google OAuth Client:
    - `https://<api-host>/auth/callback`
    - `https://<api-host>/admin/callback`
 
-6. **GitHub Actions** — if CI/CD should deploy to this environment, add a workflow file and configure GitHub environment secrets (`CF_API_TOKEN`, `CF_ACCOUNT_ID`, `VOID_TOKEN`).
+6. **GitHub Actions** — if CI/CD should deploy to this environment, add a workflow file and configure GitHub environment secrets (`CF_API_TOKEN`, `CF_ACCOUNT_ID`).
 
 7. **Deploy** — run `pnpm run deploy --env <name>` or equivalent.
