@@ -74,6 +74,20 @@ pnpm docs              # local docs dev server
 | `packages/docs`   | Documentation (VitePress)       |
 | `playground/*`    | Test apps for local development |
 
+## GitHub Environments & Secrets
+
+Deploy and publish workflows require three GitHub environments:
+
+| Environment | Trigger   | Secret       | Purpose                                        |
+| ----------- | --------- | ------------ | ---------------------------------------------- |
+| `Prod`      | `prod`    | `VOID_TOKEN` | Auth token for `void deploy` (production docs) |
+| `Staging`   | `main`    | `VOID_TOKEN` | Auth token for `void deploy` (staging docs)    |
+| `Release`   | `v*` tags | `NPM_TOKEN`  | npm publish token (with provenance)            |
+
+Note both prod and staging docs are self-hosted on the **production** environment of the platform, so `VOID_TOKEN` for both Prod and Staging envs should be issued from the production API.
+
+CI (`ci.yml`) runs on PRs to `main` and requires no secrets.
+
 ## License
 
 MIT
