@@ -149,7 +149,7 @@ Set via `vars` in `wrangler.jsonc` (production uses defaults, staging overrides)
 
 ### GitHub Actions Secrets
 
-Two GitHub environments (`Prod` and `Staging`) each hold the same secrets (values are **the same** for both environments, we only use one API token):
+Two GitHub environments (`Prod` and `Staging`) share the same repo-level secrets:
 
 | Secret          | Purpose                                                   |
 | --------------- | --------------------------------------------------------- |
