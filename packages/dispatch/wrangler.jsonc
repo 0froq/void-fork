@@ -31,7 +31,7 @@
   "analytics_engine_datasets": [
     {
       "binding": "ANALYTICS",
-      "dataset": "vite_cloud_requests",
+      "dataset": "void_requests",
     },
   ],
   "env": {
@@ -65,7 +65,7 @@
       "analytics_engine_datasets": [
         {
           "binding": "ANALYTICS",
-          "dataset": "vite_cloud_requests_staging",
+          "dataset": "void_requests_staging",
         },
       ],
     },

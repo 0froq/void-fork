@@ -10,7 +10,7 @@
     {
       "binding": "DB",
       "database_name": "void-api",
-      "database_id": "f85c1d7d-7b41-4f85-88e5-ad37966825e7",
+      "database_id": "b559aaf5-e70b-47f3-998e-af502abed7eb",
       "migrations_dir": "drizzle",
     },
   ],
@@ -46,7 +46,7 @@
         {
           "binding": "DB",
           "database_name": "void-api-staging",
-          "database_id": "e78b32c1-497a-40ad-8f83-7049e139983e",
+          "database_id": "dd8eebb3-fe07-44dd-aadc-09675eb7b581",
           "migrations_dir": "drizzle",
         },
       ],

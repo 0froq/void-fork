@@ -286,7 +286,23 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    wrangler secret put GOOGLE_CLIENT_SECRET --env <name>
    ```
 
-4. **DNS records** — on the `void.app` zone, add a wildcard CNAME for user sites. On the `void.cloud` zone, add CNAMEs for the API and dashboard.
+4. **DNS records** — all records must be proxied (orange cloud).
+
+   **`void.app` zone:**
+
+   | Record           | Type  | Content                                    | Purpose                                     |
+   | ---------------- | ----- | ------------------------------------------ | ------------------------------------------- |
+   | `proxy-fallback` | AAAA  | `100::`                                    | Proxied dummy target for CNAME chaining     |
+   | `cname`          | CNAME | `proxy-fallback.void.app`                  | CNAME target for user custom domains        |
+   | `*.<env>`        | CNAME | `void-dispatch-<env>.voidzer0.workers.dev` | Wildcard for dispatch worker route patterns |
+   | `ai-proxy.<env>` | CNAME | `void-ai-proxy-<env>.voidzer0.workers.dev` | AI proxy worker route patterns              |
+
+   **`void.cloud` zone** (API and dashboard use Worker Custom Domains — CF creates the DNS records automatically when you add the custom domain to the worker):
+
+   | Record       | Type  | Content           | Purpose          |
+   | ------------ | ----- | ----------------- | ---------------- |
+   | `api.<env>`  | CNAME | _(managed by CF)_ | API worker       |
+   | `dash.<env>` | CNAME | _(managed by CF)_ | Dashboard worker |
 
 5. **OAuth callback URLs** — add the new API URL as an authorized redirect in both the GitHub OAuth App and Google OAuth Client:
    - `https://<api-host>/auth/callback`
