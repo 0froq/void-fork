@@ -27,6 +27,10 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
 
+      - uses: actions/cache@v4
+        with:
+          path: framework/node_modules
+          key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
       - run: pnpm --dir framework install --frozen-lockfile
       - run: pnpm --dir framework build
       - run: pnpm install --frozen-lockfile
