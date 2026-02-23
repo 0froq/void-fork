@@ -21,6 +21,7 @@ export interface HeaderRule {
 }
 
 export interface DeployManifest {
+  version: number;
   bindings: {
     d1?: string[];
     kv?: string[];

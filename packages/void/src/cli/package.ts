@@ -45,7 +45,7 @@ export function packageBuild(
   const formData = new FormData();
 
   // Build manifest from inferred bindings
-  const manifest: DeployManifest = { bindings: {} };
+  const manifest: DeployManifest = { version: 1, bindings: {} };
   if (bindings.needsD1) manifest.bindings.d1 = ["DB"];
   if (bindings.needsKV) manifest.bindings.kv = ["KV"];
   if (bindings.needsR2) manifest.bindings.r2 = ["STORAGE"];
@@ -146,7 +146,7 @@ export function packageStaticBuild(
 ): FormData {
   const formData = new FormData();
 
-  const manifest: DeployManifest = { bindings: {}, static: mode };
+  const manifest: DeployManifest = { version: 1, bindings: {}, static: mode };
   if (assetHashes) {
     manifest.assetHashes = assetHashes;
   }
