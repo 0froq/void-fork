@@ -1,6 +1,22 @@
-## Platform and framework repos relationship
+## Repo setup
 
 This is the private platform repo for Void. The open-source framework code lives in `framework/` (git submodule pointing at `voidzero-dev/void`).
+
+When making changes that span both repos, commit framework first, then update the submodule pointer in the platform repo:
+
+```bash
+# 1. commit and push framework changes
+cd framework
+git add . && git commit -m "feat: whatever" && git push
+
+# 2. update submodule pointer + commit platform changes
+cd ..
+git add framework  # updates the pointer to the new framework commit
+git add ...        # any platform changes
+git commit -m "feat: whatever (bump framework)"
+```
+
+For PRs that span both repos: merge the framework PR first, then update the submodule pointer in the platform PR so CI picks up the merged framework changes.
 
 ## Context Overview
 
