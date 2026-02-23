@@ -56,7 +56,17 @@ export async function handlePageGet(
   getAssetTags: (req: Request, env: any) => Promise<{ head: string; body: string }>,
 ): Promise<Response> {
   const shared = c.get("shared") || {};
-  const props = handler ? await extractProps(await handler(c)) : {};
+
+  // Run loader and check for redirect/non-data responses before extracting props
+  let props: Record<string, unknown> = {};
+  if (handler) {
+    const result = await handler(c);
+    if (result instanceof Response) {
+      const status = result.status;
+      if (status >= 300 && status < 400) return result;
+    }
+    props = await extractProps(result);
+  }
   const pageObj: PageObject = {
     component: componentId,
     props,

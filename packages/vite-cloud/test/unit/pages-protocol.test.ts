@@ -85,6 +85,22 @@ describe("handlePageGet", () => {
     expect(body.component).toBe("index");
   });
 
+  it("passes through redirect Response from loader", async () => {
+    const c = await createTestContext("GET", "/auth/callback");
+
+    const redirect = new Response(null, {
+      status: 302,
+      headers: { Location: "/" },
+    });
+    const handler = vi.fn(() => redirect);
+    const renderFn = vi.fn(async (pageObj: any) => `<html>${pageObj.component}</html>`);
+    const response = await handlePageGet(handler, c, "callback", renderFn, mockGetAssetTags);
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/");
+    expect(renderFn).not.toHaveBeenCalled();
+  });
+
   it("includes shared data from context", async () => {
     const c = await createTestContext("GET", "/", {
       headers: { "x-vitecloudpages": "true" },
