@@ -4,7 +4,7 @@ outline: deep
 
 # Type Safety
 
-Vite Cloud provides end-to-end type safety across your entire stack — from database queries, through route handlers, to frontend fetch calls. Types are derived from your source code and SQL migrations. Nothing is manually written or duplicated.
+Void provides end-to-end type safety across your entire stack — from database queries, through route handlers, to frontend fetch calls. Types are derived from your source code and SQL migrations. Nothing is manually written or duplicated.
 
 ## The Type Pipeline
 
@@ -18,19 +18,19 @@ Each layer feeds into the next:
 2. **Route handler types** are extracted from your `routes/` files using `typeof import(...)`. Return types, validator schemas, and parameter patterns all become part of the generated `RouteMap`.
 3. **The fetch client** consumes the `RouteMap` to type-check paths, methods, request bodies, and response types at the call site.
 
-All generated types live in `.vite-cloud/` and update automatically when you change source files or migrations.
+All generated types live in `.void/` and update automatically when you change source files or migrations.
 
 ## Database → Handler
 
-Types from `vite-cloud/db` are inferred from your migration SQL. When a handler queries the database, the return type flows through naturally:
+Types from `void/db` are inferred from your migration SQL. When a handler queries the database, the return type flows through naturally:
 
 ```ts
 // migrations/001_create_users.sql
 // CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)
 
 // routes/api/users.ts
-import { defineHandler } from "vite-cloud";
-import { db } from "vite-cloud/db";
+import { defineHandler } from "void";
+import { db } from "void/db";
 
 export const GET = defineHandler(async (c) => {
   const users = await db.list("users", { select: ["name", "email"] });
@@ -47,7 +47,7 @@ The typed fetch client infers its types from your handler's return type and vali
 
 ```ts
 // src/App.tsx
-import { fetch } from "vite-cloud/client";
+import { fetch } from "void/client";
 
 const users = await fetch("/api/users");
 // users: { name: string; email: string }[]
@@ -64,8 +64,8 @@ When you add input validation with `defineHandler.withValidator()`, the schemas 
 
 ```ts
 // routes/api/users.ts
-import { defineHandler } from "vite-cloud";
-import { db } from "vite-cloud/db";
+import { defineHandler } from "void";
+import { db } from "void/db";
 import * as v from "valibot";
 
 export const POST = defineHandler.withValidator({
@@ -81,7 +81,7 @@ export const POST = defineHandler.withValidator({
 
 ```ts
 // src/App.tsx
-import { fetch } from "vite-cloud/client";
+import { fetch } from "void/client";
 
 // ✓ body shape matches the validator schema
 await fetch("/api/users", {
@@ -112,7 +112,7 @@ export const action = defineHandler.withValidator({
 ```
 
 ```ts
-import { useForm } from "@vite-cloud/vue"; // or "@vite-cloud/react" or "@vite-cloud/svelte"
+import { useForm } from "@voidcloud/vue"; // or "@voidcloud/react" or "@voidcloud/svelte"
 
 const form = useForm("/users/create", { name: "", email: "" });
 //                    ^ autocompletes     ^ must match body schema
@@ -155,13 +155,13 @@ The type system models JSON serialization. A `Serialize<T>` transform is applied
 
 ## Context Variables
 
-Route handlers and middleware share data through Hono's context variables (`c.set()` / `c.get()`). Vite Cloud's `CloudContextVariables` interface defines the variable types, and you can augment it to add your own:
+Route handlers and middleware share data through Hono's context variables (`c.set()` / `c.get()`). Void's `CloudContextVariables` interface defines the variable types, and you can augment it to add your own:
 
 ```ts
 // middleware/01.auth.ts
-import { defineMiddleware } from "vite-cloud";
+import { defineMiddleware } from "void";
 
-declare module "vite-cloud" {
+declare module "void" {
   interface CloudContextVariables {
     requestId: string;
   }
@@ -183,19 +183,19 @@ Extend the generated tsconfig in your project's `tsconfig.json`:
 
 ```json
 {
-  "extends": "./.vite-cloud/tsconfig.json",
+  "extends": "./.void/tsconfig.json",
   "compilerOptions": {
     "target": "ES2022",
     "module": "ES2022",
     "moduleResolution": "bundler",
     "strict": true,
     "jsx": "react-jsx",
-    "types": ["vite-cloud/env"]
+    "types": ["void/env"]
   },
   "include": ["src", "routes", "middleware", "crons", "queues"]
 }
 ```
 
-The `"extends"` line is the key part. The generated `.vite-cloud/tsconfig.json` uses `"files"` to include both `routes.d.ts` and `db.d.ts`, which TypeScript inherits automatically. You do not need to add `.vite-cloud` to your `include` array.
+The `"extends"` line is the key part. The generated `.void/tsconfig.json` uses `"files"` to include both `routes.d.ts` and `db.d.ts`, which TypeScript inherits automatically. You do not need to add `.void` to your `include` array.
 
-> The `.vite-cloud/` files are generated when the dev server starts or when you build. Run `vite dev` or `vite build` at least once to generate them.
+> The `.void/` files are generated when the dev server starts or when you build. Run `vite dev` or `vite build` at least once to generate them.

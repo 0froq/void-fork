@@ -1,12 +1,12 @@
 import type { Plugin } from "vite";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
-import { scanPages } from "vite-cloud/pages";
-import type { PageScanResult } from "vite-cloud/pages";
+import { scanPages } from "void/pages";
+import type { PageScanResult } from "void/pages";
 import { generateComponentManifest } from "./pages-manifest";
 
-const RENDERER_ID = "virtual:vite-cloud-pages-renderer";
-const CLIENT_ENTRY_ID = "virtual:vite-cloud-pages-client";
+const RENDERER_ID = "virtual:void-pages-renderer";
+const CLIENT_ENTRY_ID = "virtual:void-pages-client";
 
 interface PagesPluginOptions {
   viewTransitions?: boolean;
@@ -17,7 +17,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
   const root = dirname(pagesDir);
 
   return {
-    name: "vite-cloud-solid:pages",
+    name: "void-solid:pages",
 
     async buildStart() {
       if (existsSync(pagesDir)) {
@@ -26,7 +26,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
     },
 
     resolveId: {
-      filter: { id: /^virtual:vite-cloud-pages-(renderer|client)$/ },
+      filter: { id: /^virtual:void-pages-(renderer|client)$/ },
       handler(id) {
         return "\0" + id;
       },
@@ -34,7 +34,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
 
     load: {
       // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
-      filter: { id: /^\0virtual:vite-cloud-pages-(renderer|client)$/ },
+      filter: { id: /^\0virtual:void-pages-(renderer|client)$/ },
       handler(id) {
         if (id === "\0" + RENDERER_ID) {
           if (!pageScan)
@@ -54,9 +54,9 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       if (env.command === "serve") {
         return {
           optimizeDeps: {
-            // Exclude @vite-cloud/solid so the virtual module and user
+            // Exclude @voidcloud/solid so the virtual module and user
             // components share the same Solid context objects (identity).
-            exclude: ["@vite-cloud/solid"],
+            exclude: ["@voidcloud/solid"],
             // Pre-include Solid entries discovered late via dynamic imports
             include: ["solid-js", "solid-js/web", "solid-js/store"],
           },
@@ -79,7 +79,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string): string 
   return `
 import { renderToStringAsync, generateHydrationScript } from "solid-js/web";
 import { createComponent } from "solid-js";
-import { SharedContext, ErrorsContext, RouterContext } from "@vite-cloud/solid";
+import { SharedContext, ErrorsContext, RouterContext } from "@voidcloud/solid";
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -145,7 +145,7 @@ function generateClientEntry(
   return `
 import { createSignal, createComponent, batch } from "solid-js";
 import { hydrate } from "solid-js/web";
-import { SharedContext, ErrorsContext, RouterContext } from "@vite-cloud/solid";
+import { SharedContext, ErrorsContext, RouterContext } from "@voidcloud/solid";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 
@@ -174,7 +174,7 @@ async function resolveLayouts(componentId) {
 const router = {
   async visit(url, options = {}) {
     const method = (options.method || "GET").toUpperCase();
-    const headers = { "X-ViteCloudPages": "true", "Accept": "application/json" };
+    const headers = { "X-VoidPages": "true", "Accept": "application/json" };
     const fetchOptions = { method, headers };
 
     if (options.data && method !== "GET") {

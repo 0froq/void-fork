@@ -60,7 +60,7 @@ export function scriptServerPlugin(pagesDir: string): Plugin {
   const serverBlocks = new Map<string, string>();
 
   return {
-    name: "vite-cloud-vue:script-server",
+    name: "void-vue:script-server",
     enforce: "pre",
 
     transform: {

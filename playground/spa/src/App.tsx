@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { fetch } from "vite-cloud/client";
+import { fetch } from "void/client";
 
 export default function App() {
   const [hello, setHello] = useState<{ message: string; timestamp: number } | null>(null);
@@ -27,7 +27,7 @@ export default function App() {
 
   return (
     <div>
-      <h1>Vite Cloud Playground</h1>
+      <h1>Void Playground</h1>
 
       <h2>Hello API</h2>
       <pre>{JSON.stringify(hello, null, 2)}</pre>

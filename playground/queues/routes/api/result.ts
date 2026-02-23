@@ -1,4 +1,4 @@
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const GET = defineHandler(async (c) => {
   const key = c.req.query("key");

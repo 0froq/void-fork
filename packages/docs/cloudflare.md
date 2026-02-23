@@ -4,19 +4,19 @@ outline: deep
 
 # Cloudflare
 
-Vite Cloud runs on Cloudflare Workers. This page covers how bindings work, how the plugin merges your wrangler config, and how to deploy directly to your own Cloudflare account.
+Void runs on Cloudflare Workers. This page covers how bindings work, how the plugin merges your wrangler config, and how to deploy directly to your own Cloudflare account.
 
 ## Bindings
 
-Vite Cloud automatically infers and provisions Cloudflare bindings (D1, KV, R2) by scanning your source files. There are two ways to access them at runtime depending on your setup.
+Void automatically infers and provisions Cloudflare bindings (D1, KV, R2) by scanning your source files. There are two ways to access them at runtime depending on your setup.
 
 ### Via Hono context (`c.env`)
 
-In Vite Cloud's default routing mode, route handlers and middleware receive a Hono `Context` object with bindings on `c.env`:
+In Void's default routing mode, route handlers and middleware receive a Hono `Context` object with bindings on `c.env`:
 
 ```ts
 // routes/api/users.ts
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const GET = defineHandler(async (c) => {
   const { results } = await c.env.DB.prepare("SELECT * FROM users").all();
@@ -26,7 +26,7 @@ export const GET = defineHandler(async (c) => {
 
 ```ts
 // routes/api/cache.ts
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const GET = defineHandler(async (c) => {
   const value = await c.env.KV.get("key");
@@ -67,12 +67,12 @@ export const Route = createFileRoute("/users")({
 
 ### TypeScript setup
 
-Add `"vite-cloud/env"` to your tsconfig `types` to get typed bindings on `env`:
+Add `"void/env"` to your tsconfig `types` to get typed bindings on `env`:
 
 ```json
 {
   "compilerOptions": {
-    "types": ["vite-cloud/env"]
+    "types": ["void/env"]
   }
 }
 ```
@@ -87,7 +87,7 @@ This augments the `Cloudflare.Env` interface with `DB`, `KV`, and `STORAGE` and 
 | `KV`      | `KVNamespace` | `env.KV` or `c.env.KV` usage detected           |
 | `STORAGE` | `R2Bucket`    | `env.STORAGE` or `c.env.STORAGE` usage detected |
 
-Bindings are inferred automatically by scanning your source files for these access patterns. You can also set them explicitly in `vite-cloud.json`:
+Bindings are inferred automatically by scanning your source files for these access patterns. You can also set them explicitly in `void.json`:
 
 ```json
 {
@@ -99,7 +99,7 @@ See [Configuration](./config.md) for details.
 
 ### Wrangler passthrough
 
-You can set non-binding wrangler fields like `compatibility_date`, `compatibility_flags`, and `vars` in `vite-cloud.json`:
+You can set non-binding wrangler fields like `compatibility_date`, `compatibility_flags`, and `vars` in `void.json`:
 
 ```json
 {
@@ -111,13 +111,13 @@ You can set non-binding wrangler fields like `compatibility_date`, `compatibilit
 }
 ```
 
-Binding arrays (`d1_databases`, `kv_namespaces`, `r2_buckets`) are not allowed in the `wrangler` field — bindings are fully managed by vite-cloud. Users wanting custom bindings should use a `wrangler.json` with real binding IDs and `wrangler deploy`.
+Binding arrays (`d1_databases`, `kv_namespaces`, `r2_buckets`) are not allowed in the `wrangler` field — bindings are fully managed by void. Users wanting custom bindings should use a `wrangler.json` with real binding IDs and `wrangler deploy`.
 
 ## Wrangler config merging
 
-By default, Vite Cloud configures the Cloudflare plugin entirely programmatically -- you don't need a `wrangler.json`. Bindings are inferred from your source code and provisioned with local placeholder IDs for development.
+By default, Void configures the Cloudflare plugin entirely programmatically -- you don't need a `wrangler.json`. Bindings are inferred from your source code and provisioned with local placeholder IDs for development.
 
-If you add a `wrangler.json` (or `wrangler.toml`) to your project root, the Cloudflare Vite plugin reads it automatically. Vite Cloud merges its inferred bindings with your config:
+If you add a `wrangler.json` (or `wrangler.toml`) to your project root, the Cloudflare Vite plugin reads it automatically. Void merges its inferred bindings with your config:
 
 - **Bindings you define** in `wrangler.json` (with real resource IDs) are preserved as-is.
 - **Inferred bindings** that are missing from your config are added with local placeholder IDs.
@@ -137,13 +137,13 @@ For example, if your code uses `c.env.DB` and `c.env.KV`, and your `wrangler.jso
 }
 ```
 
-Vite Cloud sees that `DB` is already configured and leaves it alone, but adds a local placeholder for `KV` since it's missing. This means `pnpm dev` works out of the box (Miniflare creates local instances for all bindings), while `wrangler deploy` uses your real D1 database ID.
+Void sees that `DB` is already configured and leaves it alone, but adds a local placeholder for `KV` since it's missing. This means `pnpm dev` works out of the box (Miniflare creates local instances for all bindings), while `wrangler deploy` uses your real D1 database ID.
 
-Settings like `main`, `triggers`, and `assets` are always set by Vite Cloud and don't need to be in your wrangler config.
+Settings like `main`, `triggers`, and `assets` are always set by Void and don't need to be in your wrangler config.
 
 ## Deploy to your own Cloudflare account
 
-Vite Cloud's default deployment path is `vcc deploy`, which uploads to the Vite Cloud platform. But the generated worker is a standard Cloudflare Worker -- you can deploy it directly to your own account with `wrangler deploy`.
+Void's default deployment path is `void deploy`, which uploads to the Void platform. But the generated worker is a standard Cloudflare Worker -- you can deploy it directly to your own account with `wrangler deploy`.
 
 ### 1. Create your resources
 
@@ -200,7 +200,7 @@ If your app uses D1, apply migrations before deploying:
 wrangler d1 migrations apply DB --remote
 ```
 
-This uses the same `migrations/` directory that Vite Cloud uses locally.
+This uses the same `migrations/` directory that Void uses locally.
 
 ### 4. Build and deploy
 

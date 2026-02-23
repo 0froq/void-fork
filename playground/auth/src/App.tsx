@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { auth, AuthError } from "vite-cloud/client";
-import type { AuthUser } from "vite-cloud/client";
+import { auth, AuthError } from "void/client";
+import type { AuthUser } from "void/client";
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);

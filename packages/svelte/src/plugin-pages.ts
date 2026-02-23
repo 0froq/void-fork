@@ -1,12 +1,12 @@
 import type { Plugin } from "vite";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
-import { scanPages } from "vite-cloud/pages";
-import type { PageScanResult } from "vite-cloud/pages";
+import { scanPages } from "void/pages";
+import type { PageScanResult } from "void/pages";
 import { generateComponentManifest } from "./pages-manifest";
 
-const RENDERER_ID = "virtual:vite-cloud-pages-renderer";
-const CLIENT_ENTRY_ID = "virtual:vite-cloud-pages-client";
+const RENDERER_ID = "virtual:void-pages-renderer";
+const CLIENT_ENTRY_ID = "virtual:void-pages-client";
 
 interface PagesPluginOptions {
   viewTransitions?: boolean;
@@ -18,7 +18,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
   const root = dirname(pagesDir);
 
   return {
-    name: "vite-cloud-svelte:pages",
+    name: "void-svelte:pages",
 
     async buildStart() {
       if (existsSync(pagesDir)) {
@@ -27,7 +27,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
     },
 
     resolveId: {
-      filter: { id: /^virtual:vite-cloud-pages-(renderer|client)$/ },
+      filter: { id: /^virtual:void-pages-(renderer|client)$/ },
       handler(id) {
         return "\0" + id;
       },
@@ -35,7 +35,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
 
     load: {
       // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
-      filter: { id: /^\0virtual:vite-cloud-pages-(renderer|client)$/ },
+      filter: { id: /^\0virtual:void-pages-(renderer|client)$/ },
       handler(id) {
         if (id === "\0" + RENDERER_ID) {
           if (!pageScan)
@@ -56,9 +56,9 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
         isDev = true;
         return {
           optimizeDeps: {
-            // Exclude @vite-cloud/svelte so the virtual module and user
+            // Exclude @voidcloud/svelte so the virtual module and user
             // components share the same Svelte context (identity).
-            exclude: ["@vite-cloud/svelte"],
+            exclude: ["@voidcloud/svelte"],
             // Pre-include Svelte so it's not discovered late via dynamic imports.
             include: ["svelte", "svelte/store", "svelte/internal", "svelte/internal/client"],
           },
@@ -80,7 +80,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
 function generateRendererModule(scan: PageScanResult, pagesDir: string, _isDev: boolean): string {
   return `
 import { render } from "svelte/server";
-import App from "@vite-cloud/svelte/App.svelte";
+import App from "@voidcloud/svelte/App.svelte";
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -129,7 +129,7 @@ function generateClientEntry(
   return `
 import { hydrate } from "svelte";
 import { writable } from "svelte/store";
-import App from "@vite-cloud/svelte/App.svelte";
+import App from "@voidcloud/svelte/App.svelte";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 
@@ -158,7 +158,7 @@ const errorsStore = writable({});
 const router = {
   async visit(url, options = {}) {
     const method = (options.method || "GET").toUpperCase();
-    const headers = { "X-ViteCloudPages": "true", "Accept": "application/json" };
+    const headers = { "X-VoidPages": "true", "Accept": "application/json" };
     const fetchOptions = { method, headers };
 
     if (options.data && method !== "GET") {

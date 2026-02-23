@@ -1,5 +1,5 @@
 <script server lang="ts">
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 interface Props {
   title: string;
@@ -11,7 +11,7 @@ export const loader = defineHandler<Props>(() => {
 </script>
 
 <script setup lang="ts">
-import { Link } from "@vite-cloud/vue";
+import { Link } from "@voidcloud/vue";
 
 defineProps<Props>();
 </script>

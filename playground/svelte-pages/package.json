@@ -14,9 +14,9 @@
     "valibot": "^1.0.0"
   },
   "devDependencies": {
-    "@vite-cloud/svelte": "workspace:*",
+    "@voidcloud/svelte": "workspace:*",
     "typescript": "~5.8.3",
     "vite": "catalog:",
-    "vite-cloud": "workspace:*"
+    "void": "workspace:*"
   }
 }

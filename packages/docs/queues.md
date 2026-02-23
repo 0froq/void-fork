@@ -4,7 +4,7 @@ outline: deep
 
 # Queues
 
-Vite Cloud supports Cloudflare Queues for asynchronous message processing from a top-level `queues/` directory.
+Void supports Cloudflare Queues for asynchronous message processing from a top-level `queues/` directory.
 
 ## Defining queues
 
@@ -14,7 +14,7 @@ Each queue file should export a default handler wrapped with [`defineQueue`](./a
 
 ```ts
 // queues/emails.ts
-import { defineQueue } from "vite-cloud";
+import { defineQueue } from "void";
 
 interface Message {
   to: string;
@@ -32,12 +32,12 @@ Files or directories starting with `_` are ignored.
 
 ## Sending messages
 
-Import the typed `queues` proxy from `vite-cloud/queues` to send messages. Each queue is available as a property matching its name, with full type safety from the consumer's `defineQueue<T>` generic.
+Import the typed `queues` proxy from `void/queues` to send messages. Each queue is available as a property matching its name, with full type safety from the consumer's `defineQueue<T>` generic.
 
 ```ts
 // routes/api/orders.ts
-import { defineHandler } from "vite-cloud";
-import { queues } from "vite-cloud/queues";
+import { defineHandler } from "void";
+import { queues } from "void/queues";
 
 export const POST = defineHandler(async (c) => {
   const order = await c.req.json();
@@ -59,7 +59,7 @@ You can export `maxBatchSize` and `maxBatchTimeout` to configure how Cloudflare 
 
 ```ts
 // queues/emails.ts
-import { defineQueue } from "vite-cloud";
+import { defineQueue } from "void";
 
 interface Message {
   to: string;
@@ -81,7 +81,7 @@ export default defineQueue<Message>(async (batch, env) => {
 
 ## Deployment behavior
 
-On deploy, Vite Cloud includes all discovered queues in the deploy manifest. The platform provisions Cloudflare Queues, configures producer bindings on the user worker, and registers the dispatch worker as the queue consumer for relay delivery.
+On deploy, Void includes all discovered queues in the deploy manifest. The platform provisions Cloudflare Queues, configures producer bindings on the user worker, and registers the dispatch worker as the queue consumer for relay delivery.
 
 ## Local development
 

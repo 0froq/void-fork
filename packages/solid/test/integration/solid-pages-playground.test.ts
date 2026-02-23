@@ -278,7 +278,7 @@ describe("solid-pages client (dev)", () => {
         stdio: ["ignore", "pipe", "pipe"],
         env: {
           ...process.env,
-          VITE_CLOUD_INSPECTOR_PORT: "false",
+          VOID_INSPECTOR_PORT: "false",
         },
       },
     );
@@ -336,12 +336,12 @@ describe("solid-pages client (dev)", () => {
     expect(userHtml).toContain("Alice");
     expect(userHtml).toContain("alice@example.com");
 
-    // 5. Inertia navigation — GET / with X-ViteCloudPages header returns JSON page object
+    // 5. Inertia navigation — GET / with X-VoidPages header returns JSON page object
     const inertiaRoot = await fetch(`${DEV_BASE}/`, {
-      headers: { "X-ViteCloudPages": "true" },
+      headers: { "X-VoidPages": "true" },
     });
     expect(inertiaRoot.status).toBe(200);
-    expect(inertiaRoot.headers.get("X-ViteCloudPages")).toBe("true");
+    expect(inertiaRoot.headers.get("X-VoidPages")).toBe("true");
     const rootPage = (await inertiaRoot.json()) as {
       component: string;
       props: Record<string, unknown>;
@@ -355,7 +355,7 @@ describe("solid-pages client (dev)", () => {
 
     // 6. Inertia navigation — GET /users returns user list in props
     const inertiaUsers = await fetch(`${DEV_BASE}/users`, {
-      headers: { "X-ViteCloudPages": "true" },
+      headers: { "X-VoidPages": "true" },
     });
     expect(inertiaUsers.status).toBe(200);
     const usersPage = (await inertiaUsers.json()) as {
@@ -375,7 +375,7 @@ describe("solid-pages client (dev)", () => {
     // 8. Form submission — POST /users with valid data
     const postValid = await fetch(`${DEV_BASE}/users`, {
       method: "POST",
-      headers: { "X-ViteCloudPages": "true", "Content-Type": "application/json" },
+      headers: { "X-VoidPages": "true", "Content-Type": "application/json" },
       body: JSON.stringify({ name: "Charlie", email: "charlie@example.com" }),
     });
     expect(postValid.status).toBe(200);
@@ -391,7 +391,7 @@ describe("solid-pages client (dev)", () => {
     // 9. Form submission — POST /users with invalid data returns validation errors
     const postInvalid = await fetch(`${DEV_BASE}/users`, {
       method: "POST",
-      headers: { "X-ViteCloudPages": "true", "Content-Type": "application/json" },
+      headers: { "X-VoidPages": "true", "Content-Type": "application/json" },
       body: JSON.stringify({ name: "", email: "" }),
     });
     expect(postInvalid.status).toBe(200);
@@ -408,7 +408,7 @@ describe("solid-pages client (dev)", () => {
 
     // 10. User detail via Inertia
     const inertiaUser = await fetch(`${DEV_BASE}/users/1`, {
-      headers: { "X-ViteCloudPages": "true" },
+      headers: { "X-VoidPages": "true" },
     });
     expect(inertiaUser.status).toBe(200);
     const userPage = (await inertiaUser.json()) as {
@@ -420,7 +420,7 @@ describe("solid-pages client (dev)", () => {
 
     // 11. Newly added user is accessible via detail page
     const inertiaCharlie = await fetch(`${DEV_BASE}/users/3`, {
-      headers: { "X-ViteCloudPages": "true" },
+      headers: { "X-VoidPages": "true" },
     });
     expect(inertiaCharlie.status).toBe(200);
     const charliePage = (await inertiaCharlie.json()) as {

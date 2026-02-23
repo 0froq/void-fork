@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Link, useShared } from "@vite-cloud/svelte";
+  import { Link, useShared } from "@voidcloud/svelte";
   import type { Snippet } from "svelte";
 
   let { children }: { children: Snippet } = $props();

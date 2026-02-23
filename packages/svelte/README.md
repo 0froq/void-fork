@@ -1,23 +1,23 @@
-# @vite-cloud/svelte
+# @voidcloud/svelte
 
-Svelte 5 framework adapter for Vite Cloud Pages mode — Inertia-inspired full-stack DX with SSR.
+Svelte 5 framework adapter for Void Pages mode — Inertia-inspired full-stack DX with SSR.
 
 ## Setup
 
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
-import { viteCloudSvelte } from "@vite-cloud/svelte/plugin";
+import voidPlugin from "void";
+import { voidSvelte } from "@voidcloud/svelte/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudSvelte()],
+  plugins: [voidPlugin(), voidSvelte()],
 });
 ```
 
 ## Plugin
 
-`viteCloudSvelte(options?)` returns `[@sveltejs/vite-plugin-svelte, pagesPlugin]`.
+`voidSvelte(options?)` returns `[@sveltejs/vite-plugin-svelte, pagesPlugin]`.
 
 Options:
 
@@ -26,12 +26,12 @@ Options:
 
 The pages plugin generates two virtual modules:
 
-- `virtual:vite-cloud-pages-renderer` — SSR entry using `render()` from `svelte/server`
-- `virtual:vite-cloud-pages-client` — client hydration entry using `hydrate()` from `svelte`
+- `virtual:void-pages-renderer` — SSR entry using `render()` from `svelte/server`
+- `virtual:void-pages-client` — client hydration entry using `hydrate()` from `svelte`
 
 ## Runtime
 
-Import from `@vite-cloud/svelte`:
+Import from `@voidcloud/svelte`:
 
 - **`Link`** — SPA navigation component. Renders `<a>` for GET, `<button>` otherwise. Intercepts clicks for client-side navigation.
 - **`useForm(url, defaults, options?)`** — Form state management using Svelte 5 runes (`$state`, `$derived`). Supports `bind:value` directly on `form.data.name`. Methods: `post`, `put`, `patch`, `delete`, `reset`, `clearErrors`.
@@ -53,7 +53,7 @@ Pages are `.svelte` files in the `pages/` directory with companion `.server.ts` 
 
 ```ts
 // pages/index.server.ts
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const loader = defineHandler(() => {
   return { title: "Home" };

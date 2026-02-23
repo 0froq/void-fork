@@ -1,9 +1,9 @@
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
-import { viteCloudSolid } from "@vite-cloud/solid/plugin";
+import voidPlugin from "void";
+import { voidSolid } from "@voidcloud/solid/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudSolid()],
+  plugins: [voidPlugin(), voidSolid()],
   // stabilize dev server start for tests
   optimizeDeps: { include: ["valibot"] },
 });

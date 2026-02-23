@@ -7,7 +7,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "jsx": "react-jsx",
-    "types": ["vite/client", "vite-cloud/env"]
+    "types": ["vite/client", "void/env"]
   },
   "include": ["src", "routes", "middleware", "jobs"]
 }

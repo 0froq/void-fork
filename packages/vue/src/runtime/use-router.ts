@@ -1,7 +1,7 @@
 import { inject } from "vue";
 
 export function useRouter() {
-  const router = inject<any>("__vc_router", null);
+  const router = inject<any>("__void_router", null);
   if (!router) {
     throw new Error("useRouter() must be called inside a Pages component");
   }

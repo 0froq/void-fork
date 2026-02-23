@@ -1,5 +1,5 @@
 import { reactive, ref, inject, watch } from "vue";
-import type { PageActionMap } from "vite-cloud/routes";
+import type { PageActionMap } from "void/routes";
 
 type HasParams<U extends keyof PageActionMap> = PageActionMap[U] extends { params: infer P }
   ? P extends Record<string, string>
@@ -45,7 +45,7 @@ export function useForm(
     }
   }
 
-  const router = inject<any>("__vc_router", null);
+  const router = inject<any>("__void_router", null);
   const data = reactive({ ...formDefaults }) as Record<string, unknown>;
   const errors = reactive<Record<string, string>>({});
   const processing = ref(false);

@@ -4,7 +4,7 @@ outline: deep
 
 # Caching and Headers
 
-Vite Cloud serves static assets through Cloudflare's global edge network with sensible cache defaults. This page covers how static assets and dynamically rendered pages are cached, and how to customize response headers.
+Void serves static assets through Cloudflare's global edge network with sensible cache defaults. This page covers how static assets and dynamically rendered pages are cached, and how to customize response headers.
 
 ## Static asset caching
 
@@ -20,7 +20,7 @@ Cache-Control: public, max-age=31536000, immutable
 
 Cached at the edge for up to one year. Browsers cache them indefinitely. Because the cache key is unversioned, hashed assets survive across deploys without re-fetching.
 
-If your Vite config customizes `build.assetsDir`, Vite Cloud automatically detects this and applies the immutable optimization to the configured directory:
+If your Vite config customizes `build.assetsDir`, Void automatically detects this and applies the immutable optimization to the configured directory:
 
 ```ts
 // vite.config.ts
@@ -55,13 +55,13 @@ API responses (`/api/*`) and SSR-rendered pages that fall through to the worker 
 
 ## Revalidation (ISR)
 
-For SSR and [Pages mode](./pages-routing.md) projects, Vite Cloud supports stale-while-revalidate caching for dynamically rendered pages. Cached pages are served instantly from R2 while the worker re-renders in the background when the cache is stale. This is the equivalent of [Incremental Static Regeneration (ISR)](https://vercel.com/docs/incremental-static-regeneration) in other frameworks.
+For SSR and [Pages mode](./pages-routing.md) projects, Void supports stale-while-revalidate caching for dynamically rendered pages. Cached pages are served instantly from R2 while the worker re-renders in the background when the cache is stale. This is the equivalent of [Incremental Static Regeneration (ISR)](https://vercel.com/docs/incremental-static-regeneration) in other frameworks.
 
 This requires [SSR](./ssr.md) or [Pages mode](./pages-routing.md) to be configured.
 
 ### Enabling revalidation
 
-Add a `cache.revalidate` field to `vite-cloud.json` with a TTL in seconds:
+Add a `cache.revalidate` field to `void.json` with a TTL in seconds:
 
 ```json
 {
@@ -110,7 +110,7 @@ export const loader = defineHandler(async (c) => {
 });
 ```
 
-Per-page values take precedence over `vite-cloud.json` patterns.
+Per-page values take precedence over `void.json` patterns.
 
 ### Precedence
 
@@ -118,8 +118,8 @@ When multiple sources set a revalidate TTL, the most specific wins:
 
 1. `x-revalidate` response header (per-response)
 2. `.server.ts` export (per-page, Pages mode only)
-3. `vite-cloud.json` `cache.revalidate` path pattern match
-4. `vite-cloud.json` `cache.revalidate` global number or `"*"` fallback
+3. `void.json` `cache.revalidate` path pattern match
+4. `void.json` `cache.revalidate` global number or `"*"` fallback
 
 ### How revalidation works
 
@@ -158,7 +158,7 @@ Requests with `Cookie` or `Authorization` headers bypass the ISR cache entirely 
 You can purge ISR cache entries programmatically from a route handler:
 
 ```ts
-import { revalidate } from "vite-cloud/isr";
+import { revalidate } from "void/isr";
 
 export const POST = defineHandler(async (c) => {
   // ... update content in database ...
@@ -175,8 +175,8 @@ export const POST = defineHandler(async (c) => {
 
 This requires two env bindings:
 
-- `VITE_CLOUD_PROJECT_ID` — automatically injected by the platform on deploy
-- `VITE_CLOUD_REVALIDATE_TOKEN` — set manually via `vcc secret set VITE_CLOUD_REVALIDATE_TOKEN <token>`
+- `VOID_PROJECT_ID` — automatically injected by the platform on deploy
+- `VOID_REVALIDATE_TOKEN` — set manually via `void secret set VOID_REVALIDATE_TOKEN <token>`
 
 ## Prerendering
 
@@ -247,7 +247,7 @@ Each deploy clears the ISR cache for the project. This ensures stale content fro
 
 ## Custom headers
 
-Define custom response headers in [`vite-cloud.json`](./config.md) using the `headers` field. Keys are URL patterns, values are arrays of `"Name: value"` strings.
+Define custom response headers in [`void.json`](./config.md) using the `headers` field. Keys are URL patterns, values are arrays of `"Name: value"` strings.
 
 ```json
 {
@@ -300,7 +300,7 @@ Header rules apply to **static asset responses only** — files served from R2 (
 
 ### How headers work
 
-1. `vcc deploy` reads header rules from `vite-cloud.json` and includes them in the deploy manifest.
+1. `void deploy` reads header rules from `void.json` and includes them in the deploy manifest.
 2. The platform stores the rules in the KV routing entry for your project.
 3. The dispatch worker applies matching rules to static responses before edge caching.
 

@@ -4,32 +4,32 @@ outline: deep
 
 # API Reference
 
-All public exports of the `vite-cloud` package.
+All public exports of the `void` package.
 
 ## Plugin
 
-### `viteCloud()`
+### `voidPlugin()`
 
-The default export. Returns an array of Vite plugins that set up file-based routing, migration support, and the Cloudflare Workers runtime. Takes no arguments — all configuration is read from [`vite-cloud.json`](./config.md).
+The default export. Returns an array of Vite plugins that set up file-based routing, migration support, and the Cloudflare Workers runtime. Takes no arguments — all configuration is read from [`void.json`](./config.md).
 
 ```ts
-import viteCloud from "vite-cloud";
+import voidPlugin from "void";
 
 export default defineConfig({
-  plugins: [viteCloud()],
+  plugins: [voidPlugin()],
 });
 ```
 
 ## Handlers
 
-Imported from `"vite-cloud"` or `"vite-cloud/handler"`.
+Imported from `"void"` or `"void/handler"`.
 
 ### `defineHandler(handler)`
 
 Wraps a route handler function. The handler receives a [`CloudContext`](#cloudcontext) and can return a plain value (auto-converted to a Response) or use the Hono `c.json()` / `c.text()` APIs directly.
 
 ```ts
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const GET = defineHandler((c) => {
   return { message: "hello" };
@@ -59,7 +59,7 @@ Creates a handler with input validation using any [Standard Schema](https://gith
 Validated input is passed as the second argument to the handler.
 
 ```ts
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 import * as v from "valibot";
 
 export const POST = defineHandler.withValidator({
@@ -99,7 +99,7 @@ The inferred output types of each validator slot. For a `ValidatorSlots` with `b
 Type-safe wrapper for Hono middleware. At runtime, returns the function unchanged.
 
 ```ts
-import { defineMiddleware } from "vite-cloud";
+import { defineMiddleware } from "void";
 
 export default defineMiddleware(async (c, next) => {
   console.log(`${c.req.method} ${c.req.path}`);
@@ -118,7 +118,7 @@ function defineMiddleware(handler: MiddlewareHandler<CloudEnv>): MiddlewareHandl
 Wraps a Cloudflare [Scheduled handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) with type inference.
 
 ```ts
-import { defineScheduled } from "vite-cloud";
+import { defineScheduled } from "void";
 
 export default defineScheduled(async (controller, env, ctx) => {
   const { results } = await env.DB.prepare("SELECT * FROM stale").all();
@@ -143,7 +143,7 @@ function defineScheduled(
 Wraps a [queue](./queues.md) consumer handler with typed message bodies. The generic `<T>` defines the message body type, which flows through to the typed `queues` proxy for `send()` calls.
 
 ```ts
-import { defineQueue } from "vite-cloud";
+import { defineQueue } from "void";
 
 export default defineQueue<{ to: string; subject: string }>(async (batch, env) => {
   for (const msg of batch.messages) {
@@ -165,7 +165,7 @@ function defineQueue<T>(
 Wraps an SSR render entry. The second argument provides pre-built `<head>` and `<body>` asset tags for injecting client scripts and styles.
 
 ```ts
-import { defineRender } from "vite-cloud";
+import { defineRender } from "void";
 import { renderToString } from "react-dom/server";
 
 export default defineRender((c, assetTags) => {
@@ -195,15 +195,15 @@ interface RenderAssetTags {
 
 ## Auth
 
-Imported from `"vite-cloud"` or `"vite-cloud/auth"`. Client-side helpers imported from `"vite-cloud/client"`.
+Imported from `"void"` or `"void/auth"`. Client-side helpers imported from `"void/client"`.
 
 ### `requireAuth(c)`
 
 Extracts the authenticated user from the request context. Throws a 401 `HTTPException` if no session is present.
 
 ```ts
-import { defineHandler } from "vite-cloud";
-import { requireAuth } from "vite-cloud/auth";
+import { defineHandler } from "void";
+import { requireAuth } from "void/auth";
 
 export const GET = defineHandler((c) => {
   const user = requireAuth(c);
@@ -231,10 +231,10 @@ interface AuthUser {
 
 ### `AuthClient`
 
-Client-side helpers for Vite Cloud's built-in [authentication](./auth.md). Imported from `"vite-cloud/client"`. Handles JSON serialization and cookie sessions automatically.
+Client-side helpers for Void's built-in [authentication](./auth.md). Imported from `"void/client"`. Handles JSON serialization and cookie sessions automatically.
 
 ```ts
-import { auth } from "vite-cloud/client";
+import { auth } from "void/client";
 ```
 
 #### `auth.register(input)`
@@ -305,7 +305,7 @@ logout(): Promise<void>;
 Error class thrown by `auth` client helpers on non-2xx responses.
 
 ```ts
-import { auth, AuthError } from "vite-cloud/client";
+import { auth, AuthError } from "void/client";
 
 try {
   await auth.login({ email, password });
@@ -328,14 +328,14 @@ try {
 
 ## Fetch Client
 
-Imported from `"vite-cloud/client"`.
+Imported from `"void/client"`.
 
 ### `fetch(path, options?)`
 
 Type-safe fetch client for calling your API routes from client code, built on top of [ofetch](https://github.com/unjs/ofetch). Route paths and return types are inferred from the generated `RouteMap`.
 
 ```ts
-import { fetch } from "vite-cloud/client";
+import { fetch } from "void/client";
 
 // Types are fully inferred from your route handlers
 const users = await fetch("/api/users");
@@ -374,7 +374,7 @@ Returns the parsed JSON response body, or `undefined` for 204 responses. Throws 
 Error class thrown by `fetch` on non-2xx responses.
 
 ```ts
-import { fetch, FetchError } from "vite-cloud/client";
+import { fetch, FetchError } from "void/client";
 
 try {
   await fetch("/api/users/:id", { params: { id: "999" } });
@@ -398,7 +398,7 @@ try {
 
 The typed client is built on [ofetch](https://github.com/unjs/ofetch) with a typed route layer on top. Key differences from native `fetch`:
 
-| Behavior               | Native `fetch`                                       | `vite-cloud/client` `fetch`                                                                                               |
+| Behavior               | Native `fetch`                                       | `void/client` `fetch`                                                                                                     |
 | ---------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | **Return type**        | `Promise<Response>` — you call `.json()` yourself    | `Promise<T>` — auto-parses JSON, returns the typed result directly (`undefined` for 204)                                  |
 | **Error handling**     | Resolves on any HTTP status; you check `response.ok` | Throws `FetchError` on non-2xx responses                                                                                  |
@@ -412,14 +412,14 @@ The typed client is built on [ofetch](https://github.com/unjs/ofetch) with a typ
 
 ## Database
 
-Imported from `"vite-cloud/db"`. See [Database](./db.md) for usage guide.
+Imported from `"void/db"`. See [Database](./db.md) for usage guide.
 
 ### `db`
 
 Default query client instance. Uses `env.DB` from `cloudflare:workers` automatically.
 
 ```ts
-import { db } from "vite-cloud/db";
+import { db } from "void/db";
 
 const users = await db.list("users");
 ```
@@ -429,7 +429,7 @@ const users = await db.list("users");
 Creates a query client for a specific D1 instance. Use this when you need to pass the binding explicitly (e.g. in framework mode).
 
 ```ts
-import { createDb } from "vite-cloud/db";
+import { createDb } from "void/db";
 import { env } from "cloudflare:workers";
 
 const db = createDb(env.DB);
@@ -582,12 +582,12 @@ raw<R = Record<string, unknown>>(sql: string, bindings?: unknown[]): Promise<R[]
 Hono `Context` pre-typed with [`CloudEnv`](#cloudenv). This is the type of the `c` parameter in all route handlers and middleware.
 
 ```ts
-import type { CloudContext } from "vite-cloud";
+import type { CloudContext } from "void";
 ```
 
 ### `CloudEnv`
 
-Hono environment type for Vite Cloud workers. Extends Hono's `Env` with Cloudflare bindings and context variables.
+Hono environment type for Void workers. Extends Hono's `Env` with Cloudflare bindings and context variables.
 
 ```ts
 interface CloudEnv extends Env {
@@ -616,7 +616,7 @@ interface CloudContextVariables {
 **Augmentation example:**
 
 ```ts
-declare module "vite-cloud" {
+declare module "void" {
   interface CloudContextVariables {
     requestId: string;
   }
@@ -641,59 +641,59 @@ interface TypedHandler<V extends ValidatorSlots = {}, R = unknown> {
 
 ### `RouteMap`
 
-Empty stub interface augmented at build time by the generated `.vite-cloud/routes.d.ts`. Contains the full type information for all routes, methods, inputs, and outputs — used by the typed `fetch` client.
+Empty stub interface augmented at build time by the generated `.void/routes.d.ts`. Contains the full type information for all routes, methods, inputs, and outputs — used by the typed `fetch` client.
 
 ```ts
-import type { RouteMap } from "vite-cloud/routes";
+import type { RouteMap } from "void/routes";
 ```
 
 ## Environment Types
 
-Importing `"vite-cloud/env"` provides global Cloudflare environment types:
+Importing `"void/env"` provides global Cloudflare environment types:
 
 ```ts
-/// <reference types="vite-cloud/env" />
+/// <reference types="void/env" />
 ```
 
 Declares the `Cloudflare.Env` namespace with `DB: D1Database`, `KV: KVNamespace`, and `STORAGE: R2Bucket`.
 
-For handler context variables (`c.set()` / `c.get()`), augment [`CloudContextVariables`](#cloudcontextvariables) — this is separate from `Cloudflare.Env`, which types the worker bindings. Framework adaptors (`@vite-cloud/vue`, `@vite-cloud/react`, `@vite-cloud/svelte`) also augment `CloudContextVariables` to add the `shared` key used by `useShared()`.
+For handler context variables (`c.set()` / `c.get()`), augment [`CloudContextVariables`](#cloudcontextvariables) — this is separate from `Cloudflare.Env`, which types the worker bindings. Framework adaptors (`@voidcloud/vue`, `@voidcloud/react`, `@voidcloud/svelte`) also augment `CloudContextVariables` to add the `shared` key used by `useShared()`.
 
 ## Framework Adaptors
 
 Framework adaptors for [Pages Routing](./pages-routing.md). Each adaptor provides a Vite plugin and client-side runtime.
 
-### `@vite-cloud/vue`
+### `@voidcloud/vue`
 
-#### `viteCloudVue(options?)`
+#### `voidVue(options?)`
 
-Imported from `"@vite-cloud/vue/plugin"`. Returns an array of Vite plugins that handle `<script server>` extraction, Vue SFC compilation, and SSR/hydration entry generation. Includes `@vitejs/plugin-vue` — no need to install or configure it separately.
+Imported from `"@voidcloud/vue/plugin"`. Returns an array of Vite plugins that handle `<script server>` extraction, Vue SFC compilation, and SSR/hydration entry generation. Includes `@vitejs/plugin-vue` — no need to install or configure it separately.
 
 ```ts
-import { viteCloudVue } from "@vite-cloud/vue/plugin";
+import { voidVue } from "@voidcloud/vue/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudVue()],
+  plugins: [voidPlugin(), voidVue()],
 });
 ```
 
 **Signature:**
 
 ```ts
-function viteCloudVue(options?: ViteCloudVueOptions): Plugin[];
+function voidVue(options?: VoidVueOptions): Plugin[];
 ```
 
 **Options:**
 
 ```ts
-interface ViteCloudVueOptions {
+interface VoidVueOptions {
   vue?: VuePluginOptions; // passed through to @vitejs/plugin-vue
 }
 ```
 
 #### Vue Runtime
 
-Imported from `"@vite-cloud/vue"`.
+Imported from `"@voidcloud/vue"`.
 
 | Export                             | Description                                                                                                                                           |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -702,37 +702,37 @@ Imported from `"@vite-cloud/vue"`.
 | `useForm(url, defaults, options?)` | Typed reactive form helper bound to a page action URL. Returns `{ data, post, put, patch, delete, processing, errors, isDirty, reset, clearErrors }`. |
 | `useShared()`                      | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                              |
 
-### `@vite-cloud/react`
+### `@voidcloud/react`
 
-#### `viteCloudReact(options?)`
+#### `voidReact(options?)`
 
-Imported from `"@vite-cloud/react/plugin"`. Returns an array of Vite plugins that handle SSR/hydration entry generation. Includes `@vitejs/plugin-react` — no need to install or configure it separately.
+Imported from `"@voidcloud/react/plugin"`. Returns an array of Vite plugins that handle SSR/hydration entry generation. Includes `@vitejs/plugin-react` — no need to install or configure it separately.
 
 ```ts
-import { viteCloudReact } from "@vite-cloud/react/plugin";
+import { voidReact } from "@voidcloud/react/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudReact()],
+  plugins: [voidPlugin(), voidReact()],
 });
 ```
 
 **Signature:**
 
 ```ts
-function viteCloudReact(options?: ViteCloudReactOptions): Plugin[];
+function voidReact(options?: VoidReactOptions): Plugin[];
 ```
 
 **Options:**
 
 ```ts
-interface ViteCloudReactOptions {
+interface VoidReactOptions {
   react?: ReactPluginOptions; // passed through to @vitejs/plugin-react
 }
 ```
 
 #### React Runtime
 
-Imported from `"@vite-cloud/react"`.
+Imported from `"@voidcloud/react"`.
 
 | Export              | Description                                                                                                                                   |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -740,30 +740,30 @@ Imported from `"@vite-cloud/react"`.
 | `useForm(defaults)` | Form helper hook. Returns `{ data, setData, post, put, patch, delete, processing, errors, isDirty, reset, clearErrors }`.                     |
 | `useShared()`       | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                      |
 
-### `@vite-cloud/svelte`
+### `@voidcloud/svelte`
 
-#### `viteCloudSvelte(options?)`
+#### `voidSvelte(options?)`
 
-Imported from `"@vite-cloud/svelte/plugin"`. Returns an array of Vite plugins that handle SSR/hydration entry generation for Svelte 5. Includes `@sveltejs/vite-plugin-svelte` — no need to install or configure it separately.
+Imported from `"@voidcloud/svelte/plugin"`. Returns an array of Vite plugins that handle SSR/hydration entry generation for Svelte 5. Includes `@sveltejs/vite-plugin-svelte` — no need to install or configure it separately.
 
 ```ts
-import { viteCloudSvelte } from "@vite-cloud/svelte/plugin";
+import { voidSvelte } from "@voidcloud/svelte/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudSvelte()],
+  plugins: [voidPlugin(), voidSvelte()],
 });
 ```
 
 **Signature:**
 
 ```ts
-function viteCloudSvelte(options?: ViteCloudSvelteOptions): Plugin[];
+function voidSvelte(options?: VoidSvelteOptions): Plugin[];
 ```
 
 **Options:**
 
 ```ts
-interface ViteCloudSvelteOptions {
+interface VoidSvelteOptions {
   svelte?: SveltePluginOptions; // passed through to @sveltejs/vite-plugin-svelte
   viewTransitions?: boolean; // enable View Transitions API
 }
@@ -771,7 +771,7 @@ interface ViteCloudSvelteOptions {
 
 #### Svelte Runtime
 
-Imported from `"@vite-cloud/svelte"`.
+Imported from `"@voidcloud/svelte"`.
 
 | Export              | Description                                                                                                                                    |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -782,15 +782,15 @@ Imported from `"@vite-cloud/svelte"`.
 
 ## Subpath Exports
 
-| Import path            | Contents                                                                                     |
-| ---------------------- | -------------------------------------------------------------------------------------------- |
-| `vite-cloud`           | Plugin default export + all handler/type re-exports                                          |
-| `vite-cloud/handler`   | `defineHandler`, `defineMiddleware`, `defineScheduled`, `defineQueue`, `defineRender`, types |
-| `vite-cloud/auth`      | `requireAuth`, `AuthUser`                                                                    |
-| `vite-cloud/client`    | `fetch`, `FetchError`, `auth`, `AuthError`, `AuthUser`                                       |
-| `vite-cloud/response`  | `convertReturnValue`                                                                         |
-| `vite-cloud/validator` | `runValidation`, `ValidatorSlots`, `HandlerInput`                                            |
-| `vite-cloud/db`        | `db`, `createDb`, `QueryClient`, `DbTables`, `DbInsertTables`                                |
-| `vite-cloud/routes`    | `RouteMap` stub (types only)                                                                 |
-| `vite-cloud/queues`    | `queues` proxy for sending messages to typed queues                                          |
-| `vite-cloud/env`       | Global Cloudflare env types (types only)                                                     |
+| Import path      | Contents                                                                                     |
+| ---------------- | -------------------------------------------------------------------------------------------- |
+| `void`           | Plugin default export + all handler/type re-exports                                          |
+| `void/handler`   | `defineHandler`, `defineMiddleware`, `defineScheduled`, `defineQueue`, `defineRender`, types |
+| `void/auth`      | `requireAuth`, `AuthUser`                                                                    |
+| `void/client`    | `fetch`, `FetchError`, `auth`, `AuthError`, `AuthUser`                                       |
+| `void/response`  | `convertReturnValue`                                                                         |
+| `void/validator` | `runValidation`, `ValidatorSlots`, `HandlerInput`                                            |
+| `void/db`        | `db`, `createDb`, `QueryClient`, `DbTables`, `DbInsertTables`                                |
+| `void/routes`    | `RouteMap` stub (types only)                                                                 |
+| `void/queues`    | `queues` proxy for sending messages to typed queues                                          |
+| `void/env`       | Global Cloudflare env types (types only)                                                     |

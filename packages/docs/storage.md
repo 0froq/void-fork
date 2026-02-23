@@ -4,12 +4,12 @@ outline: deep
 
 # Object Storage
 
-Vite Cloud provides a typed `storage` export for [Cloudflare R2](https://developers.cloudflare.com/r2/). Import it from `vite-cloud/storage` and use the full R2 API directly.
+Void provides a typed `storage` export for [Cloudflare R2](https://developers.cloudflare.com/r2/). Import it from `void/storage` and use the full R2 API directly.
 
 ## Basic Operations
 
 ```ts
-import { storage } from "vite-cloud/storage";
+import { storage } from "void/storage";
 
 // Upload
 await storage.put("uploads/photo.jpg", file, {
@@ -42,7 +42,7 @@ The `storage` object is a full `R2Bucket` — every method from the [Cloudflare 
 A common pattern is serving uploaded files from an API route:
 
 ```ts
-import { storage } from "vite-cloud/storage";
+import { storage } from "void/storage";
 
 export const GET = defineHandler(async (c) => {
   const key = c.req.param("key");

@@ -4,12 +4,12 @@ import { scriptServerPlugin } from "./plugin-script-server";
 import { pagesPlugin } from "./plugin-pages";
 import { join } from "node:path";
 
-export interface ViteCloudVueOptions {
+export interface VoidVueOptions {
   vue?: Parameters<typeof vue>[0];
   viewTransitions?: boolean;
 }
 
-export function viteCloudVue(options?: ViteCloudVueOptions): Plugin[] {
+export function voidVue(options?: VoidVueOptions): Plugin[] {
   const pagesDir = join(process.cwd(), "pages");
   return [
     scriptServerPlugin(pagesDir),

@@ -1,4 +1,4 @@
-import { Link } from "@vite-cloud/react";
+import { Link } from "@voidcloud/react";
 import type { Props } from "./[id].server";
 
 export default function UserDetailPage({ user }: Props) {

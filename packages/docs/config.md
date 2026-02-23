@@ -6,11 +6,11 @@ outline: deep
 
 ## Config File Format
 
-All project-level configuration lives in a `vite-cloud.json` file at the project root. Every field is optional — missing file means all defaults.
+All project-level configuration lives in a `void.json` file at the project root. Every field is optional — missing file means all defaults.
 
 ```json
 {
-  "$schema": "https://unpkg.com/vite-cloud/schema.json",
+  "$schema": "https://unpkg.com/void/schema.json",
   "auth": ["github", "google", "email"],
   "bindings": { "db": true, "kv": false },
   "headers": {
@@ -104,7 +104,7 @@ Output directory for static deploys, relative to the project root. Only relevant
 
 ### `wrangler`
 
-Curated Cloudflare Workers configuration. Binding arrays (`d1_databases`, `kv_namespaces`, `r2_buckets`) are not allowed here — bindings are fully managed by vite-cloud via inference and the `bindings` field. Users wanting custom bindings should use a `wrangler.json` with real binding IDs and `wrangler deploy`.
+Curated Cloudflare Workers configuration. Binding arrays (`d1_databases`, `kv_namespaces`, `r2_buckets`) are not allowed here — bindings are fully managed by void via inference and the `bindings` field. Users wanting custom bindings should use a `wrangler.json` with real binding IDs and `wrangler deploy`.
 
 | Field                 | Type       | Description                            |
 | --------------------- | ---------- | -------------------------------------- |

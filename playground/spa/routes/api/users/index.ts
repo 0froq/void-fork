@@ -1,6 +1,6 @@
 import * as v from "valibot";
-import { defineHandler } from "vite-cloud";
-import { db } from "vite-cloud/db";
+import { defineHandler } from "void";
+import { db } from "void/db";
 
 export const GET = defineHandler(async () => {
   return db.list("users");

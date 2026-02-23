@@ -4,23 +4,23 @@ outline: deep
 
 # Deployment
 
-Vite Cloud apps run on Cloudflare's infrastructure but you don't need to use your own Cloudflare account. Our long term goal is to provide a simpler app-centric deployment experience similar to that of Vercel and Netlify. But right now, Vite Cloud only supports deploying via the CLI or GitHub actions.
+Void apps run on Cloudflare's infrastructure but you don't need to use your own Cloudflare account. Our long term goal is to provide a simpler app-centric deployment experience similar to that of Vercel and Netlify. But right now, Void only supports deploying via the CLI or GitHub actions.
 
 ## CLI
 
 ### First deploy
 
 ```bash
-vcc login              # OAuth via GitHub or Google
-vcc deploy             # auto-detects app type, builds, deploys
+void login              # OAuth via GitHub or Google
+void deploy             # auto-detects app type, builds, deploys
 ```
 
-On first deploy, the CLI prompts you to create or select a project. The project link is saved to `.vite-cloud/project.json` for subsequent deploys.
+On first deploy, the CLI prompts you to create or select a project. The project link is saved to `.void/project.json` for subsequent deploys.
 
 ### Flags
 
 ```bash
-vcc deploy [--project <name>] [--dir <path>] [--spa]
+void deploy [--project <name>] [--dir <path>] [--spa]
 ```
 
 | Flag               | Purpose                                           |
@@ -34,21 +34,21 @@ vcc deploy [--project <name>] [--dir <path>] [--spa]
 The CLI resolves which project to deploy to in this order:
 
 1. `--project <name>` flag
-2. `VITE_CLOUD_PROJECT` environment variable
-3. Linked project in `.vite-cloud/project.json`
+2. `VOID_PROJECT` environment variable
+3. Linked project in `.void/project.json`
 
 If none match, the CLI prompts interactively.
 
 ### Environment variables
 
-| Variable             | Purpose                          |
-| -------------------- | -------------------------------- |
-| `VITE_CLOUD_TOKEN`   | Auth token (for CI, skips OAuth) |
-| `VITE_CLOUD_PROJECT` | Project slug override            |
+| Variable       | Purpose                          |
+| -------------- | -------------------------------- |
+| `VOID_TOKEN`   | Auth token (for CI, skips OAuth) |
+| `VOID_PROJECT` | Project slug override            |
 
 ## GitHub Actions
 
-You can deploy from a GitHub repo with a simple GitHub Actions workflow. Running `vcc init --github` will generate this as `.github/workflows/deploy.yml` in your project:
+You can deploy from a GitHub repo with a simple GitHub Actions workflow. Running `void init --github` will generate this as `.github/workflows/deploy.yml` in your project:
 
 ```yaml
 name: Deploy
@@ -67,13 +67,13 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install
-      - run: pnpm vcc deploy
+      - run: pnpm void deploy
         env:
-          VITE_CLOUD_TOKEN: ${{ secrets.VITE_CLOUD_TOKEN }}
-          VITE_CLOUD_PROJECT: my-app
+          VOID_TOKEN: ${{ secrets.VOID_TOKEN }}
+          VOID_PROJECT: my-app
 ```
 
-To get a deploy token, run `vcc token` to copy it to your clipboard, then add it as a GitHub Actions secret.
+To get a deploy token, run `void token` to copy it to your clipboard, then add it as a GitHub Actions secret.
 
 ## Deploy Pipeline
 
@@ -82,7 +82,7 @@ To get a deploy token, run `vcc token` to copy it to your clipboard, then add it
 For projects with API routes, pages, queues, jobs, or any backend code:
 
 ```
-vcc deploy
+void deploy
   │
   ├─ 1. Build
   │    vite build → dist/client/ (static assets)
@@ -112,7 +112,7 @@ vcc deploy
   │    └─ Update edge routing (KV)
   │
   └─ 6. Live
-       https://my-app.vitecloud.app
+       https://my-app.void.app
 ```
 
 **Key invariant:** The worker is never deployed unless all migrations succeed. On migration failure, the deployment is marked as failed and the existing worker keeps running.
@@ -124,7 +124,7 @@ Framework mode (TanStack Start, React Router) follows the same pipeline but skip
 For client-side apps without backend code:
 
 ```
-vcc deploy
+void deploy
   │
   ├─ 1. Build
   │    vite build → dist/ (static assets)
@@ -141,7 +141,7 @@ vcc deploy
   │    Update edge routing (KV)
   │
   └─ 5. Live
-       https://my-app.vitecloud.app
+       https://my-app.void.app
        All non-file paths → index.html (200)
 ```
 
@@ -150,7 +150,7 @@ vcc deploy
 For statically generated sites (VitePress, etc.):
 
 ```
-vcc deploy
+void deploy
   │
   ├─ 1. Build
   │    vitepress build → .vitepress/dist/ (or custom outputDir)
@@ -167,7 +167,7 @@ vcc deploy
   │    Update edge routing (KV)
   │
   └─ 5. Live
-       https://my-app.vitecloud.app
+       https://my-app.void.app
        /about → about/index.html
        /missing → 404.html (404)
 ```
@@ -177,8 +177,8 @@ vcc deploy
 Skip the build step entirely with `--dir`:
 
 ```bash
-vcc deploy --dir public         # SSG mode (default)
-vcc deploy --dir build --spa    # SPA mode
+void deploy --dir public         # SSG mode (default)
+void deploy --dir build --spa    # SPA mode
 ```
 
 The CLI uploads all files from the directory directly — no build command runs.

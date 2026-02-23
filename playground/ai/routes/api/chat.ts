@@ -1,5 +1,5 @@
-import { defineHandler } from "vite-cloud";
-import { ai } from "vite-cloud/ai";
+import { defineHandler } from "void";
+import { ai } from "void/ai";
 
 export const POST = defineHandler(async (c) => {
   const { model, messages } = await c.req.json<{

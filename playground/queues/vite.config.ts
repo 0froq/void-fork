@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
+import voidPlugin from "void";
 
 export default defineConfig({
-  plugins: [viteCloud()],
+  plugins: [voidPlugin()],
 });

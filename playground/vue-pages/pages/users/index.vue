@@ -1,5 +1,5 @@
 <script server lang="ts">
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 import * as v from "valibot";
 import { USERS } from "./_data";
 
@@ -22,7 +22,7 @@ export const action = defineHandler.withValidator({
 </script>
 
 <script setup lang="ts">
-import { Link, useForm } from "@vite-cloud/vue";
+import { Link, useForm } from "@voidcloud/vue";
 
 const props = defineProps<Props>();
 

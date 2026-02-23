@@ -1,4 +1,4 @@
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 import { USERS } from "./_data";
 
 export interface Props {

@@ -1,23 +1,23 @@
-# @vite-cloud/vue
+# @voidcloud/vue
 
-Vue framework adapter for Vite Cloud Pages mode — Inertia-inspired full-stack DX with SSR.
+Vue framework adapter for Void Pages mode — Inertia-inspired full-stack DX with SSR.
 
 ## Setup
 
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
-import { viteCloudVue } from "@vite-cloud/vue/plugin";
+import voidPlugin from "void";
+import { voidVue } from "@voidcloud/vue/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudVue()],
+  plugins: [voidPlugin(), voidVue()],
 });
 ```
 
 ## Plugin
 
-`viteCloudVue(options?)` returns `[scriptServerPlugin, @vitejs/plugin-vue, pagesPlugin]`.
+`voidVue(options?)` returns `[scriptServerPlugin, @vitejs/plugin-vue, pagesPlugin]`.
 
 Options:
 
@@ -26,14 +26,14 @@ Options:
 
 The pages plugin generates two virtual modules:
 
-- `virtual:vite-cloud-pages-renderer` — SSR entry using `renderToString()` from `vue/server-renderer`
-- `virtual:vite-cloud-pages-client` — client hydration entry using `createSSRApp()` from `vue`
+- `virtual:void-pages-renderer` — SSR entry using `renderToString()` from `vue/server-renderer`
+- `virtual:void-pages-client` — client hydration entry using `createSSRApp()` from `vue`
 
 An additional `scriptServerPlugin` extracts `<script server>` blocks from Vue SFCs before compilation.
 
 ## Runtime
 
-Import from `@vite-cloud/vue`:
+Import from `@voidcloud/vue`:
 
 - **`Link`** — SPA navigation component. Renders `<a>` for GET, `<button>` otherwise. Intercepts clicks for client-side navigation.
 - **`useForm(url, defaults, options?)`** — Form state management using Vue `reactive()` and `ref()`. Supports `v-model` directly on `form.data.name`. Methods: `post`, `put`, `patch`, `delete`, `reset`, `clearErrors`.
@@ -57,7 +57,7 @@ defineProps<{ title: string }>();
 
 ```ts
 // pages/index.server.ts
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const loader = defineHandler(() => {
   return { title: "Home" };

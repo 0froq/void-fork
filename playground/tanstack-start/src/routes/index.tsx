@@ -17,10 +17,10 @@ function HomePage() {
 
   return (
     <div style={{ padding: "16px" }}>
-      <h1>TanStack Start + Vite Cloud</h1>
+      <h1>TanStack Start + Void</h1>
       <p>
         This playground demonstrates meta-framework integration. TanStack Start handles routing and
-        SSR, while Vite Cloud provides bindings, migrations, and deployment.
+        SSR, while Void provides bindings, migrations, and deployment.
       </p>
       <p>
         Runtime: <code>{data.runtime}</code>

@@ -1,5 +1,5 @@
 {
-  "name": "@vite-cloud/vue",
+  "name": "@voidcloud/vue",
   "version": "0.0.1",
   "files": [
     "dist"
@@ -27,12 +27,12 @@
     "@types/node": "catalog:",
     "tsdown": "catalog:",
     "vite": "catalog:",
-    "vite-cloud": "workspace:*",
+    "void": "workspace:*",
     "vue": "^3.5.0"
   },
   "peerDependencies": {
     "vite": "catalog:",
-    "vite-cloud": "workspace:*",
+    "void": "workspace:*",
     "vue": "^3.5.0"
   }
 }

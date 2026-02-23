@@ -1,6 +1,6 @@
-import { defineMiddleware } from "vite-cloud";
+import { defineMiddleware } from "void";
 
-declare module "vite-cloud" {
+declare module "void" {
   interface CloudContextVariables {
     shared: { appName: string };
   }

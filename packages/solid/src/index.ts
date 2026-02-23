@@ -3,12 +3,12 @@ import type { Plugin } from "vite";
 import { pagesPlugin } from "./plugin-pages";
 import { join } from "node:path";
 
-export interface ViteCloudSolidOptions {
+export interface VoidSolidOptions {
   solid?: Parameters<typeof solid>[0];
   viewTransitions?: boolean;
 }
 
-export function viteCloudSolid(options?: ViteCloudSolidOptions): Plugin[] {
+export function voidSolid(options?: VoidSolidOptions): Plugin[] {
   const pagesDir = join(process.cwd(), "pages");
   return [
     solid({ ssr: true, ...options?.solid }),

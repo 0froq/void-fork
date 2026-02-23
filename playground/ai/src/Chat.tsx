@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { fetchStream } from "vite-cloud/client";
+import { fetchStream } from "void/client";
 
 interface Message {
   role: "system" | "user" | "assistant";

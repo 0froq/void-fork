@@ -2,8 +2,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm -r build",
-    "build:cli": "pnpm -F vite-cloud build",
+    "build": "pnpm --filter './packages/**' -r build",
+    "build:all": "pnpm -r build",
+    "build:core": "pnpm -F void build",
     "build:docs": "pnpm -F docs build",
     "test": "vitest --run",
     "lint": "oxlint",
@@ -11,7 +12,7 @@
     "check": "pnpm -r --parallel typecheck",
     "docs": "cd packages/docs && vitepress dev",
     "deploy:docs": "pnpm -F docs run deploy",
-    "deploy:staging:docs": "pnpm -F docs run deploy --project vite-cloud-staging",
+    "deploy:staging:docs": "pnpm -F docs run deploy --project void-staging",
     "prepare": "husky"
   },
   "devDependencies": {

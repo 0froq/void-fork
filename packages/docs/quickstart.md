@@ -2,58 +2,58 @@
 outline: deep
 ---
 
-# Vite Cloud Quickstart
+# Void Quickstart
 
 ## Start in an Empty Directory
 
 ::: code-group
 
 ```sh [npm]
-npm install -D vite-cloud
-npx vcc init
+npm install -D void
+npx void init
 ```
 
 ```sh [pnpm]
-pnpm add -D vite-cloud
-pnpm vcc init
+pnpm add -D void
+pnpm void init
 ```
 
 ```sh [yarn]
-yarn add -D vite-cloud
-yarn vcc init
+yarn add -D void
+yarn void init
 ```
 
 ```sh [bun]
-bun add -D vite-cloud
-bunx vcc init
+bun add -D void
+bunx void init
 ```
 
 :::
 
-This scaffolds a starter Vite Cloud app with an interactive setup flow.
+This scaffolds a starter Void app with an interactive setup flow.
 
 <details>
 <summary style="cursor:pointer">
-💡 <b>Notes on <code>vcc</code> binary usage</b>
+💡 <b>Notes on <code>void</code> binary usage</b>
 </summary>
 
-`vcc` is a local binary from the installed `vite-cloud` package, so outside of npm scripts, you will have to invoke it with `npx`, `pnpm`, `yarn`, or `bunx`. For brevity, you will sometimes see unprefixed `vcc` usage throughout the docs. Just remember it needs to be invoked through a binary runner.
+`void` is a local binary from the installed `void` package, so outside of npm scripts, you will have to invoke it with `npx`, `pnpm`, `yarn`, or `bunx`. For brevity, you will sometimes see unprefixed `void` usage throughout the docs. Just remember it needs to be invoked through a binary runner.
 
-Alternatively, you can add `./node_modules/.bin` to your `PATH` so that you can invoke `vcc` directly when you are in the root directory of your app.
+Alternatively, you can add `./node_modules/.bin` to your `PATH` so that you can invoke `void` directly when you are in the root directory of your app.
 
 :::warning ⚠️ Prefer local install
-We do not recommend installing `vite-cloud` globally, because the CLI needs to be in sync with same version of the runtime framework. Always install `vite-cloud` locally as a dev dependency of your project.
+We do not recommend installing `void` globally, because the CLI needs to be in sync with same version of the runtime framework. Always install `void` locally as a dev dependency of your project.
 :::
 
 </details>
 
 ## Using with Coding Agents
 
-`vcc init` detects your agent once and reuses that choice for instructions, skills linking, and MCP config.
+`void init` detects your agent once and reuses that choice for instructions, skills linking, and MCP config.
 
-If auto-detection fails, `vcc init` asks you to choose from a short list (Claude, Cursor, Codex, Gemini CLI, Generic).
+If auto-detection fails, `void init` asks you to choose from a short list (Claude, Cursor, Codex, Gemini CLI, Generic).
 
-In supported agents such as Claude Code, you can invoke the `/vite-cloud` skill to turn your agent into a Vite Cloud export. Then, simply ask the agent to build an app with Vite Cloud.
+In supported agents such as Claude Code, you can invoke the `/void` skill to turn your agent into a Void export. Then, simply ask the agent to build an app with Void.
 
 ## Adding to an Existing Vite App
 
@@ -64,19 +64,19 @@ Currently, not all Vite-based meta frameworks are fully supported, but they shou
 ::: code-group
 
 ```sh [npm]
-npm install -D vite-cloud
+npm install -D void
 ```
 
 ```sh [pnpm]
-pnpm add -D vite-cloud
+pnpm add -D void
 ```
 
 ```sh [yarn]
-yarn add -D vite-cloud
+yarn add -D void
 ```
 
 ```sh [bun]
-bun add -D vite-cloud
+bun add -D void
 ```
 
 :::
@@ -85,31 +85,31 @@ Enable the plugin in `vite.config.ts`
 
 ```ts
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
+import voidPlugin from "void";
 
 export default defineConfig({
-  plugins: [viteCloud()],
+  plugins: [voidPlugin()],
 });
 ```
 
-Then run the setup guide via `vcc` (Vite Cloud CLI):
+Then run the setup guide via `void` (Void CLI):
 
 ::: code-group
 
 ```sh [npm]
-npx vcc init
+npx void init
 ```
 
 ```sh [pnpm]
-pnpm vcc init
+pnpm void init
 ```
 
 ```sh [yarn]
-yarn vcc init
+yarn void init
 ```
 
 ```sh [bun]
-bunx vcc init
+bunx void init
 ```
 
 :::
@@ -121,10 +121,10 @@ bunx vcc init
 Create `routes/api/hello.get.ts`:
 
 ```ts
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export default defineHandler((c) => {
-  return c.json({ message: "Hello from Vite Cloud" });
+  return c.json({ message: "Hello from Void" });
 });
 ```
 
@@ -142,7 +142,7 @@ Then visit:
 ### 3. Log in
 
 ```sh
-vcc login
+void login
 ```
 
 ### 4. Deploy
@@ -150,17 +150,17 @@ vcc login
 Set secrets once before deploying, if any:
 
 ```sh
-vcc secret put KEY=value
+void secret put KEY=value
 ```
 
 Then run:
 
 ```sh
-vcc deploy
+void deploy
 ```
 
 ```sh
-┌  vite-cloud deploy
+┌  void deploy
 │
 ◇  Building...
 │  (vite build output)
@@ -174,7 +174,7 @@ vcc deploy
 ◇  Deployed!
 │
 │  ╭─────────────────────────────────────────╮
-│  │  https://my-app.vitecloud.app           │
+│  │  https://my-app.void.app           │
 │  │                                         │
 │  │  2 worker module(s), 5 static asset(s)  │
 │  │  1 migration(s) applied                 │
@@ -184,14 +184,14 @@ vcc deploy
 └  Done!
 ```
 
-On first deploy, Vite Cloud will:
+On first deploy, Void will:
 
 - build your app
 - create or link a project
 - provision required resources (for example D1/KV/R2 when inferred)
-- deploy to `https://<slug>.vitecloud.app`
+- deploy to `https://<slug>.void.app`
 
-Right now, only deploys via the CLI is supported. To setup push-to-deploy GitHub, run `vcc init --github`.
+Right now, only deploys via the CLI is supported. To setup push-to-deploy GitHub, run `void init --github`.
 
 ## Next steps
 

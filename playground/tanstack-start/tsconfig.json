@@ -12,6 +12,6 @@
     "resolveJsonModule": true,
     "noEmit": true,
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
-    "types": ["vite/client", "vite-cloud/env"]
+    "types": ["vite/client", "void/env"]
   }
 }

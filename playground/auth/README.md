@@ -9,7 +9,7 @@ cd playground/auth
 pnpm dev
 ```
 
-Email/password auth works immediately with no setup — auth is auto-detected from `vite-cloud/client` imports.
+Email/password auth works immediately with no setup — auth is auto-detected from `void/client` imports.
 
 ## OAuth Setup
 
@@ -50,11 +50,11 @@ Email/password auth works immediately with no setup — auth is auto-detected fr
 
 ## Protected Routes
 
-Use `requireAuth(c)` from `vite-cloud/auth` in any route handler. It returns the current `AuthUser` or throws a 401 error.
+Use `requireAuth(c)` from `void/auth` in any route handler. It returns the current `AuthUser` or throws a 401 error.
 
 ```ts
-import { defineHandler } from "vite-cloud";
-import { requireAuth } from "vite-cloud/auth";
+import { defineHandler } from "void";
+import { requireAuth } from "void/auth";
 
 export default defineHandler((c) => {
   const user = requireAuth(c);
@@ -64,8 +64,8 @@ export default defineHandler((c) => {
 
 ## Resetting State
 
-Delete the `.vite-cloud/` directory to clear all local data (users, sessions, D1 database):
+Delete the `.void/` directory to clear all local data (users, sessions, D1 database):
 
 ```bash
-rm -rf .vite-cloud/
+rm -rf .void/
 ```

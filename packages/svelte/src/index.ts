@@ -3,12 +3,12 @@ import type { Plugin } from "vite";
 import { pagesPlugin } from "./plugin-pages";
 import { join } from "node:path";
 
-export interface ViteCloudSvelteOptions {
+export interface VoidSvelteOptions {
   svelte?: Parameters<typeof svelte>[0];
   viewTransitions?: boolean;
 }
 
-export function viteCloudSvelte(options?: ViteCloudSvelteOptions): Plugin[] {
+export function voidSvelte(options?: VoidSvelteOptions): Plugin[] {
   const pagesDir = join(process.cwd(), "pages");
   return [
     ...(svelte(options?.svelte) as Plugin[]),

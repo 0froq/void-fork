@@ -4,14 +4,14 @@ outline: deep
 
 # Key-Value Storage
 
-Vite Cloud provides a typed KV client with automatic JSON serialization for [Cloudflare Workers KV](https://developers.cloudflare.com/kv/). Import `kv` from `vite-cloud/kv` and start reading and writing data.
+Void provides a typed KV client with automatic JSON serialization for [Cloudflare Workers KV](https://developers.cloudflare.com/kv/). Import `kv` from `void/kv` and start reading and writing data.
 
 ## Basic Operations
 
 ### Get
 
 ```ts
-import { kv } from "vite-cloud/kv";
+import { kv } from "void/kv";
 
 const user = await kv.get<User>("user:123");
 // User | null

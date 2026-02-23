@@ -1,12 +1,12 @@
 import type { Plugin } from "vite";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
-import { scanPages } from "vite-cloud/pages";
-import type { PageScanResult } from "vite-cloud/pages";
+import { scanPages } from "void/pages";
+import type { PageScanResult } from "void/pages";
 import { generateComponentManifest } from "./pages-manifest";
 
-const RENDERER_ID = "virtual:vite-cloud-pages-renderer";
-const CLIENT_ENTRY_ID = "virtual:vite-cloud-pages-client";
+const RENDERER_ID = "virtual:void-pages-renderer";
+const CLIENT_ENTRY_ID = "virtual:void-pages-client";
 
 interface PagesPluginOptions {
   viewTransitions?: boolean;
@@ -18,7 +18,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
   const root = dirname(pagesDir);
 
   return {
-    name: "vite-cloud-react:pages",
+    name: "void-react:pages",
 
     async buildStart() {
       if (existsSync(pagesDir)) {
@@ -27,7 +27,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
     },
 
     resolveId: {
-      filter: { id: /^virtual:vite-cloud-pages-(renderer|client)$/ },
+      filter: { id: /^virtual:void-pages-(renderer|client)$/ },
       handler(id) {
         return "\0" + id;
       },
@@ -35,7 +35,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
 
     load: {
       // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
-      filter: { id: /^\0virtual:vite-cloud-pages-(renderer|client)$/ },
+      filter: { id: /^\0virtual:void-pages-(renderer|client)$/ },
       handler(id) {
         if (id === "\0" + RENDERER_ID) {
           if (!pageScan)
@@ -52,17 +52,17 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
     config(_, env) {
       if (!existsSync(pagesDir)) return;
 
-      // In dev mode, exclude @vite-cloud/react from dep optimization so the
+      // In dev mode, exclude @voidcloud/react from dep optimization so the
       // virtual module and user components share the same React context objects.
-      // Without this, Vite pre-bundles @vite-cloud/react, creating separate
+      // Without this, Vite pre-bundles @voidcloud/react, creating separate
       // context instances that break useContext (React contexts use object identity).
       if (env.command === "serve") {
         isDev = true;
         return {
           optimizeDeps: {
-            // Exclude @vite-cloud/react so the virtual module and user
+            // Exclude @voidcloud/react so the virtual module and user
             // components share the same React context objects (identity).
-            exclude: ["@vite-cloud/react"],
+            exclude: ["@voidcloud/react"],
             // Pre-include React entries that are discovered late via dynamic
             // imports during SPA navigation, avoiding a full-page reload
             // from Vite's dep optimizer.
@@ -102,7 +102,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string, isDev: b
   return `
 import React from "react";
 import { renderToString } from "react-dom/server";
-import { SharedContext, ErrorsContext, RouterContext } from "@vite-cloud/react";
+import { SharedContext, ErrorsContext, RouterContext } from "@voidcloud/react";
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -164,7 +164,7 @@ function generateClientEntry(
 import React, { useSyncExternalStore } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { SharedContext, ErrorsContext, RouterContext } from "@vite-cloud/react";
+import { SharedContext, ErrorsContext, RouterContext } from "@voidcloud/react";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 
@@ -208,7 +208,7 @@ async function resolveLayouts(componentId) {
 export const router = {
   async visit(url, options = {}) {
     const method = (options.method || "GET").toUpperCase();
-    const headers = { "X-ViteCloudPages": "true", "Accept": "application/json" };
+    const headers = { "X-VoidPages": "true", "Accept": "application/json" };
     const fetchOptions = { method, headers };
 
     if (options.data && method !== "GET") {

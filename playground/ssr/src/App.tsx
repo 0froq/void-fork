@@ -11,7 +11,7 @@ export default function App({ url, visitCount, blogContent }: AppProps) {
 
   return (
     <main>
-      <h1>Vite Cloud SSR Playground</h1>
+      <h1>Void SSR Playground</h1>
       <p>Rendered URL: {url}</p>
       <p>KV visit count: {visitCount}</p>
       {blogContent ? (

@@ -4,18 +4,18 @@ outline: deep
 
 # Authentication
 
-Vite Cloud includes built-in authentication with cookie-based sessions, email/password login, and OAuth providers. Auth is auto-detected from your code — when you import `auth` from `vite-cloud/client` or `requireAuth` from `vite-cloud/auth`, auth routes and session middleware are generated automatically.
+Void includes built-in authentication with cookie-based sessions, email/password login, and OAuth providers. Auth is auto-detected from your code — when you import `auth` from `void/client` or `requireAuth` from `void/auth`, auth routes and session middleware are generated automatically.
 
 ## Auto-Detection
 
-Auth is enabled automatically when Vite Cloud detects:
+Auth is enabled automatically when Void detects:
 
-1. **Import detection**: Importing `auth` from `vite-cloud/client` or anything from `vite-cloud/auth` enables email auth
+1. **Import detection**: Importing `auth` from `void/client` or anything from `void/auth` enables email auth
 2. **OAuth from env vars**: Setting `GITHUB_OAUTH_ID` or `GOOGLE_OAUTH_ID` in `.env.local` adds the corresponding OAuth provider
 
-No configuration in `vite-cloud.json` is needed. Just use the auth APIs and set up your OAuth credentials — everything else is handled for you.
+No configuration in `void.json` is needed. Just use the auth APIs and set up your OAuth credentials — everything else is handled for you.
 
-You can also [configure auth explicitly](#explicit-configuration) in `vite-cloud.json` to override auto-detection.
+You can also [configure auth explicitly](#explicit-configuration) in `void.json` to override auto-detection.
 
 ## Auth Routes
 
@@ -32,10 +32,10 @@ The following routes are generated based on your enabled providers:
 
 ### Email/password
 
-Use the `auth` helpers from `vite-cloud/client`:
+Use the `auth` helpers from `void/client`:
 
 ```ts
-import { auth } from "vite-cloud/client";
+import { auth } from "void/client";
 
 // Register a new user
 const user = await auth.register({
@@ -51,7 +51,7 @@ const user = await auth.login({
 });
 ```
 
-Both methods set a `__vc_session` cookie on success and return the `AuthUser` object. They throw an `AuthError` on failure (wrong credentials, duplicate email, etc.).
+Both methods set a `__void_session` cookie on success and return the `AuthUser` object. They throw an `AuthError` on failure (wrong credentials, duplicate email, etc.).
 
 ### OAuth
 
@@ -75,16 +75,16 @@ GOOGLE_OAUTH_ID=your-google-client-id
 GOOGLE_OAUTH_SECRET=your-google-client-secret
 ```
 
-For production, set these as secrets via `vcc secret put` or `vcc secret sync .env.local`.
+For production, set these as secrets via `void secret put` or `void secret sync .env.local`.
 
 #### OAuth callback URLs
 
 The OAuth callback URL is the same as the login URL. Configure these in your OAuth app settings:
 
-| Provider | Dev callback URL                          | Production callback URL                            |
-| -------- | ----------------------------------------- | -------------------------------------------------- |
-| GitHub   | `http://localhost:5173/auth/login/github` | `https://your-app.vitecloud.app/auth/login/github` |
-| Google   | `http://localhost:5173/auth/login/google` | `https://your-app.vitecloud.app/auth/login/google` |
+| Provider | Dev callback URL                          | Production callback URL                       |
+| -------- | ----------------------------------------- | --------------------------------------------- |
+| GitHub   | `http://localhost:5173/auth/login/github` | `https://your-app.void.app/auth/login/github` |
+| Google   | `http://localhost:5173/auth/login/google` | `https://your-app.void.app/auth/login/google` |
 
 ## Protecting Routes
 
@@ -92,8 +92,8 @@ Use `requireAuth()` to protect a route. It returns the authenticated user or thr
 
 ```ts
 // routes/api/profile.ts
-import { defineHandler } from "vite-cloud";
-import { requireAuth } from "vite-cloud/auth";
+import { defineHandler } from "void";
+import { requireAuth } from "void/auth";
 
 export const GET = defineHandler((c) => {
   const user = requireAuth(c);
@@ -126,10 +126,10 @@ interface AuthUser {
 
 ## Client Helpers
 
-`vite-cloud/client` exports an `auth` object with helpers for all auth operations:
+`void/client` exports an `auth` object with helpers for all auth operations:
 
 ```ts
-import { auth, AuthError } from "vite-cloud/client";
+import { auth, AuthError } from "void/client";
 
 const user = await auth.register({ email, password, name }); // AuthUser
 const user = await auth.login({ email, password }); // AuthUser
@@ -152,7 +152,7 @@ try {
 
 ## Sessions
 
-Sessions are stored in a KV namespace (`AUTH_KV`) with a 7-day TTL. The session ID is stored in an `HttpOnly`, `SameSite=Lax` cookie (`__vc_session`).
+Sessions are stored in a KV namespace (`AUTH_KV`) with a 7-day TTL. The session ID is stored in an `HttpOnly`, `SameSite=Lax` cookie (`__void_session`).
 
 To sign out:
 
@@ -164,7 +164,7 @@ This deletes the session from KV and clears the cookie.
 
 ## Explicit Configuration
 
-You can configure auth explicitly in `vite-cloud.json` to override auto-detection:
+You can configure auth explicitly in `void.json` to override auto-detection:
 
 ```json
 {

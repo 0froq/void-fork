@@ -1,4 +1,4 @@
 node_modules/
 dist/
-.vite-cloud/
+.void/
 src/routeTree.gen.ts

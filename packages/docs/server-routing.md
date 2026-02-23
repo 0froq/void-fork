@@ -4,7 +4,7 @@ outline: deep
 
 # Server Routing
 
-Full-stack Vite Cloud apps uses file-based routing powered by [Hono](https://hono.dev). Drop files in `routes/` and they become endpoints. Add global middleware in `middleware/`.
+Full-stack Void apps uses file-based routing powered by [Hono](https://hono.dev). Drop files in `routes/` and they become endpoints. Add global middleware in `middleware/`.
 
 ## Route Files
 
@@ -26,7 +26,7 @@ Each file exports named HTTP method constants to handle specific methods:
 
 ```ts
 // routes/api/hello.ts  →  GET /api/hello
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const GET = defineHandler((c) => {
   return { message: "Hello!", timestamp: Date.now() };
@@ -37,7 +37,7 @@ A file can export multiple methods:
 
 ```ts
 // routes/api/users/index.ts  →  GET + POST /api/users
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const GET = defineHandler(async (c) => {
   const { results } = await c.env.DB.prepare("SELECT * FROM users").all();
@@ -56,7 +56,7 @@ export const POST = defineHandler(async (c) => {
 `defineHandler` wraps a route handler function:
 
 ```ts
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const GET = defineHandler((c) => {
   return { data: "hello" };
@@ -79,7 +79,7 @@ Return values are automatically converted:
 ```ts
 // routes/api/users/index.ts
 import * as v from "valibot";
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const POST = defineHandler.withValidator({
   body: v.object({
@@ -100,7 +100,7 @@ You can validate multiple slots at once:
 ```ts
 // routes/api/users/[id].ts
 import { z } from "zod";
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const PUT = defineHandler.withValidator({
   params: z.object({ id: z.string() }),
@@ -127,7 +127,7 @@ When validation fails, a `400` response is returned with structured error detail
 }
 ```
 
-No extra dependencies are required — Vite Cloud inlines the Standard Schema types. You only need your chosen schema library.
+No extra dependencies are required — Void inlines the Standard Schema types. You only need your chosen schema library.
 
 Validator schemas also power the [typed fetch client](./typed-fetch.md) — `body`, `query`, and `params` types are enforced at the call site.
 
@@ -146,7 +146,7 @@ Place global middleware in `middleware/`. Use numeric prefixes for ordering:
 - `middleware/02.auth.ts`
 
 ```ts
-import { defineMiddleware } from "vite-cloud";
+import { defineMiddleware } from "void";
 
 export default defineMiddleware(async (c, next) => {
   console.log(c.req.method, c.req.path);
@@ -160,9 +160,9 @@ Middleware can set typed context variables using `c.set()`. Augment the `CloudCo
 
 ```ts
 // middleware/01.request-id.ts
-import { defineMiddleware } from "vite-cloud";
+import { defineMiddleware } from "void";
 
-declare module "vite-cloud" {
+declare module "void" {
   interface CloudContextVariables {
     requestId: string;
   }
@@ -188,7 +188,7 @@ Middleware runs in order. Each can short-circuit (return a response without call
 
 ```ts
 // routes/api/admin/stats.ts
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 import { bearerAuth } from "hono/bearer-auth";
 
 const requireAdmin = async (c, next) => {
@@ -204,4 +204,4 @@ export const GET = defineHandler(bearerAuth({ token: "secret" }), requireAdmin, 
 
 Up to 5 middleware can be passed before the handler, with full type inference for each position.
 
-Since Vite Cloud runs on Hono, you can use any `hono/*` built-in middleware, response helpers, and third-party packages directly. See [Hono](./hono.md) for details.
+Since Void runs on Hono, you can use any `hono/*` built-in middleware, response helpers, and third-party packages directly. See [Hono](./hono.md) for details.

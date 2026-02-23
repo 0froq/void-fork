@@ -1,4 +1,4 @@
-import { defineScheduled } from "vite-cloud";
+import { defineScheduled } from "void";
 
 export const cron = "0 * * * *";
 

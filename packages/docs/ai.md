@@ -4,10 +4,10 @@ outline: deep
 
 # AI
 
-Vite Cloud provides a typed AI client powered by [Workers AI](https://developers.cloudflare.com/workers-ai/). Import `ai` from `vite-cloud/ai` and run inference models directly from your route handlers — all usage is metered via Vite Cloud with no Cloudflare account or API keys required.
+Void provides a typed AI client powered by [Workers AI](https://developers.cloudflare.com/workers-ai/). Import `ai` from `void/ai` and run inference models directly from your route handlers — all usage is metered via Void with no Cloudflare account or API keys required.
 
 ```ts
-import { ai } from "vite-cloud/ai";
+import { ai } from "void/ai";
 ```
 
 ## Basic Usage
@@ -15,8 +15,8 @@ import { ai } from "vite-cloud/ai";
 Call `ai.run()` with a model name and inputs. Model names and input types are fully typed from `@cloudflare/workers-types`.
 
 ```ts
-import { defineHandler } from "vite-cloud";
-import { ai } from "vite-cloud/ai";
+import { defineHandler } from "void";
+import { ai } from "void/ai";
 
 export const POST = defineHandler(async (c) => {
   const { prompt } = await c.req.json();
@@ -36,8 +36,8 @@ You can use any model available on [Workers AI](https://developers.cloudflare.co
 Use `ai.stream()` to get a streaming response with SSE headers — ready to return directly from a route handler:
 
 ```ts
-import { defineHandler } from "vite-cloud";
-import { ai } from "vite-cloud/ai";
+import { defineHandler } from "void";
+import { ai } from "void/ai";
 
 export const POST = defineHandler(async (c) => {
   const { prompt } = await c.req.json();
@@ -71,21 +71,21 @@ const result = await ai.toMarkdown([{ name: "document.pdf", blob: pdfBytes }]);
 
 ## Local Development
 
-AI requires Vite Cloud credentials for local development. Run `vcc login` and `vcc link` (or follow the interactive setup during `vite dev`) to connect your project.
+AI requires Void credentials for local development. Run `void login` and `void link` (or follow the interactive setup during `vite dev`) to connect your project.
 
-Once linked, credentials are injected automatically as worker bindings — no manual configuration needed. All inference traffic routes through the Vite Cloud AI proxy over HTTPS, so usage is tracked and metered the same way as in production.
+Once linked, credentials are injected automatically as worker bindings — no manual configuration needed. All inference traffic routes through the Void AI proxy over HTTPS, so usage is tracked and metered the same way as in production.
 
 ## How It Works
 
-The AI binding is auto-detected when your code imports `vite-cloud/ai`. No configuration is needed.
+The AI binding is auto-detected when your code imports `void/ai`. No configuration is needed.
 
 At runtime, the `ai` client resolves its backend in priority order:
 
 1. **Service binding** (production) — direct service binding to the AI proxy worker, zero-latency within Cloudflare's network
-2. **HTTPS proxy** (local dev) — authenticated requests to the Vite Cloud AI proxy using your login credentials
+2. **HTTPS proxy** (local dev) — authenticated requests to the Void AI proxy using your login credentials
 3. **Direct AI binding** (self-hosted) — falls back to `env.AI` if you're running with your own Cloudflare account and `wrangler.json`
 
-All inference is routed through [AI Gateway](https://developers.cloudflare.com/ai-gateway/) for tamper-proof token counting and usage tracking. This is what powers per-project metering on the Vite Cloud dashboard.
+All inference is routed through [AI Gateway](https://developers.cloudflare.com/ai-gateway/) for tamper-proof token counting and usage tracking. This is what powers per-project metering on the Void dashboard.
 
 ## Usage Limits
 

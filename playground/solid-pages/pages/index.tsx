@@ -1,4 +1,4 @@
-import { Link } from "@vite-cloud/solid";
+import { Link } from "@voidcloud/solid";
 import type { Props } from "./index.server";
 
 export default function HomePage(props: Props) {

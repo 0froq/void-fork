@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link, useShared } from "@vite-cloud/vue";
+import { Link, useShared } from "@voidcloud/vue";
 
 const shared = useShared();
 </script>

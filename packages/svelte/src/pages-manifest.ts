@@ -1,4 +1,4 @@
-import type { PageScanResult, LayoutDefinition } from "vite-cloud/pages";
+import type { PageScanResult, LayoutDefinition } from "void/pages";
 
 /**
  * Generates the component import map and layout tree as code strings.

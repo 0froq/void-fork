@@ -14,7 +14,7 @@ export default {
     app.provide(themeContextKey, {
       logoDark,
       logoLight,
-      logoAlt: "Vite Cloud",
+      logoAlt: "Void",
       footerBg,
       monoIcon,
     });

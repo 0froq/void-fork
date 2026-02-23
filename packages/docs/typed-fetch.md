@@ -4,12 +4,12 @@ outline: deep
 
 # Typed Fetch
 
-Vite Cloud ships a typed `fetch` client that knows every route in your app. Import it from `vite-cloud/client` and get autocomplete for paths, type-checked request bodies, and fully inferred response types.
+Void ships a typed `fetch` client that knows every route in your app. Import it from `void/client` and get autocomplete for paths, type-checked request bodies, and fully inferred response types.
 
 ## Basic Usage
 
 ```ts
-import { fetch } from "vite-cloud/client";
+import { fetch } from "void/client";
 
 // GET — return type inferred from your handler
 const users = await fetch("/api/users");
@@ -61,7 +61,7 @@ const data = await fetch("/api/search", {
 Non-2xx responses throw a `FetchError`:
 
 ```ts
-import { fetch, FetchError } from "vite-cloud/client";
+import { fetch, FetchError } from "void/client";
 
 try {
   await fetch("/api/users/:id", { params: { id: "999" } });
@@ -90,12 +90,12 @@ try {
 
 ## Isomorphic Fetch During SSR
 
-`fetch()` from `vite-cloud/client` works seamlessly during server-side rendering and inside route handlers — no HTTP round-trip is needed. In the worker environment, `fetch()` calls your Hono app directly via `app.fetch()`, skipping the network entirely.
+`fetch()` from `void/client` works seamlessly during server-side rendering and inside route handlers — no HTTP round-trip is needed. In the worker environment, `fetch()` calls your Hono app directly via `app.fetch()`, skipping the network entirely.
 
 ```ts
 // src/main.ssr.tsx
-import { fetch } from "vite-cloud/client";
-import { defineRender } from "vite-cloud";
+import { fetch } from "void/client";
+import { defineRender } from "void";
 
 export default defineRender(async (c, assetTags) => {
   // This calls your API route directly — no HTTP request
@@ -110,11 +110,11 @@ export default defineRender(async (c, assetTags) => {
 
 **Automatic header forwarding**: `cookie` and `authorization` headers from the incoming request are automatically forwarded to subrequests, so authentication context is preserved. If you pass these headers explicitly, your values take precedence.
 
-**How it works**: In the browser, `fetch()` uses the normal HTTP client. In the worker, Vite Cloud redirects the import to a virtual module that calls `app.fetch()` directly using the Hono app instance. AsyncLocalStorage threads the outer request context so headers and `waitUntil()` work correctly.
+**How it works**: In the browser, `fetch()` uses the normal HTTP client. In the worker, Void redirects the import to a virtual module that calls `app.fetch()` directly using the Hono app instance. AsyncLocalStorage threads the outer request context so headers and `waitUntil()` work correctly.
 
 ## Using Your Own ORM
 
-The built-in [database helper](./db.md) covers simple CRUD, but you're not locked into it. Any ORM or query builder that works with D1 works with Vite Cloud — just pass the D1 binding.
+The built-in [database helper](./db.md) covers simple CRUD, but you're not locked into it. Any ORM or query builder that works with D1 works with Void — just pass the D1 binding.
 
 For example, with [Drizzle](https://orm.drizzle.team/docs/get-started/d1-new):
 
@@ -128,7 +128,7 @@ export const db = drizzle(env.DB);
 
 ```ts
 // routes/api/users.ts
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 import { db } from "../../db/drizzle";
 import { users } from "../../db/schema";
 
@@ -139,4 +139,4 @@ export const GET = defineHandler(async (c) => {
 
 The typed fetch client works regardless of how your handler queries the database — it infers the response type from whatever the handler returns. This means Drizzle, Kysely, raw D1 queries, or any other approach all get the same end-to-end type safety on the client side.
 
-Vite Cloud still handles binding inference (it detects `env.DB` usage and provisions D1 automatically), migrations, and deployment. The query layer is the only part you're swapping out.
+Void still handles binding inference (it detects `env.DB` usage and provisions D1 automatically), migrations, and deployment. The query layer is the only part you're swapping out.

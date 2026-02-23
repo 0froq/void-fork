@@ -1,6 +1,6 @@
 # Hello World
 
-Welcome to the Vite Cloud blog. This is a sample post rendered from a markdown file at build time.
+Welcome to the Void blog. This is a sample post rendered from a markdown file at build time.
 
 ## How it works
 

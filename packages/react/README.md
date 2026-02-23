@@ -1,23 +1,23 @@
-# @vite-cloud/react
+# @voidcloud/react
 
-React framework adapter for Vite Cloud Pages mode — Inertia-inspired full-stack DX with SSR.
+React framework adapter for Void Pages mode — Inertia-inspired full-stack DX with SSR.
 
 ## Setup
 
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
-import { viteCloudReact } from "@vite-cloud/react/plugin";
+import voidPlugin from "void";
+import { voidReact } from "@voidcloud/react/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudReact()],
+  plugins: [voidPlugin(), voidReact()],
 });
 ```
 
 ## Plugin
 
-`viteCloudReact(options?)` returns `[@vitejs/plugin-react, pagesPlugin]`.
+`voidReact(options?)` returns `[@vitejs/plugin-react, pagesPlugin]`.
 
 Options:
 
@@ -26,12 +26,12 @@ Options:
 
 The pages plugin generates two virtual modules:
 
-- `virtual:vite-cloud-pages-renderer` — SSR entry using `renderToString()` from `react-dom/server`
-- `virtual:vite-cloud-pages-client` — client hydration entry using `hydrateRoot()` from `react-dom/client`
+- `virtual:void-pages-renderer` — SSR entry using `renderToString()` from `react-dom/server`
+- `virtual:void-pages-client` — client hydration entry using `hydrateRoot()` from `react-dom/client`
 
 ## Runtime
 
-Import from `@vite-cloud/react`:
+Import from `@voidcloud/react`:
 
 - **`Link`** — SPA navigation component. Renders `<a>` for GET, `<button>` otherwise. Intercepts clicks for client-side navigation.
 - **`useForm(url, defaults, options?)`** — Form state management using `useState`. Methods: `post`, `put`, `patch`, `delete`, `reset`, `clearErrors`.
@@ -51,7 +51,7 @@ export default function Home({ title }: { title: string }) {
 
 ```ts
 // pages/index.server.ts
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const loader = defineHandler(() => {
   return { title: "Home" };

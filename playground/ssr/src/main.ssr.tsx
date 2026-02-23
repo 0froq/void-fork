@@ -1,5 +1,5 @@
 import { renderToString } from "react-dom/server";
-import { defineRender } from "vite-cloud";
+import { defineRender } from "void";
 import App from "./App";
 
 async function readBlogPost(slug: string): Promise<string | null> {
@@ -24,7 +24,7 @@ export default defineRender(async (c, assetTags) => {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite Cloud SSR Playground</title>
+    <title>Void SSR Playground</title>
     <script>window.__STATE__=${stateJson}</script>
     ${assetTags.head}
   </head>

@@ -10,7 +10,7 @@ export const Link: Component = defineComponent({
     viewTransition: { type: Boolean, default: undefined },
   },
   setup(props, { slots, attrs }) {
-    const router = inject<any>("__vc_router", null);
+    const router = inject<any>("__void_router", null);
 
     function onClick(e: MouseEvent) {
       if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;

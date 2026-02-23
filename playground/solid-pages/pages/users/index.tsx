@@ -1,4 +1,4 @@
-import { Link, useForm } from "@vite-cloud/solid";
+import { Link, useForm } from "@voidcloud/solid";
 import { For, Show } from "solid-js";
 import type { Props } from "./index.server";
 

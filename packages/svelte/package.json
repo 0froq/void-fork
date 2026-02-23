@@ -1,5 +1,5 @@
 {
-  "name": "@vite-cloud/svelte",
+  "name": "@voidcloud/svelte",
   "version": "0.0.1",
   "files": [
     "dist",
@@ -34,11 +34,11 @@
     "svelte": "^5.53.2",
     "tsdown": "catalog:",
     "vite": "catalog:",
-    "vite-cloud": "workspace:*"
+    "void": "workspace:*"
   },
   "peerDependencies": {
     "svelte": "^5.0.0",
     "vite": "catalog:",
-    "vite-cloud": "workspace:*"
+    "void": "workspace:*"
   }
 }

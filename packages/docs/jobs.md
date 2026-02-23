@@ -4,7 +4,7 @@ outline: deep
 
 # Cron Jobs
 
-Vite Cloud supports cron-triggered jobs from a top-level `crons/` directory.
+Void supports cron-triggered jobs from a top-level `crons/` directory.
 
 ## Job files
 
@@ -19,7 +19,7 @@ Example:
 
 ```ts
 // crons/hourly-heartbeat.ts
-import { defineScheduled } from "vite-cloud";
+import { defineScheduled } from "void";
 
 export const cron = "0 * * * *";
 
@@ -34,7 +34,7 @@ A single job file can export an array of cron expressions:
 
 ```ts
 // crons/cleanup.ts
-import { defineScheduled } from "vite-cloud";
+import { defineScheduled } from "void";
 
 export const cron = ["0 * * * *", "30 * * * *"];
 
@@ -63,4 +63,4 @@ Notes:
 
 ## Deployment behavior
 
-On deploy, Vite Cloud includes all discovered job schedules in the deploy manifest and configures worker cron triggers automatically.
+On deploy, Void includes all discovered job schedules in the deploy manifest and configures worker cron triggers automatically.

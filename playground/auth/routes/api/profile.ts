@@ -1,5 +1,5 @@
-import { defineHandler } from "vite-cloud";
-import { requireAuth } from "vite-cloud/auth";
+import { defineHandler } from "void";
+import { requireAuth } from "void/auth";
 
 export const GET = defineHandler((c) => {
   const user = requireAuth(c);

@@ -1,18 +1,18 @@
 {
-  "name": "@vite-cloud/docs",
+  "name": "@voidcloud/docs",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vitepress dev",
     "build": "vitepress build",
     "preview": "vitepress preview",
-    "deploy": "vcc deploy"
+    "deploy": "void deploy"
   },
   "devDependencies": {
     "@voidzero-dev/vitepress-theme": "^4.5.0",
     "oxc-minify": "^0.114.0",
-    "vite-cloud": "workspace:*",
     "vitepress": "2.0.0-alpha.16",
-    "vitepress-plugin-group-icons": "^1.7.1"
+    "vitepress-plugin-group-icons": "^1.7.1",
+    "void": "workspace:*"
   }
 }

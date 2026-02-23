@@ -18,7 +18,7 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build:cli
+      - run: pnpm build:core
       - run: pnpm deploy:staging:docs
         env:
-          VITE_CLOUD_TOKEN: ${{ secrets.VITE_CLOUD_TOKEN }}
+          VOID_TOKEN: ${{ secrets.VOID_TOKEN }}

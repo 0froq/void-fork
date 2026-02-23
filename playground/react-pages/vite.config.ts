@@ -1,9 +1,9 @@
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
-import { viteCloudReact } from "@vite-cloud/react/plugin";
+import voidPlugin from "void";
+import { voidReact } from "@voidcloud/react/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudReact()],
+  plugins: [voidPlugin(), voidReact()],
   // stabilize dev server start for tests
   optimizeDeps: { include: ["valibot"] },
 });

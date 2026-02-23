@@ -1,0 +1,6 @@
+Void is a fullstack Vite framework and deployment platform for Cloudflare. In an empty directory, set up a new app with:
+
+npm install -D void
+npx void init
+
+Now ask me what I want to build.

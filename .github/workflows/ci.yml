@@ -17,7 +17,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      - run: pnpm -r build
+      - run: pnpm build:all
       - run: pnpm check
 
   test:
@@ -28,7 +28,7 @@ jobs:
           - suite: unit
             pattern: test/unit
           - suite: integration
-            pattern: vite-cloud/test/integration
+            pattern: void/test/integration
           - suite: pages-adapters-react-vue
             pattern: react/test/integration vue/test/integration
           - suite: pages-adapters-svelte-solid
@@ -41,7 +41,7 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -r build
+      - run: pnpm build
 
       - uses: actions/cache@v4
         if: matrix.suite == 'pages-adapters-react-vue' || matrix.suite == 'pages-adapters-svelte-solid'

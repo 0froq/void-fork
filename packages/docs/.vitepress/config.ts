@@ -4,7 +4,7 @@ import { groupIconMdPlugin, groupIconVitePlugin } from "vitepress-plugin-group-i
 
 export default extendConfig(
   defineConfig({
-    title: "Vite Cloud",
+    title: "Void",
     description: "Fullstack Vite plugin for Cloudflare Workers",
     cleanUrls: true,
 

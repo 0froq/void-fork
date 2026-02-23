@@ -1,6 +1,6 @@
 import { useContext } from "solid-js";
 import { SharedContext } from "./context";
-import type { CloudContextVariables } from "vite-cloud";
+import type { CloudContextVariables } from "void";
 
 export function useShared<T = CloudContextVariables["shared"]>(): T {
   const shared = useContext(SharedContext);

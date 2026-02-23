@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Link, useForm } from "@vite-cloud/svelte";
+  import { Link, useForm } from "@voidcloud/svelte";
   import type { Props } from "./index.server";
 
   let { users }: Props = $props();

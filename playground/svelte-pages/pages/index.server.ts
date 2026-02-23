@@ -1,4 +1,4 @@
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export interface Props {
   title: string;

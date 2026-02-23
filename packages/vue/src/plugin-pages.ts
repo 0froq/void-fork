@@ -1,12 +1,12 @@
 import type { Plugin } from "vite";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
-import { scanPages } from "vite-cloud/pages";
-import type { PageScanResult } from "vite-cloud/pages";
+import { scanPages } from "void/pages";
+import type { PageScanResult } from "void/pages";
 import { generateComponentManifest } from "./pages-manifest";
 
-const RENDERER_ID = "virtual:vite-cloud-pages-renderer";
-const CLIENT_ENTRY_ID = "virtual:vite-cloud-pages-client";
+const RENDERER_ID = "virtual:void-pages-renderer";
+const CLIENT_ENTRY_ID = "virtual:void-pages-client";
 
 interface PagesPluginOptions {
   viewTransitions?: boolean;
@@ -17,7 +17,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
   const root = dirname(pagesDir);
 
   return {
-    name: "vite-cloud-vue:pages",
+    name: "void-vue:pages",
 
     async buildStart() {
       if (existsSync(pagesDir)) {
@@ -26,7 +26,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
     },
 
     resolveId: {
-      filter: { id: /^virtual:vite-cloud-pages-(renderer|client)$/ },
+      filter: { id: /^virtual:void-pages-(renderer|client)$/ },
       handler(id) {
         return "\0" + id;
       },
@@ -34,7 +34,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
 
     load: {
       // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
-      filter: { id: /^\0virtual:vite-cloud-pages-(renderer|client)$/ },
+      filter: { id: /^\0virtual:void-pages-(renderer|client)$/ },
       handler(id) {
         if (id === "\0" + RENDERER_ID) {
           if (!pageScan)
@@ -94,9 +94,9 @@ export async function renderPage(pageObj, assetTags) {
 
   const app = createSSRApp({
     setup() {
-      provide("__vc_shared", reactive(pageObj.shared || {}));
-      provide("__vc_errors", reactive(pageObj.errors || {}));
-      provide("__vc_router", null);
+      provide("__void_shared", reactive(pageObj.shared || {}));
+      provide("__void_errors", reactive(pageObj.errors || {}));
+      provide("__void_router", null);
       return () => {
         let vnode = h(PageComponent, pageObj.props);
         for (let i = layoutComponents.length - 1; i >= 0; i--) {
@@ -174,7 +174,7 @@ async function updatePage(pageData) {
 export const router = {
   async visit(url, options = {}) {
     const method = (options.method || "GET").toUpperCase();
-    const headers = { "X-ViteCloudPages": "true", "Accept": "application/json" };
+    const headers = { "X-VoidPages": "true", "Accept": "application/json" };
     const fetchOptions = { method, headers };
 
     if (options.data && method !== "GET") {
@@ -247,9 +247,9 @@ await updatePage(initialPageData);
 
 const app = createSSRApp({
   setup() {
-    provide("__vc_shared", shared);
-    provide("__vc_errors", errors);
-    provide("__vc_router", router);
+    provide("__void_shared", shared);
+    provide("__void_errors", errors);
+    provide("__void_router", router);
 
     return () => {
       if (!currentComponent.value) return null;

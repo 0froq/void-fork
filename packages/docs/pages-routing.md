@@ -40,7 +40,7 @@ onMounted(() => {
 
 # Pages Routing
 
-Pages routing provides the server-rendered, components-as-pages, collocated-data-loading routing system that is seen in many existing JavaScript meta frameworks. However, pages routing in Vite Cloud is different from most in that it is **rendering framework agnostic.** It is built on patterns inspired by [Inertia.js](https://inertiajs.com/): The server returns the data, and the component receives it as props. The client-side routing logic is minimal, allowing Vite Cloud to support any rendering framework Vite can support. Today, React, Vue, Svelte, and Solid have first-party adapters.
+Pages routing provides the server-rendered, components-as-pages, collocated-data-loading routing system that is seen in many existing JavaScript meta frameworks. However, pages routing in Void is different from most in that it is **rendering framework agnostic.** It is built on patterns inspired by [Inertia.js](https://inertiajs.com/): The server returns the data, and the component receives it as props. The client-side routing logic is minimal, allowing Void to support any rendering framework Vite can support. Today, React, Vue, Svelte, and Solid have first-party adapters.
 
 Pages mode activates when a `pages/` directory exists. It coexists with `routes/` — use `pages/` for UI pages and `routes/` for APIs. Components in `pages/` will be server-rendered, which means **they will run in both Cloudflare Workers and browsers**.
 
@@ -48,24 +48,24 @@ Pages mode is also entirely optional - you can use any client-side router to bui
 
 ## Setup
 
-Install a framework adapter alongside `vite-cloud`:
+Install a framework adapter alongside `void`:
 
 ::: code-group
 
 ```sh [React]
-npm install @vite-cloud/react
+npm install @voidcloud/react
 ```
 
 ```sh [Vue]
-npm install @vite-cloud/vue
+npm install @voidcloud/vue
 ```
 
 ```sh [Svelte]
-npm install @vite-cloud/svelte
+npm install @voidcloud/svelte
 ```
 
 ```sh [Solid]
-npm install @vite-cloud/solid
+npm install @voidcloud/solid
 ```
 
 :::
@@ -77,44 +77,44 @@ Add both plugins to your Vite config:
 ```ts [React]
 // vite.config.ts
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
-import { viteCloudReact } from "@vite-cloud/react/plugin";
+import voidPlugin from "void";
+import { voidReact } from "@voidcloud/react/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudReact()],
+  plugins: [voidPlugin(), voidReact()],
 });
 ```
 
 ```ts [Vue]
 // vite.config.ts
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
-import { viteCloudVue } from "@vite-cloud/vue/plugin";
+import voidPlugin from "void";
+import { voidVue } from "@voidcloud/vue/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudVue()],
+  plugins: [voidPlugin(), voidVue()],
 });
 ```
 
 ```ts [Svelte]
 // vite.config.ts
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
-import { viteCloudSvelte } from "@vite-cloud/svelte/plugin";
+import voidPlugin from "void";
+import { voidSvelte } from "@voidcloud/svelte/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudSvelte()],
+  plugins: [voidPlugin(), voidSvelte()],
 });
 ```
 
 ```ts [Solid]
 // vite.config.ts
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
-import { viteCloudSolid } from "@vite-cloud/solid/plugin";
+import voidPlugin from "void";
+import { voidSolid } from "@voidcloud/solid/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudSolid()],
+  plugins: [voidPlugin(), voidSolid()],
 });
 ```
 
@@ -122,7 +122,7 @@ export default defineConfig({
 
 That's it — no SSR entry, no client entry, no hydration boilerplate. The adapter generates everything.
 
-Each adapter plugin includes the framework's Vite plugin (`@vitejs/plugin-react`, `@vitejs/plugin-vue`, `@sveltejs/vite-plugin-svelte`, `vite-plugin-solid`) so you don't need to install or configure it separately. Pass framework plugin options via `viteCloudReact({ react: { ... } })`, `viteCloudVue({ vue: { ... } })`, `viteCloudSvelte({ svelte: { ... } })`, or `viteCloudSolid({ solid: { ... } })` if needed.
+Each adapter plugin includes the framework's Vite plugin (`@vitejs/plugin-react`, `@vitejs/plugin-vue`, `@sveltejs/vite-plugin-svelte`, `vite-plugin-solid`) so you don't need to install or configure it separately. Pass framework plugin options via `voidReact({ react: { ... } })`, `voidVue({ vue: { ... } })`, `voidSvelte({ svelte: { ... } })`, or `voidSolid({ solid: { ... } })` if needed.
 
 ## How Navigation Works
 
@@ -141,7 +141,7 @@ Use the `Link` component for SPA navigation between pages. It renders an `<a>` t
 ::: code-group
 
 ```tsx [React]
-import { Link } from "@vite-cloud/react";
+import { Link } from "@voidcloud/react";
 
 <Link href="/users">Users</Link>
 <Link href={`/users/${id}`}>View</Link>
@@ -149,7 +149,7 @@ import { Link } from "@vite-cloud/react";
 
 ```vue [Vue]
 <script setup lang="ts">
-import { Link } from "@vite-cloud/vue";
+import { Link } from "@voidcloud/vue";
 </script>
 
 <template>
@@ -160,7 +160,7 @@ import { Link } from "@vite-cloud/vue";
 
 ```svelte [Svelte]
 <script>
-  import { Link } from "@vite-cloud/svelte";
+  import { Link } from "@voidcloud/svelte";
 </script>
 
 <Link href="/users">Users</Link>
@@ -168,7 +168,7 @@ import { Link } from "@vite-cloud/vue";
 ```
 
 ```tsx [Solid]
-import { Link } from "@vite-cloud/solid";
+import { Link } from "@voidcloud/solid";
 
 <Link href="/users">Users</Link>
 <Link href={`/users/${id}`}>View</Link>
@@ -179,7 +179,7 @@ import { Link } from "@vite-cloud/solid";
 For programmatic navigation, use `useRouter()`:
 
 ```ts
-import { useRouter } from "@vite-cloud/vue"; // or "@vite-cloud/react", "@vite-cloud/svelte", "@vite-cloud/solid"
+import { useRouter } from "@voidcloud/vue"; // or "@voidcloud/react", "@voidcloud/svelte", "@voidcloud/solid"
 
 const router = useRouter();
 router.visit("/users");
@@ -247,8 +247,8 @@ Every page can have a companion `.server.ts` file that exports a `loader` and/or
 
 ```ts
 // pages/users/index.server.ts
-import { defineHandler } from "vite-cloud";
-import { db } from "vite-cloud/db";
+import { defineHandler } from "void";
+import { db } from "void/db";
 
 export interface Props {
   users: Array<{ id: number; name: string; email: string }>;
@@ -358,8 +358,8 @@ Vue pages can optionally colocate server logic directly in the SFC using a <code
 ```vue
 <!-- pages/users/index.vue -->
 <script server lang="ts">
-import { defineHandler } from "vite-cloud";
-import { db } from "vite-cloud/db";
+import { defineHandler } from "void";
+import { db } from "void/db";
 
 export interface Props {
   users: Array<{ id: number; name: string; email: string }>;
@@ -438,7 +438,7 @@ pages/
 
 ```tsx [React]
 // pages/layout.tsx
-import { useShared, Link } from "@vite-cloud/react";
+import { useShared, Link } from "@voidcloud/react";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { auth } = useShared();
@@ -458,7 +458,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 ```vue [Vue]
 <!-- pages/layout.vue -->
 <script setup lang="ts">
-import { useShared, Link } from "@vite-cloud/vue";
+import { useShared, Link } from "@voidcloud/vue";
 const { auth } = useShared();
 </script>
 
@@ -477,7 +477,7 @@ const { auth } = useShared();
 ```svelte [Svelte]
 <!-- pages/layout.svelte -->
 <script>
-  import { useShared, Link } from "@vite-cloud/svelte";
+  import { useShared, Link } from "@voidcloud/svelte";
   let { children } = $props();
   const { auth } = useShared();
 </script>
@@ -494,7 +494,7 @@ const { auth } = useShared();
 
 ```tsx [Solid]
 // pages/layout.tsx
-import { useShared, Link } from "@vite-cloud/solid";
+import { useShared, Link } from "@voidcloud/solid";
 import type { JSX } from "solid-js";
 
 export default function Layout(props: { children: JSX.Element }) {
@@ -522,9 +522,9 @@ Middleware can inject data available on every page via `c.set("shared", {...})`.
 
 ```ts
 // middleware/01.auth.ts
-import { defineMiddleware } from "vite-cloud";
+import { defineMiddleware } from "void";
 
-declare module "vite-cloud" {
+declare module "void" {
   interface CloudContextVariables {
     shared: { auth: { user: { name: string } | null } };
   }
@@ -542,7 +542,7 @@ Access it on the client with `useShared()` — the return type is inferred from 
 ::: code-group
 
 ```tsx [React]
-import { useShared } from "@vite-cloud/react";
+import { useShared } from "@voidcloud/react";
 
 export default function Page() {
   const { auth } = useShared(); // { auth: { user: { name: string } | null } }
@@ -552,20 +552,20 @@ export default function Page() {
 
 ```vue [Vue]
 <script setup lang="ts">
-import { useShared } from "@vite-cloud/vue";
+import { useShared } from "@voidcloud/vue";
 const { auth } = useShared(); // { auth: { user: { name: string } | null } }
 </script>
 ```
 
 ```svelte [Svelte]
 <script>
-  import { useShared } from "@vite-cloud/svelte";
+  import { useShared } from "@voidcloud/svelte";
   const { auth } = useShared(); // { auth: { user: { name: string } | null } }
 </script>
 ```
 
 ```tsx [Solid]
-import { useShared } from "@vite-cloud/solid";
+import { useShared } from "@voidcloud/solid";
 
 export default function Page() {
   const shared = useShared(); // { auth: { user: { name: string } | null } }
@@ -585,7 +585,7 @@ Given an action with a validator:
 
 ```ts
 // pages/users/create.server.ts
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 import * as v from "valibot";
 
 export const action = defineHandler.withValidator({
@@ -604,8 +604,8 @@ First, define the action in your server handler:
 
 ```ts
 // pages/users/create.server.ts
-import { defineHandler } from "vite-cloud";
-import { db } from "vite-cloud/db";
+import { defineHandler } from "void";
+import { db } from "void/db";
 import * as v from "valibot";
 
 const createUserSchema = v.object({
@@ -627,7 +627,7 @@ Then, use `useForm` in the page component to submit to this action:
 
 ```tsx [React]
 // pages/users/create.tsx
-import { useForm } from "@vite-cloud/react";
+import { useForm } from "@voidcloud/react";
 
 export default function CreateUser() {
   // "/users/create" autocompletes; { name, email } is typed from the action's validator
@@ -655,7 +655,7 @@ export default function CreateUser() {
 ```vue [Vue]
 <!-- pages/users/create.vue -->
 <script setup lang="ts">
-import { useForm } from "@vite-cloud/vue";
+import { useForm } from "@voidcloud/vue";
 
 // "/users/create" autocompletes; { name, email } is typed from the action's validator
 const form = useForm("/users/create", { name: "", email: "" });
@@ -677,7 +677,7 @@ const form = useForm("/users/create", { name: "", email: "" });
 ```svelte [Svelte]
 <!-- pages/users/create.svelte -->
 <script>
-  import { useForm } from "@vite-cloud/svelte";
+  import { useForm } from "@voidcloud/svelte";
 
   // "/users/create" autocompletes; { name, email } is typed from the action's validator
   const form = useForm("/users/create", { name: "", email: "" });
@@ -696,7 +696,7 @@ const form = useForm("/users/create", { name: "", email: "" });
 
 ```tsx [Solid]
 // pages/users/create.tsx
-import { useForm } from "@vite-cloud/solid";
+import { useForm } from "@voidcloud/solid";
 
 export default function CreateUser() {
   // "/users/create" autocompletes; { name, email } is typed from the action's validator
@@ -752,7 +752,7 @@ When an action throws a `ValidationError` (or validation fails via `withValidato
 Actions can throw `ValidationError` for custom validation logic:
 
 ```ts
-import { defineHandler, ValidationError } from "vite-cloud";
+import { defineHandler, ValidationError } from "void";
 
 export const action = defineHandler(async (c) => {
   const body = await c.req.json();
@@ -778,28 +778,28 @@ Pass `viewTransitions: true` to the adapter plugin:
 ```ts [React]
 // vite.config.ts
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudReact({ viewTransitions: true })],
+  plugins: [voidPlugin(), voidReact({ viewTransitions: true })],
 });
 ```
 
 ```ts [Vue]
 // vite.config.ts
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudVue({ viewTransitions: true })],
+  plugins: [voidPlugin(), voidVue({ viewTransitions: true })],
 });
 ```
 
 ```ts [Svelte]
 // vite.config.ts
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudSvelte({ viewTransitions: true })],
+  plugins: [voidPlugin(), voidSvelte({ viewTransitions: true })],
 });
 ```
 
 ```ts [Solid]
 // vite.config.ts
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudSolid({ viewTransitions: true })],
+  plugins: [voidPlugin(), voidSolid({ viewTransitions: true })],
 });
 ```
 

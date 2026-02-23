@@ -1,9 +1,9 @@
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
-import { viteCloudSvelte } from "@vite-cloud/svelte/plugin";
+import voidPlugin from "void";
+import { voidSvelte } from "@voidcloud/svelte/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudSvelte()],
+  plugins: [voidPlugin(), voidSvelte()],
   // stabilize dev server start for tests
   optimizeDeps: { include: ["valibot"] },
 });

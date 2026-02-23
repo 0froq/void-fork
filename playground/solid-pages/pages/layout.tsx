@@ -1,4 +1,4 @@
-import { Link, useShared } from "@vite-cloud/solid";
+import { Link, useShared } from "@voidcloud/solid";
 import type { JSX } from "solid-js";
 
 export default function Layout(props: { children: JSX.Element }) {

@@ -1,5 +1,5 @@
 import { getContext } from "svelte";
-import type { PageActionMap } from "vite-cloud/routes";
+import type { PageActionMap } from "void/routes";
 
 type HasParams<U extends keyof PageActionMap> = PageActionMap[U] extends { params: infer P }
   ? P extends Record<string, string>
@@ -64,7 +64,7 @@ export function useForm(
     }
   }
 
-  const router = getContext<any>("__vc_router");
+  const router = getContext<any>("__void_router");
 
   let data = $state({ ...defaults });
   let errors: Record<string, string> = $state({});

@@ -94,7 +94,7 @@ export const loader = () => ({ count: 42 });
   it("preserves type declarations for <script setup>", () => {
     const p = createPlugin();
     const code = `<script server lang="ts">
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 interface Props {
   title: string;
@@ -131,7 +131,7 @@ defineProps<Props>();
   it("preserves multi-line types with brace tracking", () => {
     const p = createPlugin();
     const code = `<script server lang="ts">
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export interface User {
   id: number;
@@ -160,7 +160,7 @@ export const loader = defineHandler(() => {
     const p = createPlugin();
     const code = `<script server lang="ts">
 import type { User } from "../types";
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const loader = defineHandler(() => {
   return { users: [] as User[] };
@@ -178,7 +178,7 @@ export const loader = defineHandler(() => {
   it("falls back to newlines when no type declarations exist", () => {
     const p = createPlugin();
     const code = `<script server>
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const loader = defineHandler(() => {
   return { count: 1 };
@@ -198,7 +198,7 @@ export const loader = defineHandler(() => {
 describe("extractTypeDeclarations", () => {
   it("returns null when no types exist", () => {
     const content = `
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const loader = defineHandler(() => {
   return { count: 1 };
@@ -208,7 +208,7 @@ export const loader = defineHandler(() => {
 
   it("keeps interface and blanks runtime", () => {
     const content = `
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 interface Props {
   title: string;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Link } from "@vite-cloud/svelte";
+  import { Link } from "@voidcloud/svelte";
   import type { Props } from "./[id].server";
 
   let { user }: Props = $props();

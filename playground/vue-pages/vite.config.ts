@@ -1,9 +1,9 @@
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
-import { viteCloudVue } from "@vite-cloud/vue/plugin";
+import voidPlugin from "void";
+import { voidVue } from "@voidcloud/vue/plugin";
 
 export default defineConfig({
-  plugins: [viteCloud(), viteCloudVue()],
+  plugins: [voidPlugin(), voidVue()],
   // stabilize dev server start for tests
   optimizeDeps: { include: ["valibot"] },
 });

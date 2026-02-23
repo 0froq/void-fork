@@ -4,7 +4,7 @@ outline: deep
 
 # Custom SSR
 
-Vite Cloud supports framework-agnostic SSR via explicit server and client entries. This is for advanced use cases where you want full control over rendering and hydration.
+Void supports framework-agnostic SSR via explicit server and client entries. This is for advanced use cases where you want full control over rendering and hydration.
 
 ::: tip
 For most apps, [Pages Routing](./pages-routing.md) handles SSR automatically — no entry files or hydration code needed.
@@ -51,7 +51,7 @@ Example:
 
 ```tsx
 import { renderToString } from "react-dom/server";
-import { defineRender } from "vite-cloud";
+import { defineRender } from "void";
 import App from "./App";
 
 export default defineRender(async (c, assetTags) => {
@@ -82,10 +82,10 @@ hydrateRoot(document.getElementById("root")!, <App url={window.location.pathname
 
 ## Client Asset Injection
 
-Vite Cloud no longer mutates your rendered HTML automatically.
+Void no longer mutates your rendered HTML automatically.
 You decide whether and where to inject client asset tags.
 
-The `assetTags` values are computed by Vite Cloud:
+The `assetTags` values are computed by Void:
 
 - In production: from `dist/client/.vite/manifest.json` (entry script, CSS, modulepreload)
 - In dev: includes Vite HMR client and React refresh preamble (when React plugin is active), plus the client entry script

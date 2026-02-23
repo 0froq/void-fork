@@ -5,12 +5,5 @@ export default defineConfig({
   format: "esm",
   dts: true,
   clean: true,
-  external: [
-    "solid-js",
-    "solid-js/web",
-    "solid-js/store",
-    "vite",
-    "vite-cloud",
-    "vite-plugin-solid",
-  ],
+  external: ["solid-js", "solid-js/web", "solid-js/store", "vite", "void", "vite-plugin-solid"],
 });

@@ -1,5 +1,5 @@
-import { defineHandler } from "vite-cloud";
+import { defineHandler } from "void";
 
 export const GET = defineHandler(() => {
-  return { message: "Hello from Vite Cloud!", timestamp: Date.now() };
+  return { message: "Hello from Void!", timestamp: Date.now() };
 });

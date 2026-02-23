@@ -3,7 +3,7 @@
 
   let { href, method = "GET", data = undefined, preserveScroll = false, viewTransition = undefined, children, ...rest } = $props();
 
-  const router = getContext("__vc_router");
+  const router = getContext("__void_router");
 
   function onClick(e) {
     if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;

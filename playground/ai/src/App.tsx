@@ -11,7 +11,7 @@ export default function App() {
     <>
       <nav className="nav">
         <div className="nav-brand">
-          <span>vite-cloud</span>/ai
+          <span>void</span>/ai
         </div>
       </nav>
       <div className="layout">

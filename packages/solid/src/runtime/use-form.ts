@@ -1,7 +1,7 @@
 import { createSignal, createMemo, useContext } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { RouterContext, ErrorsContext } from "./context";
-import type { PageActionMap } from "vite-cloud/routes";
+import type { PageActionMap } from "void/routes";
 
 type HasParams<U extends keyof PageActionMap> = PageActionMap[U] extends { params: infer P }
   ? P extends Record<string, string>

@@ -1,4 +1,4 @@
-# Vite Cloud
+# Void
 
 Full-stack framework for Cloudflare Workers, powered by Vite.
 
@@ -21,17 +21,17 @@ Full-stack framework for Cloudflare Workers, powered by Vite.
     - `README.md` (this file)
     - affected packages's `README.md` or `AGENTS.md`
     - relevant docs md files in `packages/docs`
-    - `packages/vite-cloud/skills/vite-cloud` (if change affects skill/CLI guidance)
-    - `packages/vite-cloud/AGENT_PROMPT.md`
-    - `packages/vite-cloud/getting-started-prompt.txt`
+    - `packages/void/skills/void` (if change affects skill/CLI guidance)
+    - `packages/void/AGENT_PROMPT.md`
+    - `packages/void/getting-started-prompt.txt`
 
 ## Quick Reference
 
 ```
 pnpm -r build                       # Build all packages
-pnpm -C packages/vite-cloud build   # Build only the core plugin
+pnpm -C packages/void build   # Build only the core plugin
 pnpm test                           # Run vitest (unit + integration tests)
-pnpm test packages/vite-cloud       # Only test the core plugin
+pnpm test packages/void       # Only test the core plugin
 pnpm lint                           # oxlint
 pnpm fmt                            # oxfmt --write .
 pnpm check                          # Typecheck all packages (tsc --noEmit)
@@ -42,21 +42,21 @@ pnpm -C packages/vue typecheck      # Typecheck a specific package
 
 pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-workspace.yaml` (typescript, tsdown, vite, @cloudflare/workers-types, wrangler). Make sure to run `pnpm install` after making package structure changes.
 
-| Package                                                  | npm name             | Purpose                                                        |
-| -------------------------------------------------------- | -------------------- | -------------------------------------------------------------- |
-| [`packages/vite-cloud`](./packages/vite-cloud/AGENTS.md) | `vite-cloud`         | Core Vite plugin — routing, inference, migrations, CLI         |
-| [`packages/react`](./packages/react/README.md)           | `@vite-cloud/react`  | React framework adapter for Pages mode (SSR, Link, useForm)    |
-| [`packages/vue`](./packages/vue/README.md)               | `@vite-cloud/vue`    | Vue framework adapter for Pages mode (SSR, Link, useForm)      |
-| [`packages/svelte`](./packages/svelte/README.md)         | `@vite-cloud/svelte` | Svelte 5 framework adapter for Pages mode (SSR, Link, useForm) |
-| [`packages/solid`](./packages/solid/README.md)           | `@vite-cloud/solid`  | SolidJS framework adapter for Pages mode (SSR, Link, useForm)  |
-| [`packages/docs`](./packages/docs)                       | (private)            | Documentation site (VitePress)                                 |
-| `playground/*`                                           | (private)            | local apps for testing                                         |
+| Package                                          | npm name            | Purpose                                                        |
+| ------------------------------------------------ | ------------------- | -------------------------------------------------------------- |
+| [`packages/void`](./packages/void/AGENTS.md)     | `void`              | Core Vite plugin — routing, inference, migrations, CLI         |
+| [`packages/react`](./packages/react/README.md)   | `@voidcloud/react`  | React framework adapter for Pages mode (SSR, Link, useForm)    |
+| [`packages/vue`](./packages/vue/README.md)       | `@voidcloud/vue`    | Vue framework adapter for Pages mode (SSR, Link, useForm)      |
+| [`packages/svelte`](./packages/svelte/README.md) | `@voidcloud/svelte` | Svelte 5 framework adapter for Pages mode (SSR, Link, useForm) |
+| [`packages/solid`](./packages/solid/README.md)   | `@voidcloud/solid`  | SolidJS framework adapter for Pages mode (SSR, Link, useForm)  |
+| [`packages/docs`](./packages/docs)               | (private)           | Documentation site (VitePress)                                 |
+| `playground/*`                                   | (private)           | local apps for testing                                         |
 
-## `vite-cloud` Overview
+## `void` Overview
 
-The `vite-cloud` package contains two parts:
+The `void` package contains two parts:
 
-**Vite plugin** — `viteCloud()` returns `[routingPlugin, migrationPlugin, cloudflare({...inferredBindings})]`. Depends on `@cloudflare/vite-plugin` and transitively on wrangler/miniflare.
+**Vite plugin** — `voidPlugin()` returns `[routingPlugin, migrationPlugin, cloudflare({...inferredBindings})]`. Depends on `@cloudflare/vite-plugin` and transitively on wrangler/miniflare.
 
 - **Routing** — file-based API routing on Hono with named HTTP method exports
 - **Validation** — request body/query/params validation via any Standard Schema library
@@ -65,51 +65,51 @@ The `vite-cloud` package contains two parts:
 - **Auth** — built-in email/password + OAuth, auto-detected from imports and env vars
 - **Cron jobs** — scheduled handlers via `defineScheduled`
 - **Queues** — typed producers and consumers via `defineQueue`
-- **AI** — `import { ai } from "vite-cloud/ai"` for Workers AI inference, metered via AI Gateway proxy
+- **AI** — `import { ai } from "void/ai"` for Workers AI inference, metered via AI Gateway proxy
 - **Binding inference** — auto-detects D1, KV, R2, AI, queues from source code
 - **Migration runner** — applies SQL migrations to local D1 on dev startup
 
-**CLI (`vcc`)** — commands for local development DX and deployment:
+**CLI (`void`)** — commands for local development DX and deployment:
 
-- **`deploy`** — builds, validates migrations, packages, and uploads to Vite Cloud
+- **`deploy`** — builds, validates migrations, packages, and uploads to Void
 - **`gen`** — scaffolds models, routes, middleware, SSR entries, cron jobs, and queue consumers
 - **`init`** — sets up agent instructions, skills, and reference prompts for coding agents
 - **`db`** — manages migrations and inspects the local D1 database
 - **`auth`** — login, logout, and token management
-- **`projects`** — link, create, and manage Vite Cloud projects
+- **`projects`** — link, create, and manage Void projects
 - **`domains`** — configure custom domains for deployed projects
 - **`secrets`** — manage production environment variables
 
-See [`packages/vite-cloud/AGENTS.md`](./packages/vite-cloud/AGENTS.md) for architecture, source layout, design decisions, package exports, route parsing rules, code generation, and agent integration.
+See [`packages/void/AGENTS.md`](./packages/void/AGENTS.md) for architecture, source layout, design decisions, package exports, route parsing rules, code generation, and agent integration.
 
-**Note:** `packages/vite-cloud/skills/vite-cloud/docs` is ignored from git and is auto copied during build. Ignore files in this directory.
+**Note:** `packages/void/skills/void/docs` is ignored from git and is auto copied during build. Ignore files in this directory.
 
-## `@vite-cloud/vue` Overview
+## `@voidcloud/vue` Overview
 
 Vue framework adapter for Pages mode — Inertia-inspired full-stack DX with SSR.
 
-- **Plugin** (`@vite-cloud/vue/plugin`): `viteCloudVue()` — extracts `<script server>` blocks, compiles Vue SFCs, generates SSR + client hydration entries
-- **Runtime** (`@vite-cloud/vue`): `Link`, `useForm`, `useShared` composables
+- **Plugin** (`@voidcloud/vue/plugin`): `voidVue()` — extracts `<script server>` blocks, compiles Vue SFCs, generates SSR + client hydration entries
+- **Runtime** (`@voidcloud/vue`): `Link`, `useForm`, `useShared` composables
 - **Server handlers**: Remix-style `loader` (GET → props) and `action` (mutations) exports in `<script server>` or companion `.server.ts` files
 
 See [`packages/vue/README.md`](./packages/vue/README.md) for architecture.
 
-## `@vite-cloud/svelte` Overview
+## `@voidcloud/svelte` Overview
 
 Svelte 5 framework adapter for Pages mode — same Inertia-inspired DX as Vue/React.
 
-- **Plugin** (`@vite-cloud/svelte/plugin`): `viteCloudSvelte()` — wraps `@sveltejs/vite-plugin-svelte`, generates SSR + client hydration entries
-- **Runtime** (`@vite-cloud/svelte`): `Link`, `useForm`, `useShared`, `useRouter` — uses Svelte 5 runes (`$state`, `$derived`) and `getContext`
+- **Plugin** (`@voidcloud/svelte/plugin`): `voidSvelte()` — wraps `@sveltejs/vite-plugin-svelte`, generates SSR + client hydration entries
+- **Runtime** (`@voidcloud/svelte`): `Link`, `useForm`, `useShared`, `useRouter` — uses Svelte 5 runes (`$state`, `$derived`) and `getContext`
 - **Server handlers**: companion `.server.ts` files with `loader` and `action` exports (same as React adapter)
 
 See [`packages/svelte/README.md`](./packages/svelte/README.md) for details.
 
-## `@vite-cloud/solid` Overview
+## `@voidcloud/solid` Overview
 
 SolidJS framework adapter for Pages mode — same Inertia-inspired DX as Vue/React/Svelte.
 
-- **Plugin** (`@vite-cloud/solid/plugin`): `viteCloudSolid()` — wraps `vite-plugin-solid`, generates SSR + client hydration entries
-- **Runtime** (`@vite-cloud/solid`): `Link`, `useForm`, `useShared`, `useRouter` — uses Solid signals (`createSignal`, `createStore`) and `createContext`/`useContext`
+- **Plugin** (`@voidcloud/solid/plugin`): `voidSolid()` — wraps `vite-plugin-solid`, generates SSR + client hydration entries
+- **Runtime** (`@voidcloud/solid`): `Link`, `useForm`, `useShared`, `useRouter` — uses Solid signals (`createSignal`, `createStore`) and `createContext`/`useContext`
 - **Server handlers**: companion `.server.ts` files with `loader` and `action` exports (same as React/Svelte adapter)
 
 See [`packages/solid/README.md`](./packages/solid/README.md) for details.
@@ -155,9 +155,9 @@ Local apps for testing features end-to-end. Run scripts with `pnpm -C playground
 - **Miniflare D1 SQLite path** is NOT `<persist>/d1/<id>.db`. It's `<persist>/v3/d1/miniflare-D1DatabaseObject/<hmac-hash>.sqlite` where the hash is derived from `database_id`.
 - **Miniflare D1 `exec()` with multi-statement SQL** fails with `Cannot read properties of undefined (reading 'duration')`. Split into individual statements and use `db.batch(stmts.map(s => db.prepare(s)))` instead.
 - **ArkType `ArkErrors.map()` returns `ArkErrors`** (not a plain array), causing `Response.json()` serialization to crash via its custom `toJSON()`. Use `Array.from(issues, mapper)` instead of `issues.map(mapper)` when flattening Standard Schema issues.
-- **tsconfig `extends` does NOT merge `include`/`files`** — the child completely replaces the parent's. To make generated types discoverable, the `.vite-cloud/tsconfig.json` uses `"files"` (inherited when the child doesn't specify `files`) rather than `"include"` (overridden by the child's `include`).
+- **tsconfig `extends` does NOT merge `include`/`files`** — the child completely replaces the parent's. To make generated types discoverable, the `.void/tsconfig.json` uses `"files"` (inherited when the child doesn't specify `files`) rather than `"include"` (overridden by the child's `include`).
 - **`declare module` augmentation requires `export {}`** at the top of the generated file. Without a top-level export/import, TypeScript treats it as an ambient module declaration (replaces the module entirely) rather than an augmentation (merges with existing exports). This hides runtime exports like `db` and `createDb`. Both `routes.d.ts` and `db.d.ts` use `export {}` to ensure augmentation semantics.
-- **tsconfig `lib` must be explicit** for CF Workers packages. Without `"lib": ["ES2022"]`, TS defaults to including `lib.dom.d.ts` which shadows `@cloudflare/workers-types` globals (e.g. `CacheStorage.default`). Applied to `vite-cloud`.
+- **tsconfig `lib` must be explicit** for CF Workers packages. Without `"lib": ["ES2022"]`, TS defaults to including `lib.dom.d.ts` which shadows `@cloudflare/workers-types` globals (e.g. `CacheStorage.default`). Applied to `void`.
 - **D1 does not allow `PRAGMA foreign_keys=OFF`** — D1 enforces `foreign_keys=ON` always. Drizzle-generated migrations that do table rebuilds (e.g. adding NOT NULL to an existing column) use `PRAGMA foreign_keys=OFF/ON`, which silently fails on D1. Hand-edit these to `PRAGMA defer_foreign_keys=on/off` instead, which defers FK checks to the end of the current transaction.
 - **Vite config plugins option accepts array of plugins by default** - there is no need to spread plugins that export an array of plugins.
 - **Solid `createComponent()` evaluates immediately** — unlike React's JSX (which creates lazy descriptors), Solid's `createComponent(Fn, props)` calls `Fn` right away. Context providers must wrap the _evaluation_ of child components, not the evaluated result. Build layout chains inside provider `children` getters, not before wrapping in providers.

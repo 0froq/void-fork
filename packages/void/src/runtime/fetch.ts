@@ -1,0 +1,90 @@
+import { ofetch, FetchError } from "ofetch";
+import type { RouteMap } from "void/routes";
+
+export { FetchError };
+
+type MethodsOf<P extends keyof RouteMap> = keyof RouteMap[P] & string;
+type DefaultMethod<P extends keyof RouteMap> = "GET" extends MethodsOf<P> ? "GET" : never;
+
+type RouteEntry<P extends keyof RouteMap, M extends MethodsOf<P>> = RouteMap[P][M] extends {
+  input: infer I;
+  output: infer O;
+}
+  ? { input: I; output: O }
+  : { input: {}; output: unknown };
+
+type OutputOf<P extends keyof RouteMap, M extends MethodsOf<P>> = RouteEntry<P, M>["output"];
+type InputOf<P extends keyof RouteMap, M extends MethodsOf<P>> = RouteEntry<P, M>["input"];
+
+type BodyOption<I> = "body" extends keyof I
+  ? { body: I["body" & keyof I] }
+  : { body?: Record<string, any> | BodyInit | null };
+type QueryOption<I> = "query" extends keyof I
+  ? { query: I["query" & keyof I] }
+  : { query?: Record<string, string> };
+type ParamsOption<I> = "params" extends keyof I
+  ? { params: I["params" & keyof I] }
+  : { params?: Record<string, string> };
+
+type HasRequiredInput<
+  P extends keyof RouteMap,
+  M extends MethodsOf<P>,
+> = "body" extends keyof InputOf<P, M>
+  ? true
+  : "query" extends keyof InputOf<P, M>
+    ? true
+    : "params" extends keyof InputOf<P, M>
+      ? true
+      : false;
+
+type FetchOptions<P extends keyof RouteMap, M extends MethodsOf<P>> = BodyOption<InputOf<P, M>> &
+  QueryOption<InputOf<P, M>> &
+  ParamsOption<InputOf<P, M>> & {
+    method?: M;
+    headers?: HeadersInit;
+    signal?: AbortSignal;
+    baseURL?: string;
+    retry?: number;
+    timeout?: number;
+  };
+
+/**
+ * Typed fetch client for Void API routes.
+ *
+ * Built on top of ofetch. Supports baseURL, retry, timeout, and all
+ * ofetch features while providing full route type safety.
+ *
+ * ```ts
+ * import { fetch } from "void/client";
+ *
+ * const users = await fetch("/api/users"); // typed!
+ * const user = await fetch("/api/users/:id", { params: { id: "1" } });
+ * ```
+ */
+export function fetch<P extends keyof RouteMap & string>(
+  path: HasRequiredInput<P, DefaultMethod<P>> extends false ? P : never,
+): Promise<OutputOf<P, DefaultMethod<P>>>;
+export function fetch<P extends keyof RouteMap & string, M extends MethodsOf<P> = DefaultMethod<P>>(
+  path: P,
+  options: FetchOptions<P, M>,
+): Promise<OutputOf<P, M>>;
+export async function fetch(path: string, options?: Record<string, any>): Promise<unknown> {
+  // Interpolate :param segments
+  let url = path;
+  if (options?.params) {
+    for (const [key, value] of Object.entries(options.params as Record<string, string>)) {
+      url = url.replace(`:${key}`, encodeURIComponent(value));
+    }
+  }
+
+  return ofetch(url, {
+    method: (options?.method ?? "GET") as string,
+    body: options?.body,
+    query: options?.query,
+    headers: options?.headers,
+    signal: options?.signal,
+    baseURL: options?.baseURL,
+    retry: options?.retry,
+    timeout: options?.timeout,
+  });
+}

@@ -1,7 +1,7 @@
 import { getContext } from "svelte";
 
 export function useRouter() {
-  const router = getContext<any>("__vc_router");
+  const router = getContext<any>("__void_router");
   if (!router) {
     throw new Error("useRouter() must be called inside a Pages component");
   }

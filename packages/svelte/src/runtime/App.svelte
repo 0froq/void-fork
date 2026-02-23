@@ -27,13 +27,13 @@
   let Page = $derived(currentPage);
 
   // Provide context for child components (useShared, useRouter, useForm)
-  setContext("__vc_shared", {
+  setContext("__void_shared", {
     get value() { return shared; },
   });
-  setContext("__vc_errors", {
+  setContext("__void_errors", {
     get value() { return errors; },
   });
-  setContext("__vc_router", init.router);
+  setContext("__void_router", init.router);
 
   // Client mode: subscribe to stores for live updates after hydration.
   // onMount only runs on the client, not during SSR.

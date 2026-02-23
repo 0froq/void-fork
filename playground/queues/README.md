@@ -14,7 +14,7 @@ queues/
 
 ## Features
 
-- **Queue producer** — `POST /api/send` uses `queues["test-queue"].send({ key, value })` from `vite-cloud/queues`
+- **Queue producer** — `POST /api/send` uses `queues["test-queue"].send({ key, value })` from `void/queues`
 - **Queue consumer** — `defineQueue<{ key, value }>()` for typed batch message handling with `maxBatchTimeout = 1` for immediate delivery
 - **KV bridge** — consumer writes `queue-result:<key>` entries to KV; `GET /api/result?key=...` reads them back
 - **End-to-end flow** — send → consumer → KV round-trip, integration-tested

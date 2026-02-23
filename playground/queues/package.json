@@ -11,6 +11,6 @@
   },
   "devDependencies": {
     "vite": "catalog:",
-    "vite-cloud": "workspace:*"
+    "void": "workspace:*"
   }
 }

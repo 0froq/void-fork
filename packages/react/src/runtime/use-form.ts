@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useContext, useMemo } from "react";
-import type { PageActionMap } from "vite-cloud/routes";
+import type { PageActionMap } from "void/routes";
 import { RouterContext } from "./context";
 
 type HasParams<U extends keyof PageActionMap> = PageActionMap[U] extends { params: infer P }

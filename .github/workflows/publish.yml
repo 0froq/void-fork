@@ -26,19 +26,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
 
-      # Publish in dependency order: vite-cloud first, then adapters
-      - run: pnpm -F vite-cloud publish --provenance --access public --no-git-checks
+      # Publish in dependency order: void first, then adapters
+      - run: pnpm -F void publish --provenance --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -F @vite-cloud/react publish --provenance --access public --no-git-checks
+      - run: pnpm -F @voidcloud/react publish --provenance --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -F @vite-cloud/vue publish --provenance --access public --no-git-checks
+      - run: pnpm -F @voidcloud/vue publish --provenance --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -F @vite-cloud/svelte publish --provenance --access public --no-git-checks
+      - run: pnpm -F @voidcloud/svelte publish --provenance --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -F @vite-cloud/solid publish --provenance --access public --no-git-checks
+      - run: pnpm -F @voidcloud/solid publish --provenance --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

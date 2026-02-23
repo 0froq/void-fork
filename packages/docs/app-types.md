@@ -4,19 +4,19 @@ outline: deep
 
 # App Types
 
-Vite Cloud supports three types of apps:
+Void supports three types of apps:
 
-1. Vite apps that leverage Vite Cloud's backend ([API routes](./server-routing.md)) or full-stack ([pages mode](./pages-routing.md)) features
+1. Vite apps that leverage Void's backend ([API routes](./server-routing.md)) or full-stack ([pages mode](./pages-routing.md)) features
 2. Other Vite-based meta frameworks that can run on Cloudflare, e.g. [TanStack Start](https://tanstack.com/start/latest), [React Router](https://reactrouter.com/)
 3. Purely static sites — SPAs, SSGs like [VitePress](https://vitepress.dev/), or any directory of static files
 
-The type is auto-detected from your project structure, or you can set it explicitly in [`vite-cloud.json`](./config.md).
+The type is auto-detected from your project structure, or you can set it explicitly in [`void.json`](./config.md).
 
 ## Vite Full-Stack
 
-A Vite app with backend code that runs on Cloudflare Workers. In this mode, **Vite Cloud is both the framework and the platform** — an opinionated setup that unlocks DX perks unique to Vite Cloud, while staying frontend-framework-agnostic. You can use it with React, Vue, Svelte, Solid, or any frontend that works with Vite.
+A Vite app with backend code that runs on Cloudflare Workers. In this mode, **Void is both the framework and the platform** — an opinionated setup that unlocks DX perks unique to Void, while staying frontend-framework-agnostic. You can use it with React, Vue, Svelte, Solid, or any frontend that works with Vite.
 
-All Vite Cloud features that involve backend logic — [server routing](./server-routing.md), [pages mode](./pages-routing.md), [authentication](./auth.md), [typed fetch](./typed-fetch.md), [cron jobs](./jobs.md), [queues](./queues.md) — are only available in this mode.
+All Void features that involve backend logic — [server routing](./server-routing.md), [pages mode](./pages-routing.md), [authentication](./auth.md), [typed fetch](./typed-fetch.md), [cron jobs](./jobs.md), [queues](./queues.md) — are only available in this mode.
 
 A full-stack app can be **API-only** (just `routes/`), a **SPA + API** (frontend in `src/` with API routes), or **full-stack with pages mode** (server-rendered pages in `pages/` with co-located data loading):
 
@@ -39,7 +39,7 @@ my-app/
     01.auth.ts
   migrations/
     001_create_users.sql
-  vite.config.ts            ← plugins: [viteCloud()]
+  vite.config.ts            ← plugins: [voidPlugin()]
 ```
 
 Your worker handles API routes, page rendering, and (optionally) [custom SSR](./ssr.md). Static assets are served from the edge via R2. Cloudflare bindings (D1, KV, R2) are inferred from your source code and provisioned automatically.
@@ -55,13 +55,13 @@ Your worker handles API routes, page rendering, and (optionally) [custom SSR](./
 
 ## Meta Frameworks
 
-Vite Cloud supports [TanStack Start](https://tanstack.com/start/latest) and [React Router v7](https://reactrouter.com/), auto-detected from `package.json`. The framework owns routing and SSR — Vite Cloud handles binding inference, [typed DB queries](./db.md), migrations, and deployment.
+Void supports [TanStack Start](https://tanstack.com/start/latest) and [React Router v7](https://reactrouter.com/), auto-detected from `package.json`. The framework owns routing and SSR — Void handles binding inference, [typed DB queries](./db.md), migrations, and deployment.
 
 ```ts
 // vite.config.ts
 export default defineConfig({
   plugins: [
-    viteCloud(), // must come before the framework plugin
+    voidPlugin(), // must come before the framework plugin
     tanstackStart(),
     react(),
   ],
@@ -73,7 +73,7 @@ Access bindings via the `cloudflare:workers` module in server functions. The [ty
 ```tsx
 // src/routes/users.tsx
 import { createServerFn } from "@tanstack/react-start";
-import { db } from "vite-cloud/db";
+import { db } from "void/db";
 
 const getUsers = createServerFn().handler(async () => {
   return db.list("users"); // fully typed from migrations
@@ -101,7 +101,7 @@ At the edge, the resolution order is:
 
 ## Auto-Detection
 
-When running `vcc deploy` and no `mode` is set in `vite-cloud.json`, the detection logic runs in this order:
+When running `void deploy` and no `mode` is set in `void.json`, the detection logic runs in this order:
 
 | Priority | Condition                                                                                | Type                               |
 | -------- | ---------------------------------------------------------------------------------------- | ---------------------------------- |
@@ -114,7 +114,7 @@ When running `vcc deploy` and no `mode` is set in `vite-cloud.json`, the detecti
 
 ## Explicit Configuration
 
-To lock the app type and skip auto-detection, set `mode` in [`vite-cloud.json`](./config.md):
+To lock the app type and skip auto-detection, set `mode` in [`void.json`](./config.md):
 
 ```json
 {

@@ -1,4 +1,4 @@
-import { defineQueue } from "vite-cloud";
+import { defineQueue } from "void";
 
 export const maxBatchTimeout = 1;
 

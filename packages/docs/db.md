@@ -4,7 +4,7 @@ outline: deep
 
 # Database
 
-Vite Cloud provides automated migration application and a typed query helper for [Cloudflare D1](https://developers.cloudflare.com/d1/) (SQLite) that covers common CRUD operations without writing SQL. Import `db` from `vite-cloud/db` and start querying.
+Void provides automated migration application and a typed query helper for [Cloudflare D1](https://developers.cloudflare.com/d1/) (SQLite) that covers common CRUD operations without writing SQL. Import `db` from `void/db` and start querying.
 
 ## Migrations
 
@@ -29,33 +29,33 @@ Migrations run automatically when the dev server starts. On deploy, they run aga
 
 The CLI provides commands to inspect, reset, and seed your local database. Place dev data in `migrations/seed.sql` — it's automatically excluded from migration collection and will never be deployed.
 
-- `vcc db status` — show which migrations are applied locally (and remotely if linked)
-- `vcc db reset` — drop the local DB and re-apply all migrations
-- `vcc db seed` — reset + run `migrations/seed.sql` (or `--file <path>`)
-- `vcc db execute <sql>` — run ad-hoc SQL against the local DB (or `--file <path>`)
-- `vcc db migrate` — apply pending migrations without resetting
-- `vcc db export` — dump local DB as SQL (supports `--output`, `--no-data`, `--no-schema`, `--table`)
+- `void db status` — show which migrations are applied locally (and remotely if linked)
+- `void db reset` — drop the local DB and re-apply all migrations
+- `void db seed` — reset + run `migrations/seed.sql` (or `--file <path>`)
+- `void db execute <sql>` — run ad-hoc SQL against the local DB (or `--file <path>`)
+- `void db migrate` — apply pending migrations without resetting
+- `void db export` — dump local DB as SQL (supports `--output`, `--no-data`, `--no-schema`, `--table`)
 
 See the [CLI reference](./cli.md#database) for details.
 
 ## Scaffolding
 
-The `vcc gen` command can scaffold a complete model (migration + CRUD routes + types) or a standalone migration:
+The `void gen` command can scaffold a complete model (migration + CRUD routes + types) or a standalone migration:
 
 ```sh
 # Generate a full model: migration, API routes, and regenerated db types
-vcc gen model posts title:string body:text published:boolean
+void gen model posts title:string body:text published:boolean
 
 # Generate just a migration file
-vcc gen migration add_avatar_to_users
+void gen migration add_avatar_to_users
 ```
 
-`vcc gen model <name> [columns...]` creates:
+`void gen model <name> [columns...]` creates:
 
 1. `migrations/NNN_create_<name>.sql` — CREATE TABLE with `id` (autoincrement), your columns, and `created_at`
 2. `routes/api/<name>/index.ts` — GET (list) + POST (insert with validation)
 3. `routes/api/<name>/[id].ts` — GET by id with 404 handling
-4. Regenerated `.vite-cloud/db.d.ts` — types updated to include the new table
+4. Regenerated `.void/db.d.ts` — types updated to include the new table
 
 **Validator detection:** The generated routes use whichever validation library your project already has installed. The CLI checks `package.json` for [valibot](https://valibot.dev/), [zod](https://zod.dev/), or [arktype](https://arktype.io/) (in that order). If none is found, you'll be prompted to choose one or skip validation entirely.
 
@@ -70,7 +70,7 @@ Column format is `name:type`, with an optional `?` suffix for nullable:
 | `blob`                       | BLOB NOT NULL    | `v.instance(Blob)` | `z.instanceof(Blob)` | `"instanceof Blob"`  |
 | any type with `?`            | (no NOT NULL)    | `v.optional(...)`  | `....optional()`     | `"... \| undefined"` |
 
-`vcc gen migration <name>` creates an empty `migrations/NNN_<name>.sql` with a comment placeholder. The number is auto-detected from the highest existing migration prefix.
+`void gen migration <name>` creates an empty `migrations/NNN_<name>.sql` with a comment placeholder. The number is auto-detected from the highest existing migration prefix.
 
 See the [CLI reference](./cli.md#code-generation) for the full list of generators.
 
@@ -81,7 +81,7 @@ The `db` object provides typed methods for common operations. Types are derived 
 ### List rows
 
 ```ts
-import { db } from "vite-cloud/db";
+import { db } from "void/db";
 
 const users = await db.list("users");
 // users: { id: number; name: string; email: string; role: string; created_at: string | null }[]
@@ -214,7 +214,7 @@ The query helper is powered by three pieces working together:
 
 1. **Migration parsing** — At dev server start and build time, the plugin reads your `migrations/*.sql` files and replays the DDL statements (CREATE TABLE, ALTER TABLE, DROP TABLE) through a schema parser to build a complete picture of your database schema.
 
-2. **Type generation** — The schema is used to generate `.vite-cloud/db.d.ts`, which augments the `DbTables` and `DbInsertTables` interfaces from `vite-cloud/db`. This gives every table and column a TypeScript type derived from the SQL column types (`INTEGER` → `number`, `TEXT` → `string`, `REAL` → `number`, `BLOB` → `ArrayBuffer`). Nullable columns get `| null`. Columns with defaults or autoincrement primary keys become optional in the insert type.
+2. **Type generation** — The schema is used to generate `.void/db.d.ts`, which augments the `DbTables` and `DbInsertTables` interfaces from `void/db`. This gives every table and column a TypeScript type derived from the SQL column types (`INTEGER` → `number`, `TEXT` → `string`, `REAL` → `number`, `BLOB` → `ArrayBuffer`). Nullable columns get `| null`. Columns with defaults or autoincrement primary keys become optional in the insert type.
 
 3. **Runtime client** — The `db` object builds parameterized SQL from the method calls, validates all identifiers to prevent injection, and executes queries against the D1 binding. All values are passed as bound parameters — never interpolated into SQL strings.
 

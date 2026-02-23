@@ -1,4 +1,4 @@
-# Vite Cloud
+# Void
 
 Full-stack framework for Cloudflare Workers, powered by [Vite](https://vite.dev).
 
@@ -7,31 +7,31 @@ Add a single plugin to your `vite.config.ts` and get file-based API routing, ser
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import viteCloud from "vite-cloud";
+import voidPlugin from "void";
 
 export default defineConfig({
-  plugins: [viteCloud()],
+  plugins: [voidPlugin()],
 });
 ```
 
 ## Quickstart
 
 ```sh
-npm install -D vite-cloud
-npx vcc init
+npm install -D void
+npx void init
 ```
 
 This scaffolds a starter app with an interactive setup flow. Then:
 
 ```sh
 npm run dev          # local dev with workerd runtime
-npx vcc deploy       # deploy to vitecloud.app
+npx void deploy       # deploy to void.app
 ```
 
 ## Features
 
 - **Zero config** — no `wrangler.json`, no dashboard clicks
-- **Automatic provisioning** — import `db`, `kv`, `storage`, or `ai` from `vite-cloud` and resources are created on deploy
+- **Automatic provisioning** — import `db`, `kv`, `storage`, or `ai` from `void` and resources are created on deploy
 - **File-based routing** — drop a file in `routes/`, get an endpoint with method exports, dynamic params, middleware, and [Standard Schema](https://standardschema.dev/) validation
 - **Full-stack pages** — `pages/` directory for server-rendered UI with co-located data loading, SPA navigation, and typed forms (React, Vue, Svelte, Solid)
 - **End-to-end type safety** — SQL migrations generate DB types, route handlers infer return types, typed fetch client checks everything at the call site
@@ -39,15 +39,15 @@ npx vcc deploy       # deploy to vitecloud.app
 
 ## Documentation
 
-Full docs at [vite.cloud](https://vite.cloud)
+Full docs at [void.cloud](https://void.cloud)
 
 ## Contributing
 
 ### Setup
 
 ```sh
-git clone https://github.com/nicepkg/vite-cloud.git
-cd vite-cloud
+git clone https://github.com/nicepkg/void.git
+cd void
 pnpm install
 pnpm -r build
 ```
@@ -64,15 +64,15 @@ pnpm docs              # local docs dev server
 
 ### Project Structure
 
-| Package               | Purpose                         |
-| --------------------- | ------------------------------- |
-| `packages/vite-cloud` | Core Vite plugin + CLI          |
-| `packages/react`      | React framework adapter         |
-| `packages/vue`        | Vue framework adapter           |
-| `packages/svelte`     | Svelte 5 framework adapter      |
-| `packages/solid`      | SolidJS framework adapter       |
-| `packages/docs`       | Documentation (VitePress)       |
-| `playground/*`        | Test apps for local development |
+| Package           | Purpose                         |
+| ----------------- | ------------------------------- |
+| `packages/void`   | Core Vite plugin + CLI          |
+| `packages/react`  | React framework adapter         |
+| `packages/vue`    | Vue framework adapter           |
+| `packages/svelte` | Svelte 5 framework adapter      |
+| `packages/solid`  | SolidJS framework adapter       |
+| `packages/docs`   | Documentation (VitePress)       |
+| `playground/*`    | Test apps for local development |
 
 ## License
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link } from "@vite-cloud/vue";
+import { Link } from "@voidcloud/vue";
 import type { Props } from "./[id].server";
 
 const props = defineProps<Props>();

@@ -1,5 +1,5 @@
 {
-  "name": "@vite-cloud/react",
+  "name": "@voidcloud/react",
   "version": "0.0.1",
   "files": [
     "dist"
@@ -31,12 +31,12 @@
     "react-dom": "^19.0.0",
     "tsdown": "catalog:",
     "vite": "catalog:",
-    "vite-cloud": "workspace:*"
+    "void": "workspace:*"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",
     "react-dom": "^18.0.0 || ^19.0.0",
     "vite": "catalog:",
-    "vite-cloud": "workspace:*"
+    "void": "workspace:*"
   }
 }
