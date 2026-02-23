@@ -14,8 +14,9 @@ import {
   getCustomHostname,
   deleteCustomHostname,
 } from "../provisioning/cloudflare-api";
+import { SITE_DOMAIN } from "../constants";
 
-const CNAME_TARGET = "cname.void.app";
+const CNAME_TARGET = `cname.${SITE_DOMAIN}`;
 
 const app = new Hono<ApiEnv>()
 
@@ -43,9 +44,9 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "invalid hostname format" }, 400);
     }
 
-    // Cannot be a void.app subdomain
-    if (hostname.endsWith(".void.app")) {
-      return c.json({ error: "cannot use void.app subdomains" }, 400);
+    // Cannot be a subdomain of the platform's app domain
+    if (hostname.endsWith(`.${SITE_DOMAIN}`)) {
+      return c.json({ error: `cannot use ${SITE_DOMAIN} subdomains` }, 400);
     }
 
     // Uniqueness check

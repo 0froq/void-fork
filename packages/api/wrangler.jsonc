@@ -71,7 +71,7 @@
       "routes": [{ "pattern": "api.staging.void.cloud", "custom_domain": true }],
       "vars": {
         "DISPATCH_NAMESPACE": "void-users-staging",
-        "SITE_DOMAIN": "staging.void.app",
+        "SITE_DOMAIN": "staging.vitecloud.app",
         "DASHBOARD_URL": "https://dash.staging.void.cloud",
         "AUTH_REDIRECT_URI": "https://api.staging.void.cloud/auth/callback",
         "SIGNUP_ALLOWLIST": "@voidzero.dev",

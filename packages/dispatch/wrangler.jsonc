@@ -3,8 +3,8 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-02-12",
   "routes": [
-    { "pattern": "*.void.app/*", "zone_name": "void.app" },
-    { "pattern": "*.void.app", "zone_name": "void.app" },
+    { "pattern": "*.vitecloud.app/*", "zone_name": "vitecloud.app" },
+    { "pattern": "*.vitecloud.app", "zone_name": "vitecloud.app" },
   ],
   "observability": {
     "enabled": true,
@@ -38,11 +38,11 @@
     "staging": {
       "name": "void-dispatch-staging",
       "routes": [
-        { "pattern": "*.staging.void.app/*", "zone_name": "void.app" },
-        { "pattern": "*.staging.void.app", "zone_name": "void.app" },
+        { "pattern": "*.staging.vitecloud.app/*", "zone_name": "vitecloud.app" },
+        { "pattern": "*.staging.vitecloud.app", "zone_name": "vitecloud.app" },
       ],
       "vars": {
-        "BASE_HOSTNAME": "staging.void.app",
+        "BASE_HOSTNAME": "staging.vitecloud.app",
       },
       "dispatch_namespaces": [
         {

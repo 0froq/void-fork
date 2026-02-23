@@ -62,7 +62,7 @@ function formatBytes(bytes: number): string {
           </span>
         </div>
         <div class="flex items-center gap-4 font-mono text-xs text-text-muted">
-          <span>{{ project.custom_domain ?? `${project.slug}.void.app` }}</span>
+          <span>{{ project.custom_domain ?? `${project.slug}.vitecloud.app` }}</span>
           <span>
             {{
               formatNumber(usage.projects.find((u) => u.projectId === project.id)?.requests ?? 0)

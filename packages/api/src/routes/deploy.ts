@@ -15,9 +15,9 @@ import { addQueueConsumer } from "../provisioning/cloudflare-api";
 import { runRemoteMigrations, type RemoteMigration } from "../migrations/remote-runner";
 import { validateMigrationSQL } from "../migrations/validate";
 import { getPlanLimits, isWithinLimit } from "../tiers";
+import { SITE_DOMAIN } from "../constants";
 
 const DEFAULT_DISPATCH_NAMESPACE = "void-users";
-const DEFAULT_SITE_DOMAIN = "void.app";
 const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
 
 const app = new Hono<ApiEnv>();
@@ -143,7 +143,7 @@ app.post("/:id/deploy", async (c) => {
       await updateDeploymentStatus(c.get("db"), deployment.id, "live");
       await updateProjectMode(c.get("db"), projectId, manifest.static);
 
-      const siteDomain = c.env.SITE_DOMAIN ?? DEFAULT_SITE_DOMAIN;
+      const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
       const staticActiveDomains = staticDomains.filter((d) => d.status === "active");
       const staticUrl =
         staticActiveDomains.length > 0
@@ -360,7 +360,7 @@ app.post("/:id/deploy", async (c) => {
     // 5b. Prerender pages (write ISR cache entries before going live)
     if (manifest.prerender && manifest.prerender.length > 0 && manifest.revalidate) {
       await updateDeploymentStatus(c.get("db"), deployment.id, "prerendering");
-      const siteDomain = c.env.SITE_DOMAIN ?? DEFAULT_SITE_DOMAIN;
+      const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
 
       await uploadPool(manifest.prerender, 3, async (pathname) => {
         const ttl = resolvePathTtl(manifest.revalidate, pathname);
@@ -433,7 +433,7 @@ app.post("/:id/deploy", async (c) => {
     await updateDeploymentStatus(c.get("db"), deployment.id, "live");
     await updateProjectMode(c.get("db"), projectId, manifest.framework ? "framework" : "fullstack");
 
-    const siteDomain = c.env.SITE_DOMAIN ?? DEFAULT_SITE_DOMAIN;
+    const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
     const fullActiveDomains = fullDomains.filter((d) => d.status === "active");
     const fullUrl =
       fullActiveDomains.length > 0

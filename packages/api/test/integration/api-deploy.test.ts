@@ -125,7 +125,7 @@ describe("POST /projects/:id/deploy", () => {
       url: string;
     };
     expect(body.deployment).toMatch(/^dpl_/);
-    expect(body.url).toBe("https://minimal-app.void.app");
+    expect(body.url).toBe("https://minimal-app.vitecloud.app");
 
     // Verify deployment is marked live in D1
     const dpl = await env.db
@@ -491,7 +491,7 @@ describe("POST /projects/:id/deploy", () => {
     const body = (await res.json()) as { url: string; urls: string[] };
     expect(body.url).toBe("https://deploy.example.com");
     expect(body.urls).toContain("https://deploy.example.com");
-    expect(body.urls).toContain("https://domain-deploy.void.app");
+    expect(body.urls).toContain("https://domain-deploy.vitecloud.app");
 
     // Verify domain KV routing was written
     const domainRouting = await env.ROUTING.get("domain:deploy.example.com", "json");
@@ -835,7 +835,7 @@ describe("POST /projects/:id/deploy (static)", () => {
       workers: number;
     };
     expect(body.deployment).toMatch(/^dpl_/);
-    expect(body.url).toBe("https://spa-site.void.app");
+    expect(body.url).toBe("https://spa-site.vitecloud.app");
     expect(body.assets).toBe(2);
     expect(body.workers).toBe(0);
   });

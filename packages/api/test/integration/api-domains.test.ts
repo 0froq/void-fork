@@ -67,7 +67,7 @@ describe("POST /projects/:id/domains", () => {
     expect(body.id).toMatch(/^dom_/);
     expect(body.hostname).toBe("app.example.com");
     expect(body.status).toBe("pending");
-    expect(body.cname_target).toBe("cname.void.app");
+    expect(body.cname_target).toBe("cname.vitecloud.app");
   });
 
   it("returns 404 for non-existent project", async () => {
@@ -147,7 +147,7 @@ describe("POST /projects/:id/domains", () => {
     expect(await res.json()).toEqual({ error: "hostname already in use" });
   });
 
-  it("rejects void.app subdomains", async () => {
+  it("rejects vitecloud.app subdomains", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "reject-vc");
     mockCfApi();
@@ -159,13 +159,13 @@ describe("POST /projects/:id/domains", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${user.jwt}`,
         },
-        body: JSON.stringify({ hostname: "bad.void.app" }),
+        body: JSON.stringify({ hostname: "bad.vitecloud.app" }),
       }),
       env,
     );
 
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "cannot use void.app subdomains" });
+    expect(await res.json()).toEqual({ error: "cannot use vitecloud.app subdomains" });
   });
 
   it("rejects invalid hostname format", async () => {

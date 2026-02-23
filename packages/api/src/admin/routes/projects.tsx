@@ -11,6 +11,7 @@ import {
 } from "../../db";
 import { ProjectsListPage } from "../views/projects-list";
 import { Layout } from "../views/layout";
+import { SITE_DOMAIN } from "../../constants";
 
 const PAGE_SIZE = 20;
 const app = new Hono<ApiEnv>();
@@ -24,7 +25,7 @@ app.get("/", async (c) => {
     countProjects(c.get("db")),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const siteDomain = c.env.SITE_DOMAIN ?? "void.app";
+  const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
   return c.html(
     <ProjectsListPage
       projects={projects}
@@ -50,7 +51,7 @@ app.get("/:id", async (c) => {
   ]);
 
   const cfAccountId = c.env.CF_ACCOUNT_ID;
-  const siteDomain = c.env.SITE_DOMAIN ?? "void.app";
+  const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
   const deployUrl = `https://${project.slug}.${siteDomain}`;
 
   return c.html(

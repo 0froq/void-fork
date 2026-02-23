@@ -1,14 +1,16 @@
+import { SITE_DOMAIN } from "./constants";
+
 /**
  * Extract the project slug from a hostname.
  * Returns null if the hostname doesn't match the expected pattern.
  *
  * Examples:
- *   "my-app.void.app" → "my-app"
- *   "void.app" → null
- *   "foo.bar.void.app" → null (no subdomains)
+ *   "my-app.vitecloud.app" → "my-app"
+ *   "vitecloud.app" → null
+ *   "foo.bar.vitecloud.app" → null (no subdomains)
  *   "example.com" → null
  */
-export function extractSlug(hostname: string, baseHostname: string = "void.app"): string | null {
+export function extractSlug(hostname: string, baseHostname: string = SITE_DOMAIN): string | null {
   const suffix = `.${baseHostname}`;
   if (!hostname.endsWith(suffix)) {
     return null;

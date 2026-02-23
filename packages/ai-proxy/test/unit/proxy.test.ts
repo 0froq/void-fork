@@ -71,7 +71,7 @@ function createEnv(aiOverrides?: Partial<MockAi>, kvData?: Record<string, string
 }
 
 function post(path: string, body: unknown, headers?: Record<string, string>): Request {
-  return new Request(`https://ai-proxy.void.app${path}`, {
+  return new Request(`https://ai-proxy.void.cloud${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
@@ -89,7 +89,7 @@ describe("ai-proxy worker", () => {
 
   describe("CORS", () => {
     it("returns 204 with CORS headers on OPTIONS", async () => {
-      const req = new Request("https://ai-proxy.void.app/run", { method: "OPTIONS" });
+      const req = new Request("https://ai-proxy.void.cloud/run", { method: "OPTIONS" });
       const res = await worker.fetch(req, createEnv());
 
       expect(res.status).toBe(204);
@@ -101,7 +101,7 @@ describe("ai-proxy worker", () => {
 
   describe("method validation", () => {
     it("rejects non-POST requests with 405", async () => {
-      const req = new Request("https://ai-proxy.void.app/run", { method: "GET" });
+      const req = new Request("https://ai-proxy.void.cloud/run", { method: "GET" });
       const res = await worker.fetch(req, createEnv());
 
       expect(res.status).toBe(405);
