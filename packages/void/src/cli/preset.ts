@@ -31,7 +31,7 @@ export function detectPreset(
     const srcDir = detectVitePressSourceDir(root);
     const buildArg = srcDir === "." ? "" : ` ${srcDir}`;
     return {
-      buildCommand: `npx vitepress build${buildArg}`,
+      buildCommand: `${localBin(root, "vitepress")} build${buildArg}`,
       outputDir: resolve(root, srcDir, ".vitepress/dist"),
       mode: "ssg",
     };
@@ -45,7 +45,7 @@ export function detectPreset(
   // 4. Vite in deps → static SPA
   if (pkg && hasVite(pkg)) {
     return {
-      buildCommand: "npx vite build",
+      buildCommand: `${localBin(root, "vite")} build`,
       outputDir: resolve(root, "dist"),
       mode: options?.spa ? "spa" : "spa",
     };
@@ -69,6 +69,15 @@ export function detectPreset(
   }
 
   return null;
+}
+
+/**
+ * Resolve a local node_modules/.bin executable path.
+ * Falls back to bare command name if the bin doesn't exist locally.
+ */
+function localBin(root: string, name: string): string {
+  const bin = join(root, "node_modules", ".bin", name);
+  return existsSync(bin) ? bin : name;
 }
 
 function readPackageJson(root: string): Record<string, unknown> | null {
