@@ -59,16 +59,24 @@ const platformSrc = resolve(import.meta.dirname, "..", "src");
 function parseIndex(): { mounts: Map<string, string[]>; inlineRoutes: Route[] } {
   const src = readFileSync(join(platformSrc, "index.ts"), "utf-8");
 
-  // Build import-name → file map: `import foo from "./routes/bar"`
+  // Build import-name → file map
+  // Default: `import foo from "./routes/bar"`
+  // Named:   `import { foo, bar } from "./routes/baz"`
   const importMap = new Map<string, string>();
   for (const m of src.matchAll(/import\s+(\w+)\s+from\s+["']\.\/routes\/([^"']+)["']/g)) {
     importMap.set(m[1], m[2]);
   }
+  for (const m of src.matchAll(/import\s+\{([^}]+)\}\s+from\s+["']\.\/routes\/([^"']+)["']/g)) {
+    const names = m[1].split(",").map((n) => n.trim());
+    for (const name of names) {
+      importMap.set(name, m[2]);
+    }
+  }
 
-  // Mounts: `app.route("/projects", projects)`
+  // Mounts: `app.route("/projects", projects)` or `.route("/projects", projects)` (chained)
   // A file can be mounted at multiple bases (e.g. usage at /projects + /usage)
   const mounts = new Map<string, string[]>();
-  for (const m of src.matchAll(/app\.route\(["']([^"']+)["'],\s*(\w+)\)/g)) {
+  for (const m of src.matchAll(/\.route\(["']([^"']+)["'],\s*(\w+)\)/g)) {
     const base = m[1];
     const name = m[2];
     const file = importMap.get(name);
@@ -79,9 +87,9 @@ function parseIndex(): { mounts: Map<string, string[]>; inlineRoutes: Route[] } 
     }
   }
 
-  // Inline routes: `app.get("/health", ...)`
+  // Inline routes: `app.get("/health", ...)` or `.get("/health", ...)` (chained)
   const inlineRoutes: Route[] = [];
-  for (const m of src.matchAll(/app\.(get|post|put|delete|patch)\(["']([^"']+)["']/g)) {
+  for (const m of src.matchAll(/\.(get|post|put|delete|patch)\(["'](\/[^"']*)["']/g)) {
     inlineRoutes.push({ method: m[1].toUpperCase(), path: m[2] });
   }
 
@@ -94,7 +102,7 @@ function parseIndex(): { mounts: Map<string, string[]>; inlineRoutes: Route[] } 
 function parseRouteFile(filePath: string): { method: string; subPath: string }[] {
   const src = readFileSync(filePath, "utf-8");
   const routes: { method: string; subPath: string }[] = [];
-  for (const m of src.matchAll(/app\.(get|post|put|delete|patch)\(["']([^"']+)["']/g)) {
+  for (const m of src.matchAll(/\.(get|post|put|delete|patch)\(["'](\/[^"']*)["']/g)) {
     routes.push({ method: m[1].toUpperCase(), subPath: m[2] });
   }
   return routes;
