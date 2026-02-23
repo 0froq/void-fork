@@ -1,4 +1,4 @@
-import { Link, useShared } from "@voidcloud/react";
+import { Link, useShared } from "@void-x/react";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const shared = useShared();

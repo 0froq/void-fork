@@ -323,7 +323,7 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.0
         version: 19.2.3(@types/react@19.2.14)
-      '@voidcloud/react':
+      '@void-x/react':
         specifier: workspace:*
         version: link:../../packages/react
       typescript:
@@ -348,7 +348,7 @@ importers:
         specifier: ^1.0.0
         version: 1.2.0(typescript@5.8.3)
     devDependencies:
-      '@voidcloud/solid':
+      '@void-x/solid':
         specifier: workspace:*
         version: link:../../packages/solid
       typescript:
@@ -438,7 +438,7 @@ importers:
         specifier: ^1.0.0
         version: 1.2.0(typescript@5.8.3)
     devDependencies:
-      '@voidcloud/svelte':
+      '@void-x/svelte':
         specifier: workspace:*
         version: link:../../packages/svelte
       typescript:
@@ -497,7 +497,7 @@ importers:
         specifier: ^3.5.0
         version: 3.5.28(typescript@5.8.3)
     devDependencies:
-      '@voidcloud/vue':
+      '@void-x/vue':
         specifier: workspace:*
         version: link:../../packages/vue
       typescript:

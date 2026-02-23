@@ -17,7 +17,7 @@
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@voidcloud/react": "workspace:*",
+    "@void-x/react": "workspace:*",
     "typescript": "~5.8.3",
     "vite": "catalog:",
     "void": "workspace:*"

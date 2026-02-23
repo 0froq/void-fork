@@ -1,4 +1,4 @@
-import { Link } from "@voidcloud/react";
+import { Link } from "@void-x/react";
 import type { Props } from "./index.server";
 
 export default function HomePage({ title }: Props) {

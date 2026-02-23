@@ -52,17 +52,17 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
     config(_, env) {
       if (!existsSync(pagesDir)) return;
 
-      // In dev mode, exclude @voidcloud/react from dep optimization so the
+      // In dev mode, exclude @void-x/react from dep optimization so the
       // virtual module and user components share the same React context objects.
-      // Without this, Vite pre-bundles @voidcloud/react, creating separate
+      // Without this, Vite pre-bundles @void-x/react, creating separate
       // context instances that break useContext (React contexts use object identity).
       if (env.command === "serve") {
         isDev = true;
         return {
           optimizeDeps: {
-            // Exclude @voidcloud/react so the virtual module and user
+            // Exclude @void-x/react so the virtual module and user
             // components share the same React context objects (identity).
-            exclude: ["@voidcloud/react"],
+            exclude: ["@void-x/react"],
             // Pre-include React entries that are discovered late via dynamic
             // imports during SPA navigation, avoiding a full-page reload
             // from Vite's dep optimizer.
@@ -102,7 +102,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string, isDev: b
   return `
 import React from "react";
 import { renderToString } from "react-dom/server";
-import { SharedContext, ErrorsContext, RouterContext } from "@voidcloud/react";
+import { SharedContext, ErrorsContext, RouterContext } from "@void-x/react";
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -164,7 +164,7 @@ function generateClientEntry(
 import React, { useSyncExternalStore } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { SharedContext, ErrorsContext, RouterContext } from "@voidcloud/react";
+import { SharedContext, ErrorsContext, RouterContext } from "@void-x/react";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 

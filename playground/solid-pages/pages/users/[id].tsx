@@ -1,4 +1,4 @@
-import { Link } from "@voidcloud/solid";
+import { Link } from "@void-x/solid";
 import type { Props } from "./[id].server";
 
 export default function UserDetailPage(props: Props) {

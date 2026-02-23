@@ -14,7 +14,7 @@
     "valibot": "^1.0.0"
   },
   "devDependencies": {
-    "@voidcloud/solid": "workspace:*",
+    "@void-x/solid": "workspace:*",
     "typescript": "~5.8.3",
     "vite": "catalog:",
     "void": "workspace:*"

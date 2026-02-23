@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidVue } from "@voidcloud/vue/plugin";
+import { voidVue } from "@void-x/vue/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue()],

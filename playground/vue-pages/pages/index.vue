@@ -11,7 +11,7 @@ export const loader = defineHandler<Props>(() => {
 </script>
 
 <script setup lang="ts">
-import { Link } from "@voidcloud/vue";
+import { Link } from "@void-x/vue";
 
 defineProps<Props>();
 </script>

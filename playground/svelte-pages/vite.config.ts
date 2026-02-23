@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidSvelte } from "@voidcloud/svelte/plugin";
+import { voidSvelte } from "@void-x/svelte/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSvelte()],

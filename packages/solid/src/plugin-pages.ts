@@ -54,9 +54,9 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       if (env.command === "serve") {
         return {
           optimizeDeps: {
-            // Exclude @voidcloud/solid so the virtual module and user
+            // Exclude @void-x/solid so the virtual module and user
             // components share the same Solid context objects (identity).
-            exclude: ["@voidcloud/solid"],
+            exclude: ["@void-x/solid"],
             // Pre-include Solid entries discovered late via dynamic imports
             include: ["solid-js", "solid-js/web", "solid-js/store"],
           },
@@ -79,7 +79,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string): string 
   return `
 import { renderToStringAsync, generateHydrationScript } from "solid-js/web";
 import { createComponent } from "solid-js";
-import { SharedContext, ErrorsContext, RouterContext } from "@voidcloud/solid";
+import { SharedContext, ErrorsContext, RouterContext } from "@void-x/solid";
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -145,7 +145,7 @@ function generateClientEntry(
   return `
 import { createSignal, createComponent, batch } from "solid-js";
 import { hydrate } from "solid-js/web";
-import { SharedContext, ErrorsContext, RouterContext } from "@voidcloud/solid";
+import { SharedContext, ErrorsContext, RouterContext } from "@void-x/solid";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 

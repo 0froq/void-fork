@@ -14,7 +14,7 @@
     "vue": "^3.5.0"
   },
   "devDependencies": {
-    "@voidcloud/vue": "workspace:*",
+    "@void-x/vue": "workspace:*",
     "typescript": "~5.8.3",
     "vite": "catalog:",
     "void": "workspace:*",

@@ -53,19 +53,19 @@ Install a framework adapter alongside `void`:
 ::: code-group
 
 ```sh [React]
-npm install @voidcloud/react
+npm install @void-x/react
 ```
 
 ```sh [Vue]
-npm install @voidcloud/vue
+npm install @void-x/vue
 ```
 
 ```sh [Svelte]
-npm install @voidcloud/svelte
+npm install @void-x/svelte
 ```
 
 ```sh [Solid]
-npm install @voidcloud/solid
+npm install @void-x/solid
 ```
 
 :::
@@ -78,7 +78,7 @@ Add both plugins to your Vite config:
 // vite.config.ts
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidReact } from "@voidcloud/react/plugin";
+import { voidReact } from "@void-x/react/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidReact()],
@@ -89,7 +89,7 @@ export default defineConfig({
 // vite.config.ts
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidVue } from "@voidcloud/vue/plugin";
+import { voidVue } from "@void-x/vue/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue()],
@@ -100,7 +100,7 @@ export default defineConfig({
 // vite.config.ts
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidSvelte } from "@voidcloud/svelte/plugin";
+import { voidSvelte } from "@void-x/svelte/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSvelte()],
@@ -111,7 +111,7 @@ export default defineConfig({
 // vite.config.ts
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidSolid } from "@voidcloud/solid/plugin";
+import { voidSolid } from "@void-x/solid/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSolid()],
@@ -141,7 +141,7 @@ Use the `Link` component for SPA navigation between pages. It renders an `<a>` t
 ::: code-group
 
 ```tsx [React]
-import { Link } from "@voidcloud/react";
+import { Link } from "@void-x/react";
 
 <Link href="/users">Users</Link>
 <Link href={`/users/${id}`}>View</Link>
@@ -149,7 +149,7 @@ import { Link } from "@voidcloud/react";
 
 ```vue [Vue]
 <script setup lang="ts">
-import { Link } from "@voidcloud/vue";
+import { Link } from "@void-x/vue";
 </script>
 
 <template>
@@ -160,7 +160,7 @@ import { Link } from "@voidcloud/vue";
 
 ```svelte [Svelte]
 <script>
-  import { Link } from "@voidcloud/svelte";
+  import { Link } from "@void-x/svelte";
 </script>
 
 <Link href="/users">Users</Link>
@@ -168,7 +168,7 @@ import { Link } from "@voidcloud/vue";
 ```
 
 ```tsx [Solid]
-import { Link } from "@voidcloud/solid";
+import { Link } from "@void-x/solid";
 
 <Link href="/users">Users</Link>
 <Link href={`/users/${id}`}>View</Link>
@@ -179,7 +179,7 @@ import { Link } from "@voidcloud/solid";
 For programmatic navigation, use `useRouter()`:
 
 ```ts
-import { useRouter } from "@voidcloud/vue"; // or "@voidcloud/react", "@voidcloud/svelte", "@voidcloud/solid"
+import { useRouter } from "@void-x/vue"; // or "@void-x/react", "@void-x/svelte", "@void-x/solid"
 
 const router = useRouter();
 router.visit("/users");
@@ -438,7 +438,7 @@ pages/
 
 ```tsx [React]
 // pages/layout.tsx
-import { useShared, Link } from "@voidcloud/react";
+import { useShared, Link } from "@void-x/react";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { auth } = useShared();
@@ -458,7 +458,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 ```vue [Vue]
 <!-- pages/layout.vue -->
 <script setup lang="ts">
-import { useShared, Link } from "@voidcloud/vue";
+import { useShared, Link } from "@void-x/vue";
 const { auth } = useShared();
 </script>
 
@@ -477,7 +477,7 @@ const { auth } = useShared();
 ```svelte [Svelte]
 <!-- pages/layout.svelte -->
 <script>
-  import { useShared, Link } from "@voidcloud/svelte";
+  import { useShared, Link } from "@void-x/svelte";
   let { children } = $props();
   const { auth } = useShared();
 </script>
@@ -494,7 +494,7 @@ const { auth } = useShared();
 
 ```tsx [Solid]
 // pages/layout.tsx
-import { useShared, Link } from "@voidcloud/solid";
+import { useShared, Link } from "@void-x/solid";
 import type { JSX } from "solid-js";
 
 export default function Layout(props: { children: JSX.Element }) {
@@ -542,7 +542,7 @@ Access it on the client with `useShared()` — the return type is inferred from 
 ::: code-group
 
 ```tsx [React]
-import { useShared } from "@voidcloud/react";
+import { useShared } from "@void-x/react";
 
 export default function Page() {
   const { auth } = useShared(); // { auth: { user: { name: string } | null } }
@@ -552,20 +552,20 @@ export default function Page() {
 
 ```vue [Vue]
 <script setup lang="ts">
-import { useShared } from "@voidcloud/vue";
+import { useShared } from "@void-x/vue";
 const { auth } = useShared(); // { auth: { user: { name: string } | null } }
 </script>
 ```
 
 ```svelte [Svelte]
 <script>
-  import { useShared } from "@voidcloud/svelte";
+  import { useShared } from "@void-x/svelte";
   const { auth } = useShared(); // { auth: { user: { name: string } | null } }
 </script>
 ```
 
 ```tsx [Solid]
-import { useShared } from "@voidcloud/solid";
+import { useShared } from "@void-x/solid";
 
 export default function Page() {
   const shared = useShared(); // { auth: { user: { name: string } | null } }
@@ -627,7 +627,7 @@ Then, use `useForm` in the page component to submit to this action:
 
 ```tsx [React]
 // pages/users/create.tsx
-import { useForm } from "@voidcloud/react";
+import { useForm } from "@void-x/react";
 
 export default function CreateUser() {
   // "/users/create" autocompletes; { name, email } is typed from the action's validator
@@ -655,7 +655,7 @@ export default function CreateUser() {
 ```vue [Vue]
 <!-- pages/users/create.vue -->
 <script setup lang="ts">
-import { useForm } from "@voidcloud/vue";
+import { useForm } from "@void-x/vue";
 
 // "/users/create" autocompletes; { name, email } is typed from the action's validator
 const form = useForm("/users/create", { name: "", email: "" });
@@ -677,7 +677,7 @@ const form = useForm("/users/create", { name: "", email: "" });
 ```svelte [Svelte]
 <!-- pages/users/create.svelte -->
 <script>
-  import { useForm } from "@voidcloud/svelte";
+  import { useForm } from "@void-x/svelte";
 
   // "/users/create" autocompletes; { name, email } is typed from the action's validator
   const form = useForm("/users/create", { name: "", email: "" });
@@ -696,7 +696,7 @@ const form = useForm("/users/create", { name: "", email: "" });
 
 ```tsx [Solid]
 // pages/users/create.tsx
-import { useForm } from "@voidcloud/solid";
+import { useForm } from "@void-x/solid";
 
 export default function CreateUser() {
   // "/users/create" autocompletes; { name, email } is typed from the action's validator

@@ -31,15 +31,15 @@ jobs:
       - run: pnpm -F void publish --provenance --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -F @voidcloud/react publish --provenance --access public --no-git-checks
+      - run: pnpm -F @void-x/react publish --provenance --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -F @voidcloud/vue publish --provenance --access public --no-git-checks
+      - run: pnpm -F @void-x/vue publish --provenance --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -F @voidcloud/svelte publish --provenance --access public --no-git-checks
+      - run: pnpm -F @void-x/svelte publish --provenance --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -F @voidcloud/solid publish --provenance --access public --no-git-checks
+      - run: pnpm -F @void-x/solid publish --provenance --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidReact } from "@voidcloud/react/plugin";
+import { voidReact } from "@void-x/react/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidReact()],

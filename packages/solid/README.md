@@ -1,4 +1,4 @@
-# @voidcloud/solid
+# @void-x/solid
 
 SolidJS framework adapter for Void Pages mode — Inertia-inspired full-stack DX with SSR.
 
@@ -8,7 +8,7 @@ SolidJS framework adapter for Void Pages mode — Inertia-inspired full-stack DX
 // vite.config.ts
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidSolid } from "@voidcloud/solid/plugin";
+import { voidSolid } from "@void-x/solid/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSolid()],
@@ -31,7 +31,7 @@ The pages plugin generates two virtual modules:
 
 ## Runtime
 
-Import from `@voidcloud/solid`:
+Import from `@void-x/solid`:
 
 - **`Link`** — SPA navigation component. Renders `<a>` for GET, `<button>` otherwise. Intercepts clicks for client-side navigation.
 - **`useForm(url, defaults, options?)`** — Form state management using `createStore` from `solid-js/store` and `createSignal`. Methods: `post`, `put`, `patch`, `delete`, `reset`, `clearErrors`.
