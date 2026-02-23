@@ -2,7 +2,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm --filter './packages/**' -r build",
+    "build": "pnpm --F './packages/**' -F '!docs' build",
     "build:all": "pnpm -r build",
     "build:core": "pnpm -F void build",
     "build:docs": "pnpm -F docs build",
