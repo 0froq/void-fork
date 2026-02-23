@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import voidPlugin from "void";
-import { voidVue } from "@void-x/vue/plugin";
+import { voidVue } from "@void-x/vue";
 import tailwind from "@tailwindcss/vite";
 
 export default defineConfig({

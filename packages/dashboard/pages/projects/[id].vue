@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link, useRouter } from "@void-x/vue";
+import { Link, useRouter } from "void/vue";
 import type { Props } from "./[id].server";
 import { ref } from "vue";
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import "../app.css";
-import { Link, useShared } from "@void-x/vue";
+import { Link, useShared } from "void/vue";
 
 const shared = useShared<{ user: { login: string } | null }>();
 </script>
