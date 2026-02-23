@@ -2,7 +2,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm -r build",
     "test": "vitest --run",
     "lint": "oxlint",
     "fmt": "oxfmt --write .",

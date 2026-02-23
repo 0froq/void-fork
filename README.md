@@ -1,11 +1,13 @@
-This is the private platform repo for Void. The open-source framework code lives in `framework/` (gitignored, independent git repo).
+## Platform and framework repos relationship
+
+This is the private platform repo for Void. The open-source framework code lives in `framework/` (git submodule pointing at `voidzero-dev/void`).
 
 ## Context Overview
 
 - **Important**: The source of truth of this file on disk is `README.md`. Both `AGENTS.md` and `CLAUDE.md` are symlinks to this file. When asked to update any of these, always update `README.md` (the actual file).
 - Refer to the [Design Doc](./meta/design-docs/0001-design.md) for the high-level vision and architecture.
 - Refer to the [Progress Doc](./meta/progress.md) for tracking progress.
-- Framework repo: `framework/` (clone from GitHub if not present)
+- Framework repo: `framework/` (git submodule — run `git submodule update --init` after cloning)
 
 ## Best Practices That Must Be Followed
 
@@ -49,7 +51,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | [`packages/dashboard`](./packages/dashboard/README.md) | `@voidcloud/dashboard` (private) | User-facing dashboard — project management, deployments, usage |
 | [`packages/ui`](./packages/ui)                         | `@voidcloud/ui` (private)        | Shared CSS/design tokens (used by dashboard)                   |
 
-The dashboard depends on `void` and `@voidcloud/vue` from npm (resolved via `file:` overrides to `framework/` during local development).
+The dashboard depends on `void` and `@voidcloud/vue`, resolved via `pnpm.overrides` to `link:framework/...` (the git submodule). CI checks out the submodule and builds it before `pnpm install`.
 
 ## `dashboard` Overview
 
