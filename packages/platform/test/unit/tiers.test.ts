@@ -150,4 +150,25 @@ describe("getCurrentBillingPeriodStart", () => {
 
     vi.useRealTimers();
   });
+
+  it("falls back to current date for null input", () => {
+    const before = Date.now();
+    const result = getCurrentBillingPeriodStart(null as any);
+    expect(result.getTime()).toBeGreaterThanOrEqual(before);
+    expect(result.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("falls back to current date for empty string", () => {
+    const before = Date.now();
+    const result = getCurrentBillingPeriodStart("");
+    expect(result.getTime()).toBeGreaterThanOrEqual(before);
+    expect(result.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("falls back to current date for invalid date string", () => {
+    const before = Date.now();
+    const result = getCurrentBillingPeriodStart("not-a-date");
+    expect(result.getTime()).toBeGreaterThanOrEqual(before);
+    expect(result.getTime()).toBeLessThanOrEqual(Date.now());
+  });
 });

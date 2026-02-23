@@ -89,12 +89,15 @@ export function isWithinLimit(limit: number, current: number): boolean {
  * signup anniversary day. Clamps to the last day of the month for short
  * months (e.g. signup Jan 31 → Feb 28 in non-leap years).
  */
-export function getCurrentBillingPeriodStart(billingCycleStart: string): Date {
+export function getCurrentBillingPeriodStart(billingCycleStart: string | null | undefined): Date {
+  // Handle missing or invalid billing_cycle_start (e.g. legacy rows before column existed)
+  if (!billingCycleStart) return new Date();
   // Handle SQLite datetime format (space instead of T, no Z)
   const normalized = billingCycleStart.includes("T")
     ? billingCycleStart
     : billingCycleStart.replace(" ", "T") + "Z";
   const signup = new Date(normalized);
+  if (isNaN(signup.getTime())) return new Date();
   const anchorDay = signup.getUTCDate();
   const now = new Date();
   const year = now.getUTCFullYear();

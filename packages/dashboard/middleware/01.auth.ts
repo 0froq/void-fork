@@ -11,12 +11,6 @@ declare module "vite-cloud" {
 export default defineMiddleware(async (c, next) => {
   const path = c.req.path;
 
-  // Skip non-navigation requests (Vite module fetches, assets, HMR)
-  const accept = c.req.header("Accept") ?? "";
-  if (!accept.includes("text/html")) {
-    return next();
-  }
-
   // Dev bypass — skip auth entirely, platform also bypasses when DEV_AUTH_BYPASS is set
   const devBypass = (c.env as Record<string, string>).DEV_AUTH_BYPASS;
   if (devBypass) {
