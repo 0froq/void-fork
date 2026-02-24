@@ -45,16 +45,14 @@ export async function runRemoteMigrations(
       continue;
     }
 
-    // Execute the migration SQL
-    await queryD1(accountId, apiToken, databaseId, {
-      sql: migration.sql,
-    });
-
-    // Record it in _migrations
-    await queryD1(accountId, apiToken, databaseId, {
-      sql: "INSERT INTO _migrations (name, applied_at) VALUES (?, ?)",
-      params: [migration.name, new Date().toISOString()],
-    });
+    // Execute migration SQL + record in _migrations atomically (single D1 transaction)
+    await batchQueryD1(accountId, apiToken, databaseId, [
+      { sql: migration.sql },
+      {
+        sql: "INSERT INTO _migrations (name, applied_at) VALUES (?, ?)",
+        params: [migration.name, new Date().toISOString()],
+      },
+    ]);
 
     result.applied.push(migration.name);
   }
@@ -69,6 +67,36 @@ interface D1Query {
 
 interface D1QueryResponse {
   results: Record<string, unknown>[];
+}
+
+async function batchQueryD1(
+  accountId: string,
+  apiToken: string,
+  databaseId: string,
+  queries: D1Query[],
+): Promise<D1QueryResponse[]> {
+  const url = `${CF_API_BASE}/${accountId}/d1/database/${databaseId}/query`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(queries),
+  });
+
+  const json = (await response.json()) as {
+    success: boolean;
+    errors: { code: number; message: string }[];
+    result: D1QueryResponse[];
+  };
+
+  if (!json.success) {
+    const msg = json.errors.map((e) => e.message).join(", ");
+    throw new Error(`D1 migration failed: ${msg}`);
+  }
+
+  return json.result;
 }
 
 export async function queryD1(

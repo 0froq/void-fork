@@ -71,6 +71,45 @@ export async function createR2Bucket(
   });
 }
 
+export async function getD1DatabaseByName(
+  accountId: string,
+  apiToken: string,
+  name: string,
+): Promise<D1DatabaseInfo> {
+  const result = await cfFetch<D1DatabaseInfo[]>(
+    `${CF_API_BASE}/${accountId}/d1/database?name=${encodeURIComponent(name)}`,
+    apiToken,
+  );
+  if (result.length === 0) throw new Error(`D1 database not found: ${name}`);
+  return result[0];
+}
+
+export async function getKVNamespaceByTitle(
+  accountId: string,
+  apiToken: string,
+  title: string,
+): Promise<KVNamespaceInfo> {
+  const result = await cfFetch<KVNamespaceInfo[]>(
+    `${CF_API_BASE}/${accountId}/storage/kv/namespaces?title=${encodeURIComponent(title)}`,
+    apiToken,
+  );
+  if (result.length === 0) throw new Error(`KV namespace not found: ${title}`);
+  return result[0];
+}
+
+export async function getQueueByName(
+  accountId: string,
+  apiToken: string,
+  name: string,
+): Promise<QueueInfo> {
+  const result = await cfFetch<QueueInfo[]>(
+    `${CF_API_BASE}/${accountId}/queues?name=${encodeURIComponent(name)}`,
+    apiToken,
+  );
+  if (result.length === 0) throw new Error(`Queue not found: ${name}`);
+  return result[0];
+}
+
 export async function deleteD1Database(
   accountId: string,
   apiToken: string,

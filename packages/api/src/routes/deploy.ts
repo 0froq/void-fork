@@ -9,13 +9,16 @@ import {
   updateProjectMode,
   getDomainsByProjectId,
   countUserDeploymentsToday,
+  getActiveDeployment,
 } from "../db";
 import { provisionBindings } from "../provisioning/provision";
 import { addQueueConsumer } from "../provisioning/cloudflare-api";
 import { runRemoteMigrations, type RemoteMigration } from "../migrations/remote-runner";
 import { validateMigrationSQL } from "../migrations/validate";
 import { getPlanLimits, isWithinLimit } from "../tiers";
-import { SITE_DOMAIN, DEFAULT_DISPATCH_NAMESPACE } from "../constants";
+import { SITE_DOMAIN } from "../constants";
+
+const DEFAULT_DISPATCH_NAMESPACE = "void-users";
 const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
 
 const app = new Hono<ApiEnv>();
@@ -49,6 +52,22 @@ app.post("/:id/deploy", async (c) => {
 
   if (project.user_id !== c.get("userId")) {
     return c.json({ error: "forbidden" }, 403);
+  }
+
+  // Reject concurrent deploys to the same project
+  const activeDeploy = await getActiveDeployment(c.get("db"), projectId);
+  if (activeDeploy) {
+    // SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" in UTC without a Z suffix.
+    // Normalize to ISO 8601 so Date parses it as UTC, not local time.
+    const createdAt = activeDeploy.created_at.includes("T")
+      ? activeDeploy.created_at
+      : activeDeploy.created_at.replace(" ", "T") + "Z";
+    const ageMs = Date.now() - new Date(createdAt).getTime();
+    if (ageMs < 10 * 60 * 1000) {
+      return c.json({ error: "deploy in progress", deployment: activeDeploy.id }, 409);
+    }
+    // Stale — auto-fail and proceed
+    await updateDeploymentStatus(c.get("db"), activeDeploy.id, "failed", "timed out");
   }
 
   // Enforce deploy count limit
@@ -171,7 +190,6 @@ app.post("/:id/deploy", async (c) => {
       projectId,
       manifest,
       c.env.JWT_SECRET,
-      c.env.AI_PROXY_SERVICE ?? "void-ai-proxy",
     );
 
     // 1. Run migrations (before worker deploy — key invariant)

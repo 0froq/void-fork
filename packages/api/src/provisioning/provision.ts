@@ -1,6 +1,14 @@
 import type { DeployManifest, Resource } from "../types";
 import { getProjectResources, createResource, type Db } from "../db";
-import { createD1Database, createKVNamespace, createR2Bucket, createQueue } from "./cloudflare-api";
+import {
+  createD1Database,
+  createKVNamespace,
+  createR2Bucket,
+  createQueue,
+  getD1DatabaseByName,
+  getKVNamespaceByTitle,
+  getQueueByName,
+} from "./cloudflare-api";
 import { hmacSignState } from "../auth/hmac";
 
 export interface WorkerBinding {
@@ -21,7 +29,6 @@ export async function provisionBindings(
   projectId: string,
   manifest: DeployManifest,
   jwtSecret: string,
-  aiProxyService: string,
 ): Promise<WorkerBinding[]> {
   const existing = await getProjectResources(db, projectId);
   const bindings: WorkerBinding[] = [];
@@ -47,7 +54,7 @@ export async function provisionBindings(
   // AI — add service binding to proxy + signed project token
   if (manifest.bindings.ai) {
     const aiToken = await hmacSignState(projectId, jwtSecret);
-    bindings.push({ type: "service", name: "__AI_PROXY", service: aiProxyService });
+    bindings.push({ type: "service", name: "__AI_PROXY", service: "void-ai-proxy" });
     bindings.push({ type: "plain_text", name: "__PROJECT_ID", text: projectId });
     bindings.push({ type: "plain_text", name: "__AI_TOKEN", text: aiToken });
   }
@@ -84,28 +91,72 @@ async function ensureResource(
   const resourceName = `${projectId}-${bindingName}`;
   let cfId: string;
 
-  switch (type) {
-    case "d1": {
-      const result = await createD1Database(accountId, apiToken, resourceName);
-      cfId = result.uuid;
-      break;
-    }
-    case "kv": {
-      const result = await createKVNamespace(accountId, apiToken, resourceName);
-      cfId = result.id;
-      break;
-    }
-    case "r2": {
-      const result = await createR2Bucket(accountId, apiToken, resourceName);
-      cfId = result.name;
-      break;
-    }
-    case "queue": {
-      const result = await createQueue(accountId, apiToken, resourceName);
-      cfId = result.queue_id;
-      break;
+  try {
+    cfId = await createCfResource(type, accountId, apiToken, resourceName);
+  } catch (err) {
+    if (isAlreadyExistsError(err)) {
+      cfId = await lookupCfResource(type, accountId, apiToken, resourceName);
+    } else {
+      throw err;
     }
   }
 
   return createResource(db, projectId, type, cfId, bindingName);
+}
+
+async function createCfResource(
+  type: Resource["type"],
+  accountId: string,
+  apiToken: string,
+  resourceName: string,
+): Promise<string> {
+  switch (type) {
+    case "d1": {
+      const result = await createD1Database(accountId, apiToken, resourceName);
+      return result.uuid;
+    }
+    case "kv": {
+      const result = await createKVNamespace(accountId, apiToken, resourceName);
+      return result.id;
+    }
+    case "r2": {
+      const result = await createR2Bucket(accountId, apiToken, resourceName);
+      return result.name;
+    }
+    case "queue": {
+      const result = await createQueue(accountId, apiToken, resourceName);
+      return result.queue_id;
+    }
+  }
+}
+
+async function lookupCfResource(
+  type: Resource["type"],
+  accountId: string,
+  apiToken: string,
+  resourceName: string,
+): Promise<string> {
+  switch (type) {
+    case "d1": {
+      const result = await getD1DatabaseByName(accountId, apiToken, resourceName);
+      return result.uuid;
+    }
+    case "kv": {
+      const result = await getKVNamespaceByTitle(accountId, apiToken, resourceName);
+      return result.id;
+    }
+    case "r2":
+      // R2 bucket name IS the cf_id — no lookup API needed
+      return resourceName;
+    case "queue": {
+      const result = await getQueueByName(accountId, apiToken, resourceName);
+      return result.queue_id;
+    }
+  }
+}
+
+function isAlreadyExistsError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return msg.includes("already exists") || msg.includes("already been created");
 }

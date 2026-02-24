@@ -784,6 +784,93 @@ describe("POST /projects/:id/deploy", () => {
   });
 });
 
+describe("Deploy serialization (concurrent deploy guard)", () => {
+  it("returns 409 while a deploy is in progress", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "concurrent-app");
+    mockCfApi();
+
+    // Insert an active (non-terminal) deployment
+    await env.db.insert(deployments).values({
+      id: "dpl_active",
+      project_id: project.id,
+      status: "uploading",
+      created_at: sql`datetime('now')`,
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm(),
+      }),
+      env,
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string; deployment: string };
+    expect(body.error).toBe("deploy in progress");
+    expect(body.deployment).toBe("dpl_active");
+  });
+
+  it("auto-fails stale deployment (>10 min) and allows new deploy", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "stale-app");
+    mockCfApi();
+
+    // Insert a stale active deployment (created 15 minutes ago)
+    const staleTime = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    await env.db.insert(deployments).values({
+      id: "dpl_stale",
+      project_id: project.id,
+      status: "uploading",
+      created_at: staleTime,
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm(),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    // Verify stale deployment was auto-failed
+    const stale = await env.db
+      .select({ status: deployments.status, error_message: deployments.error_message })
+      .from(deployments)
+      .where(eq(deployments.id, "dpl_stale"))
+      .get();
+    expect(stale?.status).toBe("failed");
+    expect(stale?.error_message).toBe("timed out");
+  });
+
+  it("allows deploy when previous deployment is terminal (live)", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "terminal-app");
+    mockCfApi();
+
+    // Insert a completed deployment
+    await env.db.insert(deployments).values({
+      id: "dpl_done",
+      project_id: project.id,
+      status: "live",
+      created_at: sql`datetime('now')`,
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm(),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+  });
+});
+
 function buildStaticDeployForm(opts: {
   mode: "spa" | "ssg";
   assets?: Record<string, string>;

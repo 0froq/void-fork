@@ -1,4 +1,16 @@
-import { and, count, desc, asc, eq, inArray, like, or, sql, getTableColumns } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  asc,
+  eq,
+  inArray,
+  notInArray,
+  like,
+  or,
+  sql,
+  getTableColumns,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema";
 import { users, projects, deployments, resources, domains } from "./schema";
@@ -206,6 +218,22 @@ export async function getAllDeploymentsWithProject(
 export async function countDeployments(db: Db): Promise<number> {
   const result = await db.select({ count: count() }).from(deployments).get();
   return result?.count ?? 0;
+}
+
+export async function getActiveDeployment(db: Db, projectId: string): Promise<Deployment | null> {
+  return (
+    (await db
+      .select()
+      .from(deployments)
+      .where(
+        and(
+          eq(deployments.project_id, projectId),
+          notInArray(deployments.status, ["live", "failed"]),
+        ),
+      )
+      .limit(1)
+      .get()) ?? null
+  );
 }
 
 // --- Resources ---
