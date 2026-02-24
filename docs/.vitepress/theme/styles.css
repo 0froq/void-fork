@@ -1,1 +1,8 @@
 @import "@voidzero-dev/vitepress-theme/src/styles/index.css";
+
+.dark .aside-credit-logo-dark {
+  display: none !important;
+}
+.dark .aside-credit-logo-light {
+  display: inline !important;
+}
