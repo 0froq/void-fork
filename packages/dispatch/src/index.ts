@@ -70,7 +70,23 @@ export default {
 
     if (request.method === "GET") {
       const cached = await cache.match(cacheKey);
-      if (cached) return conditionalResponse(request, cached);
+      if (cached) {
+        const response = conditionalResponse(request, cached);
+        ctx.waitUntil(
+          Promise.resolve().then(() =>
+            recordRequest(env, {
+              projectId: routing.projectId,
+              type: "static",
+              method: request.method,
+              status: response.status,
+              responseBytes: Number(response.headers.get("content-length") ?? 0),
+              durationMs: Date.now() - startTime,
+              slug: slug ?? url.hostname,
+            }),
+          ),
+        );
+        return response;
+      }
     }
 
     const pathname = url.pathname;

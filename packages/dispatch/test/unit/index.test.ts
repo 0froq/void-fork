@@ -799,6 +799,34 @@ describe("edge cache versioning", () => {
   });
 });
 
+describe("cache-hit metering", () => {
+  it("records analytics for edge cache hits", async () => {
+    const { env, analyticsWrites } = createEnv({
+      routing: { projectId: "proj_1", mode: "spa", version: "dpl_1" },
+      assets: {
+        "proj_1/current/index.html": { body: "<html>SPA</html>", contentType: "text/html" },
+      },
+    });
+
+    // First request: cache miss — populates cache and meters
+    const ctx1 = createCtx();
+    await app.fetch(new Request("https://my-app.vitecloud.app/"), env, ctx1);
+    await Promise.all((ctx1.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    const countAfterMiss = analyticsWrites.length;
+    expect(countAfterMiss).toBeGreaterThan(0);
+
+    // Second request: cache hit — should also meter
+    const ctx2 = createCtx();
+    await app.fetch(new Request("https://my-app.vitecloud.app/"), env, ctx2);
+    await Promise.all((ctx2.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(analyticsWrites.length).toBe(countAfterMiss + 1);
+
+    const dp = analyticsWrites[analyticsWrites.length - 1] as { blobs: string[] };
+    expect(dp.blobs[0]).toBe("proj_1");
+    expect(dp.blobs[1]).toBe("static");
+  });
+});
+
 describe("custom domain routing", () => {
   it("routes custom domain via domain: KV key", async () => {
     const workerFetch = vi.fn(async () => new Response("custom-domain-api"));

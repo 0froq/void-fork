@@ -50,8 +50,16 @@ const app = new Hono<ApiEnv>()
     }
 
     const userId = c.get("userId");
-    const project = await createProject(c.get("db"), userId, body.slug);
-    return c.json(project, 201);
+    try {
+      const project = await createProject(c.get("db"), userId, body.slug);
+      return c.json(project, 201);
+    } catch (err) {
+      // D1 unique constraint violation — slug was taken between check and insert
+      if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
+        return c.json({ error: "slug already taken" }, 409);
+      }
+      throw err;
+    }
   })
 
   // Get project by ID

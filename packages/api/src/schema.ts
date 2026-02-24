@@ -45,7 +45,7 @@ export const projects = sqliteTable(
       .notNull()
       .default(sql`(datetime('now'))`),
   },
-  (t) => [unique().on(t.user_id, t.slug)],
+  (t) => [unique().on(t.user_id, t.slug), uniqueIndex("idx_projects_slug").on(t.slug)],
 );
 
 // ---------------------------------------------------------------------------

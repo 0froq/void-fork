@@ -14,15 +14,29 @@ const DEFAULT_REDIRECT_URI = "https://api.void.cloud/auth/callback";
 
 const app = new Hono<ApiEnv>();
 
-function isAllowedRedirect(url: string, dashboardUrl?: string): boolean {
-  if (url.startsWith("http://localhost:") || url.startsWith("http://127.0.0.1:")) {
+export function isAllowedRedirect(url: string, dashboardUrl?: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+
+  // Localhost: allow any port, require exact hostname and http protocol
+  if (
+    parsed.protocol === "http:" &&
+    (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")
+  ) {
     return true;
   }
+
+  // Dashboard: compare exact origin (protocol + hostname + port)
   const origin = dashboardUrl ?? "https://dash.void.cloud";
-  if (url.startsWith(origin)) {
-    return true;
+  try {
+    return parsed.origin === new URL(origin).origin;
+  } catch {
+    return false;
   }
-  return false;
 }
 
 // GET /auth/login?redirect=http://localhost:PORT/callback&provider=github|google
