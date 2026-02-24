@@ -13,7 +13,7 @@ export function voidVue(options?: VoidVueOptions): Plugin[] {
   const pagesDir = join(process.cwd(), "pages");
   return [
     vue(options?.vue) as Plugin,
-    pagesPlugin(pagesDir, { viewTransitions: options?.viewTransitions }),
+    ...pagesPlugin(pagesDir, { viewTransitions: options?.viewTransitions }),
     islandsPlugin(pagesDir),
   ];
 }

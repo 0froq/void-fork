@@ -12,70 +12,115 @@ interface PagesPluginOptions {
   viewTransitions?: boolean;
 }
 
-export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plugin {
+export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plugin[] {
   let pageScan: PageScanResult | null = null;
   const root = dirname(pagesDir);
 
-  return {
-    name: "void-vue:pages",
+  return [
+    {
+      name: "void-vue:pages-transform",
+      enforce: "pre",
 
-    async buildStart() {
-      if (existsSync(pagesDir)) {
-        pageScan = await scanPages(root);
-      }
-    },
+      transform: {
+        filter: { id: /\.vue$/ },
+        handler(code, id) {
+          if (!id.startsWith(pagesDir + "/")) return;
+          const rel = id.slice(pagesDir.length + 1);
+          if (rel.split("/").some((s) => s.startsWith("_"))) return;
+          const basename = rel.slice(rel.lastIndexOf("/") + 1);
+          if (basename === "layout.vue" || basename.endsWith(".island.vue")) return;
 
-    resolveId: {
-      filter: { id: /^virtual:void-pages-(renderer|client)$/ },
-      handler(id) {
-        return "\0" + id;
+          // Find defineProps<...>( and strip the generic using bracket counting
+          // to handle nested generics like InferProps<typeof loader>
+          const match = /\bdefineProps\s*</.exec(code);
+          if (!match) return;
+
+          const start = match.index + match[0].length - 1; // position of '<'
+          let depth = 0;
+          let end = -1;
+          let newlineCount = 0;
+          for (let i = start; i < code.length; i++) {
+            const ch = code[i];
+            if (ch === "\n") newlineCount++;
+            else if (ch === "<") depth++;
+            else if (ch === ">") {
+              depth--;
+              if (depth === 0) {
+                end = i;
+                break;
+              }
+            }
+          }
+          if (end === -1) return;
+
+          // Replace with equivalent newlines to preserve line count for source maps
+          const transformed =
+            code.slice(0, start) + "\n".repeat(newlineCount) + code.slice(end + 1);
+          return { code: transformed, map: { mappings: "" } };
+        },
       },
     },
+    {
+      name: "void-vue:pages",
 
-    load: {
-      // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
-      filter: { id: /^\0virtual:void-pages-(renderer|client)$/ },
-      handler(id) {
-        if (id === "\0" + RENDERER_ID) {
-          if (!pageScan)
-            return "export function renderPage() { throw new Error('No pages found'); }";
-          return generateRendererModule(pageScan, pagesDir);
-        }
-        if (id === "\0" + CLIENT_ENTRY_ID) {
-          if (!pageScan) return "";
-          return generateClientEntry(pageScan, pagesDir, options?.viewTransitions);
+      async buildStart() {
+        if (existsSync(pagesDir)) {
+          pageScan = await scanPages(root);
         }
       },
-    },
 
-    config(_, env) {
-      if (!existsSync(pagesDir)) return;
+      resolveId: {
+        filter: { id: /^virtual:void-pages-(renderer|client)$/ },
+        handler(id) {
+          return "\0" + id;
+        },
+      },
 
-      if (env.command === "serve") {
+      load: {
+        // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
+        filter: { id: /^\0virtual:void-pages-(renderer|client)$/ },
+        handler(id) {
+          if (id === "\0" + RENDERER_ID) {
+            if (!pageScan)
+              return "export function renderPage() { throw new Error('No pages found'); }";
+            return generateRendererModule(pageScan, pagesDir);
+          }
+          if (id === "\0" + CLIENT_ENTRY_ID) {
+            if (!pageScan) return "";
+            return generateClientEntry(pageScan, pagesDir, options?.viewTransitions);
+          }
+        },
+      },
+
+      config(_, env) {
+        if (!existsSync(pagesDir)) return;
+
+        if (env.command === "serve") {
+          return {
+            optimizeDeps: {
+              // Pre-include Vue so it's not discovered late via dynamic
+              // imports during SPA navigation, avoiding a full-page reload
+              // from Vite's dep optimizer.
+              include: ["vue"],
+            },
+          };
+        }
+
         return {
-          optimizeDeps: {
-            // Pre-include Vue so it's not discovered late via dynamic
-            // imports during SPA navigation, avoiding a full-page reload
-            // from Vite's dep optimizer.
-            include: ["vue"],
-          },
-        };
-      }
-
-      return {
-        environments: {
-          client: {
-            build: {
-              manifest: true,
-              rollupOptions: {
-                input: { "pages-client": CLIENT_ENTRY_ID },
+          environments: {
+            client: {
+              build: {
+                manifest: true,
+                rollupOptions: {
+                  input: { "pages-client": CLIENT_ENTRY_ID },
+                },
               },
             },
           },
-        },
-      };
+        };
+      },
     },
-  };
+  ];
 }
 
 function generateRendererModule(scan: PageScanResult, pagesDir: string): string {
@@ -87,6 +132,12 @@ ${generateComponentManifest(scan, pagesDir)}
 
 function escapeAttr(s) {
   return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function patchProps(comp, props) {
+  if (comp.__voidPatched) return;
+  comp.props = Object.keys(props);
+  comp.__voidPatched = true;
 }
 
 export async function renderPage(pageObj, assetTags) {
@@ -102,6 +153,7 @@ export async function renderPage(pageObj, assetTags) {
       provide("__void_errors", reactive(pageObj.errors || {}));
       provide("__void_router", null);
       return () => {
+        patchProps(PageComponent, pageObj.props);
         let vnode = h(PageComponent, pageObj.props);
         for (let i = layoutComponents.length - 1; i >= 0; i--) {
           const inner = vnode;
@@ -146,6 +198,12 @@ const initialPageData = JSON.parse(
 
 const shared = reactive(initialPageData.shared || {});
 const errors = reactive(initialPageData.errors || {});
+
+function patchProps(comp, props) {
+  if (comp.__voidPatched) return;
+  comp.props = Object.keys(props);
+  comp.__voidPatched = true;
+}
 
 async function resolveComponent(id) {
   const loader = components[id];
@@ -400,6 +458,7 @@ const app = createSSRApp({
 
     return () => {
       if (!currentComponent.value) return null;
+      patchProps(currentComponent.value, currentProps.value);
       let vnode = h(currentComponent.value, currentProps.value);
       for (let i = currentLayouts.value.length - 1; i >= 0; i--) {
         const inner = vnode;
