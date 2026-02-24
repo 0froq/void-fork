@@ -70,6 +70,7 @@ export default extendConfig(
             items: [
               { text: "Server Routing", link: "/server-routing" },
               { text: "Pages Routing", link: "/pages-routing" },
+              { text: "Islands", link: "/islands" },
               { text: "Typed Fetch", link: "/typed-fetch" },
               { text: "Database", link: "/db" },
               { text: "Key-Value Storage", link: "/kv" },
