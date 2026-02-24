@@ -17,6 +17,7 @@ export type Props = {
   domains: Domain[];
   secrets: API<"secrets", P>;
   resources: Resource[];
+  siteDomain: string;
 };
 
 export const loader = defineHandler<Props>(async (c) => {
@@ -50,6 +51,7 @@ export const loader = defineHandler<Props>(async (c) => {
       };
   const secrets = secretsRes.ok ? ((await secretsRes.json()) as Props["secrets"]) : [];
 
+  const siteDomain = (c.env as Record<string, string>).SITE_DOMAIN ?? "vitecloud.app";
   const activeDomain = domains.find((d) => d.status === "active") ?? domains[0];
   return {
     project: { ...project, custom_domain: activeDomain?.hostname ?? null },
@@ -58,6 +60,7 @@ export const loader = defineHandler<Props>(async (c) => {
     domains,
     secrets,
     resources,
+    siteDomain,
   };
 });
 

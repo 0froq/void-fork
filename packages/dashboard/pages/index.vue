@@ -2,7 +2,7 @@
 import { Link } from "void/vue";
 import type { Props } from "./index.server";
 
-const { projects, usage } = defineProps<Props>();
+const { projects, usage, siteDomain } = defineProps<Props>();
 
 function formatNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -62,7 +62,7 @@ function formatBytes(bytes: number): string {
           </span>
         </div>
         <div class="flex items-center gap-4 font-mono text-xs text-text-muted">
-          <span>{{ project.custom_domain ?? `${project.slug}.vitecloud.app` }}</span>
+          <span>{{ project.custom_domain ?? `${project.slug}.${siteDomain}` }}</span>
           <span>
             {{
               formatNumber(usage.projects.find((u) => u.projectId === project.id)?.requests ?? 0)

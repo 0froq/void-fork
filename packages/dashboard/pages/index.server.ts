@@ -6,6 +6,7 @@ import { createClient, type API } from "../lib/api";
 export type Props = {
   projects: (Project & { custom_domain: string | null })[];
   usage: API<"usage">;
+  siteDomain: string;
 };
 
 export const loader = defineHandler<Props>(async (c) => {
@@ -29,5 +30,6 @@ export const loader = defineHandler<Props>(async (c) => {
     ? await usageRes.json()
     : { requests: 0, bandwidthBytes: 0, aiNeurons: 0, projects: [] };
 
-  return { projects: projectsWithDomains, usage };
+  const siteDomain = (c.env as Record<string, string>).SITE_DOMAIN ?? "vitecloud.app";
+  return { projects: projectsWithDomains, usage, siteDomain };
 });

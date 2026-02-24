@@ -3,7 +3,8 @@ import { Link, useRouter } from "void/vue";
 import type { Props } from "./[id].server";
 import { ref } from "vue";
 
-const { project, deployments, usage, domains, secrets, resources } = defineProps<Props>();
+const { project, deployments, usage, domains, secrets, resources, siteDomain } =
+  defineProps<Props>();
 
 const router = useRouter();
 const expandedDeploy = ref<string | null>(null);
@@ -46,7 +47,7 @@ function timeAgo(dateStr: string): string {
 
 const liveUrl = project.custom_domain
   ? `https://${project.custom_domain}`
-  : `https://${project.slug}.vitecloud.app`;
+  : `https://${project.slug}.${siteDomain}`;
 
 // Domain form
 const newDomain = ref("");
@@ -176,7 +177,7 @@ function removeSecret(name: string) {
       <div class="border border-border p-4">
         <div class="mb-2 flex items-center justify-between">
           <span class="font-mono text-xs text-text-secondary">
-            {{ project.slug }}.vitecloud.app
+            {{ project.slug }}.{{ siteDomain }}
           </span>
           <span class="text-xs text-status-live">default</span>
         </div>
