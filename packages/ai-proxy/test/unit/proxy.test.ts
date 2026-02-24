@@ -41,6 +41,21 @@ async function signJwt(
   return `${header}.${body}.${base64urlEncode(sig)}`;
 }
 
+// --- HMAC helper (mirrors the worker's project token signing) ---
+
+async function signAiToken(projectId: string, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(projectId)));
+  return base64urlEncode(sig);
+}
+
 // --- Mock env factory ---
 
 interface MockAi {
@@ -82,9 +97,14 @@ function post(path: string, body: unknown, headers?: Record<string, string>): Re
 
 describe("ai-proxy worker", () => {
   let validToken: string;
+  const aiTokens: Record<string, string> = {};
 
   beforeAll(async () => {
     validToken = await signJwt({ sub: "user_1", login: "testuser" }, JWT_SECRET);
+    // Pre-compute AI tokens for project IDs used in tests
+    for (const pid of ["proj_1", "proj_42", "proj_99", "p"]) {
+      aiTokens[pid] = await signAiToken(pid, JWT_SECRET);
+    }
   });
 
   describe("CORS", () => {
@@ -198,10 +218,16 @@ describe("ai-proxy worker", () => {
   });
 
   describe("service binding path (no auth header)", () => {
-    it("accepts requests without auth header (trusted)", async () => {
+    it("accepts requests with valid aiToken", async () => {
       const env = createEnv();
       const res = await worker.fetch(
-        post("/run", { action: "run", model: "test-model", inputs: {}, projectId: "proj_1" }),
+        post("/run", {
+          action: "run",
+          model: "test-model",
+          inputs: {},
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_1"],
+        }),
         env,
       );
 
@@ -209,14 +235,56 @@ describe("ai-proxy worker", () => {
       expect(env.AI.run).toHaveBeenCalled();
     });
 
-    it("requires projectId even without auth", async () => {
+    it("requires projectId and aiToken", async () => {
       const res = await worker.fetch(
         post("/run", { action: "run", model: "m", inputs: {} }),
         createEnv(),
       );
 
       expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({ error: "projectId required" });
+      expect(await res.json()).toEqual({ error: "projectId and aiToken required" });
+    });
+
+    it("rejects request with missing aiToken", async () => {
+      const res = await worker.fetch(
+        post("/run", { action: "run", model: "m", inputs: {}, projectId: "proj_1" }),
+        createEnv(),
+      );
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "projectId and aiToken required" });
+    });
+
+    it("rejects request with wrong aiToken", async () => {
+      const res = await worker.fetch(
+        post("/run", {
+          action: "run",
+          model: "m",
+          inputs: {},
+          projectId: "proj_1",
+          aiToken: "invalid-token",
+        }),
+        createEnv(),
+      );
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "invalid project token" });
+    });
+
+    it("rejects request with aiToken for different projectId", async () => {
+      const res = await worker.fetch(
+        post("/run", {
+          action: "run",
+          model: "m",
+          inputs: {},
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_42"], // Token for different project
+        }),
+        createEnv(),
+      );
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "invalid project token" });
     });
   });
 
@@ -224,7 +292,13 @@ describe("ai-proxy worker", () => {
     it("returns 429 when ai-block key exists (service binding path)", async () => {
       const env = createEnv({}, { "ai-block:proj_1": "1" });
       const res = await worker.fetch(
-        post("/run", { action: "run", model: "m", inputs: {}, projectId: "proj_1" }),
+        post("/run", {
+          action: "run",
+          model: "m",
+          inputs: {},
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_1"],
+        }),
         env,
       );
 
@@ -251,7 +325,13 @@ describe("ai-proxy worker", () => {
     it("allows request when ai-block key does not exist", async () => {
       const env = createEnv({}, {});
       const res = await worker.fetch(
-        post("/run", { action: "run", model: "m", inputs: {}, projectId: "proj_1" }),
+        post("/run", {
+          action: "run",
+          model: "m",
+          inputs: {},
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_1"],
+        }),
         env,
       );
 
@@ -269,6 +349,7 @@ describe("ai-proxy worker", () => {
           inputs: { prompt: "hi" },
           options: { max_tokens: 100 },
           projectId: "proj_42",
+          aiToken: aiTokens["proj_42"],
         }),
         env,
       );
@@ -286,7 +367,7 @@ describe("ai-proxy worker", () => {
 
     it("returns 400 when model is missing", async () => {
       const res = await worker.fetch(
-        post("/run", { action: "run", inputs: {}, projectId: "p" }),
+        post("/run", { action: "run", inputs: {}, projectId: "p", aiToken: aiTokens["p"] }),
         createEnv(),
       );
 
@@ -309,6 +390,7 @@ describe("ai-proxy worker", () => {
           model: "m",
           inputs: { prompt: "hi", stream: true },
           projectId: "p",
+          aiToken: aiTokens["p"],
         }),
         env,
       );
@@ -325,7 +407,13 @@ describe("ai-proxy worker", () => {
       const env = createEnv({ run: vi.fn(async () => ({ response: "world" })) });
 
       const res = await worker.fetch(
-        post("/run", { action: "run", model: "m", inputs: { prompt: "hi" }, projectId: "p" }),
+        post("/run", {
+          action: "run",
+          model: "m",
+          inputs: { prompt: "hi" },
+          projectId: "p",
+          aiToken: aiTokens["p"],
+        }),
         env,
       );
 
@@ -336,7 +424,13 @@ describe("ai-proxy worker", () => {
     it("injects gateway metadata even without user options", async () => {
       const env = createEnv();
       await worker.fetch(
-        post("/run", { action: "run", model: "m", inputs: {}, projectId: "proj_99" }),
+        post("/run", {
+          action: "run",
+          model: "m",
+          inputs: {},
+          projectId: "proj_99",
+          aiToken: aiTokens["proj_99"],
+        }),
         env,
       );
 
@@ -356,7 +450,12 @@ describe("ai-proxy worker", () => {
       const env = createEnv({ models: vi.fn(async () => models) });
 
       const res = await worker.fetch(
-        post("/models", { action: "models", inputs: { search: "llama" }, projectId: "p" }),
+        post("/models", {
+          action: "models",
+          inputs: { search: "llama" },
+          projectId: "p",
+          aiToken: aiTokens["p"],
+        }),
         env,
       );
 
@@ -377,6 +476,7 @@ describe("ai-proxy worker", () => {
           inputs: { content: "hello" },
           options: { format: "md" },
           projectId: "p",
+          aiToken: aiTokens["p"],
         }),
         env,
       );
@@ -390,7 +490,7 @@ describe("ai-proxy worker", () => {
   describe("unknown action", () => {
     it("returns 400 for unknown action", async () => {
       const res = await worker.fetch(
-        post("/run", { action: "unknown", projectId: "p" }),
+        post("/run", { action: "unknown", projectId: "p", aiToken: aiTokens["p"] }),
         createEnv(),
       );
 
@@ -408,7 +508,13 @@ describe("ai-proxy worker", () => {
       });
 
       const res = await worker.fetch(
-        post("/run", { action: "run", model: "m", inputs: {}, projectId: "p" }),
+        post("/run", {
+          action: "run",
+          model: "m",
+          inputs: {},
+          projectId: "p",
+          aiToken: aiTokens["p"],
+        }),
         env,
       );
 
@@ -424,7 +530,13 @@ describe("ai-proxy worker", () => {
       });
 
       const res = await worker.fetch(
-        post("/run", { action: "run", model: "m", inputs: {}, projectId: "p" }),
+        post("/run", {
+          action: "run",
+          model: "m",
+          inputs: {},
+          projectId: "p",
+          aiToken: aiTokens["p"],
+        }),
         env,
       );
 
@@ -440,7 +552,13 @@ describe("ai-proxy worker", () => {
       });
 
       const res = await worker.fetch(
-        post("/run", { action: "run", model: "m", inputs: {}, projectId: "p" }),
+        post("/run", {
+          action: "run",
+          model: "m",
+          inputs: {},
+          projectId: "p",
+          aiToken: aiTokens["p"],
+        }),
         env,
       );
 

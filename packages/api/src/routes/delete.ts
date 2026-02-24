@@ -13,6 +13,7 @@ import {
   deleteD1Database,
   deleteKVNamespace,
   deleteR2Bucket,
+  deleteQueue,
   deleteCustomHostname,
 } from "../provisioning/cloudflare-api";
 
@@ -43,6 +44,8 @@ app.delete("/:id", async (c) => {
         await deleteKVNamespace(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id);
       } else if (resource.type === "r2") {
         await deleteR2Bucket(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id);
+      } else if (resource.type === "queue") {
+        await deleteQueue(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id);
       }
     } catch (err) {
       warnings.push(
@@ -100,6 +103,18 @@ app.delete("/:id", async (c) => {
     warnings.push(
       `Failed to delete routing entry: ${err instanceof Error ? err.message : String(err)}`,
     );
+  }
+
+  // Delete queue routing KV entries
+  const queueResources = resources.filter((r) => r.type === "queue");
+  for (const q of queueResources) {
+    try {
+      await c.env.ROUTING.delete(`queue:${q.cf_id}`);
+    } catch (err) {
+      warnings.push(
+        `Failed to delete queue routing entry: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   // Clean up custom hostnames from CF + KV

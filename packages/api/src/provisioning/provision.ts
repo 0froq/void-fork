@@ -1,6 +1,7 @@
 import type { DeployManifest, Resource } from "../types";
 import { getProjectResources, createResource, type Db } from "../db";
 import { createD1Database, createKVNamespace, createR2Bucket, createQueue } from "./cloudflare-api";
+import { hmacSignState } from "../auth/hmac";
 
 export interface WorkerBinding {
   type: "d1" | "kv_namespace" | "r2_bucket" | "queue" | "service" | "plain_text";
@@ -19,6 +20,7 @@ export async function provisionBindings(
   apiToken: string,
   projectId: string,
   manifest: DeployManifest,
+  jwtSecret: string,
 ): Promise<WorkerBinding[]> {
   const existing = await getProjectResources(db, projectId);
   const bindings: WorkerBinding[] = [];
@@ -41,10 +43,12 @@ export async function provisionBindings(
     bindings.push({ type: "r2_bucket", name, bucket_name: binding.cf_id });
   }
 
-  // AI — add service binding to proxy + project ID
+  // AI — add service binding to proxy + signed project token
   if (manifest.bindings.ai) {
+    const aiToken = await hmacSignState(projectId, jwtSecret);
     bindings.push({ type: "service", name: "__AI_PROXY", service: "void-ai-proxy" });
     bindings.push({ type: "plain_text", name: "__PROJECT_ID", text: projectId });
+    bindings.push({ type: "plain_text", name: "__AI_TOKEN", text: aiToken });
   }
 
   // Queues — provision CF queues and add producer bindings

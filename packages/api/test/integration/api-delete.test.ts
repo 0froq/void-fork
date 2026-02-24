@@ -33,7 +33,7 @@ afterEach(() => {
 
 async function addResource(
   projectId: string,
-  type: "d1" | "kv" | "r2",
+  type: "d1" | "kv" | "r2" | "queue",
   cfId: string,
   bindingName: string,
 ): Promise<void> {
@@ -223,6 +223,51 @@ describe("DELETE /projects/:id", () => {
     const body = (await res.json()) as { ok: boolean; warnings?: string[] };
     expect(body).toEqual({ ok: true, id: project.id, slug: "static-app" });
     expect(body.warnings).toBeUndefined();
+  });
+
+  it("deletes queue resources and routing KV entries", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "queue-app");
+    const fetchMock = mockCfApi();
+
+    // Add a queue resource
+    await addResource(project.id, "queue", "queue-cf-id-123", "MY_QUEUE");
+
+    // Add queue routing KV entry (as deploy would)
+    await env.ROUTING.put(
+      "queue:queue-cf-id-123",
+      JSON.stringify({ workerName: "user-queue-app", projectId: project.id, queueName: "tasks" }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    // Verify deleteQueue CF API was called
+    const deleteQueueCall = fetchMock.mock.calls.find((call: unknown[]) => {
+      const url = typeof call[0] === "string" ? call[0] : String(call[0]);
+      return (
+        url.includes("/queues/queue-cf-id-123") && (call[1] as RequestInit)?.method === "DELETE"
+      );
+    });
+    expect(deleteQueueCall).toBeDefined();
+
+    // Verify queue routing KV entry is removed
+    const routing = await env.ROUTING.get("queue:queue-cf-id-123");
+    expect(routing).toBeNull();
+
+    // Verify DB records are gone
+    const dbResources = await env.db
+      .select()
+      .from(resources)
+      .where(eq(resources.project_id, project.id))
+      .all();
+    expect(dbResources).toHaveLength(0);
   });
 
   it("calls worker dispatch deletion", async () => {

@@ -38,6 +38,7 @@ import { getProjectResources, createResource } from "../../src/db";
 const ACCOUNT_ID = "test-account";
 const API_TOKEN = "test-token";
 const PROJECT_ID = "proj_abc123";
+const JWT_SECRET = "test-jwt-secret";
 const mockDb = {} as Db;
 
 beforeEach(() => {
@@ -49,7 +50,14 @@ describe("provisionBindings", () => {
   it("provisions D1 when manifest requires it and no resource exists", async () => {
     const manifest: DeployManifest = { version: 1, bindings: { d1: ["DB"] } };
 
-    const bindings = await provisionBindings(mockDb, ACCOUNT_ID, API_TOKEN, PROJECT_ID, manifest);
+    const bindings = await provisionBindings(
+      mockDb,
+      ACCOUNT_ID,
+      API_TOKEN,
+      PROJECT_ID,
+      manifest,
+      JWT_SECRET,
+    );
 
     expect(createD1Database).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, `${PROJECT_ID}-DB`);
     expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, "d1", "d1-uuid-123", "DB");
@@ -59,7 +67,14 @@ describe("provisionBindings", () => {
   it("provisions KV when manifest requires it", async () => {
     const manifest: DeployManifest = { version: 1, bindings: { kv: ["KV"] } };
 
-    const bindings = await provisionBindings(mockDb, ACCOUNT_ID, API_TOKEN, PROJECT_ID, manifest);
+    const bindings = await provisionBindings(
+      mockDb,
+      ACCOUNT_ID,
+      API_TOKEN,
+      PROJECT_ID,
+      manifest,
+      JWT_SECRET,
+    );
 
     expect(createKVNamespace).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, `${PROJECT_ID}-KV`);
     expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, "kv", "kv-id-456", "KV");
@@ -69,7 +84,14 @@ describe("provisionBindings", () => {
   it("provisions R2 when manifest requires it", async () => {
     const manifest: DeployManifest = { version: 1, bindings: { r2: ["STORAGE"] } };
 
-    const bindings = await provisionBindings(mockDb, ACCOUNT_ID, API_TOKEN, PROJECT_ID, manifest);
+    const bindings = await provisionBindings(
+      mockDb,
+      ACCOUNT_ID,
+      API_TOKEN,
+      PROJECT_ID,
+      manifest,
+      JWT_SECRET,
+    );
 
     expect(createR2Bucket).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, `${PROJECT_ID}-STORAGE`);
     expect(createResource).toHaveBeenCalledWith(
@@ -96,7 +118,14 @@ describe("provisionBindings", () => {
     vi.mocked(getProjectResources).mockResolvedValue(existingResources);
 
     const manifest: DeployManifest = { version: 1, bindings: { d1: ["DB"] } };
-    const bindings = await provisionBindings(mockDb, ACCOUNT_ID, API_TOKEN, PROJECT_ID, manifest);
+    const bindings = await provisionBindings(
+      mockDb,
+      ACCOUNT_ID,
+      API_TOKEN,
+      PROJECT_ID,
+      manifest,
+      JWT_SECRET,
+    );
 
     expect(createD1Database).not.toHaveBeenCalled();
     expect(createResource).not.toHaveBeenCalled();
@@ -109,7 +138,14 @@ describe("provisionBindings", () => {
       bindings: { d1: ["DB"], kv: ["KV"], r2: ["STORAGE"] },
     };
 
-    const bindings = await provisionBindings(mockDb, ACCOUNT_ID, API_TOKEN, PROJECT_ID, manifest);
+    const bindings = await provisionBindings(
+      mockDb,
+      ACCOUNT_ID,
+      API_TOKEN,
+      PROJECT_ID,
+      manifest,
+      JWT_SECRET,
+    );
 
     expect(createD1Database).toHaveBeenCalledOnce();
     expect(createKVNamespace).toHaveBeenCalledOnce();
@@ -127,13 +163,42 @@ describe("provisionBindings", () => {
   it("handles empty manifest (no bindings needed)", async () => {
     const manifest: DeployManifest = { version: 1, bindings: {} };
 
-    const bindings = await provisionBindings(mockDb, ACCOUNT_ID, API_TOKEN, PROJECT_ID, manifest);
+    const bindings = await provisionBindings(
+      mockDb,
+      ACCOUNT_ID,
+      API_TOKEN,
+      PROJECT_ID,
+      manifest,
+      JWT_SECRET,
+    );
 
     expect(createD1Database).not.toHaveBeenCalled();
     expect(createKVNamespace).not.toHaveBeenCalled();
     expect(createR2Bucket).not.toHaveBeenCalled();
     expect(createResource).not.toHaveBeenCalled();
     expect(bindings).toEqual([]);
+  });
+
+  it("provisions AI bindings with signed token when manifest requires ai", async () => {
+    const manifest: DeployManifest = { version: 1, bindings: { ai: true } };
+
+    const bindings = await provisionBindings(
+      mockDb,
+      ACCOUNT_ID,
+      API_TOKEN,
+      PROJECT_ID,
+      manifest,
+      JWT_SECRET,
+    );
+
+    expect(bindings).toHaveLength(3);
+    expect(bindings[0]).toEqual({ type: "service", name: "__AI_PROXY", service: "void-ai-proxy" });
+    expect(bindings[1]).toEqual({ type: "plain_text", name: "__PROJECT_ID", text: PROJECT_ID });
+    expect(bindings[2].type).toBe("plain_text");
+    expect(bindings[2].name).toBe("__AI_TOKEN");
+    // Token should be a non-empty string (HMAC signature)
+    expect(typeof bindings[2].text).toBe("string");
+    expect(bindings[2].text!.length).toBeGreaterThan(0);
   });
 
   it("provisions only missing resources when some already exist", async () => {
@@ -154,7 +219,14 @@ describe("provisionBindings", () => {
       bindings: { d1: ["DB"], kv: ["KV"] },
     };
 
-    const bindings = await provisionBindings(mockDb, ACCOUNT_ID, API_TOKEN, PROJECT_ID, manifest);
+    const bindings = await provisionBindings(
+      mockDb,
+      ACCOUNT_ID,
+      API_TOKEN,
+      PROJECT_ID,
+      manifest,
+      JWT_SECRET,
+    );
 
     expect(createD1Database).not.toHaveBeenCalled();
     expect(createKVNamespace).toHaveBeenCalledOnce();

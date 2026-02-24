@@ -10,6 +10,7 @@ interface ProxyRequest {
   inputs?: unknown;
   options?: Record<string, unknown>;
   projectId?: string;
+  aiToken?: string;
 }
 
 interface JwtPayload {
@@ -77,10 +78,13 @@ export default {
       return handleAction(env, body, projectId);
     }
 
-    // Service binding path (production) — trusted, projectId from body
+    // Service binding path (production) — verify HMAC-signed project token
     const body = (await req.json()) as ProxyRequest;
-    if (!body.projectId) {
-      return Response.json({ error: "projectId required" }, { status: 400 });
+    if (!body.projectId || !body.aiToken) {
+      return Response.json({ error: "projectId and aiToken required" }, { status: 400 });
+    }
+    if (!(await verifyHmac(body.projectId, body.aiToken, env.JWT_SECRET))) {
+      return Response.json({ error: "invalid project token" }, { status: 403 });
     }
     projectId = body.projectId;
 
@@ -136,6 +140,25 @@ async function handleAction(env: Env, body: ProxyRequest, projectId: string): Pr
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return Response.json({ error: message }, { status: 502, headers: CORS_HEADERS });
+  }
+}
+
+// --- HMAC verification for project tokens ---
+
+async function verifyHmac(data: string, signature: string, secret: string): Promise<boolean> {
+  try {
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    const sigBytes = base64urlDecode(signature);
+    return crypto.subtle.verify("HMAC", key, sigBytes.buffer as ArrayBuffer, encoder.encode(data));
+  } catch {
+    return false;
   }
 }
 

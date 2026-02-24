@@ -172,6 +172,7 @@ app.post("/:id/deploy", async (c) => {
       c.env.CF_API_TOKEN,
       projectId,
       manifest,
+      c.env.JWT_SECRET,
     );
 
     // 1. Run migrations (before worker deploy — key invariant)
