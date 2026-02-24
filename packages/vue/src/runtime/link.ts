@@ -30,7 +30,7 @@ export const Link: Component = defineComponent({
       h(
         props.method.toUpperCase() === "GET" ? "a" : "button",
         {
-          ...(props.method.toUpperCase() === "GET" ? { href: props.href } : {}),
+          ...(props.method.toUpperCase() === "GET" ? { href: props.href } : { type: "button" }),
           onClick,
           ...attrs,
         },

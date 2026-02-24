@@ -27,7 +27,7 @@
     {@render children()}
   </a>
 {:else}
-  <button onclick={onClick} {...rest}>
+  <button type="button" onclick={onClick} {...rest}>
     {@render children()}
   </button>
 {/if}

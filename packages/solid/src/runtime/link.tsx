@@ -48,7 +48,7 @@ export function Link(props: LinkProps): JSX.Element {
           {local.children}
         </a>
       ) : (
-        <button onClick={onClick} {...(rest as any)}>
+        <button type="button" onClick={onClick} {...(rest as any)}>
           {local.children}
         </button>
       )}

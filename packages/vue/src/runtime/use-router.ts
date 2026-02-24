@@ -8,7 +8,13 @@ export function useRouter() {
   return router as {
     visit(
       url: string,
-      options?: { method?: string; data?: unknown; preserveScroll?: boolean },
+      options?: {
+        method?: string;
+        data?: unknown;
+        preserveScroll?: boolean;
+        preserveState?: boolean;
+        viewTransition?: boolean;
+      },
     ): Promise<unknown>;
     reload(): Promise<unknown>;
     post(url: string, data?: unknown, options?: Record<string, unknown>): Promise<unknown>;

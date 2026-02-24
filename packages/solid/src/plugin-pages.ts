@@ -217,12 +217,17 @@ const router = {
       window.history.pushState({}, "", pageData.url);
     }
 
+    if (!options.preserveScroll) {
+      window.scrollTo(0, 0);
+    }
+
     return pageData;
   },
 
   async reload() {
     return router.visit(window.location.pathname + window.location.search, {
       preserveState: true,
+      preserveScroll: true,
     });
   },
 

@@ -50,7 +50,7 @@ export function Link({
   }
 
   return (
-    <button onClick={onClick} {...(rest as ButtonHTMLAttributes<HTMLButtonElement>)}>
+    <button type="button" onClick={onClick} {...(rest as ButtonHTMLAttributes<HTMLButtonElement>)}>
       {children}
     </button>
   );
