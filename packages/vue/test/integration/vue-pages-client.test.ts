@@ -618,6 +618,53 @@ describe("vue-pages client (dev)", () => {
   defineClientTests(DEV_BASE);
   defineIslandTests(DEV_BASE);
 
+  it("island component HMR updates without full page reload", async () => {
+    const counterFile = join(ROOT, "playground/vue-pages/pages/blog/_Counter.vue");
+    const original = readFileSync(counterFile, "utf-8");
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    page.setDefaultTimeout(10_000);
+
+    try {
+      await page.goto(`${DEV_BASE}/blog`);
+      await page.waitForSelector('[data-island][data-hydrated="true"]');
+
+      // Interact to establish client state — count becomes 1
+      await page.click("button:has-text('Increment')");
+      await page.waitForFunction(
+        () => document.querySelector('[data-testid="count"]')?.textContent === "Count: 1",
+      );
+
+      // Set a window marker to detect full page reload
+      await page.evaluate(() => {
+        (window as any).__hmr_marker = true;
+      });
+
+      // Edit the island component — change the label in the template
+      const modified = original.replace("Count: {{ count }}", "Total: {{ count }}");
+      writeFileSync(counterFile, modified);
+
+      // Wait for HMR to update the component text
+      await page.waitForFunction(
+        () => document.querySelector('[data-testid="count"]')?.textContent?.startsWith("Total:"),
+        { timeout: 10_000 },
+      );
+
+      // No full page reload — window marker should still be set
+      const markerSurvived = await page.evaluate(() => (window as any).__hmr_marker === true);
+      expect(markerSurvived).toBe(true);
+
+      // Vue HMR preserves reactive state for template-only changes — count should still be 1
+      const text = await page.textContent('[data-testid="count"]');
+      expect(text).toBe("Total: 1");
+    } finally {
+      await page.context().close();
+      writeFileSync(counterFile, original);
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  });
+
   it("island file edit triggers reload with updated content", async () => {
     const islandFile = join(ROOT, "playground/vue-pages/pages/blog/index.island.vue");
     const original = readFileSync(islandFile, "utf-8");
