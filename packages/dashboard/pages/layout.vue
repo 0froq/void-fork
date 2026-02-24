@@ -1,12 +1,32 @@
 <script setup lang="ts">
 import "../app.css";
-import { Link, useShared } from "void/vue";
+import { ref, watch } from "vue";
+import { Link, useShared, useRouter } from "void/vue";
 
 const shared = useShared<{ user: { login: string } | null }>();
+const { navigating } = useRouter();
+
+const barState = ref<"idle" | "loading" | "completing">("idle");
+let completingTimer: ReturnType<typeof setTimeout>;
+
+watch(navigating, (active) => {
+  clearTimeout(completingTimer);
+  if (active) {
+    barState.value = "loading";
+  } else if (barState.value === "loading") {
+    barState.value = "completing";
+    completingTimer = setTimeout(() => {
+      barState.value = "idle";
+    }, 500);
+  }
+});
 </script>
 
 <template>
   <div class="min-h-screen bg-bg text-text">
+    <!-- Navigation progress bar -->
+    <div class="nav-progress" :class="barState" />
+
     <!-- Top bar -->
     <nav
       v-if="shared.user"
