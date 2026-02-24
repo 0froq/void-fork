@@ -12,8 +12,25 @@ const seedSql = resolve(__dirname, "seed.sql");
 // Helpers
 // ---------------------------------------------------------------------------
 
-function run(cmd: string, cwd: string): void {
-  execSync(cmd, { cwd, stdio: "pipe" });
+const force = process.argv.includes("--force");
+
+function run(cmd: string, cwd: string): string {
+  return execSync(cmd, { cwd, stdio: "pipe" }).toString();
+}
+
+function adminUserExists(): boolean {
+  const state = resolve(platformDir, ".wrangler/state");
+  if (!existsSync(state)) return false;
+  try {
+    const out = run(
+      `npx wrangler d1 execute void-api --local --command "SELECT id FROM users WHERE id = 'user_admin'" --json`,
+      platformDir,
+    );
+    const results = JSON.parse(out);
+    return results[0]?.results?.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -22,6 +39,12 @@ function run(cmd: string, cwd: string): void {
 
 async function main(): Promise<void> {
   p.intro("Platform local dev setup");
+
+  if (!force && adminUserExists()) {
+    p.log.info("Local dev already set up (admin user exists). Use --force to re-setup.");
+    p.outro("Nothing to do.");
+    return;
+  }
 
   // 1. Reset local D1 state
   const s = p.spinner();

@@ -2,6 +2,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "pnpm -F api -F dashboard --parallel dev",
     "test": "vitest --run",
     "lint": "oxlint",
     "fmt": "oxfmt --write .",
