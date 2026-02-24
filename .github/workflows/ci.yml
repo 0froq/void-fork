@@ -45,15 +45,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
-      - uses: actions/cache@v4
-        if: matrix.suite == 'pages-adapters-react-vue' || matrix.suite == 'pages-adapters-svelte-solid'
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ hashFiles('pnpm-lock.yaml') }}
-      - run: pnpm exec playwright install chromium
-        if: (matrix.suite == 'pages-adapters-react-vue' || matrix.suite == 'pages-adapters-svelte-solid') && steps.playwright-cache.outputs.cache-hit != 'true'
-      - run: pnpm exec playwright install-deps chromium
+      - run: pnpm exec playwright install --with-deps chromium
         if: matrix.suite == 'pages-adapters-react-vue' || matrix.suite == 'pages-adapters-svelte-solid'
 
       - run: pnpm vitest --run ${{ matrix.pattern }}
