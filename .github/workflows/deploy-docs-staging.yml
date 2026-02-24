@@ -19,6 +19,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:core
+      - run: pnpm install
       - run: pnpm deploy:staging:docs
         env:
           VOID_TOKEN: ${{ secrets.VOID_TOKEN }}
