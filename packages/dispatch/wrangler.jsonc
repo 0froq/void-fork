@@ -53,8 +53,6 @@
           "zone_name": "vitecloud.app",
         },
         { "pattern": "*.staging.vitecloud.app", "zone_name": "vitecloud.app" },
-        { "pattern": "*/*", "zone_name": "vitecloud.app" },
-        { "pattern": "*", "zone_name": "vitecloud.app" },
       ],
       "vars": {
         "BASE_HOSTNAME": "staging.vitecloud.app",
