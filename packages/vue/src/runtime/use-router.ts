@@ -6,7 +6,7 @@ export function useRouter() {
     throw new Error("useRouter() must be called inside a Pages component");
   }
   return router as {
-    navigating: import("vue").Ref<boolean>;
+    onNavigation(onStart?: () => void, onEnd?: () => void): () => void;
     visit(
       url: string,
       options?: {

@@ -6,6 +6,7 @@ export function useRouter() {
     throw new Error("useRouter() must be called inside a Pages component");
   }
   return router as {
+    onNavigation(onStart?: () => void, onEnd?: () => void): () => void;
     visit(
       url: string,
       options?: { method?: string; data?: unknown; preserveScroll?: boolean },

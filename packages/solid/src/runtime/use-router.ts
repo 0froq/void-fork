@@ -9,6 +9,7 @@ export function useRouter() {
     );
   }
   return router as {
+    onNavigation(onStart?: () => void, onEnd?: () => void): () => void;
     visit(url: string, options?: Record<string, unknown>): Promise<unknown>;
     reload(): Promise<unknown>;
     post(

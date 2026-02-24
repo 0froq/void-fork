@@ -205,8 +205,17 @@ async function resolveLayouts(componentId) {
 }
 
 // --- Router ---
+const _navListeners = new Set();
+
 export const router = {
+  onNavigation(onStart, onEnd) {
+    const entry = { onStart, onEnd };
+    _navListeners.add(entry);
+    return () => _navListeners.delete(entry);
+  },
   async visit(url, options = {}) {
+    for (const l of _navListeners) l.onStart?.();
+    try {
     const method = (options.method || "GET").toUpperCase();
     const headers = { "X-VoidPages": "true", "Accept": "application/json" };
     const fetchOptions = { method, headers };
@@ -258,6 +267,9 @@ export const router = {
     }
 
     return pageData;
+    } finally {
+      for (const l of _navListeners) l.onEnd?.();
+    }
   },
 
   async reload() {

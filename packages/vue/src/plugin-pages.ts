@@ -76,7 +76,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
 
 function generateRendererModule(scan: PageScanResult, pagesDir: string): string {
   return `
-import { createSSRApp, h, reactive, provide, ref } from "vue";
+import { createSSRApp, h, reactive, provide } from "vue";
 import { renderToString } from "vue/server-renderer";
 
 ${generateComponentManifest(scan, pagesDir)}
@@ -96,7 +96,7 @@ export async function renderPage(pageObj, assetTags) {
     setup() {
       provide("__void_shared", reactive(pageObj.shared || {}));
       provide("__void_errors", reactive(pageObj.errors || {}));
-      provide("__void_router", { navigating: ref(false) });
+      provide("__void_router", null);
       return () => {
         let vnode = h(PageComponent, pageObj.props);
         for (let i = layoutComponents.length - 1; i >= 0; i--) {
@@ -129,7 +129,7 @@ function generateClientEntry(
   viewTransitions?: boolean,
 ): string {
   return `
-import { createSSRApp, h, reactive, provide, shallowRef, nextTick, ref } from "vue";
+import { createSSRApp, h, reactive, provide, shallowRef, nextTick } from "vue";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 
@@ -171,12 +171,16 @@ async function updatePage(pageData) {
   currentComponent.value = comp;
 }
 
-const navigating = ref(false);
+const _navListeners = new Set();
 
 export const router = {
-  navigating,
+  onNavigation(onStart, onEnd) {
+    const entry = { onStart, onEnd };
+    _navListeners.add(entry);
+    return () => _navListeners.delete(entry);
+  },
   async visit(url, options = {}) {
-    navigating.value = true;
+    for (const l of _navListeners) l.onStart?.();
     try {
     const method = (options.method || "GET").toUpperCase();
     const headers = { "X-VoidPages": "true", "Accept": "application/json" };
@@ -230,7 +234,7 @@ export const router = {
 
     return pageData;
     } finally {
-      navigating.value = false;
+      for (const l of _navListeners) l.onEnd?.();
     }
   },
 
