@@ -5,8 +5,9 @@ User-facing dashboard for Void. Built as a Vue Pages mode app, dogfooding the pl
 ## Architecture
 
 - **Vue Pages mode** — `voidPlugin()` + `voidVue()`, SSR with client hydration
-- **BFF pattern** — server-side loaders call the platform API over HTTP using the user's JWT. No direct D1 or Analytics Engine access.
-- **Auth** — OAuth (GitHub/Google) via the platform's `/auth/login` flow. JWT stored in an httpOnly cookie (`void_token`), forwarded as Bearer token in loaders.
+- **Direct D1 for reads** — loaders query the shared API database directly via Drizzle (projects, deployments, domains, resources, user profile). Non-D1 reads (usage metrics via Analytics Engine, secrets via CF API) still go through the platform API over HTTP.
+- **API for mutations** — all write operations (add/remove domain, set/remove secret) go through the platform API.
+- **Auth** — OAuth (GitHub/Google) via the platform's `/auth/login` flow. JWT stored in an httpOnly cookie (`void_token`). Middleware extracts `userId` from the JWT and initializes a Drizzle DB instance from the D1 binding.
 - **Styling** — Tailwind CSS v4 with shared design tokens from `@voidcloud/ui`. Dark TUI aesthetic.
 
 ## Pages
@@ -21,54 +22,48 @@ User-facing dashboard for Void. Built as a Vue Pages mode app, dogfooding the pl
 
 ## Local Development
 
-1. **Build dependencies** (from repo root):
+The easiest way is to run the setup script from the API package, which seeds the DB and creates `.dev.vars` for both the API and dashboard:
 
 ```sh
-pnpm -C packages/void build
-pnpm -C packages/vue build
+pnpm -C packages/api setup
 ```
 
-2. **Start the platform API** (separate terminal):
+Then:
+
+1. **Start the platform API** (needed for usage + secrets):
 
 ```sh
 pnpm -C packages/api dev
 ```
 
-3. **Create `.dev.vars`** in `packages/dashboard/`:
-
-```
-DEV_AUTH_BYPASS=true
-API_URL=http://localhost:8787
-```
-
-This skips OAuth entirely — the dashboard sends a dummy token and the platform resolves to the first user in the DB.
-
-4. **Start the dashboard dev server:**
+2. **Start the dashboard dev server** (separate terminal):
 
 ```sh
 pnpm -C packages/dashboard dev
 ```
 
+The dashboard shares the API's local D1 state via the `persistTo` option in `vite.config.ts`, so both workers read from the same SQLite file in dev.
+
 ## Source Layout
 
 ```
 lib/
-  api.ts                    # Platform API client (typed fetch wrapper)
+  api.ts                    # Platform API client (typed fetch wrapper, used for mutations + usage/secrets)
 middleware/
-  01.auth.ts                # JWT cookie extraction, login redirect
+  01.auth.ts                # D1 init, JWT cookie extraction, userId extraction, login redirect
 pages/
   layout.vue                # Top bar with nav + user info
   login.vue                 # OAuth login buttons
   logout.vue                # Cookie clear + redirect
   logout.server.ts
   index.vue                 # Project list + usage cards
-  index.server.ts
+  index.server.ts           # Direct D1 for projects, API for usage
   settings.vue              # Profile + plan info
-  settings.server.ts
+  settings.server.ts        # Direct D1 for user + plan limits
   auth/
     callback.vue            # OAuth callback (receives token)
     callback.server.ts
   projects/
     [id].vue                # Project detail (all sections)
-    [id].server.ts          # Loader + action (domains, secrets)
+    [id].server.ts          # Direct D1 for project/deployments/domains/resources, API for usage/secrets. Actions for mutations.
 ```

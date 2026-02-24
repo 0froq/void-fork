@@ -29,6 +29,7 @@ For PRs that span both repos: merge the framework PR first, then update the subm
 
 1. General
 
+- **Always** read `meta/lessons.md` at the start of each session before taking any action.
 - **Never** commit without asking for confirmation.
 - When writing design docs or implementation plans to disk, place them in `meta/design-docs` and follow existing file name and frontmatter conventions.
 - When adding new dependencies to the project, always run `npm view [package] version` to get the latest version.
@@ -43,7 +44,6 @@ For PRs that span both repos: merge the framework PR first, then update the subm
    - After any correction from the user, update meta/lessons.md with the relevant pattern.
    - Create rules for yourself that prevent repeating the same mistake.
    - Iterate on these lessons rigorously until the mistake rate declines.
-   - Review lessons at the start of each session when relevant to the project.
 
 4. Principles
    - Simplicity First: Make every change as simple as possible. Minimize code impact.
@@ -98,7 +98,7 @@ The dashboard depends on `void` and `@void-x/vue`, resolved via `pnpm.overrides`
 
 ## `dashboard` Overview
 
-Vue Pages mode app serving the user-facing Void dashboard at `dash.void.cloud`. Built with `@void-x/vue` (SSR + `<script server>` blocks), Hono, and Tailwind CSS v4 with shared design tokens from `@voidcloud/ui`. Uses a BFF pattern — server-side loaders call the API with the user's JWT (stored in an httpOnly cookie), so the client never talks to the API directly.
+Vue Pages mode app serving the user-facing Void dashboard at `dash.void.cloud`. Built with `@void-x/vue` (SSR + `<script server>` blocks), Hono, and Tailwind CSS v4 with shared design tokens from `@voidcloud/ui`. Has its own D1 binding to the API database — read-only loaders use direct Drizzle queries, while mutations and non-D1 reads (usage metrics, secrets) go through the API via HTTP.
 
 - **Auth**: OAuth (GitHub/Google) via API, JWT in httpOnly `void_token` cookie
 - **Pages**: login, project list with aggregate usage, project detail (deployments, domains, secrets, usage metrics), settings
