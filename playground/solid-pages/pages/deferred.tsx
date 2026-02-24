@@ -2,7 +2,7 @@ import type { Props } from "./deferred.server";
 
 export default function DeferredPage(props: Props) {
   const stats = props.stats;
-  if (!stats || stats.loading) {
+  if (stats.loading) {
     return (
       <div>
         <h1>{props.title}</h1>

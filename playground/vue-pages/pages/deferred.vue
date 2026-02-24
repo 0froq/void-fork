@@ -7,7 +7,7 @@ defineProps<Props>();
 <template>
   <div>
     <h1>{{ title }}</h1>
-    <div v-if="!stats || stats.loading" data-testid="deferred-loading">Loading stats...</div>
+    <div v-if="stats.loading" data-testid="deferred-loading">Loading stats...</div>
     <div v-else-if="stats.error" data-testid="deferred-error">Error: {{ stats.error.message }}</div>
     <div v-else data-testid="deferred-resolved">Count: {{ stats.value.count }}</div>
   </div>

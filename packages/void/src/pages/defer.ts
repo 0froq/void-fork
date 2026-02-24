@@ -54,6 +54,8 @@ export function separateDeferred(props: Record<string, unknown>): {
         deferredMap[groupName] = { resolver: sentinel.resolver, keys: [] };
       }
       deferredMap[groupName].keys.push(key);
+      // Include a loading placeholder so SSR components receive the prop
+      immediateProps[key] = { value: null, loading: true, error: null };
     } else {
       immediateProps[key] = value;
     }

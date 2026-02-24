@@ -6,7 +6,7 @@
 
 <div>
   <h1>{title}</h1>
-  {#if !stats || stats.loading}
+  {#if stats.loading}
     <div data-testid="deferred-loading">Loading stats...</div>
   {:else if stats.error}
     <div data-testid="deferred-error">Error: {stats.error.message}</div>

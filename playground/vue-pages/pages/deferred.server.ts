@@ -1,12 +1,9 @@
 import { defineHandler, defer } from "void";
-import type { Deferred } from "void";
+import type { InferProps } from "void";
 
-export interface Props {
-  title: string;
-  stats: Deferred<{ count: number }>;
-}
+export type Props = InferProps<typeof loader>;
 
-export const loader = defineHandler<Props>(() => {
+export const loader = defineHandler(() => {
   return {
     title: "Deferred Page",
     stats: defer(async () => ({ count: 42 })),

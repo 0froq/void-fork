@@ -395,7 +395,10 @@ describe("handlePageGet with deferred props", () => {
     expect(lines.length).toBe(2);
 
     const pageObj = JSON.parse(lines[0]);
-    expect(pageObj.props).toEqual({ projects: [1, 2] });
+    expect(pageObj.props).toEqual({
+      projects: [1, 2],
+      usage: { value: null, loading: true, error: null },
+    });
     expect(pageObj.deferred).toEqual(["usage"]);
     expect(pageObj.deferredKeys).toEqual({ usage: "usage" });
 
