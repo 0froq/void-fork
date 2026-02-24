@@ -61,18 +61,21 @@ function makeServiceBindingBackend(proxy: Fetcher): AiBackend {
   return {
     async run(model, inputs, options) {
       const projectId = (env as any).__PROJECT_ID;
-      const res = await proxyFetch("run", { model, inputs, options, projectId });
+      const aiToken = (env as any).__AI_TOKEN;
+      const res = await proxyFetch("run", { model, inputs, options, projectId, aiToken });
       if ((inputs as any)?.stream) return res.body;
       return res.json();
     },
     async models(params) {
       const projectId = (env as any).__PROJECT_ID;
-      const res = await proxyFetch("models", { inputs: params, projectId });
+      const aiToken = (env as any).__AI_TOKEN;
+      const res = await proxyFetch("models", { inputs: params, projectId, aiToken });
       return res.json();
     },
     async toMarkdown(items, options) {
       const projectId = (env as any).__PROJECT_ID;
-      const res = await proxyFetch("toMarkdown", { inputs: items, options, projectId });
+      const aiToken = (env as any).__AI_TOKEN;
+      const res = await proxyFetch("toMarkdown", { inputs: items, options, projectId, aiToken });
       return res.json();
     },
   };
