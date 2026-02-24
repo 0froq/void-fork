@@ -1,7 +1,6 @@
 {
   "name": "void-dashboard",
   "compatibility_date": "2026-02-12",
-  "no_bundle": true,
   "assets": {
     "directory": "dist/client",
   },
