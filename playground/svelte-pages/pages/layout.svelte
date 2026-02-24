@@ -9,6 +9,7 @@
 <div>
   <nav>
     <Link href="/">Home</Link> | <Link href="/users">Users</Link> |
+    <Link href="/blog">Blog</Link> |
     <span>{shared.appName}</span>
   </nav>
   <hr />

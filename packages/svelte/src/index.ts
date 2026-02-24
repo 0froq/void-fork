@@ -1,6 +1,7 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import type { Plugin } from "vite";
 import { pagesPlugin } from "./plugin-pages";
+import { islandsPlugin } from "./plugin-islands";
 import { join } from "node:path";
 
 export interface VoidSvelteOptions {
@@ -13,5 +14,6 @@ export function voidSvelte(options?: VoidSvelteOptions): Plugin[] {
   return [
     ...(svelte(options?.svelte) as Plugin[]),
     pagesPlugin(pagesDir, { viewTransitions: options?.viewTransitions }),
+    islandsPlugin(pagesDir),
   ];
 }

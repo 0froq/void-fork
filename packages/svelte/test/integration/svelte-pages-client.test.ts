@@ -2,6 +2,7 @@ import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { execSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
 import { chromium, type Browser, type Page } from "playwright";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
@@ -258,6 +259,122 @@ function defineClientTests(BASE: string) {
   });
 }
 
+function defineIslandTests(BASE: string) {
+  async function newPage(): Promise<Page> {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    page.setDefaultTimeout(10_000);
+    return page;
+  }
+
+  it("island hydration: data-hydrated appears after load", async () => {
+    const page = await newPage();
+    try {
+      await page.goto(BASE + "/blog");
+      await page.waitForSelector('[data-island][data-hydrated="true"]');
+
+      const islands = await page.$$eval("[data-island]", (els) =>
+        els.map((el) => ({
+          id: el.getAttribute("data-island"),
+          hydrated: el.getAttribute("data-hydrated"),
+        })),
+      );
+
+      expect(islands.length).toBeGreaterThanOrEqual(2);
+      for (const island of islands) {
+        expect(island.hydrated).toBe("true");
+      }
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  it("island interaction: counter increments on click", async () => {
+    const page = await newPage();
+    try {
+      await page.goto(BASE + "/blog");
+      await page.waitForSelector('[data-island][data-hydrated="true"]');
+
+      const countBefore = await page.textContent('[data-testid="count"]');
+      expect(countBefore).toBe("Count: 0");
+
+      await page.click("button:has-text('Increment')");
+      await page.waitForFunction(
+        () => document.querySelector('[data-testid="count"]')?.textContent === "Count: 1",
+      );
+
+      const countAfter = await page.textContent('[data-testid="count"]');
+      expect(countAfter).toBe("Count: 1");
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  it("island form: validation errors display", async () => {
+    const page = await newPage();
+    try {
+      await page.goto(BASE + "/blog");
+      await page.waitForSelector('[data-island][data-hydrated="true"]');
+
+      await page.click('button:has-text("Add Post")');
+      await page.waitForFunction(() => document.body.textContent?.includes("Title is required"));
+
+      const text = await page.textContent("body");
+      expect(text).toContain("Title is required");
+      expect(text).toContain("Body is required");
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  it("island form: successful submission reloads page", async () => {
+    const page = await newPage();
+    try {
+      await page.goto(BASE + "/blog");
+      await page.waitForSelector('[data-island][data-hydrated="true"]');
+
+      await page.fill('input:near(:text("Title:"))', "New Post");
+      await page.fill('textarea:near(:text("Body:"))', "Some content");
+
+      await page.click('button:has-text("Add Post")');
+      await page.waitForFunction(() => document.body.textContent?.includes("New Post"));
+
+      const text = await page.textContent("body");
+      expect(text).toContain("New Post");
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  it("cross-navigation: Inertia page to island page falls back to full navigation", async () => {
+    const page = await newPage();
+    try {
+      await page.goto(BASE + "/");
+      await page.waitForSelector('#app[data-hydrated="true"]');
+
+      // Set SPA marker to detect full page reload
+      await page.evaluate(() => {
+        (window as any).__SPA_MARKER = true;
+      });
+
+      // Click Blog link (goes through Inertia router.visit)
+      await page.click('a[href="/blog"]');
+      await page.waitForFunction(() => document.querySelector("h1")?.textContent?.includes("Blog"));
+
+      expect(page.url()).toBe(BASE + "/blog");
+
+      // SPA marker should be gone — full page navigation happened
+      const marker = await page.evaluate(() => (window as any).__SPA_MARKER);
+      expect(marker).toBeUndefined();
+
+      // Islands should be hydrated
+      await page.waitForSelector('[data-island][data-hydrated="true"]');
+    } finally {
+      await page.context().close();
+    }
+  });
+}
+
 describe("svelte-pages client (dev)", () => {
   let child: ReturnType<typeof spawn>;
   let stderr = "";
@@ -433,9 +550,145 @@ describe("svelte-pages client (dev)", () => {
     expect(charliePage.component).toBe("users/[id]");
     expect(charliePage.props.user.name).toBe("Charlie");
     expect(charliePage.props.user.email).toBe("charlie@example.com");
+
+    // --- Island pages ---
+
+    // 12. Island page SSR — HTML with data-island markers, NOT data-page
+    const blogRes = await fetch(`${DEV_BASE}/blog`);
+    expect(blogRes.status).toBe(200);
+    const blogHtml = await blogRes.text();
+    expect(blogHtml).toContain("data-island=");
+    expect(blogHtml).toContain("data-props=");
+    expect(blogHtml).toContain("data-hydrate=");
+    expect(blogHtml).not.toContain("data-page=");
+    expect(blogHtml).toContain("Hello World");
+    expect(blogHtml).toContain("Second Post");
+    expect(blogHtml).toContain("Count:");
+
+    // 13. Island page always returns HTML even with X-VoidPages header
+    const inertiaBlog = await fetch(`${DEV_BASE}/blog`, {
+      headers: { "X-VoidPages": "true" },
+    });
+    expect(inertiaBlog.status).toBe(200);
+    expect(inertiaBlog.headers.get("content-type")).toContain("text/html");
+    expect(inertiaBlog.headers.get("X-VoidPages")).toBeNull();
+    const inertiaBlogHtml = await inertiaBlog.text();
+    expect(inertiaBlogHtml).toContain("data-island=");
+
+    // 14. Island mutation — validation errors return JSON 422
+    const blogPostInvalid = await fetch(`${DEV_BASE}/blog`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "", body: "" }),
+    });
+    expect(blogPostInvalid.status).toBe(422);
+    const invalidBlog = (await blogPostInvalid.json()) as { errors: Record<string, string> };
+    expect(invalidBlog.errors.title).toBe("Title is required");
+    expect(invalidBlog.errors.body).toBe("Body is required");
+
+    // 15. Island mutation — success returns JSON 200
+    const blogPostValid = await fetch(`${DEV_BASE}/blog`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Third Post", body: "Content here" }),
+    });
+    expect(blogPostValid.status).toBe(200);
+    const validBlog = (await blogPostValid.json()) as { success: boolean };
+    expect(validBlog.success).toBe(true);
+
+    // 16. Island detail page with dynamic param
+    const detailRes = await fetch(`${DEV_BASE}/blog/hello-world`);
+    expect(detailRes.status).toBe(200);
+    const detailHtml = await detailRes.text();
+    expect(detailHtml).toContain("Hello World");
+    expect(detailHtml).toContain("First post");
+    expect(detailHtml).not.toContain("data-page=");
   });
 
   defineClientTests(DEV_BASE);
+  defineIslandTests(DEV_BASE);
+
+  it("island component HMR updates without full page reload", async () => {
+    const counterFile = join(ROOT, "playground/svelte-pages/pages/blog/_Counter.svelte");
+    const original = readFileSync(counterFile, "utf-8");
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    page.setDefaultTimeout(10_000);
+
+    try {
+      await page.goto(`${DEV_BASE}/blog`);
+      await page.waitForSelector('[data-island][data-hydrated="true"]');
+
+      // Interact to establish client state — count becomes 1
+      await page.click("button:has-text('Increment')");
+      await page.waitForFunction(
+        () => document.querySelector('[data-testid="count"]')?.textContent === "Count: 1",
+      );
+
+      // Set a window marker to detect full page reload
+      await page.evaluate(() => {
+        (window as any).__hmr_marker = true;
+      });
+
+      // Edit the island component — change the label in the template
+      const modified = original.replace("Count: {count}", "Total: {count}");
+      writeFileSync(counterFile, modified);
+
+      // Wait for HMR to update the component text
+      await page.waitForFunction(
+        () => document.querySelector('[data-testid="count"]')?.textContent?.startsWith("Total:"),
+        { timeout: 10_000 },
+      );
+
+      // No full page reload — window marker should still be set
+      const markerSurvived = await page.evaluate(() => (window as any).__hmr_marker === true);
+      expect(markerSurvived).toBe(true);
+
+      // Svelte HMR resets component state (unlike React Fast Refresh / Vue HMR)
+      const text = await page.textContent('[data-testid="count"]');
+      expect(text).toBe("Total: 0");
+    } finally {
+      await page.context().close();
+      writeFileSync(counterFile, original);
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  });
+
+  it("island file edit triggers reload with updated content", async () => {
+    const islandFile = join(ROOT, "playground/svelte-pages/pages/blog/index.island.svelte");
+    const original = readFileSync(islandFile, "utf-8");
+
+    try {
+      // Verify initial content renders
+      const initialRes = await fetch(`${DEV_BASE}/blog`);
+      expect(initialRes.status).toBe(200);
+      const initialHtml = await initialRes.text();
+      expect(initialHtml).toContain("<h1>Blog</h1>");
+
+      // Edit the island file — change the heading
+      const modified = original.replace("<h1>Blog</h1>", "<h1>Blog Updated</h1>");
+      writeFileSync(islandFile, modified);
+
+      // Poll for updated content — every request must return 200 (no ISE).
+      const start = Date.now();
+      let updatedHtml = "";
+      while (Date.now() - start < 10_000) {
+        await new Promise((r) => setTimeout(r, 100));
+        const res = await fetch(`${DEV_BASE}/blog`);
+        expect(res.status).toBe(200);
+        updatedHtml = await res.text();
+        if (updatedHtml.includes("Blog Updated")) break;
+      }
+
+      expect(updatedHtml).toContain("<h1>Blog Updated</h1>");
+      expect(updatedHtml).toContain("data-island=");
+    } finally {
+      writeFileSync(islandFile, original);
+      // Wait for restore to be picked up
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  });
 }, 60_000);
 
 describe("svelte-pages client (preview)", () => {
@@ -494,4 +747,5 @@ describe("svelte-pages client (preview)", () => {
   });
 
   defineClientTests(PREVIEW_BASE);
+  defineIslandTests(PREVIEW_BASE);
 }, 60_000);
