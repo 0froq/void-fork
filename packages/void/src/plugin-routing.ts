@@ -226,7 +226,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       const watcher = devServer.watcher;
       let authHintShown = false;
 
-      const handleFileChange = async (path: string) => {
+      const handleFileChange = async (path: string, event: "add" | "change" | "unlink") => {
         if (
           !path.startsWith(routesDir) &&
           !path.startsWith(middlewareDir) &&
@@ -261,18 +261,34 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         writeQueueTypes();
         writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(scan!.queues.length > 0));
 
+        // For structural changes (file add/remove), send full-reload to trigger
+        // a program reload so the workerd picks up new/removed routes.
+        // For content-only changes, module invalidation alone is sufficient —
+        // the workerd re-evaluates stale modules on the next request. Sending
+        // full-reload for content changes triggers an unnecessary program reload
+        // that can break React SSR (dual module instances).
+        const structural = event !== "change";
+
         for (const env of Object.values(devServer.environments)) {
           const mod = env.moduleGraph.getModuleById(VIRTUAL_ROUTES_ID);
           if (mod) {
             env.moduleGraph.invalidateModule(mod);
-            env.hot.send({ type: "full-reload" });
+            if (structural) {
+              env.hot.send({ type: "full-reload" });
+            }
           }
+        }
+
+        // Reload the browser for island page changes — islands are
+        // server-rendered only, so there's no client HMR to handle updates.
+        if (/\.island\./.test(path)) {
+          devServer.environments.client?.hot.send({ type: "full-reload" });
         }
       };
 
-      watcher.on("add", handleFileChange);
-      watcher.on("change", handleFileChange);
-      watcher.on("unlink", handleFileChange);
+      watcher.on("add", (path) => handleFileChange(path, "add"));
+      watcher.on("change", (path) => handleFileChange(path, "change"));
+      watcher.on("unlink", (path) => handleFileChange(path, "unlink"));
     },
   };
 }

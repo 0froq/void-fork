@@ -2,6 +2,7 @@ import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { execSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
 import { chromium, type Browser, type Page } from "playwright";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
@@ -606,6 +607,43 @@ describe("react-pages client (dev)", () => {
 
   defineClientTests(DEV_BASE);
   defineIslandTests(DEV_BASE);
+
+  it("island file edit triggers reload with updated content", async () => {
+    const islandFile = join(ROOT, "playground/react-pages/pages/blog/index.island.tsx");
+    const original = readFileSync(islandFile, "utf-8");
+
+    try {
+      // Verify initial content renders
+      const initialRes = await fetch(`${DEV_BASE}/blog`);
+      expect(initialRes.status).toBe(200);
+      const initialHtml = await initialRes.text();
+      expect(initialHtml).toContain("<h1>Blog</h1>");
+
+      // Edit the island file — change the heading
+      const modified = original.replace("<h1>Blog</h1>", "<h1>Blog Updated</h1>");
+      writeFileSync(islandFile, modified);
+
+      // Poll for updated content — every request must return 200 (no ISE).
+      // The previous bug: sending full-reload to the workerd triggered a
+      // program reload that caused React dual-instance errors (500s).
+      const start = Date.now();
+      let updatedHtml = "";
+      while (Date.now() - start < 10_000) {
+        await new Promise((r) => setTimeout(r, 100));
+        const res = await fetch(`${DEV_BASE}/blog`);
+        expect(res.status).toBe(200);
+        updatedHtml = await res.text();
+        if (updatedHtml.includes("Blog Updated")) break;
+      }
+
+      expect(updatedHtml).toContain("<h1>Blog Updated</h1>");
+      expect(updatedHtml).toContain("data-island=");
+    } finally {
+      writeFileSync(islandFile, original);
+      // Wait for restore to be picked up
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  });
 }, 60_000);
 
 describe("react-pages client (preview)", () => {
@@ -643,7 +681,7 @@ describe("react-pages client (preview)", () => {
     });
 
     await waitForServer(PREVIEW_BASE, 20_000);
-  });
+  }, 30_000);
 
   afterAll(async () => {
     if (child) {
