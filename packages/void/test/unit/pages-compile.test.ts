@@ -264,6 +264,127 @@ describe("compileRouteTable with pages", () => {
     expect(code).not.toContain("renderPage");
   });
 
+  it("island page uses renderIslandPage and getIslandsAssetTags", () => {
+    const scan = makeScan({
+      pages: [
+        {
+          pattern: "/",
+          params: [],
+          catchAll: false,
+          componentPath: "index.island.tsx",
+          serverPath: null,
+          hasInlineServer: false,
+          methods: [],
+          componentId: "index",
+          island: true,
+        },
+      ],
+      layouts: [],
+    });
+
+    const islandPagesOptions: PagesCompileOptions = {
+      ...pagesOptions,
+      islandClientEntryId: "virtual:void-islands-client",
+    };
+
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/crons",
+      "/queues",
+      null,
+      testOptions,
+      islandPagesOptions,
+    );
+
+    expect(code).toContain(`import { renderIslandPage } from "virtual:void-islands-renderer"`);
+    expect(code).toContain("renderIslandPage");
+    expect(code).toContain("getIslandsAssetTags");
+    expect(code).toContain(", true)");
+  });
+
+  it("non-island page does not use island renderer", () => {
+    const scan = makeScan({
+      pages: [
+        {
+          pattern: "/dash",
+          params: [],
+          catchAll: false,
+          componentPath: "dash.tsx",
+          serverPath: null,
+          hasInlineServer: false,
+          methods: [],
+          componentId: "dash",
+        },
+      ],
+      layouts: [],
+    });
+
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/crons",
+      "/queues",
+      null,
+      testOptions,
+      pagesOptions,
+    );
+
+    expect(code).toContain("renderPage");
+    expect(code).not.toContain("renderIslandPage");
+    expect(code).not.toContain("getIslandsAssetTags");
+  });
+
+  it("mixed island and non-island pages import both renderers", () => {
+    const scan = makeScan({
+      pages: [
+        {
+          pattern: "/",
+          params: [],
+          catchAll: false,
+          componentPath: "index.island.tsx",
+          serverPath: null,
+          hasInlineServer: false,
+          methods: [],
+          componentId: "index",
+          island: true,
+        },
+        {
+          pattern: "/dash",
+          params: [],
+          catchAll: false,
+          componentPath: "dash.tsx",
+          serverPath: null,
+          hasInlineServer: false,
+          methods: [],
+          componentId: "dash",
+        },
+      ],
+      layouts: [],
+    });
+
+    const islandPagesOptions: PagesCompileOptions = {
+      ...pagesOptions,
+      islandClientEntryId: "virtual:void-islands-client",
+    };
+
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/crons",
+      "/queues",
+      null,
+      testOptions,
+      islandPagesOptions,
+    );
+
+    expect(code).toContain(`import { renderPage } from "virtual:void-pages-renderer"`);
+    expect(code).toContain(`import { renderIslandPage } from "virtual:void-islands-renderer"`);
+  });
+
   it("generates asset tags function for production manifest", () => {
     const scan = makeScan({
       pages: [

@@ -247,6 +247,70 @@ export const loader = () => ({});
     expect(page!.hasGetPrerenderPaths).toBe(true);
   });
 
+  it("scans .island.tsx files with island flag", async () => {
+    writeFile("index.island.tsx", "export default function Home() { return <div />; }");
+    const result = await scanPages(TMP);
+    expect(result.pages).toHaveLength(1);
+    expect(result.pages[0].island).toBe(true);
+    expect(result.pages[0].componentId).toBe("index");
+    expect(result.pages[0].pattern).toBe("/");
+  });
+
+  it("scans .island.vue files with island flag", async () => {
+    writeFile("pricing.island.vue", "<template><div>Pricing</div></template>");
+    const result = await scanPages(TMP);
+    expect(result.pages).toHaveLength(1);
+    expect(result.pages[0].island).toBe(true);
+    expect(result.pages[0].componentId).toBe("pricing");
+    expect(result.pages[0].pattern).toBe("/pricing");
+  });
+
+  it("detects layout.island.tsx as island layout", async () => {
+    writeFile(
+      "blog/layout.island.tsx",
+      "export default function Layout({ children }) { return <div>{children}</div>; }",
+    );
+    writeFile("blog/index.island.tsx", "export default function Blog() { return <div />; }");
+    const result = await scanPages(TMP);
+    expect(result.layouts).toHaveLength(1);
+    expect(result.layouts[0].island).toBe(true);
+    expect(result.layouts[0].directory).toBe("blog");
+  });
+
+  it("finds companion .server.ts for island pages", async () => {
+    writeFile("index.island.tsx", "export default function Home() { return <div />; }");
+    writeFile("index.server.ts", "export const loader = () => ({});");
+    const result = await scanPages(TMP);
+    expect(result.pages[0].island).toBe(true);
+    expect(result.pages[0].serverPath).toBe("index.server.ts");
+  });
+
+  it("throws when regular page is under island layout", async () => {
+    writeFile(
+      "blog/layout.island.tsx",
+      "export default function L({ children }) { return children; }",
+    );
+    writeFile("blog/post.tsx", "export default function Post() { return <div />; }");
+
+    await expect(scanPages(TMP)).rejects.toThrow("Regular page");
+  });
+
+  it("throws when regular index page is under island layout", async () => {
+    writeFile(
+      "blog/layout.island.tsx",
+      "export default function L({ children }) { return children; }",
+    );
+    writeFile("blog/index.tsx", "export default function Blog() { return <div />; }");
+
+    await expect(scanPages(TMP)).rejects.toThrow("Regular page");
+  });
+
+  it("non-island pages have island as undefined", async () => {
+    writeFile("dashboard.tsx", "export default function Dashboard() { return <div />; }");
+    const result = await scanPages(TMP);
+    expect(result.pages[0].island).toBeUndefined();
+  });
+
   it("returns undefined prerender when not exported", async () => {
     writeFile("about.vue", "<template><div>About</div></template>");
     writeFile("about.server.ts", "export const loader = () => [];");

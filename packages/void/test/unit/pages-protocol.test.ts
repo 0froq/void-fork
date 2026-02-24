@@ -101,6 +101,30 @@ describe("handlePageGet", () => {
     expect(renderFn).not.toHaveBeenCalled();
   });
 
+  it("island=true always renders HTML even with X-VoidPages header", async () => {
+    const c = await createTestContext("GET", "/", {
+      headers: { "x-voidpages": "true" },
+    });
+
+    const renderFn = vi.fn(async () => "<html>island</html>");
+    const response = await handlePageGet(undefined, c, "index", renderFn, mockGetAssetTags, true);
+
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(renderFn).toHaveBeenCalled();
+  });
+
+  it("island=false returns JSON for X-VoidPages requests (unchanged)", async () => {
+    const c = await createTestContext("GET", "/", {
+      headers: { "x-voidpages": "true" },
+    });
+
+    const renderFn = vi.fn(async () => "<html></html>");
+    const response = await handlePageGet(undefined, c, "index", renderFn, mockGetAssetTags, false);
+
+    expect(response.headers.get("X-VoidPages")).toBe("true");
+    expect(renderFn).not.toHaveBeenCalled();
+  });
+
   it("includes shared data from context", async () => {
     const c = await createTestContext("GET", "/", {
       headers: { "x-voidpages": "true" },
@@ -252,6 +276,102 @@ describe("handlePageMutation", () => {
     await expect(
       handlePageMutation(mutationHandler, undefined, c, "users", mockRenderFn, mockGetAssetTags),
     ).rejects.toThrow("boom");
+  });
+
+  it("island mutation — ValidationError returns JSON 422", async () => {
+    const c = await createTestContext("POST", "/contact");
+
+    const mutationHandler = vi.fn(() => {
+      throw new ValidationError({ email: "required" });
+    });
+
+    const response = await handlePageMutation(
+      mutationHandler,
+      undefined,
+      c,
+      "contact",
+      mockRenderFn,
+      mockGetAssetTags,
+      true,
+    );
+
+    expect(response.status).toBe(422);
+    const body = (await response.json()) as any;
+    expect(body.errors).toEqual({ email: "required" });
+  });
+
+  it("island mutation — withValidator 400 returns JSON 422", async () => {
+    const c = await createTestContext("POST", "/contact");
+
+    const validationResponse = Response.json(
+      {
+        issues: [
+          {
+            slot: "body",
+            issues: [{ message: "required", path: "email" }],
+          },
+        ],
+      },
+      { status: 400 },
+    );
+    const mutationHandler = vi.fn(() => validationResponse);
+
+    const response = await handlePageMutation(
+      mutationHandler,
+      undefined,
+      c,
+      "contact",
+      mockRenderFn,
+      mockGetAssetTags,
+      true,
+    );
+
+    expect(response.status).toBe(422);
+    const body = (await response.json()) as any;
+    expect(body.errors).toEqual({ email: "required" });
+  });
+
+  it("island mutation — success returns JSON 200", async () => {
+    const c = await createTestContext("POST", "/contact");
+
+    const mutationHandler = vi.fn(() => undefined);
+
+    const response = await handlePageMutation(
+      mutationHandler,
+      undefined,
+      c,
+      "contact",
+      mockRenderFn,
+      mockGetAssetTags,
+      true,
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as any;
+    expect(body.success).toBe(true);
+  });
+
+  it("island mutation — redirect passes through", async () => {
+    const c = await createTestContext("POST", "/contact");
+
+    const redirect = new Response(null, {
+      status: 302,
+      headers: { Location: "/dashboard" },
+    });
+    const mutationHandler = vi.fn(() => redirect);
+
+    const response = await handlePageMutation(
+      mutationHandler,
+      undefined,
+      c,
+      "contact",
+      mockRenderFn,
+      mockGetAssetTags,
+      true,
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/dashboard");
   });
 });
 

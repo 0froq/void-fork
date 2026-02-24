@@ -75,7 +75,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
         build: {
           manifest: true,
           rollupOptions: {
-            input: CLIENT_ENTRY_ID,
+            input: { "pages-client": CLIENT_ENTRY_ID },
           },
         },
       };
@@ -229,6 +229,11 @@ export const router = {
 
     if (response.redirected) {
       return router.visit(response.url);
+    }
+
+    if (!response.headers.get("X-VoidPages")) {
+      window.location.href = url;
+      return;
     }
 
     const pageData = await response.json();

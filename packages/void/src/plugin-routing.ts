@@ -121,10 +121,12 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
 
   function getPagesCompileOptions(): PagesCompileOptions | null {
     if (!scan || scan.pages.pages.length === 0) return null;
+    const hasIslandPages = scan.pages.pages.some((p) => p.island);
     return {
       pagesDir,
       protocolPath: resolveFile("void/pages-protocol"),
       clientEntryId: "virtual:void-pages-client",
+      islandClientEntryId: hasIslandPages ? "virtual:void-islands-client" : undefined,
     };
   }
 

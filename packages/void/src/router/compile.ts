@@ -36,6 +36,8 @@ export interface PagesCompileOptions {
   protocolPath: string;
   /** Virtual module ID for the client entry (used for asset tags) */
   clientEntryId: string;
+  /** Virtual module ID for the islands client entry (used for island asset tags) */
+  islandClientEntryId?: string;
 }
 
 /**
@@ -569,6 +571,12 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     `import { handlePageGet, handlePageMutation } from ${JSON.stringify(pages.protocolPath)};`,
   );
   lines.push(`import { renderPage } from "virtual:void-pages-renderer";`);
+
+  // Import island renderer if any island pages exist
+  const hasIslandPages = scan.pages.pages.some((p) => p.island);
+  if (hasIslandPages) {
+    lines.push(`import { renderIslandPage } from "virtual:void-islands-renderer";`);
+  }
   lines.push("");
 
   // Asset tags — reuse the SSR asset tags pattern with the pages client entry
@@ -658,6 +666,63 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`}`);
   lines.push("");
 
+  // Island asset tags — same pattern but using the islands client entry
+  if (hasIslandPages && pages.islandClientEntryId) {
+    const islandEntryId = pages.islandClientEntryId;
+    lines.push(`const ISLANDS_CLIENT_ENTRY_ID = ${JSON.stringify(islandEntryId)};`);
+    lines.push(
+      `const ISLANDS_CLIENT_ENTRY_URL = ${JSON.stringify("/@id/__x00__" + islandEntryId)};`,
+    );
+    lines.push("");
+    lines.push(`function getIslandsDevClientTags() {`);
+    lines.push(`  const headTag = \`<script type="module" src="/@vite/client"></script>\`;`);
+    lines.push(
+      `  const bodyTag = \`<script type="module" src="\${escapeHtmlAttr(ISLANDS_CLIENT_ENTRY_URL)}"></script>\`;`,
+    );
+    lines.push(`  return { head: headTag, body: bodyTag };`);
+    lines.push(`}`);
+    lines.push("");
+    lines.push(`async function getIslandsAssetTags(request, env) {`);
+    lines.push(`  const manifest = await loadPagesManifest(request, env);`);
+    lines.push(`  if (!manifest || typeof manifest !== "object") {`);
+    lines.push(`    return getIslandsDevClientTags();`);
+    lines.push(`  }`);
+    lines.push(`  const entry = manifest[ISLANDS_CLIENT_ENTRY_ID];`);
+    lines.push(`  if (!entry || typeof entry !== "object" || typeof entry.file !== "string") {`);
+    lines.push(`    return { head: "", body: "" };`);
+    lines.push(`  }`);
+    lines.push(`  const ids = collectPagesManifestFiles(manifest, ISLANDS_CLIENT_ENTRY_ID);`);
+    lines.push(`  const cssFiles = new Set();`);
+    lines.push(`  const preloadFiles = new Set();`);
+    lines.push(`  for (const id of ids) {`);
+    lines.push(`    const chunk = manifest[id];`);
+    lines.push(`    if (!chunk || typeof chunk !== "object") continue;`);
+    lines.push(`    if (Array.isArray(chunk.css)) {`);
+    lines.push(`      for (const cssFile of chunk.css) cssFiles.add(cssFile);`);
+    lines.push(`    }`);
+    lines.push(`    if (id !== ISLANDS_CLIENT_ENTRY_ID && typeof chunk.file === "string") {`);
+    lines.push(`      preloadFiles.add(chunk.file);`);
+    lines.push(`    }`);
+    lines.push(`  }`);
+    lines.push(`  const headTags = [];`);
+    lines.push(`  for (const cssFile of cssFiles) {`);
+    lines.push(
+      `    headTags.push(\`<link rel="stylesheet" href="/\${escapeHtmlAttr(cssFile)}">\`);`,
+    );
+    lines.push(`  }`);
+    lines.push(`  for (const preloadFile of preloadFiles) {`);
+    lines.push(
+      `    headTags.push(\`<link rel="modulepreload" href="/\${escapeHtmlAttr(preloadFile)}">\`);`,
+    );
+    lines.push(`  }`);
+    lines.push(
+      `  const bodyTag = \`<script type="module" src="/\${escapeHtmlAttr(entry.file)}"></script>\`;`,
+    );
+    lines.push(`  return { head: headTags.join("\\n"), body: bodyTag };`);
+    lines.push(`}`);
+    lines.push("");
+  }
+
   // Generate lazy loaders and route registrations for each page
   const seenServerFiles = new Set<string>();
   for (const page of scan.pages.pages) {
@@ -685,17 +750,23 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
       lines.push(`}`);
     }
 
+    // Choose renderer and asset tags based on island flag
+    const renderer = page.island ? "renderIslandPage" : "renderPage";
+    const assetTags =
+      page.island && pages.islandClientEntryId ? "getIslandsAssetTags" : "getPagesAssetTags";
+    const islandFlag = page.island ? ", true" : "";
+
     // Loader (always registered — pages always handle GET)
     lines.push(`app.get(${JSON.stringify(page.pattern)}, async (c) => {`);
     if (serverImportPath) {
       const loaderName = `_pload_${safeId}`;
       lines.push(`  const mod = await ${loaderName}();`);
       lines.push(
-        `  return handlePageGet(mod.loader, c, ${JSON.stringify(page.componentId)}, renderPage, getPagesAssetTags);`,
+        `  return handlePageGet(mod.loader, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}${islandFlag});`,
       );
     } else {
       lines.push(
-        `  return handlePageGet(undefined, c, ${JSON.stringify(page.componentId)}, renderPage, getPagesAssetTags);`,
+        `  return handlePageGet(undefined, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}${islandFlag});`,
       );
     }
     lines.push(`});`);
@@ -708,7 +779,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
       );
       lines.push(`  const mod = await ${loaderName}();`);
       lines.push(
-        `  return handlePageMutation(mod.action, mod.loader, c, ${JSON.stringify(page.componentId)}, renderPage, getPagesAssetTags);`,
+        `  return handlePageMutation(mod.action, mod.loader, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}${islandFlag});`,
       );
       lines.push(`});`);
     }

@@ -54,6 +54,7 @@ export async function handlePageGet(
   componentId: string,
   renderFn: (pageObj: PageObject, assetTags: { head: string; body: string }) => Promise<string>,
   getAssetTags: (req: Request, env: any) => Promise<{ head: string; body: string }>,
+  island?: boolean,
 ): Promise<Response> {
   const shared = c.get("shared") || {};
 
@@ -75,7 +76,8 @@ export async function handlePageGet(
     errors: null,
   };
 
-  if (isPagesRequest(c)) {
+  // Island pages always render HTML — no Inertia JSON navigation
+  if (!island && isPagesRequest(c)) {
     return pageJsonResponse(pageObj);
   }
 
@@ -94,6 +96,7 @@ export async function handlePageMutation(
   componentId: string,
   renderFn: (pageObj: PageObject, assetTags: { head: string; body: string }) => Promise<string>,
   getAssetTags: (req: Request, env: any) => Promise<{ head: string; body: string }>,
+  island?: boolean,
 ): Promise<Response> {
   const shared = c.get("shared") || {};
 
@@ -102,6 +105,9 @@ export async function handlePageMutation(
     result = mutationHandler ? await mutationHandler(c) : undefined;
   } catch (e) {
     if (e instanceof ValidationError) {
+      if (island) {
+        return Response.json({ errors: e.errors }, { status: 422 });
+      }
       const props = getHandler ? await extractProps(await getHandler(c)) : {};
       const pageObj: PageObject = {
         component: componentId,
@@ -128,6 +134,9 @@ export async function handlePageMutation(
     if (status === 400) {
       const body = await result.json();
       const errors = flattenValidationErrors(body);
+      if (island) {
+        return Response.json({ errors }, { status: 422 });
+      }
       const props = getHandler ? await extractProps(await getHandler(c)) : {};
       const pageObj: PageObject = {
         component: componentId,
@@ -147,6 +156,9 @@ export async function handlePageMutation(
   }
 
   // void — re-run GET with fresh props
+  if (island) {
+    return Response.json({ success: true });
+  }
   const props = getHandler ? await extractProps(await getHandler(c)) : {};
   const pageObj: PageObject = {
     component: componentId,

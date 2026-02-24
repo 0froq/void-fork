@@ -23,6 +23,8 @@ export interface PageDefinition {
   prerender?: boolean;
   /** Whether `export function getPrerenderPaths` is defined in server handler */
   hasGetPrerenderPaths?: boolean;
+  /** Whether this is an island page (.island.tsx/.island.vue) */
+  island?: boolean;
 }
 
 export interface LayoutDefinition {
@@ -30,6 +32,8 @@ export interface LayoutDefinition {
   directory: string;
   /** Layout file relative path, e.g. "layout.vue" or "users/layout.vue" */
   filePath: string;
+  /** Whether this is an island layout (layout.island.tsx/.island.vue) */
+  island?: boolean;
 }
 
 export interface PageScanResult {

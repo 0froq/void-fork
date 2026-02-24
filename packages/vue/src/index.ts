@@ -2,6 +2,7 @@ import vue from "@vitejs/plugin-vue";
 import type { Plugin } from "vite";
 import { scriptServerPlugin } from "./plugin-script-server";
 import { pagesPlugin } from "./plugin-pages";
+import { islandsPlugin } from "./plugin-islands";
 import { join } from "node:path";
 
 export interface VoidVueOptions {
@@ -15,5 +16,6 @@ export function voidVue(options?: VoidVueOptions): Plugin[] {
     scriptServerPlugin(pagesDir),
     vue(options?.vue) as Plugin,
     pagesPlugin(pagesDir, { viewTransitions: options?.viewTransitions }),
+    islandsPlugin(pagesDir),
   ];
 }

@@ -27,7 +27,14 @@ export async function scanPages(root: string): Promise<PageScanResult> {
     if (file.split("/").some((s) => s.startsWith("_"))) continue;
 
     const ext = extname(file);
-    const base = basename(file, ext);
+    let base = basename(file, ext);
+
+    // Detect island suffix (.island.tsx, .island.vue, etc.)
+    let island: boolean | undefined;
+    if (base.endsWith(".island")) {
+      island = true;
+      base = base.slice(0, -".island".length);
+    }
 
     // Layout files
     if (base === "layout") {
@@ -35,6 +42,7 @@ export async function scanPages(root: string): Promise<PageScanResult> {
       layouts.push({
         directory: dir === "." ? "" : dir,
         filePath: file,
+        island,
       });
       continue;
     }
@@ -42,21 +50,25 @@ export async function scanPages(root: string): Promise<PageScanResult> {
     // Page files — parse as route
     // parseRouteFilename only strips .ts/.js/.mts/.mjs — convert component
     // extension to .ts so the parser handles it correctly.
-    const route = parseRouteFilename(file.replace(ext, ".ts"));
+    // Strip .island suffix before parsing so route patterns are clean.
+    const parseName = island ? file.replace(`.island${ext}`, ".ts") : file.replace(ext, ".ts");
+    const route = parseRouteFilename(parseName);
     const componentId =
       file
         .replace(ext, "")
+        .replace(/\.island$/, "")
         .replace(/\/index$/, "")
         .replace(/^index$/, "") || "index";
 
-    // Check for companion .server.ts
+    // Check for companion .server.ts — server files never have .island suffix
     let serverPath: string | null = null;
     let methods: string[] = [];
     let revalidate: number | undefined;
     let prerender: boolean | undefined;
     let hasGetPrerenderPaths: boolean | undefined;
+    const serverBase = island ? file.replace(`.island${ext}`, "") : file.replace(ext, "");
     for (const serverExt of SERVER_EXTENSIONS) {
-      const candidate = file.replace(ext, `.server.${serverExt}`);
+      const candidate = `${serverBase}.server.${serverExt}`;
       if (existsSync(join(pagesDir, candidate))) {
         serverPath = candidate;
         const content = readFileSync(join(pagesDir, candidate), "utf-8");
@@ -118,6 +130,7 @@ export async function scanPages(root: string): Promise<PageScanResult> {
       revalidate,
       prerender,
       hasGetPrerenderPaths,
+      island,
     });
   }
 
@@ -129,6 +142,29 @@ export async function scanPages(root: string): Promise<PageScanResult> {
     if (aDynamic !== bDynamic) return aDynamic ? 1 : -1;
     return a.pattern.localeCompare(b.pattern);
   });
+
+  // Validate: throw when regular pages are under island layouts
+  for (const page of pages) {
+    if (page.island) continue;
+    const dir = dirname(page.componentPath);
+    const segments = dir === "." ? [] : dir.split("/");
+    let current = "";
+    // Check root layout
+    if (layouts.some((l) => l.directory === "" && l.island)) {
+      throw new Error(
+        `[void] Regular page "${page.componentPath}" is under an island layout — use .island suffix`,
+      );
+    }
+    // Check each directory level
+    for (const seg of segments) {
+      current = current ? `${current}/${seg}` : seg;
+      if (layouts.some((l) => l.directory === current && l.island)) {
+        throw new Error(
+          `[void] Regular page "${page.componentPath}" is under an island layout — use .island suffix`,
+        );
+      }
+    }
+  }
 
   return { pages, layouts };
 }
