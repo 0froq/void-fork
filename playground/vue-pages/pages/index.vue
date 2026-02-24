@@ -1,17 +1,6 @@
-<script server lang="ts">
-import { defineHandler } from "void";
-
-interface Props {
-  title: string;
-}
-
-export const loader = defineHandler<Props>(() => {
-  return { title: "Home" };
-});
-</script>
-
 <script setup lang="ts">
 import { Link } from "void/vue";
+import type { Props } from "./index.server";
 
 defineProps<Props>();
 </script>

@@ -667,7 +667,7 @@ Framework adaptors for [Pages Routing](./pages-routing.md). Each adaptor provide
 
 #### `voidVue(options?)`
 
-Imported from `"@void-x/vue"`. Returns an array of Vite plugins that handle `<script server>` extraction, Vue SFC compilation, and SSR/hydration entry generation. Includes `@vitejs/plugin-vue` — no need to install or configure it separately.
+Imported from `"@void-x/vue"`. Returns an array of Vite plugins that handle Vue SFC compilation and SSR/hydration entry generation. Includes `@vitejs/plugin-vue` — no need to install or configure it separately.
 
 ```ts
 import { voidVue } from "@void-x/vue";

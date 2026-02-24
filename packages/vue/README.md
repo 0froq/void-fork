@@ -17,7 +17,7 @@ export default defineConfig({
 
 ## Plugin
 
-`voidVue(options?)` returns `[scriptServerPlugin, @vitejs/plugin-vue, pagesPlugin]`.
+`voidVue(options?)` returns `[@vitejs/plugin-vue, pagesPlugin, islandsPlugin]`.
 
 Options:
 
@@ -28,8 +28,6 @@ The pages plugin generates two virtual modules:
 
 - `virtual:void-pages-renderer` — SSR entry using `renderToString()` from `vue/server-renderer`
 - `virtual:void-pages-client` — client hydration entry using `createSSRApp()` from `vue`
-
-An additional `scriptServerPlugin` extracts `<script server>` blocks from Vue SFCs before compilation.
 
 ## Runtime
 
@@ -42,7 +40,7 @@ Import from `void/vue`:
 
 ## Pages
 
-Pages are `.vue` files in the `pages/` directory with companion `.server.ts` files or colocated `<script server>` blocks:
+Pages are `.vue` files in the `pages/` directory with companion `.server.ts` files:
 
 ```vue
 <!-- pages/index.vue -->
@@ -64,8 +62,6 @@ export const loader = defineHandler(() => {
 });
 ```
 
-Vue pages can also colocate server logic in a `<script server>` block instead of a separate `.server.ts` file. The block is extracted at build time and never ships to the client.
-
 ## Architecture
 
 - **Runtime is pre-built** — compiled with tsdown to ESM + DTS. The plugin entry (`./plugin`) is also pre-built.
@@ -74,6 +70,5 @@ Vue pages can also colocate server logic in a `<script server>` block instead of
 
 ## Tests
 
-- `test/unit/script-server.test.ts` — `<script server>` extraction, `?server` resolution, lang attribute handling
 - `test/integration/vue-pages-playground.test.ts` — Server-side SSR + Inertia protocol tests
 - `test/integration/vue-pages-client.test.ts` — Playwright browser tests (dev + preview) for hydration, SPA navigation, forms

@@ -184,7 +184,7 @@ Pages with long revalidate TTLs (e.g. 1 year) are effectively static, but the fi
 
 ### Static pages (no params)
 
-Export `prerender = true` from a `.server.ts` file or `<script server>` block:
+Export `prerender = true` from the companion `.server.ts` file:
 
 ```ts
 // pages/about.server.ts

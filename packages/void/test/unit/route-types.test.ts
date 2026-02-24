@@ -156,7 +156,6 @@ describe("generateRouteTypes", () => {
             catchAll: false,
             componentPath: "users/index.vue",
             serverPath: "users/index.server.ts",
-            hasInlineServer: false,
             methods: ["loader", "action"],
             componentId: "users",
           },
@@ -187,7 +186,6 @@ describe("generateRouteTypes", () => {
             catchAll: false,
             componentPath: "users/[id].vue",
             serverPath: "users/[id].server.ts",
-            hasInlineServer: false,
             methods: ["loader", "action"],
             componentId: "users/[id]",
           },
@@ -200,136 +198,6 @@ describe("generateRouteTypes", () => {
 
     expect(dts).toContain('"/users/:id"');
     expect(dts).toContain("params: { id: string }");
-  });
-
-  it("generates server file and typeof import for inline script server pages", () => {
-    const scan: ScanResult = {
-      routes: [],
-      middleware: [],
-      jobs: [],
-      queues: [],
-      pages: {
-        pages: [
-          {
-            pattern: "/settings",
-            params: [],
-            catchAll: false,
-            componentPath: "settings.vue",
-            serverPath: null,
-            hasInlineServer: true,
-            inlineServerContent: `
-import { defineHandler } from "void";
-import * as v from "valibot";
-
-export const action = defineHandler.withValidator({
-  body: v.object({ theme: v.string() }),
-})(async (c, { body }) => {});
-`,
-            methods: ["loader", "action"],
-            componentId: "settings",
-          },
-        ],
-        layouts: [],
-      },
-    };
-
-    const { dts, serverFiles } = generateRouteTypes(
-      scan,
-      "/project/routes",
-      "/project/.void",
-      "/project/pages",
-    );
-
-    // Should generate typeof import pointing to the extracted server file
-    expect(dts).toContain('"/settings"');
-    expect(dts).toContain('typeof import("./server/settings.server")');
-    expect(dts).not.toContain("body: Record<string, unknown>");
-
-    // Should produce a server file with the extracted content
-    expect(serverFiles).toHaveLength(1);
-    expect(serverFiles[0].relativePath).toBe("server/settings.server.ts");
-    expect(serverFiles[0].content).toContain("defineHandler.withValidator");
-  });
-
-  it("rewrites relative imports in extracted server files", () => {
-    const scan: ScanResult = {
-      routes: [],
-      middleware: [],
-      jobs: [],
-      queues: [],
-      pages: {
-        pages: [
-          {
-            pattern: "/users",
-            params: [],
-            catchAll: false,
-            componentPath: "users/index.vue",
-            serverPath: null,
-            hasInlineServer: true,
-            inlineServerContent: `
-import { defineHandler } from "void";
-import { USERS } from "./_data";
-
-export const action = defineHandler(() => {});
-`,
-            methods: ["action"],
-            componentId: "users",
-          },
-        ],
-        layouts: [],
-      },
-    };
-
-    const { serverFiles } = generateRouteTypes(
-      scan,
-      "/project/routes",
-      "/project/.void",
-      "/project/pages",
-    );
-
-    expect(serverFiles).toHaveLength(1);
-    expect(serverFiles[0].relativePath).toBe("server/users/index.server.ts");
-    // Relative import "./_data" should be rewritten to resolve from
-    // .void/server/users/ back to pages/users/_data
-    expect(serverFiles[0].content).toContain("../../../pages/users/_data");
-    expect(serverFiles[0].content).not.toContain('"./_data"');
-    // Non-relative imports should be untouched
-    expect(serverFiles[0].content).toContain('"void"');
-  });
-
-  it("falls back to Record<string, unknown> for inline script server without content", () => {
-    const scan: ScanResult = {
-      routes: [],
-      middleware: [],
-      jobs: [],
-      queues: [],
-      pages: {
-        pages: [
-          {
-            pattern: "/settings",
-            params: [],
-            catchAll: false,
-            componentPath: "settings.vue",
-            serverPath: null,
-            hasInlineServer: true,
-            // no inlineServerContent
-            methods: ["loader", "action"],
-            componentId: "settings",
-          },
-        ],
-        layouts: [],
-      },
-    };
-
-    const { dts, serverFiles } = generateRouteTypes(
-      scan,
-      "/project/routes",
-      "/project/.void",
-      "/project/pages",
-    );
-
-    expect(dts).toContain("body: Record<string, unknown>");
-    expect(serverFiles).toHaveLength(0);
   });
 
   it("skips pages without action in PageActionMap", () => {
@@ -346,7 +214,6 @@ export const action = defineHandler(() => {});
             catchAll: false,
             componentPath: "about.vue",
             serverPath: "about.server.ts",
-            hasInlineServer: false,
             methods: ["loader"],
             componentId: "about",
           },
@@ -374,7 +241,6 @@ export const action = defineHandler(() => {});
             catchAll: false,
             componentPath: "users/index.vue",
             serverPath: "users/index.server.ts",
-            hasInlineServer: false,
             methods: ["loader", "action"],
             componentId: "users",
           },

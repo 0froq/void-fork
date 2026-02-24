@@ -7,12 +7,8 @@ export interface PageDefinition {
   catchAll: boolean;
   /** Component file relative path, e.g. "users/[id].vue" */
   componentPath: string;
-  /** Server handler file relative path, e.g. "users/[id].server.ts" or null for <script server> */
+  /** Server handler file relative path, e.g. "users/[id].server.ts" */
   serverPath: string | null;
-  /** Whether the .vue file has a <script server> block (detected by regex) */
-  hasInlineServer: boolean;
-  /** Extracted <script server> block content (only set when hasInlineServer is true) */
-  inlineServerContent?: string;
   /** HTTP methods exported by server handler */
   methods: string[];
   /** Component ID used in page object, e.g. "users/[id]" */

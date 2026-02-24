@@ -66,40 +66,6 @@ describe("scanPages", () => {
     expect(page).toBeDefined();
     expect(page!.serverPath).toBe("users/index.server.ts");
     expect(page!.methods).toEqual(["loader", "action"]);
-    expect(page!.hasInlineServer).toBe(false);
-  });
-
-  it("detects <script server> blocks in .vue files", async () => {
-    writeFile(
-      "users/index.vue",
-      `<script server>
-export const loader = () => [];
-</script>
-<template><div>Users</div></template>`,
-    );
-
-    const result = await scanPages(TMP);
-    const page = result.pages.find((p) => p.componentId === "users");
-    expect(page).toBeDefined();
-    expect(page!.hasInlineServer).toBe(true);
-    expect(page!.serverPath).toBeNull();
-  });
-
-  it("prefers companion .server.ts over <script server>", async () => {
-    writeFile(
-      "users/index.vue",
-      `<script server>
-export const loader = () => [];
-</script>
-<template><div>Users</div></template>`,
-    );
-    writeFile("users/index.server.ts", "export const loader = () => [];");
-
-    const result = await scanPages(TMP);
-    const page = result.pages.find((p) => p.componentId === "users");
-    expect(page).toBeDefined();
-    expect(page!.serverPath).toBe("users/index.server.ts");
-    expect(page!.hasInlineServer).toBe(false);
   });
 
   it("identifies layout.vue files separately", async () => {
@@ -208,40 +174,6 @@ export const loader = () => [];
 
     const result = await scanPages(TMP);
     const page = result.pages.find((p) => p.componentId === "blog/[slug]");
-    expect(page).toBeDefined();
-    expect(page!.prerender).toBe(true);
-    expect(page!.hasGetPrerenderPaths).toBe(true);
-  });
-
-  it("detects prerender = true from <script server> block", async () => {
-    writeFile(
-      "about.vue",
-      `<script server>
-export const prerender = true;
-export const loader = () => ({ title: "About" });
-</script>
-<template><div>About</div></template>`,
-    );
-
-    const result = await scanPages(TMP);
-    const page = result.pages.find((p) => p.componentId === "about");
-    expect(page).toBeDefined();
-    expect(page!.prerender).toBe(true);
-  });
-
-  it("detects getPrerenderPaths from <script server> block", async () => {
-    writeFile(
-      "posts/[id].vue",
-      `<script server>
-export const prerender = true;
-export async function getPrerenderPaths() { return [{ id: "1" }]; }
-export const loader = () => ({});
-</script>
-<template><div>Post</div></template>`,
-    );
-
-    const result = await scanPages(TMP);
-    const page = result.pages.find((p) => p.componentId === "posts/[id]");
     expect(page).toBeDefined();
     expect(page!.prerender).toBe(true);
     expect(page!.hasGetPrerenderPaths).toBe(true);

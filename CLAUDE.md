@@ -88,9 +88,9 @@ See [`packages/void/AGENTS.md`](./packages/void/AGENTS.md) for architecture, sou
 
 Vue framework adapter for Pages mode — Inertia-inspired full-stack DX with SSR.
 
-- **Plugin** (`@void-x/vue`): `voidVue()` — extracts `<script server>` blocks, compiles Vue SFCs, generates SSR + client hydration entries
+- **Plugin** (`@void-x/vue`): `voidVue()` — compiles Vue SFCs, generates SSR + client hydration entries
 - **Runtime** (`void/vue`): `Link`, `useForm`, `useShared` composables
-- **Server handlers**: Remix-style `loader` (GET → props) and `action` (mutations) exports in `<script server>` or companion `.server.ts` files
+- **Server handlers**: Remix-style `loader` (GET → props) and `action` (mutations) exports in companion `.server.ts` files
 
 See [`packages/vue/README.md`](./packages/vue/README.md) for architecture.
 
@@ -135,16 +135,16 @@ Tests run from root with `pnpm test` (vitest). See each package README for detai
 
 Local apps for testing features end-to-end. Run scripts with `pnpm -C playground/<app> <script>` (e.g. `pnpm -C playground/spa dev`).
 
-| App                                                       | Description                                                                                       |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [`spa`](./playground/spa/README.md)                       | React SPA — API routes, valibot validation, typed DB, typed fetch client, middleware, cron jobs   |
-| [`ssr`](./playground/ssr/README.md)                       | React SSR — `defineRender()`, client hydration, KV storage, dynamic markdown blog                 |
-| [`vue-pages`](./playground/vue-pages/README.md)           | Vue Pages mode — `<script server>` blocks, Inertia protocol, SSR, layouts, `useForm`, `useShared` |
-| [`svelte-pages`](./playground/svelte-pages)               | Svelte 5 Pages mode — companion `.server.ts` files, Inertia protocol, SSR, layouts, `useForm`     |
-| [`solid-pages`](./playground/solid-pages)                 | SolidJS Pages mode — companion `.server.ts` files, Inertia protocol, SSR, layouts, `useForm`      |
-| [`queues`](./playground/queues/README.md)                 | API-only — typed queue producer/consumer with KV bridge                                           |
-| [`auth`](./playground/auth/README.md)                     | React SPA — email/password + OAuth (GitHub/Google) auth flows, protected routes                   |
-| [`tanstack-start`](./playground/tanstack-start/README.md) | TanStack Start meta-framework — server functions, D1 queries, SSR via TanStack                    |
+| App                                                       | Description                                                                                           |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| [`spa`](./playground/spa/README.md)                       | React SPA — API routes, valibot validation, typed DB, typed fetch client, middleware, cron jobs       |
+| [`ssr`](./playground/ssr/README.md)                       | React SSR — `defineRender()`, client hydration, KV storage, dynamic markdown blog                     |
+| [`vue-pages`](./playground/vue-pages/README.md)           | Vue Pages mode — companion `.server.ts` files, Inertia protocol, SSR, layouts, `useForm`, `useShared` |
+| [`svelte-pages`](./playground/svelte-pages)               | Svelte 5 Pages mode — companion `.server.ts` files, Inertia protocol, SSR, layouts, `useForm`         |
+| [`solid-pages`](./playground/solid-pages)                 | SolidJS Pages mode — companion `.server.ts` files, Inertia protocol, SSR, layouts, `useForm`          |
+| [`queues`](./playground/queues/README.md)                 | API-only — typed queue producer/consumer with KV bridge                                               |
+| [`auth`](./playground/auth/README.md)                     | React SPA — email/password + OAuth (GitHub/Google) auth flows, protected routes                       |
+| [`tanstack-start`](./playground/tanstack-start/README.md) | TanStack Start meta-framework — server functions, D1 queries, SSR via TanStack                        |
 
 `playground-local/` is gitignored and used for ad-hoc local testing apps that are not part of the codebase.
 

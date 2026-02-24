@@ -6,7 +6,6 @@ import type { PageDefinition, LayoutDefinition, PageScanResult } from "./types";
 
 const COMPONENT_EXTENSIONS = ["vue", "tsx", "jsx", "svelte"];
 const SERVER_EXTENSIONS = ["ts", "tsx", "js", "mjs", "mts"];
-const SCRIPT_SERVER_CONTENT_RE = /<script\s+server\b[^>]*>([\s\S]*?)<\/script>/;
 const PAGES_EXPORT_RE = /export\s+(?:const|function|async\s+function)\s+(loader|action)\b/g;
 const REVALIDATE_RE = /export\s+const\s+revalidate\s*=\s*(\d+)\s*;/;
 const PRERENDER_RE = /export\s+const\s+prerender\s*=\s*true\s*;/;
@@ -89,42 +88,12 @@ export async function scanPages(root: string): Promise<PageScanResult> {
       }
     }
 
-    // Check for inline <script server> (only .vue files)
-    let hasInlineServer = false;
-    let inlineServerContent: string | undefined;
-    if (file.endsWith(".vue")) {
-      const content = readFileSync(join(pagesDir, file), "utf-8");
-      const blockMatch = content.match(SCRIPT_SERVER_CONTENT_RE);
-      if (blockMatch) {
-        if (serverPath) {
-          console.warn(
-            `[void] ${file} has both <script server> and companion ${serverPath} — the companion file takes precedence, <script server> will be ignored`,
-          );
-        } else {
-          hasInlineServer = true;
-          inlineServerContent = blockMatch[1];
-          // Detect loader/action exports from the inline block
-          for (const m of inlineServerContent.matchAll(PAGES_EXPORT_RE)) {
-            methods.push(m[1]);
-          }
-          if (PRERENDER_RE.test(inlineServerContent)) {
-            prerender = true;
-          }
-          if (GET_PRERENDER_PATHS_RE.test(inlineServerContent)) {
-            hasGetPrerenderPaths = true;
-          }
-        }
-      }
-    }
-
     pages.push({
       pattern: route.pattern,
       params: route.params,
       catchAll: route.catchAll,
       componentPath: file,
       serverPath,
-      hasInlineServer,
-      inlineServerContent,
       methods,
       componentId,
       revalidate,

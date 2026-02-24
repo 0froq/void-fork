@@ -35,7 +35,6 @@ describe("compileRouteTable with pages", () => {
           catchAll: false,
           componentPath: "index.vue",
           serverPath: null,
-          hasInlineServer: false,
           methods: [],
           componentId: "index",
         },
@@ -68,7 +67,6 @@ describe("compileRouteTable with pages", () => {
           catchAll: false,
           componentPath: "index.vue",
           serverPath: null,
-          hasInlineServer: false,
           methods: [],
           componentId: "index",
         },
@@ -99,7 +97,6 @@ describe("compileRouteTable with pages", () => {
           catchAll: false,
           componentPath: "about.vue",
           serverPath: null,
-          hasInlineServer: false,
           methods: [],
           componentId: "about",
         },
@@ -131,7 +128,6 @@ describe("compileRouteTable with pages", () => {
           catchAll: false,
           componentPath: "users/index.vue",
           serverPath: "users/index.server.ts",
-          hasInlineServer: false,
           methods: ["loader", "action"],
           componentId: "users",
         },
@@ -164,37 +160,6 @@ describe("compileRouteTable with pages", () => {
     expect(code).toContain("handlePageMutation(mod.action, mod.loader");
   });
 
-  it("uses ?server virtual module for inline <script server>", () => {
-    const scan = makeScan({
-      pages: [
-        {
-          pattern: "/contact",
-          params: [],
-          catchAll: false,
-          componentPath: "contact.vue",
-          serverPath: null,
-          hasInlineServer: true,
-          methods: [],
-          componentId: "contact",
-        },
-      ],
-      layouts: [],
-    });
-
-    const code = compileRouteTable(
-      scan,
-      "/routes",
-      "/middleware",
-      "/crons",
-      "/queues",
-      null,
-      testOptions,
-      pagesOptions,
-    );
-
-    expect(code).toContain('import("/project/pages/contact.vue?server")');
-  });
-
   it("generates catch-all for SPA navigation", () => {
     const scan = makeScan({
       pages: [
@@ -204,7 +169,6 @@ describe("compileRouteTable with pages", () => {
           catchAll: false,
           componentPath: "index.vue",
           serverPath: null,
-          hasInlineServer: false,
           methods: [],
           componentId: "index",
         },
@@ -273,7 +237,6 @@ describe("compileRouteTable with pages", () => {
           catchAll: false,
           componentPath: "index.island.tsx",
           serverPath: null,
-          hasInlineServer: false,
           methods: [],
           componentId: "index",
           island: true,
@@ -313,7 +276,6 @@ describe("compileRouteTable with pages", () => {
           catchAll: false,
           componentPath: "dash.tsx",
           serverPath: null,
-          hasInlineServer: false,
           methods: [],
           componentId: "dash",
         },
@@ -346,7 +308,6 @@ describe("compileRouteTable with pages", () => {
           catchAll: false,
           componentPath: "index.island.tsx",
           serverPath: null,
-          hasInlineServer: false,
           methods: [],
           componentId: "index",
           island: true,
@@ -357,7 +318,6 @@ describe("compileRouteTable with pages", () => {
           catchAll: false,
           componentPath: "dash.tsx",
           serverPath: null,
-          hasInlineServer: false,
           methods: [],
           componentId: "dash",
         },
@@ -394,7 +354,6 @@ describe("compileRouteTable with pages", () => {
           catchAll: false,
           componentPath: "index.vue",
           serverPath: null,
-          hasInlineServer: false,
           methods: [],
           componentId: "index",
         },

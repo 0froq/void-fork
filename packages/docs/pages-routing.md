@@ -326,41 +326,6 @@ Aside from the loader, the component can also use the [typed fetch]()
 
 :::
 
-### Vue: `<script server>` {#vue-script-server}
-
-Vue pages can optionally colocate server logic directly in the SFC using a <code v-pre>&lt;script server&gt;</code> block, instead of a separate `.server.ts` file:
-
-```vue
-<!-- pages/users/index.vue -->
-<script server lang="ts">
-import { defineHandler } from "void";
-import { db } from "void/db";
-
-export interface Props {
-  users: Array<{ id: number; name: string; email: string }>;
-}
-
-export const loader = defineHandler<Props>(async (c) => {
-  return { users: await db.list("users") };
-});
-</script>
-
-<script setup lang="ts">
-defineProps<Props>();
-</script>
-
-<template>
-  <h1>Users</h1>
-  <ul>
-    <li v-for="u in users" :key="u.id">{{ u.name }}</li>
-  </ul>
-</template>
-```
-
-The `<script server>` block is extracted at build time — runtime code never ships to the client. Type declarations (`interface`, `type`, `import type`) defined in `<script server>` are preserved and available to `<script setup>`, so you can define your props type once and reference it in both blocks.
-
-If both `<script server>` and a `.server.ts` file exist, the `.server.ts` file takes precedence.
-
 ## Layouts
 
 Place a layout file in any `pages/` directory to wrap all pages in that subtree:

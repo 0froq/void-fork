@@ -732,8 +732,6 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     let serverImportPath: string | null = null;
     if (page.serverPath) {
       serverImportPath = `${pages.pagesDir}/${page.serverPath}`;
-    } else if (page.hasInlineServer) {
-      serverImportPath = `${pages.pagesDir}/${page.componentPath}?server`;
     }
 
     // Generate lazy loader for server module (if any)
