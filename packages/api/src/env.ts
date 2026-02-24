@@ -19,6 +19,7 @@ export interface ApiEnv extends Env {
     DEV_AUTH_BYPASS?: string;
     DISPATCH_NAMESPACE?: string;
     DISPATCH_WORKER_NAME?: string;
+    AI_PROXY_SERVICE?: string;
     SITE_DOMAIN?: string;
     DASHBOARD_URL?: string;
     SIGNUP_ALLOWLIST?: string;

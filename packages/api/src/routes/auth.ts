@@ -150,8 +150,8 @@ app.get("/callback", async (c) => {
         return c.redirect(redirectUrl.toString());
       }
     }
-    // Check signup allowlist (Google only, new users only)
-    if (resolvedProvider === "google" && c.env.SIGNUP_ALLOWLIST) {
+    // Check signup allowlist (new users only)
+    if (c.env.SIGNUP_ALLOWLIST) {
       if (!isEmailAllowed(email, c.env.SIGNUP_ALLOWLIST)) {
         const redirectUrl = new URL(redirect);
         redirectUrl.searchParams.set("error", "signup_restricted");

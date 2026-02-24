@@ -62,6 +62,51 @@ describe("GET /projects", () => {
   });
 });
 
+describe("GET /projects/:id", () => {
+  it("returns project for the owner", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "my-app");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; slug: string };
+    expect(body.id).toBe(project.id);
+    expect(body.slug).toBe("my-app");
+  });
+
+  it("returns 403 when user does not own the project", async () => {
+    const alice = await createTestUser(env.db, "alice");
+    const bob = await createTestUser(env.db, "bob");
+    const project = await createTestProject(env.db, alice.id, "alice-app");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        headers: { Authorization: `Bearer ${bob.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "forbidden" });
+  });
+
+  it("returns 404 for nonexistent project", async () => {
+    const user = await createTestUser(env.db);
+
+    const res = await app.fetch(
+      new Request("http://localhost/projects/proj_nonexistent", {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("POST /projects", () => {
   it("creates project with valid slug", async () => {
     const user = await createTestUser(env.db);

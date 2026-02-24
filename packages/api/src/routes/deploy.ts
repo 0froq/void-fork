@@ -15,9 +15,7 @@ import { addQueueConsumer } from "../provisioning/cloudflare-api";
 import { runRemoteMigrations, type RemoteMigration } from "../migrations/remote-runner";
 import { validateMigrationSQL } from "../migrations/validate";
 import { getPlanLimits, isWithinLimit } from "../tiers";
-import { SITE_DOMAIN } from "../constants";
-
-const DEFAULT_DISPATCH_NAMESPACE = "void-users";
+import { SITE_DOMAIN, DEFAULT_DISPATCH_NAMESPACE } from "../constants";
 const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
 
 const app = new Hono<ApiEnv>();
@@ -173,6 +171,7 @@ app.post("/:id/deploy", async (c) => {
       projectId,
       manifest,
       c.env.JWT_SECRET,
+      c.env.AI_PROXY_SERVICE ?? "void-ai-proxy",
     );
 
     // 1. Run migrations (before worker deploy — key invariant)

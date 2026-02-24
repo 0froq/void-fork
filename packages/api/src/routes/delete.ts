@@ -16,8 +16,7 @@ import {
   deleteQueue,
   deleteCustomHostname,
 } from "../provisioning/cloudflare-api";
-
-const DEFAULT_DISPATCH_NAMESPACE = "void-users";
+import { DEFAULT_DISPATCH_NAMESPACE } from "../constants";
 
 const app = new Hono<ApiEnv>();
 

@@ -21,6 +21,7 @@ export async function provisionBindings(
   projectId: string,
   manifest: DeployManifest,
   jwtSecret: string,
+  aiProxyService: string,
 ): Promise<WorkerBinding[]> {
   const existing = await getProjectResources(db, projectId);
   const bindings: WorkerBinding[] = [];
@@ -46,7 +47,7 @@ export async function provisionBindings(
   // AI — add service binding to proxy + signed project token
   if (manifest.bindings.ai) {
     const aiToken = await hmacSignState(projectId, jwtSecret);
-    bindings.push({ type: "service", name: "__AI_PROXY", service: "void-ai-proxy" });
+    bindings.push({ type: "service", name: "__AI_PROXY", service: aiProxyService });
     bindings.push({ type: "plain_text", name: "__PROJECT_ID", text: projectId });
     bindings.push({ type: "plain_text", name: "__AI_TOKEN", text: aiToken });
   }

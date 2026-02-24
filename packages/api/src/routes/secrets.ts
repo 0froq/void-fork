@@ -1,8 +1,7 @@
 import { Hono } from "hono";
 import type { ApiEnv } from "../env";
 import { getProject } from "../db";
-
-const DEFAULT_DISPATCH_NAMESPACE = "void-users";
+import { DEFAULT_DISPATCH_NAMESPACE } from "../constants";
 
 function isValidSecretName(name: string): boolean {
   return /^[A-Z][A-Z0-9_]*$/.test(name);

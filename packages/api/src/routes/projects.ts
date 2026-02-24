@@ -68,6 +68,9 @@ const app = new Hono<ApiEnv>()
     if (!project) {
       return c.json({ error: "project not found" }, 404);
     }
+    if (project.user_id !== c.get("userId")) {
+      return c.json({ error: "forbidden" }, 403);
+    }
     return c.json(project);
   })
 

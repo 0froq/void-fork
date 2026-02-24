@@ -39,6 +39,7 @@ const ACCOUNT_ID = "test-account";
 const API_TOKEN = "test-token";
 const PROJECT_ID = "proj_abc123";
 const JWT_SECRET = "test-jwt-secret";
+const AI_PROXY_SERVICE = "void-ai-proxy";
 const mockDb = {} as Db;
 
 beforeEach(() => {
@@ -57,6 +58,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      AI_PROXY_SERVICE,
     );
 
     expect(createD1Database).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, `${PROJECT_ID}-DB`);
@@ -74,6 +76,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      AI_PROXY_SERVICE,
     );
 
     expect(createKVNamespace).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, `${PROJECT_ID}-KV`);
@@ -91,6 +94,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      AI_PROXY_SERVICE,
     );
 
     expect(createR2Bucket).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, `${PROJECT_ID}-STORAGE`);
@@ -125,6 +129,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      AI_PROXY_SERVICE,
     );
 
     expect(createD1Database).not.toHaveBeenCalled();
@@ -145,6 +150,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      AI_PROXY_SERVICE,
     );
 
     expect(createD1Database).toHaveBeenCalledOnce();
@@ -170,6 +176,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      AI_PROXY_SERVICE,
     );
 
     expect(createD1Database).not.toHaveBeenCalled();
@@ -189,10 +196,11 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      AI_PROXY_SERVICE,
     );
 
     expect(bindings).toHaveLength(3);
-    expect(bindings[0]).toEqual({ type: "service", name: "__AI_PROXY", service: "void-ai-proxy" });
+    expect(bindings[0]).toEqual({ type: "service", name: "__AI_PROXY", service: AI_PROXY_SERVICE });
     expect(bindings[1]).toEqual({ type: "plain_text", name: "__PROJECT_ID", text: PROJECT_ID });
     expect(bindings[2].type).toBe("plain_text");
     expect(bindings[2].name).toBe("__AI_TOKEN");
@@ -226,6 +234,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      AI_PROXY_SERVICE,
     );
 
     expect(createD1Database).not.toHaveBeenCalled();
