@@ -2,6 +2,40 @@ import { extendConfig } from "@voidzero-dev/vitepress-theme/config";
 import { defineConfig } from "vitepress";
 import { groupIconMdPlugin, groupIconVitePlugin } from "vitepress-plugin-group-icons";
 
+const referenceLinks = {
+  text: "Reference",
+  collapsed: false,
+  items: [
+    { text: "Configuration", link: "/config" },
+    { text: "API", link: "/api" },
+    { text: "CLI", link: "/cli" },
+  ],
+};
+
+const integrationLinks = {
+  text: "Integrations",
+  collapsed: false,
+  items: [
+    { text: "Coding Agents", link: "integrations/agents" },
+    { text: "Hono", link: "integrations/hono" },
+    { text: "Cloudflare", link: "integrations/cloudflare" },
+    { text: "ORMs", link: "integrations/orms" },
+    { text: "Auth Providers", link: "integrations/auth-providers" },
+    { text: "Payment Processors", link: "integrations/payment-processors" },
+  ],
+};
+
+const resourcesLinks = {
+  text: "Resources",
+  items: [
+    { text: "Guides", link: "/guides/", activeMatch: "/guides/" },
+    { text: "Templates", link: "/templates/", activeMatch: "/templates/" },
+    { text: "Blog", link: "/blog/", activeMatch: "/blog/" },
+    referenceLinks,
+    integrationLinks,
+  ],
+};
+
 export default extendConfig(
   defineConfig({
     title: "Void",
@@ -24,25 +58,15 @@ export default extendConfig(
       },
 
       nav: [
-        { text: "Docs", link: "/", activeMatch: "/" },
-        {
-          text: "Reference",
-          items: [
-            { text: "Configuration", link: "/config" },
-            { text: "API", link: "/api" },
-            { text: "CLI", link: "/cli" },
-          ],
-        },
-        {
-          text: "Resources",
-          items: [
-            { text: "Guides", link: "/guides/", activeMatch: "/guides/" },
-            { text: "Templates", link: "/templates/", activeMatch: "/templates/" },
-            { text: "Blog", link: "/blog/", activeMatch: "/blog/" },
-            { text: "MCP Server", link: "/mcp" },
-          ],
-        },
-        { text: "Pricing", link: "/pricing" },
+        { text: "Platform", link: "https://void.cloud" },
+        { text: "Framework", link: "/", activeMatch: "/" },
+        resourcesLinks,
+      ],
+
+      socialLinks: [
+        { icon: "x", link: "https://x.com/voidcloudhq" },
+        { icon: "discord", link: "https://discord.gg/cC6TEVFKSx" },
+        { icon: "github", link: "https://github.com/voidzero-dev/void" },
       ],
 
       sidebar: {
@@ -84,24 +108,8 @@ export default extendConfig(
               { text: "Environment Variables", link: "/env-vars" },
             ],
           },
-          {
-            text: "Integrations",
-            collapsed: false,
-            items: [
-              { text: "Hono", link: "/hono" },
-              { text: "Cloudflare", link: "/cloudflare" },
-              { text: "MCP", link: "/mcp" },
-            ],
-          },
-          {
-            text: "Reference",
-            collapsed: false,
-            items: [
-              { text: "Configuration", link: "/config" },
-              { text: "API", link: "/api" },
-              { text: "CLI", link: "/cli" },
-            ],
-          },
+          referenceLinks,
+          integrationLinks,
         ],
       },
     },

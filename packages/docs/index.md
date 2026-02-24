@@ -41,7 +41,7 @@ Void makes it dead simple:
 
 ### Flexible by design
 
-Void auto-detects your [app type](./app-types.md) and adapts accordingly. Build a full-stack app with API routes and pages, deploy a meta-framework like TanStack Start or React Router, or ship a static SPA or SSG site. Use any UI library that works with Vite. Every build produces a standard Cloudflare Worker, so you can always [self-host](./cloudflare.md) with your own `wrangler.json`.
+Void auto-detects your [app type](./app-types.md) and adapts accordingly. Build a full-stack app with API routes and pages, deploy a meta-framework like TanStack Start or React Router, or ship a static SPA or SSG site. Use any UI library that works with Vite. Every build produces a standard Cloudflare Worker, so you can always [self-host](./integrations/cloudflare.md#deploy-to-your-own-cloudflare-account) with your own `wrangler.json`.
 
 ### End-to-end type safety
 

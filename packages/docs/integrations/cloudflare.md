@@ -95,7 +95,7 @@ Bindings are inferred automatically by scanning your source files for these acce
 }
 ```
 
-See [Configuration](./config.md) for details.
+See [Configuration](../config.md) for details.
 
 ### Wrangler passthrough
 

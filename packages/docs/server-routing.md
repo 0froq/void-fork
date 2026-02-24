@@ -63,7 +63,7 @@ export const GET = defineHandler((c) => {
 });
 ```
 
-The handler receives a Hono `Context` with typed Cloudflare bindings on `c.env` (see [Cloudflare](./cloudflare.md)). You can use the full Hono API (`c.json()`, `c.text()`, `c.header()`, etc.).
+The handler receives a Hono `Context` with typed Cloudflare bindings on `c.env` (see [Cloudflare](./integrations/cloudflare.md)). You can use the full Hono API (`c.json()`, `c.text()`, `c.header()`, etc.).
 
 Return values are automatically converted:
 
@@ -204,4 +204,4 @@ export const GET = defineHandler(bearerAuth({ token: "secret" }), requireAdmin, 
 
 Up to 5 middleware can be passed before the handler, with full type inference for each position.
 
-Since Void runs on Hono, you can use any `hono/*` built-in middleware, response helpers, and third-party packages directly. See [Hono](./hono.md) for details.
+Since Void runs on Hono, you can use any `hono/*` built-in middleware, response helpers, and third-party packages directly. See [Hono integration guide](./integrations/hono.md) for details.

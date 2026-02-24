@@ -2,7 +2,9 @@
 outline: deep
 ---
 
-# Void MCP Server
+# Using Void with Coding Agents
+
+[TODO]
 
 Void ships with a built-in [MCP](https://modelcontextprotocol.io/) server that runs locally via stdio. It provides three tools — `list_pages`, `get_page`, and `search_docs` — giving your AI agent full access to the Void documentation, version-matched and offline-capable.
 
