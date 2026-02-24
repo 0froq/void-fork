@@ -254,6 +254,24 @@ function defineClientTests(BASE: string) {
       await page.context().close();
     }
   });
+
+  it("deferred props: SPA navigation resolves in browser", async () => {
+    const page = await newPage();
+    try {
+      await page.goto(BASE + "/");
+      await waitForHydration(page);
+
+      // SPA navigate to deferred page
+      await page.click('a[href="/deferred"]');
+      await page.waitForFunction(() => document.querySelector('[data-testid="deferred-resolved"]'));
+
+      const text = await page.textContent('[data-testid="deferred-resolved"]');
+      expect(text).toBe("Count: 42");
+      expect(page.url()).toBe(BASE + "/deferred");
+    } finally {
+      await page.context().close();
+    }
+  });
 }
 
 function defineIslandTests(BASE: string) {
@@ -600,6 +618,32 @@ describe("solid-pages client (dev)", () => {
     expect(detailHtml).toContain("Hello World");
     expect(detailHtml).toContain("First post");
     expect(detailHtml).not.toContain("data-page=");
+
+    // --- Deferred props ---
+
+    // 17. Deferred props: SPA navigation streams NDJSON
+    const deferredInertia = await fetch(`${DEV_BASE}/deferred`, {
+      headers: { "X-VoidPages": "true" },
+    });
+    expect(deferredInertia.headers.get("content-type")).toContain("application/x-ndjson");
+    const ndjsonText = await deferredInertia.text();
+    const ndjsonLines = ndjsonText.trim().split("\n");
+    expect(ndjsonLines.length).toBe(2);
+    const pageObj = JSON.parse(ndjsonLines[0]);
+    expect(pageObj.component).toBe("deferred");
+    expect(pageObj.props.title).toBe("Deferred Page");
+    expect(pageObj.deferredKeys).toEqual({ stats: "stats" });
+    const deferredLine = JSON.parse(ndjsonLines[1]);
+    expect(deferredLine.__deferred).toBe("stats");
+    expect(deferredLine.data).toEqual({ count: 42 });
+
+    // 18. Deferred props: SSR includes resolution script tags
+    const deferredSsr = await fetch(`${DEV_BASE}/deferred`);
+    const deferredHtml = await deferredSsr.text();
+    expect(deferredHtml).toContain("data-page=");
+    expect(deferredHtml).toContain("Deferred Page");
+    expect(deferredHtml).toContain('window.__resolveDeferred("stats"');
+    expect(deferredHtml).toContain('"count":42');
   });
 
   defineClientTests(DEV_BASE);
@@ -723,7 +767,7 @@ describe("solid-pages client (preview)", () => {
     });
 
     await waitForServer(PREVIEW_BASE, 20_000);
-  });
+  }, 30_000);
 
   afterAll(async () => {
     if (child) {

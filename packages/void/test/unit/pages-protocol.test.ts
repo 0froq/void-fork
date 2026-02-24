@@ -6,6 +6,7 @@ import {
   flattenValidationErrors,
   ValidationError,
 } from "../../src/pages/protocol";
+import { defer } from "../../src/pages/defer";
 
 /** Create a minimal Hono context for testing */
 function createTestContext(
@@ -372,6 +373,143 @@ describe("handlePageMutation", () => {
 
     expect(response.status).toBe(302);
     expect(response.headers.get("Location")).toBe("/dashboard");
+  });
+});
+
+describe("handlePageGet with deferred props", () => {
+  it("SPA — streams NDJSON with immediate props first, then deferred", async () => {
+    const c = await createTestContext("GET", "/dashboard", {
+      headers: { "x-voidpages": "true" },
+    });
+
+    const handler = vi.fn(() => ({
+      projects: [1, 2],
+      usage: defer(() => Promise.resolve({ requests: 100 })),
+    }));
+
+    const response = await handlePageGet(handler, c, "dashboard", mockRenderFn, mockGetAssetTags);
+
+    expect(response.headers.get("content-type")).toBe("application/x-ndjson");
+    const text = await response.text();
+    const lines = text.trim().split("\n");
+    expect(lines.length).toBe(2);
+
+    const pageObj = JSON.parse(lines[0]);
+    expect(pageObj.props).toEqual({ projects: [1, 2] });
+    expect(pageObj.deferred).toEqual(["usage"]);
+    expect(pageObj.deferredKeys).toEqual({ usage: "usage" });
+
+    const deferredLine = JSON.parse(lines[1]);
+    expect(deferredLine.__deferred).toBe("usage");
+    expect(deferredLine.data).toEqual({ requests: 100 });
+  });
+
+  it("SPA — streams error for failed deferred resolver", async () => {
+    const c = await createTestContext("GET", "/dashboard", {
+      headers: { "x-voidpages": "true" },
+    });
+
+    const handler = vi.fn(() => ({
+      projects: [],
+      usage: defer(() => Promise.reject(new Error("timeout"))),
+    }));
+
+    const response = await handlePageGet(handler, c, "dashboard", mockRenderFn, mockGetAssetTags);
+
+    const text = await response.text();
+    const lines = text.trim().split("\n");
+    expect(lines.length).toBe(2);
+
+    const deferredLine = JSON.parse(lines[1]);
+    expect(deferredLine.__deferred).toBe("usage");
+    expect(deferredLine.error).toBe("timeout");
+  });
+
+  it("SPA — no deferred props returns normal JSON (not streaming)", async () => {
+    const c = await createTestContext("GET", "/users", {
+      headers: { "x-voidpages": "true" },
+    });
+
+    const handler = vi.fn(() => ({ users: [1] }));
+    const response = await handlePageGet(handler, c, "users", mockRenderFn, mockGetAssetTags);
+
+    const body = (await response.json()) as any;
+    expect(body.props).toEqual({ users: [1] });
+    expect(body.deferred).toBeUndefined();
+  });
+
+  it("SSR — streams HTML then deferred script tags", async () => {
+    const c = await createTestContext("GET", "/dashboard");
+
+    const handler = vi.fn(() => ({
+      projects: [1],
+      usage: defer(() => Promise.resolve({ requests: 100 })),
+    }));
+
+    const renderFn = vi.fn(
+      async (pageObj: any) => `<div id="app" data-page='${JSON.stringify(pageObj)}'></div>`,
+    );
+
+    const response = await handlePageGet(handler, c, "dashboard", renderFn, mockGetAssetTags);
+
+    const text = await response.text();
+    expect(text).toContain("data-page=");
+    expect(text).toContain('"deferred":["usage"]');
+    expect(text).toContain('window.__resolveDeferred("usage",');
+    expect(text).toContain('"requests":100');
+  });
+
+  it("SSR — no deferred props returns normal HTML", async () => {
+    const c = await createTestContext("GET", "/users");
+
+    const handler = vi.fn(() => ({ users: [1] }));
+    const response = await handlePageGet(handler, c, "users", mockRenderFn, mockGetAssetTags);
+
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+  });
+
+  it("deferred named group — resolves all keys together", async () => {
+    const c = await createTestContext("GET", "/dashboard", {
+      headers: { "x-voidpages": "true" },
+    });
+
+    const analyticsResolver = () =>
+      Promise.resolve({ metrics: { count: 5 }, chart: { data: [1] } });
+
+    const analytics = defer("analytics", analyticsResolver);
+    const handler = vi.fn(() => ({
+      projects: [1],
+      metrics: analytics,
+      chart: analytics,
+    }));
+
+    const response = await handlePageGet(handler, c, "dashboard", mockRenderFn, mockGetAssetTags);
+
+    const text = await response.text();
+    const lines = text.trim().split("\n");
+    expect(lines.length).toBe(2);
+
+    const pageObj = JSON.parse(lines[0]);
+    expect(pageObj.deferred).toEqual(["analytics"]);
+    expect(pageObj.deferredKeys).toEqual({ metrics: "analytics", chart: "analytics" });
+
+    const deferredLine = JSON.parse(lines[1]);
+    expect(deferredLine.__deferred).toBe("analytics");
+    expect(deferredLine.data).toHaveProperty("metrics");
+    expect(deferredLine.data).toHaveProperty("chart");
+  });
+
+  it("redirect from loader with deferred props — passes through", async () => {
+    const c = await createTestContext("GET", "/dashboard");
+
+    const redirect = new Response(null, {
+      status: 302,
+      headers: { Location: "/login" },
+    });
+    const handler = vi.fn(() => redirect);
+    const response = await handlePageGet(handler, c, "dashboard", mockRenderFn, mockGetAssetTags);
+
+    expect(response.status).toBe(302);
   });
 });
 

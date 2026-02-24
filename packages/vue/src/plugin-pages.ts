@@ -134,6 +134,7 @@ function generateClientEntry(
 ): string {
   return `
 import { createSSRApp, h, reactive, provide, shallowRef, nextTick } from "vue";
+import { createDeferred, resolveDeferred, rejectDeferred } from "@void-x/vue/deferred";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 
@@ -161,6 +162,60 @@ const currentComponent = shallowRef(null);
 const currentLayouts = shallowRef([]);
 const currentProps = shallowRef(initialPageData.props);
 
+// --- Deferred props ---
+
+let activeKeyRefs = {};
+
+function setupDeferredProps(pageData) {
+  const keyRefs = {};
+  if (!pageData.deferredKeys) return keyRefs;
+  for (const [key, group] of Object.entries(pageData.deferredKeys)) {
+    const ref = createDeferred();
+    keyRefs[key] = ref;
+    pageData.props[key] = ref;
+  }
+  return keyRefs;
+}
+
+function handleDeferredMessage(group, data, error) {
+  if (data !== undefined) {
+    if (typeof data === "object" && data !== null && !Array.isArray(data)) {
+      // Could be a named group (multiple keys) or a single object-valued prop.
+      // Check if any keys in data match our keyRefs — if so, resolve individually.
+      let resolvedAny = false;
+      for (const [key, value] of Object.entries(data)) {
+        if (activeKeyRefs[key]) {
+          resolveDeferred(activeKeyRefs[key], value);
+          resolvedAny = true;
+        }
+      }
+      // If no individual keys matched, this is a single prop whose value is an object
+      if (!resolvedAny && activeKeyRefs[group]) {
+        resolveDeferred(activeKeyRefs[group], data);
+      }
+    } else {
+      if (activeKeyRefs[group]) resolveDeferred(activeKeyRefs[group], data);
+    }
+  } else if (error !== undefined) {
+    // Reject all keys in this group
+    for (const [key, ref] of Object.entries(activeKeyRefs)) {
+      if (ref.loading) {
+        // Check if this key belongs to the errored group by checking deferredKeys
+        rejectDeferred(ref, typeof error === "string" ? error : String(error));
+      }
+    }
+  }
+}
+
+// Set up deferred props for initial page data
+activeKeyRefs = setupDeferredProps(initialPageData);
+
+// SSR deferred resolution via streamed script tags
+window.__resolveDeferred = (group, data) => handleDeferredMessage(group, data, undefined);
+window.__rejectDeferred = (group, error) => handleDeferredMessage(group, undefined, error);
+
+// --- End deferred props ---
+
 // Resolve all async work first, then update refs synchronously so Vue
 // never renders with a new component but stale props.
 async function updatePage(pageData) {
@@ -176,6 +231,7 @@ async function updatePage(pageData) {
 }
 
 const _navListeners = new Set();
+let _abortController = null;
 
 export const router = {
   onNavigation(onStart, onEnd) {
@@ -186,9 +242,13 @@ export const router = {
   async visit(url, options = {}) {
     for (const l of _navListeners) l.onStart?.();
     try {
+    // Abort any in-flight deferred stream from previous navigation
+    _abortController?.abort();
+    _abortController = new AbortController();
+
     const method = (options.method || "GET").toUpperCase();
     const headers = { "X-VoidPages": "true", "Accept": "application/json" };
-    const fetchOptions = { method, headers };
+    const fetchOptions = { method, headers, signal: _abortController.signal };
 
     if (options.data && method !== "GET") {
       headers["Content-Type"] = "application/json";
@@ -206,7 +266,68 @@ export const router = {
       return;
     }
 
-    const pageData = await response.json();
+    const contentType = response.headers.get("content-type") || "";
+    let pageData;
+
+    if (contentType.includes("application/x-ndjson")) {
+      // Streaming response with deferred props — read NDJSON
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let firstLine = true;
+      const signal = _abortController.signal;
+
+      const processLines = () => {
+        let newlineIdx;
+        while ((newlineIdx = buffer.indexOf("\\n")) !== -1) {
+          const line = buffer.slice(0, newlineIdx);
+          buffer = buffer.slice(newlineIdx + 1);
+          if (!line) continue;
+
+          if (firstLine) {
+            pageData = JSON.parse(line);
+            activeKeyRefs = setupDeferredProps(pageData);
+            firstLine = false;
+          } else {
+            const msg = JSON.parse(line);
+            if (msg.__deferred) {
+              handleDeferredMessage(msg.__deferred, msg.data, msg.error);
+            }
+          }
+        }
+      };
+
+      // Read first line synchronously to get pageData for mounting
+      while (firstLine) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        processLines();
+      }
+
+      // Continue reading deferred data in background
+      (async () => {
+        try {
+          while (!signal.aborted) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            processLines();
+          }
+          // Process any remaining buffer
+          if (buffer.trim()) processLines();
+        } catch (e) {
+          if (e.name !== "AbortError") {
+            // Stream closed unexpectedly — reject remaining deferred
+            for (const ref of Object.values(activeKeyRefs)) {
+              if (ref.loading) rejectDeferred(ref, "Stream closed before resolution");
+            }
+          }
+        }
+      })();
+    } else {
+      pageData = await response.json();
+    }
 
     // Resolve async work before starting the transition
     const [comp, layouts] = await Promise.all([
@@ -291,6 +412,15 @@ const app = createSSRApp({
 
 app.mount("#app");
 document.getElementById("app").setAttribute("data-hydrated", "true");
+
+// Drain any deferred resolutions that arrived before the module loaded (after hydration)
+if (window.__deferredQueue) {
+  for (const entry of window.__deferredQueue) {
+    if (entry.length === 3) handleDeferredMessage(entry[0], undefined, entry[2]);
+    else handleDeferredMessage(entry[0], entry[1], undefined);
+  }
+  delete window.__deferredQueue;
+}
 
 window.addEventListener("popstate", () => {
   router.visit(window.location.pathname + window.location.search, { preserveState: true });

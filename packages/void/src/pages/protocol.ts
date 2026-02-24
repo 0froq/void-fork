@@ -1,4 +1,5 @@
 import { ValidationError } from "./validation-error";
+import { DEFERRED, separateDeferred, type ResolvedDeferredGroup } from "./defer";
 
 export { ValidationError };
 
@@ -8,6 +9,8 @@ export interface PageObject {
   shared: Record<string, unknown>;
   url: string;
   errors: Record<string, string> | null;
+  deferred?: string[];
+  deferredKeys?: Record<string, string>;
 }
 
 function isPagesRequest(c: any): boolean {
@@ -47,6 +50,53 @@ export function flattenValidationErrors(body: any): Record<string, string> {
   return errors;
 }
 
+/** Strip deferred sentinels from props, setting their keys to null. Used by mutations. */
+function stripDeferred(props: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(props)) {
+    if (value && typeof value === "object" && DEFERRED in value) {
+      result[key] = null;
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/** Build a streaming response that sends an initial chunk then streams deferred results. */
+function streamDeferredResponse(
+  initialChunk: string,
+  deferredMap: Record<string, ResolvedDeferredGroup>,
+  c: any,
+  contentType: string,
+  formatResolved: (group: string, data: unknown) => string,
+  formatRejected: (group: string, error: string) => string,
+): Response {
+  const encoder = new TextEncoder();
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+
+  writer.write(encoder.encode(initialChunk));
+
+  const entries = Object.entries(deferredMap);
+  let remaining = entries.length;
+
+  for (const [group, { resolver }] of entries) {
+    resolver(c)
+      .then((data) => writer.write(encoder.encode(formatResolved(group, data))))
+      .catch((err: unknown) =>
+        writer.write(
+          encoder.encode(formatRejected(group, err instanceof Error ? err.message : String(err))),
+        ),
+      )
+      .finally(() => {
+        if (--remaining === 0) writer.close();
+      });
+  }
+
+  return new Response(readable, { headers: { "content-type": contentType } });
+}
+
 /** Handle GET page request — run handler, return page object or SSR HTML */
 export async function handlePageGet(
   handler: Function | undefined,
@@ -68,24 +118,69 @@ export async function handlePageGet(
     }
     props = await extractProps(result);
   }
+
+  // Separate immediate props from deferred sentinels
+  const { immediateProps, deferredMap } = separateDeferred(props);
+  const hasDeferred = Object.keys(deferredMap).length > 0;
+
+  // Build key-to-group mapping for the client
+  const deferredKeys: Record<string, string> = {};
+  if (hasDeferred) {
+    for (const [group, { keys }] of Object.entries(deferredMap)) {
+      for (const key of keys) {
+        deferredKeys[key] = group;
+      }
+    }
+  }
+
   const pageObj: PageObject = {
     component: componentId,
-    props,
+    props: immediateProps,
     shared,
     url: c.req.path,
     errors: null,
+    ...(hasDeferred && {
+      deferred: Object.keys(deferredMap),
+      deferredKeys,
+    }),
   };
 
   // Island pages always render HTML — no Inertia JSON navigation
   if (!island && isPagesRequest(c)) {
-    return pageJsonResponse(pageObj);
+    if (!hasDeferred) {
+      return pageJsonResponse(pageObj);
+    }
+    // Stream NDJSON: first line is PageObject, subsequent lines are deferred groups
+    return streamDeferredResponse(
+      JSON.stringify(pageObj) + "\n",
+      deferredMap,
+      c,
+      "application/x-ndjson",
+      (group, data) => JSON.stringify({ __deferred: group, data }) + "\n",
+      (group, error) => JSON.stringify({ __deferred: group, error }) + "\n",
+    );
   }
 
   const assetTags = await getAssetTags(c.req.raw, c.env);
   const html = await renderFn(pageObj, assetTags);
-  return new Response(html, {
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
+
+  if (!hasDeferred) {
+    return new Response(html, {
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
+  }
+
+  // Stream HTML followed by deferred <script> tags
+  return streamDeferredResponse(
+    html,
+    deferredMap,
+    c,
+    "text/html; charset=utf-8",
+    (group, data) =>
+      `\n<script>window.__resolveDeferred?window.__resolveDeferred(${JSON.stringify(group)},${JSON.stringify(data)}):(window.__deferredQueue??=[]).push([${JSON.stringify(group)},${JSON.stringify(data)}])</script>`,
+    (group, error) =>
+      `\n<script>window.__rejectDeferred?window.__rejectDeferred(${JSON.stringify(group)},${JSON.stringify(error)}):(window.__deferredQueue??=[]).push([${JSON.stringify(group)},0,${JSON.stringify(error)}])</script>`,
+  );
 }
 
 /** Handle POST/PUT/DELETE page request — run mutation, then re-run GET or redirect */
@@ -108,7 +203,8 @@ export async function handlePageMutation(
       if (island) {
         return Response.json({ errors: e.errors }, { status: 422 });
       }
-      const props = getHandler ? await extractProps(await getHandler(c)) : {};
+      const rawProps = getHandler ? await extractProps(await getHandler(c)) : {};
+      const props = stripDeferred(rawProps);
       const pageObj: PageObject = {
         component: componentId,
         props,
@@ -137,7 +233,8 @@ export async function handlePageMutation(
       if (island) {
         return Response.json({ errors }, { status: 422 });
       }
-      const props = getHandler ? await extractProps(await getHandler(c)) : {};
+      const rawProps = getHandler ? await extractProps(await getHandler(c)) : {};
+      const props = stripDeferred(rawProps);
       const pageObj: PageObject = {
         component: componentId,
         props,
@@ -159,7 +256,8 @@ export async function handlePageMutation(
   if (island) {
     return Response.json({ success: true });
   }
-  const props = getHandler ? await extractProps(await getHandler(c)) : {};
+  const rawProps = getHandler ? await extractProps(await getHandler(c)) : {};
+  const props = stripDeferred(rawProps);
   const pageObj: PageObject = {
     component: componentId,
     props,

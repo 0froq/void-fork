@@ -466,5 +466,7 @@ export type {
 export type { ValidatorSlots, HandlerInput } from "./runtime/validator";
 export type { AuthUser } from "./runtime/auth";
 export type { QueueMap } from "./runtime/queues";
+export { defer } from "./pages/defer";
+export type { Deferred, InferProps } from "./pages/defer";
 
 type AuthProvider = import("./config").AuthProvider;
