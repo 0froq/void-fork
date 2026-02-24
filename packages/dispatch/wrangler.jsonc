@@ -5,6 +5,8 @@
   "routes": [
     { "pattern": "*.vitecloud.app/*", "zone_name": "vitecloud.app" },
     { "pattern": "*.vitecloud.app", "zone_name": "vitecloud.app" },
+    { "pattern": "*/*", "zone_name": "vitecloud.app" },
+    { "pattern": "*", "zone_name": "vitecloud.app" },
   ],
   "observability": {
     "enabled": true,
@@ -38,8 +40,13 @@
     "staging": {
       "name": "void-dispatch-staging",
       "routes": [
-        { "pattern": "*.staging.vitecloud.app/*", "zone_name": "vitecloud.app" },
+        {
+          "pattern": "*.staging.vitecloud.app/*",
+          "zone_name": "vitecloud.app",
+        },
         { "pattern": "*.staging.vitecloud.app", "zone_name": "vitecloud.app" },
+        { "pattern": "*/*", "zone_name": "vitecloud.app" },
+        { "pattern": "*", "zone_name": "vitecloud.app" },
       ],
       "vars": {
         "BASE_HOSTNAME": "staging.vitecloud.app",

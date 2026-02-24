@@ -14,12 +14,12 @@ How we deploy, what we provision, and how the system is configured.
 
 Four Cloudflare Workers:
 
-| Worker           | Package              | Purpose                                                                                                   |
-| ---------------- | -------------------- | --------------------------------------------------------------------------------------------------------- |
-| `void-ai-proxy`  | `packages/ai-proxy`  | AI inference proxy — holds the real `AI` binding, injects AI Gateway metadata for metering                |
-| `void-api`       | `packages/api`       | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering                |
-| `void-dashboard` | `packages/dashboard` | User-facing dashboard — project management, deployments, usage                                            |
-| `void-dispatch`  | `packages/dispatch`  | Edge router — routes `*.void.app` traffic to user workers (via Workers for Platforms) or R2 static assets |
+| Worker           | Package              | Purpose                                                                                                                        |
+| ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `void-ai-proxy`  | `packages/ai-proxy`  | AI inference proxy — holds the real `AI` binding, injects AI Gateway metadata for metering                                     |
+| `void-api`       | `packages/api`       | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering                                     |
+| `void-dashboard` | `packages/dashboard` | User-facing dashboard — project management, deployments, usage                                                                 |
+| `void-dispatch`  | `packages/dispatch`  | Edge router — routes `*.vitecloud.app` + custom domain traffic to user workers (via Workers for Platforms) or R2 static assets |
 
 ## Environments
 
@@ -46,13 +46,13 @@ Two fully isolated environments. Each has its own CF resources (D1, KV, R2, disp
 
 **Dispatch worker** (`void-dispatch`):
 
-| Resource           | Binding     | Name / ID                                       |
-| ------------------ | ----------- | ----------------------------------------------- |
-| Dispatch Namespace | `DISPATCH`  | `void-users`                                    |
-| R2 Bucket          | `ASSETS`    | `void-assets`                                   |
-| KV Namespace       | `ROUTING`   | `9250c33f3db6494ebe8ad6272812c8c0`              |
-| Analytics Engine   | `ANALYTICS` | `vite_cloud_requests`                           |
-| Routes             | —           | `*.void.app/*`, `*.void.app` (zone: `void.app`) |
+| Resource           | Binding     | Name / ID                                                                  |
+| ------------------ | ----------- | -------------------------------------------------------------------------- |
+| Dispatch Namespace | `DISPATCH`  | `void-users`                                                               |
+| R2 Bucket          | `ASSETS`    | `void-assets`                                                              |
+| KV Namespace       | `ROUTING`   | `9250c33f3db6494ebe8ad6272812c8c0`                                         |
+| Analytics Engine   | `ANALYTICS` | `vite_cloud_requests`                                                      |
+| Routes             | —           | `*.vitecloud.app/*`, `*.vitecloud.app`, `*/*`, `*` (zone: `vitecloud.app`) |
 
 **AI proxy worker** (`void-ai-proxy`):
 
@@ -77,15 +77,15 @@ All workers: `compatibility_date: 2026-02-12`, `compatibility_flags: ["nodejs_co
 
 Same resource types with `-staging` suffixes:
 
-| Resource    | API                                                         | Dashboard                 | Dispatch                                     | AI Proxy                                                   |
-| ----------- | ----------------------------------------------------------- | ------------------------- | -------------------------------------------- | ---------------------------------------------------------- |
-| D1          | `void-api-staging` (`e78b32c1-497a-40ad-8f83-7049e139983e`) | —                         | —                                            | —                                                          |
-| R2          | `void-assets-staging`                                       | —                         | `void-assets-staging`                        | —                                                          |
-| KV          | `60240eecea804f39bf8b7395cd6c6b08`                          | —                         | `60240eecea804f39bf8b7395cd6c6b08`           | —                                                          |
-| Dispatch NS | `void-users-staging`                                        | —                         | `void-users-staging`                         | —                                                          |
-| Analytics   | —                                                           | —                         | `vite_cloud_requests_staging`                | —                                                          |
-| Workers AI  | —                                                           | —                         | —                                            | `AI` (account-level)                                       |
-| Routes      | —                                                           | `dash.staging.void.cloud` | `*.staging.void.app/*`, `*.staging.void.app` | `ai-proxy.staging.void.app/*`, `ai-proxy.staging.void.app` |
+| Resource    | API                                                         | Dashboard                 | Dispatch                                                           | AI Proxy                                                   |
+| ----------- | ----------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------- |
+| D1          | `void-api-staging` (`e78b32c1-497a-40ad-8f83-7049e139983e`) | —                         | —                                                                  | —                                                          |
+| R2          | `void-assets-staging`                                       | —                         | `void-assets-staging`                                              | —                                                          |
+| KV          | `60240eecea804f39bf8b7395cd6c6b08`                          | —                         | `60240eecea804f39bf8b7395cd6c6b08`                                 | —                                                          |
+| Dispatch NS | `void-users-staging`                                        | —                         | `void-users-staging`                                               | —                                                          |
+| Analytics   | —                                                           | —                         | `vite_cloud_requests_staging`                                      | —                                                          |
+| Workers AI  | —                                                           | —                         | —                                                                  | `AI` (account-level)                                       |
+| Routes      | —                                                           | `dash.staging.void.cloud` | `*.staging.vitecloud.app/*`, `*.staging.vitecloud.app`, `*/*`, `*` | `ai-proxy.staging.void.app/*`, `ai-proxy.staging.void.app` |
 
 ## Secrets and Environment Variables
 
@@ -248,16 +248,17 @@ pnpm health:staging    # Check staging API health
 
 ## DNS Setup
 
-| Record                      | Zone         | Points To                                |
-| --------------------------- | ------------ | ---------------------------------------- |
-| `api.void.cloud`            | `void.cloud` | API worker                               |
-| `dash.void.cloud`           | `void.cloud` | Dashboard worker                         |
-| `*.void.app`                | `void.app`   | Dispatch worker (wildcard route)         |
-| `ai-proxy.void.app`         | `void.app`   | AI proxy worker                          |
-| `api.staging.void.cloud`    | `void.cloud` | Staging API worker                       |
-| `dash.staging.void.cloud`   | `void.cloud` | Staging dashboard worker                 |
-| `*.staging.void.app`        | `void.app`   | Staging dispatch worker (wildcard route) |
-| `ai-proxy.staging.void.app` | `void.app`   | Staging AI proxy worker                  |
+| Record                      | Zone            | Points To                                  |
+| --------------------------- | --------------- | ------------------------------------------ |
+| `api.void.cloud`            | `void.cloud`    | API worker                                 |
+| `dash.void.cloud`           | `void.cloud`    | Dashboard worker                           |
+| `*.vitecloud.app`           | `vitecloud.app` | Dispatch worker (wildcard route)           |
+| `cname.vitecloud.app`       | `vitecloud.app` | CF for SaaS fallback origin (AAAA `100::`) |
+| `ai-proxy.void.app`         | `void.app`      | AI proxy worker                            |
+| `api.staging.void.cloud`    | `void.cloud`    | Staging API worker                         |
+| `dash.staging.void.cloud`   | `void.cloud`    | Staging dashboard worker                   |
+| `*.staging.vitecloud.app`   | `vitecloud.app` | Staging dispatch worker (wildcard route)   |
+| `ai-proxy.staging.void.app` | `void.app`      | Staging AI proxy worker                    |
 
 ## Fresh Environment Setup
 
@@ -288,14 +289,15 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
 
 4. **DNS records** — all records must be proxied (orange cloud).
 
-   **`void.app` zone:**
+   **`vitecloud.app` zone:**
 
-   | Record           | Type  | Content                                    | Purpose                                     |
-   | ---------------- | ----- | ------------------------------------------ | ------------------------------------------- |
-   | `proxy-fallback` | AAAA  | `100::`                                    | Proxied dummy target for CNAME chaining     |
-   | `cname`          | CNAME | `proxy-fallback.void.app`                  | CNAME target for user custom domains        |
-   | `*.<env>`        | CNAME | `void-dispatch-<env>.voidzer0.workers.dev` | Wildcard for dispatch worker route patterns |
-   | `ai-proxy.<env>` | CNAME | `void-ai-proxy-<env>.voidzer0.workers.dev` | AI proxy worker route patterns              |
+   | Record           | Type  | Content                                    | Purpose                                                       |
+   | ---------------- | ----- | ------------------------------------------ | ------------------------------------------------------------- |
+   | `cname`          | AAAA  | `100::`                                    | CF for SaaS fallback origin + CNAME target for custom domains |
+   | `*.<env>`        | CNAME | `void-dispatch-<env>.voidzer0.workers.dev` | Wildcard for dispatch worker route patterns                   |
+   | `ai-proxy.<env>` | CNAME | `void-ai-proxy-<env>.voidzer0.workers.dev` | AI proxy worker route patterns                                |
+
+   **CF for SaaS (Custom Hostnames):** Enabled on the `vitecloud.app` zone. Fallback origin set to `cname.vitecloud.app`. The dispatch worker's `*/*` catch-all route intercepts custom hostname traffic before CF reaches the dummy `100::` origin. Users CNAME their custom domain to `cname.vitecloud.app`.
 
    **`void.cloud` zone** (API and dashboard use Worker Custom Domains — CF creates the DNS records automatically when you add the custom domain to the worker):
 
