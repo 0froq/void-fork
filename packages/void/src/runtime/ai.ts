@@ -10,23 +10,23 @@ interface AiBackend {
 }
 
 function getProxyUrl(): string {
-  const custom = (env as any).__AI_PROXY_URL;
+  const custom = env.__AI_PROXY_URL;
   if (custom) return custom;
-  return (env as any).__VOID_STAGING ? STAGING_PROXY_URL : PROXY_URL;
+  return env.__VOID_STAGING ? STAGING_PROXY_URL : PROXY_URL;
 }
 
 function resolveBackend(): AiBackend {
   // Priority 1: Service binding (production via Void)
-  const proxy = (env as any).__AI_PROXY;
+  const proxy = env.__AI_PROXY;
   if (proxy) return makeServiceBindingBackend(proxy);
 
   // Priority 2: HTTPS to our proxy (local dev with Void auth)
-  const token = (env as any).__VOID_TOKEN;
-  const projectId = (env as any).__VOID_PROJECT_ID;
+  const token = env.__VOID_TOKEN;
+  const projectId = env.__VOID_PROJECT_ID;
   if (token && projectId) return makeHttpBackend(token, projectId);
 
   // Priority 3: Direct AI binding (user's own CF account)
-  const directAi = (env as any).AI;
+  const directAi = env.AI;
   if (directAi) {
     return {
       run: directAi.run.bind(directAi),
@@ -60,21 +60,21 @@ function makeServiceBindingBackend(proxy: Fetcher): AiBackend {
 
   return {
     async run(model, inputs, options) {
-      const projectId = (env as any).__PROJECT_ID;
-      const aiToken = (env as any).__AI_TOKEN;
+      const projectId = env.__PROJECT_ID;
+      const aiToken = env.__AI_TOKEN;
       const res = await proxyFetch("run", { model, inputs, options, projectId, aiToken });
       if ((inputs as any)?.stream) return res.body;
       return res.json();
     },
     async models(params) {
-      const projectId = (env as any).__PROJECT_ID;
-      const aiToken = (env as any).__AI_TOKEN;
+      const projectId = env.__PROJECT_ID;
+      const aiToken = env.__AI_TOKEN;
       const res = await proxyFetch("models", { inputs: params, projectId, aiToken });
       return res.json();
     },
     async toMarkdown(items, options) {
-      const projectId = (env as any).__PROJECT_ID;
-      const aiToken = (env as any).__AI_TOKEN;
+      const projectId = env.__PROJECT_ID;
+      const aiToken = env.__AI_TOKEN;
       const res = await proxyFetch("toMarkdown", { inputs: items, options, projectId, aiToken });
       return res.json();
     },

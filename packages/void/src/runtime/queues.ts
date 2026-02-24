@@ -6,7 +6,8 @@ import { env } from "cloudflare:workers";
 /** Typed queue producers — uses `env.QUEUE_*` from `cloudflare:workers`. */
 export const queues: QueueMap = new Proxy({} as QueueMap, {
   get(_, name: string) {
-    const bindingName = "QUEUE_" + name.toUpperCase().replace(/[^A-Z0-9]/g, "_");
-    return (env as any)[bindingName];
+    const bindingName =
+      `QUEUE_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}` as `QUEUE_${string}`;
+    return env[bindingName];
   },
 });

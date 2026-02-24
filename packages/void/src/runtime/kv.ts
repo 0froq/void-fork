@@ -157,4 +157,4 @@ export function createKV(namespace: KVNamespace): KVClient {
 import { env } from "cloudflare:workers";
 
 /** Default KV client — uses `env.KV` from `cloudflare:workers`. */
-export const kv: KVClient = createKVClient(() => (env as any).KV);
+export const kv: KVClient = createKVClient(() => env.KV);

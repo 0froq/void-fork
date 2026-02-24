@@ -8,6 +8,6 @@ import { env } from "cloudflare:workers";
 /** Default storage client — uses `env.STORAGE` from `cloudflare:workers`. */
 export const storage: R2Bucket = new Proxy({} as R2Bucket, {
   get(_target, prop, receiver) {
-    return Reflect.get((env as any).STORAGE, prop, receiver);
+    return Reflect.get(env.STORAGE, prop, receiver);
   },
 });

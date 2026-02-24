@@ -24,8 +24,8 @@ export interface RevalidateOptions {
  * ```
  */
 export async function revalidate(options: RevalidateOptions): Promise<void> {
-  const projectId = (env as any).VOID_PROJECT_ID;
-  const token = (env as any).VOID_REVALIDATE_TOKEN;
+  const projectId = env.VOID_PROJECT_ID;
+  const token = env.VOID_REVALIDATE_TOKEN;
 
   if (!projectId) {
     throw new Error("VOID_PROJECT_ID env binding is not set.");

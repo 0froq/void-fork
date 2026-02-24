@@ -240,4 +240,4 @@ function createQueryClient(getDB: () => D1Database): QueryClient {
 import { env } from "cloudflare:workers";
 
 /** Default query client — uses `env.DB` from `cloudflare:workers`. */
-export const db: QueryClient = createQueryClient(() => (env as any).DB);
+export const db: QueryClient = createQueryClient(() => env.DB);
