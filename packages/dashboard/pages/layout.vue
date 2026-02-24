@@ -1,25 +1,28 @@
 <script setup lang="ts">
 import "../app.css";
-import { ref, watch } from "vue";
-import { Link, useShared, useRouter } from "void/vue";
+import { ref } from "vue";
+import { Link, useShared, useNavigation } from "void/vue";
 
 const shared = useShared<{ user: { login: string } | null }>();
-const { navigating } = useRouter();
 
 const barState = ref<"idle" | "loading" | "completing">("idle");
 let completingTimer: ReturnType<typeof setTimeout>;
 
-watch(navigating, (active) => {
-  clearTimeout(completingTimer);
-  if (active) {
+useNavigation(
+  () => {
+    clearTimeout(completingTimer);
     barState.value = "loading";
-  } else if (barState.value === "loading") {
-    barState.value = "completing";
-    completingTimer = setTimeout(() => {
-      barState.value = "idle";
-    }, 500);
-  }
-});
+  },
+  () => {
+    clearTimeout(completingTimer);
+    if (barState.value === "loading") {
+      barState.value = "completing";
+      completingTimer = setTimeout(() => {
+        barState.value = "idle";
+      }, 500);
+    }
+  },
+);
 </script>
 
 <template>
