@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as p from "@clack/prompts";
@@ -46,27 +46,38 @@ async function main(): Promise<void> {
   // 4. Add local admin user (local-only, not in shared seed)
   s.start("Creating local admin user");
   run(
-    `npx wrangler d1 execute void-api --local --command "INSERT INTO users (id, provider, provider_id, login, email, github_id, github_login, plan, billing_cycle_start, role, created_at) VALUES ('user_admin', 'google', 'local-admin', 'local-admin', 'admin@localhost', 0, '', 'free', datetime('now'), 'admin', datetime('now'))"`,
+    `npx wrangler d1 execute void-api --local --command "INSERT INTO users (id, provider, provider_id, login, email, plan, billing_cycle_start, role, created_at) VALUES ('user_admin', 'google', 'local-admin', 'local-admin', 'admin@localhost', 'free', datetime('now'), 'admin', datetime('now'))"`,
     platformDir,
   );
   s.stop("Created local admin user");
 
   p.log.success("Created admin user: admin@localhost");
 
-  // 5. Next steps
-  const devVarsPath = resolve(platformDir, ".dev.vars");
+  // 5. Create .dev.vars if missing (API + dashboard)
+  const apiDevVars = ["DEV_AUTH_BYPASS=true", "JWT_SECRET=dev", ""].join("\n");
+  const dashboardDevVars = [
+    "DEV_AUTH_BYPASS=true",
+    "JWT_SECRET=dev",
+    "API_URL=http://localhost:8787",
+    "",
+  ].join("\n");
+  const devVarsConfigs: [string, string][] = [
+    [platformDir, apiDevVars],
+    [resolve(platformDir, "../dashboard"), dashboardDevVars],
+  ];
+  for (const [dir, content] of devVarsConfigs) {
+    const devVarsPath = resolve(dir, ".dev.vars");
+    if (!existsSync(devVarsPath)) {
+      writeFileSync(devVarsPath, content);
+      p.log.success(`Created ${devVarsPath}`);
+    } else {
+      p.log.info(`.dev.vars already exists at ${devVarsPath}`);
+    }
+  }
+
+  // 6. Next steps
   p.note(
-    [
-      "Ensure .dev.vars has:",
-      "  DEV_AUTH_BYPASS=true",
-      "  JWT_SECRET=dev",
-      "",
-      `  ${devVarsPath}`,
-      "",
-      "Then:",
-      "  1. pnpm dev",
-      "  2. Open http://localhost:8787/admin/",
-    ].join("\n"),
+    ["Run:", "  1. pnpm dev", "  2. Open http://localhost:8787/admin/"].join("\n"),
     "Next steps",
   );
 

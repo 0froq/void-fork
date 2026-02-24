@@ -1,51 +1,54 @@
 import { defineHandler } from "void";
+import {
+  getProject,
+  getProjectDeployments,
+  getDomainsByProjectId,
+  getProjectResources,
+} from "@voidcloud/api/db";
+import type { Project, Deployment, Domain, Resource } from "@voidcloud/api/types";
 import { createClient, api, type API, type Client } from "../../lib/api";
 
 type P = Client["projects"][":id"];
 
 export type Props = {
-  project: API<"$get", P> & { custom_domain: string | null };
-  deployments: API<"deployments", P>;
+  project: Project & { custom_domain: string | null };
+  deployments: Deployment[];
   usage: API<"usage", P>;
-  domains: API<"domains", P>;
+  domains: Domain[];
   secrets: API<"secrets", P>;
-  resources: API<"resources", P>;
+  resources: Resource[];
 };
 
 export const loader = defineHandler<Props>(async (c) => {
   const id = c.req.param("id");
+  const db = c.get("db");
+
+  // Direct D1
+  const project = await getProject(db, id);
+  if (!project) return c.notFound();
+
+  const [deployments, domains, resources] = await Promise.all([
+    getProjectDeployments(db, project.id),
+    getDomainsByProjectId(db, project.id),
+    getProjectResources(db, project.id),
+  ]);
+
+  // Still via API (Analytics Engine + CF API)
   const client = createClient(c);
-
-  const projectRes = await client.projects[":id"].$get({ param: { id } });
-  if (!projectRes.ok) {
-    if (projectRes.status === 404) return c.notFound();
-    throw new Error(await projectRes.text());
-  }
-  const project = (await projectRes.json()) as API<"$get", P>;
-
-  const [deploymentsRes, usageRes, domainsRes, secretsRes, resourcesRes] = await Promise.all([
-    client.projects[":id"].deployments.$get({ param: { id } }),
+  const [usageRes, secretsRes] = await Promise.all([
     client.projects[":id"].usage.$get({ param: { id } }),
-    client.projects[":id"].domains.$get({ param: { id } }),
     client.projects[":id"].secrets.$get({ param: { id } }),
-    client.projects[":id"].resources.$get({ param: { id } }),
   ]);
-
-  const [deployments, usage, domains, secrets, resources] = await Promise.all([
-    deploymentsRes.json() as Promise<Props["deployments"]>,
-    usageRes.ok
-      ? (usageRes.json() as Promise<Props["usage"]>)
-      : {
-          projectId: id,
-          billingPeriodStart: new Date().toISOString(),
-          requests: 0,
-          bandwidthBytes: 0,
-          aiNeurons: 0,
-        },
-    domainsRes.json() as Promise<Props["domains"]>,
-    secretsRes.ok ? (secretsRes.json() as Promise<Props["secrets"]>) : [],
-    resourcesRes.ok ? (resourcesRes.json() as Promise<Props["resources"]>) : [],
-  ]);
+  const usage = usageRes.ok
+    ? ((await usageRes.json()) as Props["usage"])
+    : {
+        projectId: id,
+        billingPeriodStart: new Date().toISOString(),
+        requests: 0,
+        bandwidthBytes: 0,
+        aiNeurons: 0,
+      };
+  const secrets = secretsRes.ok ? ((await secretsRes.json()) as Props["secrets"]) : [];
 
   const activeDomain = domains.find((d) => d.status === "active") ?? domains[0];
   return {

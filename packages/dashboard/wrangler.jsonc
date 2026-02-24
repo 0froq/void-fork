@@ -6,6 +6,13 @@
     "directory": "dist/client",
   },
   "routes": [{ "pattern": "dash.void.cloud", "custom_domain": true }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "void-api",
+      "database_id": "b559aaf5-e70b-47f3-998e-af502abed7eb",
+    },
+  ],
   "env": {
     "staging": {
       "name": "void-dashboard-staging",
@@ -13,6 +20,13 @@
       "vars": {
         "API_URL": "https://api.staging.void.cloud",
       },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "void-api-staging",
+          "database_id": "dd8eebb3-fe07-44dd-aadc-09675eb7b581",
+        },
+      ],
     },
   },
 }
