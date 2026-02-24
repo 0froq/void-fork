@@ -4,7 +4,7 @@ on:
   push:
     branches: [prod]
     paths:
-      - packages/docs/**
+      - docs/**
 
 jobs:
   deploy:

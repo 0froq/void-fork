@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(scriptsDir, "..");
-const sourceDir = resolve(packageDir, "../docs");
+const sourceDir = resolve(packageDir, "../../docs");
 const targetDir = resolve(packageDir, "skills/void/docs");
 
 if (!existsSync(sourceDir)) {

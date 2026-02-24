@@ -5,7 +5,7 @@ Full-stack framework for Cloudflare Workers, powered by Vite.
 ## Context Overview
 
 - **Important**: The source of truth for agent instructions is `CLAUDE.md` (this file). `AGENTS.md` is a symlink to this file. `README.md` is a separate public-facing file. When asked to update agent instructions, always update `CLAUDE.md`.
-- Documentation source lives in `packages/docs/`. A root-level `docs/` symlink points there for convenience.
+- Documentation source lives in `docs/`.
 
 ## Best Practices That Must Be Followed
 
@@ -20,7 +20,7 @@ Full-stack framework for Cloudflare Workers, powered by Vite.
   - Documentation: after verification, update all docs if relevant and applicable:
     - `README.md` (this file)
     - affected packages's `README.md` or `AGENTS.md`
-    - relevant docs md files in `packages/docs`
+    - relevant docs md files in `docs`
     - `packages/void/skills/void` (if change affects skill/CLI guidance)
     - `packages/void/AGENT_PROMPT.md`
     - `packages/void/getting-started-prompt.txt`
@@ -49,7 +49,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | [`packages/vue`](./packages/vue/README.md)       | `@void-x/vue`    | Vue framework adapter for Pages mode (SSR, Link, useForm)      |
 | [`packages/svelte`](./packages/svelte/README.md) | `@void-x/svelte` | Svelte 5 framework adapter for Pages mode (SSR, Link, useForm) |
 | [`packages/solid`](./packages/solid/README.md)   | `@void-x/solid`  | SolidJS framework adapter for Pages mode (SSR, Link, useForm)  |
-| [`packages/docs`](./packages/docs)               | (private)        | Documentation site (VitePress)                                 |
+| [`docs`](./docs)                                 | (private)        | Documentation site (VitePress)                                 |
 | `playground/*`                                   | (private)        | local apps for testing                                         |
 
 ## `void` Overview

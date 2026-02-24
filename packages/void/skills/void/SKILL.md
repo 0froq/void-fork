@@ -7,7 +7,7 @@ description: Void skill for app development and CLI operations. Use this skill t
 
 This skill is a router. Open the minimum relevant docs files under `docs/` and execute.
 
-Docs in this skill are bundled from `packages/docs` during `void` package build and live at:
+Docs in this skill are bundled from `docs` during `void` package build and live at:
 
 - `skills/void/docs/*.md`
 

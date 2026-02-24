@@ -2,15 +2,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm --F './packages/**' -F '!docs' build",
-    "build:all": "pnpm -r build",
+    "build": "pnpm -F './packages/**' build",
+    "build:all": "pnpm -F './packages/**' -F './playground/**' build",
     "build:core": "pnpm -F void build",
     "build:docs": "pnpm -F docs build",
     "test": "vitest --run",
     "lint": "oxlint",
     "fmt": "oxfmt --write .",
     "check": "pnpm -r --parallel typecheck",
-    "docs": "cd packages/docs && vitepress dev",
+    "docs": "cd docs && vitepress dev",
     "deploy:docs": "pnpm -F docs run deploy --project void-docs",
     "deploy:staging:docs": "pnpm -F docs run deploy --project void-docs-staging",
     "prepare": "husky"

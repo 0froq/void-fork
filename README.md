@@ -71,7 +71,7 @@ pnpm docs              # local docs dev server
 | `packages/vue`    | Vue framework adapter           |
 | `packages/svelte` | Svelte 5 framework adapter      |
 | `packages/solid`  | SolidJS framework adapter       |
-| `packages/docs`   | Documentation (VitePress)       |
+| `docs`            | Documentation (VitePress)       |
 | `playground/*`    | Test apps for local development |
 
 ## GitHub Environments & Secrets
