@@ -32,8 +32,31 @@
       "namespace": "void-users",
     },
   ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "USAGE_COUNTER",
+        "class_name": "UsageCounter",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["UsageCounter"],
+    },
+  ],
+  "queues": {
+    "consumers": [
+      {
+        "queue": "void-usage-events",
+        "max_batch_size": 100,
+        "max_batch_timeout": 5,
+      },
+    ],
+  },
   "triggers": {
-    "crons": ["*/5 * * * *"],
+    "crons": ["0 * * * *"],
   },
   "routes": [{ "pattern": "api.void.cloud", "custom_domain": true }],
   // Secrets (via `wrangler secret put`): CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID, JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
@@ -68,6 +91,23 @@
           "namespace": "void-users-staging",
         },
       ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "USAGE_COUNTER",
+            "class_name": "UsageCounter",
+          },
+        ],
+      },
+      "queues": {
+        "consumers": [
+          {
+            "queue": "void-usage-events-staging",
+            "max_batch_size": 100,
+            "max_batch_timeout": 5,
+          },
+        ],
+      },
       "routes": [{ "pattern": "api.staging.void.cloud", "custom_domain": true }],
       "vars": {
         "DISPATCH_NAMESPACE": "void-users-staging",

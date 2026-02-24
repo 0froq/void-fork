@@ -187,6 +187,7 @@ describe("POST /projects/:id/deploy", () => {
     expect(routing).toEqual({
       workerName: "user-routed-app",
       projectId: project.id,
+      userId: user.id,
       version: expect.stringMatching(/^dpl_/),
       limits: { cpuMs: 10, subRequests: 50 },
     });
@@ -217,6 +218,7 @@ describe("POST /projects/:id/deploy", () => {
     expect(routing).toEqual({
       workerName: "user-headers-full",
       projectId: project.id,
+      userId: user.id,
       version: expect.stringMatching(/^dpl_/),
       headers,
       limits: { cpuMs: 10, subRequests: 50 },
@@ -244,6 +246,7 @@ describe("POST /projects/:id/deploy", () => {
     expect(routing).toEqual({
       workerName: "user-ssr-app",
       projectId: project.id,
+      userId: user.id,
       ssr: true,
       version: expect.stringMatching(/^dpl_/),
       limits: { cpuMs: 10, subRequests: 50 },
@@ -498,6 +501,7 @@ describe("POST /projects/:id/deploy", () => {
     expect(domainRouting).toEqual({
       workerName: "user-domain-deploy",
       projectId: project.id,
+      userId: user.id,
       version: expect.stringMatching(/^dpl_/),
       limits: { cpuMs: 10, subRequests: 50 },
     });
@@ -973,6 +977,7 @@ describe("POST /projects/:id/deploy (static)", () => {
     const routing = await env.ROUTING.get("kv-spa", "json");
     expect(routing).toEqual({
       projectId: project.id,
+      userId: user.id,
       mode: "spa",
       version: expect.stringMatching(/^dpl_/),
     });
@@ -1003,6 +1008,7 @@ describe("POST /projects/:id/deploy (static)", () => {
     const routing = await env.ROUTING.get("headers-spa", "json");
     expect(routing).toEqual({
       projectId: project.id,
+      userId: user.id,
       mode: "spa",
       version: expect.stringMatching(/^dpl_/),
       headers,
@@ -1026,6 +1032,7 @@ describe("POST /projects/:id/deploy (static)", () => {
     const routing = await env.ROUTING.get("kv-ssg", "json");
     expect(routing).toEqual({
       projectId: project.id,
+      userId: user.id,
       mode: "ssg",
       version: expect.stringMatching(/^dpl_/),
     });

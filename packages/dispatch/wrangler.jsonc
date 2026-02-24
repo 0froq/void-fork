@@ -36,6 +36,14 @@
       "dataset": "void_requests",
     },
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "USAGE_QUEUE",
+        "queue": "void-usage-events",
+      },
+    ],
+  },
   "env": {
     "staging": {
       "name": "void-dispatch-staging",
@@ -75,6 +83,14 @@
           "dataset": "void_requests_staging",
         },
       ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "USAGE_QUEUE",
+            "queue": "void-usage-events-staging",
+          },
+        ],
+      },
     },
   },
 }

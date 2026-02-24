@@ -140,6 +140,7 @@ app.post("/:id/deploy", async (c) => {
       const existingStaticEntry = existingStaticRouting ? JSON.parse(existingStaticRouting) : null;
       const staticRoutingJson = JSON.stringify({
         projectId,
+        userId: project.user_id,
         mode: manifest.static,
         version: deployment.id,
         ...(manifest.assetsDir ? { assetsDir: manifest.assetsDir } : {}),
@@ -429,6 +430,7 @@ app.post("/:id/deploy", async (c) => {
     const routingJson = JSON.stringify({
       workerName,
       projectId,
+      userId: project.user_id,
       ...(manifest.ssr ? { ssr: true } : {}),
       ...(manifest.revalidate ? { revalidate: manifest.revalidate } : {}),
       version: deployment.id,

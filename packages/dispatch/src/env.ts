@@ -3,5 +3,6 @@ export interface Env {
   ASSETS: R2Bucket;
   ROUTING: KVNamespace;
   ANALYTICS: AnalyticsEngineDataset;
+  USAGE_QUEUE: Queue<unknown>;
   BASE_HOSTNAME?: string;
 }

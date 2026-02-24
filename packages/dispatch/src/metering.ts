@@ -20,3 +20,16 @@ export function recordRequest(
     doubles: [1, data.responseBytes, data.durationMs],
   });
 }
+
+export function sendUsageEvent(
+  env: Env,
+  data: {
+    projectId: string;
+    userId: string;
+    slug: string;
+    requests: number;
+    responseBytes: number;
+  },
+): void {
+  env.USAGE_QUEUE.send(data);
+}

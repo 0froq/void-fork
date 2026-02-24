@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import type { ApiEnv } from "./env";
+import { UsageCounter } from "./usage-counter";
+import { processUsageEventBatch } from "./usage-queue";
 import auth from "./routes/auth";
 import projects from "./routes/projects";
 import deploy from "./routes/deploy";
@@ -16,10 +18,9 @@ import adminUsers from "./admin/routes/users";
 import adminProjects from "./admin/routes/projects";
 import adminDeployments from "./admin/routes/deployments";
 import me from "./routes/me";
-import { createDb, getUsersWithProjectsBatch, suspendUser, unsuspendUserIfReason } from "./db";
+import { createDb, getUsersWithProjectsBatch, unsuspendUserIfReason } from "./db";
 import type { Db } from "./db";
-import { queryProjectUsage, queryProjectAiUsage } from "./routes/usage";
-import { getCurrentBillingPeriodStart, getPlanLimits, isWithinLimit } from "./tiers";
+import { getCurrentBillingPeriodStart, getPlanLimits } from "./tiers";
 
 const app = new Hono<ApiEnv>()
 
@@ -53,7 +54,6 @@ app.route("/admin/projects", adminProjects);
 app.route("/admin/deployments", adminDeployments);
 
 const BATCH_SIZE = 50;
-const ANALYTICS_CONCURRENCY = 10;
 
 async function scheduled(
   _controller: ScheduledController,
@@ -68,109 +68,84 @@ async function scheduled(
     if (batch.length === 0) break;
 
     await Promise.allSettled(
-      batch.map(({ user, projects }) => processUserUsage(env, db, user, projects)),
+      batch.map(({ user, projects }) => processUserRollover(env, db, user, projects)),
     );
 
     offset += BATCH_SIZE;
   }
 }
 
-async function processUserUsage(
+async function processUserRollover(
   env: ApiEnv["Bindings"],
   db: Db,
   user: { id: string; plan: string; billing_cycle_start: string; suspended_reason: string | null },
   userProjects: { id: string; slug: string }[],
 ): Promise<void> {
   const limits = getPlanLimits(user.plan);
-  if (limits.requestsPerMonth === 0) return; // unlimited
+  // Skip unlimited plans (no enforcement needed)
+  if (limits.requestsPerMonth === 0 && limits.aiNeuronsPerMonth === 0) return;
   if (userProjects.length === 0) return;
 
-  const since = getCurrentBillingPeriodStart(user.billing_cycle_start);
+  const billingPeriodStart = getCurrentBillingPeriodStart(user.billing_cycle_start).toISOString();
+  const projectSlugs: Record<string, string> = {};
+  for (const p of userProjects) {
+    projectSlugs[p.id] = p.slug;
+  }
 
-  // Query analytics for all projects with bounded concurrency
-  const usages = await asyncPool(userProjects, ANALYTICS_CONCURRENCY, (project) =>
-    queryProjectUsage(env.CF_ACCOUNT_ID, env.CF_API_TOKEN, project.id, since),
+  const doId = env.USAGE_COUNTER.idFromName(user.id);
+  const stub = env.USAGE_COUNTER.get(doId);
+
+  // Send rollover check (DO only resets if period actually changed)
+  const rolloverRes = await stub.fetch(
+    new Request("https://do/rollover", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ billingPeriodStart, plan: user.plan }),
+    }),
   );
 
-  let totalRequests = 0;
-  for (const usage of usages) {
-    totalRequests += usage.requests;
+  if (rolloverRes.ok) {
+    const result = await rolloverRes.json<{
+      rolled: boolean;
+      unsuspendRequests?: boolean;
+      unsuspendAi?: boolean;
+    }>();
+
+    // If period rolled and user was request-suspended, unsuspend in D1
+    if (result.rolled && result.unsuspendRequests) {
+      await unsuspendUserIfReason(db, user.id, "requests_exceeded");
+    }
   }
 
-  const exceeded = !isWithinLimit(limits.requestsPerMonth, totalRequests);
+  // Initialize DO with current project slugs (handles new users/projects)
+  await stub.fetch(
+    new Request("https://do/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: user.plan, billingPeriodStart, projectSlugs }),
+    }),
+  );
 
-  // Update KV routing entries for each project
+  // Backfill userId into old KV routing entries
   for (const project of userProjects) {
-    const routingRaw = await env.ROUTING.get(project.slug);
-    if (!routingRaw) continue;
-
-    const routing = JSON.parse(routingRaw);
-
-    if (exceeded && !routing.suspended) {
-      routing.suspended = "requests_exceeded";
+    const raw = await env.ROUTING.get(project.slug);
+    if (!raw) continue;
+    const routing = JSON.parse(raw);
+    if (!routing.userId) {
+      routing.userId = user.id;
       await env.ROUTING.put(project.slug, JSON.stringify(routing));
-    } else if (!exceeded && routing.suspended === "requests_exceeded") {
-      delete routing.suspended;
-      await env.ROUTING.put(project.slug, JSON.stringify(routing));
-    }
-    // Leave admin-suspended or other suspension reasons untouched
-  }
-
-  // Update DB suspension status
-  if (exceeded) {
-    await suspendUser(db, user.id, "requests_exceeded");
-  } else {
-    await unsuspendUserIfReason(db, user.id, "requests_exceeded");
-  }
-
-  // --- AI neuron limit enforcement (free tier only) ---
-  if (limits.aiNeuronsPerMonth !== 0 && user.plan === "free") {
-    const aiUsages = await asyncPool(userProjects, ANALYTICS_CONCURRENCY, (project) =>
-      queryProjectAiUsage(env.CF_ACCOUNT_ID, env.CF_API_TOKEN, project.id, since),
-    );
-
-    let totalNeurons = 0;
-    for (const usage of aiUsages) {
-      totalNeurons += usage.neurons;
-    }
-
-    const aiExceeded = !isWithinLimit(limits.aiNeuronsPerMonth, totalNeurons);
-
-    for (const project of userProjects) {
-      const key = `ai-block:${project.id}`;
-      if (aiExceeded) {
-        await env.ROUTING.put(key, "1");
-      } else {
-        await env.ROUTING.delete(key);
-      }
     }
   }
 }
 
-async function asyncPool<T, R>(
-  items: T[],
-  concurrency: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let nextIndex = 0;
-
-  async function worker(): Promise<void> {
-    while (nextIndex < items.length) {
-      const i = nextIndex++;
-      results[i] = await fn(items[i]);
-    }
-  }
-
-  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
-  await Promise.all(workers);
-  return results;
-}
-
+export { UsageCounter };
 export type AppType = typeof app;
 export { app, scheduled };
 
 export default {
   fetch: app.fetch,
   scheduled,
+  async queue(batch: MessageBatch<unknown>, env: ApiEnv["Bindings"]): Promise<void> {
+    await processUsageEventBatch(batch, env);
+  },
 } satisfies ExportedHandler<ApiEnv["Bindings"]>;

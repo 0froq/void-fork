@@ -23,6 +23,7 @@ export interface ApiEnv extends Env {
     SITE_DOMAIN?: string;
     DASHBOARD_URL?: string;
     SIGNUP_ALLOWLIST?: string;
+    USAGE_COUNTER: DurableObjectNamespace;
   };
   Variables: {
     userId: string;

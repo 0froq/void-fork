@@ -11,12 +11,13 @@ import {
   resolvePathTtl,
   shouldBypassIsr,
 } from "./isr";
-import { recordRequest, type RequestType } from "./metering";
+import { recordRequest, sendUsageEvent, type RequestType } from "./metering";
 import { serveStaticAsset, serveStaticAssetWithFallback, serveSSGAsset } from "./static";
 
 interface RoutingEntry {
   workerName?: string;
   projectId: string;
+  userId?: string;
   ssr?: boolean;
   revalidate?: number | Record<string, number>;
   mode?: "spa" | "ssg";
@@ -73,7 +74,7 @@ export default {
       if (cached) {
         const response = conditionalResponse(request, cached);
         ctx.waitUntil(
-          Promise.resolve().then(() =>
+          Promise.resolve().then(() => {
             recordRequest(env, {
               projectId: routing.projectId,
               type: "static",
@@ -82,8 +83,17 @@ export default {
               responseBytes: Number(response.headers.get("content-length") ?? 0),
               durationMs: Date.now() - startTime,
               slug: slug ?? url.hostname,
-            }),
-          ),
+            });
+            if (routing.userId) {
+              sendUsageEvent(env, {
+                projectId: routing.projectId,
+                userId: routing.userId,
+                slug: slug ?? url.hostname,
+                requests: 1,
+                responseBytes: Number(response.headers.get("content-length") ?? 0),
+              });
+            }
+          }),
         );
         return response;
       }
@@ -94,7 +104,7 @@ export default {
 
     const meter = (response: Response) => {
       ctx.waitUntil(
-        Promise.resolve().then(() =>
+        Promise.resolve().then(() => {
           recordRequest(env, {
             projectId: routing.projectId,
             type: requestType,
@@ -103,8 +113,17 @@ export default {
             responseBytes: Number(response.headers.get("content-length") ?? 0),
             durationMs: Date.now() - startTime,
             slug: slug ?? url.hostname,
-          }),
-        ),
+          });
+          if (routing.userId) {
+            sendUsageEvent(env, {
+              projectId: routing.projectId,
+              userId: routing.userId,
+              slug: slug ?? url.hostname,
+              requests: 1,
+              responseBytes: Number(response.headers.get("content-length") ?? 0),
+            });
+          }
+        }),
       );
       return response;
     };

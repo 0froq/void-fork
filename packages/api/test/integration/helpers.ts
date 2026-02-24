@@ -29,7 +29,23 @@ export type TestEnv = {
   DEV_AUTH_BYPASS?: string;
   SITE_DOMAIN?: string;
   SIGNUP_ALLOWLIST?: string;
+  USAGE_COUNTER: DurableObjectNamespace;
 };
+
+function createMockDoNamespace(): DurableObjectNamespace {
+  return {
+    idFromName: (name: string) => ({ toString: () => name }),
+    get: (_id: unknown) => ({
+      fetch: async (req: Request) => {
+        const url = new URL(req.url);
+        if (url.pathname === "/rollover") return Response.json({ rolled: false });
+        if (url.pathname === "/init") return Response.json({ ok: true });
+        if (url.pathname === "/state") return Response.json({});
+        return Response.json({ totalRequests: 0, suspended: false });
+      },
+    }),
+  } as unknown as DurableObjectNamespace;
+}
 
 let mf: Miniflare;
 
@@ -65,6 +81,7 @@ export async function setupEnv(): Promise<TestEnv> {
     GITHUB_CLIENT_SECRET: "test-github-client-secret",
     GOOGLE_CLIENT_ID: "test-google-client-id",
     GOOGLE_CLIENT_SECRET: "test-google-client-secret",
+    USAGE_COUNTER: createMockDoNamespace(),
   };
 }
 
