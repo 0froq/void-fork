@@ -36,23 +36,26 @@ Two fully isolated environments. Each has its own CF resources (D1, KV, R2, disp
 
 **API worker** (`void-api`):
 
-| Resource           | Binding    | Name / ID                                           |
-| ------------------ | ---------- | --------------------------------------------------- |
-| D1 Database        | `DB`       | `void-api` (`f85c1d7d-7b41-4f85-88e5-ad37966825e7`) |
-| R2 Bucket          | `ASSETS`   | `void-assets`                                       |
-| KV Namespace       | `ROUTING`  | `9250c33f3db6494ebe8ad6272812c8c0`                  |
-| Dispatch Namespace | `DISPATCH` | `void-users`                                        |
-| Cron Trigger       | —          | `*/5 * * * *`                                       |
+| Resource           | Binding         | Name / ID                                           |
+| ------------------ | --------------- | --------------------------------------------------- |
+| D1 Database        | `DB`            | `void-api` (`f85c1d7d-7b41-4f85-88e5-ad37966825e7`) |
+| R2 Bucket          | `ASSETS`        | `void-assets`                                       |
+| KV Namespace       | `ROUTING`       | `9250c33f3db6494ebe8ad6272812c8c0`                  |
+| Dispatch Namespace | `DISPATCH`      | `void-users`                                        |
+| Durable Object     | `USAGE_COUNTER` | `UsageCounter` (per-user usage enforcement)         |
+| Queue (consumer)   | —               | `void-usage-events` (batch 100, timeout 5s)         |
+| Cron Trigger       | —               | `0 * * * *` (hourly — billing rollovers + backfill) |
 
 **Dispatch worker** (`void-dispatch`):
 
-| Resource           | Binding     | Name / ID                                                                  |
-| ------------------ | ----------- | -------------------------------------------------------------------------- |
-| Dispatch Namespace | `DISPATCH`  | `void-users`                                                               |
-| R2 Bucket          | `ASSETS`    | `void-assets`                                                              |
-| KV Namespace       | `ROUTING`   | `9250c33f3db6494ebe8ad6272812c8c0`                                         |
-| Analytics Engine   | `ANALYTICS` | `vite_cloud_requests`                                                      |
-| Routes             | —           | `*.vitecloud.app/*`, `*.vitecloud.app`, `*/*`, `*` (zone: `vitecloud.app`) |
+| Resource           | Binding       | Name / ID                                                                  |
+| ------------------ | ------------- | -------------------------------------------------------------------------- |
+| Dispatch Namespace | `DISPATCH`    | `void-users`                                                               |
+| R2 Bucket          | `ASSETS`      | `void-assets`                                                              |
+| KV Namespace       | `ROUTING`     | `9250c33f3db6494ebe8ad6272812c8c0`                                         |
+| Analytics Engine   | `ANALYTICS`   | `vite_cloud_requests`                                                      |
+| Queue (producer)   | `USAGE_QUEUE` | `void-usage-events`                                                        |
+| Routes             | —             | `*.vitecloud.app/*`, `*.vitecloud.app`, `*/*`, `*` (zone: `vitecloud.app`) |
 
 **AI proxy worker** (`void-ai-proxy`):
 
@@ -84,6 +87,8 @@ Same resource types with `-staging` suffixes:
 | KV          | `60240eecea804f39bf8b7395cd6c6b08`                          | —                         | `60240eecea804f39bf8b7395cd6c6b08`                                 | —                                                          |
 | Dispatch NS | `void-users-staging`                                        | —                         | `void-users-staging`                                               | —                                                          |
 | Analytics   | —                                                           | —                         | `vite_cloud_requests_staging`                                      | —                                                          |
+| Queue       | `void-usage-events-staging` (consumer)                      | —                         | `void-usage-events-staging` (producer)                             | —                                                          |
+| DO          | `UsageCounter` (same class, staging-isolated)               | —                         | —                                                                  | —                                                          |
 | Workers AI  | —                                                           | —                         | —                                                                  | `AI` (account-level)                                       |
 | Routes      | —                                                           | `dash.staging.void.cloud` | `*.staging.vitecloud.app/*`, `*.staging.vitecloud.app`, `*/*`, `*` | `ai-proxy.staging.void.app/*`, `ai-proxy.staging.void.app` |
 
@@ -271,6 +276,7 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    - Dispatch namespace (Workers for Platforms)
    - Analytics Engine dataset
    - AI Gateway named `void`
+   - Queue: `wrangler queues create void-usage-events-<env>` (usage enforcement events)
 
 2. **Update wrangler configs** — add an `env.<name>` section in `packages/api/wrangler.jsonc`, `packages/dashboard/wrangler.jsonc`, `packages/dispatch/wrangler.jsonc`, and `packages/ai-proxy/wrangler.jsonc` with the new resource IDs.
 
