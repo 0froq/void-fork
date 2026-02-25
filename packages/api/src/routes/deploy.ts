@@ -276,6 +276,11 @@ app.post("/:id/deploy", async (c) => {
     const allBindings = [...workerBindings, ...plainTextBindings];
 
     // Add metadata part (include provisioned bindings)
+    if (!manifest.compatibilityDate) {
+      console.warn(
+        `[deploy] manifest missing compatibilityDate for project ${project.id}, using fallback`,
+      );
+    }
     const metadata = {
       main_module: manifest.workerMain ?? "index.js",
       compatibility_date: manifest.compatibilityDate ?? "2026-02-12",
