@@ -7,6 +7,7 @@ const referenceLinks = {
   collapsed: false,
   items: [
     { text: "Configuration", link: "/config" },
+    { text: "Resource Inference", link: "/resource-inference" },
     { text: "API", link: "/api" },
     { text: "CLI", link: "/cli" },
   ],

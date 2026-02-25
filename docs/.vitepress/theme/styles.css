@@ -1,5 +1,10 @@
 @import "@voidzero-dev/vitepress-theme/src/styles/index.css";
 
+.dark {
+  --vp-code-bg: rgba(255, 255, 255, 0.025);
+  --vp-code-color: var(--vp-code-link-color);
+}
+
 .dark .aside-credit-logo-dark {
   display: none !important;
 }

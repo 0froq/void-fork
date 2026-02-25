@@ -4,16 +4,27 @@ outline: deep
 
 # CLI
 
-`void` ships a CLI with two binaries:
+`void` is a local binary from the installed `void` package.
 
-- `void` (short)
-- `void` (alias)
+## Cheat Sheet
 
-Examples below use `void`.
+| Command                           | Purpose                              |
+| --------------------------------- | ------------------------------------ |
+| `void deploy`                     | Build and deploy to Void             |
+| `void gen model <name> [cols...]` | Scaffold migration + CRUD routes     |
+| `void gen route <path>`           | Create an API route                  |
+| `void db status`                  | Show local/remote migration status   |
+| `void db reset`                   | Drop and re-apply all migrations     |
+| `void db seed`                    | Reset + seed local database          |
+| `void secret put <name=value>`    | Set a production secret              |
+| `void secret sync .env.local`     | Bulk upload secrets from dotenv file |
+| `void login`                      | Authenticate with Void               |
+| `void link`                       | Link directory to a project          |
+| `void init`                       | Setup wizard (tsconfig, agents, CI)  |
 
-## Binary invocation
+## Binary Invocation
 
-`void` is a local binary from the installed `void` package, so outside of npm scripts, you will have to invoke it with `npx`, `pnpm`, `yarn`, or `bunx`. For brevity, you will sometimes see unprefixed `void` usage throughout the docs. Just remember it needs to be invoked through a binary runner.
+Outside of npm scripts, you need to invoke `void` with `npx`, `pnpm`, `yarn`, or `bunx`. For brevity, docs show unprefixed `void` usage — just remember it needs a binary runner.
 
 Alternatively, you can add `./node_modules/.bin` to your `PATH` so that you can invoke `void` directly when you are in the root directory of your app.
 

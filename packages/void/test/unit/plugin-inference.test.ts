@@ -93,6 +93,23 @@ describe("inferProjectBindings", () => {
     expect(result.needsAuth).toBe(false);
   });
 
+  it("detects bindings from pages/ .server.ts files", () => {
+    const root = createTempRoot();
+    mkdirSync(join(root, "pages"), { recursive: true });
+    writeFileSync(
+      join(root, "pages", "index.server.ts"),
+      `
+      import { db } from "void/db";
+      export function loader() {
+        return db.select().from(users);
+      }
+      `,
+    );
+
+    const result = inferProjectBindings(root);
+    expect(result.needsD1).toBe(true);
+  });
+
   it("does not scan src/ twice in framework mode", () => {
     const root = createTempRoot();
     writeFileSync(

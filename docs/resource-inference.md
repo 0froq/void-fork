@@ -1,0 +1,130 @@
+---
+outline: deep
+---
+
+# Resource Inference
+
+Void automatically detects which Cloudflare resources your project uses, and provisions bindings by scanning your source files at startup. No manual configuration is needed — just use a resource in your code and Void provisions it for local development.
+
+## How It Works
+
+When `voidPlugin()` initializes, it synchronously scans your source files using a three-tier approach optimized for speed:
+
+1. **Import detection** — uses `es-module-lexer` to check for `void/*` imports (fastest, no AST parsing)
+2. **Regex pre-check** — tests for `env.DB`, `env.KV`, etc. patterns to skip files that don't use bindings
+3. **AST confirmation** — only when the regex matches, parses the full AST to confirm `c.env.DB` or `env.DB` member expressions
+
+This runs once before plugins initialize, so the results are available to configure the Cloudflare Vite plugin.
+
+## Detected Bindings
+
+| Binding   | Type          | Detected by import                                                        | Detected by env access           |
+| --------- | ------------- | ------------------------------------------------------------------------- | -------------------------------- |
+| `DB`      | `D1Database`  | `import { db } from "void/db"`                                            | `env.DB` or `c.env.DB`           |
+| `KV`      | `KVNamespace` | `import { kv } from "void/kv"`                                            | `env.KV` or `c.env.KV`           |
+| `STORAGE` | `R2Bucket`    | `import { storage } from "void/storage"`                                  | `env.STORAGE` or `c.env.STORAGE` |
+| `AI`      | `Ai`          | `import { ai } from "void/ai"`                                            | `env.AI` or `c.env.AI`           |
+| Auth      | —             | `import { ... } from "void/auth"` or `import { auth } from "void/client"` | —                                |
+| `QUEUE_*` | `Queue`       | `import { ... } from "void/queue"`                                        | `env.QUEUE_*`                    |
+
+Auth detection also triggers when importing the `auth` specifier from `void/client` (but not when importing only `fetch`).
+
+## Scanned Directories
+
+### Standard mode
+
+When using Void's built-in routing (no meta-framework), these directories are scanned:
+
+| Directory     | Contains                                    |
+| ------------- | ------------------------------------------- |
+| `routes/`     | API route handlers                          |
+| `middleware/` | Hono middleware                             |
+| `queues/`     | Queue consumers                             |
+| `pages/`      | Page components and `.server.ts` companions |
+| `crons/`      | Scheduled job handlers                      |
+
+### Framework mode
+
+When a meta-framework is detected (TanStack Start or React Router), a broader set of directories is scanned instead:
+
+| Directory | Contains                |
+| --------- | ----------------------- |
+| `src/`    | Application source      |
+| `app/`    | Framework app directory |
+| `routes/` | Framework routes        |
+| `server/` | Server-side code        |
+
+Framework detection checks `package.json` for `@tanstack/react-start` or `@react-router/dev` in dependencies.
+
+### Always scanned
+
+Regardless of mode, these are always checked:
+
+- **SSR entry** (`src/main.ssr.ts` or equivalent) — for SSR apps that access bindings during rendering
+- **`src/`** — always scanned for auth imports, unless `src/` is already in the scan list (framework mode)
+
+## Explicit Overrides
+
+If inference doesn't match your setup, you can override it in `void.json`:
+
+```json
+{
+  "bindings": {
+    "db": true,
+    "kv": true,
+    "storage": false,
+    "ai": false
+  }
+}
+```
+
+When `bindings` is set, explicit values take full precedence — inference is skipped entirely.
+
+## File Types
+
+Inference scans files matching `**/*.{ts,tsx,mts,js,jsx,mjs}` within each directory. Non-JS files (CSS, HTML, images) are ignored.
+
+## Common Patterns
+
+### Pages mode with D1
+
+A page companion file in `pages/` triggers D1 inference:
+
+```ts
+// pages/users.server.ts
+import { db } from "void/db";
+
+export function loader() {
+  return db.select().from(users);
+}
+```
+
+### Cron job with KV
+
+A scheduled handler in `crons/` triggers KV inference:
+
+```ts
+// crons/cleanup.ts
+import { defineScheduled } from "void";
+import { kv } from "void/kv";
+
+export default defineScheduled(async () => {
+  await kv.delete("temp-cache");
+});
+```
+
+### Route handler with R2
+
+A route handler in `routes/` triggers R2 inference:
+
+```ts
+// routes/api/upload.ts
+import { defineHandler } from "void";
+import { storage } from "void/storage";
+
+export const POST = defineHandler(async (c) => {
+  const file = await c.req.blob();
+  await storage.put("uploads/file.bin", file);
+  return c.json({ ok: true });
+});
+```

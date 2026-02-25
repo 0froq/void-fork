@@ -44,7 +44,7 @@ Enable built-in auth routes and session management.
 
 ### `bindings`
 
-Explicitly control inferred Cloudflare bindings. If omitted, bindings are inferred by scanning `routes/` and `middleware/` usage (`c.env.DB`, `c.env.KV`, `c.env.STORAGE`). If provided, explicit values take precedence over inference.
+Explicitly control inferred Cloudflare bindings. If omitted, bindings are [automatically inferred](./resource-inference.md) by scanning your source files for binding usage. If provided, explicit values take precedence and inference is skipped entirely.
 
 ```json
 { "bindings": { "db": true, "kv": false, "storage": false } }

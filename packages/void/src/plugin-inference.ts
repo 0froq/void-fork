@@ -78,7 +78,7 @@ export function inferProjectBindings(
     };
   }
 
-  const dirs = scanDirs ?? ["routes", "middleware", "queues"];
+  const dirs = scanDirs ?? ["routes", "middleware", "queues", "pages", "crons"];
   const allBindings: InferredBindings[] = [];
 
   for (const dir of dirs) {
