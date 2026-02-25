@@ -276,7 +276,8 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
 
         // Reload the browser for island page changes — islands are
         // server-rendered only, so there's no client HMR to handle updates.
-        if (/\.island\./.test(path)) {
+        // .md pages are implicit islands (no client JS), so reload those too.
+        if (/\.island\./.test(path) || path.endsWith(".md")) {
           devServer.environments.client?.hot.send({ type: "full-reload" });
         }
       };
