@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { getRuntimeEnv, type RuntimeEnv } from "./env";
 
 const PROXY_URL = "https://ai-proxy.void.cloud";
 const STAGING_PROXY_URL = "https://ai-proxy.staging.void.cloud";
@@ -9,24 +9,28 @@ interface AiBackend {
   toMarkdown(items: unknown, options?: unknown): Promise<unknown>;
 }
 
-function getProxyUrl(): string {
-  const custom = env.__AI_PROXY_URL;
-  if (custom) return custom;
-  return env.__VOID_STAGING ? STAGING_PROXY_URL : PROXY_URL;
+function getProxyUrl(runtimeEnv: RuntimeEnv): string {
+  const custom = runtimeEnv.__AI_PROXY_URL;
+  if (typeof custom === "string" && custom.length > 0) return custom;
+  return runtimeEnv.__VOID_STAGING ? STAGING_PROXY_URL : PROXY_URL;
 }
 
 function resolveBackend(): AiBackend {
+  const runtimeEnv = getRuntimeEnv();
+
   // Priority 1: Service binding (production via Void)
-  const proxy = env.__AI_PROXY;
-  if (proxy) return makeServiceBindingBackend(proxy);
+  const proxy = runtimeEnv.__AI_PROXY as Fetcher | undefined;
+  if (proxy) return makeServiceBindingBackend(proxy, runtimeEnv);
 
   // Priority 2: HTTPS to our proxy (local dev with Void auth)
-  const token = env.__VOID_TOKEN;
-  const projectId = env.__VOID_PROJECT_ID;
-  if (token && projectId) return makeHttpBackend(token, projectId);
+  const token = runtimeEnv.__VOID_TOKEN;
+  const projectId = runtimeEnv.__VOID_PROJECT_ID;
+  if (typeof token === "string" && typeof projectId === "string") {
+    return makeHttpBackend(token, projectId, runtimeEnv);
+  }
 
   // Priority 3: Direct AI binding (user's own CF account)
-  const directAi = env.AI;
+  const directAi = runtimeEnv.AI as Ai | undefined;
   if (directAi) {
     return {
       run: directAi.run.bind(directAi),
@@ -44,7 +48,7 @@ function unsupported(method: string): () => never {
   };
 }
 
-function makeServiceBindingBackend(proxy: Fetcher): AiBackend {
+function makeServiceBindingBackend(proxy: Fetcher, runtimeEnv: RuntimeEnv): AiBackend {
   async function proxyFetch(action: string, body: Record<string, unknown>): Promise<Response> {
     const res = await proxy.fetch(`https://ai-proxy/${action}`, {
       method: "POST",
@@ -60,29 +64,29 @@ function makeServiceBindingBackend(proxy: Fetcher): AiBackend {
 
   return {
     async run(model, inputs, options) {
-      const projectId = env.__PROJECT_ID;
-      const aiToken = env.__AI_TOKEN;
+      const projectId = runtimeEnv.__PROJECT_ID;
+      const aiToken = runtimeEnv.__AI_TOKEN;
       const res = await proxyFetch("run", { model, inputs, options, projectId, aiToken });
       if ((inputs as any)?.stream) return res.body;
       return res.json();
     },
     async models(params) {
-      const projectId = env.__PROJECT_ID;
-      const aiToken = env.__AI_TOKEN;
+      const projectId = runtimeEnv.__PROJECT_ID;
+      const aiToken = runtimeEnv.__AI_TOKEN;
       const res = await proxyFetch("models", { inputs: params, projectId, aiToken });
       return res.json();
     },
     async toMarkdown(items, options) {
-      const projectId = env.__PROJECT_ID;
-      const aiToken = env.__AI_TOKEN;
+      const projectId = runtimeEnv.__PROJECT_ID;
+      const aiToken = runtimeEnv.__AI_TOKEN;
       const res = await proxyFetch("toMarkdown", { inputs: items, options, projectId, aiToken });
       return res.json();
     },
   };
 }
 
-function makeHttpBackend(token: string, projectId: string): AiBackend {
-  const base = getProxyUrl();
+function makeHttpBackend(token: string, projectId: string, runtimeEnv: RuntimeEnv): AiBackend {
+  const base = getProxyUrl(runtimeEnv);
   const headers = { "content-type": "application/json", authorization: `Bearer ${token}` };
 
   async function proxyFetch(action: string, body: Record<string, unknown>): Promise<Response> {

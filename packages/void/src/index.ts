@@ -209,7 +209,49 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
       },
     };
 
-    return [wranglerSyncPlugin, dbTypesPlugin(root, false), migrationPlugin(root)];
+    // SvelteKit dev bridge: expose Wrangler's platform proxy env on a global
+    // so runtime helpers (void/db, void/kv, etc.) can resolve bindings
+    // without relying on cloudflare:workers imports in Node.
+    const svelteKitEnvBridgePlugin: Plugin = {
+      name: "void:sveltekit-env-bridge",
+      apply: "serve",
+      async configureServer(server) {
+        if (detected.class !== "b") return;
+
+        const wranglerJsonc = join(root, "wrangler.jsonc");
+        const wranglerJson = join(root, "wrangler.json");
+        const configPath = existsSync(wranglerJsonc)
+          ? wranglerJsonc
+          : existsSync(wranglerJson)
+            ? wranglerJson
+            : undefined;
+
+        try {
+          const { getPlatformProxy } = await import("wrangler");
+          const proxy = await getPlatformProxy({
+            ...(configPath ? { configPath } : {}),
+            persist: { path: join(root, ".void", "v3") },
+          });
+
+          (globalThis as Record<string, unknown>).__void_cf_env = proxy.env as unknown;
+
+          server.httpServer?.once("close", () => {
+            void proxy.dispose();
+          });
+        } catch {
+          server.config.logger.warn(
+            "[void] Failed to initialize SvelteKit Cloudflare env bridge. Runtime bindings may be unavailable.",
+          );
+        }
+      },
+    };
+
+    return [
+      wranglerSyncPlugin,
+      svelteKitEnvBridgePlugin,
+      dbTypesPlugin(root, false),
+      migrationPlugin(root),
+    ];
   }
 
   // Phase 1: Determine auth providers from imports (sync, at plugin creation)

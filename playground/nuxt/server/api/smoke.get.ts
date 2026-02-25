@@ -1,10 +1,11 @@
-export default defineEventHandler(async (event) => {
-  const { env } = event.context.cloudflare;
+import { db } from "void/db";
+import { kv } from "void/kv";
 
-  const result = await env.DB.prepare("SELECT * FROM users LIMIT 1").first();
+export default defineEventHandler(async () => {
+  const result = await db.get("users");
 
-  await env.KV.put("smoke", "ok");
-  const kvValue = await env.KV.get("smoke");
+  await kv.set("smoke", "ok");
+  const kvValue = await kv.get<string>("smoke");
 
   return { user: result, kvValue };
 });

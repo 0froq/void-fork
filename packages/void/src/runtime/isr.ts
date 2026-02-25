@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { getRuntimeBinding } from "./env";
 
 const PLATFORM_URL = "https://api.void.cloud";
 
@@ -24,8 +24,8 @@ export interface RevalidateOptions {
  * ```
  */
 export async function revalidate(options: RevalidateOptions): Promise<void> {
-  const projectId = env.VOID_PROJECT_ID;
-  const token = env.VOID_REVALIDATE_TOKEN;
+  const projectId = getRuntimeBinding<string>("VOID_PROJECT_ID");
+  const token = getRuntimeBinding<string>("VOID_REVALIDATE_TOKEN");
 
   if (!projectId) {
     throw new Error("VOID_PROJECT_ID env binding is not set.");

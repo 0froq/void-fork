@@ -237,7 +237,7 @@ function createQueryClient(getDB: () => D1Database): QueryClient {
   };
 }
 
-import { env } from "cloudflare:workers";
+import { requireRuntimeBinding } from "./env";
 
-/** Default query client — uses `env.DB` from `cloudflare:workers`. */
-export const db: QueryClient = createQueryClient(() => env.DB);
+/** Default query client — resolves `DB` from the active runtime environment. */
+export const db: QueryClient = createQueryClient(() => requireRuntimeBinding<D1Database>("DB"));

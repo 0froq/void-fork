@@ -154,7 +154,7 @@ export function createKV(namespace: KVNamespace): KVClient {
   return createKVClient(() => namespace);
 }
 
-import { env } from "cloudflare:workers";
+import { requireRuntimeBinding } from "./env";
 
-/** Default KV client — uses `env.KV` from `cloudflare:workers`. */
-export const kv: KVClient = createKVClient(() => env.KV);
+/** Default KV client — resolves `KV` from the active runtime environment. */
+export const kv: KVClient = createKVClient(() => requireRuntimeBinding<KVNamespace>("KV"));
