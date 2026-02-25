@@ -1,0 +1,143 @@
+---
+outline: deep
+---
+
+# TanStack Start
+
+[TanStack Start](https://tanstack.com/start/latest) is a Vite-based full-stack React framework. `voidPlugin()` composes directly with the TanStack Start plugin in the Vite pipeline — no separate adapter needed.
+
+## Setup
+
+### 1. Install dependencies
+
+```bash
+npm install -D void
+```
+
+### 2. Configure `vite.config.ts`
+
+```ts
+import { defineConfig } from "vite";
+import { tanstackStart } from "@tanstack/react-start/plugin";
+import react from "@vitejs/plugin-react";
+import { voidPlugin } from "void";
+
+export default defineConfig({
+  plugins: [
+    voidPlugin(), // must come before the framework plugin
+    tanstackStart(),
+    react(),
+  ],
+});
+```
+
+### 3. Deploy
+
+```bash
+void login
+void deploy
+```
+
+## Using Void Platform Features
+
+All [Void platform features](../../app-types.md#void-apps) work with TanStack Start. Use them in server functions:
+
+### Database
+
+```tsx
+import { createServerFn } from "@tanstack/react-start";
+import { db } from "void/db";
+
+const getUsers = createServerFn().handler(async () => {
+  return db.list("users"); // fully typed from migrations
+});
+```
+
+### Auth
+
+Use `getUser()` from `void/auth` to access the authenticated user in server functions:
+
+```tsx
+import { createServerFn } from "@tanstack/react-start";
+import { getUser } from "void/auth";
+
+const getProfile = createServerFn({ method: "GET" }).handler(async () => {
+  const user = getUser();
+  if (!user) throw new Error("Not authenticated");
+  return user;
+});
+```
+
+See [Authentication](../../auth.md) for setup, providers, and the full API.
+
+### KV Storage
+
+```tsx
+import { createServerFn } from "@tanstack/react-start";
+import { kv } from "void/kv";
+
+const getSettings = createServerFn().handler(async () => {
+  return kv.get("app:settings");
+});
+```
+
+### Blob Storage
+
+```tsx
+import { createServerFn } from "@tanstack/react-start";
+import { storage } from "void/storage";
+
+const getAvatar = createServerFn().handler(async () => {
+  return storage.get("avatars/user-1.png");
+});
+```
+
+### AI
+
+```tsx
+import { createServerFn } from "@tanstack/react-start";
+import { ai } from "void/ai";
+
+const summarize = createServerFn().handler(async () => {
+  return ai.run("@cf/meta/llama-3.1-8b-instruct", {
+    prompt: "Summarize the latest news",
+  });
+});
+```
+
+### Cron Jobs
+
+```ts
+// crons/daily-cleanup.ts
+import { defineScheduled } from "void";
+
+export const cron = "0 0 * * *";
+
+export default defineScheduled(async () => {
+  // runs daily at midnight
+});
+```
+
+### Queue Consumers
+
+```ts
+// queues/emails.ts
+import { defineQueue } from "void";
+
+export default defineQueue<{ to: string; subject: string }>(async (batch) => {
+  for (const msg of batch.messages) {
+    // process each message
+    msg.ack();
+  }
+});
+```
+
+## Accessing Bindings Directly
+
+You can also access Cloudflare bindings via the `cloudflare:workers` module:
+
+```tsx
+import { env } from "cloudflare:workers";
+
+const { results } = await env.DB.prepare("SELECT * FROM users").all();
+```

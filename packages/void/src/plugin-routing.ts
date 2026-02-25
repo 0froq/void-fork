@@ -110,6 +110,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       schemaPath: resolveFile("void/auth/schema"),
       githubProviderPath: hasGitHub ? resolveFile("@hono/oauth-providers/github") : null,
       googleProviderPath: hasGoogle ? resolveFile("@hono/oauth-providers/google") : null,
+      authRuntimePath: resolveFile("void/auth"),
     };
   }
 

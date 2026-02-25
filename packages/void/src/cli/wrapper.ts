@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { build } from "vite";
 import type { AuthProvider } from "../config";
 
@@ -85,6 +86,7 @@ export async function generateAndBundleWrapper(
     resolve: {
       alias: {
         __ORIGINAL_WORKER__: features.originalEntry,
+        __VOID_AUTH__: fileURLToPath(import.meta.resolve("void/auth")),
       },
     },
   });
@@ -225,9 +227,8 @@ function generateQueueSource(root: string, queues: WrapperFeatures["queues"]): s
 function generateAuthSource(_providers: AuthProvider[]): string {
   const lines: string[] = [];
 
-  lines.push(`import { AsyncLocalStorage } from "node:async_hooks";`);
-  lines.push("");
-  lines.push("export const authContext = new AsyncLocalStorage();");
+  lines.push(`import { authContext } from "__VOID_AUTH__";`);
+  lines.push("export { authContext };");
   lines.push("");
 
   // Session resolution — parse cookie, look up in KV

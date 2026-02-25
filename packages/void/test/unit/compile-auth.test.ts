@@ -23,6 +23,7 @@ const emailAuth: AuthCompileOptions = {
   schemaPath: "/resolved/auth/schema.mjs",
   githubProviderPath: null,
   googleProviderPath: null,
+  authRuntimePath: "/resolved/void/runtime/auth.mjs",
 };
 
 const githubAuth: AuthCompileOptions = {
@@ -32,6 +33,7 @@ const githubAuth: AuthCompileOptions = {
   schemaPath: "/resolved/auth/schema.mjs",
   githubProviderPath: "/resolved/oauth/github.mjs",
   googleProviderPath: null,
+  authRuntimePath: "/resolved/void/runtime/auth.mjs",
 };
 
 const allAuth: AuthCompileOptions = {
@@ -41,6 +43,7 @@ const allAuth: AuthCompileOptions = {
   schemaPath: "/resolved/auth/schema.mjs",
   githubProviderPath: "/resolved/oauth/github.mjs",
   googleProviderPath: "/resolved/oauth/google.mjs",
+  authRuntimePath: "/resolved/void/runtime/auth.mjs",
 };
 
 describe("compileRouteTable with auth", () => {
@@ -218,6 +221,7 @@ describe("compileRouteTable with auth", () => {
       schemaPath: "/resolved/auth/schema.mjs",
       githubProviderPath: null,
       googleProviderPath: "/resolved/oauth/google.mjs",
+      authRuntimePath: "/resolved/void/runtime/auth.mjs",
     };
     const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,

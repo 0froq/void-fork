@@ -9,6 +9,8 @@ export interface AuthCompileOptions {
   schemaPath: string;
   githubProviderPath: string | null;
   googleProviderPath: string | null;
+  /** Resolved path to void/auth — used to import the shared authContext ALS. */
+  authRuntimePath: string;
 }
 
 export interface CompileOptions {
@@ -82,6 +84,7 @@ export function compileRouteTable(
     if (auth.googleProviderPath) {
       lines.push(`import { googleAuth } from ${JSON.stringify(auth.googleProviderPath)};`);
     }
+    lines.push(`import { authContext } from ${JSON.stringify(auth.authRuntimePath)};`);
   }
   lines.push("");
 
@@ -129,7 +132,8 @@ export function compileRouteTable(
     lines.push("      });");
     lines.push("    }");
     lines.push("  }");
-    lines.push("  await next();");
+    lines.push('  const __user = c.get("user") ?? null;');
+    lines.push("  await authContext.run({ user: __user }, next);");
     lines.push("});");
     lines.push("");
   }

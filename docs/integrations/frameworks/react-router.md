@@ -1,0 +1,137 @@
+---
+outline: deep
+---
+
+# React Router v7
+
+[React Router v7](https://reactrouter.com/) is a Vite-based full-stack React framework. `voidPlugin()` composes directly with the React Router plugin in the Vite pipeline — no separate adapter needed.
+
+## Setup
+
+### 1. Install dependencies
+
+```bash
+npm install -D void
+```
+
+### 2. Configure `vite.config.ts`
+
+```ts
+import { defineConfig } from "vite";
+import { reactRouter } from "@react-router/dev/vite";
+import { voidPlugin } from "void";
+
+export default defineConfig({
+  plugins: [
+    voidPlugin(), // must come before the framework plugin
+    reactRouter(),
+  ],
+});
+```
+
+### 3. Deploy
+
+```bash
+void login
+void deploy
+```
+
+## Using Void Platform Features
+
+All [Void platform features](../../app-types.md#void-apps) work with React Router. Use them in loaders and actions:
+
+### Database
+
+```tsx
+import type { Route } from "./+types/users";
+import { db } from "void/db";
+
+export async function loader({}: Route.LoaderArgs) {
+  return { users: await db.list("users") }; // fully typed from migrations
+}
+```
+
+### Auth
+
+Use `getUser()` from `void/auth` to access the authenticated user in loaders and actions:
+
+```ts
+import { getUser } from "void/auth";
+
+export async function loader() {
+  const user = getUser();
+  if (!user) throw new Response("Unauthorized", { status: 401 });
+  return { user };
+}
+```
+
+See [Authentication](../../auth.md) for setup, providers, and the full API.
+
+### KV Storage
+
+```tsx
+import { kv } from "void/kv";
+
+export async function loader() {
+  return { settings: await kv.get("app:settings") };
+}
+```
+
+### Blob Storage
+
+```tsx
+import { storage } from "void/storage";
+
+export async function loader() {
+  return { avatar: await storage.get("avatars/user-1.png") };
+}
+```
+
+### AI
+
+```tsx
+import { ai } from "void/ai";
+
+export async function action() {
+  return ai.run("@cf/meta/llama-3.1-8b-instruct", {
+    prompt: "Summarize the latest news",
+  });
+}
+```
+
+### Cron Jobs
+
+```ts
+// crons/daily-cleanup.ts
+import { defineScheduled } from "void";
+
+export const cron = "0 0 * * *";
+
+export default defineScheduled(async () => {
+  // runs daily at midnight
+});
+```
+
+### Queue Consumers
+
+```ts
+// queues/emails.ts
+import { defineQueue } from "void";
+
+export default defineQueue<{ to: string; subject: string }>(async (batch) => {
+  for (const msg of batch.messages) {
+    // process each message
+    msg.ack();
+  }
+});
+```
+
+## Accessing Bindings Directly
+
+You can also access Cloudflare bindings via the `cloudflare:workers` module:
+
+```tsx
+import { env } from "cloudflare:workers";
+
+const { results } = await env.DB.prepare("SELECT * FROM users").all();
+```

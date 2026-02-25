@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { Context, Env } from "hono";
 import { HTTPException } from "hono/http-exception";
 
@@ -9,6 +10,36 @@ export interface AuthUser {
   email: string | null;
   name: string | null;
   avatar_url: string | null;
+}
+
+/**
+ * Shared AsyncLocalStorage that holds the authenticated user for the current request.
+ * Populated by:
+ * - The Hono session middleware (Void apps)
+ * - The deploy wrapper (meta-framework apps)
+ */
+export const authContext: AsyncLocalStorage<{ user: AuthUser | null }> = new AsyncLocalStorage<{
+  user: AuthUser | null;
+}>();
+
+/**
+ * Get the authenticated user for the current request.
+ *
+ * Works in both Void apps and meta-framework apps (e.g. TanStack Start, Nuxt)
+ * as long as auth is enabled. Returns `null` if no user is authenticated or
+ * if called outside a request context.
+ *
+ * ```ts
+ * import { getUser } from "void/auth";
+ *
+ * const user = getUser();
+ * if (user) {
+ *   console.log(user.email);
+ * }
+ * ```
+ */
+export function getUser(): AuthUser | null {
+  return authContext.getStore()?.user ?? null;
 }
 
 /**

@@ -86,6 +86,18 @@ The OAuth callback URL is the same as the login URL. Configure these in your OAu
 | GitHub   | `http://localhost:5173/auth/login/github` | `https://your-app.void.app/auth/login/github` |
 | Google   | `http://localhost:5173/auth/login/google` | `https://your-app.void.app/auth/login/google` |
 
+## Getting the Current User
+
+Use `getUser()` to read the authenticated user anywhere in your server code — route handlers, server functions, middleware, or meta-framework loaders:
+
+```ts
+import { getUser } from "void/auth";
+
+const user = getUser(); // AuthUser | null
+```
+
+This works in both Void apps and [meta-framework apps](./integrations/frameworks/overview.md) (TanStack Start, SvelteKit, Nuxt, etc.). Returns `null` if not authenticated or if called outside a request context.
+
 ## Protecting Routes
 
 Use `requireAuth()` to protect a route. It returns the authenticated user or throws a 401:
@@ -101,16 +113,29 @@ export const GET = defineHandler((c) => {
 });
 ```
 
-For optional auth (don't throw if not logged in), read the user from context directly:
+For optional auth (don't throw if not logged in), use `getUser()` or read the user from context directly:
 
 ```ts
+import { getUser } from "void/auth";
+
 export const GET = defineHandler((c) => {
-  const user = c.get("user"); // AuthUser | null
+  const user = getUser(); // AuthUser | null
   return { loggedIn: !!user };
 });
 ```
 
-The session middleware runs on every request and populates `c.get("user")` with the session data (or `null` if not authenticated). `requireAuth()` is a convenience that throws if the value is null.
+The session middleware runs on every request and populates the user for both `getUser()` and `c.get("user")`. `requireAuth()` is a convenience that throws if the value is null.
+
+### `getUser()` vs `requireAuth(c)`
+
+|                    | `getUser()`                                 | `requireAuth(c)`                |
+| ------------------ | ------------------------------------------- | ------------------------------- |
+| **Import**         | `void/auth`                                 | `void/auth`                     |
+| **Context needed** | None — reads from AsyncLocalStorage         | Hono `Context` (`c`)            |
+| **Returns**        | `AuthUser \| null`                          | `AuthUser` (throws 401 if null) |
+| **Works in**       | Void apps, meta-frameworks, any server code | Void app route handlers only    |
+
+Use `getUser()` when you don't have a Hono context or want optional auth. Use `requireAuth(c)` in Void app route handlers where you want a 401 thrown automatically.
 
 ### `AuthUser`
 
