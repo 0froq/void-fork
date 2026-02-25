@@ -11,8 +11,6 @@ const REVALIDATE_RE = /export\s+const\s+revalidate\s*=\s*(\d+)\s*;/;
 const PRERENDER_RE = /export\s+const\s+prerender\s*=\s*true\s*;/;
 const PRERENDER_FALSE_RE = /export\s+const\s+prerender\s*=\s*false\s*;/;
 const GET_PRERENDER_PATHS_RE = /export\s+(?:async\s+)?function\s+getPrerenderPaths\b/;
-const ISLAND_IMPORT_RE = /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:/;
-
 export const MAX_REVALIDATE = 31536000; // 1 year in seconds
 
 export async function scanPages(root: string): Promise<PageScanResult> {
@@ -96,17 +94,9 @@ export async function scanPages(root: string): Promise<PageScanResult> {
       }
     }
 
-    // Detect island imports in component file
-    let hasIslandImports: boolean | undefined;
-    if (island) {
-      const componentContent = readFileSync(join(pagesDir, file), "utf-8");
-      hasIslandImports = ISLAND_IMPORT_RE.test(componentContent);
-    }
-
-    // Auto-static: island page with no island imports, no loader, no params → prerender
+    // Auto-static: island page with no loader and no params → prerender
     if (
       island &&
-      !hasIslandImports &&
       !methods.includes("loader") &&
       route.params.length === 0 &&
       !route.catchAll &&
@@ -131,7 +121,6 @@ export async function scanPages(root: string): Promise<PageScanResult> {
       revalidate,
       prerender,
       hasGetPrerenderPaths,
-      hasIslandImports,
       island,
     });
   }

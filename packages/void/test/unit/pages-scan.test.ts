@@ -254,24 +254,23 @@ describe("scanPages", () => {
     expect(page!.hasGetPrerenderPaths).toBeUndefined();
   });
 
-  it("auto-prerenders static island page with no imports, no loader, no server file", async () => {
+  it("auto-prerenders static island page with no loader, no params", async () => {
     writeFile("pricing.island.vue", "<template><div>Pricing</div></template>");
     const result = await scanPages(TMP);
     const page = result.pages.find((p) => p.componentId === "pricing");
     expect(page!.prerender).toBe(true);
     expect(page!.revalidate).toBe(MAX_REVALIDATE);
-    expect(page!.hasIslandImports).toBe(false);
   });
 
-  it("does not auto-prerender island page with island imports", async () => {
+  it("auto-prerenders island page even with island imports", async () => {
     writeFile(
       "pricing.island.vue",
       `<script setup>\nimport Counter from "./Counter.vue" with { island: "load" };\n</script>\n<template><Counter /></template>`,
     );
     const result = await scanPages(TMP);
     const page = result.pages.find((p) => p.componentId === "pricing");
-    expect(page!.prerender).toBeUndefined();
-    expect(page!.hasIslandImports).toBe(true);
+    expect(page!.prerender).toBe(true);
+    expect(page!.revalidate).toBe(MAX_REVALIDATE);
   });
 
   it("does not auto-prerender island page with loader", async () => {
