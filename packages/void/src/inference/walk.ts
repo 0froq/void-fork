@@ -68,7 +68,16 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
       }
     }
   } catch {
-    // es-module-lexer can't parse this file, fall through to AST
+    // es-module-lexer can't parse JSX/TSX — fall back to regex for void/* imports
+    if (/\bfrom\s+["']void\/db["']/.test(code)) result.needsD1 = true;
+    if (/\bfrom\s+["']void\/kv["']/.test(code)) result.needsKV = true;
+    if (/\bfrom\s+["']void\/storage["']/.test(code)) result.needsR2 = true;
+    if (/\bfrom\s+["']void\/auth["']/.test(code)) result.needsAuth = true;
+    if (/\bfrom\s+["']void\/queue["']/.test(code)) result.needsQueues = true;
+    if (/\bfrom\s+["']void\/ai["']/.test(code)) result.needsAI = true;
+    if (/\bfrom\s+["']void\/client["']/.test(code) && /\bauth\b/.test(code)) {
+      result.needsAuth = true;
+    }
   }
 
   // If imports resolved all bindings, we're done

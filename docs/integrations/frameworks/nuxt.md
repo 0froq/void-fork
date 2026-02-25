@@ -23,10 +23,18 @@ The `nitro-cloudflare-dev` module enables `getPlatformProxy()` for local dev, gi
 import { voidPlugin } from "void";
 
 export default defineNuxtConfig({
-  nitro: { preset: "cloudflare-module" },
+  nitro: {
+    preset: "cloudflare-module",
+    cloudflareDev: {
+      persistDir: ".void/v3", // share D1 data with migration plugin
+    },
+  },
+  modules: ["nitro-cloudflare-dev"],
   vite: { plugins: [voidPlugin()] },
 });
 ```
+
+The `persistDir` must be `.void/v3` so that `nitro-cloudflare-dev` reads from the same D1 database that the migration plugin writes to.
 
 ### 3. Create `wrangler.jsonc`
 
@@ -49,12 +57,24 @@ void deploy
 
 ## Using Void Platform Features
 
-All [Void platform features](../../app-types.md#void-apps) work with Nuxt. Use them in server routes and middleware:
+All [Void platform features](../../app-types.md#void-apps) work with Nuxt after deployment. During local development, Nuxt server routes must use `event.context.cloudflare.env` to access bindings because Nitro's server runtime doesn't go through Vite's plugin pipeline where the `cloudflare:workers` shim lives. See [Runtime Helpers in Dev Mode](./overview.md#runtime-helpers-in-dev-mode) for details.
 
 ### Database
 
+During dev, use `event.context.cloudflare.env` directly:
+
 ```ts
 // server/api/users.get.ts
+export default defineEventHandler(async (event) => {
+  const { DB } = event.context.cloudflare.env;
+  const { results } = await DB.prepare("SELECT * FROM users").all();
+  return results;
+});
+```
+
+After deployment to workerd, `void/db` also works:
+
+```ts
 import { db } from "void/db";
 
 export default defineEventHandler(async () => {
@@ -80,6 +100,17 @@ export default defineEventHandler(() => {
 See [Authentication](../../auth.md) for setup, providers, and the full API.
 
 ### KV Storage
+
+During dev, use the Nitro event context:
+
+```ts
+export default defineEventHandler(async (event) => {
+  const { KV } = event.context.cloudflare.env;
+  return KV.get("app:settings");
+});
+```
+
+After deployment, `void/kv` also works:
 
 ```ts
 import { kv } from "void/kv";
@@ -140,7 +171,7 @@ export default defineQueue<{ to: string; subject: string }>(async (batch) => {
 
 ## Accessing Bindings Directly
 
-You can also access bindings via the Nitro event:
+Access bindings via the Nitro event context (works in both dev and production):
 
 ```ts
 // server/api/users.get.ts
@@ -151,10 +182,6 @@ export default defineEventHandler(async (event) => {
 });
 ```
 
-Or the `cloudflare:workers` module:
-
-```ts
-import { env } from "cloudflare:workers";
-
-const { results } = await env.DB.prepare("SELECT * FROM users").all();
-```
+::: tip Recommended for Dev
+Using `event.context.cloudflare.env` is the recommended approach for Nuxt server routes during local development. It works because `nitro-cloudflare-dev` provides Cloudflare bindings through Nitro's event context.
+:::

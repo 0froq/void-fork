@@ -1,0 +1,6 @@
+{
+  "bindings": {
+    "db": true,
+    "kv": true
+  }
+}

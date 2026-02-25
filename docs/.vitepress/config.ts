@@ -17,7 +17,6 @@ const integrationLinks = {
   text: "Integrations",
   collapsed: false,
   items: [
-    { text: "Coding Agents", link: "integrations/agents" },
     {
       text: "Meta Frameworks",
       collapsed: true,
@@ -30,6 +29,7 @@ const integrationLinks = {
         { text: "Astro", link: "/integrations/frameworks/astro" },
       ],
     },
+    { text: "Coding Agents", link: "integrations/agents" },
     { text: "Hono", link: "integrations/hono" },
     { text: "Cloudflare", link: "integrations/cloudflare" },
     { text: "ORMs", link: "integrations/orms" },
@@ -44,8 +44,6 @@ const resourcesLinks = {
     { text: "Guides", link: "/guides/", activeMatch: "/guides/" },
     { text: "Templates", link: "/templates/", activeMatch: "/templates/" },
     { text: "Blog", link: "/blog/", activeMatch: "/blog/" },
-    referenceLinks,
-    integrationLinks,
   ],
 };
 
@@ -75,7 +73,7 @@ export default extendConfig(
 
       nav: [
         { text: "Platform", link: "https://void.cloud" },
-        { text: "Framework", link: "/", activeMatch: "/" },
+        { text: "SDK", link: "/", activeMatch: "/" },
         resourcesLinks,
       ],
 

@@ -117,7 +117,8 @@
     "@hono/oauth-providers": "^0.8.5",
     "better-sqlite3": "^12.6.2",
     "ofetch": "^1.5.1",
-    "picocolors": "^1.1.1"
+    "picocolors": "^1.1.1",
+    "wrangler": "catalog:"
   },
   "devDependencies": {
     "@clack/prompts": "catalog:",

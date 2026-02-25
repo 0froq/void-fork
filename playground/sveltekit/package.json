@@ -1,0 +1,20 @@
+{
+  "name": "playground-sveltekit",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@sveltejs/adapter-cloudflare": "^7.2.8",
+    "@sveltejs/kit": "^2.53.1",
+    "svelte": "^5.53.3"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.1.0",
+    "@typescript/native-preview": "catalog:",
+    "vite": "catalog:",
+    "void": "workspace:*"
+  }
+}

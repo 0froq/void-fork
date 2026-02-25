@@ -22,11 +22,16 @@ import cloudflare from "@astrojs/cloudflare";
 import { voidPlugin } from "void";
 
 export default defineConfig({
-  output: "server",
-  adapter: cloudflare(),
+  adapter: cloudflare({
+    platformProxy: {
+      persist: { path: ".void/v3" }, // share D1 data with migration plugin
+    },
+  }),
   vite: { plugins: [voidPlugin()] },
 });
 ```
+
+The `persist.path` must be `.void/v3` so that `@astrojs/cloudflare` reads from the same D1 database that the migration plugin writes to.
 
 ### 3. Create `wrangler.jsonc`
 
@@ -49,18 +54,54 @@ void deploy
 
 ## Using Void Platform Features
 
-All [Void platform features](../../app-types.md#void-apps) work with Astro. Use them in server endpoints and middleware:
+All [Void platform features](../../app-types.md#void-apps) work with Astro after deployment. During local development, Astro SSR pages must use `Astro.locals.runtime.env` to access bindings because Astro's SSR module resolution doesn't go through Vite's plugin pipeline where the `cloudflare:workers` shim lives. See [Runtime Helpers in Dev Mode](./overview.md#runtime-helpers-in-dev-mode) for details.
+
+Pages that access runtime bindings must opt out of prerendering:
+
+```astro
+---
+export const prerender = false;
+// now Astro.locals.runtime is available
+---
+```
 
 ### Database
 
+During dev, use `Astro.locals.runtime.env` directly:
+
+```astro
+---
+export const prerender = false;
+const { DB } = Astro.locals.runtime.env;
+const { results } = await DB.prepare("SELECT * FROM users").all();
+---
+<ul>
+  {results.map(user => <li>{user.name}</li>)}
+</ul>
+```
+
+In API routes:
+
 ```ts
 // src/pages/api/users.ts
+import type { APIRoute } from "astro";
+
+export const GET: APIRoute = async ({ locals }) => {
+  const { DB } = locals.runtime.env;
+  const { results } = await DB.prepare("SELECT * FROM users").all();
+  return Response.json(results);
+};
+```
+
+After deployment to workerd, `void/db` also works:
+
+```ts
 import type { APIRoute } from "astro";
 import { db } from "void/db";
 
 export const GET: APIRoute = async () => {
   const users = await db.list("users"); // fully typed from migrations
-  return new Response(JSON.stringify(users));
+  return Response.json(users);
 };
 ```
 
@@ -83,13 +124,27 @@ See [Authentication](../../auth.md) for setup, providers, and the full API.
 
 ### KV Storage
 
+During dev, use the runtime directly:
+
+```ts
+import type { APIRoute } from "astro";
+
+export const GET: APIRoute = async ({ locals }) => {
+  const { KV } = locals.runtime.env;
+  const settings = await KV.get("app:settings");
+  return Response.json(settings);
+};
+```
+
+After deployment, `void/kv` also works:
+
 ```ts
 import type { APIRoute } from "astro";
 import { kv } from "void/kv";
 
 export const GET: APIRoute = async () => {
   const settings = await kv.get("app:settings");
-  return new Response(JSON.stringify(settings));
+  return Response.json(settings);
 };
 ```
 
@@ -115,7 +170,7 @@ export const POST: APIRoute = async () => {
   const result = await ai.run("@cf/meta/llama-3.1-8b-instruct", {
     prompt: "Summarize the latest news",
   });
-  return new Response(JSON.stringify(result));
+  return Response.json(result);
 };
 ```
 
@@ -148,7 +203,7 @@ export default defineQueue<{ to: string; subject: string }>(async (batch) => {
 
 ## Accessing Bindings Directly
 
-You can also use Astro's `locals.runtime.env` in server endpoints and middleware:
+Access bindings via `Astro.locals.runtime.env` (works in both dev and production):
 
 ```ts
 import type { APIRoute } from "astro";
@@ -156,14 +211,20 @@ import type { APIRoute } from "astro";
 export const GET: APIRoute = async ({ locals }) => {
   const { DB } = locals.runtime.env;
   const { results } = await DB.prepare("SELECT * FROM users").all();
-  return new Response(JSON.stringify(results));
+  return Response.json(results);
 };
 ```
 
-Or the `cloudflare:workers` module:
+In `.astro` pages (remember to set `prerender = false`):
 
-```ts
-import { env } from "cloudflare:workers";
-
-const { results } = await env.DB.prepare("SELECT * FROM users").all();
+```astro
+---
+export const prerender = false;
+const { DB } = Astro.locals.runtime.env;
+const { results } = await DB.prepare("SELECT * FROM users").all();
+---
 ```
+
+::: tip Recommended for Dev
+Using `Astro.locals.runtime.env` is the recommended approach for Astro pages during local development. It works because `@astrojs/cloudflare` provides Cloudflare bindings through the Astro runtime context.
+:::

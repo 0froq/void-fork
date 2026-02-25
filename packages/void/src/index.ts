@@ -209,7 +209,43 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
       },
     };
 
-    return [wranglerSyncPlugin, dbTypesPlugin(root, false), migrationPlugin(root)];
+    // Shim for `cloudflare:workers` — Class B/C frameworks run SSR in Node.js
+    // (not workerd), so `cloudflare:workers` isn't natively available.
+    // During dev: call getPlatformProxy() in the plugin context (Node.js) and
+    // expose the result via globalThis so the virtual module can access it.
+    // During build: mark as external so the adapter's bundler handles it.
+    let isServe = false;
+    const cfWorkersShimPlugin: Plugin = {
+      name: "void:cloudflare-workers-shim",
+      configResolved(resolvedConfig) {
+        isServe = resolvedConfig.command === "serve";
+      },
+      async configureServer() {
+        const { getPlatformProxy } = await import("wrangler");
+        const proxy = await getPlatformProxy({ persist: { path: ".void/v3" } });
+        (globalThis as any).__void_cf_env = proxy.env;
+      },
+      resolveId(id) {
+        if (id === "cloudflare:workers") return "\0cloudflare:workers";
+      },
+      load(id) {
+        if (id !== "\0cloudflare:workers") return;
+        if (isServe) {
+          // Dev: use the proxy env populated by configureServer
+          return `export const env = globalThis.__void_cf_env;`;
+        }
+        // Build: stub — the adapter re-bundles for workerd where
+        // cloudflare:workers is natively available.
+        return `export const env = {};`;
+      },
+    };
+
+    return [
+      wranglerSyncPlugin,
+      cfWorkersShimPlugin,
+      dbTypesPlugin(root, false),
+      migrationPlugin(root),
+    ];
   }
 
   // Phase 1: Determine auth providers from imports (sync, at plugin creation)

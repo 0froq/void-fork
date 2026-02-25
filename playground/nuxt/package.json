@@ -1,0 +1,19 @@
+{
+  "name": "playground-nuxt",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build"
+  },
+  "dependencies": {
+    "nitro-cloudflare-dev": "^0.2.2",
+    "nuxt": "^4.3.1"
+  },
+  "devDependencies": {
+    "@typescript/native-preview": "catalog:",
+    "vite": "catalog:",
+    "void": "workspace:*",
+    "wrangler": "catalog:"
+  }
+}
