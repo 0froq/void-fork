@@ -9,7 +9,11 @@ const SERVER_EXTENSIONS = ["ts", "tsx", "js", "mjs", "mts"];
 const PAGES_EXPORT_RE = /export\s+(?:const|function|async\s+function)\s+(loader|action)\b/g;
 const REVALIDATE_RE = /export\s+const\s+revalidate\s*=\s*(\d+)\s*;/;
 const PRERENDER_RE = /export\s+const\s+prerender\s*=\s*true\s*;/;
+const PRERENDER_FALSE_RE = /export\s+const\s+prerender\s*=\s*false\s*;/;
 const GET_PRERENDER_PATHS_RE = /export\s+(?:async\s+)?function\s+getPrerenderPaths\b/;
+const ISLAND_IMPORT_RE = /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:/;
+
+export const MAX_REVALIDATE = 31536000; // 1 year in seconds
 
 export async function scanPages(root: string): Promise<PageScanResult> {
   const pagesDir = join(root, "pages");
@@ -64,6 +68,7 @@ export async function scanPages(root: string): Promise<PageScanResult> {
     let methods: string[] = [];
     let revalidate: number | undefined;
     let prerender: boolean | undefined;
+    let prerenderExplicitlyFalse = false;
     let hasGetPrerenderPaths: boolean | undefined;
     const serverBase = island ? file.replace(`.island${ext}`, "") : file.replace(ext, "");
     for (const serverExt of SERVER_EXTENSIONS) {
@@ -81,11 +86,38 @@ export async function scanPages(root: string): Promise<PageScanResult> {
         if (PRERENDER_RE.test(content)) {
           prerender = true;
         }
+        if (PRERENDER_FALSE_RE.test(content)) {
+          prerenderExplicitlyFalse = true;
+        }
         if (GET_PRERENDER_PATHS_RE.test(content)) {
           hasGetPrerenderPaths = true;
         }
         break;
       }
+    }
+
+    // Detect island imports in component file
+    let hasIslandImports: boolean | undefined;
+    if (island) {
+      const componentContent = readFileSync(join(pagesDir, file), "utf-8");
+      hasIslandImports = ISLAND_IMPORT_RE.test(componentContent);
+    }
+
+    // Auto-static: island page with no island imports, no loader, no params → prerender
+    if (
+      island &&
+      !hasIslandImports &&
+      !methods.includes("loader") &&
+      route.params.length === 0 &&
+      !route.catchAll &&
+      !prerenderExplicitlyFalse
+    ) {
+      prerender = true;
+    }
+
+    // Prerender → max revalidate (applies to all pages)
+    if (prerender && revalidate === undefined) {
+      revalidate = MAX_REVALIDATE;
     }
 
     pages.push({
@@ -99,6 +131,7 @@ export async function scanPages(root: string): Promise<PageScanResult> {
       revalidate,
       prerender,
       hasGetPrerenderPaths,
+      hasIslandImports,
       island,
     });
   }

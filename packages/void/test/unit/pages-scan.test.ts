@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { scanPages, resolveLayoutChain } from "../../src/pages/scan";
+import { scanPages, resolveLayoutChain, MAX_REVALIDATE } from "../../src/pages/scan";
 
 const TMP = join(import.meta.dirname, "__tmp_pages_scan__");
 
@@ -252,6 +252,68 @@ describe("scanPages", () => {
     expect(page).toBeDefined();
     expect(page!.prerender).toBeUndefined();
     expect(page!.hasGetPrerenderPaths).toBeUndefined();
+  });
+
+  it("auto-prerenders static island page with no imports, no loader, no server file", async () => {
+    writeFile("pricing.island.vue", "<template><div>Pricing</div></template>");
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "pricing");
+    expect(page!.prerender).toBe(true);
+    expect(page!.revalidate).toBe(MAX_REVALIDATE);
+    expect(page!.hasIslandImports).toBe(false);
+  });
+
+  it("does not auto-prerender island page with island imports", async () => {
+    writeFile(
+      "pricing.island.vue",
+      `<script setup>\nimport Counter from "./Counter.vue" with { island: "load" };\n</script>\n<template><Counter /></template>`,
+    );
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "pricing");
+    expect(page!.prerender).toBeUndefined();
+    expect(page!.hasIslandImports).toBe(true);
+  });
+
+  it("does not auto-prerender island page with loader", async () => {
+    writeFile("products.island.vue", "<template><div>Products</div></template>");
+    writeFile("products.server.ts", "export const loader = () => [];");
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "products");
+    expect(page!.prerender).toBeUndefined();
+  });
+
+  it("does not auto-prerender dynamic island page", async () => {
+    writeFile("blog/[slug].island.vue", "<template><div>Post</div></template>");
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "blog/[slug]");
+    expect(page!.prerender).toBeUndefined();
+  });
+
+  it("auto-sets max revalidate for explicit prerender on any page", async () => {
+    writeFile("about.vue", "<template><div>About</div></template>");
+    writeFile("about.server.ts", "export const prerender = true;");
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "about");
+    expect(page!.prerender).toBe(true);
+    expect(page!.revalidate).toBe(MAX_REVALIDATE);
+  });
+
+  it("preserves explicit revalidate when prerender is true", async () => {
+    writeFile("about.vue", "<template><div>About</div></template>");
+    writeFile("about.server.ts", "export const prerender = true;\nexport const revalidate = 3600;");
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "about");
+    expect(page!.prerender).toBe(true);
+    expect(page!.revalidate).toBe(3600);
+  });
+
+  it("auto-prerenders island page but preserves user revalidate from server file", async () => {
+    writeFile("pricing.island.vue", "<template><div>Pricing</div></template>");
+    writeFile("pricing.server.ts", "export const revalidate = 60;");
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "pricing");
+    expect(page!.prerender).toBe(true);
+    expect(page!.revalidate).toBe(60);
   });
 });
 

@@ -19,6 +19,8 @@ export interface PageDefinition {
   prerender?: boolean;
   /** Whether `export function getPrerenderPaths` is defined in server handler */
   hasGetPrerenderPaths?: boolean;
+  /** Whether the island page has `with { island: ... }` imports */
+  hasIslandImports?: boolean;
   /** Whether this is an island page (.island.tsx/.island.vue) */
   island?: boolean;
 }
