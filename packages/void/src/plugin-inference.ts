@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { inferBindingsFromSource, mergeBindings, type InferredBindings } from "./inference/walk";
 import { getSsrServerEntryPath } from "./ssr/entry";
 
+const SOURCE_GLOB = "**/*.{ts,tsx,mts,js,jsx,mjs,astro}";
+
 /** Framework class determines integration depth. */
 export type FrameworkClass = "a" | "b" | "c";
 
@@ -63,6 +65,22 @@ export interface InferenceOptions {
   };
 }
 
+function extractAstroFrontmatter(code: string): string {
+  const match = code.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  return match?.[1] ?? "";
+}
+
+function inferBindingsFromFile(file: string, code: string): InferredBindings {
+  const filename = file.split("/").pop() ?? "unknown.ts";
+  if (!filename.endsWith(".astro")) {
+    return inferBindingsFromSource(code, filename);
+  }
+
+  const frontmatter = extractAstroFrontmatter(code);
+  const virtualFilename = filename.replace(/\.astro$/, ".ts");
+  return inferBindingsFromSource(frontmatter, virtualFilename);
+}
+
 /**
  * Synchronously infer which Cloudflare bindings the project needs
  * by scanning route/middleware files and optional src/main.ssr.ts with oxc-parser.
@@ -96,15 +114,14 @@ export function inferProjectBindings(
     const dirPath = join(root, dir);
     let files: string[];
     try {
-      files = globSync("**/*.{ts,tsx,mts,js,jsx,mjs}", { cwd: dirPath, absolute: true });
+      files = globSync(SOURCE_GLOB, { cwd: dirPath, absolute: true });
     } catch {
       continue;
     }
 
     for (const file of files) {
       const code = readFileSync(file, "utf-8");
-      const filename = file.split("/").pop()!;
-      allBindings.push(inferBindingsFromSource(code, filename));
+      allBindings.push(inferBindingsFromFile(file, code));
     }
   }
 
@@ -121,14 +138,13 @@ export function inferProjectBindings(
     const srcPath = join(root, "src");
     let srcFiles: string[];
     try {
-      srcFiles = globSync("**/*.{ts,tsx,mts,js,jsx,mjs}", { cwd: srcPath, absolute: true });
+      srcFiles = globSync(SOURCE_GLOB, { cwd: srcPath, absolute: true });
     } catch {
       srcFiles = [];
     }
     for (const file of srcFiles) {
       const code = readFileSync(file, "utf-8");
-      const filename = file.split("/").pop()!;
-      allBindings.push(inferBindingsFromSource(code, filename));
+      allBindings.push(inferBindingsFromFile(file, code));
     }
   }
 

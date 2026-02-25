@@ -123,4 +123,40 @@ describe("inferProjectBindings", () => {
     const result = inferProjectBindings(root, undefined, ["src", "routes"]);
     expect(result.needsAuth).toBe(true);
   });
+
+  it("detects bindings from .astro frontmatter", () => {
+    const root = createTempRoot();
+    mkdirSync(join(root, "src", "pages"), { recursive: true });
+    writeFileSync(
+      join(root, "src", "pages", "smoke.astro"),
+      `---
+import { db } from "void/db";
+import { kv } from "void/kv";
+const row = await Astro.locals.runtime.env.DB.prepare("SELECT 1").first();
+---
+<h1>{row ? "ok" : "none"}</h1>
+`,
+    );
+
+    const result = inferProjectBindings(root);
+    expect(result.needsD1).toBe(true);
+    expect(result.needsKV).toBe(true);
+  });
+
+  it("ignores env.* references outside Astro frontmatter", () => {
+    const root = createTempRoot();
+    mkdirSync(join(root, "src", "pages"), { recursive: true });
+    writeFileSync(
+      join(root, "src", "pages", "index.astro"),
+      `
+<script>
+  console.log(env.DB);
+</script>
+`,
+    );
+
+    const result = inferProjectBindings(root);
+    expect(result.needsD1).toBe(false);
+    expect(result.needsKV).toBe(false);
+  });
 });
