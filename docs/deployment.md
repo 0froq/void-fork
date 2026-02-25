@@ -117,7 +117,7 @@ void deploy
 
 **Key invariant:** The worker is never deployed unless all migrations succeed. On migration failure, the deployment is marked as failed and the existing worker keeps running.
 
-Framework mode follows the same pipeline but skips the Hono routing layer — the framework owns routing and SSR. TanStack Start and React Router build via Vite. SvelteKit, Nuxt, and Astro use their own build toolchains and output conventions — see [Frameworks Integration](./integrations/frameworks.md) for the full deploy pipeline.
+Framework mode follows the same pipeline but skips the Hono routing layer — the framework owns routing and SSR. TanStack Start and React Router build via Vite. SvelteKit, Nuxt, and Astro use their own build toolchains and output conventions — see [Frameworks Integration](./integrations/frameworks/overview.md) for the full deploy pipeline.
 
 ### Static SPA
 

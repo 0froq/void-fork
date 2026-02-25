@@ -18,7 +18,18 @@ const integrationLinks = {
   collapsed: false,
   items: [
     { text: "Coding Agents", link: "integrations/agents" },
-    { text: "Other Frameworks", link: "integrations/frameworks" },
+    {
+      text: "Meta Frameworks",
+      collapsed: true,
+      items: [
+        { text: "Overview", link: "/integrations/frameworks/overview" },
+        { text: "TanStack Start", link: "/integrations/frameworks/tanstack-start" },
+        { text: "React Router", link: "/integrations/frameworks/react-router" },
+        { text: "SvelteKit", link: "/integrations/frameworks/sveltekit" },
+        { text: "Nuxt", link: "/integrations/frameworks/nuxt" },
+        { text: "Astro", link: "/integrations/frameworks/astro" },
+      ],
+    },
     { text: "Hono", link: "integrations/hono" },
     { text: "Cloudflare", link: "integrations/cloudflare" },
     { text: "ORMs", link: "integrations/orms" },

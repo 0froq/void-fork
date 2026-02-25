@@ -6,19 +6,19 @@ outline: deep
 
 Void supports three types of apps:
 
-1. Vite apps that leverage Void's backend ([API routes](./server-routing.md)) or full-stack ([pages mode](./pages-routing.md)) features
-2. Other Vite-based meta frameworks that can run on Cloudflare, e.g. [TanStack Start](https://tanstack.com/start/latest), [React Router](https://reactrouter.com/)
-3. Purely static sites — SPAs, SSGs like [VitePress](https://vitepress.dev/), or any directory of static files
+1. **Void apps** — Vite apps powered by Void's framework layer ([API routes](./server-routing.md), [pages mode](./pages-routing/overview.md), [auth](./auth.md), [crons](./jobs.md), [queues](./queues.md))
+2. **Meta frameworks** — [TanStack Start](https://tanstack.com/start/latest), [React Router](https://reactrouter.com/), [SvelteKit](https://svelte.dev/docs/kit), [Nuxt](https://nuxt.com/), [Astro](https://astro.build/)
+3. **Static sites** — SPAs, SSGs like [VitePress](https://vitepress.dev/), or any directory of static files
 
 The type is auto-detected from your project structure, or you can set it explicitly in [`void.json`](./config.md).
 
-## Void Full-Stack
+## Void Apps
 
-A Vite app with full stack powered by Void. In this mode, **Void is both the framework and the platform** — an opinionated setup that unlocks DX perks unique to Void, while staying frontend-framework-agnostic. You can use it with React, Vue, Svelte, Solid, or any frontend that works with Vite.
+A Vite app powered by Void's framework layer. In this mode, **Void is both the framework and the platform** — an opinionated setup that unlocks DX perks unique to Void, while staying frontend-framework-agnostic. You can use it with React, Vue, Svelte, Solid, or any frontend that works with Vite.
 
-All Void features that involve backend logic — [server routing](./server-routing.md), [pages mode](./pages-routing.md), [authentication](./auth.md), [typed fetch](./typed-fetch.md), [cron jobs](./jobs.md), [queues](./queues.md) — are only available in this mode.
+All Void features that involve backend logic — [server routing](./server-routing.md), [pages mode](./pages-routing/overview.md), [authentication](./auth.md), [typed fetch](./typed-fetch.md), [cron jobs](./jobs.md), [queues](./queues.md) — are available in this mode.
 
-A full-stack app can be **API-only** (just `routes/`), a **SPA + API** (frontend in `src/` with API routes), or **full-stack with pages mode** (server-rendered pages in `pages/` with co-located data loading):
+A Void app can be **API-only** (just `routes/`), a **SPA + API** (frontend in `src/` with API routes), or **full-stack with pages mode** (server-rendered pages in `pages/` with co-located data loading):
 
 ```
 my-app/
@@ -42,7 +42,7 @@ my-app/
   vite.config.ts            ← plugins: [voidPlugin()]
 ```
 
-Your worker handles API routes, page rendering, and (optionally) [custom SSR](./ssr.md). Static assets are served from the edge via R2. Cloudflare bindings (D1, KV, R2) are inferred from your source code and provisioned automatically.
+Your worker handles API routes, page rendering, and (optionally) [custom SSR](./ssr.md). Static assets are served from the edge via R2. Cloudflare bindings (D1, KV, R2) are [inferred from your source code](./resource-inference.md) and provisioned automatically.
 
 **Detected when any of these exist:**
 
@@ -55,44 +55,17 @@ Your worker handles API routes, page rendering, and (optionally) [custom SSR](./
 
 ## Meta Frameworks
 
-Void supports several meta-frameworks, auto-detected from `package.json`. The framework owns routing and SSR — Void handles binding inference, [typed DB queries](./db.md), migrations, and deployment via `void deploy`.
+Void supports deploying Vite-based meta-framework apps via `void deploy`. The framework owns routing and SSR — Void handles [binding inference](./resource-inference.md), [typed DB queries](./db.md), migrations, and deployment.
 
-| Framework                                           | Package                 | Integration             |
-| --------------------------------------------------- | ----------------------- | ----------------------- |
-| [TanStack Start](https://tanstack.com/start/latest) | `@tanstack/react-start` | Vite plugin composition |
-| [React Router v7](https://reactrouter.com/)         | `@react-router/dev`     | Vite plugin composition |
-| [SvelteKit](https://svelte.dev/docs/kit)            | `@sveltejs/kit`         | Vite-based, own adapter |
-| [Nuxt](https://nuxt.com/)                           | `nuxt`                  | Own CLI + build         |
-| [Astro](https://astro.build/)                       | `astro`                 | Own CLI + adapter       |
+| Framework                                           | Detected from package   | Setup guide                                          |
+| --------------------------------------------------- | ----------------------- | ---------------------------------------------------- |
+| [TanStack Start](https://tanstack.com/start/latest) | `@tanstack/react-start` | [Guide](./integrations/frameworks/tanstack-start.md) |
+| [React Router v7](https://reactrouter.com/)         | `@react-router/dev`     | [Guide](./integrations/frameworks/react-router.md)   |
+| [SvelteKit](https://svelte.dev/docs/kit)            | `@sveltejs/kit`         | [Guide](./integrations/frameworks/sveltekit.md)      |
+| [Nuxt](https://nuxt.com/)                           | `nuxt`                  | [Guide](./integrations/frameworks/nuxt.md)           |
+| [Astro](https://astro.build/)                       | `astro`                 | [Guide](./integrations/frameworks/astro.md)          |
 
-TanStack Start and React Router compose directly with `voidPlugin()` in Vite:
-
-```ts
-// vite.config.ts
-export default defineConfig({
-  plugins: [
-    voidPlugin(), // must come before the framework plugin
-    tanstackStart(),
-    react(),
-  ],
-});
-```
-
-Access bindings via the `cloudflare:workers` module in server functions. The [typed query helper](./db.md) works the same as in full-stack mode — types are generated from your migrations:
-
-```tsx
-// src/routes/users.tsx
-import { createServerFn } from "@tanstack/react-start";
-import { db } from "void/db";
-
-const getUsers = createServerFn().handler(async () => {
-  return db.list("users"); // fully typed from migrations
-});
-```
-
-SvelteKit, Nuxt, and Astro have their own build toolchains. Add `voidPlugin()` to the framework's Vite config to get binding inference, typed DB generation, and migration management during dev. `void deploy` detects the framework, runs the appropriate build command, and packages the output. See [Frameworks Integration](./integrations/frameworks.md) for setup guides.
-
-Features like `defineHandler`, file-based routing, and the [typed fetch client](./typed-fetch.md) are not active in framework mode — the framework provides its own equivalents.
+Add `voidPlugin()` to the framework's Vite config to get binding inference, typed DB generation, and migration management during dev. See the [Meta Frameworks Integration](./integrations/frameworks/overview.md) for the full feature matrix, deploy pipeline, and per-framework setup guides.
 
 **Detected when** any of the above packages is in your dependencies.
 
@@ -120,7 +93,7 @@ When running `void deploy` and no `mode` is set in `void.json`, the detection lo
 | 1        | `--dir` flag                                                                              | SSG (or SPA with `--spa`)          |
 | 2        | `vitepress` in dependencies                                                               | SSG, builds with `vitepress build` |
 | 3        | `@tanstack/react-start`, `@react-router/dev`, `@sveltejs/kit`, `nuxt`, or `astro` in deps | Framework                          |
-| 4        | Backend files exist (`routes/`, `pages/`, `middleware/`, `crons/`, `queues/`, SSR entry)  | Full-stack                         |
+| 4        | Backend files exist (`routes/`, `pages/`, `middleware/`, `crons/`, `queues/`, SSR entry)  | Void app                           |
 | 5        | `vite` in dependencies, no backend files                                                  | SPA, builds with `vite build`      |
 | 6        | `dist/index.html` or `./index.html` exists                                                | SSG (no build step)                |
 
