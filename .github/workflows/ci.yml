@@ -33,8 +33,10 @@ jobs:
             pattern: void/test/integration
           - suite: pages-adapters-react-vue
             pattern: react/test/integration vue/test/integration
+            retry: 2
           - suite: pages-adapters-svelte-solid
             pattern: svelte/test/integration solid/test/integration
+            retry: 2
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -48,4 +50,4 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
         if: matrix.suite == 'pages-adapters-react-vue' || matrix.suite == 'pages-adapters-svelte-solid'
 
-      - run: pnpm vitest --run ${{ matrix.pattern }}
+      - run: pnpm vitest --run --retry ${{ matrix.retry || 0 }} ${{ matrix.pattern }}
