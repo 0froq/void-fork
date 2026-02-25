@@ -16,6 +16,7 @@ import { parseGenArgs } from "./gen-args";
 import { parseDomainArgs } from "./domain";
 import { categoryTitle, helpLine, pc, sectionTitle } from "./output";
 import { getPackageDir } from "./agents";
+import { asciiArts } from "./ascii";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -227,16 +228,8 @@ if (command === "staging") {
   process.exit(1);
 } else {
   const version = JSON.parse(readFileSync(join(getPackageDir(), "package.json"), "utf-8")).version;
-  console.log(
-    pc.blue(`
-              _     __
- _   ______ (__)___/ /
-| | / / __ \\/ / __  /
-| |/ / /_/ / / /_/ /
-|___/\\____/_/\\__,_/  v${version}
-`),
-  );
-
+  const art = asciiArts[Math.floor(Math.random() * asciiArts.length)];
+  console.log(pc.blue(`${art}  v${version}\n`));
   note(
     [
       helpLine("void init", "Set up void in a new or existing project"),
