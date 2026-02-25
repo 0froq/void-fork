@@ -1,6 +1,7 @@
 import { defineMiddleware } from "void";
-import { getCookie } from "hono/cookie";
+import { deleteCookie, getCookie } from "hono/cookie";
 import { createDb, type Db } from "@voidcloud/api/db";
+import { authenticateDashboardToken } from "@voidcloud/api/auth/dashboard";
 
 declare module "void" {
   interface CloudContextVariables {
@@ -34,20 +35,19 @@ export default defineMiddleware(async (c, next) => {
   }
 
   const token = getCookie(c, "void_token");
-  if (!token) {
+  const session = await authenticateDashboardToken(
+    token,
+    (c.env as Record<string, string | undefined>).JWT_SECRET,
+  );
+  if (!session) {
+    deleteCookie(c, "void_token", { path: "/" });
+    c.set("shared", { user: null });
     return c.redirect("/login");
   }
 
-  c.set("token", token);
-
-  // Decode login + userId from JWT payload
-  try {
-    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-    c.set("userId", payload.sub);
-    c.set("shared", { user: { login: payload.login } });
-  } catch {
-    c.set("shared", { user: null });
-  }
+  c.set("token", session.token);
+  c.set("userId", session.user.id);
+  c.set("shared", { user: { login: session.user.login } });
 
   return next();
 });
