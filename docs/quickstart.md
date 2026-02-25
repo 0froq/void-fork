@@ -2,7 +2,7 @@
 outline: deep
 ---
 
-# Void Quickstart
+# Quickstart
 
 ## Start in an Empty Directory
 
@@ -53,12 +53,12 @@ We do not recommend installing `void` globally, because the CLI needs to be in s
 
 If auto-detection fails, `void init` asks you to choose from a short list (Claude, Cursor, Codex, Gemini CLI, Generic).
 
-In supported agents such as Claude Code, you can invoke the `/void` skill to turn your agent into a Void export. Then, simply ask the agent to build an app with Void.
+In supported agents such as Claude Code, you can invoke the `/void` skill to turn your agent into a Void export. Then, simply ask the agent to build an app with Void. See the [Coding Agents](./integrations/agents) guide for more details.
 
 ## Adding to an Existing Vite App
 
-::: warning ⚠️ Framework Compatibility
-Currently, not all Vite-based meta frameworks are fully supported, but they should be eventually. See [App Types](./app-types) for details.
+::: info 💡 Framework Compatibility
+This guide assumes you are working with a plain Vite app. If you are using a Vite-based meta framework, check out the [Framework Integration Guides](./integrations/frameworks) instead.
 :::
 
 ::: code-group
@@ -195,7 +195,7 @@ Right now, only deploys via the CLI is supported. To setup push-to-deploy GitHub
 
 ## Next steps
 
-- To understand what kind of apps are supported: [App Types](./app-types)
+- To understand what kind of apps are supported: [Supported App Types](./app-types)
 - [Server Routing](./server-routing) — dynamic params, middleware, and validation
 - [Database](./db) — queries, migrations, and generated types
 - [Type Safety](./type-safety) — end-to-end typed fetch client

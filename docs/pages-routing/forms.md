@@ -1,0 +1,212 @@
+---
+outline: deep
+---
+
+<script setup>
+import { onMounted, nextTick } from 'vue'
+onMounted(() => {
+  const key = 'vitepress:code-group-tab'
+  const saved = localStorage.getItem(key)
+  if (saved) nextTick(() => syncAll(saved))
+  window.addEventListener('click', (e) => {
+    const label = e.target.closest?.('.vp-code-group .tabs label')
+    if (!label) return
+    const title = label.getAttribute('data-title')
+    if (title) {
+      localStorage.setItem(key, title)
+      const rect = label.getBoundingClientRect()
+      syncAll(title)
+      const shift = label.getBoundingClientRect().top - rect.top
+      if (shift) window.scrollBy(0, shift)
+    }
+  })
+  function syncAll(title) {
+    document.querySelectorAll('.vp-code-group').forEach((group) => {
+      const label = group.querySelector(`.tabs label[data-title="${title}"]`)
+      if (!label) return
+      const input = group.querySelector(`#${CSS.escape(label.getAttribute('for'))}`)
+      if (!input || input.checked) return
+      const i = Array.from(group.querySelectorAll('.tabs input')).indexOf(input)
+      const blocks = group.querySelector('.blocks')
+      if (!blocks || i < 0) return
+      input.checked = true
+      const current = blocks.querySelector('.active')
+      if (current) current.classList.remove('active')
+      blocks.children[i]?.classList.add('active')
+    })
+  }
+})
+</script>
+
+# Forms
+
+`useForm` handles form submissions, loading state, and validation errors. It is **fully typed end-to-end** — the URL autocompletes to pages that have an `action`, `form.data` is typed to match the action's validator schema, and `form.errors` keys are constrained to the body's field names. No manual type annotations needed.
+
+## Usage
+
+First, define the action in your server handler:
+
+```ts
+// pages/users/create.server.ts
+import { defineHandler } from "void";
+import { db } from "void/db";
+import * as v from "valibot";
+
+const createUserSchema = v.object({
+  name: v.pipe(v.string(), v.minLength(1)),
+  email: v.pipe(v.string(), v.email()),
+});
+
+export const action = defineHandler.withValidator({
+  body: createUserSchema,
+})(async (c, { body }) => {
+  await db.insert("users", body);
+  return c.redirect("/users");
+});
+```
+
+Then, use `useForm` in the page component to submit to this action:
+
+::: code-group
+
+```tsx [React]
+// pages/users/create.tsx
+import { useForm } from "void/react";
+
+export default function CreateUser() {
+  // "/users/create" autocompletes; { name, email } is typed from the action's validator
+  const form = useForm("/users/create", { name: "", email: "" });
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        form.post();
+      }}
+    >
+      <input value={form.data.name} onChange={(e) => form.setData("name", e.target.value)} />
+      {form.errors.name && <span>{form.errors.name}</span>}
+
+      <input value={form.data.email} onChange={(e) => form.setData("email", e.target.value)} />
+      {form.errors.email && <span>{form.errors.email}</span>}
+
+      <button disabled={form.processing}>Create</button>
+    </form>
+  );
+}
+```
+
+```vue [Vue]
+<!-- pages/users/create.vue -->
+<script setup lang="ts">
+import { useForm } from "void/vue";
+
+// "/users/create" autocompletes; { name, email } is typed from the action's validator
+const form = useForm("/users/create", { name: "", email: "" });
+</script>
+
+<template>
+  <form @submit.prevent="form.post()">
+    <input v-model="form.data.name" />
+    <span v-if="form.errors.name">{{ form.errors.name }}</span>
+
+    <input v-model="form.data.email" />
+    <span v-if="form.errors.email">{{ form.errors.email }}</span>
+
+    <button :disabled="form.processing">Create</button>
+  </form>
+</template>
+```
+
+```svelte [Svelte]
+<!-- pages/users/create.svelte -->
+<script>
+  import { useForm } from "void/svelte";
+
+  // "/users/create" autocompletes; { name, email } is typed from the action's validator
+  const form = useForm("/users/create", { name: "", email: "" });
+</script>
+
+<form onsubmit={(e) => { e.preventDefault(); form.post(); }}>
+  <input bind:value={form.data.name} />
+  {#if form.errors.name}<span>{form.errors.name}</span>{/if}
+
+  <input bind:value={form.data.email} />
+  {#if form.errors.email}<span>{form.errors.email}</span>{/if}
+
+  <button disabled={form.processing}>Create</button>
+</form>
+```
+
+```tsx [Solid]
+// pages/users/create.tsx
+import { useForm } from "void/solid";
+
+export default function CreateUser() {
+  // "/users/create" autocompletes; { name, email } is typed from the action's validator
+  const form = useForm("/users/create", { name: "", email: "" });
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        form.post();
+      }}
+    >
+      <input value={form.data.name} onInput={(e) => form.setData("name", e.target.value)} />
+      {form.errors.name && <span>{form.errors.name}</span>}
+
+      <input value={form.data.email} onInput={(e) => form.setData("email", e.target.value)} />
+      {form.errors.email && <span>{form.errors.email}</span>}
+
+      <button disabled={form.processing}>Create</button>
+    </form>
+  );
+}
+```
+
+:::
+
+The types are inferred from your action's `withValidator()` schema in the companion `.server.ts` file. If no validator is defined, the body type falls back to `Record<string, unknown>` — you still get URL autocomplete either way.
+
+## API Reference
+
+`useForm` returns a reactive object with:
+
+| Property / Method                | Purpose                                                        |
+| -------------------------------- | -------------------------------------------------------------- |
+| `data` / `setData`               | Current form values, typed to match the action's body schema.  |
+| `errors`                         | Field-level validation errors, keys typed to body field names. |
+| `post`, `put`, `patch`, `delete` | Submit the form (URL is already bound).                        |
+| `processing`                     | `true` while the submission is in flight.                      |
+| `isDirty`                        | `true` if form data differs from initial values.               |
+| `reset(...fields)`               | Reset form data to initial values. Field names autocomplete.   |
+| `clearErrors(...fields)`         | Clear validation errors. Field names autocomplete.             |
+
+For dynamic routes, pass `params` in the options:
+
+```ts
+// pages/users/[id].server.ts has an action
+const form = useForm("/users/:id", { name: "" }, { params: { id: "42" } });
+form.put(); // submits to /users/42
+```
+
+## Validation Errors
+
+When an action throws a `ValidationError` (or validation fails via `withValidator`), the errors are automatically available on `form.errors` — no manual error handling needed.
+
+Actions can throw `ValidationError` for custom validation logic:
+
+```ts
+import { defineHandler, ValidationError } from "void";
+
+export const action = defineHandler(async (c) => {
+  const body = await c.req.json();
+  if (await emailExists(body.email)) {
+    throw new ValidationError({ email: "Email already taken" });
+  }
+  // ...
+});
+```
+
+Or use `withValidator()` for automatic schema-based validation — errors are returned in the same format.

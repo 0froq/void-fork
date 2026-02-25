@@ -17,6 +17,7 @@ const integrationLinks = {
   collapsed: false,
   items: [
     { text: "Coding Agents", link: "integrations/agents" },
+    { text: "Other Frameworks", link: "integrations/frameworks" },
     { text: "Hono", link: "integrations/hono" },
     { text: "Cloudflare", link: "integrations/cloudflare" },
     { text: "ORMs", link: "integrations/orms" },
@@ -80,28 +81,54 @@ export default extendConfig(
             ],
           },
           {
-            text: "Core Concepts",
-            collapsed: false,
-            items: [
-              { text: "App Types", link: "/app-types" },
-              { text: "Type Safety", link: "/type-safety" },
-              { text: "Deployment", link: "/deployment" },
-            ],
-          },
-          {
-            text: "Features",
+            text: "Routing & Rendering",
             collapsed: false,
             items: [
               { text: "Server Routing", link: "/server-routing" },
-              { text: "Pages Routing", link: "/pages-routing" },
-              { text: "Islands", link: "/islands" },
-              { text: "Typed Fetch", link: "/typed-fetch" },
+              {
+                text: "Pages Routing",
+                collapsed: true,
+                items: [
+                  { text: "Overview", link: "/pages-routing/overview" },
+                  { text: "Loaders & Actions", link: "/pages-routing/loaders-actions" },
+                  { text: "Layouts & Shared Data", link: "/pages-routing/layouts" },
+                  { text: "Forms", link: "/pages-routing/forms" },
+                  { text: "Deferred Props", link: "/pages-routing/deferred-props" },
+                  { text: "View Transitions", link: "/pages-routing/view-transitions" },
+                  { text: "Islands", link: "/islands" },
+                ],
+              },
+              { text: "Custom SSR", link: "/ssr" },
+              { text: "Authentication", link: "/auth" },
+            ],
+          },
+          {
+            text: "Data",
+            collapsed: false,
+            items: [
+              { text: "Type Safety", link: "/type-safety" },
               { text: "Database", link: "/db" },
+              { text: "Typed Fetch", link: "/typed-fetch" },
               { text: "Key-Value Storage", link: "/kv" },
               { text: "Blob Storage", link: "/storage" },
-              { text: "Authentication", link: "/auth" },
-              { text: "Custom SSR", link: "/ssr" },
-              { text: "Caching and Headers", link: "/cache" },
+            ],
+          },
+          {
+            text: "Platform",
+            collapsed: false,
+            items: [
+              { text: "Supported App Types", link: "/app-types" },
+              { text: "Deployment", link: "/deployment" },
+              {
+                text: "Caching and Headers",
+                collapsed: true,
+                items: [
+                  { text: "Static Assets", link: "/cache/static-assets" },
+                  { text: "Revalidation (ISR)", link: "/cache/revalidation" },
+                  { text: "Prerendering", link: "/cache/prerendering" },
+                  { text: "Custom Headers", link: "/cache/headers" },
+                ],
+              },
               { text: "Cron Jobs", link: "/jobs" },
               { text: "Queues", link: "/queues" },
               { text: "AI", link: "/ai" },

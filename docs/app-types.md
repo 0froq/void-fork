@@ -2,7 +2,7 @@
 outline: deep
 ---
 
-# App Types
+# Supported App Types
 
 Void supports three types of apps:
 

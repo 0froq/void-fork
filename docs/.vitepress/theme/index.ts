@@ -4,8 +4,8 @@ import { h } from "vue";
 import "virtual:group-icons.css";
 import "./styles.css";
 
-import logoDark from "./logo-dark.svg";
-import logoLight from "./logo-light.svg";
+import logoDark from "./void-dark.svg";
+import logoLight from "./void-light.svg";
 import voidzeroLogoDark from "./voidzero-logo-dark.svg";
 import voidzeroLogoLight from "./voidzero-logo-light.svg";
 import footerBg from "@assets/vite/footer-background.jpg";
@@ -19,6 +19,7 @@ function AsideCredit() {
       target: "_blank",
       rel: "noopener noreferrer",
       style: {
+        marginTop: "20px",
         border: "1px solid var(--vp-c-divider)",
         borderRadius: "4px",
         padding: "12px 16px",

@@ -3,11 +3,11 @@ outline: deep
 ---
 
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, nextTick } from 'vue'
 onMounted(() => {
   const key = 'vitepress:code-group-tab'
   const saved = localStorage.getItem(key)
-  if (saved) syncAll(saved)
+  if (saved) nextTick(() => syncAll(saved))
   window.addEventListener('click', (e) => {
     const label = e.target.closest?.('.vp-code-group .tabs label')
     if (!label) return

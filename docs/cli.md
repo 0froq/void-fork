@@ -101,7 +101,7 @@ Show the last 5 deployments for a project. Alias: `void ls`.
 void deploy [--project <name>] [--dir <path>] [--spa] [--skip-build]
 ```
 
-Auto-detects your project type and chooses the right pipeline. See [App Types](./app-types.md) and [Deployment](./deployment.md) for details.
+Auto-detects your project type and chooses the right pipeline. See [Supported App Types](./app-types.md) and [Deployment](./deployment.md) for details.
 
 | Flag               | Purpose                                           |
 | ------------------ | ------------------------------------------------- |
