@@ -7,6 +7,7 @@ import type { VoidConfig } from "../config";
 export const DEFAULT_COMPAT_DATE = "2026-02-12";
 
 const COMPAT_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const NODEJS_ALS_FLAG = "nodejs_als";
 
 /** Subset of wrangler config fields we extract. */
 export interface WranglerCompat {
@@ -84,13 +85,14 @@ export function syncWranglerBindings(
 ): boolean {
   // Find the wrangler config file
   let configPath: string | undefined;
-  let raw: string | undefined;
+  let parsed: Record<string, unknown> | undefined;
+  let created = false;
   for (const name of ["wrangler.jsonc", "wrangler.json"]) {
     const p = join(root, name);
     if (existsSync(p)) {
       configPath = p;
       try {
-        raw = readFileSync(p, "utf-8");
+        parsed = parseJsonc(readFileSync(p, "utf-8"));
       } catch {
         // Can't read, skip
       }
@@ -98,9 +100,12 @@ export function syncWranglerBindings(
     }
   }
 
-  if (!configPath || !raw) return false;
+  if (!configPath || !parsed) {
+    configPath = join(root, "wrangler.json");
+    parsed = {};
+    created = true;
+  }
 
-  const parsed = parseJsonc(raw);
   let modified = false;
 
   // D1
@@ -145,11 +150,49 @@ export function syncWranglerBindings(
     }
   }
 
-  if (modified) {
-    writeFileSync(configPath, JSON.stringify(parsed, null, "\t") + "\n");
+  if (created || modified) {
+    writeFileSync(configPath, JSON.stringify(parsed, null, 2) + "\n");
   }
 
-  return modified;
+  return created || modified;
+}
+
+/**
+ * Ensure the `nodejs_als` compatibility flag exists in wrangler config.
+ * Returns true if the config file was modified.
+ */
+export function ensureWranglerNodejsAlsFlag(root: string): boolean {
+  // Find the wrangler config file
+  let configPath: string | undefined;
+  let parsed: Record<string, unknown> | undefined;
+  for (const name of ["wrangler.jsonc", "wrangler.json"]) {
+    const p = join(root, name);
+    if (existsSync(p)) {
+      configPath = p;
+      try {
+        parsed = parseJsonc(readFileSync(p, "utf-8"));
+      } catch {
+        // Can't read, skip
+      }
+      break;
+    }
+  }
+
+  if (!configPath || !parsed) {
+    configPath = join(root, "wrangler.json");
+    parsed = {};
+  }
+
+  const compatibilityFlags = Array.isArray(parsed.compatibility_flags)
+    ? (parsed.compatibility_flags as unknown[])
+    : [];
+  if (compatibilityFlags.includes(NODEJS_ALS_FLAG)) {
+    return false;
+  }
+
+  parsed.compatibility_flags = [...compatibilityFlags, NODEJS_ALS_FLAG];
+  writeFileSync(configPath, JSON.stringify(parsed, null, 2) + "\n");
+  return true;
 }
 
 /**

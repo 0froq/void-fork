@@ -16,7 +16,7 @@ import { scanJobsSync } from "./crons/scan";
 import { scanQueuesSync } from "./queues/scan";
 import { validateSsrEntry } from "./ssr/entry";
 import { readConfig, normalizeAuth, resolveBindingNames } from "./config";
-import { syncWranglerBindings } from "./cli/wrangler";
+import { ensureWranglerNodejsAlsFlag, syncWranglerBindings } from "./cli/wrangler";
 
 export type { AuthProvider } from "./config";
 
@@ -194,6 +194,21 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
     const bindingNames = resolveBindingNames(config.bindings);
     const frameworkPersistRoot = join(root, ".wrangler", "state");
 
+    // Ensure required compat flags are written before framework adapters
+    // initialize Cloudflare dev runtime / Miniflare.
+    const wranglerCompatPlugin: Plugin = {
+      name: "void:wrangler-compat",
+      enforce: "pre",
+      config(_, env) {
+        if (env.command !== "serve") return;
+        const synced = ensureWranglerNodejsAlsFlag(root);
+        if (synced) {
+          // eslint-disable-next-line no-console
+          console.log("[void] Synced nodejs_als to wrangler config");
+        }
+      },
+    };
+
     // Wrangler.jsonc binding sync plugin — runs on dev startup
     const wranglerSyncPlugin: Plugin = {
       name: "void:wrangler-sync",
@@ -247,6 +262,7 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
     };
 
     return [
+      wranglerCompatPlugin,
       wranglerSyncPlugin,
       svelteKitEnvBridgePlugin,
       dbTypesPlugin(root, false),

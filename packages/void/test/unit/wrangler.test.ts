@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import {
+  ensureWranglerNodejsAlsFlag,
   readWranglerCompat,
   syncWranglerBindings,
   DEFAULT_COMPAT_DATE,
@@ -144,11 +145,37 @@ const noBindings: InferredBindings = {
   needsAI: false,
 };
 
-describe("syncWranglerBindings", () => {
-  it("returns false when no wrangler config exists", () => {
+describe("ensureWranglerNodejsAlsFlag", () => {
+  it("creates wrangler.json when no wrangler config exists", () => {
     rmSync(tmpDir, { recursive: true, force: true });
     mkdirSync(tmpDir, { recursive: true });
-    expect(syncWranglerBindings(tmpDir, noBindings)).toBe(false);
+    expect(ensureWranglerNodejsAlsFlag(tmpDir)).toBe(true);
+    const created = JSON.parse(readFileSync(join(tmpDir, "wrangler.json"), "utf-8"));
+    expect(created.compatibility_flags).toEqual(["nodejs_als"]);
+  });
+
+  it("adds nodejs_als compatibility flag when missing", () => {
+    setup("wrangler.jsonc", '{ "name": "test" }');
+    const result = ensureWranglerNodejsAlsFlag(tmpDir);
+    expect(result).toBe(true);
+    const parsed = JSON.parse(readFileSync(join(tmpDir, "wrangler.jsonc"), "utf-8"));
+    expect(parsed.compatibility_flags).toEqual(["nodejs_als"]);
+  });
+
+  it("does not duplicate existing nodejs_als compatibility flag", () => {
+    setup("wrangler.jsonc", '{ "name": "test", "compatibility_flags": ["nodejs_als"] }');
+    const result = ensureWranglerNodejsAlsFlag(tmpDir);
+    expect(result).toBe(false);
+  });
+});
+
+describe("syncWranglerBindings", () => {
+  it("creates wrangler.json when no wrangler config exists", () => {
+    rmSync(tmpDir, { recursive: true, force: true });
+    mkdirSync(tmpDir, { recursive: true });
+    expect(syncWranglerBindings(tmpDir, noBindings)).toBe(true);
+    const created = JSON.parse(readFileSync(join(tmpDir, "wrangler.json"), "utf-8"));
+    expect(created).toEqual({});
   });
 
   it("adds D1 binding when needsD1 is true", () => {
@@ -197,6 +224,7 @@ describe("syncWranglerBindings", () => {
       "wrangler.jsonc",
       JSON.stringify({
         name: "test",
+        compatibility_flags: ["nodejs_als"],
         d1_databases: [{ binding: "DB", database_name: "prod", database_id: "real-id" }],
       }),
     );
@@ -204,7 +232,7 @@ describe("syncWranglerBindings", () => {
     expect(result).toBe(false);
   });
 
-  it("returns false when no bindings needed", () => {
+  it("returns false when no bindings are needed", () => {
     setup("wrangler.jsonc", '{ "name": "test" }');
     expect(syncWranglerBindings(tmpDir, noBindings)).toBe(false);
   });

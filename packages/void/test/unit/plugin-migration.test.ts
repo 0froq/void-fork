@@ -25,12 +25,22 @@ afterEach(() => {
   }
 });
 
+async function runConfigureServer(plugin: ReturnType<typeof migrationPlugin>) {
+  const hook = plugin.configureServer as any;
+  if (!hook) return;
+  if (typeof hook === "function") {
+    await hook.call({} as any, {} as any);
+    return;
+  }
+  await hook.handler.call({} as any, {} as any);
+}
+
 describe("migrationPlugin persistence roots", () => {
   it("uses .void by default", async () => {
     const root = createProjectRoot();
     const plugin = migrationPlugin(root);
 
-    await plugin.configureServer?.({} as any);
+    await runConfigureServer(plugin);
 
     const dbPath = getMiniflareDatabasePath(join(root, ".void"), "local");
     expect(existsSync(dbPath)).toBe(true);
@@ -41,7 +51,7 @@ describe("migrationPlugin persistence roots", () => {
     const persistRoot = join(root, ".wrangler", "state");
     const plugin = migrationPlugin(root, "local", persistRoot);
 
-    await plugin.configureServer?.({} as any);
+    await runConfigureServer(plugin);
 
     const dbPath = getMiniflareDatabasePath(persistRoot, "local");
     expect(existsSync(dbPath)).toBe(true);
