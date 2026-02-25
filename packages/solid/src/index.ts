@@ -14,6 +14,6 @@ export function voidSolid(options?: VoidSolidOptions): Plugin[] {
   return [
     solid({ ssr: true, ...options?.solid }),
     pagesPlugin(pagesDir, { viewTransitions: options?.viewTransitions }),
-    islandsPlugin(pagesDir),
+    ...islandsPlugin(pagesDir),
   ];
 }

@@ -14,6 +14,6 @@ export function voidSvelte(options?: VoidSvelteOptions): Plugin[] {
   return [
     ...(svelte(options?.svelte) as Plugin[]),
     pagesPlugin(pagesDir, { viewTransitions: options?.viewTransitions }),
-    islandsPlugin(pagesDir),
+    ...islandsPlugin(pagesDir),
   ];
 }

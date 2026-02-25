@@ -2,7 +2,7 @@ import type { Plugin } from "vite";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve, relative } from "node:path";
 import { scanPages } from "void/pages";
-import type { PageScanResult } from "void/pages";
+import type { LayoutDefinition, PageScanResult } from "void/pages";
 import { generateComponentManifest } from "./pages-manifest";
 
 const ISLANDS_RENDERER_ID = "virtual:void-islands-renderer";
@@ -52,153 +52,212 @@ function hasIslandFiles(dir: string): boolean {
   return false;
 }
 
-export function islandsPlugin(pagesDir: string): Plugin {
+function resolveLayoutChain(componentId: string, layouts: LayoutDefinition[]): LayoutDefinition[] {
+  const parts = componentId.split("/");
+  const chain: LayoutDefinition[] = [];
+  const root = layouts.find((l) => l.directory === "");
+  if (root) chain.push(root);
+  let dir = "";
+  for (let i = 0; i < parts.length - 1; i++) {
+    dir = dir ? `${dir}/${parts[i]}` : parts[i];
+    const layout = layouts.find((l) => l.directory === dir);
+    if (layout) chain.push(layout);
+  }
+  return chain;
+}
+
+export function islandsPlugin(pagesDir: string): Plugin[] {
   let pageScan: PageScanResult | null = null;
   let isDev = false;
   const root = dirname(pagesDir);
   const islandManifest = new Map<string, IslandEntry>();
+  const islandCssFiles = new Set<string>();
   // Metadata for virtual wrapper modules — keyed by wrapper URL
   const wrapperMeta = new Map<string, WrapperMeta>();
   let wrapperId = 0;
 
-  return {
-    name: "void-solid:islands",
-    enforce: "pre",
+  return [
+    {
+      name: "void-solid:islands",
+      enforce: "pre",
 
-    async buildStart() {
-      if (existsSync(pagesDir)) {
-        pageScan = await scanPages(root);
-        // Pre-scan island pages to populate the manifest eagerly.
-        // This is needed because the client build may load the virtual
-        // islands-client entry before island page transforms run.
-        const importAttrRe =
-          /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
-        for (const page of pageScan.pages) {
-          if (!page.island) continue;
-          const filePath = resolve(pagesDir, page.componentPath);
-          const code = readFileSync(filePath, "utf-8");
-          const importerDir = dirname(filePath);
-          importAttrRe.lastIndex = 0;
-          let m;
-          while ((m = importAttrRe.exec(code)) !== null) {
-            const spec = m[1].slice(1, -1);
-            const strategy = m[2].slice(1, -1);
-            const absPath = resolveSpecifier(spec, importerDir);
-            if (absPath) {
-              const islandId = relative(root, absPath).replace(/\.[^.]+$/, "");
-              islandManifest.set(islandId, { componentPath: absPath, islandId, hydrate: strategy });
+      async buildStart() {
+        if (existsSync(pagesDir)) {
+          pageScan = await scanPages(root);
+          // Pre-scan island pages to populate the manifest eagerly.
+          // This is needed because the client build may load the virtual
+          // islands-client entry before island page transforms run.
+          const importAttrRe =
+            /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
+          for (const page of pageScan.pages) {
+            if (!page.island) continue;
+            const filePath = resolve(pagesDir, page.componentPath);
+            const code = readFileSync(filePath, "utf-8");
+            const importerDir = dirname(filePath);
+            importAttrRe.lastIndex = 0;
+            let m;
+            while ((m = importAttrRe.exec(code)) !== null) {
+              const spec = m[1].slice(1, -1);
+              const strategy = m[2].slice(1, -1);
+              const absPath = resolveSpecifier(spec, importerDir);
+              if (absPath) {
+                const islandId = relative(root, absPath).replace(/\.[^.]+$/, "");
+                islandManifest.set(islandId, {
+                  componentPath: absPath,
+                  islandId,
+                  hydrate: strategy,
+                });
+              }
+            }
+          }
+
+          // Collect page and layout files needing CSS for island pages
+          for (const page of pageScan.pages) {
+            if (!page.island) continue;
+            if (/\.(tsx|jsx)$/.test(page.componentPath)) {
+              islandCssFiles.add(resolve(pagesDir, page.componentPath));
+            }
+            const layoutChain = resolveLayoutChain(page.componentId, pageScan.layouts);
+            for (const layout of layoutChain) {
+              islandCssFiles.add(resolve(pagesDir, layout.filePath));
             }
           }
         }
-      }
-    },
-
-    resolveId: {
-      filter: { id: /^(virtual:void-islands-(renderer|client)|\/@void-island-wrap\/)/ },
-      handler(source) {
-        if (source === ISLANDS_RENDERER_ID || source === ISLANDS_CLIENT_ENTRY_ID) {
-          return "\0" + source;
-        }
-        // Virtual wrapper modules — resolve without \0 prefix so
-        // vite-plugin-solid processes them as .tsx files
-        if (source.startsWith(WRAPPER_PREFIX)) {
-          return source;
-        }
       },
-    },
 
-    load: {
-      // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
-      filter: { id: /^(\0virtual:void-islands-(renderer|client)|\/@void-island-wrap\/)/ },
-      handler(id) {
-        if (id === "\0" + ISLANDS_RENDERER_ID) {
-          if (!pageScan) {
-            return "export function renderIslandPage() { throw new Error('No pages found'); }";
+      resolveId: {
+        filter: { id: /^(virtual:void-islands-(renderer|client)|\/@void-island-wrap\/)/ },
+        handler(source) {
+          if (source === ISLANDS_RENDERER_ID || source === ISLANDS_CLIENT_ENTRY_ID) {
+            return "\0" + source;
           }
-          return generateIslandRenderer(pageScan, pagesDir, isDev);
-        }
-        if (id === "\0" + ISLANDS_CLIENT_ENTRY_ID) {
-          if (!pageScan) return "";
-          return generateIslandClientEntry(islandManifest);
-        }
-        // Virtual wrapper component — generates a .tsx wrapper
-        if (id.startsWith(WRAPPER_PREFIX)) {
-          const meta = wrapperMeta.get(id);
-          if (meta) return generateWrapperComponent(meta);
-        }
+          // Virtual wrapper modules — resolve without \0 prefix so
+          // vite-plugin-solid processes them as .tsx files
+          if (source.startsWith(WRAPPER_PREFIX)) {
+            return source;
+          }
+        },
       },
-    },
 
-    // Rewrite island imports to point to virtual wrapper components.
-    // The wrapper module is a generated .tsx file that vite-plugin-solid
-    // compiles normally, wrapping the original component with
-    // data-island/data-props/data-hydrate attributes.
-    transform: {
-      filter: { id: /\.island\.(tsx|jsx)$/ },
-      handler(code, id) {
-        if (/import\s+\{[^}]*\buseForm\b/.test(code)) {
-          this.warn(
-            `useForm imported in island page "${id}" — useForm requires the Inertia client-side router. Use useIslandForm instead.`,
-          );
-        }
+      load: {
+        // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
+        filter: { id: /^(\0virtual:void-islands-(renderer|client)|\/@void-island-wrap\/)/ },
+        handler(id) {
+          if (id === "\0" + ISLANDS_RENDERER_ID) {
+            if (!pageScan) {
+              return "export function renderIslandPage() { throw new Error('No pages found'); }";
+            }
+            return generateIslandRenderer(pageScan, pagesDir, isDev);
+          }
+          if (id === "\0" + ISLANDS_CLIENT_ENTRY_ID) {
+            if (!pageScan) return "";
+            return generateIslandClientEntry(islandManifest, islandCssFiles);
+          }
+          // Virtual wrapper component — generates a .tsx wrapper
+          if (id.startsWith(WRAPPER_PREFIX)) {
+            const meta = wrapperMeta.get(id);
+            if (meta) return generateWrapperComponent(meta);
+          }
+        },
+      },
 
-        const importAttrRe =
-          /import\s+(\w+)\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
-
-        const importerDir = dirname(id);
-        let transformed = code;
-        let match;
-
-        while ((match = importAttrRe.exec(code)) !== null) {
-          const name = match[1];
-          const specRaw = match[2];
-          const strategyRaw = match[3];
-          const spec = specRaw.slice(1, -1);
-          const strategy = strategyRaw.slice(1, -1);
-
-          // Resolve to absolute path for the island manifest
-          const absPath = resolveSpecifier(spec, importerDir);
-          if (absPath) {
-            const islandId = relative(root, absPath).replace(/\.[^.]+$/, "");
-            islandManifest.set(islandId, {
-              componentPath: absPath,
-              islandId,
-              hydrate: strategy,
-            });
+      // Rewrite island imports to point to virtual wrapper components.
+      // The wrapper module is a generated .tsx file that vite-plugin-solid
+      // compiles normally, wrapping the original component with
+      // data-island/data-props/data-hydrate attributes.
+      transform: {
+        filter: { id: /\.island\.(tsx|jsx)$/ },
+        handler(code, id) {
+          if (/import\s+\{[^}]*\buseForm\b/.test(code)) {
+            this.warn(
+              `useForm imported in island page "${id}" — useForm requires the Inertia client-side router. Use useIslandForm instead.`,
+            );
           }
 
-          const islandId = absPath ? relative(root, absPath).replace(/\.[^.]+$/, "") : spec;
+          const importAttrRe =
+            /import\s+(\w+)\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
 
-          // Rewrite import to point to virtual wrapper component.
-          // Use a clean .tsx path (no query params) so rolldown can detect the
-          // language. Store metadata in a Map for the load hook.
-          const wrapperUrl = WRAPPER_PREFIX + "island_" + wrapperId++ + ".tsx";
-          wrapperMeta.set(wrapperUrl, { src: absPath || spec, islandId, hydrate: strategy });
-          const replacement = `import ${name} from ${JSON.stringify(wrapperUrl)}`;
-          transformed = transformed.replace(match[0], replacement);
-        }
+          const importerDir = dirname(id);
+          let transformed = code;
+          let match;
 
-        if (transformed !== code) {
-          return { code: transformed, map: null };
-        }
+          while ((match = importAttrRe.exec(code)) !== null) {
+            const name = match[1];
+            const specRaw = match[2];
+            const strategyRaw = match[3];
+            const spec = specRaw.slice(1, -1);
+            const strategy = strategyRaw.slice(1, -1);
+
+            // Resolve to absolute path for the island manifest
+            const absPath = resolveSpecifier(spec, importerDir);
+            if (absPath) {
+              const islandId = relative(root, absPath).replace(/\.[^.]+$/, "");
+              islandManifest.set(islandId, {
+                componentPath: absPath,
+                islandId,
+                hydrate: strategy,
+              });
+            }
+
+            const islandId = absPath ? relative(root, absPath).replace(/\.[^.]+$/, "") : spec;
+
+            // Rewrite import to point to virtual wrapper component.
+            // Use a clean .tsx path (no query params) so rolldown can detect the
+            // language. Store metadata in a Map for the load hook.
+            const wrapperUrl = WRAPPER_PREFIX + "island_" + wrapperId++ + ".tsx";
+            wrapperMeta.set(wrapperUrl, { src: absPath || spec, islandId, hydrate: strategy });
+            const replacement = `import ${name} from ${JSON.stringify(wrapperUrl)}`;
+            transformed = transformed.replace(match[0], replacement);
+          }
+
+          if (transformed !== code) {
+            return { code: transformed, map: null };
+          }
+        },
       },
-    },
 
-    config(_, env) {
-      if (!existsSync(pagesDir)) return;
-      isDev = env.command === "serve";
-      // Only add the islands client entry when island pages actually exist
-      if (!isDev && hasIslandFiles(pagesDir)) {
-        return {
-          build: {
-            rollupOptions: {
-              input: { "islands-client": ISLANDS_CLIENT_ENTRY_ID },
+      config(_, env) {
+        if (!existsSync(pagesDir)) return;
+        isDev = env.command === "serve";
+        // Only add the islands client entry when island pages actually exist
+        if (!isDev && hasIslandFiles(pagesDir)) {
+          return {
+            build: {
+              rollupOptions: {
+                input: { "islands-client": ISLANDS_CLIENT_ENTRY_ID },
+              },
             },
-          },
-        };
-      }
+          };
+        }
+      },
     },
-  };
+    {
+      name: "void-solid:islands-css",
+
+      resolveId: {
+        filter: { id: /\?island-css$/ },
+        handler(source) {
+          return source;
+        },
+      },
+
+      load: {
+        filter: { id: /\?island-css$/ },
+        handler(id) {
+          const filePath = id.replace(/\?island-css$/, "");
+          const content = readFileSync(filePath, "utf-8");
+          const cssImportRe =
+            /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
+          const imports: string[] = [];
+          let match;
+          while ((match = cssImportRe.exec(content)) !== null) {
+            imports.push(match[0].trim());
+          }
+          return imports.join("\n") || "/* no styles */";
+        },
+      },
+    },
+  ];
 }
 
 /**
@@ -271,7 +330,10 @@ export async function renderIslandPage(pageObj, assetTags) {
 `;
 }
 
-function generateIslandClientEntry(manifest: Map<string, IslandEntry>): string {
+function generateIslandClientEntry(
+  manifest: Map<string, IslandEntry>,
+  cssFiles: Set<string>,
+): string {
   const entries = [...manifest.values()];
   const uniqueIslands = new Map<string, string>();
   for (const entry of entries) {
@@ -279,6 +341,11 @@ function generateIslandClientEntry(manifest: Map<string, IslandEntry>): string {
   }
 
   const lines: string[] = [];
+
+  // CSS-only imports for island page/layout files
+  for (const file of cssFiles) {
+    lines.push(`import ${JSON.stringify(file + "?island-css")};`);
+  }
 
   lines.push("const islands = {");
   for (const [id, path] of uniqueIslands) {

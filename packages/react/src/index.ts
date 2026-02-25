@@ -14,6 +14,6 @@ export function voidReact(options?: VoidReactOptions): Plugin[] {
   return [
     ...react(options?.react),
     pagesPlugin(pagesDir, { viewTransitions: options?.viewTransitions }),
-    islandsPlugin(pagesDir),
+    ...islandsPlugin(pagesDir),
   ];
 }
