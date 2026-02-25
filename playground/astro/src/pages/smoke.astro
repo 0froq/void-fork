@@ -1,10 +1,17 @@
 ---
 export const prerender = false;
 
-const runtime = Astro.locals.runtime;
-const result = await runtime.env.DB.prepare("SELECT * FROM users LIMIT 1").first();
-await runtime.env.KV.put("smoke", "ok");
-const kvValue = await runtime.env.KV.get("smoke");
+import { db } from "void/db";
+import { kv } from "void/kv";
+
+await db.raw("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)");
+await db.raw("INSERT OR IGNORE INTO users (id, name) VALUES (1, 'Alice')");
+
+const rows = await db.raw<{ name: string }>("SELECT name FROM users LIMIT 1");
+const result = rows[0] ?? null;
+
+await kv.set("smoke", "ok");
+const kvValue = await kv.get<string>("smoke");
 ---
 <html lang="en">
   <head>

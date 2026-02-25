@@ -3,11 +3,7 @@ import cloudflare from "@astrojs/cloudflare";
 import { voidPlugin } from "void";
 
 export default defineConfig({
-  adapter: cloudflare({
-    platformProxy: {
-      persist: { path: ".void/v3" },
-    },
-  }),
+  adapter: cloudflare(),
   vite: {
     plugins: [voidPlugin()],
   },
