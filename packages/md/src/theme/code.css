@@ -71,16 +71,20 @@
     center / 60% no-repeat;
 }
 
-/* Shiki dual theme — light/dark switching via CSS */
+/* Shiki dual theme — keep inline light colors, only swap in dark mode */
 .void-md pre.shiki.shiki-themes {
-  background-color: light-dark(
-    var(--shiki-light-bg, #fff),
-    var(--shiki-dark-bg, #1e293b)
-  ) !important;
+  background-color: var(--shiki-light-bg, #fff) !important;
 }
 
-.void-md pre.shiki.shiki-themes span {
-  color: light-dark(var(--shiki-light, inherit), var(--shiki-dark, inherit)) !important;
+@media (prefers-color-scheme: dark) {
+  .void-md pre.shiki.shiki-themes {
+    background-color: var(--shiki-dark-bg, #1e293b) !important;
+    color: var(--shiki-dark, #e1e4e8) !important;
+  }
+
+  .void-md pre.shiki.shiki-themes span[style*="--shiki-dark"] {
+    color: var(--shiki-dark) !important;
+  }
 }
 
 /* Shiki notation transformers */
