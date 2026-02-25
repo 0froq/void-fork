@@ -15,7 +15,8 @@ import {
 import { scanJobsSync } from "./crons/scan";
 import { scanQueuesSync } from "./queues/scan";
 import { validateSsrEntry } from "./ssr/entry";
-import { readConfig, normalizeAuth } from "./config";
+import { readConfig, normalizeAuth, resolveBindingNames } from "./config";
+import { syncWranglerBindings } from "./cli/wrangler";
 
 export type { AuthProvider } from "./config";
 
@@ -176,12 +177,40 @@ export default function voidPlugin(options?: { persistTo?: string }): Plugin[] {
   // Resolve root relative to CWD — this runs at config time
   const root = process.cwd();
   const config = readConfig(root);
-  const framework = detectFramework(root);
+  const detected = detectFramework(root);
+  const framework = detected?.class === "a" ? (detected.name as Framework) : undefined;
 
   // Infer bindings synchronously from source files
-  const scanDirs = framework ? FRAMEWORK_SCAN_DIRS : undefined;
+  const scanDirs = config.scanDirs ?? (detected ? FRAMEWORK_SCAN_DIRS : undefined);
   const inferenceOptions = config.bindings ? { bindings: config.bindings } : undefined;
   const bindings = inferProjectBindings(root, inferenceOptions, scanDirs);
+
+  // Class B/C: lighter composition — DB types + migrations only.
+  // The framework's own adapter handles the CF worker build and dev server.
+  // voidPlugin() only provides DB type codegen, migration management, and
+  // wrangler.jsonc binding sync for local dev.
+  if (detected && (detected.class === "b" || detected.class === "c")) {
+    const hasAuth = normalizeAuth(config.auth) !== null;
+    const bindingNames = resolveBindingNames(config.bindings);
+
+    // Wrangler.jsonc binding sync plugin — runs on dev startup
+    const wranglerSyncPlugin: Plugin = {
+      name: "void:wrangler-sync",
+      configResolved(resolvedConfig) {
+        if (resolvedConfig.command !== "serve") return;
+        const synced = syncWranglerBindings(root, bindings, {
+          auth: hasAuth,
+          bindingNames,
+        });
+        if (synced) {
+          // eslint-disable-next-line no-console
+          console.log("[void] Synced bindings to wrangler.jsonc");
+        }
+      },
+    };
+
+    return [wranglerSyncPlugin, dbTypesPlugin(root, false), migrationPlugin(root)];
+  }
 
   // Phase 1: Determine auth providers from imports (sync, at plugin creation)
   // Explicit config takes precedence over auto-detection.

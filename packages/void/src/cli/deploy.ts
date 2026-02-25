@@ -6,7 +6,12 @@ import { intro, outro, log, note, spinner, confirm, isCancel } from "@clack/prom
 import { createServer, loadEnv } from "vite";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
-import { computeAssetHashes, packageBuild, packageStaticBuild } from "./package";
+import {
+  computeAssetHashes,
+  packageBuild,
+  packageStaticBuild,
+  packageFrameworkBuild,
+} from "./package";
 import { PlatformClient } from "./client";
 import { inferProjectBindings, FRAMEWORK_SCAN_DIRS, detectFramework } from "../plugin-inference";
 import { promptProjectSelection, promptProjectSlug } from "./prompt";
@@ -16,8 +21,15 @@ import { scanJobsSync } from "../crons/scan";
 import { scanQueuesSync } from "../queues/scan";
 import { validateSsrEntry, detectSsrPrerender, getSsrServerEntryPath } from "../ssr/entry";
 import { scanPages } from "../pages/scan";
-import { detectPreset, type StaticPreset } from "./preset";
-import { readConfig, convertHeadersConfig } from "../config";
+import { detectPreset, FRAMEWORK_PRESETS, type StaticPreset } from "./preset";
+import { readConfig, convertHeadersConfig, resolveBindingNames } from "../config";
+import { readWranglerCompat } from "./wrangler";
+import {
+  needsWrapper,
+  generateAndBundleWrapper,
+  cleanupWrapper,
+  type WrapperFeatures,
+} from "./wrapper";
 import { getRequestedProjectSlug, resolveProjectBySlug, inferDefaultSlug } from "./resolve-project";
 import { cliTitle } from "./output";
 
@@ -102,6 +114,30 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   // 3. Resolve deploy mode: void.json > CLI flags > auto-detection
   const vcConfig = readConfig(root);
   const headers = convertHeadersConfig(vcConfig.headers);
+
+  // Check for Class B/C framework first
+  const detected = detectFramework(root);
+  if (detected && (detected.class === "b" || detected.class === "c")) {
+    const fwPreset = FRAMEWORK_PRESETS[detected.name];
+    if (!fwPreset) {
+      log.error(`No deploy preset found for framework "${detected.name}".`);
+      process.exit(1);
+    }
+    const gitCommit = options?.skipBuild ? null : getGitCommit(root);
+    await runFrameworkDeploy(
+      root,
+      config,
+      client,
+      detected,
+      fwPreset,
+      vcConfig,
+      headers,
+      options?.skipBuild,
+      gitCommit,
+    );
+    return;
+  }
+
   let preset: StaticPreset | null = null;
 
   if (vcConfig.mode && vcConfig.mode !== "fullstack" && vcConfig.mode !== "framework") {
@@ -112,11 +148,11 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
       mode: vcConfig.mode,
     };
     // Re-detect build command (config stores mode, not command)
-    const detected = detectPreset(root, { dir: options?.dir, spa: options?.spa });
-    if (detected) {
-      preset.buildCommand = detected.buildCommand;
+    const detectedPreset = detectPreset(root, { dir: options?.dir, spa: options?.spa });
+    if (detectedPreset) {
+      preset.buildCommand = detectedPreset.buildCommand;
       if (!vcConfig.outputDir) {
-        preset.outputDir = detected.outputDir;
+        preset.outputDir = detectedPreset.outputDir;
       }
     }
   } else if (!vcConfig.mode) {
@@ -188,6 +224,201 @@ async function runStaticDeploy(
   outro("Done!");
 }
 
+/**
+ * Class B/C framework deploy: build with framework CLI, package with preset output paths.
+ */
+async function runFrameworkDeploy(
+  root: string,
+  config: ProjectConfig,
+  client: PlatformClient,
+  detected: import("../plugin-inference").DetectedFramework,
+  fwPreset: import("./preset").FrameworkPreset,
+  vcConfig: import("../config").VoidConfig,
+  headers?: import("./types").HeaderRule[],
+  skipBuild?: boolean,
+  commit?: string | null,
+): Promise<void> {
+  log.info(`${detected.name} (Class ${detected.class.toUpperCase()}) deploy`);
+
+  // 1. Build
+  if (!skipBuild) {
+    const buildCmd = vcConfig.build ?? fwPreset.buildCommand;
+    log.step(`Building (${buildCmd})...`);
+    execSync(buildCmd, { cwd: root, stdio: "inherit" });
+  }
+
+  // 2. Verify output paths
+  const workerDir = join(root, fwPreset.workerDir);
+  const assetsDir = join(root, fwPreset.assetsDir);
+
+  if (!existsSync(workerDir)) {
+    log.error(`Worker output not found: ${fwPreset.workerDir}`);
+    process.exit(1);
+  }
+
+  // 3. Infer or read bindings
+  const inferenceOptions = vcConfig.bindings ? { bindings: vcConfig.bindings } : undefined;
+  const scanDirs = vcConfig.scanDirs ?? (detected.class === "b" ? FRAMEWORK_SCAN_DIRS : undefined);
+  const bindings = inferProjectBindings(root, inferenceOptions, scanDirs);
+
+  // 4. Collect migrations
+  const migrationsDir = join(root, "migrations");
+  const rawMigrations = collectMigrations(migrationsDir);
+  let validatedMigrations;
+  if (rawMigrations.length > 0) {
+    try {
+      validatedMigrations = validateMigrations(rawMigrations);
+      log.info(`Found ${validatedMigrations.length} migration(s)`);
+    } catch (err: any) {
+      log.error(err.message);
+      process.exit(1);
+    }
+  }
+
+  // 5. Resolve auth config
+  const authProviders = vcConfig.auth
+    ? vcConfig.auth === true
+      ? (["email"] as import("../config").AuthProvider[])
+      : vcConfig.auth
+    : null;
+
+  // 7. Generate wrapper if needed (auth, crons, or queues present)
+  const rawJobs = scanJobsSync(root);
+  const rawQueues = scanQueuesSync(root);
+  const originalEntry = join(workerDir, fwPreset.workerMain);
+
+  const wrapperFeatures: WrapperFeatures = {
+    originalEntry,
+    auth: authProviders,
+    crons: rawJobs,
+    queues: rawQueues,
+  };
+
+  let actualWorkerDir = workerDir;
+  let actualWorkerMain = fwPreset.workerMain;
+
+  if (needsWrapper(wrapperFeatures)) {
+    log.step("Generating wrapper...");
+    const wrapperResult = await generateAndBundleWrapper(root, wrapperFeatures);
+    actualWorkerDir = wrapperResult.outputDir;
+    actualWorkerMain = wrapperResult.entryFilename;
+    log.info("Wrapper bundled");
+  }
+
+  // 8. Read wrangler compat settings
+  const wranglerCompat = readWranglerCompat(root);
+
+  // 9. Resolve revalidate + prerender from void.json
+  const revalidate = vcConfig.cache?.revalidate;
+  const prerender = vcConfig.cache?.prerender;
+
+  // Build manifest-format schedules and queues from raw scans
+  const schedules = rawJobs.flatMap((job) =>
+    job.crons.map((cron) => ({
+      name: job.name,
+      cron,
+    })),
+  );
+  const queues = rawQueues.map((q) => ({
+    name: q.name,
+    bindingName: q.bindingName,
+    ...(q.maxBatchSize != null && { maxBatchSize: q.maxBatchSize }),
+    ...(q.maxBatchTimeout != null && { maxBatchTimeout: q.maxBatchTimeout }),
+  }));
+
+  // 10. Load .env vars for production
+  const envVars = loadEnv("production", root, "");
+
+  // 11. Check assets & Package
+  const s = spinner();
+
+  s.start("Checking assets...");
+  let neededPaths: Set<string> | undefined;
+  let assetHashes: Record<string, string> | undefined;
+  try {
+    assetHashes = computeAssetHashes(assetsDir);
+    // Exclude worker files from asset hashes when dirs overlap
+    const workerDirNorm = workerDir.replace(/\\/g, "/");
+    const assetsDirNorm = assetsDir.replace(/\\/g, "/");
+    if (workerDirNorm.startsWith(assetsDirNorm + "/") || workerDirNorm === assetsDirNorm) {
+      const workerFiles = new Set(
+        Object.keys(assetHashes).filter((p) => {
+          const full = join(assetsDir, p).replace(/\\/g, "/");
+          return full.startsWith(workerDirNorm);
+        }),
+      );
+      for (const wf of workerFiles) {
+        delete assetHashes[wf];
+      }
+    }
+    const totalAssets = Object.keys(assetHashes).length;
+    const needed = await client.checkAssets(config.projectId, assetHashes);
+    neededPaths = new Set(needed);
+    s.message(
+      `Uploading ${needed.length}/${totalAssets} assets (${totalAssets - needed.length} cached)`,
+    );
+  } catch {
+    // No assets directory
+  }
+
+  s.message("Packaging...");
+  const formData = packageFrameworkBuild({
+    workerDir: actualWorkerDir,
+    workerMain: actualWorkerMain,
+    assetsDir,
+    bindings,
+    migrations: validatedMigrations,
+    schedules,
+    queues,
+    revalidate,
+    prerender,
+    headers,
+    vars: envVars,
+    neededPaths,
+    assetHashes,
+    packageOptions: {
+      bindingNames: resolveBindingNames(vcConfig.bindings),
+      workerMain: actualWorkerMain,
+      compatibilityDate: wranglerCompat.compatibilityDate,
+      compatibilityFlags: wranglerCompat.compatibilityFlags,
+    },
+  });
+  formData.append("source", getTokenSource());
+  if (commit) formData.append("commit", commit);
+
+  s.message("Deploying...");
+  const result = await client.deploy(config.projectId, formData);
+  s.stop("Deployed!");
+
+  const summary = [`${result.workers} worker module(s), ${result.assets} static asset(s)`];
+  if (result.migrations) {
+    summary.push(`${result.migrations} migration(s) applied`);
+  }
+  if (schedules.length > 0) {
+    summary.push(`${schedules.length} cron job(s) scheduled`);
+  }
+  if (queues.length > 0) {
+    summary.push(`${queues.length} queue(s) configured`);
+  }
+  if (prerender && prerender.length > 0) {
+    summary.push(`${prerender.length} page(s) prerendered`);
+  }
+  if (revalidate) {
+    if (typeof revalidate === "number") {
+      summary.push(`ISR revalidate: ${revalidate}s`);
+    } else {
+      summary.push(`ISR revalidate: ${Object.keys(revalidate).length} path rule(s)`);
+    }
+  }
+  summary.push(`Framework: ${detected.name}`);
+  note(summary.join("\n"), result.url);
+
+  // Clean up generated wrapper files
+  cleanupWrapper(root);
+
+  outro("Done!");
+}
+
 async function runFullDeploy(
   root: string,
   config: ProjectConfig,
@@ -229,15 +460,15 @@ async function runFullDeploy(
     }
   }
 
-  // 5. Detect framework mode
-  const isFrameworkMode = detectFramework(root) !== undefined;
+  // 5. Detect framework mode (Class A only for existing flow)
+  const detected = detectFramework(root);
+  const isFrameworkMode = detected?.class === "a";
 
-  // 6. Infer bindings (expanded scan dirs in framework mode)
-  const bindings = inferProjectBindings(
-    root,
-    undefined,
-    isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined,
-  );
+  // 6. Infer bindings (expanded scan dirs in framework mode, or custom from config)
+  const deployConfig = readConfig(root);
+  const deployScanDirs =
+    deployConfig.scanDirs ?? (isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined);
+  const bindings = inferProjectBindings(root, undefined, deployScanDirs);
 
   // 7. Collect and validate migrations
   const migrationsDir = join(root, "migrations");
@@ -390,6 +621,12 @@ async function runFullDeploy(
     } finally {
       await viteServer.close();
     }
+  }
+
+  // Add explicit prerender paths from void.json cache.prerender
+  const configPrerender = readConfig(root).cache?.prerender;
+  if (configPrerender) {
+    prerenderPaths.push(...configPrerender);
   }
 
   // Dedupe prerender paths

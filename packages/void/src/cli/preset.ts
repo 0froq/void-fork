@@ -2,6 +2,43 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { hasSsrEntry } from "../ssr/entry";
 
+/** Build output conventions for a meta-framework (Class B/C). */
+export interface FrameworkPreset {
+  /** Default build command (overridable via void.json `build`). */
+  buildCommand: string;
+  /** Directory containing the worker entry, relative to project root. */
+  workerDir: string;
+  /** Worker entry module filename within workerDir. */
+  workerMain: string;
+  /** Directory containing static assets, relative to project root. */
+  assetsDir: string;
+}
+
+/**
+ * Known output conventions for Class B/C meta-frameworks.
+ * Keyed by the framework name from `detectFramework()`.
+ */
+export const FRAMEWORK_PRESETS: Record<string, FrameworkPreset> = {
+  sveltekit: {
+    buildCommand: "vite build",
+    workerDir: ".svelte-kit/cloudflare",
+    workerMain: "_worker.js",
+    assetsDir: ".svelte-kit/cloudflare",
+  },
+  nuxt: {
+    buildCommand: "nuxt build",
+    workerDir: ".output/server",
+    workerMain: "index.mjs",
+    assetsDir: ".output/public",
+  },
+  astro: {
+    buildCommand: "astro build",
+    workerDir: "dist/_worker.js",
+    workerMain: "index.js",
+    assetsDir: "dist",
+  },
+};
+
 export interface StaticPreset {
   buildCommand: string | null;
   outputDir: string;

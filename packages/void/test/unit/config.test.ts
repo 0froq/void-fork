@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { readConfig, convertHeadersConfig, normalizeAuth } from "../../src/config";
+import {
+  readConfig,
+  convertHeadersConfig,
+  normalizeAuth,
+  resolveBindingNames,
+} from "../../src/config";
 
 const tmpDir = join(import.meta.dirname, ".tmp-config-test");
 
@@ -122,9 +127,24 @@ describe("readConfig", () => {
     cleanup();
   });
 
-  it("throws on non-boolean binding value", () => {
-    setup(JSON.stringify({ bindings: { db: "yes" } }));
+  it("accepts string binding names for db/kv/storage", () => {
+    setup(JSON.stringify({ bindings: { db: "MY_DB", kv: "MY_KV", storage: "MY_R2" } }));
+    const config = readConfig(tmpDir);
+    expect(config.bindings?.db).toBe("MY_DB");
+    expect(config.bindings?.kv).toBe("MY_KV");
+    expect(config.bindings?.storage).toBe("MY_R2");
+    cleanup();
+  });
+
+  it("throws on non-boolean ai binding value", () => {
+    setup(JSON.stringify({ bindings: { ai: "yes" } }));
     expect(() => readConfig(tmpDir)).toThrow("must be a boolean");
+    cleanup();
+  });
+
+  it("throws on invalid binding value type", () => {
+    setup(JSON.stringify({ bindings: { db: 42 } }));
+    expect(() => readConfig(tmpDir)).toThrow("must be a boolean or a string");
     cleanup();
   });
 
@@ -227,6 +247,63 @@ describe("readConfig", () => {
     expect(config.cache).toEqual({});
     cleanup();
   });
+
+  it("accepts build command string", () => {
+    setup(JSON.stringify({ build: "nuxt build" }));
+    const config = readConfig(tmpDir);
+    expect(config.build).toBe("nuxt build");
+    cleanup();
+  });
+
+  it("throws on non-string build", () => {
+    setup(JSON.stringify({ build: true }));
+    expect(() => readConfig(tmpDir)).toThrow('"build" in void.json must be a string');
+    cleanup();
+  });
+
+  it("accepts cache.prerender paths", () => {
+    setup(JSON.stringify({ cache: { prerender: ["/", "/about", "/docs/intro"] } }));
+    const config = readConfig(tmpDir);
+    expect(config.cache?.prerender).toEqual(["/", "/about", "/docs/intro"]);
+    cleanup();
+  });
+
+  it("throws on non-array cache.prerender", () => {
+    setup(JSON.stringify({ cache: { prerender: "/about" } }));
+    expect(() => readConfig(tmpDir)).toThrow('"cache.prerender" in void.json must be an array');
+    cleanup();
+  });
+
+  it("throws on cache.prerender path not starting with /", () => {
+    setup(JSON.stringify({ cache: { prerender: ["about"] } }));
+    expect(() => readConfig(tmpDir)).toThrow('must start with "/"');
+    cleanup();
+  });
+
+  it("accepts scanDirs as array of strings", () => {
+    setup(JSON.stringify({ scanDirs: ["src", "lib", "server"] }));
+    const config = readConfig(tmpDir);
+    expect(config.scanDirs).toEqual(["src", "lib", "server"]);
+    cleanup();
+  });
+
+  it("throws on non-array scanDirs", () => {
+    setup(JSON.stringify({ scanDirs: "src" }));
+    expect(() => readConfig(tmpDir)).toThrow('"scanDirs" in void.json must be an array');
+    cleanup();
+  });
+
+  it("throws on absolute path in scanDirs", () => {
+    setup(JSON.stringify({ scanDirs: ["/etc/passwd"] }));
+    expect(() => readConfig(tmpDir)).toThrow("must be a relative directory");
+    cleanup();
+  });
+
+  it("throws on parent traversal in scanDirs", () => {
+    setup(JSON.stringify({ scanDirs: ["../secrets"] }));
+    expect(() => readConfig(tmpDir)).toThrow("must be a relative directory");
+    cleanup();
+  });
 });
 
 describe("normalizeAuth", () => {
@@ -327,5 +404,30 @@ describe("convertHeadersConfig", () => {
         headers: [["Cache-Control", "ok"]],
       },
     ]);
+  });
+});
+
+describe("resolveBindingNames", () => {
+  it("returns undefined for no bindings", () => {
+    expect(resolveBindingNames(undefined)).toBeUndefined();
+  });
+
+  it("returns undefined for boolean-only bindings", () => {
+    expect(resolveBindingNames({ db: true, kv: true })).toBeUndefined();
+  });
+
+  it("returns custom names for string bindings", () => {
+    expect(resolveBindingNames({ db: "MY_DB", kv: true, storage: "BUCKET" })).toEqual({
+      d1: "MY_DB",
+      r2: "BUCKET",
+    });
+  });
+
+  it("returns all custom names", () => {
+    expect(resolveBindingNames({ db: "D", kv: "K", storage: "S" })).toEqual({
+      d1: "D",
+      kv: "K",
+      r2: "S",
+    });
   });
 });

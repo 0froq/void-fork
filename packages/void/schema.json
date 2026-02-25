@@ -27,19 +27,27 @@
       "description": "Explicitly control inferred Cloudflare bindings. If omitted, bindings are inferred by scanning source files.",
       "properties": {
         "db": {
-          "type": "boolean",
-          "description": "Enable D1 database binding (c.env.DB)"
+          "oneOf": [{ "type": "boolean" }, { "type": "string" }],
+          "description": "Enable D1 database binding. `true` uses default name \"DB\", a string sets a custom binding name."
         },
         "kv": {
-          "type": "boolean",
-          "description": "Enable KV namespace binding (c.env.KV)"
+          "oneOf": [{ "type": "boolean" }, { "type": "string" }],
+          "description": "Enable KV namespace binding. `true` uses default name \"KV\", a string sets a custom binding name."
         },
         "storage": {
+          "oneOf": [{ "type": "boolean" }, { "type": "string" }],
+          "description": "Enable R2 bucket binding. `true` uses default name \"STORAGE\", a string sets a custom binding name."
+        },
+        "ai": {
           "type": "boolean",
-          "description": "Enable R2 bucket binding (c.env.STORAGE)"
+          "description": "Enable Workers AI binding"
         }
       },
       "additionalProperties": false
+    },
+    "build": {
+      "type": "string",
+      "description": "Custom build command. Overrides the framework preset's default build command."
     },
     "headers": {
       "type": "object",
@@ -61,6 +69,11 @@
     "outputDir": {
       "type": "string",
       "description": "Output directory for static deploys. Relative to project root."
+    },
+    "scanDirs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Directories to scan for binding inference, relative to the project root. Overrides the default scan directories."
     },
     "cache": {
       "type": "object",
@@ -84,6 +97,11 @@
               "additionalProperties": false
             }
           ]
+        },
+        "prerender": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^/" },
+          "description": "Explicit paths to prerender at deploy time. Each path must start with \"/\"."
         }
       },
       "additionalProperties": false

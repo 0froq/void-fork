@@ -45,7 +45,7 @@ When using Void's built-in routing (no meta-framework), these directories are sc
 
 ### Framework mode
 
-When a meta-framework is detected (TanStack Start or React Router), a broader set of directories is scanned instead:
+When a meta-framework is detected (TanStack Start, React Router, SvelteKit, Nuxt, or Astro), a broader set of directories is scanned instead:
 
 | Directory | Contains                |
 | --------- | ----------------------- |
@@ -54,7 +54,9 @@ When a meta-framework is detected (TanStack Start or React Router), a broader se
 | `routes/` | Framework routes        |
 | `server/` | Server-side code        |
 
-Framework detection checks `package.json` for `@tanstack/react-start` or `@react-router/dev` in dependencies.
+Framework detection checks `package.json` for `@tanstack/react-start`, `@react-router/dev`, `@sveltejs/kit`, `nuxt`, or `astro` in dependencies.
+
+For SvelteKit, Nuxt, and Astro, add `voidPlugin()` to the framework's Vite config to enable inference during dev. See [Frameworks Integration](./integrations/frameworks.md) for setup details.
 
 ### Always scanned
 
@@ -63,9 +65,21 @@ Regardless of mode, these are always checked:
 - **SSR entry** (`src/main.ssr.ts` or equivalent) — for SSR apps that access bindings during rendering
 - **`src/`** — always scanned for auth imports, unless `src/` is already in the scan list (framework mode)
 
-## Explicit Overrides
+## Custom Scan Directories
 
-If inference doesn't match your setup, you can override it in `void.json`:
+If your project organizes code in non-standard directories, you can override which directories are scanned:
+
+```json
+{
+  "scanDirs": ["src", "lib", "workers"]
+}
+```
+
+Paths are relative to the project root. When `scanDirs` is set, it replaces the default directories entirely — the defaults for the current mode are not merged in. The SSR entry and `src/` auth scan still apply regardless.
+
+## Explicit Binding Overrides
+
+If inference doesn't match your setup, you can skip it entirely and declare bindings explicitly:
 
 ```json
 {

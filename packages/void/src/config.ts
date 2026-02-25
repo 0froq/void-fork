@@ -14,6 +14,7 @@ export interface WranglerConfig {
 /** Caching configuration. */
 export interface CacheConfig {
   revalidate?: number | Record<string, number>;
+  prerender?: string[];
 }
 
 /** Shape of the `void.json` config file. All fields optional. */
@@ -21,12 +22,14 @@ export interface VoidConfig {
   $schema?: string;
   auth?: boolean | AuthProvider[];
   bindings?: {
-    db?: boolean;
-    kv?: boolean;
-    storage?: boolean;
+    db?: boolean | string;
+    kv?: boolean | string;
+    storage?: boolean | string;
     ai?: boolean;
   };
+  build?: string;
   cache?: CacheConfig;
+  scanDirs?: string[];
   headers?: Record<string, string[]>;
   mode?: "spa" | "ssg" | "fullstack" | "framework";
   outputDir?: string;
@@ -89,8 +92,33 @@ export function readConfig(root: string): VoidConfig {
       if (!["db", "kv", "storage", "ai"].includes(key)) {
         throw new Error(`Unknown binding "${key}" in ${CONFIG_FILE}. Valid: db, kv, storage, ai`);
       }
-      if (typeof b[key] !== "boolean") {
-        throw new Error(`"bindings.${key}" in ${CONFIG_FILE} must be a boolean`);
+      if (key === "ai") {
+        if (typeof b[key] !== "boolean") {
+          throw new Error(`"bindings.${key}" in ${CONFIG_FILE} must be a boolean`);
+        }
+      } else {
+        if (typeof b[key] !== "boolean" && typeof b[key] !== "string") {
+          throw new Error(
+            `"bindings.${key}" in ${CONFIG_FILE} must be a boolean or a string (custom binding name)`,
+          );
+        }
+      }
+    }
+  }
+
+  // Validate build
+  if (obj.build !== undefined && typeof obj.build !== "string") {
+    throw new Error(`"build" in ${CONFIG_FILE} must be a string`);
+  }
+
+  // Validate scanDirs
+  if (obj.scanDirs !== undefined) {
+    if (!Array.isArray(obj.scanDirs) || !obj.scanDirs.every((d) => typeof d === "string")) {
+      throw new Error(`"scanDirs" in ${CONFIG_FILE} must be an array of strings`);
+    }
+    for (const d of obj.scanDirs as string[]) {
+      if (d.startsWith("/") || d.startsWith("..")) {
+        throw new Error(`"scanDirs" path "${d}" in ${CONFIG_FILE} must be a relative directory`);
       }
     }
   }
@@ -165,6 +193,16 @@ export function readConfig(root: string): VoidConfig {
         );
       }
     }
+    if (cache.prerender !== undefined) {
+      if (!Array.isArray(cache.prerender) || !cache.prerender.every((p) => typeof p === "string")) {
+        throw new Error(`"cache.prerender" in ${CONFIG_FILE} must be an array of strings`);
+      }
+      for (const p of cache.prerender as string[]) {
+        if (!p.startsWith("/")) {
+          throw new Error(`"cache.prerender" path "${p}" in ${CONFIG_FILE} must start with "/"`);
+        }
+      }
+    }
   }
 
   // Validate wrangler
@@ -189,6 +227,31 @@ export function readConfig(root: string): VoidConfig {
   }
 
   return obj as VoidConfig;
+}
+
+/**
+ * Extract custom binding names from config. Returns only entries where
+ * a string name was explicitly provided (not `true`).
+ */
+export function resolveBindingNames(
+  bindings: VoidConfig["bindings"],
+): { d1?: string; kv?: string; r2?: string } | undefined {
+  if (!bindings) return undefined;
+  const names: { d1?: string; kv?: string; r2?: string } = {};
+  let hasCustom = false;
+  if (typeof bindings.db === "string") {
+    names.d1 = bindings.db;
+    hasCustom = true;
+  }
+  if (typeof bindings.kv === "string") {
+    names.kv = bindings.kv;
+    hasCustom = true;
+  }
+  if (typeof bindings.storage === "string") {
+    names.r2 = bindings.storage;
+    hasCustom = true;
+  }
+  return hasCustom ? names : undefined;
 }
 
 /**

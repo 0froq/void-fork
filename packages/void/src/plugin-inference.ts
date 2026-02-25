@@ -4,7 +4,15 @@ import { join } from "node:path";
 import { inferBindingsFromSource, mergeBindings, type InferredBindings } from "./inference/walk";
 import { getSsrServerEntryPath } from "./ssr/entry";
 
-/** Supported meta-frameworks for platform sidecar mode. */
+/** Framework class determines integration depth. */
+export type FrameworkClass = "a" | "b" | "c";
+
+export interface DetectedFramework {
+  name: string;
+  class: FrameworkClass;
+}
+
+/** Class A framework names (used for entry point lookup). */
 export type Framework = "tanstack-start" | "react-router";
 
 /** Directories to scan for binding inference in framework mode. */
@@ -16,16 +24,19 @@ export const FRAMEWORK_SCAN_DIRS = ["src", "app", "routes", "server"] as const;
  * For example, `react-router` alone is a client-side router — only
  * `@react-router/dev` signals the framework (Vite plugin) mode.
  */
-const FRAMEWORK_PACKAGES: Record<string, Framework> = {
-  "@tanstack/react-start": "tanstack-start",
-  "@react-router/dev": "react-router",
+const FRAMEWORK_PACKAGES: Record<string, DetectedFramework> = {
+  "@tanstack/react-start": { name: "tanstack-start", class: "a" },
+  "@react-router/dev": { name: "react-router", class: "a" },
+  "@sveltejs/kit": { name: "sveltekit", class: "b" },
+  nuxt: { name: "nuxt", class: "c" },
+  astro: { name: "astro", class: "c" },
 };
 
 /**
  * Detect a meta-framework by checking package.json dependencies.
- * Returns the first matching framework, or `undefined`.
+ * Returns the detected framework with class info, or `undefined`.
  */
-export function detectFramework(root: string): Framework | undefined {
+export function detectFramework(root: string): DetectedFramework | undefined {
   let pkg: Record<string, unknown>;
   try {
     pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
@@ -45,9 +56,9 @@ export function detectFramework(root: string): Framework | undefined {
 export interface InferenceOptions {
   /** Explicit binding overrides — takes precedence over inference */
   bindings?: {
-    db?: boolean;
-    kv?: boolean;
-    storage?: boolean;
+    db?: boolean | string;
+    kv?: boolean | string;
+    storage?: boolean | string;
     ai?: boolean;
   };
 }
@@ -69,12 +80,12 @@ export function inferProjectBindings(
   // If user provided explicit overrides, use those
   if (options?.bindings) {
     return {
-      needsD1: options.bindings.db ?? false,
-      needsKV: options.bindings.kv ?? false,
-      needsR2: options.bindings.storage ?? false,
+      needsD1: Boolean(options.bindings.db),
+      needsKV: Boolean(options.bindings.kv),
+      needsR2: Boolean(options.bindings.storage),
       needsAuth: false,
       needsQueues: false,
-      needsAI: options.bindings.ai ?? false,
+      needsAI: Boolean(options.bindings.ai),
     };
   }
 
