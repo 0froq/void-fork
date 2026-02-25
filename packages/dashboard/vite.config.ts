@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
-import voidPlugin from "void";
+import { voidPlugin } from "void";
 import { voidVue } from "@void-x/vue";
 import tailwind from "@tailwindcss/vite";
 

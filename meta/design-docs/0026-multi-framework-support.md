@@ -243,13 +243,13 @@ Class B and C get the same plugin composition. Both Nuxt and Astro support Vite 
 
 ```typescript
 // nuxt.config.ts
-import voidPlugin from "void";
+import { voidPlugin } from "void";
 export default defineNuxtConfig({
   vite: { plugins: [voidPlugin()] },
 });
 
 // astro.config.mjs
-import voidPlugin from "void";
+import { voidPlugin } from "void";
 export default defineConfig({
   vite: { plugins: [voidPlugin()] },
 });

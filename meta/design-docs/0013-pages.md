@@ -448,7 +448,7 @@ export function voidReact(options?) {
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import voidPlugin from "void";
+import { voidPlugin } from "void";
 import { voidVue } from "@void-x/vue/plugin";
 
 export default defineConfig({

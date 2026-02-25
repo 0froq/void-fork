@@ -75,7 +75,7 @@ The binding inference AST walker detects `env.DB`, `env.KV`, `env.STORAGE` from 
 import { defineConfig } from "vite";
 import { tanstackStart } from "@tanstack/react-start/plugin";
 import react from "@vitejs/plugin-react";
-import voidPlugin from "void";
+import { voidPlugin } from "void";
 
 export default defineConfig({
   plugins: [tanstackStart(), react(), voidPlugin()],
