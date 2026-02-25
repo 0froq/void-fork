@@ -13,7 +13,12 @@ import {
   packageFrameworkBuild,
 } from "./package";
 import { PlatformClient } from "./client";
-import { inferProjectBindings, FRAMEWORK_SCAN_DIRS, detectFramework } from "../plugin-inference";
+import {
+  inferProjectBindings,
+  FRAMEWORK_SCAN_DIRS,
+  detectFramework,
+  type DetectedFramework,
+} from "../plugin-inference";
 import { promptProjectSelection, promptProjectSlug } from "./prompt";
 import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
@@ -21,9 +26,17 @@ import { scanJobsSync } from "../crons/scan";
 import { scanQueuesSync } from "../queues/scan";
 import { validateSsrEntry, detectSsrPrerender, getSsrServerEntryPath } from "../ssr/entry";
 import { scanPages } from "../pages/scan";
-import { detectPreset, FRAMEWORK_PRESETS, type StaticPreset } from "./preset";
-import { readConfig, convertHeadersConfig, resolveBindingNames } from "../config";
+import { detectPreset, FRAMEWORK_PRESETS, type StaticPreset, type FrameworkPreset } from "./preset";
+import {
+  readConfig,
+  convertHeadersConfig,
+  resolveBindingNames,
+  type AuthProvider,
+  type VoidConfig,
+} from "../config";
 import { readWranglerCompat } from "./wrangler";
+import { parseHeadersFile } from "./headers";
+import type { HeaderRule } from "./types";
 import {
   needsWrapper,
   generateAndBundleWrapper,
@@ -176,7 +189,7 @@ async function runStaticDeploy(
   config: ProjectConfig,
   client: PlatformClient,
   preset: StaticPreset,
-  headers?: import("./types").HeaderRule[],
+  headers?: HeaderRule[],
   skipBuild?: boolean,
   commit?: string | null,
 ): Promise<void> {
@@ -231,10 +244,10 @@ async function runFrameworkDeploy(
   root: string,
   config: ProjectConfig,
   client: PlatformClient,
-  detected: import("../plugin-inference").DetectedFramework,
-  fwPreset: import("./preset").FrameworkPreset,
-  vcConfig: import("../config").VoidConfig,
-  headers?: import("./types").HeaderRule[],
+  detected: DetectedFramework,
+  fwPreset: FrameworkPreset,
+  vcConfig: VoidConfig,
+  headers?: HeaderRule[],
   skipBuild?: boolean,
   commit?: string | null,
 ): Promise<void> {
@@ -258,7 +271,7 @@ async function runFrameworkDeploy(
 
   // 3. Infer or read bindings
   const inferenceOptions = vcConfig.bindings ? { bindings: vcConfig.bindings } : undefined;
-  const scanDirs = vcConfig.scanDirs ?? (detected.class === "b" ? FRAMEWORK_SCAN_DIRS : undefined);
+  const scanDirs = vcConfig.scanDirs ?? FRAMEWORK_SCAN_DIRS;
   const bindings = inferProjectBindings(root, inferenceOptions, scanDirs);
 
   // 4. Collect migrations
@@ -275,12 +288,14 @@ async function runFrameworkDeploy(
     }
   }
 
-  // 5. Resolve auth config
-  const authProviders = vcConfig.auth
+  // 5. Resolve auth config (explicit config takes precedence, otherwise infer from source)
+  const authProviders: AuthProvider[] | null = vcConfig.auth
     ? vcConfig.auth === true
-      ? (["email"] as import("../config").AuthProvider[])
+      ? (["email"] as AuthProvider[])
       : vcConfig.auth
-    : null;
+    : bindings.needsAuth
+      ? ["email"]
+      : null;
 
   // 7. Generate wrapper if needed (auth, crons, or queues present)
   const rawJobs = scanJobsSync(root);
@@ -361,6 +376,11 @@ async function runFrameworkDeploy(
     // No assets directory
   }
 
+  // Parse framework-generated _headers and merge with void.json rules
+  const frameworkHeaders = parseHeadersFile(assetsDir);
+  const mergedHeaders: HeaderRule[] | undefined =
+    frameworkHeaders || headers ? [...(frameworkHeaders ?? []), ...(headers ?? [])] : undefined;
+
   s.message("Packaging...");
   const formData = packageFrameworkBuild({
     workerDir: actualWorkerDir,
@@ -372,7 +392,8 @@ async function runFrameworkDeploy(
     queues,
     revalidate,
     prerender,
-    headers,
+    headers: mergedHeaders,
+    hashedAssetsPrefix: fwPreset.hashedAssetsPrefix,
     vars: envVars,
     neededPaths,
     assetHashes,
@@ -423,7 +444,7 @@ async function runFullDeploy(
   root: string,
   config: ProjectConfig,
   client: PlatformClient,
-  headers?: import("./types").HeaderRule[],
+  headers?: HeaderRule[],
   skipBuild?: boolean,
   commit?: string | null,
 ): Promise<void> {
@@ -495,23 +516,18 @@ async function runFullDeploy(
     writeFileSync(workerEntryPath, `globalThis.__VITE_MANIFEST__=${manifestJson};\n${workerCode}`);
   }
 
-  // In framework mode: skip job/queue scanning, SSR is always true
-  const schedules = isFrameworkMode
-    ? []
-    : scanJobsSync(root).flatMap((job) =>
-        job.crons.map((cron) => ({
-          name: job.name,
-          cron,
-        })),
-      );
-  const queues = isFrameworkMode
-    ? []
-    : scanQueuesSync(root).map((q) => ({
-        name: q.name,
-        bindingName: q.bindingName,
-        ...(q.maxBatchSize != null && { maxBatchSize: q.maxBatchSize }),
-        ...(q.maxBatchTimeout != null && { maxBatchTimeout: q.maxBatchTimeout }),
-      }));
+  const schedules = scanJobsSync(root).flatMap((job) =>
+    job.crons.map((cron) => ({
+      name: job.name,
+      cron,
+    })),
+  );
+  const queues = scanQueuesSync(root).map((q) => ({
+    name: q.name,
+    bindingName: q.bindingName,
+    ...(q.maxBatchSize != null && { maxBatchSize: q.maxBatchSize }),
+    ...(q.maxBatchTimeout != null && { maxBatchTimeout: q.maxBatchTimeout }),
+  }));
   const isSsr = isFrameworkMode ? true : Boolean(validateSsrEntry(root));
 
   // Resolve revalidate config from void.json + per-page .server.ts exports

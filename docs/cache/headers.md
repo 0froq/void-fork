@@ -55,9 +55,18 @@ Header rules apply to **static asset responses only** — files served from R2 (
 - API route responses (`/api/*` dispatched to your worker)
 - SSR-rendered responses (when a static asset is not found and the request falls through to your worker)
 
+## Framework `_headers` files
+
+Meta-frameworks like SvelteKit, Nuxt, and Astro generate a `_headers` file with cache rules for their hashed asset directories. Void automatically parses this file during deploy and merges the rules into the deploy manifest.
+
+- Framework-generated rules are applied **before** `void.json` rules. Since the last match wins, `void.json` headers take precedence and can override framework defaults.
+- The `_headers` file is not uploaded as a static asset — its contents are parsed and included in the manifest only.
+
+No configuration is needed. If the framework generates a `_headers` file, it is picked up automatically.
+
 ## How headers work
 
-1. `void deploy` reads header rules from `void.json` and includes them in the deploy manifest.
+1. `void deploy` reads header rules from the framework `_headers` file (if present) and `void.json`, then includes them in the deploy manifest.
 2. The platform stores the rules in the KV routing entry for your project.
 3. The dispatch worker applies matching rules to static responses before edge caching.
 

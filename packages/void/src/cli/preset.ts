@@ -12,6 +12,8 @@ export interface FrameworkPreset {
   workerMain: string;
   /** Directory containing static assets, relative to project root. */
   assetsDir: string;
+  /** URL-level prefix for hashed/immutable assets (used by dispatch for cache headers + edge cache keys). */
+  hashedAssetsPrefix?: string;
 }
 
 /**
@@ -24,18 +26,21 @@ export const FRAMEWORK_PRESETS: Record<string, FrameworkPreset> = {
     workerDir: ".svelte-kit/cloudflare",
     workerMain: "_worker.js",
     assetsDir: ".svelte-kit/cloudflare",
+    hashedAssetsPrefix: "_app/immutable",
   },
   nuxt: {
     buildCommand: "nuxt build",
     workerDir: ".output/server",
     workerMain: "index.mjs",
     assetsDir: ".output/public",
+    hashedAssetsPrefix: "_nuxt",
   },
   astro: {
     buildCommand: "astro build",
     workerDir: "dist/_worker.js",
     workerMain: "index.js",
     assetsDir: "dist",
+    hashedAssetsPrefix: "_astro",
   },
 };
 

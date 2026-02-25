@@ -208,6 +208,8 @@ export function packageFrameworkBuild(opts: {
   revalidate?: number | Record<string, number>;
   prerender?: string[];
   headers?: HeaderRule[];
+  /** URL-level prefix for hashed/immutable assets (sets manifest.assetsDir). */
+  hashedAssetsPrefix?: string;
   vars?: Record<string, string>;
   neededPaths?: Set<string>;
   assetHashes?: Record<string, string>;
@@ -240,6 +242,7 @@ export function packageFrameworkBuild(opts: {
   if (opts.headers) manifest.headers = opts.headers;
   if (opts.vars && Object.keys(opts.vars).length > 0) manifest.vars = opts.vars;
   if (opts.assetHashes) manifest.assetHashes = opts.assetHashes;
+  if (opts.hashedAssetsPrefix) manifest.assetsDir = opts.hashedAssetsPrefix;
 
   manifest.ssr = true;
   manifest.framework = true;
@@ -273,6 +276,8 @@ export function packageFrameworkBuild(opts: {
       // Skip worker files when workerDir is inside assetsDir
       if (isOverlap && filePath.replace(/\\/g, "/").startsWith(workerDirNorm)) continue;
       const relativePath = relative(opts.assetsDir, filePath);
+      // Skip _headers and _redirects — already parsed into manifest
+      if (relativePath === "_headers" || relativePath === "_redirects") continue;
       if (opts.neededPaths && !opts.neededPaths.has(relativePath)) continue;
       const content = readFileSync(filePath);
       formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
