@@ -2,6 +2,19 @@ import { defineConfig } from "tsdown";
 
 const WORKERS_TYPES_REFERENCE = '/// <reference types="@cloudflare/workers-types" />';
 
+function stripUseAsmPlugin() {
+  return {
+    name: "void:strip-use-asm",
+    // es-module-lexer/js (asm.js variant) contains "use asm" which triggers a
+    // harmless but noisy V8 warning on Node 24+. Strip it from the bundle.
+    renderChunk(code: string) {
+      if (code.includes('"use asm"')) {
+        return code.replace('"use asm"', "");
+      }
+    },
+  };
+}
+
 function injectWorkersTypesReferencePlugin() {
   return {
     name: "void:inject-workers-types-reference",
@@ -64,7 +77,7 @@ export default defineConfig({
   format: "esm",
   dts: true,
   clean: true,
-  plugins: [injectWorkersTypesReferencePlugin()],
+  plugins: [stripUseAsmPlugin(), injectWorkersTypesReferencePlugin()],
   external: [
     "vite",
     "@cloudflare/vite-plugin",
