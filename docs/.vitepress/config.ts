@@ -55,6 +55,9 @@ export default extendConfig(
     description: "Fullstack Vite plugin for Cloudflare Workers",
     cleanUrls: true,
 
+    // ./index.server imports in code blocks are false positives
+    ignoreDeadLinks: [/\/index$/],
+
     markdown: {
       config(md) {
         md.use(groupIconMdPlugin);

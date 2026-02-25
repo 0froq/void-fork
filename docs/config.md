@@ -82,7 +82,7 @@ Override which directories are scanned for [binding inference](./resource-infere
 
 ### `cache`
 
-Caching configuration. See [Caching and Headers](./cache.md) for details.
+Caching configuration. See [Revalidation](./cache/revalidation.md) and [Custom Headers](./cache/headers.md) for details.
 
 | Sub-field    | Type                               | Description                                         |
 | ------------ | ---------------------------------- | --------------------------------------------------- |
@@ -106,7 +106,7 @@ Each path in `prerender` must start with `/`.
 
 ### `headers`
 
-Custom response headers for static assets. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Caching and Headers](./cache.md) for details.
+Custom response headers for static assets. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Custom Headers](./cache/headers.md) for details.
 
 ```json
 {
