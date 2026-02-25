@@ -51,4 +51,7 @@ export interface DeployManifest {
   assetHashes?: Record<string, string>;
   headers?: HeaderRule[];
   vars?: Record<string, string>;
+  workerMain?: string;
+  compatibilityDate?: string;
+  compatibilityFlags?: string[];
 }

@@ -277,9 +277,9 @@ app.post("/:id/deploy", async (c) => {
 
     // Add metadata part (include provisioned bindings)
     const metadata = {
-      main_module: "index.js",
-      compatibility_date: "2026-02-12",
-      compatibility_flags: ["nodejs_compat"],
+      main_module: manifest.workerMain ?? "index.js",
+      compatibility_date: manifest.compatibilityDate ?? "2026-02-12",
+      compatibility_flags: manifest.compatibilityFlags ?? ["nodejs_compat"],
       bindings: allBindings.length > 0 ? allBindings : undefined,
       triggers:
         manifest.schedules && manifest.schedules.length > 0
