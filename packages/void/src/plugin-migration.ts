@@ -7,7 +7,11 @@ import type { Plugin } from "vite";
  * Applies unapplied .sql files from the migrations/ directory
  * to the local SQLite database used by miniflare.
  */
-export function migrationPlugin(root: string, databaseId = "local"): Plugin {
+export function migrationPlugin(
+  root: string,
+  databaseId = "local",
+  persistRoot = join(root, ".void"),
+): Plugin {
   return {
     name: "void:migrations",
     apply: "serve",
@@ -15,8 +19,6 @@ export function migrationPlugin(root: string, databaseId = "local"): Plugin {
     async configureServer() {
       const migrationsDir = join(root, "migrations");
       if (!existsSync(migrationsDir)) return;
-
-      const persistRoot = join(root, ".void");
 
       try {
         const { runMigrations, getMiniflareDatabasePath } = await import("./migrations/runner");

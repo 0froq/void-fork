@@ -192,6 +192,7 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
   if (detected && (detected.class === "b" || detected.class === "c")) {
     const hasAuth = normalizeAuth(config.auth) !== null;
     const bindingNames = resolveBindingNames(config.bindings);
+    const frameworkPersistRoot = join(root, ".wrangler", "state");
 
     // Wrangler.jsonc binding sync plugin — runs on dev startup
     const wranglerSyncPlugin: Plugin = {
@@ -230,7 +231,6 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
           const { getPlatformProxy } = await import("wrangler");
           const proxy = await getPlatformProxy({
             ...(configPath ? { configPath } : {}),
-            persist: { path: join(root, ".void", "v3") },
           });
 
           (globalThis as Record<string, unknown>).__void_cf_env = proxy.env as unknown;
@@ -250,7 +250,7 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
       wranglerSyncPlugin,
       svelteKitEnvBridgePlugin,
       dbTypesPlugin(root, false),
-      migrationPlugin(root),
+      migrationPlugin(root, "local", frameworkPersistRoot),
     ];
   }
 
