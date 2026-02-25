@@ -1,18 +1,27 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { InferredBindings } from "../inference/walk";
+import type { VoidConfig } from "../config";
+
+/** Known-good default compatibility date — bumped when we test against newer runtime versions. */
+export const DEFAULT_COMPAT_DATE = "2026-02-12";
+
+const COMPAT_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Subset of wrangler config fields we extract. */
 export interface WranglerCompat {
-  compatibilityDate?: string;
+  compatibilityDate: string;
   compatibilityFlags?: string[];
 }
 
 /**
- * Read `wrangler.jsonc` or `wrangler.json` from the project root and extract
- * compatibility settings. Returns an empty object if no file is found.
+ * Read compatibility settings from `wrangler.jsonc`/`wrangler.json` and
+ * `void.json`, with priority: void.json > wrangler.jsonc > built-in default.
+ *
+ * Always returns a `compatibilityDate` (falls back to `DEFAULT_COMPAT_DATE`).
  */
-export function readWranglerCompat(root: string): WranglerCompat {
+export function readWranglerCompat(root: string, config?: VoidConfig): WranglerCompat {
+  // 1. Read wrangler.jsonc / wrangler.json
   let raw: string | undefined;
   for (const name of ["wrangler.jsonc", "wrangler.json"]) {
     try {
@@ -22,19 +31,39 @@ export function readWranglerCompat(root: string): WranglerCompat {
       // try next
     }
   }
-  if (!raw) return {};
 
-  const parsed = parseJsonc(raw);
-  const result: WranglerCompat = {};
-
-  if (typeof parsed.compatibility_date === "string") {
-    result.compatibilityDate = parsed.compatibility_date;
+  let wranglerDate: string | undefined;
+  let wranglerFlags: string[] | undefined;
+  if (raw) {
+    const parsed = parseJsonc(raw);
+    if (typeof parsed.compatibility_date === "string") {
+      if (!COMPAT_DATE_RE.test(parsed.compatibility_date)) {
+        throw new Error(
+          `"compatibility_date" in wrangler config must be YYYY-MM-DD format, got "${parsed.compatibility_date}"`,
+        );
+      }
+      wranglerDate = parsed.compatibility_date;
+    }
+    if (
+      Array.isArray(parsed.compatibility_flags) &&
+      parsed.compatibility_flags.every((f: unknown) => typeof f === "string")
+    ) {
+      wranglerFlags = parsed.compatibility_flags;
+    }
   }
-  if (
-    Array.isArray(parsed.compatibility_flags) &&
-    parsed.compatibility_flags.every((f: unknown) => typeof f === "string")
-  ) {
-    result.compatibilityFlags = parsed.compatibility_flags;
+
+  // 2. Override with void.json wrangler fields (higher priority)
+  const voidDate = config?.wrangler?.compatibility_date;
+  const voidFlags = config?.wrangler?.compatibility_flags;
+
+  // 3. Merge: void.json > wrangler.jsonc > default
+  const result: WranglerCompat = {
+    compatibilityDate: voidDate ?? wranglerDate ?? DEFAULT_COMPAT_DATE,
+  };
+
+  const flags = voidFlags ?? wranglerFlags;
+  if (flags && flags.length > 0) {
+    result.compatibilityFlags = flags;
   }
 
   return result;

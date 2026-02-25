@@ -320,8 +320,8 @@ async function runFrameworkDeploy(
     log.info("Wrapper bundled");
   }
 
-  // 8. Read wrangler compat settings
-  const wranglerCompat = readWranglerCompat(root);
+  // 8. Read wrangler compat settings (void.json > wrangler.jsonc > default)
+  const wranglerCompat = readWranglerCompat(root, vcConfig);
 
   // 9. Resolve revalidate + prerender from void.json
   const revalidate = vcConfig.cache?.revalidate;
@@ -648,10 +648,13 @@ async function runFullDeploy(
   // Dedupe prerender paths
   const uniquePrerenderPaths = [...new Set(prerenderPaths)];
 
-  // 8. Load .env vars for production
+  // 8. Read wrangler compat settings (void.json > wrangler.jsonc > default)
+  const wranglerCompat = readWranglerCompat(root, deployConfig);
+
+  // 9. Load .env vars for production
   const envVars = loadEnv("production", root, "");
 
-  // 9. Check assets & Package & Upload
+  // 10. Check assets & Package & Upload
   const s = spinner();
 
   s.start("Checking assets...");
@@ -687,6 +690,10 @@ async function runFullDeploy(
     queues,
     assetsDir,
     uniquePrerenderPaths,
+    {
+      compatibilityDate: wranglerCompat.compatibilityDate,
+      compatibilityFlags: wranglerCompat.compatibilityFlags,
+    },
   );
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);

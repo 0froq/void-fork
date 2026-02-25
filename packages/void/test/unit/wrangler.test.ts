@@ -2,8 +2,13 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
-import { readWranglerCompat, syncWranglerBindings } from "../../src/cli/wrangler";
+import {
+  readWranglerCompat,
+  syncWranglerBindings,
+  DEFAULT_COMPAT_DATE,
+} from "../../src/cli/wrangler";
 import type { InferredBindings } from "../../src/inference/walk";
+import type { VoidConfig } from "../../src/config";
 
 const tmpDir = join(import.meta.dirname, ".tmp-wrangler-test");
 
@@ -18,10 +23,12 @@ afterEach(() => {
 });
 
 describe("readWranglerCompat", () => {
-  it("returns empty when no wrangler config exists", () => {
+  it("returns default date when no wrangler config exists", () => {
     rmSync(tmpDir, { recursive: true, force: true });
     mkdirSync(tmpDir, { recursive: true });
-    expect(readWranglerCompat(tmpDir)).toEqual({});
+    expect(readWranglerCompat(tmpDir)).toEqual({
+      compatibilityDate: DEFAULT_COMPAT_DATE,
+    });
   });
 
   it("reads from wrangler.json", () => {
@@ -68,9 +75,11 @@ describe("readWranglerCompat", () => {
     });
   });
 
-  it("returns empty when fields are missing", () => {
+  it("falls back to default date when fields are missing from wrangler config", () => {
     setup("wrangler.json", '{ "name": "test" }');
-    expect(readWranglerCompat(tmpDir)).toEqual({});
+    expect(readWranglerCompat(tmpDir)).toEqual({
+      compatibilityDate: DEFAULT_COMPAT_DATE,
+    });
   });
 
   it("handles strings containing // without stripping them", () => {
@@ -84,6 +93,45 @@ describe("readWranglerCompat", () => {
     );
     const result = readWranglerCompat(tmpDir);
     expect(result.compatibilityDate).toBe("2026-02-24");
+  });
+
+  it("void.json overrides wrangler.jsonc date", () => {
+    setup("wrangler.jsonc", '{ "compatibility_date": "2025-01-01" }');
+    const config: VoidConfig = { wrangler: { compatibility_date: "2026-06-01" } };
+    expect(readWranglerCompat(tmpDir, config)).toEqual({
+      compatibilityDate: "2026-06-01",
+    });
+  });
+
+  it("void.json overrides wrangler.jsonc flags", () => {
+    setup(
+      "wrangler.jsonc",
+      '{ "compatibility_date": "2026-01-01", "compatibility_flags": ["nodejs_compat"] }',
+    );
+    const config: VoidConfig = {
+      wrangler: { compatibility_flags: ["nodejs_compat", "nodejs_als"] },
+    };
+    const result = readWranglerCompat(tmpDir, config);
+    expect(result.compatibilityFlags).toEqual(["nodejs_compat", "nodejs_als"]);
+  });
+
+  it("void.json date used when no wrangler config exists", () => {
+    rmSync(tmpDir, { recursive: true, force: true });
+    mkdirSync(tmpDir, { recursive: true });
+    const config: VoidConfig = { wrangler: { compatibility_date: "2026-03-15" } };
+    expect(readWranglerCompat(tmpDir, config)).toEqual({
+      compatibilityDate: "2026-03-15",
+    });
+  });
+
+  it("throws on invalid date format in wrangler config", () => {
+    setup("wrangler.json", '{ "compatibility_date": "not-a-date" }');
+    expect(() => readWranglerCompat(tmpDir)).toThrow("YYYY-MM-DD format");
+  });
+
+  it("throws on partial date format in wrangler config", () => {
+    setup("wrangler.json", '{ "compatibility_date": "2026-02" }');
+    expect(() => readWranglerCompat(tmpDir)).toThrow("YYYY-MM-DD format");
   });
 });
 

@@ -211,8 +211,15 @@ export function readConfig(root: string): VoidConfig {
       throw new Error(`"wrangler" in ${CONFIG_FILE} must be an object`);
     }
     const w = obj.wrangler as Record<string, unknown>;
-    if (w.compatibility_date !== undefined && typeof w.compatibility_date !== "string") {
-      throw new Error(`"wrangler.compatibility_date" in ${CONFIG_FILE} must be a string`);
+    if (w.compatibility_date !== undefined) {
+      if (typeof w.compatibility_date !== "string") {
+        throw new Error(`"wrangler.compatibility_date" in ${CONFIG_FILE} must be a string`);
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(w.compatibility_date)) {
+        throw new Error(
+          `"wrangler.compatibility_date" in ${CONFIG_FILE} must be YYYY-MM-DD format`,
+        );
+      }
     }
     if (w.compatibility_flags !== undefined) {
       if (

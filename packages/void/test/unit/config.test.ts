@@ -178,6 +178,25 @@ describe("readConfig", () => {
     cleanup();
   });
 
+  it("throws on invalid compatibility_date format", () => {
+    setup(JSON.stringify({ wrangler: { compatibility_date: "not-a-date" } }));
+    expect(() => readConfig(tmpDir)).toThrow("YYYY-MM-DD format");
+    cleanup();
+  });
+
+  it("throws on partial compatibility_date format", () => {
+    setup(JSON.stringify({ wrangler: { compatibility_date: "2026-02" } }));
+    expect(() => readConfig(tmpDir)).toThrow("YYYY-MM-DD format");
+    cleanup();
+  });
+
+  it("accepts valid compatibility_date format", () => {
+    setup(JSON.stringify({ wrangler: { compatibility_date: "2026-02-24" } }));
+    const config = readConfig(tmpDir);
+    expect(config.wrangler?.compatibility_date).toBe("2026-02-24");
+    cleanup();
+  });
+
   it("accepts cache.revalidate as a number", () => {
     setup(JSON.stringify({ cache: { revalidate: 60 } }));
     const config = readConfig(tmpDir);
