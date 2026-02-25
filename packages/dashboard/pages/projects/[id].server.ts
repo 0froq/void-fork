@@ -26,7 +26,7 @@ export const loader = defineHandler<Props>(async (c) => {
 
   // Direct D1
   const project = await getProject(db, id);
-  if (!project) return c.notFound();
+  if (!project || project.user_id !== c.get("userId")) return c.notFound();
 
   const [deployments, domains, resources] = await Promise.all([
     getProjectDeployments(db, project.id),
