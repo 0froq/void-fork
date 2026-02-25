@@ -57,7 +57,7 @@ In supported agents such as Claude Code, you can invoke the `/void` skill to tur
 
 ## Adding to an Existing Vite App
 
-::: info 💡 Framework Compatibility
+::: tip 💡 Framework Compatibility
 This guide assumes you are working with a plain Vite app. If you are using a Vite-based meta framework, check out the [Framework Integration Guides](./integrations/frameworks/overview) instead.
 :::
 

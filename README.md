@@ -1,6 +1,6 @@
 # Void
 
-Full-stack framework for Cloudflare Workers, powered by [Vite](https://vite.dev).
+Fullstack SDK for Cloudflare Workers, powered by [Vite](https://vite.dev).
 
 Add a single plugin to your `vite.config.ts` and get file-based API routing, server-rendered pages, D1 database, KV storage, R2 object storage, AI inference, and one-command deploys — all auto-provisioned from your imports.
 
