@@ -82,3 +82,30 @@ export default defineConfig({
   // framework mode auto-detected — no explicit option needed
 });
 ```
+
+---
+
+See [0026-multi-framework-support.md](./0026-multi-framework-support.md) for the expanded design covering Class A/B/C frameworks.
+
+Updated thoughts (preserved for context):
+
+There should be 3 different types of frameworks:
+
+- Class A: frameworks that ship as a vite plugin, and deploy to CF via CF's
+  vite plugin. e.g. Tanstack Start, React Router. Already covered above.
+- Class B: frameworks that ship as a vite plugin, but comes with its own
+  adapter: SvelteKit
+- Class C: frameworks that come with their own CLIs + adapters - Nuxt (via
+  Nitro), Astro
+
+The goal is to for `void deploy` to support all of them.
+
+Frameworks won't get support for features that rely on worker codegen, e.g. auth, queues and crons.
+
+For class A, the void plugin, by depending on cloudflare plugin, handles local dev env, and also ensures correct manifest generation.
+
+Class A & B will include `voidPlugin()` in their Vite config, in order to enjoy a subset of void features such as auto binding inference, `import { db } from 'void/db'` with type safety.
+
+Class C frameworks will handle everything all the way to the produced bundle
+and wrangler config. They do not include the `voidPlugin()` in the Vite config at all. `void deploy` will have a preset for known frameworks in this category and will generate the right wrangler.json internally automatically. Since there will be no binding inference, users will be required to explciitly declare
+needed bindings in `void.json`. Basically, Void is only a deploy CLI for frameworks in this category and provide no DX support.
