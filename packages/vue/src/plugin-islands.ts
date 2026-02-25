@@ -2,7 +2,7 @@ import type { Plugin } from "vite";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve, relative } from "node:path";
 import { scanPages } from "void/pages";
-import type { PageScanResult } from "void/pages";
+import type { LayoutDefinition, PageScanResult } from "void/pages";
 import { generateComponentManifest } from "./pages-manifest";
 
 const ISLANDS_RENDERER_ID = "virtual:void-islands-renderer";
@@ -38,181 +38,248 @@ function hasIslandFiles(dir: string): boolean {
   return false;
 }
 
-export function islandsPlugin(pagesDir: string): Plugin {
+function resolveLayoutChain(componentId: string, layouts: LayoutDefinition[]): LayoutDefinition[] {
+  const parts = componentId.split("/");
+  const chain: LayoutDefinition[] = [];
+  const root = layouts.find((l) => l.directory === "");
+  if (root) chain.push(root);
+  let dir = "";
+  for (let i = 0; i < parts.length - 1; i++) {
+    dir = dir ? `${dir}/${parts[i]}` : parts[i];
+    const layout = layouts.find((l) => l.directory === dir);
+    if (layout) chain.push(layout);
+  }
+  return chain;
+}
+
+export function islandsPlugin(pagesDir: string): Plugin[] {
   let pageScan: PageScanResult | null = null;
   const root = dirname(pagesDir);
   const islandManifest = new Map<string, IslandEntry>();
+  const islandCssFiles = new Set<string>();
 
-  return {
-    name: "void-vue:islands",
-    enforce: "pre",
+  return [
+    {
+      name: "void-vue:islands",
+      enforce: "pre",
 
-    async buildStart() {
-      if (existsSync(pagesDir)) {
-        pageScan = await scanPages(root);
-        // Pre-scan island pages to populate the manifest eagerly.
-        // This is needed because the client build may load the virtual
-        // islands-client entry before island page transforms run.
-        const importAttrRe =
-          /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
-        for (const page of pageScan.pages) {
-          if (!page.island) continue;
-          const filePath = resolve(pagesDir, page.componentPath);
-          const code = readFileSync(filePath, "utf-8");
-          const importerDir = dirname(filePath);
-          importAttrRe.lastIndex = 0;
-          let m;
-          while ((m = importAttrRe.exec(code)) !== null) {
-            const spec = m[1].slice(1, -1);
-            const strategy = m[2].slice(1, -1);
+      async buildStart() {
+        if (existsSync(pagesDir)) {
+          pageScan = await scanPages(root);
+          // Pre-scan island pages to populate the manifest eagerly.
+          // This is needed because the client build may load the virtual
+          // islands-client entry before island page transforms run.
+          const importAttrRe =
+            /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
+          for (const page of pageScan.pages) {
+            if (!page.island) continue;
+            const filePath = resolve(pagesDir, page.componentPath);
+            const code = readFileSync(filePath, "utf-8");
+            const importerDir = dirname(filePath);
+            importAttrRe.lastIndex = 0;
+            let m;
+            while ((m = importAttrRe.exec(code)) !== null) {
+              const spec = m[1].slice(1, -1);
+              const strategy = m[2].slice(1, -1);
+              const absPath = resolveSpecifier(spec, importerDir);
+              if (absPath) {
+                const islandId = relative(root, absPath).replace(/\.[^.]+$/, "");
+                islandManifest.set(islandId, {
+                  componentPath: absPath,
+                  islandId,
+                  hydrate: strategy,
+                });
+              }
+            }
+          }
+
+          // Collect .vue files needing CSS for island pages
+          for (const page of pageScan.pages) {
+            if (!page.island) continue;
+            if (page.componentPath.endsWith(".vue")) {
+              islandCssFiles.add(resolve(pagesDir, page.componentPath));
+            }
+            const layoutChain = resolveLayoutChain(page.componentId, pageScan.layouts);
+            for (const layout of layoutChain) {
+              islandCssFiles.add(resolve(pagesDir, layout.filePath));
+            }
+          }
+        }
+      },
+
+      resolveId: {
+        filter: { id: /^virtual:void-islands-(renderer|client)$/ },
+        handler(source) {
+          if (source === ISLANDS_RENDERER_ID || source === ISLANDS_CLIENT_ENTRY_ID) {
+            return "\0" + source;
+          }
+        },
+      },
+
+      load: {
+        // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
+        filter: { id: /^\0virtual:void-islands-(renderer|client)$/ },
+        handler(id) {
+          if (id === "\0" + ISLANDS_RENDERER_ID) {
+            if (!pageScan) {
+              return "export function renderIslandPage() { throw new Error('No pages found'); }";
+            }
+            return generateIslandRenderer(pageScan, pagesDir);
+          }
+          if (id === "\0" + ISLANDS_CLIENT_ENTRY_ID) {
+            if (!pageScan) return "";
+            return generateIslandClientEntry(islandManifest, islandCssFiles);
+          }
+        },
+      },
+
+      // Rewrite island imports inline — the workerd module runner resolves imports
+      // from the pre-transform AST, so we can't rely on resolveId to intercept
+      // rewritten specifiers. Instead, we replace each island import with:
+      //   1. A renamed import of the raw component
+      //   2. An inline wrapper that adds data-island/data-props/data-hydrate attributes
+      // This also populates the islandManifest for the client entry.
+      transform: {
+        filter: { id: /\.island\.vue$/ },
+        handler(code, id) {
+          if (/import\s+\{[^}]*\buseForm\b/.test(code)) {
+            this.warn(
+              `useForm imported in island page "${id}" — useForm requires the Inertia client-side router. Use useIslandForm instead.`,
+            );
+          }
+
+          const importAttrRe =
+            /import\s+(\w+)\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
+
+          const importerDir = dirname(id);
+          let transformed = code;
+          const wrappers: string[] = [];
+          let idx = 0;
+          let match;
+
+          while ((match = importAttrRe.exec(code)) !== null) {
+            const name = match[1];
+            const specRaw = match[2];
+            const strategyRaw = match[3];
+            const spec = specRaw.slice(1, -1);
+            const strategy = strategyRaw.slice(1, -1);
+            const rawName = `_raw_island_${idx++}`;
+
+            // Resolve to absolute path for the island manifest
             const absPath = resolveSpecifier(spec, importerDir);
             if (absPath) {
               const islandId = relative(root, absPath).replace(/\.[^.]+$/, "");
-              islandManifest.set(islandId, { componentPath: absPath, islandId, hydrate: strategy });
+              islandManifest.set(islandId, {
+                componentPath: absPath,
+                islandId,
+                hydrate: strategy,
+              });
             }
-          }
-        }
-      }
-    },
 
-    resolveId: {
-      filter: { id: /^virtual:void-islands-(renderer|client)$/ },
-      handler(source) {
-        if (source === ISLANDS_RENDERER_ID || source === ISLANDS_CLIENT_ENTRY_ID) {
-          return "\0" + source;
-        }
-      },
-    },
+            const islandId = absPath ? relative(root, absPath).replace(/\.[^.]+$/, "") : spec;
 
-    load: {
-      // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
-      filter: { id: /^\0virtual:void-islands-(renderer|client)$/ },
-      handler(id) {
-        if (id === "\0" + ISLANDS_RENDERER_ID) {
-          if (!pageScan) {
-            return "export function renderIslandPage() { throw new Error('No pages found'); }";
-          }
-          return generateIslandRenderer(pageScan, pagesDir);
-        }
-        if (id === "\0" + ISLANDS_CLIENT_ENTRY_ID) {
-          if (!pageScan) return "";
-          return generateIslandClientEntry(islandManifest);
-        }
-      },
-    },
+            // Replace the import with a renamed import
+            const replacement = `import ${rawName} from ${specRaw}`;
+            transformed = transformed.replace(match[0], replacement);
 
-    // Rewrite island imports inline — the workerd module runner resolves imports
-    // from the pre-transform AST, so we can't rely on resolveId to intercept
-    // rewritten specifiers. Instead, we replace each island import with:
-    //   1. A renamed import of the raw component
-    //   2. An inline wrapper that adds data-island/data-props/data-hydrate attributes
-    // This also populates the islandManifest for the client entry.
-    transform: {
-      filter: { id: /\.island\.vue$/ },
-      handler(code, id) {
-        if (/import\s+\{[^}]*\buseForm\b/.test(code)) {
-          this.warn(
-            `useForm imported in island page "${id}" — useForm requires the Inertia client-side router. Use useIslandForm instead.`,
-          );
-        }
-
-        const importAttrRe =
-          /import\s+(\w+)\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
-
-        const importerDir = dirname(id);
-        let transformed = code;
-        const wrappers: string[] = [];
-        let idx = 0;
-        let match;
-
-        while ((match = importAttrRe.exec(code)) !== null) {
-          const name = match[1];
-          const specRaw = match[2];
-          const strategyRaw = match[3];
-          const spec = specRaw.slice(1, -1);
-          const strategy = strategyRaw.slice(1, -1);
-          const rawName = `_raw_island_${idx++}`;
-
-          // Resolve to absolute path for the island manifest
-          const absPath = resolveSpecifier(spec, importerDir);
-          if (absPath) {
-            const islandId = relative(root, absPath).replace(/\.[^.]+$/, "");
-            islandManifest.set(islandId, {
-              componentPath: absPath,
-              islandId,
-              hydrate: strategy,
-            });
+            // Generate wrapper that adds data-island attributes during SSR.
+            // Uses Vue's h() function for createElement.
+            wrappers.push(
+              `const ${name} = {` +
+                ` inheritAttrs: false,` +
+                ` render() {` +
+                ` const props = this.$attrs;` +
+                ` return _h_island("div", {` +
+                ` "data-island": ${JSON.stringify(islandId)},` +
+                ` "data-props": JSON.stringify(props),` +
+                ` "data-hydrate": ${JSON.stringify(strategy)}` +
+                ` }, _h_island(${rawName}, props));` +
+                ` }` +
+                ` };`,
+            );
           }
 
-          const islandId = absPath ? relative(root, absPath).replace(/\.[^.]+$/, "") : spec;
-
-          // Replace the import with a renamed import
-          const replacement = `import ${rawName} from ${specRaw}`;
-          transformed = transformed.replace(match[0], replacement);
-
-          // Generate wrapper that adds data-island attributes during SSR.
-          // Uses Vue's h() function for createElement.
-          wrappers.push(
-            `const ${name} = {` +
-              ` inheritAttrs: false,` +
-              ` render() {` +
-              ` const props = this.$attrs;` +
-              ` return _h_island("div", {` +
-              ` "data-island": ${JSON.stringify(islandId)},` +
-              ` "data-props": JSON.stringify(props),` +
-              ` "data-hydrate": ${JSON.stringify(strategy)}` +
-              ` }, _h_island(${rawName}, props));` +
-              ` }` +
-              ` };`,
-          );
-        }
-
-        if (wrappers.length > 0) {
-          // Inject into <script setup> block — this transform runs with enforce: "pre"
-          // so the Vue SFC compiler hasn't processed the file yet. We must place
-          // the h() import and wrapper consts inside the script block.
-          const scriptSetupRe = /<script\b[^>]*\bsetup\b[^>]*>/;
-          const setupMatch = transformed.match(scriptSetupRe);
-          if (setupMatch) {
-            const openEnd = setupMatch.index! + setupMatch[0].length;
-            const closeIdx = transformed.indexOf("</script>", openEnd);
-            if (closeIdx !== -1) {
-              transformed =
-                transformed.slice(0, openEnd) +
-                '\nimport { h as _h_island } from "vue";' +
-                transformed.slice(openEnd, closeIdx) +
-                "\n" +
-                wrappers.join("\n") +
-                "\n" +
-                transformed.slice(closeIdx);
+          if (wrappers.length > 0) {
+            // Inject into <script setup> block — this transform runs with enforce: "pre"
+            // so the Vue SFC compiler hasn't processed the file yet. We must place
+            // the h() import and wrapper consts inside the script block.
+            const scriptSetupRe = /<script\b[^>]*\bsetup\b[^>]*>/;
+            const setupMatch = transformed.match(scriptSetupRe);
+            if (setupMatch) {
+              const openEnd = setupMatch.index! + setupMatch[0].length;
+              const closeIdx = transformed.indexOf("</script>", openEnd);
+              if (closeIdx !== -1) {
+                transformed =
+                  transformed.slice(0, openEnd) +
+                  '\nimport { h as _h_island } from "vue";' +
+                  transformed.slice(openEnd, closeIdx) +
+                  "\n" +
+                  wrappers.join("\n") +
+                  "\n" +
+                  transformed.slice(closeIdx);
+              }
             }
+            return { code: transformed, map: null };
           }
-          return { code: transformed, map: null };
-        }
+        },
       },
-    },
 
-    config(_, env) {
-      if (!existsSync(pagesDir)) return;
-      if (env.command === "serve") {
-        return { optimizeDeps: { include: ["vue"] } };
-      }
-      // Only add the islands client entry when island pages actually exist
-      if (hasIslandFiles(pagesDir)) {
-        return {
-          environments: {
-            client: {
-              build: {
-                rollupOptions: {
-                  input: { "islands-client": ISLANDS_CLIENT_ENTRY_ID },
+      config(_, env) {
+        if (!existsSync(pagesDir)) return;
+        if (env.command === "serve") {
+          return { optimizeDeps: { include: ["vue"] } };
+        }
+        // Only add the islands client entry when island pages actually exist
+        if (hasIslandFiles(pagesDir)) {
+          return {
+            environments: {
+              client: {
+                build: {
+                  rollupOptions: {
+                    input: { "islands-client": ISLANDS_CLIENT_ENTRY_ID },
+                  },
                 },
               },
             },
-          },
-        };
-      }
+          };
+        }
+      },
     },
-  };
+    {
+      name: "void-vue:islands-css",
+      enforce: "pre",
+
+      resolveId: {
+        filter: { id: /\?island-css$/ },
+        handler(source) {
+          return source;
+        },
+      },
+
+      load: {
+        filter: { id: /\?island-css$/ },
+        handler(id) {
+          const filePath = id.replace(/\?island-css$/, "");
+          const content = readFileSync(filePath, "utf-8");
+          const styleRe = /<style\b([^>]*)>/g;
+          const imports: string[] = [];
+          let index = 0;
+          let match;
+          while ((match = styleRe.exec(content)) !== null) {
+            const attrs = match[1];
+            const scoped = /\bscoped\b/.test(attrs);
+            const langMatch = attrs.match(/\blang\s*=\s*["'](\w+)["']/);
+            const lang = langMatch ? langMatch[1] : "css";
+            let query = `?vue&type=style&index=${index}&lang.${lang}`;
+            if (scoped) query += "&scoped=true";
+            imports.push(`import ${JSON.stringify(filePath + query)};`);
+            index++;
+          }
+          return imports.join("\n") || "/* no styles */";
+        },
+      },
+    },
+  ];
 }
 
 function generateIslandRenderer(scan: PageScanResult, pagesDir: string): string {
@@ -227,7 +294,9 @@ function escapeAttr(s) {
 }
 
 export async function renderIslandPage(pageObj, assetTags) {
-  const PageComponent = (await components[pageObj.component]()).default;
+  const __pageModule = await components[pageObj.component]();
+  const PageComponent = __pageModule.default;
+  const __frontmatter = __pageModule.frontmatter;
   const layoutIds = layoutTree[pageObj.component] || [];
   const layoutComponents = await Promise.all(
     layoutIds.map(async (id) => (await components[id]()).default)
@@ -237,6 +306,7 @@ export async function renderIslandPage(pageObj, assetTags) {
     setup() {
       provide("__void_shared", reactive(pageObj.shared || {}));
       provide("__void_errors", reactive(pageObj.errors || {}));
+      if (__frontmatter) provide("__void_frontmatter", __frontmatter);
       // No router provided — islands have no client-side router
       return () => {
         let vnode = h(PageComponent, pageObj.props);
@@ -263,7 +333,10 @@ export async function renderIslandPage(pageObj, assetTags) {
 `;
 }
 
-function generateIslandClientEntry(manifest: Map<string, IslandEntry>): string {
+function generateIslandClientEntry(
+  manifest: Map<string, IslandEntry>,
+  cssFiles: Set<string>,
+): string {
   const entries = [...manifest.values()];
   const uniqueIslands = new Map<string, string>();
   for (const entry of entries) {
@@ -271,6 +344,11 @@ function generateIslandClientEntry(manifest: Map<string, IslandEntry>): string {
   }
 
   const lines: string[] = [];
+
+  // CSS-only imports for island page/layout .vue files
+  for (const file of cssFiles) {
+    lines.push(`import ${JSON.stringify(file + "?island-css")};`);
+  }
 
   lines.push("const islands = {");
   for (const [id, path] of uniqueIslands) {

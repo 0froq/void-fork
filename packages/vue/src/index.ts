@@ -14,6 +14,6 @@ export function voidVue(options?: VoidVueOptions): Plugin[] {
   return [
     vue(options?.vue) as Plugin,
     ...pagesPlugin(pagesDir, { viewTransitions: options?.viewTransitions }),
-    islandsPlugin(pagesDir),
+    ...islandsPlugin(pagesDir),
   ];
 }
