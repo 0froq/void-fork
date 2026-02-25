@@ -4,7 +4,7 @@ import { glob } from "tinyglobby";
 import { parseRouteFilename } from "../router/parse-filename";
 import type { PageDefinition, LayoutDefinition, PageScanResult } from "./types";
 
-const COMPONENT_EXTENSIONS = ["vue", "tsx", "jsx", "svelte"];
+const COMPONENT_EXTENSIONS = ["vue", "tsx", "jsx", "svelte", "md"];
 const SERVER_EXTENSIONS = ["ts", "tsx", "js", "mjs", "mts"];
 const PAGES_EXPORT_RE = /export\s+(?:const|function|async\s+function)\s+(loader|action)\b/g;
 const REVALIDATE_RE = /export\s+const\s+revalidate\s*=\s*(\d+)\s*;/;
@@ -32,9 +32,15 @@ export async function scanPages(root: string): Promise<PageScanResult> {
 
     // Detect island suffix (.island.tsx, .island.vue, etc.)
     let island: boolean | undefined;
+    let hasIslandSuffix = false;
     if (base.endsWith(".island")) {
       island = true;
+      hasIslandSuffix = true;
       base = base.slice(0, -".island".length);
+    }
+    // .md files are implicitly island (static HTML, zero client JS)
+    if (ext === ".md") {
+      island = true;
     }
 
     // Layout files
@@ -52,7 +58,9 @@ export async function scanPages(root: string): Promise<PageScanResult> {
     // parseRouteFilename only strips .ts/.js/.mts/.mjs — convert component
     // extension to .ts so the parser handles it correctly.
     // Strip .island suffix before parsing so route patterns are clean.
-    const parseName = island ? file.replace(`.island${ext}`, ".ts") : file.replace(ext, ".ts");
+    const parseName = hasIslandSuffix
+      ? file.replace(`.island${ext}`, ".ts")
+      : file.replace(ext, ".ts");
     const route = parseRouteFilename(parseName);
     const componentId =
       file
@@ -68,7 +76,7 @@ export async function scanPages(root: string): Promise<PageScanResult> {
     let prerender: boolean | undefined;
     let prerenderExplicitlyFalse = false;
     let hasGetPrerenderPaths: boolean | undefined;
-    const serverBase = island ? file.replace(`.island${ext}`, "") : file.replace(ext, "");
+    const serverBase = hasIslandSuffix ? file.replace(`.island${ext}`, "") : file.replace(ext, "");
     for (const serverExt of SERVER_EXTENSIONS) {
       const candidate = `${serverBase}.server.${serverExt}`;
       if (existsSync(join(pagesDir, candidate))) {

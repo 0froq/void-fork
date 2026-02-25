@@ -306,6 +306,53 @@ describe("scanPages", () => {
     expect(page!.revalidate).toBe(3600);
   });
 
+  it("scans .md files as island pages", async () => {
+    writeFile("docs/getting-started.md", "# Getting Started\n\nHello world.");
+    const result = await scanPages(TMP);
+    expect(result.pages).toHaveLength(1);
+    const page = result.pages[0];
+    expect(page.island).toBe(true);
+    expect(page.componentId).toBe("docs/getting-started");
+    expect(page.pattern).toBe("/docs/getting-started");
+    expect(page.componentPath).toBe("docs/getting-started.md");
+  });
+
+  it("auto-prerenders static .md page (no loader, no params)", async () => {
+    writeFile("docs/guide.md", "# Guide");
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "docs/guide");
+    expect(page!.prerender).toBe(true);
+    expect(page!.revalidate).toBe(MAX_REVALIDATE);
+  });
+
+  it("does not auto-prerender dynamic .md page", async () => {
+    writeFile("blog/[slug].md", "# Post");
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "blog/[slug]");
+    expect(page!.island).toBe(true);
+    expect(page!.prerender).toBeUndefined();
+  });
+
+  it("picks up companion .server.ts for .md page", async () => {
+    writeFile("docs/guide.md", "# Guide");
+    writeFile("docs/guide.server.ts", "export const loader = () => ({});");
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "docs/guide");
+    expect(page!.serverPath).toBe("docs/guide.server.ts");
+    expect(page!.methods).toEqual(["loader"]);
+    // Has loader → no auto-prerender
+    expect(page!.prerender).toBeUndefined();
+  });
+
+  it("scans .md index file correctly", async () => {
+    writeFile("docs/index.md", "# Docs Home");
+    const result = await scanPages(TMP);
+    const page = result.pages.find((p) => p.componentId === "docs");
+    expect(page).toBeDefined();
+    expect(page!.pattern).toBe("/docs");
+    expect(page!.island).toBe(true);
+  });
+
   it("auto-prerenders island page but preserves user revalidate from server file", async () => {
     writeFile("pricing.island.vue", "<template><div>Pricing</div></template>");
     writeFile("pricing.server.ts", "export const revalidate = 60;");
