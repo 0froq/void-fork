@@ -245,40 +245,6 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
         }
       },
     },
-    {
-      name: "void-vue:islands-css",
-      enforce: "pre",
-
-      resolveId: {
-        filter: { id: /\?island-css$/ },
-        handler(source) {
-          return source;
-        },
-      },
-
-      load: {
-        filter: { id: /\?island-css$/ },
-        handler(id) {
-          const filePath = id.replace(/\?island-css$/, "");
-          const content = readFileSync(filePath, "utf-8");
-          const styleRe = /<style\b([^>]*)>/g;
-          const imports: string[] = [];
-          let index = 0;
-          let match;
-          while ((match = styleRe.exec(content)) !== null) {
-            const attrs = match[1];
-            const scoped = /\bscoped\b/.test(attrs);
-            const langMatch = attrs.match(/\blang\s*=\s*["'](\w+)["']/);
-            const lang = langMatch ? langMatch[1] : "css";
-            let query = `?vue&type=style&index=${index}&lang.${lang}`;
-            if (scoped) query += "&scoped=true";
-            imports.push(`import ${JSON.stringify(filePath + query)};`);
-            index++;
-          }
-          return imports.join("\n") || "/* no styles */";
-        },
-      },
-    },
   ];
 }
 
@@ -345,9 +311,27 @@ function generateIslandClientEntry(
 
   const lines: string[] = [];
 
-  // CSS-only imports for island page/layout .vue files
+  // Extract ?vue style imports directly from island .vue files.
+  // We inline this instead of using a ?island-css virtual module because
+  // vite:vue's transform matches any ID containing .vue and would try to
+  // parse the virtual module's CSS-only content as a Vue SFC, failing with
+  // "At least one <template> or <script> is required".
+  const styleRe = /<style\b([^>]*)>/g;
   for (const file of cssFiles) {
-    lines.push(`import ${JSON.stringify(file + "?island-css")};`);
+    const content = readFileSync(file, "utf-8");
+    styleRe.lastIndex = 0;
+    let index = 0;
+    let match;
+    while ((match = styleRe.exec(content)) !== null) {
+      const attrs = match[1];
+      const scoped = /\bscoped\b/.test(attrs);
+      const langMatch = attrs.match(/\blang\s*=\s*["'](\w+)["']/);
+      const lang = langMatch ? langMatch[1] : "css";
+      let query = `?vue&type=style&index=${index}&lang.${lang}`;
+      if (scoped) query += "&scoped=true";
+      lines.push(`import ${JSON.stringify(file + query)};`);
+      index++;
+    }
   }
 
   lines.push("const islands = {");

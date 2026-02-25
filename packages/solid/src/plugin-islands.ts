@@ -231,32 +231,6 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
         }
       },
     },
-    {
-      name: "void-solid:islands-css",
-
-      resolveId: {
-        filter: { id: /\?island-css$/ },
-        handler(source) {
-          return source;
-        },
-      },
-
-      load: {
-        filter: { id: /\?island-css$/ },
-        handler(id) {
-          const filePath = id.replace(/\?island-css$/, "");
-          const content = readFileSync(filePath, "utf-8");
-          const cssImportRe =
-            /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
-          const imports: string[] = [];
-          let match;
-          while ((match = cssImportRe.exec(content)) !== null) {
-            imports.push(match[0].trim());
-          }
-          return imports.join("\n") || "/* no styles */";
-        },
-      },
-    },
   ];
 }
 
@@ -342,9 +316,19 @@ function generateIslandClientEntry(
 
   const lines: string[] = [];
 
-  // CSS-only imports for island page/layout files
+  // Extract CSS imports directly from island page/layout files.
+  // We inline this instead of using a ?island-css virtual module because
+  // framework-specific Vite plugins may match the .tsx/.jsx extension in the
+  // virtual module ID and try to compile the CSS-only content as a component.
+  const cssImportRe =
+    /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
   for (const file of cssFiles) {
-    lines.push(`import ${JSON.stringify(file + "?island-css")};`);
+    const content = readFileSync(file, "utf-8");
+    cssImportRe.lastIndex = 0;
+    let match;
+    while ((match = cssImportRe.exec(content)) !== null) {
+      lines.push(match[0].trim() + ";");
+    }
   }
 
   lines.push("const islands = {");

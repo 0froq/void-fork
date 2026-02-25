@@ -231,67 +231,31 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
       },
     },
     {
-      name: "void-svelte:islands-css",
+      name: "void-svelte:islands-style",
 
       resolveId: {
-        filter: { id: /\?(island-css|island-style&)/ },
+        filter: { id: /\?island-style&/ },
         handler(source) {
           return source;
         },
       },
 
       load: {
-        filter: { id: /\?(island-css|island-style&)/ },
+        filter: { id: /\?island-style&/ },
         handler(id) {
           // ?island-style&index=N&lang.{ext} — return raw CSS of Nth <style> block
-          if (id.includes("?island-style&")) {
-            const filePath = id.replace(/\?island-style&.*$/, "");
-            const params = new URLSearchParams(id.slice(id.indexOf("?island-style&") + 1));
-            const index = parseInt(params.get("index") || "0", 10);
-            const content = readFileSync(filePath, "utf-8");
-            const styleBlockRe = /<style\b[^>]*>([\s\S]*?)<\/style>/g;
-            let match;
-            let i = 0;
-            while ((match = styleBlockRe.exec(content)) !== null) {
-              if (i === index) return match[1];
-              i++;
-            }
-            return "/* style block not found */";
-          }
-
-          // ?island-css — entry point: emit imports for <style> blocks + CSS imports
-          const filePath = id.replace(/\?island-css$/, "");
+          const filePath = id.replace(/\?island-style&.*$/, "");
+          const params = new URLSearchParams(id.slice(id.indexOf("?island-style&") + 1));
+          const index = parseInt(params.get("index") || "0", 10);
           const content = readFileSync(filePath, "utf-8");
-          const imports: string[] = [];
-
-          // Extract <style> blocks → emit ?island-style imports
-          const styleRe = /<style\b([^>]*)>/g;
-          let index = 0;
+          const styleBlockRe = /<style\b[^>]*>([\s\S]*?)<\/style>/g;
           let match;
-          while ((match = styleRe.exec(content)) !== null) {
-            const attrs = match[1];
-            const langMatch = attrs.match(/\blang\s*=\s*["'](\w+)["']/);
-            const lang = langMatch ? langMatch[1] : "css";
-            imports.push(
-              `import ${JSON.stringify(filePath + "?island-style&index=" + index + "&lang." + lang)};`,
-            );
-            index++;
+          let i = 0;
+          while ((match = styleBlockRe.exec(content)) !== null) {
+            if (i === index) return match[1];
+            i++;
           }
-
-          // Extract CSS imports from <script> blocks
-          const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/g;
-          const cssImportRe =
-            /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
-          while ((match = scriptRe.exec(content)) !== null) {
-            const scriptContent = match[1];
-            let cssMatch;
-            cssImportRe.lastIndex = 0;
-            while ((cssMatch = cssImportRe.exec(scriptContent)) !== null) {
-              imports.push(cssMatch[0].trim());
-            }
-          }
-
-          return imports.join("\n") || "/* no styles */";
+          return "/* style block not found */";
         },
       },
     },
@@ -372,9 +336,41 @@ function generateIslandClientEntry(
 
   const lines: string[] = [];
 
-  // CSS-only imports for island page/layout files
+  // Extract style imports directly from island page/layout files.
+  // We inline this instead of using a ?island-css virtual module because
+  // framework-specific Vite plugins may match the .svelte extension in the
+  // virtual module ID and try to compile the CSS-only content as a component.
   for (const file of cssFiles) {
-    lines.push(`import ${JSON.stringify(file + "?island-css")};`);
+    const content = readFileSync(file, "utf-8");
+
+    // Extract <style> blocks → emit ?island-style imports
+    const styleRe = /<style\b([^>]*)>/g;
+    styleRe.lastIndex = 0;
+    let styleIndex = 0;
+    let styleMatch;
+    while ((styleMatch = styleRe.exec(content)) !== null) {
+      const attrs = styleMatch[1];
+      const langMatch = attrs.match(/\blang\s*=\s*["'](\w+)["']/);
+      const lang = langMatch ? langMatch[1] : "css";
+      lines.push(
+        `import ${JSON.stringify(file + "?island-style&index=" + styleIndex + "&lang." + lang)};`,
+      );
+      styleIndex++;
+    }
+
+    // Extract CSS imports from <script> blocks
+    const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/g;
+    const cssImportRe =
+      /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
+    let scriptMatch;
+    while ((scriptMatch = scriptRe.exec(content)) !== null) {
+      const scriptContent = scriptMatch[1];
+      let cssMatch;
+      cssImportRe.lastIndex = 0;
+      while ((cssMatch = cssImportRe.exec(scriptContent)) !== null) {
+        lines.push(cssMatch[0].trim() + ";");
+      }
+    }
   }
 
   lines.push("const islands = {");
