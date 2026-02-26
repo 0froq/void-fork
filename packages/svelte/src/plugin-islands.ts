@@ -429,7 +429,7 @@ export async function renderIslandPage(pageObj, assetTags) {
 
   return \`<!doctype html>
 <html>
-<head>\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\n") : ""}\${head}\${assetTags.head}</head>
+<head>\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\\n") : ""}\${head}\${assetTags.head}</head>
 <body>
   <div id="app">\${html}</div>
   \${assetTags.body}
