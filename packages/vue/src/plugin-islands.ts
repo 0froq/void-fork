@@ -109,9 +109,9 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
         isDev = config.command === "serve";
       },
 
-      // Serve virtual island CSS as raw text/css in dev. The SSR transform
-      // outputs `export default "css"` instead of a JS module with HMR,
-      // and the CSS goes through Vite's full pipeline (PostCSS, @import, etc.).
+      // Serve virtual island CSS as raw text/css in dev. The client transform
+      // produces a JS module with `__vite__css = "..."` for HMR — we extract
+      // the CSS string and serve it directly for render-blocking <link> tags.
       configureServer(server) {
         server.middlewares.use(async (req, res, next) => {
           if (!req.url) return next();
@@ -120,9 +120,13 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
           const srcPath = resolve(viteRoot, url.slice(1, -4));
           if (!islandCssFiles.has(srcPath)) return next();
           try {
-            const result = await server.environments.ssr.transformRequest(req.url);
+            const result = await server.environments.client.transformRequest(url);
             if (result) {
-              const m = result.code.match(/export\s+default\s+("(?:[^"\\]|\\.)*")/);
+              // Vite 8 client CSS: `const __vite__css = "..."`
+              // Vite 7 SSR CSS: `export default "..."`
+              const m =
+                result.code.match(/\b__vite__css\s*=\s*("(?:[^"\\]|\\.)*")/) ||
+                result.code.match(/export\s+default\s+("(?:[^"\\]|\\.)*")/);
               if (m) {
                 res.setHeader("Content-Type", "text/css");
                 res.statusCode = 200;
@@ -228,7 +232,7 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
           }
           if (id === "\0" + ISLANDS_CLIENT_ENTRY_ID) {
             if (!pageScan) return "";
-            return generateIslandClientEntry(islandManifest, islandCssFiles);
+            return generateIslandClientEntry(islandManifest, islandCssFiles, isDev);
           }
           // Virtual island CSS module — resolveId returns absolute path
           if (id.endsWith(".css") && !id.startsWith("\0")) {
@@ -426,6 +430,7 @@ export async function renderIslandPage(pageObj, assetTags) {
 function generateIslandClientEntry(
   manifest: Map<string, IslandEntry>,
   cssFiles: Set<string>,
+  isDev: boolean,
 ): string {
   const entries = [...manifest.values()];
   const uniqueIslands = new Map<string, string>();
@@ -435,26 +440,28 @@ function generateIslandClientEntry(
 
   const lines: string[] = [];
 
-  // Extract ?vue style imports directly from island .vue files.
-  // We inline this instead of using a ?island-css virtual module because
-  // vite:vue's transform matches any ID containing .vue and would try to
-  // parse the virtual module's CSS-only content as a Vue SFC, failing with
-  // "At least one <template> or <script> is required".
-  const styleRe = /<style\b([^>]*)>/g;
-  for (const file of cssFiles) {
-    const content = readFileSync(file, "utf-8");
-    styleRe.lastIndex = 0;
-    let index = 0;
-    let match;
-    while ((match = styleRe.exec(content)) !== null) {
-      const attrs = match[1];
-      const scoped = /\bscoped\b/.test(attrs);
-      const langMatch = attrs.match(/\blang\s*=\s*["'](\w+)["']/);
-      const lang = langMatch ? langMatch[1] : "css";
-      let query = `?vue&type=style&index=${index}&lang.${lang}`;
-      if (scoped) query += "&scoped=true";
-      lines.push(`import ${JSON.stringify(file + query)};`);
-      index++;
+  // In dev, page/layout CSS is served via render-blocking <link> tags
+  // injected in the SSR HTML (see generateIslandRenderer). Skip the
+  // ?vue&type=style imports here to avoid duplicate injection.
+  // In production, the <link> tags aren't used — the style imports below
+  // ensure the CSS is included in the bundled output.
+  if (!isDev) {
+    const styleRe = /<style\b([^>]*)>/g;
+    for (const file of cssFiles) {
+      const content = readFileSync(file, "utf-8");
+      styleRe.lastIndex = 0;
+      let index = 0;
+      let match;
+      while ((match = styleRe.exec(content)) !== null) {
+        const attrs = match[1];
+        const scoped = /\bscoped\b/.test(attrs);
+        const langMatch = attrs.match(/\blang\s*=\s*["'](\w+)["']/);
+        const lang = langMatch ? langMatch[1] : "css";
+        let query = `?vue&type=style&index=${index}&lang.${lang}`;
+        if (scoped) query += "&scoped=true";
+        lines.push(`import ${JSON.stringify(file + query)};`);
+        index++;
+      }
     }
   }
 

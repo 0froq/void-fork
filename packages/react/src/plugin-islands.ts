@@ -93,8 +93,9 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
         isDev = config.command === "serve";
       },
 
-      // Serve virtual island CSS as raw text/css in dev. The SSR transform
-      // outputs `export default "css"` instead of a JS module with HMR.
+      // Serve virtual island CSS as raw text/css in dev. The client transform
+      // produces a JS module with `__vite__css = "..."` for HMR — we extract
+      // the CSS string and serve it directly for render-blocking <link> tags.
       configureServer(server) {
         server.middlewares.use(async (req, res, next) => {
           if (!req.url) return next();
@@ -103,9 +104,11 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
           const srcPath = resolve(viteRoot, url.slice(1, -4));
           if (!islandCssFiles.has(srcPath)) return next();
           try {
-            const result = await server.environments.ssr.transformRequest(req.url);
+            const result = await server.environments.client.transformRequest(url);
             if (result) {
-              const m = result.code.match(/export\s+default\s+("(?:[^"\\]|\\.)*")/);
+              const m =
+                result.code.match(/\b__vite__css\s*=\s*("(?:[^"\\]|\\.)*")/) ||
+                result.code.match(/export\s+default\s+("(?:[^"\\]|\\.)*")/);
               if (m) {
                 res.setHeader("Content-Type", "text/css");
                 res.statusCode = 200;
@@ -210,7 +213,7 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
           }
           if (id === "\0" + ISLANDS_CLIENT_ENTRY_ID) {
             if (!pageScan) return "";
-            return generateIslandClientEntry(islandManifest, islandCssFiles);
+            return generateIslandClientEntry(islandManifest, islandCssFiles, isDev);
           }
           // Virtual island CSS module — resolveId returns absolute path
           if (id.endsWith(".css") && !id.startsWith("\0")) {
@@ -392,6 +395,7 @@ export async function renderIslandPage(pageObj, assetTags) {
 function generateIslandClientEntry(
   manifest: Map<string, IslandEntry>,
   cssFiles: Set<string>,
+  isDev: boolean,
 ): string {
   const entries = [...manifest.values()];
   const uniqueIslands = new Map<string, string>();
@@ -401,18 +405,20 @@ function generateIslandClientEntry(
 
   const lines: string[] = [];
 
-  // Extract CSS imports directly from island page/layout files.
-  // We inline this instead of using a ?island-css virtual module because
-  // framework-specific Vite plugins may match the .tsx/.jsx extension in the
-  // virtual module ID and try to compile the CSS-only content as a component.
-  const cssImportRe =
-    /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
-  for (const file of cssFiles) {
-    const content = readFileSync(file, "utf-8");
-    cssImportRe.lastIndex = 0;
-    let match;
-    while ((match = cssImportRe.exec(content)) !== null) {
-      lines.push(match[0].trim() + ";");
+  // In dev, page/layout CSS is served via render-blocking <link> tags
+  // injected in the SSR HTML. Skip CSS imports here to avoid duplicate injection.
+  // In production, the <link> tags aren't used — the imports below ensure
+  // the CSS is included in the bundled output.
+  if (!isDev) {
+    const cssImportRe =
+      /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
+    for (const file of cssFiles) {
+      const content = readFileSync(file, "utf-8");
+      cssImportRe.lastIndex = 0;
+      let match;
+      while ((match = cssImportRe.exec(content)) !== null) {
+        lines.push(match[0].trim() + ";");
+      }
     }
   }
 

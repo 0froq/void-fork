@@ -101,8 +101,9 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
         isDev = config.command === "serve";
       },
 
-      // Serve virtual island CSS as raw text/css in dev. The SSR transform
-      // outputs `export default "css"` instead of a JS module with HMR.
+      // Serve virtual island CSS as raw text/css in dev. The client transform
+      // produces a JS module with `__vite__css = "..."` for HMR — we extract
+      // the CSS string and serve it directly for render-blocking <link> tags.
       configureServer(server) {
         server.middlewares.use(async (req, res, next) => {
           if (!req.url) return next();
@@ -111,9 +112,11 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
           const srcPath = resolve(viteRoot, url.slice(1, -4));
           if (!islandCssFiles.has(srcPath)) return next();
           try {
-            const result = await server.environments.ssr.transformRequest(req.url);
+            const result = await server.environments.client.transformRequest(url);
             if (result) {
-              const m = result.code.match(/export\s+default\s+("(?:[^"\\]|\\.)*")/);
+              const m =
+                result.code.match(/\b__vite__css\s*=\s*("(?:[^"\\]|\\.)*")/) ||
+                result.code.match(/export\s+default\s+("(?:[^"\\]|\\.)*")/);
               if (m) {
                 res.setHeader("Content-Type", "text/css");
                 res.statusCode = 200;
@@ -228,7 +231,7 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
           }
           if (id === "\0" + ISLANDS_CLIENT_ENTRY_ID) {
             if (!pageScan) return "";
-            return generateIslandClientEntry(islandManifest, islandCssFiles);
+            return generateIslandClientEntry(islandManifest, islandCssFiles, isDev);
           }
           // Virtual wrapper component — generates a .svelte wrapper
           if (id.startsWith(WRAPPER_PREFIX)) {
@@ -439,6 +442,7 @@ export async function renderIslandPage(pageObj, assetTags) {
 function generateIslandClientEntry(
   manifest: Map<string, IslandEntry>,
   cssFiles: Set<string>,
+  isDev: boolean,
 ): string {
   const entries = [...manifest.values()];
   const uniqueIslands = new Map<string, string>();
@@ -448,39 +452,41 @@ function generateIslandClientEntry(
 
   const lines: string[] = [];
 
-  // Extract style imports directly from island page/layout files.
-  // We inline this instead of using a ?island-css virtual module because
-  // framework-specific Vite plugins may match the .svelte extension in the
-  // virtual module ID and try to compile the CSS-only content as a component.
-  for (const file of cssFiles) {
-    const content = readFileSync(file, "utf-8");
+  // In dev, page/layout CSS is served via render-blocking <link> tags
+  // injected in the SSR HTML. Skip CSS imports here to avoid duplicate injection.
+  // In production, the <link> tags aren't used — the imports below ensure
+  // the CSS is included in the bundled output.
+  if (!isDev) {
+    for (const file of cssFiles) {
+      const content = readFileSync(file, "utf-8");
 
-    // Extract <style> blocks → emit ?island-style imports
-    const styleRe = /<style\b([^>]*)>/g;
-    styleRe.lastIndex = 0;
-    let styleIndex = 0;
-    let styleMatch;
-    while ((styleMatch = styleRe.exec(content)) !== null) {
-      const attrs = styleMatch[1];
-      const langMatch = attrs.match(/\blang\s*=\s*["'](\w+)["']/);
-      const lang = langMatch ? langMatch[1] : "css";
-      lines.push(
-        `import ${JSON.stringify(file + "?island-style&index=" + styleIndex + "&lang." + lang)};`,
-      );
-      styleIndex++;
-    }
+      // Extract <style> blocks → emit ?island-style imports
+      const styleRe = /<style\b([^>]*)>/g;
+      styleRe.lastIndex = 0;
+      let styleIndex = 0;
+      let styleMatch;
+      while ((styleMatch = styleRe.exec(content)) !== null) {
+        const attrs = styleMatch[1];
+        const langMatch = attrs.match(/\blang\s*=\s*["'](\w+)["']/);
+        const lang = langMatch ? langMatch[1] : "css";
+        lines.push(
+          `import ${JSON.stringify(file + "?island-style&index=" + styleIndex + "&lang." + lang)};`,
+        );
+        styleIndex++;
+      }
 
-    // Extract CSS imports from <script> blocks
-    const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/g;
-    const cssImportRe =
-      /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
-    let scriptMatch;
-    while ((scriptMatch = scriptRe.exec(content)) !== null) {
-      const scriptContent = scriptMatch[1];
-      let cssMatch;
-      cssImportRe.lastIndex = 0;
-      while ((cssMatch = cssImportRe.exec(scriptContent)) !== null) {
-        lines.push(cssMatch[0].trim() + ";");
+      // Extract CSS imports from <script> blocks
+      const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/g;
+      const cssImportRe =
+        /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
+      let scriptMatch;
+      while ((scriptMatch = scriptRe.exec(content)) !== null) {
+        const scriptContent = scriptMatch[1];
+        let cssMatch;
+        cssImportRe.lastIndex = 0;
+        while ((cssMatch = cssImportRe.exec(scriptContent)) !== null) {
+          lines.push(cssMatch[0].trim() + ";");
+        }
       }
     }
   }
