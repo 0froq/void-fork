@@ -1,10 +1,10 @@
 # @voidcloud/dispatch
 
-Routes `*.void.app` traffic to user workers and static assets. CF Worker using plain `fetch` handler (no framework).
+Routes `*.voidcloud.dev` traffic to user workers and static assets. CF Worker using plain `fetch` handler (no framework).
 
 ## Request Flow
 
-1. Extract slug from hostname (`{slug}.void.app`)
+1. Extract slug from hostname (`{slug}.voidcloud.dev`)
 2. KV lookup: `slug → { workerName, projectId, version, limits?, suspended? }`
 3. **Suspension check**: If `routing.suspended` is set → return 429 `{ error: "usage limit exceeded", reason }`
 4. Edge cache check via `caches.default` with versioned cache key (`?_v={version}`)

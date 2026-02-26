@@ -19,16 +19,16 @@ Four Cloudflare Workers:
 | `void-ai-proxy`  | `packages/ai-proxy`  | AI inference proxy — holds the real `AI` binding, injects AI Gateway metadata for metering                                     |
 | `void-api`       | `packages/api`       | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering                                     |
 | `void-dashboard` | `packages/dashboard` | User-facing dashboard — project management, deployments, usage                                                                 |
-| `void-dispatch`  | `packages/dispatch`  | Edge router — routes `*.vitecloud.app` + custom domain traffic to user workers (via Workers for Platforms) or R2 static assets |
+| `void-dispatch`  | `packages/dispatch`  | Edge router — routes `*.voidcloud.dev` + custom domain traffic to user workers (via Workers for Platforms) or R2 static assets |
 
 ## Environments
 
 Two fully isolated environments. Each has its own CF resources (D1, KV, R2, dispatch namespace, analytics engine).
 
-| Environment    | API URL                  | Dashboard                 | User Sites           | Trigger                      |
-| -------------- | ------------------------ | ------------------------- | -------------------- | ---------------------------- |
-| **Production** | `api.void.cloud`         | `dash.void.cloud`         | `*.void.app`         | Push to `prod` branch        |
-| **Staging**    | `api.staging.void.cloud` | `dash.staging.void.cloud` | `*.staging.void.app` | Push to `main` branch (auto) |
+| Environment    | API URL                  | Dashboard                 | User Sites                | Trigger                      |
+| -------------- | ------------------------ | ------------------------- | ------------------------- | ---------------------------- |
+| **Production** | `api.void.cloud`         | `dash.void.cloud`         | `*.voidcloud.dev`         | Push to `prod` branch        |
+| **Staging**    | `api.staging.void.cloud` | `dash.staging.void.cloud` | `*.staging.voidcloud.dev` | Push to `main` branch (auto) |
 
 ## Cloudflare Resources
 
@@ -55,15 +55,15 @@ Two fully isolated environments. Each has its own CF resources (D1, KV, R2, disp
 | KV Namespace       | `ROUTING`     | `9250c33f3db6494ebe8ad6272812c8c0`                                         |
 | Analytics Engine   | `ANALYTICS`   | `vite_cloud_requests`                                                      |
 | Queue (producer)   | `USAGE_QUEUE` | `void-usage-events`                                                        |
-| Routes             | —             | `*.vitecloud.app/*`, `*.vitecloud.app`, `*/*`, `*` (zone: `vitecloud.app`) |
+| Routes             | —             | `*.voidcloud.dev/*`, `*.voidcloud.dev`, `*/*`, `*` (zone: `voidcloud.dev`) |
 
 **AI proxy worker** (`void-ai-proxy`):
 
-| Resource   | Binding | Name / ID                                                     |
-| ---------- | ------- | ------------------------------------------------------------- |
-| Workers AI | `AI`    | (account-level)                                               |
-| AI Gateway | —       | `void` (shared, account-level)                                |
-| Routes     | —       | `ai-proxy.void.app/*`, `ai-proxy.void.app` (zone: `void.app`) |
+| Resource   | Binding | Name / ID                                                           |
+| ---------- | ------- | ------------------------------------------------------------------- |
+| Workers AI | `AI`    | (account-level)                                                     |
+| AI Gateway | —       | `void` (shared, account-level)                                      |
+| Routes     | —       | `ai-proxy.void.cloud/*`, `ai-proxy.void.cloud` (zone: `void.cloud`) |
 
 **Dashboard worker** (`void-dashboard`):
 
@@ -80,17 +80,17 @@ All workers: `compatibility_date: 2026-02-12`, `compatibility_flags: ["nodejs_co
 
 Same resource types with `-staging` suffixes:
 
-| Resource    | API                                                         | Dashboard                 | Dispatch                                                           | AI Proxy                                                   |
-| ----------- | ----------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------- |
-| D1          | `void-api-staging` (`e78b32c1-497a-40ad-8f83-7049e139983e`) | —                         | —                                                                  | —                                                          |
-| R2          | `void-assets-staging`                                       | —                         | `void-assets-staging`                                              | —                                                          |
-| KV          | `60240eecea804f39bf8b7395cd6c6b08`                          | —                         | `60240eecea804f39bf8b7395cd6c6b08`                                 | —                                                          |
-| Dispatch NS | `void-users-staging`                                        | —                         | `void-users-staging`                                               | —                                                          |
-| Analytics   | —                                                           | —                         | `vite_cloud_requests_staging`                                      | —                                                          |
-| Queue       | `void-usage-events-staging` (consumer)                      | —                         | `void-usage-events-staging` (producer)                             | —                                                          |
-| DO          | `UsageCounter` (same class, staging-isolated)               | —                         | —                                                                  | —                                                          |
-| Workers AI  | —                                                           | —                         | —                                                                  | `AI` (account-level)                                       |
-| Routes      | —                                                           | `dash.staging.void.cloud` | `*.staging.vitecloud.app/*`, `*.staging.vitecloud.app`, `*/*`, `*` | `ai-proxy.staging.void.app/*`, `ai-proxy.staging.void.app` |
+| Resource    | API                                                         | Dashboard                 | Dispatch                                                           | AI Proxy                                                       |
+| ----------- | ----------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------- |
+| D1          | `void-api-staging` (`e78b32c1-497a-40ad-8f83-7049e139983e`) | —                         | —                                                                  | —                                                              |
+| R2          | `void-assets-staging`                                       | —                         | `void-assets-staging`                                              | —                                                              |
+| KV          | `60240eecea804f39bf8b7395cd6c6b08`                          | —                         | `60240eecea804f39bf8b7395cd6c6b08`                                 | —                                                              |
+| Dispatch NS | `void-users-staging`                                        | —                         | `void-users-staging`                                               | —                                                              |
+| Analytics   | —                                                           | —                         | `vite_cloud_requests_staging`                                      | —                                                              |
+| Queue       | `void-usage-events-staging` (consumer)                      | —                         | `void-usage-events-staging` (producer)                             | —                                                              |
+| DO          | `UsageCounter` (same class, staging-isolated)               | —                         | —                                                                  | —                                                              |
+| Workers AI  | —                                                           | —                         | —                                                                  | `AI` (account-level)                                           |
+| Routes      | —                                                           | `dash.staging.void.cloud` | `*.staging.voidcloud.dev/*`, `*.staging.voidcloud.dev`, `*/*`, `*` | `ai-proxy.staging.void.cloud/*`, `ai-proxy.staging.void.cloud` |
 
 ## Secrets and Environment Variables
 
@@ -104,7 +104,7 @@ Set via `wrangler secret put <NAME>` (separate values per environment):
 | ---------------------- | -------------------------------------------- |
 | `CF_API_TOKEN`         | Cloudflare API token (see permissions below) |
 | `CF_ACCOUNT_ID`        | Cloudflare account ID                        |
-| `CF_ZONE_ID`           | DNS zone ID (`void.app` zone)                |
+| `CF_ZONE_ID`           | DNS zone ID (`voidcloud.dev` zone)           |
 | `JWT_SECRET`           | Signs auth JWTs                              |
 | `GITHUB_CLIENT_ID`     | GitHub OAuth app client ID                   |
 | `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret               |
@@ -124,7 +124,7 @@ Account-level:
 | Queues             | Edit   | Create/delete queues, manage queue consumers           |
 | Account Analytics  | Read   | Query Analytics Engine SQL API for usage metering      |
 
-Zone-level (on `void.app`):
+Zone-level (on `voidcloud.dev`):
 
 | Permission           | Access | Operations                                  |
 | -------------------- | ------ | ------------------------------------------- |
@@ -145,12 +145,12 @@ Set via `vars` in `wrangler.jsonc` (production uses defaults, staging overrides)
 | Worker    | Variable             | Default                                | Staging Override                               | Purpose                                           |
 | --------- | -------------------- | -------------------------------------- | ---------------------------------------------- | ------------------------------------------------- |
 | api       | `DISPATCH_NAMESPACE` | `void-users`                           | `void-users-staging`                           | CF dispatch namespace name                        |
-| api       | `SITE_DOMAIN`        | `void.app`                             | `staging.void.app`                             | Base domain for deploy URL output                 |
+| api       | `SITE_DOMAIN`        | `voidcloud.dev`                        | `staging.voidcloud.dev`                        | Base domain for deploy URL output                 |
 | api       | `AUTH_REDIRECT_URI`  | `https://api.void.cloud/auth/callback` | `https://api.staging.void.cloud/auth/callback` | OAuth callback URL                                |
 | api       | `SIGNUP_ALLOWLIST`   | (unset)                                | `@voidzero.dev`                                | Comma-separated emails/domains for new signups    |
 | api       | `DEV_AUTH_BYPASS`    | (unset)                                | —                                              | Skip admin OAuth for local dev (`.dev.vars` only) |
 | dashboard | `API_URL`            | (unset, defaults to production)        | `https://api.staging.void.cloud`               | API base URL for BFF server-side loaders          |
-| dispatch  | `BASE_HOSTNAME`      | `void.app`                             | `staging.void.app`                             | Base hostname for slug extraction                 |
+| dispatch  | `BASE_HOSTNAME`      | `voidcloud.dev`                        | `staging.voidcloud.dev`                        | Base hostname for slug extraction                 |
 
 ### GitHub Actions Secrets
 
@@ -174,12 +174,12 @@ Account-level:
 | Workers KV Storage | Edit   | Bind KV namespaces during deploy                       |
 | Workers R2 Storage | Edit   | Bind R2 buckets during deploy                          |
 
-Zone-level (on `void.app`):
+Zone-level (on `voidcloud.dev`):
 
-| Permission     | Access | Operations                                          |
-| -------------- | ------ | --------------------------------------------------- |
-| Workers Routes | Edit   | Set dispatch worker route patterns (`*.void.app/*`) |
-| DNS            | Read   | Zone lookup for route binding                       |
+| Permission     | Access | Operations                                               |
+| -------------- | ------ | -------------------------------------------------------- |
+| Workers Routes | Edit   | Set dispatch worker route patterns (`*.voidcloud.dev/*`) |
+| DNS            | Read   | Zone lookup for route binding                            |
 
 ### CLI Staging Mode
 
@@ -253,17 +253,17 @@ pnpm health:staging    # Check staging API health
 
 ## DNS Setup
 
-| Record                      | Zone            | Points To                                  |
-| --------------------------- | --------------- | ------------------------------------------ |
-| `api.void.cloud`            | `void.cloud`    | API worker                                 |
-| `dash.void.cloud`           | `void.cloud`    | Dashboard worker                           |
-| `*.vitecloud.app`           | `vitecloud.app` | Dispatch worker (wildcard route)           |
-| `cname.vitecloud.app`       | `vitecloud.app` | CF for SaaS fallback origin (AAAA `100::`) |
-| `ai-proxy.void.app`         | `void.app`      | AI proxy worker                            |
-| `api.staging.void.cloud`    | `void.cloud`    | Staging API worker                         |
-| `dash.staging.void.cloud`   | `void.cloud`    | Staging dashboard worker                   |
-| `*.staging.vitecloud.app`   | `vitecloud.app` | Staging dispatch worker (wildcard route)   |
-| `ai-proxy.staging.void.app` | `void.app`      | Staging AI proxy worker                    |
+| Record                        | Zone            | Points To                                  |
+| ----------------------------- | --------------- | ------------------------------------------ |
+| `api.void.cloud`              | `void.cloud`    | API worker                                 |
+| `dash.void.cloud`             | `void.cloud`    | Dashboard worker                           |
+| `*.voidcloud.dev`             | `voidcloud.dev` | Dispatch worker (wildcard route)           |
+| `cname.voidcloud.dev`         | `voidcloud.dev` | CF for SaaS fallback origin (AAAA `100::`) |
+| `ai-proxy.void.cloud`         | `void.cloud`    | AI proxy worker                            |
+| `api.staging.void.cloud`      | `void.cloud`    | Staging API worker                         |
+| `dash.staging.void.cloud`     | `void.cloud`    | Staging dashboard worker                   |
+| `*.staging.voidcloud.dev`     | `voidcloud.dev` | Staging dispatch worker (wildcard route)   |
+| `ai-proxy.staging.void.cloud` | `void.cloud`    | Staging AI proxy worker                    |
 
 ## Fresh Environment Setup
 
@@ -295,15 +295,20 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
 
 4. **DNS records** — all records must be proxied (orange cloud).
 
-   **`vitecloud.app` zone:**
+   **`voidcloud.dev` zone:**
 
-   | Record           | Type  | Content                                    | Purpose                                                       |
-   | ---------------- | ----- | ------------------------------------------ | ------------------------------------------------------------- |
-   | `cname`          | AAAA  | `100::`                                    | CF for SaaS fallback origin + CNAME target for custom domains |
-   | `*.<env>`        | CNAME | `void-dispatch-<env>.voidzer0.workers.dev` | Wildcard for dispatch worker route patterns                   |
-   | `ai-proxy.<env>` | CNAME | `void-ai-proxy-<env>.voidzer0.workers.dev` | AI proxy worker route patterns                                |
+   | Record    | Type  | Content                                    | Purpose                                                       |
+   | --------- | ----- | ------------------------------------------ | ------------------------------------------------------------- |
+   | `cname`   | AAAA  | `100::`                                    | CF for SaaS fallback origin + CNAME target for custom domains |
+   | `*.<env>` | CNAME | `void-dispatch-<env>.voidzer0.workers.dev` | Wildcard for dispatch worker route patterns                   |
 
-   **CF for SaaS (Custom Hostnames):** Enabled on the `vitecloud.app` zone. Fallback origin set to `cname.vitecloud.app`. The dispatch worker's `*/*` catch-all route intercepts custom hostname traffic before CF reaches the dummy `100::` origin. Users CNAME their custom domain to `cname.vitecloud.app`.
+   **`void.cloud` zone:**
+
+   | Record           | Type  | Content                                    | Purpose               |
+   | ---------------- | ----- | ------------------------------------------ | --------------------- |
+   | `ai-proxy.<env>` | CNAME | `void-ai-proxy-<env>.voidzer0.workers.dev` | AI proxy worker route |
+
+   **CF for SaaS (Custom Hostnames):** Enabled on the `voidcloud.dev` zone. Fallback origin set to `cname.voidcloud.dev`. The dispatch worker's `*/*` catch-all route intercepts custom hostname traffic before CF reaches the dummy `100::` origin. Users CNAME their custom domain to `cname.voidcloud.dev`.
 
    **`void.cloud` zone** (API and dashboard use Worker Custom Domains — CF creates the DNS records automatically when you add the custom domain to the worker):
 
@@ -319,3 +324,74 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
 6. **GitHub Actions** — if CI/CD should deploy to this environment, add a workflow file and configure GitHub environment secrets (`CF_API_TOKEN`, `CF_ACCOUNT_ID`).
 
 7. **Deploy** — run `pnpm run deploy --env <name>` or equivalent.
+
+## Domain Migration Checklist
+
+Procedure for migrating the userspace domain (e.g. `voidcloud.dev` → `void.app`). The current userspace domain is `voidcloud.dev` — this is temporary until the `void.app` domain transfer completes.
+
+### 1. DNS / Cloudflare setup
+
+- Add the new zone to the Cloudflare account
+- Create DNS records on the new zone:
+  - `*.<zone>` CNAME → `void-dispatch.voidzer0.workers.dev` (proxied)
+  - `cname.<zone>` AAAA → `100::` (proxied) — CF for SaaS fallback origin
+  - `*.staging.<zone>` CNAME → `void-dispatch-staging.voidzer0.workers.dev` (proxied)
+- Enable CF for SaaS on the new zone, fallback origin = `cname.<zone>`
+
+### 2. Secrets
+
+- Update `CF_ZONE_ID` on the API worker (both prod + staging) to the new zone ID
+
+### 3. API token permissions
+
+- **API worker runtime token** (`CF_API_TOKEN` secret): add SSL and Certificates Edit on the new zone (custom hostname provisioning)
+- **GitHub Actions deploy token** (`CF_API_TOKEN` repo secret): add Workers Routes Edit + DNS Read on the new zone
+
+### 4. Code changes
+
+Search-and-replace `OLD_DOMAIN` → `NEW_DOMAIN` in:
+
+| File                                               | What to change                               |
+| -------------------------------------------------- | -------------------------------------------- |
+| `packages/api/src/constants.ts`                    | `SITE_DOMAIN`                                |
+| `packages/dispatch/src/constants.ts`               | `SITE_DOMAIN`                                |
+| `packages/dispatch/wrangler.jsonc`                 | Routes, `zone_name`, staging `BASE_HOSTNAME` |
+| `packages/api/wrangler.jsonc`                      | Staging `SITE_DOMAIN`                        |
+| `packages/dashboard/wrangler.jsonc`                | Staging `SITE_DOMAIN`                        |
+| `packages/dashboard/pages/index.server.ts`         | Fallback domain                              |
+| `packages/dashboard/pages/projects/[id].server.ts` | Fallback domain                              |
+| `packages/dispatch/src/hostname.ts`                | JSDoc examples                               |
+| `framework/packages/void/src/cli/auth.ts`          | `getSiteDomain()`                            |
+
+### 5. Tests
+
+Update all domain references in test files:
+
+- `packages/dispatch/test/unit/hostname.test.ts`
+- `packages/dispatch/test/unit/index.test.ts`
+- `packages/api/test/integration/api-domains.test.ts`
+- `packages/api/test/integration/api-deploy.test.ts`
+- `framework/packages/void/test/integration/projects-command.test.ts`
+
+### 6. Docs
+
+Update domain references in:
+
+- `README.md` (platform)
+- `packages/dispatch/README.md`
+- `packages/api/README.md`
+- `meta/operations.md` (this file)
+- `framework/README.md`
+- `framework/docs/` (index, quickstart, deployment, auth, integrations/frameworks/overview)
+
+### 7. Deploy
+
+Per submodule workflow: framework commit first, then platform commit (with bumped submodule pointer), then deploy staging → verify → deploy prod.
+
+### 8. Post-deploy verification
+
+```bash
+curl -I https://test-app.NEW_DOMAIN
+```
+
+Check dashboard URLs, custom domain CNAME targets, and deploy output URLs.

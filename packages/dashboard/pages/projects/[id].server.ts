@@ -51,7 +51,7 @@ export const loader = defineHandler<Props>(async (c) => {
       };
   const secrets = secretsRes.ok ? ((await secretsRes.json()) as Props["secrets"]) : [];
 
-  const siteDomain = (c.env as Record<string, string>).SITE_DOMAIN ?? "vitecloud.app";
+  const siteDomain = (c.env as Record<string, string>).SITE_DOMAIN ?? "voidcloud.dev";
   const activeDomain = domains.find((d) => d.status === "active") ?? domains[0];
   return {
     project: { ...project, custom_domain: activeDomain?.hostname ?? null },

@@ -5,9 +5,9 @@ import { SITE_DOMAIN } from "./constants";
  * Returns null if the hostname doesn't match the expected pattern.
  *
  * Examples:
- *   "my-app.vitecloud.app" → "my-app"
- *   "vitecloud.app" → null
- *   "foo.bar.vitecloud.app" → null (no subdomains)
+ *   "my-app.voidcloud.dev" → "my-app"
+ *   "voidcloud.dev" → null
+ *   "foo.bar.voidcloud.dev" → null (no subdomains)
  *   "example.com" → null
  */
 export function extractSlug(hostname: string, baseHostname: string = SITE_DOMAIN): string | null {

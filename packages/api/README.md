@@ -181,12 +181,12 @@ Used by `pnpm run deploy` and GitHub Actions to deploy platform and dispatch wor
 | D1                 | Edit   | D1 database bindings (DB)            |
 | Workers R2 Storage | Edit   | R2 bucket bindings (ASSETS)          |
 
-**Zone permissions** (on `void.app`):
+**Zone permissions** (on `voidcloud.dev`):
 
-| Permission     | Access | Reason                                          |
-| -------------- | ------ | ----------------------------------------------- |
-| Workers Routes | Edit   | Dispatch worker route patterns (`*.void.app/*`) |
-| DNS            | Read   | Zone lookup for route binding                   |
+| Permission     | Access | Reason                                               |
+| -------------- | ------ | ---------------------------------------------------- |
+| Workers Routes | Edit   | Dispatch worker route patterns (`*.voidcloud.dev/*`) |
+| DNS            | Read   | Zone lookup for route binding                        |
 
 ### Runtime Token (`CF_API_TOKEN` secret)
 
@@ -203,7 +203,7 @@ Used by the platform worker at runtime to provision and manage user resources vi
 | Queues             | Edit   | Create/delete queues, manage consumers                 |
 | Account Analytics  | Read   | Query Analytics Engine SQL API for usage metering      |
 
-**Zone permissions** (on `void.app`):
+**Zone permissions** (on `voidcloud.dev`):
 
 | Permission           | Access | Reason                                      |
 | -------------------- | ------ | ------------------------------------------- |

@@ -30,6 +30,6 @@ export const loader = defineHandler<Props>(async (c) => {
     ? await usageRes.json()
     : { requests: 0, bandwidthBytes: 0, aiNeurons: 0, projects: [] };
 
-  const siteDomain = (c.env as Record<string, string>).SITE_DOMAIN ?? "vitecloud.app";
+  const siteDomain = (c.env as Record<string, string>).SITE_DOMAIN ?? "voidcloud.dev";
   return { projects: projectsWithDomains, usage, siteDomain };
 });
