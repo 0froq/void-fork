@@ -146,11 +146,11 @@ const noBindings: InferredBindings = {
 };
 
 describe("ensureWranglerNodejsAlsFlag", () => {
-  it("creates wrangler.json when no wrangler config exists", () => {
+  it("creates wrangler.jsonc when no wrangler config exists", () => {
     rmSync(tmpDir, { recursive: true, force: true });
     mkdirSync(tmpDir, { recursive: true });
     expect(ensureWranglerNodejsAlsFlag(tmpDir)).toBe(true);
-    const created = JSON.parse(readFileSync(join(tmpDir, "wrangler.json"), "utf-8"));
+    const created = JSON.parse(readFileSync(join(tmpDir, "wrangler.jsonc"), "utf-8"));
     expect(created.compatibility_flags).toEqual(["nodejs_als"]);
   });
 
@@ -170,11 +170,11 @@ describe("ensureWranglerNodejsAlsFlag", () => {
 });
 
 describe("syncWranglerBindings", () => {
-  it("creates wrangler.json when no wrangler config exists", () => {
+  it("creates wrangler.jsonc when no wrangler config exists", () => {
     rmSync(tmpDir, { recursive: true, force: true });
     mkdirSync(tmpDir, { recursive: true });
     expect(syncWranglerBindings(tmpDir, noBindings)).toBe(true);
-    const created = JSON.parse(readFileSync(join(tmpDir, "wrangler.json"), "utf-8"));
+    const created = JSON.parse(readFileSync(join(tmpDir, "wrangler.jsonc"), "utf-8"));
     expect(created).toEqual({});
   });
 

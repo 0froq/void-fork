@@ -101,7 +101,7 @@ export function syncWranglerBindings(
   }
 
   if (!configPath || !parsed) {
-    configPath = join(root, "wrangler.json");
+    configPath = join(root, "wrangler.jsonc");
     parsed = {};
     created = true;
   }
@@ -179,7 +179,7 @@ export function ensureWranglerNodejsAlsFlag(root: string): boolean {
   }
 
   if (!configPath || !parsed) {
-    configPath = join(root, "wrangler.json");
+    configPath = join(root, "wrangler.jsonc");
     parsed = {};
   }
 
