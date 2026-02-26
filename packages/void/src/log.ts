@@ -6,7 +6,14 @@ const timeFormat = new Intl.DateTimeFormat(undefined, {
   second: "numeric",
 });
 
+let showTimestamp = true;
+
+export function setShowTimestamp(value: boolean): void {
+  showTimestamp = value;
+}
+
 function prefix(): string {
+  if (!showTimestamp) return tag;
   return `\x1b[2m${timeFormat.format()}\x1b[22m ${tag}`;
 }
 

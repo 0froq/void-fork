@@ -5,6 +5,9 @@ import type { HeaderRule } from "./cli/types";
 /** Supported authentication providers. */
 export type AuthProvider = "github" | "google" | "email";
 
+/** Redirect destination — string (302) or object with explicit status. */
+export type RedirectDestination = string | { to: string; status?: 301 | 302 | 307 | 308 };
+
 /** Curated wrangler fields that can be set via void.json. */
 export interface WranglerConfig {
   compatibility_date?: string;
@@ -31,7 +34,9 @@ export interface VoidConfig {
   cache?: CacheConfig;
   scanDirs?: string[];
   headers?: Record<string, string[]>;
+  redirects?: Record<string, RedirectDestination>;
   mode?: "spa" | "ssg" | "fullstack" | "framework";
+  output?: "server" | "static";
   outputDir?: string;
   wrangler?: WranglerConfig;
 }
@@ -40,6 +45,8 @@ const CONFIG_FILE = "void.json";
 
 const VALID_AUTH_PROVIDERS = new Set(["github", "google", "email"]);
 const VALID_MODES = new Set(["spa", "ssg", "fullstack", "framework"]);
+const VALID_OUTPUTS = new Set(["server", "static"]);
+const VALID_REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
 
 /**
  * Read and validate the `void.json` config file from the project root.
@@ -139,10 +146,51 @@ export function readConfig(root: string): VoidConfig {
     }
   }
 
+  // Validate redirects
+  if (obj.redirects !== undefined) {
+    if (
+      typeof obj.redirects !== "object" ||
+      obj.redirects === null ||
+      Array.isArray(obj.redirects)
+    ) {
+      throw new Error(`"redirects" in ${CONFIG_FILE} must be an object`);
+    }
+    const r = obj.redirects as Record<string, unknown>;
+    for (const [source, dest] of Object.entries(r)) {
+      if (!source.startsWith("/")) {
+        throw new Error(`Redirect source "${source}" in ${CONFIG_FILE} must start with "/"`);
+      }
+      if (typeof dest === "string") {
+        // ok
+      } else if (typeof dest === "object" && dest !== null && !Array.isArray(dest)) {
+        const d = dest as Record<string, unknown>;
+        if (typeof d.to !== "string") {
+          throw new Error(`Redirect for "${source}" in ${CONFIG_FILE} must have a "to" string`);
+        }
+        if (d.status !== undefined && !VALID_REDIRECT_STATUSES.has(d.status as number)) {
+          throw new Error(
+            `Redirect status for "${source}" in ${CONFIG_FILE} must be 301, 302, 307, or 308`,
+          );
+        }
+      } else {
+        throw new Error(
+          `Redirect for "${source}" in ${CONFIG_FILE} must be a string or an object with "to" and optional "status"`,
+        );
+      }
+    }
+  }
+
   // Validate mode
   if (obj.mode !== undefined) {
     if (typeof obj.mode !== "string" || !VALID_MODES.has(obj.mode)) {
       throw new Error(`"mode" in ${CONFIG_FILE} must be one of: spa, ssg, fullstack, framework`);
+    }
+  }
+
+  // Validate output
+  if (obj.output !== undefined) {
+    if (typeof obj.output !== "string" || !VALID_OUTPUTS.has(obj.output)) {
+      throw new Error(`"output" in ${CONFIG_FILE} must be one of: server, static`);
     }
   }
 
@@ -297,6 +345,36 @@ export function convertHeadersConfig(
     }
     if (parsed.length > 0) {
       rules.push({ pattern, headers: parsed });
+    }
+  }
+
+  return rules.length > 0 ? rules : undefined;
+}
+
+export interface RedirectRule {
+  source: string;
+  destination: string;
+  status: number;
+}
+
+/**
+ * Convert the `redirects` config field into `RedirectRule[]` for the deploy manifest.
+ *
+ * Each key is a URL pattern (e.g. "/old") and each value is either a string
+ * destination (defaults to 302) or an object with `to` and optional `status`.
+ * Returns undefined if the input is empty or undefined.
+ */
+export function convertRedirectsConfig(
+  redirects: Record<string, RedirectDestination> | undefined,
+): RedirectRule[] | undefined {
+  if (!redirects) return undefined;
+
+  const rules: RedirectRule[] = [];
+  for (const [source, dest] of Object.entries(redirects)) {
+    if (typeof dest === "string") {
+      rules.push({ source, destination: dest, status: 302 });
+    } else {
+      rules.push({ source, destination: dest.to, status: dest.status ?? 302 });
     }
   }
 

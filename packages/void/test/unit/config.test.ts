@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   readConfig,
   convertHeadersConfig,
+  convertRedirectsConfig,
   normalizeAuth,
   resolveBindingNames,
 } from "../../src/config";
@@ -325,6 +326,69 @@ describe("readConfig", () => {
   });
 });
 
+describe("readConfig redirects", () => {
+  it("accepts redirects with string destinations", () => {
+    setup(JSON.stringify({ redirects: { "/old": "/new" } }));
+    const config = readConfig(tmpDir);
+    expect(config.redirects).toEqual({ "/old": "/new" });
+    cleanup();
+  });
+
+  it("accepts redirects with object destinations", () => {
+    setup(JSON.stringify({ redirects: { "/old": { to: "/new", status: 301 } } }));
+    const config = readConfig(tmpDir);
+    expect(config.redirects).toEqual({ "/old": { to: "/new", status: 301 } });
+    cleanup();
+  });
+
+  it("accepts mixed string and object destinations", () => {
+    setup(
+      JSON.stringify({
+        redirects: {
+          "/a": "/b",
+          "/c": { to: "/d", status: 308 },
+        },
+      }),
+    );
+    const config = readConfig(tmpDir);
+    expect(config.redirects).toEqual({
+      "/a": "/b",
+      "/c": { to: "/d", status: 308 },
+    });
+    cleanup();
+  });
+
+  it("throws on redirect source not starting with /", () => {
+    setup(JSON.stringify({ redirects: { old: "/new" } }));
+    expect(() => readConfig(tmpDir)).toThrow('must start with "/"');
+    cleanup();
+  });
+
+  it("throws on invalid redirects type", () => {
+    setup(JSON.stringify({ redirects: ["/old", "/new"] }));
+    expect(() => readConfig(tmpDir)).toThrow('"redirects" in void.json must be an object');
+    cleanup();
+  });
+
+  it("throws on invalid destination type", () => {
+    setup(JSON.stringify({ redirects: { "/old": 42 } }));
+    expect(() => readConfig(tmpDir)).toThrow("must be a string or an object");
+    cleanup();
+  });
+
+  it("throws on missing 'to' in object destination", () => {
+    setup(JSON.stringify({ redirects: { "/old": { status: 301 } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must have a "to" string');
+    cleanup();
+  });
+
+  it("throws on invalid status code", () => {
+    setup(JSON.stringify({ redirects: { "/old": { to: "/new", status: 200 } } }));
+    expect(() => readConfig(tmpDir)).toThrow("must be 301, 302, 307, or 308");
+    cleanup();
+  });
+});
+
 describe("normalizeAuth", () => {
   it("returns null for undefined", () => {
     expect(normalizeAuth(undefined)).toBeNull();
@@ -422,6 +486,37 @@ describe("convertHeadersConfig", () => {
         pattern: "/assets/*",
         headers: [["Cache-Control", "ok"]],
       },
+    ]);
+  });
+});
+
+describe("convertRedirectsConfig", () => {
+  it("returns undefined for undefined input", () => {
+    expect(convertRedirectsConfig(undefined)).toBeUndefined();
+  });
+
+  it("returns undefined for empty object", () => {
+    expect(convertRedirectsConfig({})).toBeUndefined();
+  });
+
+  it("converts string destinations with default 302", () => {
+    const result = convertRedirectsConfig({ "/old": "/new" });
+    expect(result).toEqual([{ source: "/old", destination: "/new", status: 302 }]);
+  });
+
+  it("converts object destinations with explicit status", () => {
+    const result = convertRedirectsConfig({ "/old": { to: "/new", status: 301 } });
+    expect(result).toEqual([{ source: "/old", destination: "/new", status: 301 }]);
+  });
+
+  it("converts mixed entries preserving order", () => {
+    const result = convertRedirectsConfig({
+      "/a": "/b",
+      "/c/*": { to: "/d/:splat", status: 308 },
+    });
+    expect(result).toEqual([
+      { source: "/a", destination: "/b", status: 302 },
+      { source: "/c/*", destination: "/d/:splat", status: 308 },
     ]);
   });
 });

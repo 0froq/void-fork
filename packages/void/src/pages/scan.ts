@@ -13,7 +13,10 @@ const PRERENDER_FALSE_RE = /export\s+const\s+prerender\s*=\s*false\s*;/;
 const GET_PRERENDER_PATHS_RE = /export\s+(?:async\s+)?function\s+getPrerenderPaths\b/;
 export const MAX_REVALIDATE = 31536000; // 1 year in seconds
 
-export async function scanPages(root: string): Promise<PageScanResult> {
+export async function scanPages(
+  root: string,
+  options?: { output?: "server" | "static" },
+): Promise<PageScanResult> {
   const pagesDir = join(root, "pages");
   if (!existsSync(pagesDir)) return { pages: [], layouts: [] };
 
@@ -102,15 +105,27 @@ export async function scanPages(root: string): Promise<PageScanResult> {
       }
     }
 
-    // Auto-static: island page with no loader and no params → prerender
-    if (
-      island &&
-      !methods.includes("loader") &&
-      route.params.length === 0 &&
-      !route.catchAll &&
-      !prerenderExplicitlyFalse
-    ) {
-      prerender = true;
+    const isStaticOutput = options?.output === "static";
+    if (isStaticOutput) {
+      // Static output: default prerender=true for all pages unless explicitly false.
+      // Dynamic pages without getPrerenderPaths stay false (can't prerender without known paths).
+      if (!prerenderExplicitlyFalse && prerender !== true) {
+        const isDynamic = route.params.length > 0 || route.catchAll;
+        if (!isDynamic || hasGetPrerenderPaths) {
+          prerender = true;
+        }
+      }
+    } else {
+      // Auto-static: island page with no loader and no params → prerender
+      if (
+        island &&
+        !methods.includes("loader") &&
+        route.params.length === 0 &&
+        !route.catchAll &&
+        !prerenderExplicitlyFalse
+      ) {
+        prerender = true;
+      }
     }
 
     // Prerender → max revalidate (applies to all pages)

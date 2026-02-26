@@ -3,7 +3,6 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { intro, outro, log, note, spinner, confirm, isCancel } from "@clack/prompts";
-import { createServer } from "vite";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
 import { packageBuild, packageStaticBuild, packageFrameworkBuild } from "./package";
@@ -19,8 +18,9 @@ import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
 import { scanJobsSync } from "../crons/scan";
 import { scanQueuesSync } from "../queues/scan";
-import { validateSsrEntry, detectSsrPrerender, getSsrServerEntryPath } from "../ssr/entry";
+import { validateSsrEntry } from "../ssr/entry";
 import { scanPages } from "../pages/scan";
+import { collectPrerenderPaths } from "../prerender-paths";
 import { detectPreset, FRAMEWORK_PRESETS, type StaticPreset, type FrameworkPreset } from "./preset";
 import { readConfig, resolveBindingNames, type AuthProvider, type VoidConfig } from "../config";
 import { readWranglerCompat } from "./wrangler";
@@ -471,7 +471,9 @@ async function runFullDeploy(
     revalidate = vcRevalidate;
   }
   // Merge per-page revalidate exports (pages mode)
-  const pageScan = existsSync(join(root, "pages")) ? await scanPages(root) : null;
+  const pageScan = existsSync(join(root, "pages"))
+    ? await scanPages(root, { output: deployConfig.output })
+    : null;
   if (pageScan) {
     const perPageRules: Record<string, number> = {};
     for (const page of pageScan.pages) {
@@ -495,92 +497,11 @@ async function runFullDeploy(
     }
   }
 
-  // Resolve prerender paths
-  const prerenderPaths: string[] = [];
-  if (pageScan) {
-    // Static pages: no params, prerender = true
-    for (const page of pageScan.pages) {
-      if (page.prerender && page.params.length === 0 && !page.catchAll) {
-        prerenderPaths.push(page.pattern);
-      }
-    }
-    // Dynamic pages: prerender = true + getPrerenderPaths
-    const dynamicPrerenderPages = pageScan.pages.filter(
-      (p) => p.prerender && p.hasGetPrerenderPaths && (p.params.length > 0 || p.catchAll),
-    );
-    if (dynamicPrerenderPages.length > 0) {
-      const viteServer = await createServer({
-        root,
-        server: { middlewareMode: true },
-        logLevel: "silent",
-      });
-      try {
-        for (const page of dynamicPrerenderPages) {
-          try {
-            const serverFile = page.serverPath
-              ? join(root, "pages", page.serverPath)
-              : join(root, "pages", page.componentPath);
-            const mod = await viteServer.ssrLoadModule(serverFile);
-            if (typeof mod.getPrerenderPaths === "function") {
-              const paramSets = await mod.getPrerenderPaths();
-              if (Array.isArray(paramSets)) {
-                for (const params of paramSets) {
-                  let path = page.pattern;
-                  for (const [key, value] of Object.entries(params as Record<string, string>)) {
-                    path = path.replace(`:${key}`, value);
-                  }
-                  prerenderPaths.push(path);
-                }
-              }
-            }
-          } catch (err) {
-            log.warn(
-              `Failed to resolve prerender paths for ${page.pattern}: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-        }
-      } finally {
-        await viteServer.close();
-      }
-    }
-  }
-
-  // Custom SSR: getPrerenderPaths() in src/main.ssr.ts
-  const ssrPrerender = detectSsrPrerender(root);
-  if (ssrPrerender?.hasGetPrerenderPaths) {
-    const viteServer = await createServer({
-      root,
-      server: { middlewareMode: true },
-      logLevel: "silent",
-    });
-    try {
-      const entryPath = getSsrServerEntryPath(root)!;
-      const mod = await viteServer.ssrLoadModule(entryPath);
-      if (typeof mod.getPrerenderPaths === "function") {
-        const paths = await mod.getPrerenderPaths();
-        if (Array.isArray(paths)) {
-          for (const p of paths) {
-            if (typeof p === "string") prerenderPaths.push(p);
-          }
-        }
-      }
-    } catch (err) {
-      log.warn(
-        `Failed to resolve SSR prerender paths: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    } finally {
-      await viteServer.close();
-    }
-  }
-
-  // Add explicit prerender paths from void.json cache.prerender
-  const configPrerender = readConfig(root).cache?.prerender;
-  if (configPrerender) {
-    prerenderPaths.push(...configPrerender);
-  }
-
-  // Dedupe prerender paths
-  const uniquePrerenderPaths = [...new Set(prerenderPaths)];
+  // Resolve prerender paths (skip when output: "static" — pages are already built as static assets)
+  const uniquePrerenderPaths =
+    deployConfig.output === "static"
+      ? []
+      : await collectPrerenderPaths({ root, config: deployConfig });
 
   // 8. Read wrangler compat settings (void.json > wrangler.jsonc > default)
   const wranglerCompat = readWranglerCompat(root, deployConfig);

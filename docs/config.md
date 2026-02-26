@@ -10,7 +10,7 @@ All project-level configuration lives in a `void.json` file at the project root.
 
 ```json
 {
-  "$schema": "https://unpkg.com/void/schema.json",
+  "$schema": "./node_modules/void/schema.json",
   "auth": ["github", "google", "email"],
   "bindings": { "db": true, "kv": false },
   "cache": {

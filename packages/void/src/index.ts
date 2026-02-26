@@ -19,6 +19,7 @@ import { validateSsrEntry } from "./ssr/entry";
 import { readConfig, normalizeAuth, resolveBindingNames } from "./config";
 import { ensureWranglerNodejsAlsFlag, syncWranglerBindings } from "./cli/wrangler";
 import { restartPlugin } from "./plugin-restart";
+import { prerenderPlugin } from "./plugin-prerender";
 import { voidLog, voidWarn, voidError } from "./log";
 
 export type { AuthProvider } from "./config";
@@ -567,6 +568,7 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
     routingPlugin(root, { getAuth: () => authProviders }),
     dbTypesPlugin(root, true),
     migrationPlugin(root),
+    prerenderPlugin(root, config),
     ...cloudflare({
       ...inspectorPortOption,
       persistState: { path: options?.persistTo ?? outDir },

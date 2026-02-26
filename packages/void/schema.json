@@ -66,6 +66,11 @@
       "enum": ["spa", "ssg", "fullstack", "framework"],
       "description": "Deployment mode. If omitted, auto-detected on first deploy."
     },
+    "output": {
+      "type": "string",
+      "enum": ["server", "static"],
+      "description": "Output mode. \"server\" (default) serves all pages dynamically. \"static\" prerenders all pages at build time, writing HTML files to dist/client/."
+    },
     "outputDir": {
       "type": "string",
       "description": "Output directory for static deploys. Relative to project root."
