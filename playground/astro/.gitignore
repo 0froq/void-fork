@@ -3,3 +3,5 @@ dist/
 .void/
 .wrangler/
 node_modules/
+wrangler.jsonc
+wrangler.json
