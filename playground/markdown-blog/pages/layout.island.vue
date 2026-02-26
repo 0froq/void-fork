@@ -1,9 +1,10 @@
 <script setup>
 import ThemeToggle from "./_ThemeToggle.vue" with { island: "load" };
+import "void/md/theme.css";
 </script>
 
 <template>
-  <div class="page">
+  <div class="page void-md">
     <header>
       <nav>
         <span class="nav-links">
@@ -19,11 +20,8 @@ import ThemeToggle from "./_ThemeToggle.vue" with { island: "load" };
 </template>
 
 <style>
-@import "void/md/theme";
-
 body {
   background: #f6f6f6;
-  color: #1a1a2e;
 }
 
 .page {
@@ -36,9 +34,6 @@ nav {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 0;
-  margin-bottom: 30px;
-  border-bottom: 1px solid var(--vmd-border);
 }
 
 .nav-links a {
