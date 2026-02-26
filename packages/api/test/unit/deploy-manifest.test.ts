@@ -5,19 +5,19 @@ import type { DeployManifest } from "../../src/types";
 describe("DeployManifest contract", () => {
   it("has a version field", () => {
     const manifest: DeployManifest = {
-      version: 1,
+      version: 2,
       bindings: {},
     };
-    expect(manifest.version).toBe(1);
+    expect(manifest.version).toBe(2);
   });
 
-  it("supports version 1", () => {
-    expect(SUPPORTED_MANIFEST_VERSIONS).toContain(1);
+  it("supports version 2", () => {
+    expect(SUPPORTED_MANIFEST_VERSIONS).toContain(2);
   });
 
   it("accepts a full manifest shape", () => {
     const manifest: DeployManifest = {
-      version: 1,
+      version: 2,
       bindings: {
         d1: ["DB"],
         kv: ["KV"],
@@ -31,17 +31,17 @@ describe("DeployManifest contract", () => {
       framework: true,
       revalidate: 60,
       prerender: ["/", "/about"],
-      static: undefined,
-      assetsDir: "assets",
-      assetHashes: { "index.html": "abc123" },
-      headers: [{ pattern: "/*", headers: [["X-Custom", "value"]] }],
+      assetConfig: {
+        not_found_handling: "single-page-application",
+        html_handling: "auto-trailing-slash",
+      },
       vars: { NODE_ENV: "production" },
       workerMain: "index.mjs",
       compatibilityDate: "2026-02-24",
       compatibilityFlags: ["nodejs_compat", "nodejs_als"],
     };
 
-    expect(manifest.version).toBe(1);
+    expect(manifest.version).toBe(2);
     expect(manifest.bindings.d1).toEqual(["DB"]);
     expect(manifest.migrations).toHaveLength(1);
     expect(manifest.schedules).toHaveLength(1);

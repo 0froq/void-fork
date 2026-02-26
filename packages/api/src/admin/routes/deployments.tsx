@@ -57,7 +57,13 @@ app.get("/:id", async (c) => {
   }
 
   const mode = manifest
-    ? (manifest.static ?? (manifest.framework ? "framework" : manifest.ssr ? "ssr" : "fullstack"))
+    ? manifest.framework
+      ? "framework"
+      : manifest.ssr
+        ? "ssr"
+        : manifest.assetConfig
+          ? "static"
+          : "fullstack"
     : null;
 
   return c.html(

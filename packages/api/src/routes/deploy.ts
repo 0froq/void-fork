@@ -17,30 +17,18 @@ import { runRemoteMigrations, type RemoteMigration } from "../migrations/remote-
 import { validateMigrationSQL } from "../migrations/validate";
 import { getPlanLimits, isWithinLimit } from "../tiers";
 import { SITE_DOMAIN } from "../constants";
+import {
+  collectAssets,
+  createAssetUploadSession,
+  uploadAssetBuckets,
+  buildAssetMetadata,
+  PASSTHROUGH_WORKER,
+} from "../assets";
 
 const DEFAULT_DISPATCH_NAMESPACE = "void-users";
 const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
 
 const app = new Hono<ApiEnv>();
-
-// Check which assets need uploading
-app.post("/:id/assets/check", async (c) => {
-  const projectId = c.req.param("id");
-  const project = await getProject(c.get("db"), projectId);
-  if (!project) {
-    return c.json({ error: "project not found" }, 404);
-  }
-
-  if (project.user_id !== c.get("userId")) {
-    return c.json({ error: "forbidden" }, 403);
-  }
-
-  const { assets } = await c.req.json<{ assets: Record<string, string> }>();
-  const manifestObj = await c.env.ASSETS.get(`${projectId}/asset-manifest.json`);
-  const existing: Record<string, string> = manifestObj ? await manifestObj.json() : {};
-  const needed = Object.keys(assets).filter((path) => existing[path] !== assets[path]);
-  return c.json({ needed });
-});
 
 // Deploy to a project
 app.post("/:id/deploy", async (c) => {
@@ -84,7 +72,7 @@ app.post("/:id/deploy", async (c) => {
   const manifestRaw = formData.get("manifest") as string | null;
   const manifest: DeployManifest = manifestRaw
     ? (JSON.parse(manifestRaw) as DeployManifest)
-    : { version: 1, bindings: {} };
+    : { version: 2, bindings: {} };
 
   // Validate deploy manifest version
   if (manifest.version == null || !SUPPORTED_MANIFEST_VERSIONS.includes(manifest.version)) {
@@ -103,86 +91,126 @@ app.post("/:id/deploy", async (c) => {
 
   // Create deployment record
   const deployment = await createDeployment(c.get("db"), projectId, manifestRaw, source, commit);
+  const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
+  const workerName = `user-${project.slug}`;
 
   try {
-    // Static-only deploy path: skip worker upload, bindings, and migrations
-    if (manifest.static) {
-      await updateDeploymentStatus(c.get("db"), deployment.id, "uploading");
+    await updateDeploymentStatus(c.get("db"), deployment.id, "uploading");
 
-      // Upload static assets to R2 (concurrency-limited to match Workers connection limit)
-      const assetUploads = collectAssetEntries(formData);
-      await uploadPool(assetUploads, R2_CONCURRENCY, ({ path, blob }) =>
-        c.env.ASSETS.put(`${projectId}/current/${path}`, blob, {
-          httpMetadata: { contentType: guessContentType(path) },
-        }),
+    // Collect assets from FormData and compute CF-compatible hashes
+    const { manifest: assetManifest, assetsByHash } = await collectAssets(formData);
+    const assetCount = Object.keys(assetManifest).length;
+
+    // Determine if this is a static-only deploy (no worker files in FormData)
+    const hasWorkerFiles = [...formData.keys()].some((k) => k.startsWith("worker:"));
+    const isStaticOnly = !hasWorkerFiles;
+
+    // Upload assets via CF asset upload API (3-step flow)
+    let completionJwt: string | undefined;
+    if (assetCount > 0) {
+      const session = await createAssetUploadSession(
+        c.env.CF_ACCOUNT_ID,
+        c.env.CF_API_TOKEN,
+        dispatchNamespace,
+        workerName,
+        assetManifest,
       );
-      const assetKeys = assetUploads.map((a) => a.path);
+      completionJwt = session.jwt;
 
-      // Write updated asset manifest + delete stale assets
-      if (manifest.assetHashes) {
-        const oldObj = await c.env.ASSETS.get(`${projectId}/asset-manifest.json`);
-        const oldManifest: Record<string, string> = oldObj ? await oldObj.json() : {};
-        const stale = Object.keys(oldManifest).filter((p) => !(p in manifest.assetHashes!));
-        if (stale.length > 0) {
-          await uploadPool(stale, R2_CONCURRENCY, (path) =>
-            c.env.ASSETS.delete(`${projectId}/current/${path}`),
-          );
-        }
-        await c.env.ASSETS.put(
-          `${projectId}/asset-manifest.json`,
-          JSON.stringify(manifest.assetHashes),
+      if (session.buckets.length > 0) {
+        await uploadAssetBuckets(
+          c.env.CF_ACCOUNT_ID,
+          c.env.CF_API_TOKEN,
+          session.jwt,
+          session.buckets,
+          assetsByHash,
         );
       }
+    }
 
-      // Update KV routing (no workerName for static deploys)
-      // Carry forward suspended flag from current KV entry
-      const existingStaticRouting = await c.env.ROUTING.get(project.slug);
-      const existingStaticEntry = existingStaticRouting ? JSON.parse(existingStaticRouting) : null;
-      const staticRoutingJson = JSON.stringify({
+    if (isStaticOnly) {
+      // Static-only deploy: generate passthrough worker, skip bindings/migrations
+      const assetConfig = manifest.assetConfig ?? { not_found_handling: "single-page-application" };
+      const workerFormData = new FormData();
+
+      const metadata: Record<string, unknown> = {
+        main_module: "index.js",
+        compatibility_date: "2026-02-12",
+        compatibility_flags: ["nodejs_compat"],
+        bindings: [{ name: "ASSETS", type: "assets" }],
+        ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
+      };
+      workerFormData.append(
+        "metadata",
+        new Blob([JSON.stringify(metadata)], { type: "application/json" }),
+      );
+      workerFormData.append(
+        "index.js",
+        new Blob([PASSTHROUGH_WORKER], { type: "application/javascript+module" }),
+        "index.js",
+      );
+
+      const cfResponse = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`,
+        {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
+          body: workerFormData,
+        },
+      );
+
+      if (!cfResponse.ok) {
+        const error = await cfResponse.text();
+        const msg = `worker upload failed: ${error}`;
+        await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
+        return c.json({ error: "worker upload failed", details: error }, 502);
+      }
+
+      // Derive project mode from assetConfig
+      const mode = assetConfig.not_found_handling === "single-page-application" ? "spa" : "ssg";
+
+      // Update KV routing
+      const existingRouting = await c.env.ROUTING.get(project.slug);
+      const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
+      const routingJson = JSON.stringify({
+        workerName,
         projectId,
         userId: project.user_id,
-        mode: manifest.static,
         version: deployment.id,
-        ...(manifest.assetsDir ? { assetsDir: manifest.assetsDir } : {}),
-        ...(manifest.headers ? { headers: manifest.headers } : {}),
-        ...(existingStaticEntry?.suspended ? { suspended: existingStaticEntry.suspended } : {}),
+        ...(existingEntry?.suspended ? { suspended: existingEntry.suspended } : {}),
       });
-      await c.env.ROUTING.put(project.slug, staticRoutingJson);
+      await c.env.ROUTING.put(project.slug, routingJson);
 
-      // Update KV routing for active custom domains
-      const staticDomains = await getDomainsByProjectId(c.get("db"), projectId);
-      for (const domain of staticDomains) {
+      const domains = await getDomainsByProjectId(c.get("db"), projectId);
+      for (const domain of domains) {
         if (domain.status === "active") {
-          await c.env.ROUTING.put(`domain:${domain.hostname}`, staticRoutingJson);
+          await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
         }
       }
 
-      // Mark deployment as live + update project mode
       await updateDeploymentStatus(c.get("db"), deployment.id, "live");
-      await updateProjectMode(c.get("db"), projectId, manifest.static);
+      await updateProjectMode(c.get("db"), projectId, mode);
 
       const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-      const staticActiveDomains = staticDomains.filter((d) => d.status === "active");
-      const staticUrl =
-        staticActiveDomains.length > 0
-          ? `https://${staticActiveDomains[0].hostname}`
+      const activeDomains = domains.filter((d) => d.status === "active");
+      const url =
+        activeDomains.length > 0
+          ? `https://${activeDomains[0].hostname}`
           : `https://${project.slug}.${siteDomain}`;
 
       return c.json({
         deployment: deployment.id,
-        url: staticUrl,
+        url,
         urls: [
-          ...staticActiveDomains.map((d) => `https://${d.hostname}`),
+          ...activeDomains.map((d) => `https://${d.hostname}`),
           `https://${project.slug}.${siteDomain}`,
         ],
-        assets: assetKeys.length,
-        workers: 0,
+        assets: assetCount,
+        workers: 1,
       });
     }
 
-    // Full deploy path (existing behavior)
-    await updateDeploymentStatus(c.get("db"), deployment.id, "uploading");
-
+    // Full deploy path
     // Provision bindings (D1, KV, R2) — creates CF resources if needed
     const workerBindings = await provisionBindings(
       c.get("db"),
@@ -214,7 +242,6 @@ app.post("/:id/deploy", async (c) => {
     }
 
     if (migrationEntries.length > 0) {
-      // Find the D1 resource for this project
       const d1Resource = workerBindings.find((b) => b.type === "d1");
       if (!d1Resource || !d1Resource.id) {
         const msg = "migrations require a D1 database but none is provisioned";
@@ -245,17 +272,7 @@ app.post("/:id/deploy", async (c) => {
       }
     }
 
-    // 2. Upload static assets to R2 (concurrency-limited to match Workers connection limit)
-    const assetUploads = collectAssetEntries(formData);
-    await uploadPool(assetUploads, R2_CONCURRENCY, ({ path, blob }) =>
-      c.env.ASSETS.put(`${projectId}/current/${path}`, blob, {
-        httpMetadata: { contentType: guessContentType(path) },
-      }),
-    );
-    const assetKeys = assetUploads.map((a) => a.path);
-
-    // 3. Upload worker to dispatch namespace via CF API
-    const workerName = `user-${project.slug}`;
+    // 2. Upload worker to dispatch namespace via CF API
     const workerFormData = new FormData();
 
     // Collect all worker modules
@@ -267,29 +284,36 @@ app.post("/:id/deploy", async (c) => {
       }
     }
 
-    // Build combined bindings: provisioned (d1/kv/r2) + plain_text vars from .env
+    // Build combined bindings: provisioned (d1/kv/r2) + plain_text vars + ASSETS
     const plainTextBindings = Object.entries(manifest.vars ?? {}).map(([name, text]) => ({
       type: "plain_text" as const,
       name,
       text,
     }));
-    const allBindings = [...workerBindings, ...plainTextBindings];
+    const allBindings = [
+      ...workerBindings,
+      ...plainTextBindings,
+      { name: "ASSETS", type: "assets" },
+    ];
 
-    // Add metadata part (include provisioned bindings)
+    // Add metadata part (include provisioned bindings + assets)
     if (!manifest.compatibilityDate) {
       console.warn(
         `[deploy] manifest missing compatibilityDate for project ${project.id}, using fallback`,
       );
     }
-    const metadata = {
+
+    const assetConfig = manifest.assetConfig ?? { not_found_handling: "none" };
+    const metadata: Record<string, unknown> = {
       main_module: manifest.workerMain ?? "index.js",
       compatibility_date: manifest.compatibilityDate ?? "2026-02-12",
       compatibility_flags: manifest.compatibilityFlags ?? ["nodejs_compat"],
-      bindings: allBindings.length > 0 ? allBindings : undefined,
+      bindings: allBindings,
       triggers:
         manifest.schedules && manifest.schedules.length > 0
           ? { crons: manifest.schedules.map((schedule) => schedule.cron) }
           : undefined,
+      ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
     };
     workerFormData.append(
       "metadata",
@@ -308,14 +332,11 @@ app.post("/:id/deploy", async (c) => {
     }
 
     // Upload to CF Workers for Platforms API
-    const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
     const cfResponse = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`,
       {
         method: "PUT",
-        headers: {
-          Authorization: `Bearer ${c.env.CF_API_TOKEN}`,
-        },
+        headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
         body: workerFormData,
       },
     );
@@ -327,7 +348,7 @@ app.post("/:id/deploy", async (c) => {
       return c.json({ error: "worker upload failed", details: error }, 502);
     }
 
-    // 3b. Configure queue consumers (dispatch worker relays to user workers)
+    // 2b. Configure queue consumers (dispatch worker relays to user workers)
     const dispatchWorkerName = c.env.DISPATCH_WORKER_NAME ?? "void-dispatch";
     for (const q of manifest.queues ?? []) {
       const queueBinding = workerBindings.find(
@@ -360,28 +381,12 @@ app.post("/:id/deploy", async (c) => {
       }
     }
 
-    // 4. Write updated asset manifest + delete stale assets
-    if (manifest.assetHashes) {
-      const oldObj = await c.env.ASSETS.get(`${projectId}/asset-manifest.json`);
-      const oldManifest: Record<string, string> = oldObj ? await oldObj.json() : {};
-      const stale = Object.keys(oldManifest).filter((p) => !(p in manifest.assetHashes!));
-      if (stale.length > 0) {
-        await uploadPool(stale, R2_CONCURRENCY, (path) =>
-          c.env.ASSETS.delete(`${projectId}/current/${path}`),
-        );
-      }
-      await c.env.ASSETS.put(
-        `${projectId}/asset-manifest.json`,
-        JSON.stringify(manifest.assetHashes),
-      );
-    }
-
-    // 5. Clear previous ISR cache on deploy.
+    // 3. Clear previous ISR cache on deploy.
     // Always clear — handles both "new deploy has ISR" and "previous deploy had ISR
     // but new one doesn't" (avoids orphaned R2 entries). No-op for empty prefixes.
     await clearIsrCache(c.env.ASSETS, projectId);
 
-    // 5b. Prerender pages (write ISR cache entries before going live)
+    // 3b. Prerender pages (write ISR cache entries before going live)
     if (manifest.prerender && manifest.prerender.length > 0 && manifest.revalidate) {
       await updateDeploymentStatus(c.get("db"), deployment.id, "prerendering");
       const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
@@ -416,7 +421,7 @@ app.post("/:id/deploy", async (c) => {
       });
     }
 
-    // 6. Update KV routing table
+    // 4. Update KV routing table
     // Carry forward suspended flag from current KV entry
     const existingRouting = await c.env.ROUTING.get(project.slug);
     const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
@@ -439,8 +444,6 @@ app.post("/:id/deploy", async (c) => {
       ...(manifest.ssr ? { ssr: true } : {}),
       ...(manifest.revalidate ? { revalidate: manifest.revalidate } : {}),
       version: deployment.id,
-      ...(manifest.assetsDir ? { assetsDir: manifest.assetsDir } : {}),
-      ...(manifest.headers ? { headers: manifest.headers } : {}),
       ...dispatchLimits,
       ...(existingEntry?.suspended ? { suspended: existingEntry.suspended } : {}),
     });
@@ -454,7 +457,7 @@ app.post("/:id/deploy", async (c) => {
       }
     }
 
-    // 7. Mark deployment as live + update project mode
+    // 5. Mark deployment as live + update project mode
     await updateDeploymentStatus(c.get("db"), deployment.id, "live");
     await updateProjectMode(c.get("db"), projectId, manifest.framework ? "framework" : "fullstack");
 
@@ -472,7 +475,7 @@ app.post("/:id/deploy", async (c) => {
         ...fullActiveDomains.map((d) => `https://${d.hostname}`),
         `https://${project.slug}.${siteDomain}`,
       ],
-      assets: assetKeys.length,
+      assets: assetCount,
       workers: workerFiles.length,
       ...(migrationsApplied > 0 && { migrations: migrationsApplied }),
     });
@@ -482,16 +485,6 @@ app.post("/:id/deploy", async (c) => {
     throw err;
   }
 });
-
-function collectAssetEntries(formData: FormData): { path: string; blob: Blob }[] {
-  const entries: { path: string; blob: Blob }[] = [];
-  for (const [key, value] of formData.entries()) {
-    if (key.startsWith("asset:")) {
-      entries.push({ path: key.slice("asset:".length), blob: value as Blob });
-    }
-  }
-  return entries;
-}
 
 async function uploadPool<T>(
   items: T[],
@@ -519,27 +512,6 @@ async function clearIsrCache(assets: R2Bucket, projectId: string): Promise<void>
     }
     cursor = listed.truncated ? listed.cursor : undefined;
   } while (cursor);
-}
-
-function guessContentType(path: string): string {
-  const ext = path.split(".").pop()?.toLowerCase();
-  const types: Record<string, string> = {
-    html: "text/html",
-    css: "text/css",
-    js: "application/javascript",
-    mjs: "application/javascript",
-    json: "application/json",
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    svg: "image/svg+xml",
-    ico: "image/x-icon",
-    woff: "font/woff",
-    woff2: "font/woff2",
-    txt: "text/plain",
-  };
-  return types[ext ?? ""] ?? "application/octet-stream";
 }
 
 // --- ISR prerender helpers (inlined from dispatch to avoid cross-package dependency) ---

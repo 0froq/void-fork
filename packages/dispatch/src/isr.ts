@@ -1,5 +1,13 @@
 import type { Env } from "./env";
-import { matchPattern } from "./headers";
+
+/**
+ * Match a pattern against a pathname.
+ * `*` matches any characters including `/`.
+ */
+function matchPattern(pattern: string, pathname: string): boolean {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*");
+  return new RegExp(`^${escaped}$`).test(pathname);
+}
 
 export interface IsrCacheEntry {
   body: ReadableStream;

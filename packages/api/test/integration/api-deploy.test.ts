@@ -39,7 +39,7 @@ function buildDeployForm(opts?: {
   migrations?: Record<string, string>;
 }): FormData {
   const form = new FormData();
-  form.append("manifest", JSON.stringify(opts?.manifest ?? { version: 1, bindings: {} }));
+  form.append("manifest", JSON.stringify(opts?.manifest ?? { version: 2, bindings: {} }));
   // Default: include at least one worker file
   const workers = opts?.workers ?? {
     "index.js": "export default { fetch() { return new Response('ok'); } }",
@@ -136,38 +136,6 @@ describe("POST /projects/:id/deploy", () => {
     expect(dpl?.status).toBe("live");
   });
 
-  it("stores assets in R2 at correct keys", async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "asset-app");
-    mockCfApi();
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildDeployForm({
-          assets: {
-            "index.html": "<h1>Hello</h1>",
-            "assets/app-abc123.js": "console.log('hi')",
-          },
-        }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { assets: number };
-    expect(body.assets).toBe(2);
-
-    // Verify R2 contents
-    const html = await env.ASSETS.get(`${project.id}/current/index.html`);
-    expect(html).not.toBeNull();
-    expect(await html!.text()).toBe("<h1>Hello</h1>");
-
-    const js = await env.ASSETS.get(`${project.id}/current/assets/app-abc123.js`);
-    expect(js).not.toBeNull();
-    expect(await js!.text()).toBe("console.log('hi')");
-  });
-
   it("updates KV routing", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "routed-app");
@@ -193,38 +161,6 @@ describe("POST /projects/:id/deploy", () => {
     });
   });
 
-  it("includes header rules in KV routing for full deploy", async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "headers-full");
-    mockCfApi();
-
-    const headers = [
-      { pattern: "/*", headers: [["X-Frame-Options", "DENY"]] as [string, string][] },
-    ];
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildDeployForm({
-          manifest: { version: 1, bindings: {}, headers },
-        }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-
-    const routing = await env.ROUTING.get("headers-full", "json");
-    expect(routing).toEqual({
-      workerName: "user-headers-full",
-      projectId: project.id,
-      userId: user.id,
-      version: expect.stringMatching(/^dpl_/),
-      headers,
-      limits: { cpuMs: 10, subRequests: 50 },
-    });
-  });
-
   it("stores ssr flag in KV routing when manifest enables ssr", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "ssr-app");
@@ -235,7 +171,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { version: 1, bindings: {}, ssr: true },
+          manifest: { version: 2, bindings: {}, ssr: true },
         }),
       }),
       env,
@@ -292,7 +228,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 1,
+            version: 2,
             bindings: {},
             schedules: [{ name: "sync", cron: "0 * * * *" }],
           },
@@ -328,7 +264,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { version: 1, bindings: { d1: ["DB"] } },
+          manifest: { version: 2, bindings: { d1: ["DB"] } },
         }),
       }),
       env,
@@ -365,7 +301,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { version: 1, bindings: { d1: ["DB"] } },
+          manifest: { version: 2, bindings: { d1: ["DB"] } },
         }),
       }),
       env,
@@ -409,7 +345,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { version: 1, bindings: { d1: ["DB"] } },
+          manifest: { version: 2, bindings: { d1: ["DB"] } },
           migrations: {
             "001_create_table.sql": "CREATE TABLE items (id TEXT PRIMARY KEY)",
           },
@@ -437,7 +373,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { version: 1, bindings: { d1: ["DB"] } },
+          manifest: { version: 2, bindings: { d1: ["DB"] } },
           migrations: {
             "002_drop.sql": "DROP TABLE users",
           },
@@ -617,7 +553,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 1,
+            version: 2,
             bindings: {},
             vars: { API_URL: "https://api.example.com", NODE_ENV: "production" },
           },
@@ -689,7 +625,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 1,
+            version: 2,
             bindings: {},
             queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
           },
@@ -728,7 +664,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 1,
+            version: 2,
             bindings: {},
             queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
           },
@@ -768,7 +704,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 1,
+            version: 2,
             bindings: {},
             queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
           },
@@ -878,18 +814,13 @@ describe("Deploy serialization (concurrent deploy guard)", () => {
 function buildStaticDeployForm(opts: {
   mode: "spa" | "ssg";
   assets?: Record<string, string>;
-  assetHashes?: Record<string, string>;
-  headers?: { pattern: string; headers: [string, string][] }[];
 }): FormData {
   const form = new FormData();
-  const manifest: Record<string, unknown> = { version: 1, bindings: {}, static: opts.mode };
-  if (opts.assetHashes) {
-    manifest.assetHashes = opts.assetHashes;
-  }
-  if (opts.headers) {
-    manifest.headers = opts.headers;
-  }
-  form.append("manifest", JSON.stringify(manifest));
+  const assetConfig =
+    opts.mode === "spa"
+      ? { not_found_handling: "single-page-application" }
+      : { not_found_handling: "404-page" };
+  form.append("manifest", JSON.stringify({ version: 2, bindings: {}, assetConfig }));
   if (opts.assets) {
     for (const [path, content] of Object.entries(opts.assets)) {
       form.append(`asset:${path}`, new Blob([content]));
@@ -899,10 +830,10 @@ function buildStaticDeployForm(opts: {
 }
 
 describe("POST /projects/:id/deploy (static)", () => {
-  it("succeeds with static SPA deploy (no worker upload)", async () => {
+  it("succeeds with static SPA deploy (passthrough worker)", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "spa-site");
-    // No mockCfApi needed — static deploys don't call CF API
+    mockCfApi();
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -928,41 +859,13 @@ describe("POST /projects/:id/deploy (static)", () => {
     expect(body.deployment).toMatch(/^dpl_/);
     expect(body.url).toBe("https://spa-site.voidcloud.dev");
     expect(body.assets).toBe(2);
-    expect(body.workers).toBe(0);
+    expect(body.workers).toBe(1);
   });
 
-  it("stores static assets in R2", async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "static-r2");
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildStaticDeployForm({
-          mode: "ssg",
-          assets: {
-            "index.html": "<html>SSG</html>",
-            "about/index.html": "<html>About</html>",
-          },
-        }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-
-    const html = await env.ASSETS.get(`${project.id}/current/index.html`);
-    expect(html).not.toBeNull();
-    expect(await html!.text()).toBe("<html>SSG</html>");
-
-    const about = await env.ASSETS.get(`${project.id}/current/about/index.html`);
-    expect(about).not.toBeNull();
-    expect(await about!.text()).toBe("<html>About</html>");
-  });
-
-  it("writes KV routing with mode for static SPA", async () => {
+  it("writes KV routing with workerName for static SPA", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "kv-spa");
+    mockCfApi();
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -976,64 +879,9 @@ describe("POST /projects/:id/deploy (static)", () => {
 
     const routing = await env.ROUTING.get("kv-spa", "json");
     expect(routing).toEqual({
+      workerName: "user-kv-spa",
       projectId: project.id,
       userId: user.id,
-      mode: "spa",
-      version: expect.stringMatching(/^dpl_/),
-    });
-  });
-
-  it("includes header rules in KV routing when manifest has headers", async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "headers-spa");
-
-    const headers = [
-      { pattern: "/*", headers: [["X-Frame-Options", "DENY"]] as [string, string][] },
-      {
-        pattern: "/assets/*",
-        headers: [["Cache-Control", "public, max-age=31536000, immutable"]] as [string, string][],
-      },
-    ];
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildStaticDeployForm({ mode: "spa", headers }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-
-    const routing = await env.ROUTING.get("headers-spa", "json");
-    expect(routing).toEqual({
-      projectId: project.id,
-      userId: user.id,
-      mode: "spa",
-      version: expect.stringMatching(/^dpl_/),
-      headers,
-    });
-  });
-
-  it("writes KV routing with mode for static SSG", async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "kv-ssg");
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildStaticDeployForm({ mode: "ssg" }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-
-    const routing = await env.ROUTING.get("kv-ssg", "json");
-    expect(routing).toEqual({
-      projectId: project.id,
-      userId: user.id,
-      mode: "ssg",
       version: expect.stringMatching(/^dpl_/),
     });
   });
@@ -1041,6 +889,7 @@ describe("POST /projects/:id/deploy (static)", () => {
   it("updates project mode column on static deploy", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "mode-update");
+    mockCfApi();
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -1058,190 +907,6 @@ describe("POST /projects/:id/deploy (static)", () => {
       .where(eq(projects.id, project.id))
       .get();
     expect(row?.mode).toBe("ssg");
-  });
-});
-
-describe("POST /projects/:id/assets/check", () => {
-  it("returns all paths as needed when no manifest exists", async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "check-new");
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/assets/check`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${user.jwt}`,
-        },
-        body: JSON.stringify({
-          assets: { "index.html": "abc123", "assets/app.js": "def456" },
-        }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { needed: string[] };
-    expect(body.needed.sort()).toEqual(["assets/app.js", "index.html"]);
-  });
-
-  it("returns empty needed list when all hashes match", async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "check-match");
-
-    // Seed manifest
-    await env.ASSETS.put(
-      `${project.id}/asset-manifest.json`,
-      JSON.stringify({ "index.html": "abc123", "assets/app.js": "def456" }),
-    );
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/assets/check`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${user.jwt}`,
-        },
-        body: JSON.stringify({
-          assets: { "index.html": "abc123", "assets/app.js": "def456" },
-        }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { needed: string[] };
-    expect(body.needed).toEqual([]);
-  });
-
-  it("returns only changed and new paths", async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "check-partial");
-
-    // Seed manifest with two files
-    await env.ASSETS.put(
-      `${project.id}/asset-manifest.json`,
-      JSON.stringify({ "index.html": "abc123", "assets/old.js": "old111" }),
-    );
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/assets/check`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${user.jwt}`,
-        },
-        body: JSON.stringify({
-          assets: {
-            "index.html": "abc123", // unchanged
-            "assets/old.js": "new222", // changed hash
-            "assets/new.js": "brand999", // new file
-          },
-        }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { needed: string[] };
-    expect(body.needed.sort()).toEqual(["assets/new.js", "assets/old.js"]);
-  });
-
-  it("returns 401 without auth", async () => {
-    const res = await app.fetch(
-      new Request("http://localhost/projects/proj_fake/assets/check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assets: {} }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it("returns 403 when user does not own project", async () => {
-    const alice = await createTestUser(env.db, "alice-check");
-    const bob = await createTestUser(env.db, "bob-check");
-    const project = await createTestProject(env.db, alice.id, "check-forbidden");
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/assets/check`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${bob.jwt}`,
-        },
-        body: JSON.stringify({ assets: {} }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(403);
-  });
-});
-
-describe("Deploy with assetHashes (manifest management)", () => {
-  it("writes asset manifest to R2 on deploy", async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "manifest-write");
-
-    const hashes = { "index.html": "aaa111", "assets/app.js": "bbb222" };
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildStaticDeployForm({
-          mode: "spa",
-          assets: { "index.html": "<html>hi</html>", "assets/app.js": "console.log(1)" },
-          assetHashes: hashes,
-        }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-
-    const manifestObj = await env.ASSETS.get(`${project.id}/asset-manifest.json`);
-    expect(manifestObj).not.toBeNull();
-    const stored = (await manifestObj!.json()) as Record<string, string>;
-    expect(stored).toEqual(hashes);
-  });
-
-  it("deletes stale R2 objects on deploy", async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "manifest-stale");
-
-    // Seed old manifest and R2 objects
-    await env.ASSETS.put(
-      `${project.id}/asset-manifest.json`,
-      JSON.stringify({ "index.html": "aaa", "old-file.js": "bbb" }),
-    );
-    await env.ASSETS.put(`${project.id}/current/index.html`, "<html>old</html>");
-    await env.ASSETS.put(`${project.id}/current/old-file.js`, "old content");
-
-    // Deploy with only index.html (old-file.js removed)
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildStaticDeployForm({
-          mode: "spa",
-          assets: { "index.html": "<html>new</html>" },
-          assetHashes: { "index.html": "ccc" },
-        }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-
-    // Stale file should be deleted
-    const stale = await env.ASSETS.get(`${project.id}/current/old-file.js`);
-    expect(stale).toBeNull();
-
-    // Current file should be updated
-    const current = await env.ASSETS.get(`${project.id}/current/index.html`);
-    expect(current).not.toBeNull();
-    expect(await current!.text()).toBe("<html>new</html>");
-
-    // Manifest should be updated
-    const manifestObj = await env.ASSETS.get(`${project.id}/asset-manifest.json`);
-    const stored = (await manifestObj!.json()) as Record<string, string>;
-    expect(stored).toEqual({ "index.html": "ccc" });
   });
 });
 
@@ -1270,7 +935,7 @@ describe("Deploy with prerendering", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 1,
+            version: 2,
             bindings: {},
             revalidate: 3600,
             prerender: ["/", "/about"],
@@ -1324,7 +989,7 @@ describe("Deploy with prerendering", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 1,
+            version: 2,
             bindings: {},
             revalidate: { "/about": 3600, "/private": 0, "*": 0 },
             prerender: ["/about", "/private"],
@@ -1364,7 +1029,7 @@ describe("Deploy with prerendering", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 1,
+            version: 2,
             bindings: {},
             revalidate: 3600,
             prerender: ["/"],
@@ -1411,7 +1076,7 @@ describe("Deploy with prerendering", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 1,
+            version: 2,
             bindings: {},
             revalidate: 3600,
             prerender: ["/"],

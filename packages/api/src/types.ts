@@ -24,12 +24,12 @@ export interface QueueMeta {
   maxBatchTimeout?: number;
 }
 
-export interface HeaderRule {
-  pattern: string;
-  headers: [string, string][];
-}
+export const SUPPORTED_MANIFEST_VERSIONS = [2];
 
-export const SUPPORTED_MANIFEST_VERSIONS = [1];
+export interface AssetConfig {
+  not_found_handling?: "none" | "single-page-application" | "404-page";
+  html_handling?: "auto-trailing-slash" | "force-trailing-slash" | "drop-trailing-slash" | "none";
+}
 
 export interface DeployManifest {
   version: number;
@@ -46,10 +46,7 @@ export interface DeployManifest {
   framework?: boolean;
   revalidate?: number | Record<string, number>;
   prerender?: string[];
-  static?: "spa" | "ssg";
-  assetsDir?: string;
-  assetHashes?: Record<string, string>;
-  headers?: HeaderRule[];
+  assetConfig?: AssetConfig;
   vars?: Record<string, string>;
   workerMain?: string;
   compatibilityDate?: string;

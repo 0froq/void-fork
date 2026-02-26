@@ -180,6 +180,8 @@ export interface CfApiMocks {
   deleteWorker: (url: string, init?: RequestInit) => Response;
   queryD1: (url: string, init?: RequestInit) => Response | Promise<Response>;
   uploadWorker: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  assetUploadSession: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  assetUpload: (url: string, init?: RequestInit) => Response | Promise<Response>;
   setWorkerSecret: (url: string, init?: RequestInit) => Response | Promise<Response>;
   deleteWorkerSecret: (url: string, init?: RequestInit) => Response | Promise<Response>;
   createCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -201,6 +203,8 @@ const defaultMocks: CfApiMocks = {
   deleteWorker: () => new Response("ok", { status: 200 }),
   queryD1: () => cfSuccess([{ results: [] }]),
   uploadWorker: () => new Response("ok", { status: 200 }),
+  assetUploadSession: () => cfSuccess({ jwt: "test-asset-jwt", buckets: [["hash1"]] }),
+  assetUpload: () => new Response("ok", { status: 200 }),
   setWorkerSecret: () => cfSuccess({}),
   deleteWorkerSecret: () => cfSuccess({}),
   createCustomHostname: () =>
@@ -241,6 +245,12 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
     }
     if (method === "POST" && url.includes("/analytics_engine/sql")) {
       return mocks.analyticsQuery(url, init);
+    }
+    if (method === "POST" && url.includes("/assets-upload-session")) {
+      return mocks.assetUploadSession(url, init);
+    }
+    if (method === "POST" && url.includes("/workers/assets/upload")) {
+      return mocks.assetUpload(url, init);
     }
     if (method === "PUT" && url.includes("/workers/dispatch/") && url.includes("/secrets")) {
       return mocks.setWorkerSecret(url, init);
