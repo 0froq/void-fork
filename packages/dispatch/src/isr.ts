@@ -183,12 +183,13 @@ export function resolvePathTtl(
 /**
  * Extract response headers as a plain object, skipping ISR-managed headers.
  */
+const SKIP_HEADERS = new Set(["cache-control", "x-isr-cache"]);
+
 function serializeHeaders(response: Response): Record<string, string> {
   const result: Record<string, string> = {};
-  const skip = new Set(["cache-control", "x-isr-cache"]);
 
   response.headers.forEach((value, key) => {
-    if (!skip.has(key.toLowerCase())) {
+    if (!SKIP_HEADERS.has(key.toLowerCase())) {
       result[key] = value;
     }
   });
