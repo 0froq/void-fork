@@ -1,6 +1,8 @@
 const SCRIPT_RE = /^<script\b[^>]*>([\s\S]*?)<\/script>\s*\n?/;
 const ISLAND_IMPORT_RE =
   /import\s+(\w+)\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
+const ISLAND_IMPORT_LINE_RE =
+  /^[ \t]*import\s+\w+\s+from\s+(?:"[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*(?:"[^"]+"|'[^']+')\s*\}\s*;?\s*$/gm;
 
 export interface IslandImport {
   name: string;
@@ -12,11 +14,12 @@ export interface ScriptExtraction {
   script: string | null;
   body: string;
   islandImports: IslandImport[];
+  clientCode: string | null;
 }
 
 export function extractScript(source: string): ScriptExtraction {
   const match = source.match(SCRIPT_RE);
-  if (!match) return { script: null, body: source, islandImports: [] };
+  if (!match) return { script: null, body: source, islandImports: [], clientCode: null };
 
   const script = match[1].trim();
   const body = source.slice(match[0].length);
@@ -31,5 +34,8 @@ export function extractScript(source: string): ScriptExtraction {
     });
   }
 
-  return { script, body, islandImports };
+  const stripped = script.replace(ISLAND_IMPORT_LINE_RE, "").trim();
+  const clientCode = stripped || null;
+
+  return { script, body, islandImports, clientCode };
 }

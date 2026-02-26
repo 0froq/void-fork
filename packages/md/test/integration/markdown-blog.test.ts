@@ -41,6 +41,46 @@ async function newPage(): Promise<Page> {
   return page;
 }
 
+function defineClientScriptTests(BASE: string) {
+  it("executes client script in markdown page", async () => {
+    const page = await newPage();
+    try {
+      await page.goto(`${BASE}/posts/client-script-test`);
+      await page.waitForSelector("#client-target");
+
+      // SSR renders "pending", client script changes it to "hydrated"
+      await page.waitForFunction(
+        () => document.getElementById("client-target")?.textContent === "hydrated",
+        { timeout: 5000 },
+      );
+
+      const text = await page.textContent("#client-target");
+      expect(text).toBe("hydrated");
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  it("supports island imports and client script in same page", async () => {
+    const page = await newPage();
+    try {
+      await page.goto(`${BASE}/posts/mixed-test`);
+
+      // Client script should execute
+      await page.waitForFunction(
+        () => document.getElementById("mixed-target")?.textContent === "hydrated",
+        { timeout: 5000 },
+      );
+
+      // Island component should be SSR'd (data-island marker present)
+      const island = await page.$("[data-island]");
+      expect(island).not.toBeNull();
+    } finally {
+      await page.context().close();
+    }
+  });
+}
+
 function defineSidebarTests(BASE: string) {
   it("renders sidebar with post links", async () => {
     const page = await newPage();
@@ -185,6 +225,7 @@ describe("markdown-blog playground", () => {
     });
 
     defineSidebarTests(DEV_BASE);
+    defineClientScriptTests(DEV_BASE);
   }, 60_000);
 
   describe("production (build + preview)", () => {
@@ -266,5 +307,6 @@ describe("markdown-blog playground", () => {
     });
 
     defineSidebarTests(PREVIEW_BASE);
+    defineClientScriptTests(PREVIEW_BASE);
   }, 60_000);
 }, 60_000);

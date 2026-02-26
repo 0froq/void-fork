@@ -1,3 +1,4 @@
+import { cpSync } from "node:fs";
 import { defineConfig } from "tsdown";
 
 const WORKERS_TYPES_REFERENCE = '/// <reference types="@cloudflare/workers-types" />';
@@ -78,6 +79,9 @@ export default defineConfig({
   format: "esm",
   dts: true,
   clean: true,
+  onSuccess() {
+    cpSync("src/css", "dist/css", { recursive: true });
+  },
   plugins: [stripUseAsmPlugin(), injectWorkersTypesReferencePlugin()],
   external: [
     "vite",

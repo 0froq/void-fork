@@ -81,4 +81,56 @@ import Sidebar from "./Sidebar.vue" with { island: "media:(min-width: 768px)" }
     const result = extractScript(source);
     expect(result.islandImports[0].strategy).toBe("media:(min-width: 768px)");
   });
+
+  it("returns clientCode as null when no script block", () => {
+    const result = extractScript("# Hello\n\nWorld");
+    expect(result.clientCode).toBeNull();
+  });
+
+  it("returns clientCode as null when script has only island imports", () => {
+    const source = `<script>
+import Counter from "./Counter.vue" with { island: "visible" }
+</script>
+
+# Hello`;
+    const result = extractScript(source);
+    expect(result.clientCode).toBeNull();
+  });
+
+  it("extracts non-island code as clientCode", () => {
+    const source = `<script>
+import Counter from "./Counter.vue" with { island: "visible" }
+import { format } from "date-fns"
+
+console.log("hello")
+</script>
+
+# Hello`;
+    const result = extractScript(source);
+    expect(result.clientCode).toBe(`import { format } from "date-fns"\n\nconsole.log("hello")`);
+  });
+
+  it("returns entire script as clientCode when no island imports", () => {
+    const source = `<script>
+console.log("client only")
+</script>
+
+# Hello`;
+    const result = extractScript(source);
+    expect(result.clientCode).toBe(`console.log("client only")`);
+    expect(result.islandImports).toEqual([]);
+  });
+
+  it("preserves non-island imports in clientCode alongside statements", () => {
+    const source = `<script>
+import Counter from "./Counter.vue" with { island: "load" }
+import { ref } from "vue"
+
+const count = ref(0)
+</script>
+
+# Hello`;
+    const result = extractScript(source);
+    expect(result.clientCode).toBe(`import { ref } from "vue"\n\nconst count = ref(0)`);
+  });
 });

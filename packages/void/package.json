@@ -108,7 +108,9 @@
     "./solid": {
       "types": "./dist/runtime/solid.d.mts",
       "import": "./dist/runtime/solid.mjs"
-    }
+    },
+    "./md/theme": "./dist/css/md-theme.css",
+    "./md/theme-content": "./dist/css/md-theme-content.css"
   },
   "scripts": {
     "build": "node scripts/sync-skill-docs.mjs && tsdown",
@@ -139,6 +141,7 @@
     "zod": "^4.3.6"
   },
   "peerDependencies": {
+    "@void-x/md": "workspace:*",
     "@void-x/react": "workspace:*",
     "@void-x/solid": "workspace:*",
     "@void-x/svelte": "workspace:*",
@@ -147,6 +150,9 @@
     "vite": "^8.0.0-beta.14"
   },
   "peerDependenciesMeta": {
+    "@void-x/md": {
+      "optional": true
+    },
     "@void-x/vue": {
       "optional": true
     },

@@ -14,7 +14,8 @@
       "types": "./dist/runtime/index.d.mts",
       "import": "./dist/runtime/index.mjs"
     },
-    "./theme": "./dist/theme/index.css"
+    "./theme": "./dist/theme/index.css",
+    "./theme-content": "./dist/theme/content.css"
   },
   "scripts": {
     "build": "tsdown",

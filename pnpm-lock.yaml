@@ -207,6 +207,9 @@ importers:
       '@hono/oauth-providers':
         specifier: ^0.8.5
         version: 0.8.5(hono@4.11.9)
+      '@void-x/md':
+        specifier: workspace:*
+        version: link:../md
       '@void-x/react':
         specifier: workspace:*
         version: link:../react

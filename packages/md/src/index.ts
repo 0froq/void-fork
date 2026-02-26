@@ -40,6 +40,7 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
   let root = "";
   const svelteModules = new Map<string, string>();
   const solidModules = new Map<string, string>();
+  const clientScripts = new Map<string, string>();
 
   function createVirtualModuleId(
     prefix: string,
@@ -60,8 +61,19 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
     const pages = await Promise.all(
       mdFiles.map(async (file) => {
         const content = readFileSync(join(pagesDir, file), "utf-8");
-        const { body } = extractScript(content);
+        const { body, clientCode } = extractScript(content);
         const result = extractMetadata(body);
+
+        const componentId =
+          file
+            .replace(/\.md$/, "")
+            .replace(/\/index$/, "")
+            .replace(/^index$/, "") || "index";
+
+        if (clientCode) {
+          clientScripts.set(componentId, clientCode);
+        }
+
         const routePath =
           "/" +
           file
@@ -84,6 +96,12 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
       name: "void-md",
       enforce: "pre",
 
+      api: {
+        getClientScripts(): Map<string, string> {
+          return clientScripts;
+        },
+      },
+
       configResolved(config: ResolvedConfig) {
         root = config.root;
         for (const plugin of config.plugins) {
@@ -103,6 +121,7 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
       async buildStart() {
         svelteModules.clear();
         solidModules.clear();
+        clientScripts.clear();
         mdPages = await scanMdPages();
       },
 
@@ -112,6 +131,13 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
             mdPages = await scanMdPages();
             const mod = server.moduleGraph.getModuleById("\0void-md-pages");
             if (mod) server.moduleGraph.invalidateModule(mod);
+            // Also invalidate md client script virtual modules
+            for (const [compId] of clientScripts) {
+              const scriptMod = server.moduleGraph.getModuleById(
+                "\0virtual:void-md-script:" + compId,
+              );
+              if (scriptMod) server.moduleGraph.invalidateModule(scriptMod);
+            }
           }
         });
         server.watcher.on("add", async (file: string) => {
@@ -119,6 +145,13 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
             mdPages = await scanMdPages();
             const mod = server.moduleGraph.getModuleById("\0void-md-pages");
             if (mod) server.moduleGraph.invalidateModule(mod);
+            // Also invalidate md client script virtual modules
+            for (const [compId] of clientScripts) {
+              const scriptMod = server.moduleGraph.getModuleById(
+                "\0virtual:void-md-script:" + compId,
+              );
+              if (scriptMod) server.moduleGraph.invalidateModule(scriptMod);
+            }
           }
         });
         server.watcher.on("unlink", async (file: string) => {
@@ -126,15 +159,25 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
             mdPages = await scanMdPages();
             const mod = server.moduleGraph.getModuleById("\0void-md-pages");
             if (mod) server.moduleGraph.invalidateModule(mod);
+            // Also invalidate md client script virtual modules
+            for (const [compId] of clientScripts) {
+              const scriptMod = server.moduleGraph.getModuleById(
+                "\0virtual:void-md-script:" + compId,
+              );
+              if (scriptMod) server.moduleGraph.invalidateModule(scriptMod);
+            }
           }
         });
       },
 
       resolveId: {
         filter: {
-          id: /^(void\/md(\/pages)?|@void-x\/md\/runtime|\/@void-md-(svelte|solid)\/)/,
+          id: /^(void\/md(\/pages)?|@void-x\/md\/runtime|\/@void-md-(svelte|solid)\/|virtual:void-md-script:)/,
         },
         handler(source: string) {
+          if (source.startsWith("virtual:void-md-script:")) {
+            return "\0" + source;
+          }
           if (source === "void/md" || source === "@void-x/md/runtime") {
             return "\0void-md-runtime";
           }
@@ -149,8 +192,15 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
 
       load: {
         // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
-        filter: { id: /^(\0void-md|\/@void-md-(svelte|solid)\/)/ },
+        filter: { id: /^(\0void-md|\/@void-md-(svelte|solid)\/|\0virtual:void-md-script:)/ },
         handler(id: string) {
+          if (id.startsWith("\0virtual:void-md-script:")) {
+            const componentId = id.slice("\0virtual:void-md-script:".length);
+            const code = clientScripts.get(componentId);
+            if (code) return code;
+            throw new Error(`[void-md] Missing client script for: ${componentId}`);
+          }
+
           if (id.startsWith(SVELTE_VIRTUAL_PREFIX)) {
             const source = svelteModules.get(id);
             if (source) return source;
@@ -202,7 +252,14 @@ export function useFrontmatter() { return useContext(FrontmatterContext) ?? {}; 
       transform: {
         filter: { id: /\.md$/ },
         async handler(code: string, _id: string) {
-          const { body, islandImports } = extractScript(code);
+          const { body, islandImports, clientCode } = extractScript(code);
+
+          const pagesPrefix = join(root, "pages") + "/";
+          if (_id.startsWith(pagesPrefix) && clientCode) {
+            const rel = _id.slice(pagesPrefix.length).replace(/\.md$/, "");
+            const componentId = rel.replace(/\/index$/, "").replace(/^index$/, "") || "index";
+            clientScripts.set(componentId, clientCode);
+          }
           const { compile } = await import("./compile");
           const result = await compile(body, { shiki: options?.shiki });
 

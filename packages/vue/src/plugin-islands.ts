@@ -1,6 +1,6 @@
 import type { Plugin } from "vite";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, resolve, relative } from "node:path";
+import { dirname, join, resolve, relative } from "node:path";
 import { scanPages } from "void/pages";
 import type { LayoutDefinition, PageScanResult } from "void/pages";
 import { generateComponentManifest } from "./pages-manifest";
@@ -31,6 +31,21 @@ function hasIslandFiles(dir: string): boolean {
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
       if (entry.isFile() && entry.name.endsWith(".island.vue")) return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+function hasMdFilesWithScript(dir: string): boolean {
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
+      if (entry.isFile() && entry.name.endsWith(".md")) {
+        const fullPath = join(entry.parentPath, entry.name);
+        const content = readFileSync(fullPath, "utf-8");
+        if (/^<script\b/m.test(content)) return true;
+      }
     }
   } catch {
     // ignore
@@ -98,6 +113,18 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
   let isDev = false;
   let viteRoot = "";
   const islandCssMap = new Map<string, string[]>();
+  let resolvedConfig: any;
+  let mdClientScriptIds = new Set<string>();
+
+  /** Lazily read md client scripts from the md plugin API.
+   *  Must be called from load() hooks (not buildStart) because the md plugin's
+   *  buildStart may not have run yet when the islands plugin's buildStart runs. */
+  function refreshMdClientScriptIds(): Set<string> {
+    const mdPlugin = resolvedConfig?.plugins?.find((p: any) => p.name === "void-md");
+    const mdScripts: Map<string, string> | undefined = mdPlugin?.api?.getClientScripts?.();
+    mdClientScriptIds = new Set(mdScripts?.keys() ?? []);
+    return mdClientScriptIds;
+  }
 
   return [
     {
@@ -105,6 +132,7 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
       enforce: "pre",
 
       configResolved(config) {
+        resolvedConfig = config;
         viteRoot = config.root;
         isDev = config.command === "serve";
       },
@@ -228,11 +256,25 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
             if (!pageScan) {
               return "export function renderIslandPage() { throw new Error('No pages found'); }";
             }
-            return generateIslandRenderer(pageScan, pagesDir, isDev, islandCssMap, viteRoot);
+            refreshMdClientScriptIds();
+            return generateIslandRenderer(
+              pageScan,
+              pagesDir,
+              isDev,
+              islandCssMap,
+              viteRoot,
+              mdClientScriptIds,
+            );
           }
           if (id === "\0" + ISLANDS_CLIENT_ENTRY_ID) {
             if (!pageScan) return "";
-            return generateIslandClientEntry(islandManifest, islandCssFiles, isDev);
+            refreshMdClientScriptIds();
+            return generateIslandClientEntry(
+              islandManifest,
+              islandCssFiles,
+              isDev,
+              mdClientScriptIds,
+            );
           }
           // Virtual island CSS module — resolveId returns absolute path
           if (id.endsWith(".css") && !id.startsWith("\0")) {
@@ -340,8 +382,8 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
         if (env.command === "serve") {
           return { optimizeDeps: { include: ["vue"] } };
         }
-        // Only add the islands client entry when island pages actually exist
-        if (hasIslandFiles(pagesDir)) {
+        // Only add the islands client entry when island pages or md scripts exist
+        if (hasIslandFiles(pagesDir) || hasMdFilesWithScript(pagesDir)) {
           return {
             environments: {
               client: {
@@ -365,6 +407,7 @@ function generateIslandRenderer(
   isDev: boolean,
   islandCssMap: Map<string, string[]>,
   viteRoot: string,
+  mdScriptIds: Set<string>,
 ): string {
   // Build CSS link map for dev FOUC prevention
   let cssMapCode = "";
@@ -376,12 +419,15 @@ function generateIslandRenderer(
     cssMapCode = `const __cssPaths = ${JSON.stringify(cssMapObj)};`;
   }
 
+  const mdScriptIdsCode = `const __mdClientScriptIds = new Set(${JSON.stringify([...mdScriptIds])});`;
+
   return `
 import { createSSRApp, h, reactive, provide } from "vue";
 import { renderToString } from "vue/server-renderer";
 
 ${generateComponentManifest(scan, pagesDir)}
 ${cssMapCode}
+${mdScriptIdsCode}
 
 function escapeAttr(s) {
   return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -414,12 +460,13 @@ export async function renderIslandPage(pageObj, assetTags) {
   });
 
   const html = await renderToString(app);
+  const __mdScriptAttr = __mdClientScriptIds.has(pageObj.component) ? \` data-md-script="\${escapeAttr(pageObj.component)}"\` : "";
 
   return \`<!doctype html>
 <html>
 <head>\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\\n") : ""}\${assetTags.head}</head>
 <body>
-  <div id="app">\${html}</div>
+  <div id="app"\${__mdScriptAttr}>\${html}</div>
   \${assetTags.body}
 </body>
 </html>\`;
@@ -431,6 +478,7 @@ function generateIslandClientEntry(
   manifest: Map<string, IslandEntry>,
   cssFiles: Set<string>,
   isDev: boolean,
+  mdScriptIds: Set<string>,
 ): string {
   const entries = [...manifest.values()];
   const uniqueIslands = new Map<string, string>();
@@ -518,6 +566,22 @@ document.querySelectorAll("[data-island]").forEach(el => {
   if (loader) scheduleHydration(el, loader, props, strategy);
 });
 `);
+
+  if (mdScriptIds.size > 0) {
+    lines.push("");
+    lines.push("// Markdown client scripts");
+    lines.push("const mdScripts = {");
+    for (const id of mdScriptIds) {
+      lines.push(
+        `  ${JSON.stringify(id)}: () => import(${JSON.stringify("virtual:void-md-script:" + id)}),`,
+      );
+    }
+    lines.push("};");
+    lines.push(
+      `const mdScriptId = document.getElementById("app")?.getAttribute("data-md-script");`,
+    );
+    lines.push(`if (mdScriptId && mdScripts[mdScriptId]) mdScripts[mdScriptId]();`);
+  }
 
   return lines.join("\n");
 }
