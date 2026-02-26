@@ -6,12 +6,7 @@ import { intro, outro, log, note, spinner, confirm, isCancel } from "@clack/prom
 import { createServer, loadEnv } from "vite";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
-import {
-  computeAssetHashes,
-  packageBuild,
-  packageStaticBuild,
-  packageFrameworkBuild,
-} from "./package";
+import { packageBuild, packageStaticBuild, packageFrameworkBuild } from "./package";
 import { PlatformClient } from "./client";
 import {
   inferProjectBindings,
@@ -27,16 +22,8 @@ import { scanQueuesSync } from "../queues/scan";
 import { validateSsrEntry, detectSsrPrerender, getSsrServerEntryPath } from "../ssr/entry";
 import { scanPages } from "../pages/scan";
 import { detectPreset, FRAMEWORK_PRESETS, type StaticPreset, type FrameworkPreset } from "./preset";
-import {
-  readConfig,
-  convertHeadersConfig,
-  resolveBindingNames,
-  type AuthProvider,
-  type VoidConfig,
-} from "../config";
+import { readConfig, resolveBindingNames, type AuthProvider, type VoidConfig } from "../config";
 import { readWranglerCompat } from "./wrangler";
-import { parseHeadersFile } from "./headers";
-import type { HeaderRule } from "./types";
 import {
   needsWrapper,
   generateAndBundleWrapper,
@@ -45,6 +32,7 @@ import {
 } from "./wrapper";
 import { getRequestedProjectSlug, resolveProjectBySlug, inferDefaultSlug } from "./resolve-project";
 import { cliTitle } from "./output";
+import type { AssetConfig } from "./types";
 
 export interface RunDeployOptions {
   projectSlug?: string;
@@ -126,7 +114,6 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
 
   // 3. Resolve deploy mode: void.json > CLI flags > auto-detection
   const vcConfig = readConfig(root);
-  const headers = convertHeadersConfig(vcConfig.headers);
 
   // Check for Class B/C framework first
   const detected = detectFramework(root);
@@ -144,7 +131,6 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
       detected,
       fwPreset,
       vcConfig,
-      headers,
       options?.skipBuild,
       gitCommit,
     );
@@ -178,9 +164,9 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   const gitCommit = options?.skipBuild ? null : getGitCommit(root);
 
   if (preset) {
-    await runStaticDeploy(root, config, client, preset, headers, options?.skipBuild, gitCommit);
+    await runStaticDeploy(root, config, client, preset, options?.skipBuild, gitCommit);
   } else {
-    await runFullDeploy(root, config, client, headers, options?.skipBuild, gitCommit);
+    await runFullDeploy(root, config, client, options?.skipBuild, gitCommit);
   }
 }
 
@@ -189,7 +175,6 @@ async function runStaticDeploy(
   config: ProjectConfig,
   client: PlatformClient,
   preset: StaticPreset,
-  headers?: HeaderRule[],
   skipBuild?: boolean,
   commit?: string | null,
 ): Promise<void> {
@@ -210,20 +195,8 @@ async function runStaticDeploy(
   // Package & Upload
   const s = spinner();
 
-  s.start("Checking assets...");
-  const hashes = computeAssetHashes(preset.outputDir);
-  const totalAssets = Object.keys(hashes).length;
-  const needed = await client.checkAssets(config.projectId, hashes);
-  s.message(
-    `Uploading ${needed.length}/${totalAssets} assets (${totalAssets - needed.length} cached)`,
-  );
-  const formData = packageStaticBuild(
-    preset.outputDir,
-    preset.mode,
-    new Set(needed),
-    hashes,
-    headers,
-  );
+  s.start("Packaging...");
+  const formData = packageStaticBuild(preset.outputDir, preset.mode);
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
 
@@ -247,7 +220,6 @@ async function runFrameworkDeploy(
   detected: DetectedFramework,
   fwPreset: FrameworkPreset,
   vcConfig: VoidConfig,
-  headers?: HeaderRule[],
   skipBuild?: boolean,
   commit?: string | null,
 ): Promise<void> {
@@ -344,44 +316,10 @@ async function runFrameworkDeploy(
   // 10. Load .env vars for production
   const envVars = loadEnv("production", root, "");
 
-  // 11. Check assets & Package
+  // 11. Package & deploy
   const s = spinner();
 
-  s.start("Checking assets...");
-  let neededPaths: Set<string> | undefined;
-  let assetHashes: Record<string, string> | undefined;
-  try {
-    assetHashes = computeAssetHashes(assetsDir);
-    // Exclude worker files from asset hashes when dirs overlap
-    const workerDirNorm = workerDir.replace(/\\/g, "/");
-    const assetsDirNorm = assetsDir.replace(/\\/g, "/");
-    if (workerDirNorm.startsWith(assetsDirNorm + "/") || workerDirNorm === assetsDirNorm) {
-      const workerFiles = new Set(
-        Object.keys(assetHashes).filter((p) => {
-          const full = join(assetsDir, p).replace(/\\/g, "/");
-          return full.startsWith(workerDirNorm);
-        }),
-      );
-      for (const wf of workerFiles) {
-        delete assetHashes[wf];
-      }
-    }
-    const totalAssets = Object.keys(assetHashes).length;
-    const needed = await client.checkAssets(config.projectId, assetHashes);
-    neededPaths = new Set(needed);
-    s.message(
-      `Uploading ${needed.length}/${totalAssets} assets (${totalAssets - needed.length} cached)`,
-    );
-  } catch {
-    // No assets directory
-  }
-
-  // Parse framework-generated _headers and merge with void.json rules
-  const frameworkHeaders = parseHeadersFile(assetsDir);
-  const mergedHeaders: HeaderRule[] | undefined =
-    frameworkHeaders || headers ? [...(frameworkHeaders ?? []), ...(headers ?? [])] : undefined;
-
-  s.message("Packaging...");
+  s.start("Packaging...");
   const formData = packageFrameworkBuild({
     workerDir: actualWorkerDir,
     workerMain: actualWorkerMain,
@@ -392,11 +330,8 @@ async function runFrameworkDeploy(
     queues,
     revalidate,
     prerender,
-    headers: mergedHeaders,
-    hashedAssetsPrefix: fwPreset.hashedAssetsPrefix,
+    assetConfig: { not_found_handling: "none" },
     vars: envVars,
-    neededPaths,
-    assetHashes,
     packageOptions: {
       bindingNames: resolveBindingNames(vcConfig.bindings),
       workerMain: actualWorkerMain,
@@ -444,7 +379,6 @@ async function runFullDeploy(
   root: string,
   config: ProjectConfig,
   client: PlatformClient,
-  headers?: HeaderRule[],
   skipBuild?: boolean,
   commit?: string | null,
 ): Promise<void> {
@@ -465,8 +399,8 @@ async function runFullDeploy(
   // Vite config in the main process — plugins only run once inside the build)
   const distDir = join(root, "dist");
 
-  // Detect non-default assetsDir from Vite client manifest
-  let assetsDir: string | undefined;
+  // Detect non-default assetsDir from Vite client manifest for _headers generation
+  let assetsPrefix = "assets";
   const clientManifestPath = join(distDir, "client", ".vite", "manifest.json");
   if (existsSync(clientManifestPath)) {
     const manifest: Record<string, { file?: string }> = JSON.parse(
@@ -475,10 +409,20 @@ async function runFullDeploy(
     for (const entry of Object.values(manifest)) {
       if (entry.file?.includes("/")) {
         const dir = entry.file.slice(0, entry.file.indexOf("/"));
-        if (dir !== "assets") assetsDir = dir;
+        if (dir !== "assets") assetsPrefix = dir;
         break;
       }
     }
+  }
+
+  // Generate _headers file for proper caching (unless one already exists)
+  const clientDir = join(distDir, "client");
+  const headersFilePath = join(clientDir, "_headers");
+  if (existsSync(clientDir) && !existsSync(headersFilePath)) {
+    writeFileSync(
+      headersFilePath,
+      `/${assetsPrefix}/*\n  Cache-Control: public, max-age=31536000, immutable\n\n/*\n  Cache-Control: public, s-maxage=60, max-age=0, must-revalidate\n`,
+    );
   }
 
   // 5. Detect framework mode (Class A only for existing flow)
@@ -505,16 +449,6 @@ async function runFullDeploy(
     }
   }
   const workerDirName = detectWorkerDir(root, distDir);
-
-  // Inject client manifest into worker entry so SSR/Pages asset tags work
-  // in production. The worker has no ASSETS binding in Workers for Platforms,
-  // so the generated code checks globalThis.__VITE_MANIFEST__ at runtime.
-  const workerEntryPath = join(distDir, workerDirName, "index.js");
-  if (existsSync(clientManifestPath) && existsSync(workerEntryPath)) {
-    const manifestJson = readFileSync(clientManifestPath, "utf-8");
-    const workerCode = readFileSync(workerEntryPath, "utf-8");
-    writeFileSync(workerEntryPath, `globalThis.__VITE_MANIFEST__=${manifestJson};\n${workerCode}`);
-  }
 
   const schedules = scanJobsSync(root).flatMap((job) =>
     job.crons.map((cron) => ({
@@ -654,26 +588,15 @@ async function runFullDeploy(
   // 9. Load .env vars for production
   const envVars = loadEnv("production", root, "");
 
-  // 10. Check assets & Package & Upload
+  // 10. Package & Upload
   const s = spinner();
 
-  s.start("Checking assets...");
-  const clientDir = join(distDir, "client");
-  let neededPaths: Set<string> | undefined;
-  let assetHashes: Record<string, string> | undefined;
-  try {
-    assetHashes = computeAssetHashes(clientDir);
-    const totalAssets = Object.keys(assetHashes).length;
-    const needed = await client.checkAssets(config.projectId, assetHashes);
-    neededPaths = new Set(needed);
-    s.message(
-      `Uploading ${needed.length}/${totalAssets} assets (${totalAssets - needed.length} cached)`,
-    );
-  } catch {
-    // No client directory — API-only project
-  }
+  // Derive asset config: SSR workers handle their own 404s, non-SSR uses SPA fallback
+  const assetConfig: AssetConfig = isSsr
+    ? { not_found_handling: "none" }
+    : { not_found_handling: "single-page-application" };
 
-  s.message("Packaging...");
+  s.start("Packaging...");
   const formData = packageBuild(
     distDir,
     workerDirName,
@@ -682,14 +605,11 @@ async function runFullDeploy(
     schedules,
     isSsr,
     isFrameworkMode,
-    neededPaths,
-    assetHashes,
-    headers,
     revalidate,
     envVars,
     queues,
-    assetsDir,
     uniquePrerenderPaths,
+    assetConfig,
     {
       compatibilityDate: wranglerCompat.compatibilityDate,
       compatibilityFlags: wranglerCompat.compatibilityFlags,

@@ -1,21 +1,8 @@
-import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { InferredBindings } from "../inference/walk";
 import type { MigrationFile } from "../migrations/validate";
-import type { DeployManifest, HeaderRule, QueueMeta, ScheduleMeta } from "./types";
-
-/**
- * Compute SHA-256 hex digests for all files in a directory.
- */
-export function computeAssetHashes(dir: string): Record<string, string> {
-  const hashes: Record<string, string> = {};
-  for (const filePath of collectFiles(dir)) {
-    const rel = relative(dir, filePath);
-    hashes[rel] = createHash("sha256").update(readFileSync(filePath)).digest("hex");
-  }
-  return hashes;
-}
+import type { AssetConfig, DeployManifest, QueueMeta, ScheduleMeta } from "./types";
 
 /**
  * Package the build output into a FormData ready for upload.
@@ -45,20 +32,17 @@ export function packageBuild(
   schedules?: ScheduleMeta[],
   ssr?: boolean,
   framework?: boolean,
-  neededPaths?: Set<string>,
-  assetHashes?: Record<string, string>,
-  headers?: HeaderRule[],
   revalidate?: number | Record<string, number>,
   vars?: Record<string, string>,
   queues?: QueueMeta[],
-  assetsDir?: string,
   prerender?: string[],
+  assetConfig?: AssetConfig,
   options?: PackageOptions,
 ): FormData {
   const formData = new FormData();
 
   // Build manifest from inferred bindings
-  const manifest: DeployManifest = { version: 1, bindings: {} };
+  const manifest: DeployManifest = { version: 2, bindings: {} };
   if (bindings.needsD1) manifest.bindings.d1 = [options?.bindingNames?.d1 ?? "DB"];
   if (bindings.needsKV) manifest.bindings.kv = [options?.bindingNames?.kv ?? "KV"];
   if (bindings.needsR2) manifest.bindings.r2 = [options?.bindingNames?.r2 ?? "STORAGE"];
@@ -91,14 +75,6 @@ export function packageBuild(
     manifest.framework = true;
   }
 
-  if (assetsDir) {
-    manifest.assetsDir = assetsDir;
-  }
-
-  if (assetHashes) {
-    manifest.assetHashes = assetHashes;
-  }
-
   if (revalidate != null && revalidate !== 0) {
     manifest.revalidate = revalidate;
   }
@@ -107,8 +83,8 @@ export function packageBuild(
     manifest.prerender = prerender;
   }
 
-  if (headers) {
-    manifest.headers = headers;
+  if (assetConfig) {
+    manifest.assetConfig = assetConfig;
   }
 
   if (vars && Object.keys(vars).length > 0) {
@@ -140,13 +116,12 @@ export function packageBuild(
     formData.append(`worker:${relativePath}`, new Blob([content]), relativePath);
   }
 
-  // Add client assets (only needed paths when filtering)
+  // Add client assets
   const clientDir = join(distDir, "client");
   try {
     const clientFiles = collectFiles(clientDir);
     for (const filePath of clientFiles) {
       const relativePath = relative(clientDir, filePath);
-      if (neededPaths && !neededPaths.has(relativePath)) continue;
       const content = readFileSync(filePath);
       formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
     }
@@ -160,28 +135,21 @@ export function packageBuild(
 /**
  * Package a static build (no worker) into a FormData ready for upload.
  */
-export function packageStaticBuild(
-  outputDir: string,
-  mode: "spa" | "ssg",
-  neededPaths?: Set<string>,
-  assetHashes?: Record<string, string>,
-  headers?: HeaderRule[],
-): FormData {
+export function packageStaticBuild(outputDir: string, mode: "spa" | "ssg"): FormData {
   const formData = new FormData();
 
-  const manifest: DeployManifest = { version: 1, bindings: {}, static: mode };
-  if (assetHashes) {
-    manifest.assetHashes = assetHashes;
-  }
-  if (headers) {
-    manifest.headers = headers;
-  }
+  const manifest: DeployManifest = {
+    version: 2,
+    bindings: {},
+    assetConfig: {
+      not_found_handling: mode === "spa" ? "single-page-application" : "404-page",
+    },
+  };
   formData.append("manifest", JSON.stringify(manifest));
 
   const files = collectFiles(outputDir);
   for (const filePath of files) {
     const relativePath = relative(outputDir, filePath);
-    if (neededPaths && !neededPaths.has(relativePath)) continue;
     const content = readFileSync(filePath);
     formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
   }
@@ -207,19 +175,15 @@ export function packageFrameworkBuild(opts: {
   queues?: QueueMeta[];
   revalidate?: number | Record<string, number>;
   prerender?: string[];
-  headers?: HeaderRule[];
-  /** URL-level prefix for hashed/immutable assets (sets manifest.assetsDir). */
-  hashedAssetsPrefix?: string;
+  assetConfig?: AssetConfig;
   vars?: Record<string, string>;
-  neededPaths?: Set<string>;
-  assetHashes?: Record<string, string>;
   packageOptions?: PackageOptions;
 }): FormData {
   const formData = new FormData();
   const po = opts.packageOptions;
 
   // Build manifest
-  const manifest: DeployManifest = { version: 1, bindings: {} };
+  const manifest: DeployManifest = { version: 2, bindings: {} };
   if (opts.bindings.needsD1) manifest.bindings.d1 = [po?.bindingNames?.d1 ?? "DB"];
   if (opts.bindings.needsKV) manifest.bindings.kv = [po?.bindingNames?.kv ?? "KV"];
   if (opts.bindings.needsR2) manifest.bindings.r2 = [po?.bindingNames?.r2 ?? "STORAGE"];
@@ -239,10 +203,8 @@ export function packageFrameworkBuild(opts: {
   if (opts.queues && opts.queues.length > 0) manifest.queues = opts.queues;
   if (opts.revalidate != null && opts.revalidate !== 0) manifest.revalidate = opts.revalidate;
   if (opts.prerender && opts.prerender.length > 0) manifest.prerender = opts.prerender;
-  if (opts.headers) manifest.headers = opts.headers;
+  if (opts.assetConfig) manifest.assetConfig = opts.assetConfig;
   if (opts.vars && Object.keys(opts.vars).length > 0) manifest.vars = opts.vars;
-  if (opts.assetHashes) manifest.assetHashes = opts.assetHashes;
-  if (opts.hashedAssetsPrefix) manifest.assetsDir = opts.hashedAssetsPrefix;
 
   manifest.ssr = true;
   manifest.framework = true;
@@ -276,9 +238,6 @@ export function packageFrameworkBuild(opts: {
       // Skip worker files when workerDir is inside assetsDir
       if (isOverlap && filePath.replace(/\\/g, "/").startsWith(workerDirNorm)) continue;
       const relativePath = relative(opts.assetsDir, filePath);
-      // Skip _headers and _redirects — already parsed into manifest
-      if (relativePath === "_headers" || relativePath === "_redirects") continue;
-      if (opts.neededPaths && !opts.neededPaths.has(relativePath)) continue;
       const content = readFileSync(filePath);
       formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
     }

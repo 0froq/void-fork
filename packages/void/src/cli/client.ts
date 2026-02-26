@@ -134,24 +134,6 @@ export class PlatformClient {
     return res.json();
   }
 
-  async checkAssets(projectId: string, assets: Record<string, string>): Promise<string[]> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/assets/check`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.token}`,
-      },
-      body: JSON.stringify({ assets }),
-    });
-
-    if (!res.ok) {
-      if (res.status === 404) return Object.keys(assets); // fallback: upload all
-      throw new Error(`Asset check failed: ${res.status}`);
-    }
-
-    return ((await res.json()) as { needed: string[] }).needed;
-  }
-
   async deploy(projectId: string, formData: FormData): Promise<DeployResponse> {
     const res = await fetch(`${this.baseUrl}/projects/${projectId}/deploy`, {
       method: "POST",
