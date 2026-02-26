@@ -1,6 +1,7 @@
 import MarkdownExit from "markdown-exit";
 import matter from "gray-matter";
-import Shiki from "@shikijs/markdown-it";
+import { createHighlighter, bundledLanguages, isSpecialLang, type BundledLanguage } from "shiki";
+import { createJavaScriptRegexEngine } from "@shikijs/engine-javascript";
 import {
   transformerMetaHighlight,
   transformerNotationDiff,
@@ -50,22 +51,42 @@ async function getCompiler(options?: CompileOptions): Promise<MarkdownExit> {
 async function createCompiler(options?: CompileOptions): Promise<MarkdownExit> {
   const md = new MarkdownExit({ html: true, linkify: true });
 
-  // Shiki highlighting with dual themes
-  const shikiPlugin = await Shiki({
-    themes: options?.shiki?.themes ?? {
-      light: "github-light",
-      dark: "github-dark",
-    },
-    transformers: [
-      transformerMetaHighlight(),
-      transformerNotationDiff(),
-      transformerNotationHighlight(),
-      transformerNotationFocus(),
-      transformerNotationErrorLevel(),
-    ],
+  // Shiki highlighting with JS RegExp engine (no WASM) + lazy language loading
+  const themes = options?.shiki?.themes ?? {
+    light: "github-light",
+    dark: "github-dark",
+  };
+  const highlighter = await createHighlighter({
+    engine: createJavaScriptRegexEngine(),
+    themes: [themes.light, themes.dark],
+    langs: [],
   });
-  // @ts-expect-error @shikijs/markdown-it types reference @types/markdown-it, structurally incompatible with markdown-exit
-  md.use(shikiPlugin);
+  const shikiTransformers = [
+    transformerMetaHighlight(),
+    transformerNotationDiff(),
+    transformerNotationHighlight(),
+    transformerNotationFocus(),
+    transformerNotationErrorLevel(),
+  ];
+  md.renderer.rules.fence = async (tokens: any[], idx: number) => {
+    const token = tokens[idx];
+    const code = token.content;
+    let lang = token.info ? token.info.split(/\s+/g)[0] : "text";
+    if (!isSpecialLang(lang) && !highlighter.getLoadedLanguages().includes(lang)) {
+      if (lang in bundledLanguages) {
+        await highlighter.loadLanguage(lang as BundledLanguage);
+      } else {
+        lang = "text";
+      }
+    }
+    return highlighter.codeToHtml(code, {
+      lang,
+      themes,
+      defaultColor: "light",
+      transformers: shikiTransformers,
+      meta: { __raw: token.info },
+    });
+  };
 
   // Code block wrapping (must come after shiki, before line-numbers)
   md.use(preWrapperPlugin);

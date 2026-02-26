@@ -7,8 +7,8 @@ import type MarkdownExit from "markdown-exit";
  */
 export function lineNumberPlugin(md: MarkdownExit, enable = false): void {
   const fence = md.renderer.rules.fence!;
-  md.renderer.rules.fence = (...args: any[]) => {
-    const rawCode = (fence as Function)(...args);
+  md.renderer.rules.fence = async (...args: any[]) => {
+    const rawCode = await (fence as Function)(...args);
     const [tokens, idx] = args;
     const info = tokens[idx].info;
 

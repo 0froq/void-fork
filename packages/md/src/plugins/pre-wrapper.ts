@@ -28,7 +28,7 @@ export interface PreWrapperOptions {
 export function preWrapperPlugin(md: MarkdownExit, options?: PreWrapperOptions): void {
   const title = options?.codeCopyButtonTitle ?? "Copy Code";
   const fence = md.renderer.rules.fence!;
-  md.renderer.rules.fence = (...args: any[]) => {
+  md.renderer.rules.fence = async (...args: any[]) => {
     const [tokens, idx] = args;
     const token = tokens[idx];
     // Strip title bracket notation before rendering
@@ -37,11 +37,12 @@ export function preWrapperPlugin(md: MarkdownExit, options?: PreWrapperOptions):
     const active = / active( |$)/.test(token.info) ? " active" : "";
     token.info = token.info.replace(/ active$/, "").replace(/ active /, " ");
     const lang = extractLang(token.info);
+    const highlighted = await (fence as Function)(...args);
     return (
       `<div class="language-${lang}${active}">` +
       `<button title="${title}" class="copy"></button>` +
       `<span class="lang">${lang}</span>` +
-      (fence as Function)(...args) +
+      highlighted +
       `</div>`
     );
   };
