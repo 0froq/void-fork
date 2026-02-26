@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { glob } from "tinyglobby";
-import { compile } from "./compile";
 import type { CompileOptions } from "./compile";
+import { extractMetadata } from "./metadata";
 import { extractScript } from "./extract-script";
 import { emitReactComponent, emitReactComponentWithIslands } from "./emit-react";
 import { emitSolidComponent, emitSolidComponentWithIslands } from "./emit-solid";
@@ -61,7 +61,7 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
       mdFiles.map(async (file) => {
         const content = readFileSync(join(pagesDir, file), "utf-8");
         const { body } = extractScript(content);
-        const result = await compile(body, { shiki: options?.shiki });
+        const result = extractMetadata(body);
         const routePath =
           "/" +
           file
@@ -203,6 +203,7 @@ export function useFrontmatter() { return useContext(FrontmatterContext) ?? {}; 
         filter: { id: /\.md$/ },
         async handler(code: string, _id: string) {
           const { body, islandImports } = extractScript(code);
+          const { compile } = await import("./compile");
           const result = await compile(body, { shiki: options?.shiki });
 
           if (adapter === "vue") {
