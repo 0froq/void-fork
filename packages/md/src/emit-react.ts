@@ -44,7 +44,7 @@ export function emitReactComponentWithIslands(
   return React.createElement(
     "div",
     {
-      "data-island": ${JSON.stringify(toIslandId(item.specifier))},
+      "data-island": ${JSON.stringify(toIslandId(item))},
       "data-props": JSON.stringify(props),
       "data-hydrate": ${JSON.stringify(item.strategy)}
     },

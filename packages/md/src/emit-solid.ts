@@ -63,7 +63,7 @@ export const headings = __headings;
     const propsLiteral = Object.keys(chunk.props).length > 0 ? JSON.stringify(chunk.props) : "{}";
     code += `\nconst ${propsName} = ${propsLiteral};`;
     bodyLines.push(
-      `<div data-island=${JSON.stringify(toIslandId(chunk.islandImport.specifier))} data-props={JSON.stringify(${propsName})} data-hydrate=${JSON.stringify(chunk.islandImport.strategy)}><${importAlias} {...${propsName}} /></div>`,
+      `<div data-island=${JSON.stringify(toIslandId(chunk.islandImport))} data-props={JSON.stringify(${propsName})} data-hydrate=${JSON.stringify(chunk.islandImport.strategy)}><${importAlias} {...${propsName}} /></div>`,
     );
   }
 

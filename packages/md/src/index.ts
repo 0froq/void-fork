@@ -1,7 +1,7 @@
 import type { Plugin, ResolvedConfig, ViteDevServer } from "vite";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { glob } from "tinyglobby";
 import type { CompileOptions } from "./compile";
 import { extractMetadata } from "./metadata";
@@ -260,6 +260,13 @@ export function useFrontmatter() { return useContext(FrontmatterContext) ?? {}; 
             const componentId = rel.replace(/\/index$/, "").replace(/^index$/, "") || "index";
             clientScripts.set(componentId, clientCode);
           }
+          // Resolve island import specifiers to root-relative IDs so they match
+          // the island manifest built by plugin-islands.ts (which uses root-relative paths).
+          for (const imp of islandImports) {
+            const absPath = resolve(dirname(_id), imp.specifier);
+            imp.islandId = relative(root, absPath).replace(/\.[^.]+$/, "");
+          }
+
           const { compile } = await import("./compile");
           const result = await compile(body, { shiki: options?.shiki });
 

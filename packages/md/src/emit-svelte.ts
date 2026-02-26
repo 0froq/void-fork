@@ -74,7 +74,7 @@ setFrontmatter(__frontmatter);
     source += `const ${propsName} = ${propsLiteral};
 `;
     body.push(
-      `<div data-island="${toIslandId(chunk.islandImport.specifier)}" data-props={JSON.stringify(${propsName})} data-hydrate="${chunk.islandImport.strategy}"><${alias} {...${propsName}} /></div>`,
+      `<div data-island="${toIslandId(chunk.islandImport)}" data-props={JSON.stringify(${propsName})} data-hydrate="${chunk.islandImport.strategy}"><${alias} {...${propsName}} /></div>`,
     );
   }
 

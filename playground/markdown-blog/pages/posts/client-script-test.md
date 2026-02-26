@@ -1,5 +1,5 @@
 <script>
-document.getElementById("client-target").textContent = "hydrated"
+document.getElementById("client-target").textContent = "hydrated (success)"
 </script>
 
 ---
@@ -8,7 +8,5 @@ title: Client Script Test
 description: Tests client-side script execution in markdown
 
 ---
-
-# Client Script Test
 
 <span id="client-target">pending</span>

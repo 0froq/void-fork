@@ -8,6 +8,8 @@ export interface IslandImport {
   name: string;
   specifier: string;
   strategy: string;
+  /** Root-relative island ID (set during transform when file context is available). */
+  islandId?: string;
 }
 
 export interface ScriptExtraction {

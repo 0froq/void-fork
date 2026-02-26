@@ -1,5 +1,6 @@
 import type { CompileResult } from "./compile";
 import type { IslandImport } from "./extract-script";
+import { toIslandId } from "./emit-shared";
 
 export function emitVueComponent(result: CompileResult): string {
   return `
@@ -81,11 +82,10 @@ export function emitVueComponentWithIslands(
   // Create island wrapper components
   for (let i = 0; i < islandImports.length; i++) {
     const imp = islandImports[i];
-    const islandId = imp.specifier.replace(/\.[^.]+$/, "");
     code += `const ${imp.name} = { inheritAttrs: false, render() {
   const props = this.$attrs;
   return h("div", {
-    "data-island": ${JSON.stringify(islandId)},
+    "data-island": ${JSON.stringify(toIslandId(imp))},
     "data-props": JSON.stringify(props),
     "data-hydrate": ${JSON.stringify(imp.strategy)}
   }, h(_raw_island_${i}, props));

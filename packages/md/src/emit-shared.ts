@@ -53,8 +53,8 @@ function parseAttrs(attrStr: string): Record<string, string> {
   return result;
 }
 
-export function toIslandId(specifier: string): string {
-  return specifier.replace(/\.[^.]+$/, "");
+export function toIslandId(imp: IslandImport): string {
+  return imp.islandId ?? imp.specifier.replace(/\.[^.]+$/, "");
 }
 
 export function buildRenderChunks(html: string, islandImports: IslandImport[]): RenderChunk[] {

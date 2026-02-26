@@ -48,14 +48,14 @@ function defineClientScriptTests(BASE: string) {
       await page.goto(`${BASE}/posts/client-script-test`);
       await page.waitForSelector("#client-target");
 
-      // SSR renders "pending", client script changes it to "hydrated"
+      // SSR renders "pending", client script changes it to "hydrated (success)"
       await page.waitForFunction(
-        () => document.getElementById("client-target")?.textContent === "hydrated",
+        () => document.getElementById("client-target")?.textContent?.startsWith("hydrated"),
         { timeout: 5000 },
       );
 
       const text = await page.textContent("#client-target");
-      expect(text).toBe("hydrated");
+      expect(text).toBe("hydrated (success)");
     } finally {
       await page.context().close();
     }
@@ -68,13 +68,29 @@ function defineClientScriptTests(BASE: string) {
 
       // Client script should execute
       await page.waitForFunction(
-        () => document.getElementById("mixed-target")?.textContent === "hydrated",
+        () => document.getElementById("mixed-target")?.textContent?.startsWith("hydrated"),
         { timeout: 5000 },
       );
 
       // Island component should be SSR'd (data-island marker present)
       const island = await page.$("[data-island]");
       expect(island).not.toBeNull();
+
+      // Island component should be interactive — click ThemeToggle in main content
+      const button = await page.waitForSelector("main button.theme-toggle", {
+        timeout: 5000,
+      });
+      const initialText = await button.textContent();
+      expect(initialText?.trim()).toBe("Auto");
+
+      await button.click();
+      await page.waitForFunction(
+        () => document.querySelector("main button.theme-toggle")?.textContent?.trim() === "Dark",
+        { timeout: 5000 },
+      );
+
+      const updatedText = await button.textContent();
+      expect(updatedText?.trim()).toBe("Dark");
     } finally {
       await page.context().close();
     }
