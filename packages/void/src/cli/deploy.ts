@@ -1,7 +1,7 @@
 import { execFileSync, execSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { intro, outro, log, note, spinner, confirm, isCancel } from "@clack/prompts";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
@@ -32,6 +32,7 @@ import {
 } from "./wrapper";
 import { getRequestedProjectSlug, resolveProjectBySlug, inferDefaultSlug } from "./resolve-project";
 import { cliTitle } from "./output";
+import { generateHeadersFile, generateRedirectsFile } from "./headers";
 import type { AssetConfig } from "./types";
 
 export interface RunDeployOptions {
@@ -236,6 +237,12 @@ async function runFrameworkDeploy(
   const workerDir = join(root, fwPreset.workerDir);
   const assetsDir = join(root, fwPreset.assetsDir);
 
+  // Generate _headers and _redirects from void.json (unless user files already exist)
+  if (existsSync(assetsDir)) {
+    generateHeadersFile(assetsDir, vcConfig.headers, "assets");
+    generateRedirectsFile(assetsDir, vcConfig.redirects);
+  }
+
   if (!existsSync(workerDir)) {
     log.error(`Worker output not found: ${fwPreset.workerDir}`);
     process.exit(1);
@@ -415,16 +422,6 @@ async function runFullDeploy(
     }
   }
 
-  // Generate _headers file for proper caching (unless one already exists)
-  const clientDir = join(distDir, "client");
-  const headersFilePath = join(clientDir, "_headers");
-  if (existsSync(clientDir) && !existsSync(headersFilePath)) {
-    writeFileSync(
-      headersFilePath,
-      `/${assetsPrefix}/*\n  Cache-Control: public, max-age=31536000, immutable\n\n/*\n  Cache-Control: public, s-maxage=60, max-age=0, must-revalidate\n`,
-    );
-  }
-
   // 5. Detect framework mode (Class A only for existing flow)
   const detected = detectFramework(root);
   const isFrameworkMode = detected?.class === "a";
@@ -434,6 +431,13 @@ async function runFullDeploy(
   const deployScanDirs =
     deployConfig.scanDirs ?? (isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined);
   const bindings = inferProjectBindings(root, undefined, deployScanDirs);
+
+  // Generate _headers and _redirects from void.json (unless user files already exist)
+  const clientDir = join(distDir, "client");
+  if (existsSync(clientDir)) {
+    generateHeadersFile(clientDir, deployConfig.headers, assetsPrefix);
+    generateRedirectsFile(clientDir, deployConfig.redirects);
+  }
 
   // 7. Collect and validate migrations
   const migrationsDir = join(root, "migrations");

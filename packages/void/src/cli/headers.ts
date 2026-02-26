@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HeaderRule } from "./types";
+import { convertRedirectsConfig, type RedirectDestination } from "../config";
 
 /**
  * Parse a Cloudflare/Netlify `_headers` file into HeaderRule[].
@@ -61,4 +62,56 @@ export function parseHeadersFile(dir: string): HeaderRule[] | undefined {
   rules.sort((a, b) => a.pattern.length - b.pattern.length);
 
   return rules;
+}
+
+/**
+ * Generate a `_headers` file in the client output directory.
+ *
+ * Writes default cache-control rules plus any headers from void.json config.
+ * Does nothing if a `_headers` file already exists (user-provided takes precedence).
+ */
+export function generateHeadersFile(
+  clientDir: string,
+  headers: Record<string, string[]> | undefined,
+  assetsPrefix: string,
+): void {
+  const headersFilePath = join(clientDir, "_headers");
+  if (existsSync(headersFilePath)) return;
+
+  let content = `/${assetsPrefix}/*\n  Cache-Control: public, max-age=31536000, immutable\n\n/*\n  Cache-Control: public, s-maxage=60, max-age=0, must-revalidate\n`;
+
+  if (headers) {
+    for (const [pattern, values] of Object.entries(headers)) {
+      const validHeaders = values.filter((v) => v.includes(":"));
+      if (validHeaders.length > 0) {
+        content += `\n${pattern}\n`;
+        for (const header of validHeaders) {
+          content += `  ${header}\n`;
+        }
+      }
+    }
+  }
+
+  writeFileSync(headersFilePath, content);
+}
+
+/**
+ * Generate a `_redirects` file in the client output directory.
+ *
+ * Converts void.json `redirects` config into Cloudflare `_redirects` format.
+ * Does nothing if a `_redirects` file already exists (user-provided takes precedence)
+ * or if no redirects are configured.
+ */
+export function generateRedirectsFile(
+  clientDir: string,
+  redirects: Record<string, RedirectDestination> | undefined,
+): void {
+  const rules = convertRedirectsConfig(redirects);
+  if (!rules) return;
+
+  const redirectsFilePath = join(clientDir, "_redirects");
+  if (existsSync(redirectsFilePath)) return;
+
+  const lines = rules.map((r) => `${r.source} ${r.destination} ${r.status}`);
+  writeFileSync(redirectsFilePath, lines.join("\n") + "\n");
 }
