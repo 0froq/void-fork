@@ -18,7 +18,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  .void-md {
+  :root:not([data-theme="light"]) .void-md {
     --vmd-text: #e2e8f0;
     --vmd-text-muted: #94a3b8;
     --vmd-link: #60a5fa;
@@ -26,6 +26,15 @@
     --vmd-border: #334155;
     --vmd-bg-soft: #1e293b;
   }
+}
+
+:root[data-theme="dark"] .void-md {
+  --vmd-text: #e2e8f0;
+  --vmd-text-muted: #94a3b8;
+  --vmd-link: #60a5fa;
+  --vmd-link-hover: #93bbfd;
+  --vmd-border: #334155;
+  --vmd-bg-soft: #1e293b;
 }
 
 /* Headings */

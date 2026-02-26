@@ -9,9 +9,13 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  .void-md div[class*="language-"] {
+  :root:not([data-theme="light"]) .void-md div[class*="language-"] {
     background: #1e293b;
   }
+}
+
+:root[data-theme="dark"] .void-md div[class*="language-"] {
+  background: #1e293b;
 }
 
 .void-md div[class*="language-"] pre {
@@ -77,14 +81,23 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  .void-md pre.shiki.shiki-themes {
+  :root:not([data-theme="light"]) .void-md pre.shiki.shiki-themes {
     background-color: var(--shiki-dark-bg, #1e293b) !important;
     color: var(--shiki-dark, #e1e4e8) !important;
   }
 
-  .void-md pre.shiki.shiki-themes span[style*="--shiki-dark"] {
+  :root:not([data-theme="light"]) .void-md pre.shiki.shiki-themes span[style*="--shiki-dark"] {
     color: var(--shiki-dark) !important;
   }
+}
+
+:root[data-theme="dark"] .void-md pre.shiki.shiki-themes {
+  background-color: var(--shiki-dark-bg, #1e293b) !important;
+  color: var(--shiki-dark, #e1e4e8) !important;
+}
+
+:root[data-theme="dark"] .void-md pre.shiki.shiki-themes span[style*="--shiki-dark"] {
+  color: var(--shiki-dark) !important;
 }
 
 /* Shiki notation transformers */
@@ -165,7 +178,11 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  .void-md .line-numbers-wrapper {
+  :root:not([data-theme="light"]) .void-md .line-numbers-wrapper {
     background: #1e293b;
   }
+}
+
+:root[data-theme="dark"] .void-md .line-numbers-wrapper {
+  background: #1e293b;
 }
