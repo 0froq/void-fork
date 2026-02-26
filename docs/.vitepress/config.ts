@@ -109,6 +109,7 @@ export default extendConfig(
                   { text: "Deferred Props", link: "/pages-routing/deferred-props" },
                   { text: "View Transitions", link: "/pages-routing/view-transitions" },
                   { text: "Islands", link: "/islands" },
+                  { text: "Markdown", link: "/pages-routing/markdown" },
                 ],
               },
               { text: "Custom SSR", link: "/ssr" },
