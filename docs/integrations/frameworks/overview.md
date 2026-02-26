@@ -14,7 +14,7 @@ Void supports deploying meta-framework apps to Cloudflare Workers via `void depl
 | [React Router v7](https://reactrouter.com/)         | `@react-router/dev`     | Vite plugin composition — same as TanStack Start                             |
 | [SvelteKit](https://svelte.dev/docs/kit)            | `@sveltejs/kit`         | Vite-based, uses its own Cloudflare adapter                                  |
 | [Nuxt](https://nuxt.com/)                           | `nuxt`                  | Own CLI and build toolchain                                                  |
-| [Astro](https://astro.build/)                       | `astro`                 | Own CLI and Cloudflare adapter                                               |
+| [Astro **v6+**](https://astro.build/)               | `astro`                 | Own CLI and Cloudflare adapter (v6 required)                                 |
 
 Detection is automatic — the CLI reads your `package.json` dependencies.
 

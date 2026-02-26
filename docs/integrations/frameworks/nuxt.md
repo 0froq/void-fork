@@ -25,16 +25,13 @@ import { voidPlugin } from "void";
 export default defineNuxtConfig({
   nitro: {
     preset: "cloudflare-module",
-    cloudflareDev: {
-      persistDir: ".void/v3", // share D1 data with migration plugin
-    },
   },
   modules: ["nitro-cloudflare-dev"],
   vite: { plugins: [voidPlugin()] },
 });
 ```
 
-The `persistDir` must be `.void/v3` so that `nitro-cloudflare-dev` reads from the same D1 database that the migration plugin writes to.
+By default, Nuxt Cloudflare dev runtime and `voidPlugin()` migrations share Wrangler's local state at `.wrangler/state/v3`, so no extra persistence configuration is required.
 
 ### 3. Create `wrangler.jsonc`
 
