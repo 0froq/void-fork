@@ -54,24 +54,12 @@ void deploy
 
 ## Using Void Platform Features
 
-All [Void platform features](../../app-types.md#void-apps) work with Nuxt after deployment. During local development, Nuxt server routes must use `event.context.cloudflare.env` to access bindings because Nitro's server runtime doesn't go through Vite's plugin pipeline where the `cloudflare:workers` shim lives. See [Runtime Helpers in Dev Mode](./overview.md#runtime-helpers-in-dev-mode) for details.
+All [Void platform features](../../app-types.md#void-apps) work with Nuxt. Use them in server routes, API handlers, and middleware:
 
 ### Database
 
-During dev, use `event.context.cloudflare.env` directly:
-
 ```ts
 // server/api/users.get.ts
-export default defineEventHandler(async (event) => {
-  const { DB } = event.context.cloudflare.env;
-  const { results } = await DB.prepare("SELECT * FROM users").all();
-  return results;
-});
-```
-
-After deployment to workerd, `void/db` also works:
-
-```ts
 import { db } from "void/db";
 
 export default defineEventHandler(async () => {
@@ -97,17 +85,6 @@ export default defineEventHandler(() => {
 See [Authentication](../../auth.md) for setup, providers, and the full API.
 
 ### KV Storage
-
-During dev, use the Nitro event context:
-
-```ts
-export default defineEventHandler(async (event) => {
-  const { KV } = event.context.cloudflare.env;
-  return KV.get("app:settings");
-});
-```
-
-After deployment, `void/kv` also works:
 
 ```ts
 import { kv } from "void/kv";
@@ -168,7 +145,7 @@ export default defineQueue<{ to: string; subject: string }>(async (batch) => {
 
 ## Accessing Bindings Directly
 
-Access bindings via the Nitro event context (works in both dev and production):
+You can also access raw Cloudflare bindings via Nitro's event context:
 
 ```ts
 // server/api/users.get.ts
@@ -178,7 +155,3 @@ export default defineEventHandler(async (event) => {
   return results;
 });
 ```
-
-::: tip Recommended for Dev
-Using `event.context.cloudflare.env` is the recommended approach for Nuxt server routes during local development. It works because `nitro-cloudflare-dev` provides Cloudflare bindings through Nitro's event context.
-:::

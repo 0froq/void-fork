@@ -33,32 +33,13 @@ With `voidPlugin()` added to the framework's Vite config, all frameworks get the
 - **Binding inference** — D1, KV, R2, AI, queues, and auth detected from source code
 - **Typed database** — query helpers generated from `migrations/*.sql`
 - **Migrations** — applied to local D1 on dev startup, validated and deployed with `void deploy`
-- **Runtime helpers** — `void/db`, `void/kv`, `void/storage`, `void/ai` for typed access to Cloudflare bindings (see [dev-mode note](#runtime-helpers-in-dev-mode) for Nuxt/Astro)
+- **Runtime helpers** — `void/db`, `void/kv`, `void/storage`, `void/ai` for typed access to Cloudflare bindings in dev and production
 - **Auth** — built-in [authentication](../../auth.md) with `getUser()`, auto-detected from `void/auth` imports
 - **Cron jobs** — scheduled handlers via `crons/` directory
 - **Queue consumers** — typed producers and consumers via `queues/` directory
 - **Revalidation & prerendering** — configured via [`cache.revalidate`](../../cache/revalidation.md) and [`cache.prerender`](../../cache/prerendering.md) in `void.json` (Void apps can also configure these per-page in component files)
 
 Frameworks can also access bindings directly via the framework's own mechanisms (e.g. `platform.env` in SvelteKit, `event.context.cloudflare.env` in Nuxt, `Astro.locals.runtime.env` in Astro).
-
-### Runtime Helpers in Dev Mode
-
-`void/db`, `void/kv`, and other runtime helpers need access to Cloudflare bindings. In production (workerd), they resolve via `cloudflare:workers`. During local development, the mechanism varies by framework:
-
-| Framework      | `void/db` in dev | How it works                                                         |
-| -------------- | ---------------- | -------------------------------------------------------------------- |
-| TanStack Start | Yes              | SSR runs in workerd via `@cloudflare/vite-plugin`                    |
-| React Router   | Yes              | Same as TanStack Start                                               |
-| SvelteKit      | Yes              | `voidPlugin()` injects `withRuntimeEnv()` into SvelteKit hooks (ALS) |
-| Nuxt           | **No**           | Nitro has its own server runtime, bypasses Vite plugins              |
-| Astro          | **No**           | Astro SSR doesn't resolve through Vite's plugin hooks                |
-
-For Nuxt and Astro during dev, use the framework's native binding access instead:
-
-- **Nuxt**: `event.context.cloudflare.env` (via `nitro-cloudflare-dev`)
-- **Astro**: `Astro.locals.runtime.env` (via `@astrojs/cloudflare`)
-
-After deployment, `void/db` and `void/kv` work in all frameworks because `cloudflare:workers` is natively available in workerd.
 
 ## Configuration
 
