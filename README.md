@@ -74,7 +74,7 @@ For PRs that span both repos: merge the framework PR first, then update the subm
 pnpm -r build                       # Build all packages
 pnpm test                           # Run vitest (unit + integration tests)
 pnpm lint                           # oxlint
-pnpm fmt                            # oxfmt --write .
+pnpm fmt                            # oxfmt
 pnpm check                          # Typecheck all packages (tsc --noEmit)
 pnpm run deploy                     # Build all + deploy ai-proxy, dispatch, api & dashboard (production)
 pnpm run deploy:staging             # Deploy all workers to staging environment

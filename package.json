@@ -5,7 +5,7 @@
     "dev": "pnpm -F api -F dashboard --parallel dev",
     "test": "vitest --run",
     "lint": "oxlint --type-aware --ignore-pattern 'framework/**'",
-    "fmt": "oxfmt --write .",
+    "fmt": "oxfmt",
     "check": "pnpm -r --parallel typecheck",
     "deploy": "pnpm deploy:ai-proxy && pnpm deploy:dispatch && pnpm deploy:api && pnpm deploy:dashboard",
     "deploy:ai-proxy": "pnpm -F /ai-proxy run deploy",
