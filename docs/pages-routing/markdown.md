@@ -42,7 +42,7 @@ onMounted(() => {
 
 Markdown pages let you use `.md` files as first-class pages in Void's file-based routing. They compile to static HTML at build time with zero client JavaScript, integrate with the layout chain, and can embed interactive framework components as [islands](../islands).
 
-The `@void-x/md` package is opt-in — projects that don't install it pay nothing.
+The `@void-x/md` package is opt-in as it contains markdown processing and syntax highlighting dependencies that are not necessarily needed in every app.
 
 ## Setup
 
@@ -147,9 +147,37 @@ Welcome to Void. Here's an interactive demo:
 <Counter />
 ```
 
-- **`<script>` block** — extracted before markdown compilation. Import components using the same `with { island: "..." }` syntax as [island pages](../islands). Components must be Uppercase.
+- **`<script>` block** — extracted before markdown compilation. Island imports use `with { island: "..." }` syntax (see [islands](../islands)). Any other code in the block becomes a [client script](#client-scripts) that runs in the browser.
 - **Frontmatter** — YAML metadata between `---` fences. Accessible in layouts via [`useFrontmatter()`](#frontmatter-access).
 - **Body** — standard markdown + GFM. Uppercase tags (`<Counter />`) reference imported components and render as islands.
+
+## Client Scripts
+
+The `<script>` block can contain both island imports and regular JavaScript. Island imports (with `{ island }`) go through the SSR + hydration pipeline as usual. Everything else is bundled as a client module and executed when the page loads.
+
+```md
+<script>
+import Counter from "./Counter.vue" with { island: "visible" }
+import { format } from "date-fns"
+
+document.querySelector('.date').textContent = format(new Date(), 'PPP')
+</script>
+
+# My Post
+
+<Counter />
+
+Published: <span class="date"></span>
+```
+
+In this example:
+
+- `Counter` is an island — SSR'd and hydrated on the client
+- `date-fns` and the `querySelector` call are client code — bundled and run on page load
+
+Each page's client script is code-split into its own chunk via dynamic import, so only the current page's script is loaded. Pages without client code ship zero extra JS.
+
+Client scripts work in both dev (served on-demand, HMR support) and production builds.
 
 ## File Structure
 
@@ -252,13 +280,27 @@ interface MdPage {
 
 The array is sorted by path and updates on HMR in dev when `.md` files are added, removed, or changed.
 
-## Default Theme
+## Default CSS Theme
 
-Import the default theme stylesheet to get prose typography, code highlighting, and container styles:
+The markdown plugin provides a minimal default theme. Unlike Vitepress, this theme is CSS only - it is designed to be built on top of. The theme ships two entry points depending on your needs:
+
+### Full theme (reset + baseline + content)
+
+For standalone markdown sites that need a complete stylesheet — includes a modern CSS reset, baseline body styles, and all markdown content styles:
 
 ```css
-@import "@void-x/md/theme";
+@import "void/md/theme.css";
 ```
+
+### Content only (scoped to `.void-md`)
+
+For embedding markdown in an existing app that already has its own reset and global styles — only includes the `.void-md`-scoped content styles:
+
+```css
+@import "void/md/theme-content.css";
+```
+
+### Usage
 
 Wrap your markdown content in a `.void-md` element to scope the styles:
 
@@ -270,10 +312,35 @@ Wrap your markdown content in a `.void-md` element to scope the styles:
 
 The theme covers:
 
-- **Prose** — headings, paragraphs, lists, blockquotes, tables, inline code, links, horizontal rules. Dark mode via `prefers-color-scheme`.
+- **Prose** — headings, paragraphs, lists, blockquotes, tables, inline code, links, horizontal rules, task lists, `<kbd>`, `<mark>`, definition lists, footnotes. Dark mode via `prefers-color-scheme` and `data-theme` attribute.
 - **Code blocks** — Shiki dual-theme highlighting (light/dark), CSS-driven switching, zero JS.
 - **Containers** — `:::tip`, `:::warning`, `:::danger`, `:::info`, `:::details` styles.
 - **GitHub alerts** — `> [!NOTE]`, `> [!TIP]`, `> [!WARNING]`, etc.
+
+### CSS Variables
+
+All styles are customizable via CSS variables set on `.void-md`. Override them to match your brand:
+
+```css
+.void-md {
+  --vmd-link: #8b5cf6;
+  --vmd-link-hover: #7c3aed;
+}
+```
+
+| Variable            | Light default                                                                  | Dark default | Description                                                            |
+| ------------------- | ------------------------------------------------------------------------------ | ------------ | ---------------------------------------------------------------------- |
+| `--vmd-font-body`   | `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`                     | —            | Body font stack                                                        |
+| `--vmd-font-mono`   | `ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace` | —            | Monospace font stack                                                   |
+| `--vmd-text`        | `#1a1a2e`                                                                      | `#e2e8f0`    | Primary text color                                                     |
+| `--vmd-text-muted`  | `#64748b`                                                                      | `#94a3b8`    | Secondary/muted text (blockquotes, line numbers, footnotes)            |
+| `--vmd-link`        | `#2563eb`                                                                      | `#60a5fa`    | Link color                                                             |
+| `--vmd-link-hover`  | `#1d4ed8`                                                                      | `#93bbfd`    | Link hover color                                                       |
+| `--vmd-border`      | `#e2e8f0`                                                                      | `#334155`    | Borders (h2 underline, tables, inline code, `<kbd>`, horizontal rules) |
+| `--vmd-bg-soft`     | `#f8fafc`                                                                      | `#1e293b`    | Soft background (table headers, inline code, code blocks, `<kbd>`)     |
+| `--vmd-line-height` | `1.75`                                                                         | —            | Body line height                                                       |
+
+Dark mode values apply automatically via `prefers-color-scheme: dark` (auto mode) and `[data-theme="dark"]` (explicit toggle). To force light mode on a dark-preference system, set `data-theme="light"` on `<html>`.
 
 Users who want full control can skip the import and write their own CSS.
 
@@ -435,46 +502,9 @@ Here's a full example of a docs layout using `useFrontmatter()` and `void/md/pag
 
 ::: code-group
 
-```vue [Vue]
-<!-- pages/docs/layout.island.vue -->
-<script setup>
-import { useFrontmatter } from "void/md";
-import pages from "void/md/pages";
-import { useRouter } from "void/vue";
-
-const fm = useFrontmatter();
-const { path } = useRouter();
-const docPages = pages.filter((p) => p.path.startsWith("/docs/"));
-</script>
-
-<style>
-@import "@void-x/md/theme";
-</style>
-
-<template>
-  <div class="docs-layout">
-    <aside>
-      <nav>
-        <a
-          v-for="page in docPages"
-          :key="page.path"
-          :href="page.path"
-          :class="{ active: page.path === path }"
-        >
-          {{ page.title }}
-        </a>
-      </nav>
-    </aside>
-    <main class="void-md">
-      <h1>{{ fm.title }}</h1>
-      <slot />
-    </main>
-  </div>
-</template>
-```
-
 ```tsx [React]
 // pages/docs/layout.island.tsx
+import "void/md/theme-content.css";
 import { useFrontmatter } from "void/md";
 import pages from "void/md/pages";
 import { useRouter } from "void/react";
@@ -499,6 +529,110 @@ export default function DocsLayout({ children }) {
       <main className="void-md">
         <h1>{fm.title}</h1>
         {children}
+      </main>
+    </div>
+  );
+}
+```
+
+```vue [Vue]
+<!-- pages/docs/layout.island.vue -->
+<script setup>
+import { useFrontmatter } from "void/md";
+import pages from "void/md/pages";
+import { useRouter } from "void/vue";
+
+const fm = useFrontmatter();
+const { path } = useRouter();
+const docPages = pages.filter((p) => p.path.startsWith("/docs/"));
+</script>
+
+<style>
+@import "void/md/theme-content.css";
+</style>
+
+<template>
+  <div class="docs-layout">
+    <aside>
+      <nav>
+        <a
+          v-for="page in docPages"
+          :key="page.path"
+          :href="page.path"
+          :class="{ active: page.path === path }"
+        >
+          {{ page.title }}
+        </a>
+      </nav>
+    </aside>
+    <main class="void-md">
+      <h1>{{ fm.title }}</h1>
+      <slot />
+    </main>
+  </div>
+</template>
+```
+
+```svelte [Svelte]
+<!-- pages/docs/layout.island.svelte -->
+<script>
+import "void/md/theme-content.css";
+import { useFrontmatter } from "void/md";
+import pages from "void/md/pages";
+import { useRouter } from "void/svelte";
+
+const fm = useFrontmatter();
+const { path } = useRouter();
+const docPages = pages.filter((p) => p.path.startsWith("/docs/"));
+</script>
+
+<div class="docs-layout">
+  <aside>
+    <nav>
+      {#each docPages as page}
+        <a href={page.path} class:active={page.path === path}>
+          {page.title}
+        </a>
+      {/each}
+    </nav>
+  </aside>
+  <main class="void-md">
+    <h1>{fm.title}</h1>
+    <slot />
+  </main>
+</div>
+```
+
+```tsx [Solid]
+// pages/docs/layout.island.tsx
+import "void/md/theme-content.css";
+import { useFrontmatter } from "void/md";
+import pages from "void/md/pages";
+import { useRouter } from "void/solid";
+import { For } from "solid-js";
+
+const docPages = pages.filter((p) => p.path.startsWith("/docs/"));
+
+export default function DocsLayout(props) {
+  const fm = useFrontmatter();
+  const { path } = useRouter();
+
+  return (
+    <div class="docs-layout">
+      <aside>
+        <nav>
+          <For each={docPages}>
+            {(page) => (
+              <a href={page.path} classList={{ active: page.path === path() }}>
+                {page.title}
+              </a>
+            )}
+          </For>
+        </nav>
+      </aside>
+      <main class="void-md">
+        <h1>{fm.title}</h1>
+        {props.children}
       </main>
     </div>
   );

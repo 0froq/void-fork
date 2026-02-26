@@ -109,8 +109,8 @@
       "types": "./dist/runtime/solid.d.mts",
       "import": "./dist/runtime/solid.mjs"
     },
-    "./md/theme": "./dist/css/md-theme.css",
-    "./md/theme-content": "./dist/css/md-theme-content.css"
+    "./md/theme.css": "./dist/css/md-theme.css",
+    "./md/theme-content.css": "./dist/css/md-theme-content.css"
   },
   "scripts": {
     "build": "node scripts/sync-skill-docs.mjs && tsdown",
