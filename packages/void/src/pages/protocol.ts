@@ -147,6 +147,37 @@ export async function handlePageGet(
 
   // Island pages always render HTML — no Inertia JSON navigation
   if (!island && isPagesRequest(c)) {
+    // Prefetch requests: resolve all deferred props inline (plain JSON, no streaming)
+    const isPrefetch = c.req.header("purpose") === "prefetch";
+    if (isPrefetch && hasDeferred) {
+      const resolvedProps: Record<string, unknown> = { ...immediateProps };
+      await Promise.all(
+        Object.entries(deferredMap).map(async ([, { resolver, keys }]) => {
+          try {
+            const data = await resolver(c);
+            if (keys.length === 1) {
+              resolvedProps[keys[0]] = data;
+            } else {
+              const obj = data as Record<string, unknown>;
+              for (const key of keys) {
+                resolvedProps[key] = obj[key];
+              }
+            }
+          } catch {
+            for (const key of keys) {
+              resolvedProps[key] = null;
+            }
+          }
+        }),
+      );
+      return pageJsonResponse({
+        ...pageObj,
+        props: resolvedProps,
+        deferred: undefined,
+        deferredKeys: undefined,
+      });
+    }
+
     if (!hasDeferred) {
       return pageJsonResponse(pageObj);
     }

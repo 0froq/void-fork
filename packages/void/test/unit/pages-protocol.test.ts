@@ -137,6 +137,27 @@ describe("handlePageGet", () => {
     const body = (await response.json()) as any;
     expect(body.shared).toEqual({ auth: { user: { name: "Test" } } });
   });
+
+  it("prefetch request — resolves deferred props inline as plain JSON", async () => {
+    const c = await createTestContext("GET", "/dashboard", {
+      headers: { "x-voidpages": "true", purpose: "prefetch" },
+    });
+
+    const handler = vi.fn(() => ({
+      stats: { count: 42 },
+      usage: defer(async () => ({ requests: 1200 })),
+    }));
+
+    const response = await handlePageGet(handler, c, "dashboard", mockRenderFn, mockGetAssetTags);
+
+    expect(response.headers.get("content-type")).not.toContain("ndjson");
+    expect(response.headers.get("X-VoidPages")).toBe("true");
+
+    const body = (await response.json()) as any;
+    expect(body.props.usage).toEqual({ requests: 1200 });
+    expect(body.deferred).toBeUndefined();
+    expect(body.deferredKeys).toBeUndefined();
+  });
 });
 
 describe("handlePageMutation", () => {

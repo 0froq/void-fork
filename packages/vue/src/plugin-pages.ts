@@ -8,8 +8,14 @@ import { generateComponentManifest } from "./pages-manifest";
 const RENDERER_ID = "virtual:void-pages-renderer";
 const CLIENT_ENTRY_ID = "virtual:void-pages-client";
 
+interface PrefetchConfig {
+  hoverDelay?: number;
+  cacheFor?: number | string | [string, string];
+}
+
 interface PagesPluginOptions {
   viewTransitions?: boolean;
+  prefetch?: PrefetchConfig;
 }
 
 export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plugin[] {
@@ -87,7 +93,12 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
           }
           if (id === "\0" + CLIENT_ENTRY_ID) {
             if (!pageScan) return "";
-            return generateClientEntry(pageScan, pagesDir, options?.viewTransitions);
+            return generateClientEntry(
+              pageScan,
+              pagesDir,
+              options?.viewTransitions,
+              options?.prefetch,
+            );
           }
         },
       },
@@ -183,12 +194,17 @@ function generateClientEntry(
   scan: PageScanResult,
   pagesDir: string,
   viewTransitions?: boolean,
+  prefetch?: PrefetchConfig,
 ): string {
   return `
 import { createSSRApp, h, reactive, provide, shallowRef, nextTick } from "vue";
 import { createDeferred, resolveDeferred, rejectDeferred } from "@void-x/vue/deferred";
+import { parseCacheFor, PrefetchCache } from "@void-x/vue/prefetch";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
+const _prefetchCache = new PrefetchCache();
+const PREFETCH_HOVER_DELAY = ${prefetch?.hoverDelay ?? 75};
+const PREFETCH_DEFAULT_CACHE_FOR = parseCacheFor(${JSON.stringify(prefetch?.cacheFor ?? "30s")});
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -292,6 +308,8 @@ const _navListeners = new Set();
 let _abortController = null;
 
 export const router = {
+  _hoverDelay: PREFETCH_HOVER_DELAY,
+
   onNavigation(onStart, onEnd) {
     const entry = { onStart, onEnd };
     _navListeners.add(entry);
@@ -305,6 +323,12 @@ export const router = {
     _abortController = new AbortController();
 
     const method = (options.method || "GET").toUpperCase();
+
+    // Flush prefetch cache on mutations
+    if (method !== "GET") {
+      _prefetchCache.flushAll();
+    }
+
     const headers = { "X-VoidPages": "true", "Accept": "application/json" };
     const fetchOptions = { method, headers, signal: _abortController.signal };
 
@@ -313,78 +337,99 @@ export const router = {
       fetchOptions.body = JSON.stringify(options.data);
     }
 
-    const response = await fetch(url, fetchOptions);
-
-    if (response.redirected) {
-      return router.visit(response.url);
-    }
-
-    if (!response.headers.get("X-VoidPages")) {
-      window.location.href = url;
-      return;
-    }
-
-    const contentType = response.headers.get("content-type") || "";
     let pageData;
+    const cacheEntry = method === "GET" ? _prefetchCache.get(url, method) : null;
 
-    if (contentType.includes("application/x-ndjson")) {
-      // Streaming response with deferred props — read NDJSON
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let firstLine = true;
-      const signal = _abortController.signal;
+    if (cacheEntry) {
+      pageData = await cacheEntry.response;
+      _prefetchCache.consume(url, method);
+      if (pageData === null) {
+        // Island/non-pages response was cached — fall back to full navigation
+        window.location.href = url;
+        return;
+      }
+      // If stale, fire background refetch to refresh cache
+      if (!_prefetchCache.isFresh(cacheEntry)) {
+        const bgHeaders = { "X-VoidPages": "true", "Accept": "application/json", "Purpose": "prefetch" };
+        const bgFetch = fetch(url, { method, headers: bgHeaders }).then((r) => {
+          if (!r.headers.get("X-VoidPages")) return null;
+          return r.json();
+        });
+        _prefetchCache.set(url, method, bgFetch, PREFETCH_DEFAULT_CACHE_FOR);
+      }
+    } else {
+      const response = await fetch(url, fetchOptions);
 
-      const processLines = () => {
-        let newlineIdx;
-        while ((newlineIdx = buffer.indexOf("\\n")) !== -1) {
-          const line = buffer.slice(0, newlineIdx);
-          buffer = buffer.slice(newlineIdx + 1);
-          if (!line) continue;
-
-          if (firstLine) {
-            pageData = JSON.parse(line);
-            activeKeyRefs = setupDeferredProps(pageData);
-            firstLine = false;
-          } else {
-            const msg = JSON.parse(line);
-            if (msg.__deferred) {
-              handleDeferredMessage(msg.__deferred, msg.data, msg.error);
-            }
-          }
-        }
-      };
-
-      // Read first line synchronously to get pageData for mounting
-      while (firstLine) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        processLines();
+      if (response.redirected) {
+        return router.visit(response.url);
       }
 
-      // Continue reading deferred data in background
-      (async () => {
-        try {
-          while (!signal.aborted) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            processLines();
-          }
-          // Process any remaining buffer
-          if (buffer.trim()) processLines();
-        } catch (e) {
-          if (e.name !== "AbortError") {
-            // Stream closed unexpectedly — reject remaining deferred
-            for (const ref of Object.values(activeKeyRefs)) {
-              if (ref.loading) rejectDeferred(ref, "Stream closed before resolution");
+      if (!response.headers.get("X-VoidPages")) {
+        window.location.href = url;
+        return;
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+
+      if (contentType.includes("application/x-ndjson")) {
+        // Streaming response with deferred props — read NDJSON
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let firstLine = true;
+        const signal = _abortController.signal;
+
+        const processLines = () => {
+          let newlineIdx;
+          while ((newlineIdx = buffer.indexOf("\\n")) !== -1) {
+            const line = buffer.slice(0, newlineIdx);
+            buffer = buffer.slice(newlineIdx + 1);
+            if (!line) continue;
+
+            if (firstLine) {
+              pageData = JSON.parse(line);
+              activeKeyRefs = setupDeferredProps(pageData);
+              firstLine = false;
+            } else {
+              const msg = JSON.parse(line);
+              if (msg.__deferred) {
+                handleDeferredMessage(msg.__deferred, msg.data, msg.error);
+              }
             }
           }
+        };
+
+        // Read first line synchronously to get pageData for mounting
+        while (firstLine) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          processLines();
         }
-      })();
-    } else {
-      pageData = await response.json();
+
+        // Continue reading deferred data in background
+        (async () => {
+          try {
+            while (!signal.aborted) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              processLines();
+            }
+            // Process any remaining buffer
+            if (buffer.trim()) processLines();
+          } catch (e) {
+            if (e.name !== "AbortError") {
+              // Stream closed unexpectedly — reject remaining deferred
+              for (const ref of Object.values(activeKeyRefs)) {
+                if (ref.loading) rejectDeferred(ref, "Stream closed before resolution");
+              }
+            }
+          }
+        })();
+      } else {
+        pageData = await response.json();
+      }
     }
 
     // Resolve async work before starting the transition
@@ -424,6 +469,51 @@ export const router = {
     } finally {
       for (const l of _navListeners) l.onEnd?.();
     }
+  },
+
+  prefetch(url, options = {}) {
+    const id = matchRoute(url);
+    if (!id) return;
+
+    // Island routes — prefetch HTML via <link rel="prefetch">
+    if (routeMeta[id]?.island) {
+      if (!document.querySelector('link[rel="prefetch"][href="' + url + '"]')) {
+        const link = document.createElement("link");
+        link.rel = "prefetch";
+        link.href = url;
+        link.as = "document";
+        document.head.appendChild(link);
+      }
+      return;
+    }
+
+    // Component JS prefetch — fire dynamic imports
+    if (components[id]) components[id]();
+    const layoutIds = layoutTree[id] || [];
+    for (const lid of layoutIds) {
+      if (components[lid]) components[lid]();
+    }
+
+    // Data prefetch — fetch page JSON and cache it
+    const method = (options.method || "GET").toUpperCase();
+    if (_prefetchCache.has(url, method)) return;
+    const ttl = options.cacheFor
+      ? parseCacheFor(options.cacheFor)
+      : PREFETCH_DEFAULT_CACHE_FOR;
+    const headers = { "X-VoidPages": "true", "Accept": "application/json", "Purpose": "prefetch" };
+    const fetchPromise = fetch(url, { method, headers }).then((r) => {
+      if (!r.headers.get("X-VoidPages")) return null;
+      return r.json();
+    });
+    _prefetchCache.set(url, method, fetchPromise, ttl);
+  },
+
+  flush(url, method = "GET") {
+    _prefetchCache.flush(url, method);
+  },
+
+  flushAll() {
+    _prefetchCache.flushAll();
   },
 
   async reload() {

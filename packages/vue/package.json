@@ -17,6 +17,10 @@
     "./deferred": {
       "types": "./dist/runtime/use-deferred.d.mts",
       "import": "./dist/runtime/use-deferred.mjs"
+    },
+    "./prefetch": {
+      "types": "./dist/runtime/prefetch.d.mts",
+      "import": "./dist/runtime/prefetch.mjs"
     }
   },
   "scripts": {
