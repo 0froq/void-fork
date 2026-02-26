@@ -284,15 +284,26 @@ app.post("/:id/deploy", async (c) => {
       }
     }
 
-    // Build combined bindings: provisioned (d1/kv/r2) + plain_text vars + ASSETS
+    // Build combined bindings: user vars + provisioned (d1/kv/r2) + ASSETS
+    // Platform bindings come LAST so they win on name collision (CF uses last-wins semantics)
+    const RESERVED_BINDING_NAMES = new Set(["__AI_PROXY", "__PROJECT_ID", "__AI_TOKEN", "ASSETS"]);
+
+    const userVarNames = Object.keys(manifest.vars ?? {});
+    const reserved = userVarNames.filter((n) => RESERVED_BINDING_NAMES.has(n));
+    if (reserved.length > 0) {
+      const msg = `reserved binding names: ${reserved.join(", ")}`;
+      await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
+      return c.json({ error: msg }, 400);
+    }
+
     const plainTextBindings = Object.entries(manifest.vars ?? {}).map(([name, text]) => ({
       type: "plain_text" as const,
       name,
       text,
     }));
     const allBindings = [
-      ...workerBindings,
       ...plainTextBindings,
+      ...workerBindings,
       { name: "ASSETS", type: "assets" },
     ];
 
