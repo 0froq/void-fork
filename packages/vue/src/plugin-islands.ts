@@ -517,8 +517,11 @@ function generateIslandClientEntry(
   // ensure the CSS is included in the bundled output.
   if (!isDev) {
     const styleRe = /<style\b([^>]*)>/g;
+    const cssImportRe =
+      /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
     for (const file of cssFiles) {
       const content = readFileSync(file, "utf-8");
+      // Extract <style> blocks via Vue SFC query params
       styleRe.lastIndex = 0;
       let index = 0;
       let match;
@@ -531,6 +534,11 @@ function generateIslandClientEntry(
         if (scoped) query += "&scoped=true";
         lines.push(`import ${JSON.stringify(file + query)};`);
         index++;
+      }
+      // Extract JS-style CSS imports (e.g. import "void/md/theme.css")
+      cssImportRe.lastIndex = 0;
+      while ((match = cssImportRe.exec(content)) !== null) {
+        lines.push(match[0].trim() + ";");
       }
     }
   }
