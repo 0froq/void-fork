@@ -89,6 +89,10 @@
     "./env": {
       "types": "./env.d.ts"
     },
+    "./_env": {
+      "types": "./dist/runtime/env.d.mts",
+      "import": "./dist/runtime/env.mjs"
+    },
     "./vue": {
       "types": "./dist/runtime/vue.d.mts",
       "import": "./dist/runtime/vue.mjs"

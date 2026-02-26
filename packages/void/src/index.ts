@@ -225,46 +225,36 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
       },
     };
 
-    // SvelteKit dev bridge: expose Wrangler's platform proxy env on a global
-    // so runtime helpers (void/db, void/kv, etc.) can resolve bindings
-    // without relying on cloudflare:workers imports in Node.
-    const svelteKitEnvBridgePlugin: Plugin = {
-      name: "void:sveltekit-env-bridge",
+    // SvelteKit hooks injection: transform get_hooks() to wrap `handle` with
+    // withRuntimeEnv(event.platform.env, ...). This stores the env in
+    // AsyncLocalStorage so void/db resolves it via envContext.getStore().
+    // Single Miniflare instance (adapter-cloudflare's), no private APIs.
+    const svelteKitHooksInjectPlugin: Plugin = {
+      name: "void:sveltekit-hooks-inject",
       apply: "serve",
-      async configureServer(server) {
+      transform(code, id) {
         if (detected.class !== "b") return;
+        if (!id.includes(".svelte-kit/generated/server/internal")) return;
+        if (!code.includes("export async function get_hooks")) return;
 
-        const wranglerJsonc = join(root, "wrangler.jsonc");
-        const wranglerJson = join(root, "wrangler.json");
-        const configPath = existsSync(wranglerJsonc)
-          ? wranglerJsonc
-          : existsSync(wranglerJson)
-            ? wranglerJson
-            : undefined;
-
-        try {
-          const { getPlatformProxy } = await import("wrangler");
-          const proxy = await getPlatformProxy({
-            ...(configPath ? { configPath } : {}),
-          });
-
-          (globalThis as Record<string, unknown>).__void_cf_env = proxy.env as unknown;
-
-          server.httpServer?.once("close", () => {
-            void proxy.dispose();
-          });
-        } catch {
-          server.config.logger.warn(
-            "[void] Failed to initialize SvelteKit Cloudflare env bridge. Runtime bindings may be unavailable.",
+        return code
+          .replace(
+            "export async function get_hooks() {",
+            `export async function get_hooks() {\n  const { withRuntimeEnv } = await import("void/_env");`,
+          )
+          .replace(
+            /return\s*\{/,
+            `const __origHandle = handle ?? (({ event, resolve }) => resolve(event));\n` +
+              `  handle = ({ event, resolve }) => withRuntimeEnv(event.platform?.env, () => __origHandle({ event, resolve }));\n` +
+              `  return {`,
           );
-        }
       },
     };
 
     return [
       wranglerCompatPlugin,
       wranglerSyncPlugin,
-      svelteKitEnvBridgePlugin,
+      svelteKitHooksInjectPlugin,
       dbTypesPlugin(root, false),
       migrationPlugin(root, "local", frameworkPersistRoot),
     ];

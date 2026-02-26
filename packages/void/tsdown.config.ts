@@ -60,6 +60,7 @@ export default defineConfig({
     "src/auth/session.ts",
     "src/auth/password.ts",
     "src/auth/schema.ts",
+    "src/runtime/env.ts",
     "src/runtime/db.ts",
     "src/runtime/kv.ts",
     "src/runtime/queues.ts",

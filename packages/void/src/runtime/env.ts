@@ -15,18 +15,6 @@ try {
   // Not running in workerd.
 }
 
-let getSvelteRequestEvent: (() => unknown) | undefined;
-try {
-  // Keep the specifier non-literal so bundling void doesn't require SvelteKit.
-  const svelteKitSpecifier = "@sveltejs/kit/internal/server";
-  const mod = (await import(svelteKitSpecifier)) as { getRequestEvent?: () => unknown };
-  if (typeof mod.getRequestEvent === "function") {
-    getSvelteRequestEvent = mod.getRequestEvent;
-  }
-} catch {
-  // Not running in SvelteKit.
-}
-
 function asEnv(value: unknown): RuntimeEnv | null {
   if (typeof value !== "object" || value === null) return null;
   // Nuxt dev sets globalThis.__env__ to a Promise before resolving to env.
@@ -42,16 +30,6 @@ function getNuxtEnv(): RuntimeEnv | null {
   return asEnv((globalThis as RuntimeEnv & { __env__?: unknown }).__env__);
 }
 
-function getSvelteKitEnv(): RuntimeEnv | null {
-  if (!getSvelteRequestEvent) return null;
-  try {
-    const event = getSvelteRequestEvent() as { platform?: { env?: unknown } } | undefined;
-    return asEnv(event?.platform?.env);
-  } catch {
-    return null;
-  }
-}
-
 export function withRuntimeEnv<T>(env: unknown, fn: () => T): T {
   const resolved = asEnv(env);
   if (!resolved) return fn();
@@ -63,7 +41,6 @@ export function getRuntimeEnv(): RuntimeEnv {
     envContext.getStore() ??
     getVoidDevEnv() ??
     getNuxtEnv() ??
-    getSvelteKitEnv() ??
     cloudflareEnv ??
     (() => {
       throw new Error(
