@@ -15,6 +15,11 @@ export interface QueueMeta {
   maxBatchTimeout?: number;
 }
 
+export interface HeaderRule {
+  pattern: string;
+  headers: [string, string][];
+}
+
 export interface AssetConfig {
   not_found_handling?: "none" | "single-page-application" | "404-page";
   html_handling?: "auto-trailing-slash" | "force-trailing-slash" | "drop-trailing-slash" | "none";
