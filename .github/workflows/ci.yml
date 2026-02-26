@@ -28,6 +28,7 @@ jobs:
       - run: pnpm --dir framework install --frozen-lockfile
       - run: pnpm --dir framework build
       - run: pnpm install --frozen-lockfile
+      - run: mkdir -p packages/dashboard/.void && echo '{"files":[]}' > packages/dashboard/.void/tsconfig.json
       - run: pnpm lint
       - run: pnpm -r build
       - run: pnpm check

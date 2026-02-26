@@ -31,5 +31,5 @@ export function sendUsageEvent(
     responseBytes: number;
   },
 ): void {
-  env.USAGE_QUEUE.send(data);
+  void env.USAGE_QUEUE.send(data);
 }

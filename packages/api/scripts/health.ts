@@ -248,4 +248,4 @@ async function run() {
   if (failed > 0) process.exit(1);
 }
 
-run();
+void run();

@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "pnpm -F api -F dashboard --parallel dev",
     "test": "vitest --run",
-    "lint": "oxlint",
+    "lint": "oxlint --type-aware --ignore-pattern 'framework/**'",
     "fmt": "oxfmt --write .",
     "check": "pnpm -r --parallel typecheck",
     "deploy": "pnpm deploy:ai-proxy && pnpm deploy:dispatch && pnpm deploy:api && pnpm deploy:dashboard",
@@ -27,6 +27,7 @@
     "lint-staged": "^16.2.7",
     "oxfmt": "^0.32.0",
     "oxlint": "^1.47.0",
+    "oxlint-tsgolint": "^0.15.0",
     "vitest": "^4.0.18"
   },
   "lint-staged": {

@@ -107,4 +107,4 @@ async function main(): Promise<void> {
   p.outro("Done!");
 }
 
-main();
+void main();
