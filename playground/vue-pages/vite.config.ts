@@ -1,10 +1,9 @@
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
 import { voidVue } from "@void-x/vue";
-import { voidMarkdown } from "@void-x/md";
 
 export default defineConfig({
-  plugins: [voidPlugin(), voidVue(), voidMarkdown()],
+  plugins: [voidPlugin(), voidVue()],
   // stabilize dev server start for tests
   optimizeDeps: { include: ["valibot"] },
 });

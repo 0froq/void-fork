@@ -3,7 +3,7 @@ import { useFrontmatter } from "void/md";
 import pages from "void/md/pages";
 
 const fm = useFrontmatter();
-const docPages = pages.filter((p) => p.path.startsWith("/docs"));
+const posts = pages.filter((p) => p.path.startsWith("/posts"));
 </script>
 
 <style>
@@ -11,13 +11,13 @@ const docPages = pages.filter((p) => p.path.startsWith("/docs"));
 </style>
 
 <template>
-  <div style="display: flex; gap: 2rem; padding: 1rem">
+  <div style="display: flex; gap: 2rem">
     <aside style="width: 200px; flex-shrink: 0">
-      <h3>Docs</h3>
+      <h3>Posts</h3>
       <nav>
         <ul style="list-style: none; padding: 0">
-          <li v-for="page in docPages" :key="page.path" style="margin-bottom: 0.5em">
-            <a :href="page.path">{{ page.title }}</a>
+          <li v-for="post in posts" :key="post.path" style="margin-bottom: 0.5em">
+            <a :href="post.path">{{ post.title }}</a>
           </li>
         </ul>
       </nav>
