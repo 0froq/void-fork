@@ -107,6 +107,7 @@ The `.island` suffix tells Void to:
 1. **Server-render the full page** as static HTML (no `data-page` attribute, no client-side router)
 2. **Only hydrate** the components you explicitly mark as islands
 3. **Skip the Inertia protocol** — navigation between island pages uses full-page loads
+4. **Auto-prerender** — island pages with no `loader` and no dynamic params are automatically [prerendered](/cache/prerendering) at deploy time. Opt out with `export const prerender = false` in the companion `.server.ts` file.
 
 ## Marking Components as Islands
 

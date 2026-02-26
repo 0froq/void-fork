@@ -195,7 +195,7 @@ pages/
       deployment.md
 ```
 
-A `.md` file inherits layouts, supports companion `.server.ts` files for dynamic data, and auto-prerenders when static — the same rules as any other page.
+A `.md` file inherits layouts, supports companion `.server.ts` files for dynamic data, and [auto-prerenders](/cache/prerendering) when static — the same rules as any other page.
 
 ## Frontmatter Access
 
