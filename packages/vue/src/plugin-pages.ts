@@ -348,6 +348,15 @@ export const router = {
         window.location.href = url;
         return;
       }
+      // Prefetch responses have deferred props pre-resolved — wrap them in deferred refs
+      if (pageData.deferredKeys) {
+        for (const key of Object.keys(pageData.deferredKeys)) {
+          const resolved = pageData.props[key];
+          const ref = createDeferred();
+          resolveDeferred(ref, resolved);
+          pageData.props[key] = ref;
+        }
+      }
       // If stale, fire background refetch to refresh cache
       if (!_prefetchCache.isFresh(cacheEntry)) {
         const bgHeaders = { "X-VoidPages": "true", "Accept": "application/json", "Purpose": "prefetch" };

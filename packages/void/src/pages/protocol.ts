@@ -174,7 +174,6 @@ export async function handlePageGet(
         ...pageObj,
         props: resolvedProps,
         deferred: undefined,
-        deferredKeys: undefined,
       });
     }
 

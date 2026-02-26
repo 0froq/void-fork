@@ -34,6 +34,8 @@ export const Link: Component = defineComponent({
 
     function doPrefetch() {
       if (!router?.prefetch) return;
+      const current = window.location.pathname + window.location.search;
+      if (props.href === current) return;
       const options: any = {};
       if (props.cacheFor !== undefined) options.cacheFor = props.cacheFor;
       if (props.method) options.method = props.method;
