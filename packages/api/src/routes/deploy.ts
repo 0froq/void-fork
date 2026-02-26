@@ -577,13 +577,27 @@ function resolvePathTtl(
   return 0;
 }
 
+const MAX_CACHE = 256;
+const regexCache = new Map<string, RegExp>();
+
 /**
  * Match a pattern against a pathname.
  * `*` matches any characters including `/`.
  */
 function matchPattern(pattern: string, pathname: string): boolean {
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*");
-  return new RegExp(`^${escaped}$`).test(pathname);
+  let regex = regexCache.get(pattern);
+  if (regex) {
+    regexCache.delete(pattern);
+    regexCache.set(pattern, regex);
+  } else {
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*");
+    regex = new RegExp(`^${escaped}$`);
+    if (regexCache.size >= MAX_CACHE) {
+      regexCache.delete(regexCache.keys().next().value!);
+    }
+    regexCache.set(pattern, regex);
+  }
+  return regex.test(pathname);
 }
 
 /**
