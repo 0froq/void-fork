@@ -84,6 +84,26 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
   let viteRoot = "";
   const islandCssMap = new Map<string, string[]>();
 
+  /** Rebuild islandCssMap from current file contents (re-runs fileHasCssImports). */
+  function rebuildIslandCssMap(): void {
+    if (!pageScan) return;
+    islandCssMap.clear();
+    for (const page of pageScan.pages) {
+      if (!page.island) continue;
+      const cssPaths: string[] = [];
+      const layoutChain = resolveLayoutChain(page.componentId, pageScan.layouts);
+      for (const layout of layoutChain) {
+        const layoutPath = resolve(pagesDir, layout.filePath);
+        if (fileHasCssImports(layoutPath)) cssPaths.push(layoutPath);
+      }
+      const pagePath = resolve(pagesDir, page.componentPath);
+      if (fileHasCssImports(pagePath)) cssPaths.push(pagePath);
+      if (cssPaths.length > 0) {
+        islandCssMap.set(page.componentId, cssPaths);
+      }
+    }
+  }
+
   return [
     {
       name: "void-react:islands",
@@ -97,6 +117,19 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
       // produces a JS module with `__vite__css = "..."` for HMR — we extract
       // the CSS string and serve it directly for render-blocking <link> tags.
       configureServer(server) {
+        // When an island CSS file changes, rebuild the CSS map and invalidate
+        // the renderer so the next SSR render picks up added/removed styles.
+        server.watcher.on("change", (path) => {
+          if (!islandCssFiles.has(path)) return;
+          rebuildIslandCssMap();
+          for (const env of Object.values(server.environments)) {
+            const mod = env.moduleGraph.getModuleById("\0" + ISLANDS_RENDERER_ID);
+            if (mod) env.moduleGraph.invalidateModule(mod);
+          }
+          const cssMod = server.environments.client?.moduleGraph.getModuleById(path + ".css");
+          if (cssMod) server.environments.client.moduleGraph.invalidateModule(cssMod);
+        });
+
         server.middlewares.use(async (req, res, next) => {
           if (!req.url) return next();
           const url = req.url.split("?")[0];
@@ -165,20 +198,7 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
           }
 
           // Build CSS map for dev FOUC prevention (only files with CSS imports)
-          for (const page of pageScan.pages) {
-            if (!page.island) continue;
-            const cssPaths: string[] = [];
-            const layoutChain = resolveLayoutChain(page.componentId, pageScan.layouts);
-            for (const layout of layoutChain) {
-              const layoutPath = resolve(pagesDir, layout.filePath);
-              if (fileHasCssImports(layoutPath)) cssPaths.push(layoutPath);
-            }
-            const pagePath = resolve(pagesDir, page.componentPath);
-            if (fileHasCssImports(pagePath)) cssPaths.push(pagePath);
-            if (cssPaths.length > 0) {
-              islandCssMap.set(page.componentId, cssPaths);
-            }
-          }
+          rebuildIslandCssMap();
         }
       },
 
