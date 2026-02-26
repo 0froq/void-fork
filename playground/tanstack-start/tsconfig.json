@@ -1,4 +1,5 @@
 {
+  "extends": "./.void/tsconfig.json",
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "compilerOptions": {
     "target": "ES2022",

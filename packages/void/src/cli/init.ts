@@ -3,6 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { intro, outro, log, confirm, isCancel, cancel, note, select } from "@clack/prompts";
 import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
+import { detectFramework, type DetectedFramework } from "../plugin-inference";
 import {
   SCAFFOLD_FILES,
   SCAFFOLD_GITIGNORE_LINES,
@@ -283,6 +284,89 @@ function setupTsconfig(root: string, state: ProjectState): void {
     if (!state.hasTypescript) {
       log.info("Don't forget to install typescript");
     }
+  }
+}
+
+/** Today's date as YYYY-MM-DD for wrangler compatibility_date. */
+function getTodayCompatDate(): string {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/**
+ * Ensure wrangler.jsonc exists with `compatibility_date` and `nodejs_als` flag
+ * for class B/C meta-frameworks that need it for local dev.
+ */
+function setupWranglerConfig(root: string, framework: DetectedFramework): void {
+  if (framework.class === "a") return;
+
+  let configPath: string | undefined;
+  let parsed: Record<string, unknown> | undefined;
+  let created = false;
+
+  for (const name of ["wrangler.jsonc", "wrangler.json"]) {
+    const p = join(root, name);
+    if (existsSync(p)) {
+      configPath = p;
+      try {
+        // Use dynamic import-free JSONC parsing — strip comments, then JSON.parse
+        const raw = readFileSync(p, "utf-8");
+        parsed = JSON.parse(raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, ""));
+      } catch {
+        // unparseable — start fresh
+      }
+      break;
+    }
+  }
+
+  if (!configPath || !parsed) {
+    configPath = join(root, "wrangler.jsonc");
+    parsed = {};
+    created = true;
+  }
+
+  let modified = false;
+
+  // Ensure compatibility_date
+  if (!parsed.compatibility_date) {
+    parsed.compatibility_date = getTodayCompatDate();
+    modified = true;
+  }
+
+  // Ensure nodejs_als flag
+  const flags = Array.isArray(parsed.compatibility_flags)
+    ? (parsed.compatibility_flags as string[])
+    : [];
+  if (!flags.includes("nodejs_als")) {
+    parsed.compatibility_flags = [...flags, "nodejs_als"];
+    modified = true;
+  }
+
+  if (created || modified) {
+    writeFileSync(configPath, JSON.stringify(parsed, null, 2) + "\n");
+    if (created) {
+      log.success("Created wrangler.jsonc with compatibility_date and nodejs_als");
+    } else {
+      log.success("Updated wrangler.jsonc with compatibility_date and nodejs_als");
+    }
+  } else {
+    log.success("wrangler.jsonc looks good");
+  }
+}
+
+/** Get the dev command for a detected framework. */
+function getDevCommand(framework?: DetectedFramework): string {
+  if (!framework) return "vite dev";
+  switch (framework.name) {
+    case "nuxt":
+      return "nuxt dev";
+    case "astro":
+      return "astro dev";
+    default:
+      return "vite dev";
   }
 }
 
@@ -767,8 +851,14 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   intro(cliTitle("init"));
 
   const targeted = Boolean(initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agents));
+  const framework = detectFramework(root);
   const preScaffoldState = detectProjectState(root);
-  if (isScaffoldableEmptyProject(root)) {
+
+  if (framework) {
+    log.info(`Detected ${framework.name} (class ${framework.class})`);
+  }
+
+  if (!framework && isScaffoldableEmptyProject(root)) {
     log.info("Empty project detected. Scaffolding starter files...");
     scaffoldBasicApp(root, preScaffoldState.packageManager);
   }
@@ -786,14 +876,19 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     ensureProjectTsconfig(root);
   }
 
-  // Steps 2–4: Agent instructions, skills, MCP config
+  // Step 2: Wrangler config (class B/C meta-frameworks)
+  if (framework) {
+    setupWranglerConfig(root, framework);
+  }
+
+  // Steps 3–5: Agent instructions, skills, MCP config
   if (!targeted || initArgs?.agents) {
     const agentSetup = await resolveAgentSetup(root);
 
-    // Step 2: Agent instructions
+    // Step 3: Agent instructions
     injectAgentBlock(root, agentSetup.instructionFilePath);
 
-    // Step 3: Link skills
+    // Step 4: Link skills
     if (agentSetup.agents.length > 0) {
       const { linkSkillsForSpecificAgents } = await import("./skills");
       linkSkillsForSpecificAgents(root, agentSetup.agents);
@@ -801,12 +896,12 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
       log.info("Skills linking skipped for generic agent setup");
     }
 
-    // Step 4: MCP config
+    // Step 5: MCP config
     setupMcpConfig(root, agentSetup.agents);
   }
 
-  // Step 5: Demo code (only in full interactive flow)
-  if (!targeted) {
+  // Step 6: Demo code (only in full interactive flow, not for meta-frameworks)
+  if (!targeted && !framework) {
     if (state.hasRoutes || state.hasMigrations) {
       log.info("Project already has routes or migrations, skipping demo");
     } else if (!state.typescriptWanted) {
@@ -825,7 +920,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     }
   }
 
-  // Step 6: GitHub Actions
+  // Step 7: GitHub Actions
   if (!targeted || initArgs?.github) {
     const deployYmlPath = join(root, ".github", "workflows", "deploy.yml");
     if (existsSync(deployYmlPath)) {
@@ -845,5 +940,5 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     }
   }
 
-  outro("Run `vite dev` to start developing");
+  outro(`Run \`${getDevCommand(framework)}\` to start developing`);
 }
