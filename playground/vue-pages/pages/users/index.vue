@@ -16,7 +16,7 @@ const form = useForm("/users", {
 
     <ul>
       <li v-for="user in users" :key="user.id">
-        <Link :href="`/users/${user.id}`">{{ user.name }}</Link>
+        <Link :href="`/users/${user.id}`" prefetch="visible">{{ user.name }}</Link>
         ({{ user.email }})
       </li>
     </ul>
