@@ -52,16 +52,73 @@ function resolveLayoutChain(componentId: string, layouts: LayoutDefinition[]): L
   return chain;
 }
 
+function fileHasCssImports(filePath: string): boolean {
+  try {
+    const code = readFileSync(filePath, "utf-8");
+    return /import\b[^"']*["'][^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)["']/.test(
+      code,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function extractCssImports(filePath: string): string {
+  const code = readFileSync(filePath, "utf-8");
+  const re =
+    /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
+  const imports: string[] = [];
+  let match;
+  while ((match = re.exec(code)) !== null) {
+    imports.push(`@import ${JSON.stringify(match[1])};`);
+  }
+  return imports.join("\n");
+}
+
 export function islandsPlugin(pagesDir: string): Plugin[] {
   let pageScan: PageScanResult | null = null;
   let isDev = false;
   const root = dirname(pagesDir);
   const islandManifest = new Map<string, IslandEntry>();
   const islandCssFiles = new Set<string>();
+  let viteRoot = "";
+  const islandCssMap = new Map<string, string[]>();
 
   return [
     {
       name: "void-react:islands",
+
+      configResolved(config) {
+        viteRoot = config.root;
+        isDev = config.command === "serve";
+      },
+
+      // Serve virtual island CSS as raw text/css in dev. The SSR transform
+      // outputs `export default "css"` instead of a JS module with HMR.
+      configureServer(server) {
+        server.middlewares.use(async (req, res, next) => {
+          if (!req.url) return next();
+          const url = req.url.split("?")[0];
+          if (!url.endsWith(".css")) return next();
+          const srcPath = resolve(viteRoot, url.slice(1, -4));
+          if (!islandCssFiles.has(srcPath)) return next();
+          try {
+            const result = await server.environments.ssr.transformRequest(req.url);
+            if (result) {
+              const m = result.code.match(/export\s+default\s+("(?:[^"\\]|\\.)*")/);
+              if (m) {
+                res.setHeader("Content-Type", "text/css");
+                res.statusCode = 200;
+                res.end(JSON.parse(m[1]));
+                return;
+              }
+            }
+          } catch {
+            // fall through
+          }
+          next();
+        });
+      },
 
       async buildStart() {
         if (existsSync(pagesDir)) {
@@ -103,31 +160,64 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
               islandCssFiles.add(resolve(pagesDir, layout.filePath));
             }
           }
+
+          // Build CSS map for dev FOUC prevention (only files with CSS imports)
+          for (const page of pageScan.pages) {
+            if (!page.island) continue;
+            const cssPaths: string[] = [];
+            const layoutChain = resolveLayoutChain(page.componentId, pageScan.layouts);
+            for (const layout of layoutChain) {
+              const layoutPath = resolve(pagesDir, layout.filePath);
+              if (fileHasCssImports(layoutPath)) cssPaths.push(layoutPath);
+            }
+            const pagePath = resolve(pagesDir, page.componentPath);
+            if (fileHasCssImports(pagePath)) cssPaths.push(pagePath);
+            if (cssPaths.length > 0) {
+              islandCssMap.set(page.componentId, cssPaths);
+            }
+          }
         }
       },
 
       resolveId: {
-        filter: { id: /^virtual:void-islands-(renderer|client)$/ },
+        filter: { id: /^virtual:void-islands-(renderer|client)$|\.(tsx|jsx)\.css$/ },
         handler(source) {
           if (source === ISLANDS_RENDERER_ID || source === ISLANDS_CLIENT_ENTRY_ID) {
             return "\0" + source;
+          }
+          // Virtual island CSS modules — no \0 prefix so Vite CSS pipeline processes them.
+          // Return absolute path so CSS @import resolution uses the correct directory.
+          if (source.endsWith(".css")) {
+            const srcPath = source.slice(0, -4);
+            if (islandCssFiles.has(srcPath)) return srcPath + ".css";
+            if (srcPath.startsWith("/")) {
+              const absPath = resolve(viteRoot, srcPath.slice(1));
+              if (islandCssFiles.has(absPath)) return absPath + ".css";
+            }
           }
         },
       },
 
       load: {
         // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
-        filter: { id: /^\0virtual:void-islands-(renderer|client)$/ },
+        filter: { id: /^\0virtual:void-islands-(renderer|client)$|\.(tsx|jsx)\.css$/ },
         handler(id) {
           if (id === "\0" + ISLANDS_RENDERER_ID) {
             if (!pageScan) {
               return "export function renderIslandPage() { throw new Error('No pages found'); }";
             }
-            return generateIslandRenderer(pageScan, pagesDir, isDev);
+            return generateIslandRenderer(pageScan, pagesDir, isDev, islandCssMap, viteRoot);
           }
           if (id === "\0" + ISLANDS_CLIENT_ENTRY_ID) {
             if (!pageScan) return "";
             return generateIslandClientEntry(islandManifest, islandCssFiles);
+          }
+          // Virtual island CSS module — resolveId returns absolute path
+          if (id.endsWith(".css") && !id.startsWith("\0")) {
+            const srcPath = id.slice(0, -4);
+            if (islandCssFiles.has(srcPath)) {
+              return extractCssImports(srcPath);
+            }
           }
         },
       },
@@ -205,9 +295,8 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
 
       config(_, env) {
         if (!existsSync(pagesDir)) return;
-        isDev = env.command === "serve";
         // Only add the islands client entry when island pages actually exist
-        if (!isDev && hasIslandFiles(pagesDir)) {
+        if (env.command !== "serve" && hasIslandFiles(pagesDir)) {
           return {
             build: {
               rollupOptions: {
@@ -221,7 +310,13 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
   ];
 }
 
-function generateIslandRenderer(scan: PageScanResult, pagesDir: string, isDev: boolean): string {
+function generateIslandRenderer(
+  scan: PageScanResult,
+  pagesDir: string,
+  isDev: boolean,
+  islandCssMap: Map<string, string[]>,
+  viteRoot: string,
+): string {
   const preambleScript = isDev
     ? `
 <script type="module">
@@ -233,12 +328,23 @@ function generateIslandRenderer(scan: PageScanResult, pagesDir: string, isDev: b
 </script>`
     : "";
 
+  // Build CSS link map for dev FOUC prevention
+  let cssMapCode = "";
+  if (isDev && islandCssMap.size > 0) {
+    const cssMapObj: Record<string, string[]> = {};
+    for (const [compId, paths] of islandCssMap) {
+      cssMapObj[compId] = paths.map((p) => "/" + relative(viteRoot, p) + ".css");
+    }
+    cssMapCode = `const __cssPaths = ${JSON.stringify(cssMapObj)};`;
+  }
+
   return `
 import React from "react";
 import { renderToString } from "react-dom/server";
 import { SharedContext, ErrorsContext } from "@void-x/react/runtime";
 
 ${generateComponentManifest(scan, pagesDir)}
+${cssMapCode}
 
 const PREAMBLE_SCRIPT = ${JSON.stringify(preambleScript)};
 
@@ -273,7 +379,7 @@ export async function renderIslandPage(pageObj, assetTags) {
 
   return \`<!doctype html>
 <html>
-<head>\${PREAMBLE_SCRIPT}\${assetTags.head}</head>
+<head>\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\\n") : ""}\${PREAMBLE_SCRIPT}\${assetTags.head}</head>
 <body>
   <div id="app">\${html}</div>
   \${assetTags.body}
