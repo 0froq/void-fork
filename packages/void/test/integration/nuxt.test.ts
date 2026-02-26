@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
@@ -9,11 +9,10 @@ const PLAYGROUND = "playground/nuxt";
 const DEV_PORT = 5219;
 const DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
 
-const MINIMAL_WRANGLER = JSON.stringify(
-  { name: "playground-nuxt", compatibility_date: "2026-02-24" },
-  null,
-  2,
-);
+function removeWranglerConfig(root: string) {
+  rmSync(join(root, "wrangler.jsonc"), { force: true });
+  rmSync(join(root, "wrangler.json"), { force: true });
+}
 
 async function waitForServer(url: string, timeoutMs: number): Promise<void> {
   const start = Date.now();
@@ -45,7 +44,7 @@ describe("playground/nuxt build", () => {
     rmSync(join(pg, ".output"), { recursive: true, force: true });
     rmSync(join(pg, ".nuxt"), { recursive: true, force: true });
     rmSync(join(pg, ".void"), { recursive: true, force: true });
-    writeFileSync(join(pg, "wrangler.jsonc"), MINIMAL_WRANGLER);
+    removeWranglerConfig(pg);
     execSync(`pnpm --dir ${PLAYGROUND} build`, { cwd: ROOT, stdio: "pipe" });
   }, 120_000);
 
@@ -66,7 +65,7 @@ describe("playground/nuxt dev", () => {
     const pg = join(ROOT, PLAYGROUND);
     rmSync(join(pg, ".void"), { recursive: true, force: true });
     rmSync(join(pg, ".wrangler"), { recursive: true, force: true });
-    writeFileSync(join(pg, "wrangler.jsonc"), MINIMAL_WRANGLER);
+    removeWranglerConfig(pg);
 
     child = spawn(
       "pnpm",
