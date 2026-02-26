@@ -1,5 +1,12 @@
 import type { ScanResult } from "./scan";
 
+/**
+ * Script tag injected into dev HTML to load the binding-hint virtual module.
+ * The virtual module (served by restartPlugin) listens for `void:new-binding`
+ * HMR events and shows a toast with a click-to-restart action.
+ */
+const BINDING_HINT_SCRIPT = `<script type="module" src="/@id/virtual:void/binding-hint"></script>`;
+
 export type AuthProvider = "github" | "google" | "email";
 
 export interface AuthCompileOptions {
@@ -202,6 +209,7 @@ export function compileRouteTable(
     lines.push("");
     lines.push(`function getDevClientTags() {`);
     lines.push(`  const headTags = [\`<script type="module" src="/@vite/client"></script>\`];`);
+    lines.push(`  headTags.push(\`${BINDING_HINT_SCRIPT}\`);`);
     if (options.reactRefresh) {
       lines.push(`  headTags.push(\`<script type="module">
 import RefreshRuntime from "/@react-refresh";
@@ -594,7 +602,9 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`}`);
   lines.push("");
   lines.push(`function getPagesDevClientTags() {`);
-  lines.push(`  const headTag = \`<script type="module" src="/@vite/client"></script>\`;`);
+  lines.push(
+    `  const headTag = \`<script type="module" src="/@vite/client"></script>\\n${BINDING_HINT_SCRIPT}\`;`,
+  );
   lines.push(
     `  const bodyTag = \`<script type="module" src="\${escapeHtmlAttr(PAGES_CLIENT_ENTRY_URL)}"></script>\`;`,
   );
@@ -679,7 +689,9 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     );
     lines.push("");
     lines.push(`function getIslandsDevClientTags() {`);
-    lines.push(`  const headTag = \`<script type="module" src="/@vite/client"></script>\`;`);
+    lines.push(
+      `  const headTag = \`<script type="module" src="/@vite/client"></script>\\n${BINDING_HINT_SCRIPT}\`;`,
+    );
     lines.push(
       `  const bodyTag = \`<script type="module" src="\${escapeHtmlAttr(ISLANDS_CLIENT_ENTRY_URL)}"></script>\`;`,
     );

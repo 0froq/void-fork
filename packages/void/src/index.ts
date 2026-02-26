@@ -12,11 +12,14 @@ import {
   FRAMEWORK_SCAN_DIRS,
   type Framework,
 } from "./plugin-inference";
+import { inferBindingsFromSource } from "./inference/walk";
 import { scanJobsSync } from "./crons/scan";
 import { scanQueuesSync } from "./queues/scan";
 import { validateSsrEntry } from "./ssr/entry";
 import { readConfig, normalizeAuth, resolveBindingNames } from "./config";
 import { ensureWranglerNodejsAlsFlag, syncWranglerBindings } from "./cli/wrangler";
+import { restartPlugin } from "./plugin-restart";
+import { voidLog, voidWarn, voidError } from "./log";
 
 export type { AuthProvider } from "./config";
 
@@ -93,9 +96,7 @@ async function runAiSetupPrompt(
   try {
     projects = await client.listProjects();
   } catch {
-    server.config.logger.warn(
-      "[void] Failed to fetch projects. Run `void link` to link a project manually.",
-    );
+    voidWarn("Failed to fetch projects. Run `void link` to link a project manually.");
     return;
   }
 
@@ -138,7 +139,7 @@ async function runAiSetupPrompt(
       projectId = created.id;
       slug = created.slug;
     } catch (err: any) {
-      server.config.logger.error(`[void] Failed to create project: ${err.message}`);
+      voidError(`Failed to create project: ${err.message}`);
       return;
     }
     log.success(`Project created: ${slug}`);
@@ -203,8 +204,7 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
         if (env.command !== "serve") return;
         const synced = ensureWranglerNodejsAlsFlag(root);
         if (synced) {
-          // eslint-disable-next-line no-console
-          console.log("[void] Synced nodejs_als to wrangler config");
+          voidLog("Synced nodejs_als to wrangler config");
         }
       },
     };
@@ -219,8 +219,7 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
           bindingNames,
         });
         if (synced) {
-          // eslint-disable-next-line no-console
-          console.log("[void] Synced bindings to wrangler.jsonc");
+          voidLog("Synced bindings to wrangler.jsonc");
         }
       },
     };
@@ -408,17 +407,13 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
       if (bindings.needsAI) {
         const credentials = readVoidDevCredentials(root);
         if (credentials.status === "no-token") {
-          server.config.logger.warn(
-            "[void] AI requires authentication. Run `void login`, then restart the dev server.",
-          );
+          voidWarn("AI requires authentication. Run `void login`, then restart the dev server.");
         } else if (credentials.status === "no-project") {
           if (process.stdin.isTTY) {
             // Fire-and-forget interactive setup
             runAiSetupPrompt(root, credentials.token, credentials.staging, server);
           } else {
-            server.config.logger.warn(
-              "[void] AI requires a linked project. Run `void link` to set one up.",
-            );
+            voidWarn("AI requires a linked project. Run `void link` to set one up.");
           }
         }
       }
@@ -437,14 +432,68 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
             providers.push("Google");
           if (providers.length > 0) {
             envHintShown = true;
-            server.config.logger.warn(
-              `[void] ${providers.join(" and ")} OAuth credentials detected — restart to enable.`,
-            );
+            voidWarn(`${providers.join(" and ")} OAuth credentials detected — restart to enable.`);
           }
         } catch {}
       };
       server.watcher.on("change", check);
       server.watcher.on("add", check);
+    },
+  };
+
+  // Binding watch plugin — detects new binding imports mid-session and
+  // notifies the developer via terminal log + browser toast.
+  const autoDetectBindings = !inferenceOptions;
+  const autoDetectAuth = config.auth === undefined;
+  const bindingWatchPlugin: Plugin = {
+    name: "void:binding-watch",
+    apply: "serve",
+    configureServer(server) {
+      if (!autoDetectBindings && !autoDetectAuth) return;
+      const effectiveDirs = scanDirs ?? ["routes", "middleware", "queues", "pages", "crons"];
+      const watchDirs = [...new Set([...effectiveDirs, "src"])].map((d) => join(root, d));
+      let hintShown = false;
+      const check = (path: string) => {
+        if (hintShown) return;
+        if (!watchDirs.some((d) => path.startsWith(d))) return;
+        try {
+          const code = readFileSync(path, "utf-8");
+          const fileBindings = inferBindingsFromSource(code, path.split("/").pop()!);
+          const newBindings: string[] = [];
+          if (autoDetectBindings) {
+            if (fileBindings.needsD1 && !bindings.needsD1) newBindings.push("D1 (void/db)");
+            if (fileBindings.needsKV && !bindings.needsKV) newBindings.push("KV (void/kv)");
+            if (fileBindings.needsR2 && !bindings.needsR2) newBindings.push("R2 (void/storage)");
+            if (fileBindings.needsAI && !bindings.needsAI) newBindings.push("AI (void/ai)");
+          }
+          if (autoDetectAuth && fileBindings.needsAuth && !authProviders) {
+            newBindings.push("Auth (void/auth)");
+          }
+          if (newBindings.length > 0) {
+            hintShown = true;
+            const detected = newBindings.join(", ");
+            setTimeout(() => {
+              voidLog(`New ${detected} binding detected. Restart to apply.`);
+            }, 300);
+            server.hot.send({
+              type: "custom",
+              event: "void:new-binding",
+              data: { message: `New ${detected} binding detected.` },
+            });
+          }
+        } catch {}
+      };
+      // Attach after the HTTP server is listening so initial plugin file
+      // writes (typegen, entry generation) don't trigger a spurious check.
+      const attach = () => {
+        server.watcher.on("add", check);
+        server.watcher.on("change", check);
+      };
+      if (server.httpServer) {
+        server.httpServer.once("listening", attach);
+      } else {
+        attach();
+      }
     },
   };
 
@@ -461,6 +510,8 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
     }
 
     return [
+      restartPlugin(),
+      bindingWatchPlugin,
       envPlugin,
       dbTypesPlugin(root, false),
       migrationPlugin(root),
@@ -510,8 +561,10 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
   }
 
   return [
+    restartPlugin(),
+    bindingWatchPlugin,
     envPlugin,
-    routingPlugin(root, { getAuth: () => authProviders, autoDetect: config.auth === undefined }),
+    routingPlugin(root, { getAuth: () => authProviders }),
     dbTypesPlugin(root, true),
     migrationPlugin(root),
     ...cloudflare({

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
+import { voidLog, voidError } from "./log";
 
 /**
  * Vite plugin that runs local D1 migrations on dev server startup.
@@ -25,10 +26,10 @@ export function migrationPlugin(
         const dbPath = getMiniflareDatabasePath(persistRoot, databaseId);
         const applied = await runMigrations(migrationsDir, dbPath);
         if (applied.length > 0) {
-          console.log(`[void] Applied ${applied.length} migration(s): ${applied.join(", ")}`);
+          voidLog(`Applied ${applied.length} migration(s): ${applied.join(", ")}`);
         }
       } catch (err) {
-        console.error("[void] Migration error:", err);
+        voidError(`Migration error: ${err}`);
       }
     },
   };
