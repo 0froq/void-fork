@@ -180,6 +180,105 @@
   opacity: 1;
 }
 
+/* Task lists */
+.void-md ul.contains-task-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.void-md .task-list-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+}
+
+.void-md .task-list-item input[type="checkbox"] {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+/* Nested task lists */
+.void-md .task-list-item ul.contains-task-list {
+  margin-top: 0.25em;
+}
+
+/* Keyboard input */
+.void-md kbd {
+  font-family: var(--vmd-font-mono);
+  font-size: 0.875em;
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  border: 1px solid var(--vmd-border);
+  box-shadow: 0 1px 0 var(--vmd-border);
+  background: var(--vmd-bg-soft);
+}
+
+/* Highlighted text */
+.void-md mark {
+  background: rgba(234, 179, 8, 0.3);
+  padding: 0.1em 0.2em;
+  border-radius: 2px;
+  color: inherit;
+}
+
+/* Definition lists */
+.void-md dl {
+  margin-bottom: 1em;
+}
+
+.void-md dt {
+  font-weight: 600;
+  margin-top: 0.5em;
+}
+
+.void-md dd {
+  margin-left: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+/* Abbreviations */
+.void-md abbr[title] {
+  text-decoration: underline dotted;
+  cursor: help;
+}
+
+/* Subscript / Superscript */
+.void-md sub,
+.void-md sup {
+  font-size: 0.75em;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+}
+
+.void-md sup {
+  top: -0.5em;
+}
+
+.void-md sub {
+  bottom: -0.25em;
+}
+
+/* Footnotes */
+.void-md section.footnotes {
+  margin-top: 2em;
+  padding-top: 1em;
+  border-top: 1px solid var(--vmd-border);
+  font-size: 0.875em;
+  color: var(--vmd-text-muted);
+}
+
+.void-md .footnote-ref a {
+  font-size: 0.75em;
+  vertical-align: super;
+  line-height: 0;
+  margin-left: 0.1em;
+}
+
+.void-md .footnote-backref {
+  font-family: initial;
+}
+
 /* Table of contents */
 .void-md .table-of-contents {
   margin-bottom: 1em;

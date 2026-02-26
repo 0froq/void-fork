@@ -6,10 +6,6 @@ const fm = useFrontmatter();
 const posts = pages.filter((p) => p.path.startsWith("/posts"));
 </script>
 
-<style>
-@import "@void-x/md/theme";
-</style>
-
 <template>
   <div style="display: flex; gap: 2rem">
     <aside style="width: 200px; flex-shrink: 0">
