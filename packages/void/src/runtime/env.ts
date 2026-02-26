@@ -22,10 +22,6 @@ function asEnv(value: unknown): RuntimeEnv | null {
   return value as RuntimeEnv;
 }
 
-function getVoidDevEnv(): RuntimeEnv | null {
-  return asEnv((globalThis as RuntimeEnv & { __void_cf_env?: unknown }).__void_cf_env);
-}
-
 function getNuxtEnv(): RuntimeEnv | null {
   return asEnv((globalThis as RuntimeEnv & { __env__?: unknown }).__env__);
 }
@@ -39,7 +35,6 @@ export function withRuntimeEnv<T>(env: unknown, fn: () => T): T {
 export function getRuntimeEnv(): RuntimeEnv {
   return (
     envContext.getStore() ??
-    getVoidDevEnv() ??
     getNuxtEnv() ??
     cloudflareEnv ??
     (() => {

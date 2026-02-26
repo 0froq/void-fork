@@ -43,17 +43,15 @@ Frameworks can also access bindings directly via the framework's own mechanisms 
 
 ### Runtime Helpers in Dev Mode
 
-`void/db`, `void/kv`, and other runtime helpers import from `cloudflare:workers`, which is only available in the Cloudflare Workers runtime (workerd). During local development, `voidPlugin()` provides a shim that resolves this import via Vite's plugin pipeline using `getPlatformProxy()`.
+`void/db`, `void/kv`, and other runtime helpers need access to Cloudflare bindings. In production (workerd), they resolve via `cloudflare:workers`. During local development, the mechanism varies by framework:
 
-This shim works for frameworks that run SSR through Vite's dev server:
-
-| Framework      | `void/db` in dev | Reason                                                  |
-| -------------- | ---------------- | ------------------------------------------------------- |
-| TanStack Start | Yes              | SSR runs in workerd via `@cloudflare/vite-plugin`       |
-| React Router   | Yes              | Same as TanStack Start                                  |
-| SvelteKit      | Yes              | `vite dev` processes all SSR through Vite               |
-| Nuxt           | **No**           | Nitro has its own server runtime, bypasses Vite plugins |
-| Astro          | **No**           | Astro SSR doesn't resolve through Vite's plugin hooks   |
+| Framework      | `void/db` in dev | How it works                                                         |
+| -------------- | ---------------- | -------------------------------------------------------------------- |
+| TanStack Start | Yes              | SSR runs in workerd via `@cloudflare/vite-plugin`                    |
+| React Router   | Yes              | Same as TanStack Start                                               |
+| SvelteKit      | Yes              | `voidPlugin()` injects `withRuntimeEnv()` into SvelteKit hooks (ALS) |
+| Nuxt           | **No**           | Nitro has its own server runtime, bypasses Vite plugins              |
+| Astro          | **No**           | Astro SSR doesn't resolve through Vite's plugin hooks                |
 
 For Nuxt and Astro during dev, use the framework's native binding access instead:
 
@@ -93,7 +91,7 @@ See [Configuration](../../config.md) for the full reference.
 
 ### `wrangler.jsonc`
 
-Frameworks that use `getPlatformProxy()` for local dev (SvelteKit, Nuxt with `nitro-cloudflare-dev`, Astro) need a `wrangler.jsonc`. `voidPlugin()` auto-syncs inferred bindings into this file on dev startup:
+Frameworks that use Cloudflare's dev runtime for local dev (SvelteKit, Nuxt with `nitro-cloudflare-dev`, Astro) need a `wrangler.jsonc` for binding configuration. `voidPlugin()` auto-syncs inferred bindings into this file on dev startup:
 
 ```jsonc
 {

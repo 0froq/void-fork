@@ -38,7 +38,7 @@ export default defineConfig({
 
 ### 4. Create `wrangler.jsonc`
 
-SvelteKit's adapter reads bindings from `wrangler.jsonc` via `getPlatformProxy()`. `voidPlugin()` auto-syncs inferred bindings into this file on dev startup, so you only need the base config:
+SvelteKit's adapter reads bindings from `wrangler.jsonc` for local dev. `voidPlugin()` auto-syncs inferred bindings into this file on dev startup, so you only need the base config:
 
 ```jsonc
 {
