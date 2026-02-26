@@ -37,6 +37,8 @@ To push local secrets to production, use [`void secret sync`](./cli#void-secret-
 
 ## How it works
 
-During `vite dev`, the `void:env` plugin calls Vite's `loadEnv()` and merges all variables into the worker's `vars` bindings. During `void deploy`, `.env` variables (but not `.env.local`) are included in the deploy manifest as `plain_text` bindings on the deployed worker.
+**Dev** (`vite dev`): All `.env` files are loaded, including `.env.local` and `.env.production.local`. Secrets are available locally via `c.env`.
 
-Secrets should never go in `.env` — use `.env.local` for local dev and `void secret put` or `void secret sync` for production.
+**Deploy** (`void deploy`): Only `.env` and `.env.production` are included in the deploy manifest as `plain_text` bindings. `.local` files (`.env.local`, `.env.production.local`) are excluded — they are for local secrets only.
+
+**Production secrets**: Use [`void secret put`](./cli#void-secret-put) or [`void secret sync`](./cli#void-secret-sync) to set secret bindings on your deployed worker. These are stored as encrypted `secret_text` bindings, not plain text.

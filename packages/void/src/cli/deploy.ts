@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { intro, outro, log, note, spinner, confirm, isCancel } from "@clack/prompts";
-import { createServer, loadEnv } from "vite";
+import { createServer } from "vite";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
 import { packageBuild, packageStaticBuild, packageFrameworkBuild } from "./package";
@@ -313,8 +313,8 @@ async function runFrameworkDeploy(
     ...(q.maxBatchTimeout != null && { maxBatchTimeout: q.maxBatchTimeout }),
   }));
 
-  // 10. Load .env vars for production
-  const envVars = loadEnv("production", root, "");
+  // 10. Load .env vars for production (excludes .local files)
+  const envVars = loadDeployEnv(root);
 
   // 11. Package & deploy
   const s = spinner();
@@ -585,8 +585,8 @@ async function runFullDeploy(
   // 8. Read wrangler compat settings (void.json > wrangler.jsonc > default)
   const wranglerCompat = readWranglerCompat(root, deployConfig);
 
-  // 9. Load .env vars for production
-  const envVars = loadEnv("production", root, "");
+  // 9. Load .env vars for production (excludes .local files)
+  const envVars = loadDeployEnv(root);
 
   // 10. Package & Upload
   const s = spinner();
@@ -680,6 +680,37 @@ function getGitCommit(root: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Load env vars for deploy — only .env and .env.production (not .local files).
+ * Later files win on conflict.
+ */
+function loadDeployEnv(root: string): Record<string, string> {
+  const files = [".env", ".env.production"];
+  const env: Record<string, string> = {};
+  for (const file of files) {
+    const filePath = join(root, file);
+    if (!existsSync(filePath)) continue;
+    const content = readFileSync(filePath, "utf-8");
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIndex = trimmed.indexOf("=");
+      if (eqIndex === -1) continue;
+      const key = trimmed.slice(0, eqIndex).trim();
+      let value = trimmed.slice(eqIndex + 1).trim();
+      // Strip surrounding quotes
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      env[key] = value;
+    }
+  }
+  return env;
 }
 
 /**
