@@ -156,7 +156,8 @@ describe("handlePageGet", () => {
     const body = (await response.json()) as any;
     expect(body.props.usage).toEqual({ requests: 1200 });
     expect(body.deferred).toBeUndefined();
-    expect(body.deferredKeys).toBeUndefined();
+    // deferredKeys is preserved so clients can wrap resolved values
+    expect(body.deferredKeys).toEqual({ usage: "usage" });
   });
 });
 
