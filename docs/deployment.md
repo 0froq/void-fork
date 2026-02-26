@@ -160,7 +160,7 @@ void deploy
   │
   ├─ 3. Upload
   │    POST /projects/:id/deploy (multipart)
-  │    ├─ manifest (mode: "ssg", headers, asset hashes)
+  │    ├─ manifest (mode: "prebuilt", headers, asset hashes)
   │    └─ asset:<path> (static files)
   │
   ├─ 4. Platform stores assets in R2

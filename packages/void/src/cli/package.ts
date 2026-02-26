@@ -135,7 +135,7 @@ export function packageBuild(
 /**
  * Package a static build (no worker) into a FormData ready for upload.
  */
-export function packageStaticBuild(outputDir: string, mode: "spa" | "ssg"): FormData {
+export function packageStaticBuild(outputDir: string, mode: "spa" | "prebuilt"): FormData {
   const formData = new FormData();
 
   const manifest: DeployManifest = {

@@ -122,13 +122,13 @@ Custom response headers for static assets. Keys are URL patterns, values are arr
 Deployment mode. If omitted, auto-detected on first deploy. See [Supported App Types](./app-types.md).
 
 - `"spa"` — static single-page app
-- `"ssg"` — static site generation
+- `"prebuilt"` — prebuilt static site (VitePress, plain HTML, external tools)
 - `"fullstack"` — worker + assets (API routes, SSR, jobs)
 - `"framework"` — meta framework (TanStack Start, React Router, SvelteKit, Nuxt, Astro)
 
 ### `outputDir`
 
-Output directory for static deploys, relative to the project root. Only relevant when `mode` is `"spa"` or `"ssg"`. Defaults to `"dist"`.
+Output directory for static deploys, relative to the project root. Only relevant when `mode` is `"spa"` or `"prebuilt"`. Defaults to `"dist"`.
 
 ### `wrangler`
 

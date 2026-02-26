@@ -178,7 +178,7 @@ async function runStaticDeploy(
   skipBuild?: boolean,
   commit?: string | null,
 ): Promise<void> {
-  const modeLabel = preset.mode === "spa" ? "Static SPA" : "Static SSG";
+  const modeLabel = preset.mode === "spa" ? "Static SPA" : "Static Prebuilt";
   log.info(`${modeLabel} deploy`);
 
   // Build (if needed)

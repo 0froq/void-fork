@@ -21,7 +21,7 @@ Use `void` in examples and commands in this skill.
 
 If invoked without a concrete task, do a brief app status check and report:
 
-1. App type (`fullstack`, `framework`, `spa`, `ssg`) using `docs/app-types.md` criteria.
+1. App type (`fullstack`, `framework`, `spa`, `prebuilt`) using `docs/app-types.md` criteria.
 2. Backend feature usage (`routes/`, `pages/`, `middleware/`, `migrations/`, `crons/`, `queues/`, SSR entries).
 3. Runtime signals (`void/db`, `void/kv`, `void/storage`, queue usage).
 4. Auth signals (`void/auth`, `auth` client imports, OAuth env vars).

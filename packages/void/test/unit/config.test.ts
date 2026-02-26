@@ -151,7 +151,7 @@ describe("readConfig", () => {
 
   it("throws on invalid mode", () => {
     setup(JSON.stringify({ mode: "serverless" }));
-    expect(() => readConfig(tmpDir)).toThrow("must be one of: spa, ssg, full");
+    expect(() => readConfig(tmpDir)).toThrow("must be one of: spa, prebuilt, full");
     cleanup();
   });
 

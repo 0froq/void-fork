@@ -113,6 +113,7 @@ export default extendConfig(
                 ],
               },
               { text: "Custom SSR", link: "/ssr" },
+              { text: "SSG", link: "/ssg" },
             ],
           },
           {
@@ -138,7 +139,7 @@ export default extendConfig(
                 items: [
                   { text: "Static Assets", link: "/cache/static-assets" },
                   { text: "Revalidation (ISR)", link: "/cache/revalidation" },
-                  { text: "Prerendering", link: "/cache/prerendering" },
+                  { text: "Edge Prerendering", link: "/cache/prerendering" },
                   { text: "Custom Headers", link: "/cache/headers" },
                 ],
               },

@@ -8,7 +8,7 @@ Void supports three types of apps:
 
 1. **Void apps** — Vite apps powered by Void's framework layer ([API routes](./server-routing.md), [pages mode](./pages-routing/overview.md), [auth](./auth.md), [crons](./jobs.md), [queues](./queues.md))
 2. **Meta frameworks** — [TanStack Start](https://tanstack.com/start/latest), [React Router](https://reactrouter.com/), [SvelteKit](https://svelte.dev/docs/kit), [Nuxt](https://nuxt.com/), [Astro](https://astro.build/)
-3. **Static sites** — SPAs, SSGs like [VitePress](https://vitepress.dev/), or any directory of static files
+3. **Static sites** — SPAs, prebuilt sites like [VitePress](https://vitepress.dev/), or any directory of static files
 
 The type is auto-detected from your project structure, or you can set it explicitly in [`void.json`](./config.md).
 
@@ -69,13 +69,13 @@ Add `voidPlugin()` to the framework's Vite config to get binding inference, type
 
 **Detected when** any of the above packages is in your dependencies.
 
-## Static Sites
+## Pre-built Static Sites
 
-Any project that produces static files — SPAs, SSGs, or plain directories. No Cloudflare Worker is deployed; assets are served directly from the edge.
+Any project that produces static files — SPAs, prebuilt sites, or plain directories. No Cloudflare Worker is deployed; assets are served directly from the edge.
 
 **SPAs** (client-side single-page apps) fall back all non-file paths to `index.html` with a 200 status, so client-side routing works out of the box. Detected when `vite` is a dependency and no backend files exist.
 
-**SSGs** (static site generators like VitePress) produce per-page HTML files. Detected when `vitepress` is a dependency, or when using the `--dir` flag.
+**Prebuilt sites** (static site generators like VitePress, or any pre-built directory) produce per-page HTML files. Detected when `vitepress` is a dependency, or when using the `--dir` flag.
 
 At the edge, the resolution order is:
 
@@ -88,14 +88,14 @@ At the edge, the resolution order is:
 
 When running `void deploy` and no `mode` is set in `void.json`, the detection logic runs in this order:
 
-| Priority | Condition                                                                                 | Type                               |
-| -------- | ----------------------------------------------------------------------------------------- | ---------------------------------- |
-| 1        | `--dir` flag                                                                              | SSG (or SPA with `--spa`)          |
-| 2        | `vitepress` in dependencies                                                               | SSG, builds with `vitepress build` |
-| 3        | `@tanstack/react-start`, `@react-router/dev`, `@sveltejs/kit`, `nuxt`, or `astro` in deps | Framework                          |
-| 4        | Backend files exist (`routes/`, `pages/`, `middleware/`, `crons/`, `queues/`, SSR entry)  | Void app                           |
-| 5        | `vite` in dependencies, no backend files                                                  | SPA, builds with `vite build`      |
-| 6        | `dist/index.html` or `./index.html` exists                                                | SSG (no build step)                |
+| Priority | Condition                                                                                 | Type                                    |
+| -------- | ----------------------------------------------------------------------------------------- | --------------------------------------- |
+| 1        | `--dir` flag                                                                              | Prebuilt (or SPA with `--spa`)          |
+| 2        | `vitepress` in dependencies                                                               | Prebuilt, builds with `vitepress build` |
+| 3        | `@tanstack/react-start`, `@react-router/dev`, `@sveltejs/kit`, `nuxt`, or `astro` in deps | Framework                               |
+| 4        | Backend files exist (`routes/`, `pages/`, `middleware/`, `crons/`, `queues/`, SSR entry)  | Void app                                |
+| 5        | `vite` in dependencies, no backend files                                                  | SPA, builds with `vite build`           |
+| 6        | `dist/index.html` or `./index.html` exists                                                | Prebuilt (no build step)                |
 
 ## Explicit Configuration
 
@@ -103,10 +103,10 @@ To lock the app type and skip auto-detection, set `mode` in [`void.json`](./conf
 
 ```json
 {
-  "mode": "ssg",
+  "mode": "prebuilt",
   "outputDir": ".vitepress/dist"
 }
 ```
 
-- `mode`: `"fullstack"`, `"framework"`, `"spa"`, or `"ssg"`
+- `mode`: `"fullstack"`, `"framework"`, `"spa"`, or `"prebuilt"`
 - `outputDir`: output directory for static modes (relative to project root, defaults to `"dist"`)

@@ -35,7 +35,7 @@ export interface VoidConfig {
   scanDirs?: string[];
   headers?: Record<string, string[]>;
   redirects?: Record<string, RedirectDestination>;
-  mode?: "spa" | "ssg" | "fullstack" | "framework";
+  mode?: "spa" | "prebuilt" | "fullstack" | "framework";
   output?: "server" | "static";
   outputDir?: string;
   wrangler?: WranglerConfig;
@@ -44,7 +44,7 @@ export interface VoidConfig {
 const CONFIG_FILE = "void.json";
 
 const VALID_AUTH_PROVIDERS = new Set(["github", "google", "email"]);
-const VALID_MODES = new Set(["spa", "ssg", "fullstack", "framework"]);
+const VALID_MODES = new Set(["spa", "prebuilt", "fullstack", "framework"]);
 const VALID_OUTPUTS = new Set(["server", "static"]);
 const VALID_REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
 
@@ -183,7 +183,9 @@ export function readConfig(root: string): VoidConfig {
   // Validate mode
   if (obj.mode !== undefined) {
     if (typeof obj.mode !== "string" || !VALID_MODES.has(obj.mode)) {
-      throw new Error(`"mode" in ${CONFIG_FILE} must be one of: spa, ssg, fullstack, framework`);
+      throw new Error(
+        `"mode" in ${CONFIG_FILE} must be one of: spa, prebuilt, fullstack, framework`,
+      );
     }
   }
 

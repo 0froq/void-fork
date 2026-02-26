@@ -52,10 +52,10 @@ describe("packageStaticBuild", () => {
     });
   });
 
-  it("sets assetConfig for SSG mode", () => {
+  it("sets assetConfig for prebuilt mode", () => {
     writeFileSync(join(TMP, "index.html"), "x");
 
-    const form = packageStaticBuild(TMP, "ssg");
+    const form = packageStaticBuild(TMP, "prebuilt");
 
     const manifestRaw = form.get("manifest") as string;
     const manifest = JSON.parse(manifestRaw);
