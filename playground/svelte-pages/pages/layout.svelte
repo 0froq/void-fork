@@ -8,9 +8,9 @@
 
 <div>
   <nav>
-    <Link href="/">Home</Link> | <Link href="/users">Users</Link> |
-    <Link href="/blog">Blog</Link> |
-    <Link href="/deferred">Deferred</Link> |
+    <Link href="/" prefetch>Home</Link> | <Link href="/users" prefetch>Users</Link> |
+    <Link href="/blog" prefetch>Blog</Link> |
+    <Link href="/deferred" prefetch>Deferred</Link> |
     <span>{shared.appName}</span>
   </nav>
   <hr />

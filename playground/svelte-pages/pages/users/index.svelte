@@ -21,7 +21,7 @@
   <ul>
     {#each users as user (user.id)}
       <li>
-        <Link href={`/users/${user.id}`}>{user.name}</Link> ({user.email})
+        <Link href={`/users/${user.id}`} prefetch="visible">{user.name}</Link> ({user.email})
       </li>
     {/each}
   </ul>

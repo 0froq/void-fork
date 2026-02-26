@@ -11,6 +11,12 @@ export function useRouter() {
   return router as {
     onNavigation(onStart?: () => void, onEnd?: () => void): () => void;
     visit(url: string, options?: Record<string, unknown>): Promise<unknown>;
+    prefetch(
+      url: string,
+      options?: { method?: string; cacheFor?: number | string | [string, string] },
+    ): void;
+    flush(url: string, method?: string): void;
+    flushAll(): void;
     reload(): Promise<unknown>;
     post(
       url: string,

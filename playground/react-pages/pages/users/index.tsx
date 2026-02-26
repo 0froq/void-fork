@@ -14,7 +14,10 @@ export default function UsersPage({ users }: Props) {
       <ul>
         {users.map((user) => (
           <li key={user.id}>
-            <Link href={`/users/${user.id}`}>{user.name}</Link> ({user.email})
+            <Link href={`/users/${user.id}`} prefetch="visible">
+              {user.name}
+            </Link>{" "}
+            ({user.email})
           </li>
         ))}
       </ul>

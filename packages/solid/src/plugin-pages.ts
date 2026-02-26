@@ -8,8 +8,14 @@ import { generateComponentManifest } from "./pages-manifest";
 const RENDERER_ID = "virtual:void-pages-renderer";
 const CLIENT_ENTRY_ID = "virtual:void-pages-client";
 
+interface PrefetchConfig {
+  hoverDelay?: number;
+  cacheFor?: number | string | [string, string];
+}
+
 interface PagesPluginOptions {
   viewTransitions?: boolean;
+  prefetch?: PrefetchConfig;
 }
 
 export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plugin {
@@ -43,7 +49,12 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
         }
         if (id === "\0" + CLIENT_ENTRY_ID) {
           if (!pageScan) return "";
-          return generateClientEntry(pageScan, pagesDir, options?.viewTransitions);
+          return generateClientEntry(
+            pageScan,
+            pagesDir,
+            options?.viewTransitions,
+            options?.prefetch,
+          );
         }
       },
     },
@@ -141,13 +152,18 @@ function generateClientEntry(
   scan: PageScanResult,
   pagesDir: string,
   viewTransitions?: boolean,
+  prefetch?: PrefetchConfig,
 ): string {
   return `
 import { createSignal, createComponent, batch } from "solid-js";
 import { hydrate } from "solid-js/web";
 import { SharedContext, ErrorsContext, RouterContext } from "@void-x/solid/runtime";
+import { parseCacheFor, PrefetchCache } from "@void-x/solid/prefetch";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
+const _prefetchCache = new PrefetchCache();
+const PREFETCH_HOVER_DELAY = ${prefetch?.hoverDelay ?? 75};
+const PREFETCH_DEFAULT_CACHE_FOR = parseCacheFor(${JSON.stringify(prefetch?.cacheFor ?? "30s")});
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -236,6 +252,7 @@ window.__rejectDeferred = (group, error) => handleDeferredMessage(group, undefin
 const _navListeners = new Set();
 
 const router = {
+  _hoverDelay: PREFETCH_HOVER_DELAY,
   onNavigation(onStart, onEnd) {
     const entry = { onStart, onEnd };
     _navListeners.add(entry);
@@ -249,6 +266,12 @@ const router = {
     _abortController = new AbortController();
 
     const method = (options.method || "GET").toUpperCase();
+
+    // Flush prefetch cache on mutations
+    if (method !== "GET") {
+      _prefetchCache.flushAll();
+    }
+
     const headers = { "X-VoidPages": "true", "Accept": "application/json" };
     const fetchOptions = { method, headers, signal: _abortController.signal };
 
@@ -257,6 +280,33 @@ const router = {
       fetchOptions.body = JSON.stringify(options.data);
     }
 
+    let pageData;
+    const cacheEntry = method === "GET" ? _prefetchCache.get(url, method) : null;
+
+    if (cacheEntry) {
+      pageData = await cacheEntry.response;
+      _prefetchCache.consume(url, method);
+      if (pageData === null) {
+        window.location.href = url;
+        return;
+      }
+      // Prefetch responses have deferred props pre-resolved — wrap as plain objects
+      if (pageData.deferredKeys) {
+        for (const key of Object.keys(pageData.deferredKeys)) {
+          const resolved = pageData.props[key];
+          pageData.props[key] = { value: resolved, loading: false, error: null };
+        }
+      }
+      // If stale, fire background refetch to refresh cache
+      if (!_prefetchCache.isFresh(cacheEntry)) {
+        const bgHeaders = { "X-VoidPages": "true", "Accept": "application/json", "Purpose": "prefetch" };
+        const bgFetch = fetch(url, { method, headers: bgHeaders }).then((r) => {
+          if (!r.headers.get("X-VoidPages")) return null;
+          return r.json();
+        });
+        _prefetchCache.set(url, method, bgFetch, PREFETCH_DEFAULT_CACHE_FOR);
+      }
+    } else {
     const response = await fetch(url, fetchOptions);
 
     if (response.redirected) {
@@ -269,7 +319,6 @@ const router = {
     }
 
     const contentType = response.headers.get("content-type") || "";
-    let pageData;
 
     if (contentType.includes("application/x-ndjson")) {
       // Streaming response with deferred props — read NDJSON
@@ -334,6 +383,7 @@ const router = {
     } else {
       pageData = await response.json();
     }
+    }
 
     // Resolve async work before starting the transition
     const [comp, layoutComps] = await Promise.all([
@@ -390,6 +440,42 @@ const router = {
   },
   delete(url, options = {}) {
     return router.visit(url, { ...options, method: "DELETE" });
+  },
+  prefetch(url, options = {}) {
+    const id = matchRoute(url);
+    if (!id) return;
+    if (routeMeta[id]?.island) {
+      if (!document.querySelector('link[rel="prefetch"][href="' + url + '"]')) {
+        const link = document.createElement("link");
+        link.rel = "prefetch";
+        link.href = url;
+        link.as = "document";
+        document.head.appendChild(link);
+      }
+      return;
+    }
+    if (components[id]) components[id]();
+    const layoutIds = layoutTree[id] || [];
+    for (const lid of layoutIds) {
+      if (components[lid]) components[lid]();
+    }
+    const method = (options.method || "GET").toUpperCase();
+    if (_prefetchCache.has(url, method)) return;
+    const ttl = options.cacheFor
+      ? parseCacheFor(options.cacheFor)
+      : PREFETCH_DEFAULT_CACHE_FOR;
+    const headers = { "X-VoidPages": "true", "Accept": "application/json", "Purpose": "prefetch" };
+    const fetchPromise = fetch(url, { method, headers }).then((r) => {
+      if (!r.headers.get("X-VoidPages")) return null;
+      return r.json();
+    });
+    _prefetchCache.set(url, method, fetchPromise, ttl);
+  },
+  flush(url, method = "GET") {
+    _prefetchCache.flush(url, method);
+  },
+  flushAll() {
+    _prefetchCache.flushAll();
   },
 };
 

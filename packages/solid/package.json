@@ -17,6 +17,9 @@
     },
     "./context": {
       "default": "./src/runtime/context.ts"
+    },
+    "./prefetch": {
+      "default": "./src/runtime/prefetch.ts"
     }
   },
   "scripts": {

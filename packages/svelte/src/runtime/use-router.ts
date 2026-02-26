@@ -11,6 +11,12 @@ export function useRouter() {
       url: string,
       options?: { method?: string; data?: unknown; preserveScroll?: boolean },
     ): Promise<unknown>;
+    prefetch(
+      url: string,
+      options?: { method?: string; cacheFor?: number | string | [string, string] },
+    ): void;
+    flush(url: string, method?: string): void;
+    flushAll(): void;
     reload(): Promise<unknown>;
     post(url: string, data?: unknown, options?: Record<string, unknown>): Promise<unknown>;
     put(url: string, data?: unknown, options?: Record<string, unknown>): Promise<unknown>;

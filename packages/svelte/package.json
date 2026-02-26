@@ -18,6 +18,9 @@
     "./App.svelte": {
       "svelte": "./src/runtime/App.svelte",
       "default": "./src/runtime/App.svelte"
+    },
+    "./prefetch": {
+      "default": "./src/runtime/prefetch.ts"
     }
   },
   "scripts": {

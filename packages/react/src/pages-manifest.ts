@@ -32,7 +32,39 @@ export function generateComponentManifest(scan: PageScanResult, pagesDir: string
   }
   lines.push("};");
 
+  // Route metadata (sparse — only island pages)
+  lines.push("const routeMeta = {");
+  for (const page of scan.pages) {
+    if (page.island) {
+      lines.push(`  ${JSON.stringify(page.componentId)}: { island: true },`);
+    }
+  }
+  lines.push("};");
+
+  // Route pattern table for client-side URL matching
+  lines.push("const routes = [");
+  for (const page of scan.pages) {
+    const regex = patternToRegex(page.pattern);
+    lines.push(`  { pattern: ${regex}, id: ${JSON.stringify(page.componentId)} },`);
+  }
+  lines.push("];");
+
+  lines.push(`function matchRoute(url) {
+  const path = new URL(url, "http://x").pathname;
+  for (const r of routes) {
+    if (r.pattern.test(path)) return r.id;
+  }
+  return null;
+}`);
+
   return lines.join("\n");
+}
+
+function patternToRegex(pattern: string): string {
+  const re = pattern
+    .replace(/:[^/{}]+\{\.\+\}/g, "(.+)") // catch-all :path{.+}
+    .replace(/:[^/]+/g, "([^/]+)"); // dynamic :param
+  return `/^${re.replace(/\//g, "\\/")}$/`;
 }
 
 function resolveLayoutIds(componentId: string, layouts: LayoutDefinition[]): string[] {

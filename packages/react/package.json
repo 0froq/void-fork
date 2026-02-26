@@ -13,6 +13,10 @@
     "./runtime": {
       "types": "./dist/runtime/index.d.mts",
       "import": "./dist/runtime/index.mjs"
+    },
+    "./prefetch": {
+      "types": "./dist/runtime/prefetch.d.mts",
+      "import": "./dist/runtime/prefetch.mjs"
     }
   },
   "scripts": {

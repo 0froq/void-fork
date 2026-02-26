@@ -8,5 +8,5 @@
 <div>
   <h1>Welcome — {title}</h1>
   <p>This is the Svelte Pages playground.</p>
-  <Link href="/users">Go to Users</Link>
+  <Link href="/users" prefetch="mount">Go to Users</Link>
 </div>
