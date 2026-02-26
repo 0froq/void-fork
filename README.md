@@ -25,7 +25,7 @@ This scaffolds a starter app with an interactive setup flow. Then:
 
 ```sh
 npm run dev          # local dev with workerd runtime
-npx void deploy       # deploy to vitecloud.app
+npx void deploy       # deploy to voidcloud.dev
 ```
 
 ## Features

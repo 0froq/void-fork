@@ -112,7 +112,7 @@ void deploy
   │    └─ Update edge routing (KV)
   │
   └─ 6. Live
-       https://my-app.void.app
+       https://my-app.voidcloud.dev
 ```
 
 **Key invariant:** The worker is never deployed unless all migrations succeed. On migration failure, the deployment is marked as failed and the existing worker keeps running.
@@ -141,7 +141,7 @@ void deploy
   │    Update edge routing (KV)
   │
   └─ 5. Live
-       https://my-app.void.app
+       https://my-app.voidcloud.dev
        All non-file paths → index.html (200)
 ```
 
@@ -167,7 +167,7 @@ void deploy
   │    Update edge routing (KV)
   │
   └─ 5. Live
-       https://my-app.void.app
+       https://my-app.voidcloud.dev
        /about → about/index.html
        /missing → 404.html (404)
 ```

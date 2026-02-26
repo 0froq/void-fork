@@ -174,7 +174,7 @@ void deploy
 ◇  Deployed!
 │
 │  ╭─────────────────────────────────────────╮
-│  │  https://my-app.void.app           │
+│  │  https://my-app.voidcloud.dev           │
 │  │                                         │
 │  │  2 worker module(s), 5 static asset(s)  │
 │  │  1 migration(s) applied                 │
@@ -189,7 +189,7 @@ On first deploy, Void will:
 - build your app
 - create or link a project
 - provision required resources (for example D1/KV/R2 when inferred)
-- deploy to `https://<slug>.void.app`
+- deploy to `https://<slug>.voidcloud.dev`
 
 Right now, only deploys via the CLI is supported. To setup push-to-deploy GitHub, run `void init --github`.
 

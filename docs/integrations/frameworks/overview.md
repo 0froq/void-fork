@@ -142,7 +142,7 @@ void deploy
   │    multipart upload, platform provisioning
   │
   └─ 6. Live
-       https://my-app.void.app
+       https://my-app.voidcloud.dev
 ```
 
 ### Build Output Conventions

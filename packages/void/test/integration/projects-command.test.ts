@@ -88,9 +88,9 @@ describe("runProjectsCommand", () => {
       headers: { Authorization: "Bearer test-token" },
     });
     expect(out).toContain("star-tracker");
-    expect(out).toContain("https://star-tracker.vitecloud.app");
+    expect(out).toContain("https://star-tracker.voidcloud.dev");
     expect(out).toContain("todo-app");
-    expect(out).toContain("https://todo-app.vitecloud.app");
+    expect(out).toContain("https://todo-app.voidcloud.dev");
   });
 
   it("prints a friendly message when there are no projects", async () => {

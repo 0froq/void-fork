@@ -21,7 +21,7 @@ export default defineConfig({
 
 ```sh
 void deploy
-# app live at <your-subdomain>.void.app!
+# app live at <your-subdomain>.voidcloud.dev!
 ```
 
 ## The idea
@@ -58,7 +58,7 @@ import { kv }                 →  KV namespace (auto-provisioned)
 import { storage }            →  R2 bucket (auto-provisioned)
 import { ai }                 →  Workers AI inference (metered)
 migrations/*.sql              →  Applied to D1 on dev startup and deploy
-void deploy                   →  Live at https://<slug>.void.app
+void deploy                   →  Live at https://<slug>.voidcloud.dev
 ```
 
 The plugin scans your source code at build time, detects which imports you use, and provisions the corresponding Cloudflare bindings on deploy.

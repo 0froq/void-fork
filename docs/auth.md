@@ -81,10 +81,10 @@ For production, set these as secrets via `void secret put` or `void secret sync 
 
 The OAuth callback URL is the same as the login URL. Configure these in your OAuth app settings:
 
-| Provider | Dev callback URL                          | Production callback URL                       |
-| -------- | ----------------------------------------- | --------------------------------------------- |
-| GitHub   | `http://localhost:5173/auth/login/github` | `https://your-app.void.app/auth/login/github` |
-| Google   | `http://localhost:5173/auth/login/google` | `https://your-app.void.app/auth/login/google` |
+| Provider | Dev callback URL                          | Production callback URL                            |
+| -------- | ----------------------------------------- | -------------------------------------------------- |
+| GitHub   | `http://localhost:5173/auth/login/github` | `https://your-app.voidcloud.dev/auth/login/github` |
+| Google   | `http://localhost:5173/auth/login/google` | `https://your-app.voidcloud.dev/auth/login/google` |
 
 ## Getting the Current User
 
