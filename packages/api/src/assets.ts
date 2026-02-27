@@ -62,14 +62,11 @@ export async function uploadAssetBuckets(
     for (const hash of bucket) {
       const blob = assetsByHash.get(hash);
       if (!blob) continue;
-      // CF expects base64-encoded content
-      const buffer = await blob.arrayBuffer();
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
-      formData.append(hash, new Blob([base64]), hash);
+      formData.append(hash, blob, hash);
     }
 
     const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/assets/upload?base64=true`,
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/assets/upload`,
       {
         method: "POST",
         headers: {
