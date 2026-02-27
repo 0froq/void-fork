@@ -31,11 +31,11 @@ export interface KVMap<T> {
 }
 
 export interface KVClient {
-  get<T = unknown>(key: string): Promise<T | null>;
+  get<T = string>(key: string): Promise<T | null>;
   put(key: string, value: unknown, options?: PutOptions): Promise<void>;
   delete(key: string): Promise<void>;
   list<M = unknown>(options?: ListOptions): Promise<ListResult<M>>;
-  getWithMetadata<T = unknown, M = unknown>(
+  getWithMetadata<T = string, M = unknown>(
     key: string,
   ): Promise<{ value: T | null; metadata: M | null }>;
   map<T = unknown>(prefix: string): KVMap<T>;
