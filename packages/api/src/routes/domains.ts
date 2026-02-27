@@ -147,16 +147,28 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "domain not found" }, 404);
     }
 
-    // Delete from CF
-    await deleteCustomHostname(c.env.CF_ZONE_ID, c.env.CF_API_TOKEN, domain.cf_hostname_id);
+    const warnings: string[] = [];
 
-    // Delete KV routing entry
-    await c.env.ROUTING.delete(`domain:${domain.hostname}`);
+    // Best-effort CF + KV cleanup (always proceed to DB delete)
+    await Promise.all([
+      deleteCustomHostname(c.env.CF_ZONE_ID, c.env.CF_API_TOKEN, domain.cf_hostname_id).catch(
+        (err) => {
+          warnings.push(
+            `Failed to delete custom hostname: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        },
+      ),
+      c.env.ROUTING.delete(`domain:${domain.hostname}`).catch((err) => {
+        warnings.push(
+          `Failed to delete routing entry: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }),
+    ]);
 
-    // Delete DB record
+    // DB record is source of truth — always delete last
     await deleteDomain(c.get("db"), domain.id);
 
-    return c.json({ ok: true });
+    return c.json({ ok: true, ...(warnings.length > 0 && { warnings }) });
   });
 
 export default app;

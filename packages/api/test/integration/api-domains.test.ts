@@ -346,7 +346,7 @@ describe("DELETE /projects/:id/domains/:domainId", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    expect(await res.json()).toMatchObject({ ok: true });
 
     // Verify DB record deleted
     const row = await env.db.select().from(domains).where(eq(domains.id, "dom_remove")).get();
@@ -364,6 +364,48 @@ describe("DELETE /projects/:id/domains/:domainId", () => {
       );
     });
     expect(deleteCall).toBeDefined();
+  });
+
+  it("still deletes DB record and KV when CF hostname deletion fails", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "cf-fail-domain");
+    mockCfApi({
+      deleteCustomHostname: () => {
+        throw new Error("CF API down");
+      },
+    });
+
+    await env.db.insert(domains).values({
+      id: "dom_cf_fail",
+      project_id: project.id,
+      hostname: "cf-fail.example.com",
+      cf_hostname_id: "ch-cf-fail",
+      status: "active",
+    });
+
+    await env.ROUTING.put("domain:cf-fail.example.com", JSON.stringify({ projectId: project.id }));
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains/dom_cf_fail`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.warnings).toHaveLength(1);
+    expect(body.warnings[0]).toContain("CF API down");
+
+    // DB record should still be deleted
+    const row = await env.db.select().from(domains).where(eq(domains.id, "dom_cf_fail")).get();
+    expect(row).toBeUndefined();
+
+    // KV routing entry should still be deleted
+    const routing = await env.ROUTING.get("domain:cf-fail.example.com");
+    expect(routing).toBeNull();
   });
 
   it("returns 404 for non-existent domain", async () => {
