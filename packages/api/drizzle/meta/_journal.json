@@ -29,6 +29,13 @@
       "when": 1771911124647,
       "tag": "0003_curved_star_brand",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1772176113222,
+      "tag": "0004_overconfident_madripoor",
+      "breakpoints": true
     }
   ]
 }

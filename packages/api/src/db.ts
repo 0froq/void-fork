@@ -352,6 +352,15 @@ export async function deleteProject(db: Db, id: string): Promise<void> {
   await db.delete(projects).where(eq(projects.id, id));
 }
 
+export async function deleteProjectCascade(db: Db, projectId: string): Promise<void> {
+  await db.batch([
+    db.delete(domains).where(eq(domains.project_id, projectId)),
+    db.delete(resources).where(eq(resources.project_id, projectId)),
+    db.delete(deployments).where(eq(deployments.project_id, projectId)),
+    db.delete(projects).where(eq(projects.id, projectId)),
+  ]);
+}
+
 // --- Counts ---
 
 export async function countUsers(db: Db): Promise<number> {

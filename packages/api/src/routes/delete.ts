@@ -4,10 +4,7 @@ import {
   getProject,
   getProjectResources,
   getDomainsByProjectId,
-  deleteProjectResources,
-  deleteProjectDeployments,
-  deleteProjectDomains,
-  deleteProject,
+  deleteProjectCascade,
 } from "../db";
 import {
   deleteD1Database,
@@ -32,114 +29,89 @@ app.delete("/:id", async (c) => {
   }
 
   const warnings: string[] = [];
-  const resources = await getProjectResources(c.get("db"), projectId);
+  const warn = (msg: string) => (err: unknown) => {
+    warnings.push(`${msg}: ${err instanceof Error ? err.message : String(err)}`);
+  };
 
-  // Best-effort CF resource cleanup
+  const [resources, projectDomains] = await Promise.all([
+    getProjectResources(c.get("db"), projectId),
+    getDomainsByProjectId(c.get("db"), projectId),
+  ]);
+
+  // Run all best-effort CF cleanup in parallel
+  const cleanup: Promise<void>[] = [];
+
+  // CF resource cleanup (D1, KV, R2, Queue)
   for (const resource of resources) {
-    try {
-      if (resource.type === "d1") {
-        await deleteD1Database(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id);
-      } else if (resource.type === "kv") {
-        await deleteKVNamespace(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id);
-      } else if (resource.type === "r2") {
-        await deleteR2Bucket(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id);
-      } else if (resource.type === "queue") {
-        await deleteQueue(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id);
-      }
-    } catch (err) {
-      warnings.push(
-        `Failed to delete ${resource.type} resource ${resource.cf_id}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    const del =
+      resource.type === "d1"
+        ? deleteD1Database(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
+        : resource.type === "kv"
+          ? deleteKVNamespace(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
+          : resource.type === "r2"
+            ? deleteR2Bucket(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
+            : deleteQueue(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id);
+    cleanup.push(del.catch(warn(`Failed to delete ${resource.type} resource ${resource.cf_id}`)));
   }
 
-  // Delete worker from dispatch namespace
+  // Worker dispatch deletion
   const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
   const workerName = `user-${project.slug}`;
-  try {
-    const cfRes = await fetch(
+  cleanup.push(
+    fetch(
       `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`,
-      {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${c.env.CF_API_TOKEN}`,
-        },
-      },
-    );
-    if (!cfRes.ok && cfRes.status !== 404) {
-      const details = await cfRes.text();
-      warnings.push(`Failed to delete worker ${workerName}: ${details}`);
-    }
-  } catch (err) {
-    warnings.push(
-      `Failed to delete worker ${workerName}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
+      { method: "DELETE", headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` } },
+    )
+      .then(async (cfRes) => {
+        if (!cfRes.ok && cfRes.status !== 404) {
+          warnings.push(`Failed to delete worker ${workerName}: ${await cfRes.text()}`);
+        }
+      })
+      .catch(warn(`Failed to delete worker ${workerName}`)),
+  );
 
-  // Delete R2 assets (paginated)
-  try {
-    let cursor: string | undefined;
-    do {
-      const listed = await c.env.ASSETS.list({
-        prefix: `${projectId}/`,
-        cursor,
-      });
-      for (const obj of listed.objects) {
-        await c.env.ASSETS.delete(obj.key);
-      }
-      cursor = listed.truncated ? listed.cursor : undefined;
-    } while (cursor);
-  } catch (err) {
-    warnings.push(
-      `Failed to clean up R2 assets: ${err instanceof Error ? err.message : String(err)}`,
+  // R2 assets (paginated, batch delete per page)
+  cleanup.push(
+    (async () => {
+      let cursor: string | undefined;
+      do {
+        const listed = await c.env.ASSETS.list({ prefix: `${projectId}/`, cursor });
+        if (listed.objects.length > 0) {
+          await c.env.ASSETS.delete(listed.objects.map((obj) => obj.key));
+        }
+        cursor = listed.truncated ? listed.cursor : undefined;
+      } while (cursor);
+    })().catch(warn("Failed to clean up R2 assets")),
+  );
+
+  // KV routing entry
+  cleanup.push(c.env.ROUTING.delete(project.slug).catch(warn("Failed to delete routing entry")));
+
+  // Queue routing KV entries
+  for (const q of resources.filter((r) => r.type === "queue")) {
+    cleanup.push(
+      c.env.ROUTING.delete(`queue:${q.cf_id}`).catch(warn("Failed to delete queue routing entry")),
     );
   }
 
-  // Delete KV routing entry
-  try {
-    await c.env.ROUTING.delete(project.slug);
-  } catch (err) {
-    warnings.push(
-      `Failed to delete routing entry: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  // Delete queue routing KV entries
-  const queueResources = resources.filter((r) => r.type === "queue");
-  for (const q of queueResources) {
-    try {
-      await c.env.ROUTING.delete(`queue:${q.cf_id}`);
-    } catch (err) {
-      warnings.push(
-        `Failed to delete queue routing entry: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-
-  // Clean up custom hostnames from CF + KV
-  const projectDomains = await getDomainsByProjectId(c.get("db"), projectId);
+  // Custom hostnames from CF + KV
   for (const domain of projectDomains) {
-    try {
-      await deleteCustomHostname(c.env.CF_ZONE_ID, c.env.CF_API_TOKEN, domain.cf_hostname_id);
-    } catch (err) {
-      warnings.push(
-        `Failed to delete custom hostname ${domain.hostname}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    try {
-      await c.env.ROUTING.delete(`domain:${domain.hostname}`);
-    } catch (err) {
-      warnings.push(
-        `Failed to delete domain routing entry: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    cleanup.push(
+      deleteCustomHostname(c.env.CF_ZONE_ID, c.env.CF_API_TOKEN, domain.cf_hostname_id).catch(
+        warn(`Failed to delete custom hostname ${domain.hostname}`),
+      ),
+    );
+    cleanup.push(
+      c.env.ROUTING.delete(`domain:${domain.hostname}`).catch(
+        warn("Failed to delete domain routing entry"),
+      ),
+    );
   }
-  await deleteProjectDomains(c.get("db"), projectId);
 
-  // Delete DB records in FK order: resources -> deployments -> project
-  await deleteProjectResources(c.get("db"), projectId);
-  await deleteProjectDeployments(c.get("db"), projectId);
-  await deleteProject(c.get("db"), projectId);
+  await Promise.all(cleanup);
+
+  // Atomic DB cleanup (domains, resources, deployments, project)
+  await deleteProjectCascade(c.get("db"), projectId);
 
   return c.json({
     ok: true,

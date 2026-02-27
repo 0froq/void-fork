@@ -31,46 +31,50 @@ export async function provisionBindings(
   jwtSecret: string,
 ): Promise<WorkerBinding[]> {
   const existing = await getProjectResources(db, projectId);
-  const bindings: WorkerBinding[] = [];
 
-  // D1 databases
+  // Run all CF API provisioning calls in parallel
+  const tasks: Promise<WorkerBinding>[] = [];
+
   for (const name of manifest.bindings.d1 ?? []) {
-    const binding = await ensureResource(db, accountId, apiToken, projectId, "d1", name, existing);
-    bindings.push({ type: "d1", name, id: binding.cf_id });
+    tasks.push(
+      ensureResource(db, accountId, apiToken, projectId, "d1", name, existing).then(
+        (r): WorkerBinding => ({ type: "d1", name, id: r.cf_id }),
+      ),
+    );
   }
 
-  // KV namespaces
   for (const name of manifest.bindings.kv ?? []) {
-    const binding = await ensureResource(db, accountId, apiToken, projectId, "kv", name, existing);
-    bindings.push({ type: "kv_namespace", name, namespace_id: binding.cf_id });
+    tasks.push(
+      ensureResource(db, accountId, apiToken, projectId, "kv", name, existing).then(
+        (r): WorkerBinding => ({ type: "kv_namespace", name, namespace_id: r.cf_id }),
+      ),
+    );
   }
 
-  // R2 buckets
   for (const name of manifest.bindings.r2 ?? []) {
-    const binding = await ensureResource(db, accountId, apiToken, projectId, "r2", name, existing);
-    bindings.push({ type: "r2_bucket", name, bucket_name: binding.cf_id });
+    tasks.push(
+      ensureResource(db, accountId, apiToken, projectId, "r2", name, existing).then(
+        (r): WorkerBinding => ({ type: "r2_bucket", name, bucket_name: r.cf_id }),
+      ),
+    );
   }
 
-  // AI — add service binding to proxy + signed project token
+  for (const q of manifest.queues ?? []) {
+    tasks.push(
+      ensureResource(db, accountId, apiToken, projectId, "queue", q.name, existing).then(
+        (r): WorkerBinding => ({ type: "queue", name: q.bindingName, queue_name: r.cf_id }),
+      ),
+    );
+  }
+
+  const bindings = await Promise.all(tasks);
+
+  // AI — add service binding to proxy + signed project token (no CF API call)
   if (manifest.bindings.ai) {
     const aiToken = await hmacSignState(projectId, jwtSecret);
     bindings.push({ type: "service", name: "__AI_PROXY", service: "void-ai-proxy" });
     bindings.push({ type: "plain_text", name: "__PROJECT_ID", text: projectId });
     bindings.push({ type: "plain_text", name: "__AI_TOKEN", text: aiToken });
-  }
-
-  // Queues — provision CF queues and add producer bindings
-  for (const q of manifest.queues ?? []) {
-    const binding = await ensureResource(
-      db,
-      accountId,
-      apiToken,
-      projectId,
-      "queue",
-      q.name,
-      existing,
-    );
-    bindings.push({ type: "queue", name: q.bindingName, queue_name: binding.cf_id });
   }
 
   return bindings;

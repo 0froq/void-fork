@@ -23,7 +23,10 @@ export const users = sqliteTable(
       .notNull()
       .default(sql`(datetime('now'))`),
   },
-  (t) => [uniqueIndex("idx_users_provider_id").on(t.provider, t.provider_id)],
+  (t) => [
+    uniqueIndex("idx_users_provider_id").on(t.provider, t.provider_id),
+    index("idx_users_email").on(t.email),
+  ],
 );
 
 // ---------------------------------------------------------------------------
@@ -45,7 +48,11 @@ export const projects = sqliteTable(
       .notNull()
       .default(sql`(datetime('now'))`),
   },
-  (t) => [unique().on(t.user_id, t.slug), uniqueIndex("idx_projects_slug").on(t.slug)],
+  (t) => [
+    unique().on(t.user_id, t.slug),
+    uniqueIndex("idx_projects_slug").on(t.slug),
+    index("idx_projects_user_id").on(t.user_id),
+  ],
 );
 
 // ---------------------------------------------------------------------------
@@ -71,7 +78,10 @@ export const deployments = sqliteTable(
       .default(sql`(datetime('now'))`),
     deployed_at: text("deployed_at"),
   },
-  (t) => [index("idx_deployments_project_id").on(t.project_id, t.created_at)],
+  (t) => [
+    index("idx_deployments_project_id").on(t.project_id, t.created_at),
+    index("idx_deployments_project_status").on(t.project_id, t.status),
+  ],
 );
 
 // ---------------------------------------------------------------------------
