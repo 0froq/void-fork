@@ -3,6 +3,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm -F api -F dashboard --parallel dev",
+    "build": "pnpm -F dashboard build",
     "test": "vitest --run",
     "lint": "oxlint --type-aware --ignore-pattern 'framework/**'",
     "fmt": "oxfmt",
