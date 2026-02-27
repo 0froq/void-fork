@@ -2,8 +2,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm -F './packages/**' build",
-    "build:all": "pnpm -F './packages/**' -F './playground/**' build",
+    "build": "pnpm -F './packages/**' --parallel build",
+    "build:all": "pnpm build && pnpm -F './playground/**' --parallel build",
     "build:core": "pnpm -F void build",
     "build:docs": "pnpm -F docs build",
     "test": "vitest --run",
