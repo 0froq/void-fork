@@ -57,18 +57,18 @@ async function showDeployments(
   const rows = deployments.map((d) => formatDeploymentRow(d));
 
   const idWidth = Math.max("id".length, ...rows.map((r) => r.id.length));
-  const modeWidth = Math.max("mode".length, ...rows.map((r) => r.mode.length));
+  const typeWidth = Math.max("type".length, ...rows.map((r) => r.appType.length));
   const statusWidth = Math.max("status".length, ...rows.map((r) => r.statusRaw.length));
   const sourceWidth = Math.max("source".length, ...rows.map((r) => r.source.length));
   const commitWidth = Math.max("commit".length, ...rows.map((r) => r.commit.length));
   const isrWidth = Math.max("isr".length, ...rows.map((r) => r.isr.length));
 
   const prefix = tablePrefix();
-  const header = `${prefix}${dim(`${"id".padEnd(idWidth)}  ${"mode".padEnd(modeWidth)}  ${"status".padEnd(statusWidth)}  ${"source".padEnd(sourceWidth)}  ${"commit".padEnd(commitWidth)}  ${"isr".padEnd(isrWidth)}  deployed`)}`;
+  const header = `${prefix}${dim(`${"id".padEnd(idWidth)}  ${"type".padEnd(typeWidth)}  ${"status".padEnd(statusWidth)}  ${"source".padEnd(sourceWidth)}  ${"commit".padEnd(commitWidth)}  ${"isr".padEnd(isrWidth)}  deployed`)}`;
 
   const lines = rows.map(
     (row) =>
-      `${prefix}${row.id.padEnd(idWidth)}  ${row.mode.padEnd(modeWidth)}  ${row.statusColored}${"".padEnd(statusWidth - row.statusRaw.length)}  ${row.source.padEnd(sourceWidth)}  ${row.commit.padEnd(commitWidth)}  ${row.isr.padEnd(isrWidth)}  ${row.deployed}`,
+      `${prefix}${row.id.padEnd(idWidth)}  ${row.appType.padEnd(typeWidth)}  ${row.statusColored}${"".padEnd(statusWidth - row.statusRaw.length)}  ${row.source.padEnd(sourceWidth)}  ${row.commit.padEnd(commitWidth)}  ${row.isr.padEnd(isrWidth)}  ${row.deployed}`,
   );
 
   console.log(prefix);
@@ -79,7 +79,7 @@ async function showDeployments(
 
 interface DeploymentRow {
   id: string;
-  mode: string;
+  appType: string;
   statusRaw: string;
   statusColored: string;
   source: string;
@@ -98,7 +98,7 @@ function formatDeploymentRow(d: DeploymentResponse): DeploymentRow {
     }
   }
 
-  const mode = manifest?.static ?? (manifest?.framework ? "framework" : "fullstack");
+  const appType = manifest?.static ?? (manifest?.framework ? "framework" : "fullstack");
   const isr = manifest?.revalidate && manifest.revalidate > 0 ? `${manifest.revalidate}s` : "-";
   const source = d.source ?? "-";
   const commit = d.commit ? d.commit.slice(0, 7) : "-";
@@ -113,7 +113,7 @@ function formatDeploymentRow(d: DeploymentResponse): DeploymentRow {
 
   const deployed = d.deployed_at ? formatRelativeTime(d.deployed_at) : "-";
 
-  return { id: d.id, mode, statusRaw, statusColored, source, commit, isr, deployed };
+  return { id: d.id, appType, statusRaw, statusColored, source, commit, isr, deployed };
 }
 
 function formatRelativeTime(iso: string): string {

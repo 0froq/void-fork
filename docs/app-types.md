@@ -88,7 +88,7 @@ At the edge, the resolution order is:
 
 ## Auto-Detection
 
-When running `void deploy` and no `mode` is set in `void.json`, the detection logic runs in this order:
+When running `void deploy` and no `appType` is set in `void.json`, the detection logic runs in this order:
 
 | Priority | Condition                                                                                 | Type                                    |
 | -------- | ----------------------------------------------------------------------------------------- | --------------------------------------- |
@@ -101,14 +101,14 @@ When running `void deploy` and no `mode` is set in `void.json`, the detection lo
 
 ## Explicit Configuration
 
-To lock the app type and skip auto-detection, set `mode` in [`void.json`](./config.md):
+To lock the app type and skip auto-detection, set `appType` in [`void.json`](./config.md):
 
 ```json
 {
-  "mode": "prebuilt",
+  "appType": "prebuilt",
   "outputDir": ".vitepress/dist"
 }
 ```
 
-- `mode`: `"fullstack"`, `"framework"`, `"spa"`, or `"prebuilt"`
-- `outputDir`: output directory for static modes (relative to project root, defaults to `"dist"`)
+- `appType`: `"fullstack"`, `"framework"`, `"spa"`, or `"prebuilt"`
+- `outputDir`: output directory for static app types (relative to project root, defaults to `"dist"`)

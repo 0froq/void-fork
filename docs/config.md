@@ -20,7 +20,7 @@ All project-level configuration lives in a `void.json` file at the project root.
     "/assets/*": ["Cache-Control: public, max-age=31536000, immutable"],
     "/*": ["X-Frame-Options: DENY", "X-Content-Type-Options: nosniff"]
   },
-  "mode": "spa",
+  "appType": "spa",
   "outputDir": "dist",
   "wrangler": {
     "compatibility_date": "2025-12-01",
@@ -117,9 +117,9 @@ Custom response headers for static assets. Keys are URL patterns, values are arr
 }
 ```
 
-### `mode`
+### `appType`
 
-Deployment mode. If omitted, auto-detected on first deploy. See [Supported App Types](./app-types.md).
+App type. If omitted, auto-detected on first deploy. See [Supported App Types](./app-types.md).
 
 - `"spa"` — static single-page app
 - `"prebuilt"` — prebuilt static site (VitePress, plain HTML, external tools)
@@ -128,7 +128,7 @@ Deployment mode. If omitted, auto-detected on first deploy. See [Supported App T
 
 ### `outputDir`
 
-Output directory for static deploys, relative to the project root. Only relevant when `mode` is `"spa"` or `"prebuilt"`. Defaults to `"dist"`.
+Output directory for static deploys, relative to the project root. Only relevant when `appType` is `"spa"` or `"prebuilt"`. Defaults to `"dist"`.
 
 ### `wrangler`
 

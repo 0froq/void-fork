@@ -113,7 +113,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
     }
   }
 
-  // 3. Resolve deploy mode: void.json > CLI flags > auto-detection
+  // 3. Resolve deploy app type: void.json > CLI flags > auto-detection
   const vcConfig = readConfig(root);
 
   // Check for Class B/C framework first
@@ -140,14 +140,14 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
 
   let preset: StaticPreset | null = null;
 
-  if (vcConfig.mode && vcConfig.mode !== "fullstack" && vcConfig.mode !== "framework") {
-    // void.json has an explicit static mode
+  if (vcConfig.appType && vcConfig.appType !== "fullstack" && vcConfig.appType !== "framework") {
+    // void.json has an explicit static app type
     preset = {
       buildCommand: null,
       outputDir: vcConfig.outputDir ? resolve(root, vcConfig.outputDir) : join(root, "dist"),
-      mode: vcConfig.mode,
+      appType: vcConfig.appType,
     };
-    // Re-detect build command (config stores mode, not command)
+    // Re-detect build command (config stores app type, not command)
     const detectedPreset = detectPreset(root, { dir: options?.dir, spa: options?.spa });
     if (detectedPreset) {
       preset.buildCommand = detectedPreset.buildCommand;
@@ -155,11 +155,11 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
         preset.outputDir = detectedPreset.outputDir;
       }
     }
-  } else if (!vcConfig.mode) {
-    // No configured mode — detect from CLI flags + project structure
+  } else if (!vcConfig.appType) {
+    // No configured app type — detect from CLI flags + project structure
     preset = detectPreset(root, { dir: options?.dir, spa: options?.spa });
   }
-  // vcConfig.mode === "fullstack" or "framework" → preset stays null → full deploy
+  // vcConfig.appType === "fullstack" or "framework" → preset stays null → full deploy
 
   // Detect git commit before build (only when not skipping build)
   const gitCommit = options?.skipBuild ? null : getGitCommit(root);
@@ -179,8 +179,8 @@ async function runStaticDeploy(
   skipBuild?: boolean,
   commit?: string | null,
 ): Promise<void> {
-  const modeLabel = preset.mode === "spa" ? "Static SPA" : "Static Prebuilt";
-  log.info(`${modeLabel} deploy`);
+  const typeLabel = preset.appType === "spa" ? "Static SPA" : "Static Prebuilt";
+  log.info(`${typeLabel} deploy`);
 
   // Build (if needed)
   if (preset.buildCommand && !skipBuild) {
@@ -197,7 +197,7 @@ async function runStaticDeploy(
   const s = spinner();
 
   s.start("Packaging...");
-  const formData = packageStaticBuild(preset.outputDir, preset.mode);
+  const formData = packageStaticBuild(preset.outputDir, preset.appType);
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
 
@@ -205,7 +205,7 @@ async function runStaticDeploy(
   const result = await client.deploy(config.projectId, formData);
   s.stop("Deployed!");
 
-  const summary = [`${modeLabel} — ${result.assets} static asset(s)`];
+  const summary = [`${typeLabel} — ${result.assets} static asset(s)`];
   note(summary.join("\n"), result.url);
 
   outro("Done!");

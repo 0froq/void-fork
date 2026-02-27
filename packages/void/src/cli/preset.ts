@@ -47,7 +47,7 @@ export const FRAMEWORK_PRESETS: Record<string, FrameworkPreset> = {
 export interface StaticPreset {
   buildCommand: string | null;
   outputDir: string;
-  mode: "spa" | "prebuilt";
+  appType: "spa" | "prebuilt";
 }
 
 /**
@@ -63,7 +63,7 @@ export function detectPreset(
     return {
       buildCommand: null,
       outputDir: resolve(root, options.dir),
-      mode: options.spa ? "spa" : "prebuilt",
+      appType: options.spa ? "spa" : "prebuilt",
     };
   }
 
@@ -75,7 +75,7 @@ export function detectPreset(
     return {
       buildCommand: `${localBin(root, "vitepress")} build${buildArg}`,
       outputDir: resolve(root, srcDir, ".vitepress/dist"),
-      mode: "prebuilt",
+      appType: "prebuilt",
     };
   }
 
@@ -89,7 +89,7 @@ export function detectPreset(
     return {
       buildCommand: `${localBin(root, "vite")} build`,
       outputDir: resolve(root, "dist"),
-      mode: options?.spa ? "spa" : "spa",
+      appType: options?.spa ? "spa" : "spa",
     };
   }
 
@@ -98,7 +98,7 @@ export function detectPreset(
     return {
       buildCommand: null,
       outputDir: resolve(root, "dist"),
-      mode: options?.spa ? "spa" : "prebuilt",
+      appType: options?.spa ? "spa" : "prebuilt",
     };
   }
 
@@ -106,7 +106,7 @@ export function detectPreset(
     return {
       buildCommand: null,
       outputDir: root,
-      mode: options?.spa ? "spa" : "prebuilt",
+      appType: options?.spa ? "spa" : "prebuilt",
     };
   }
 

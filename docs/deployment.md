@@ -134,7 +134,7 @@ void deploy
   │
   ├─ 3. Upload
   │    POST /projects/:id/deploy (multipart)
-  │    ├─ manifest (mode: "spa", headers, asset hashes)
+  │    ├─ manifest (appType: "spa", headers, asset hashes)
   │    └─ asset:<path> (static files)
   │
   ├─ 4. Platform stores assets in R2
@@ -160,7 +160,7 @@ void deploy
   │
   ├─ 3. Upload
   │    POST /projects/:id/deploy (multipart)
-  │    ├─ manifest (mode: "prebuilt", headers, asset hashes)
+  │    ├─ manifest (appType: "prebuilt", headers, asset hashes)
   │    └─ asset:<path> (static files)
   │
   ├─ 4. Platform stores assets in R2

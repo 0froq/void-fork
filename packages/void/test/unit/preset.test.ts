@@ -39,7 +39,7 @@ describe("detectPreset", () => {
     expect(result).toEqual({
       buildCommand: null,
       outputDir: resolve(root, "public"),
-      mode: "prebuilt",
+      appType: "prebuilt",
     });
   });
 
@@ -49,7 +49,7 @@ describe("detectPreset", () => {
     expect(result).toEqual({
       buildCommand: null,
       outputDir: resolve(root, "build"),
-      mode: "spa",
+      appType: "spa",
     });
   });
 
@@ -62,7 +62,7 @@ describe("detectPreset", () => {
     expect(result).toEqual({
       buildCommand: "vitepress build",
       outputDir: resolve(root, ".vitepress/dist"),
-      mode: "prebuilt",
+      appType: "prebuilt",
     });
   });
 
@@ -75,7 +75,7 @@ describe("detectPreset", () => {
     expect(result).toEqual({
       buildCommand: "vitepress build docs",
       outputDir: resolve(root, "docs/.vitepress/dist"),
-      mode: "prebuilt",
+      appType: "prebuilt",
     });
   });
 
@@ -132,7 +132,7 @@ describe("detectPreset", () => {
     expect(result).toEqual({
       buildCommand: "vite build",
       outputDir: resolve(root, "dist"),
-      mode: "spa",
+      appType: "spa",
     });
   });
 
@@ -144,7 +144,7 @@ describe("detectPreset", () => {
     expect(result).toEqual({
       buildCommand: null,
       outputDir: resolve(root, "dist"),
-      mode: "prebuilt",
+      appType: "prebuilt",
     });
   });
 
@@ -156,7 +156,7 @@ describe("detectPreset", () => {
     expect(result).toEqual({
       buildCommand: null,
       outputDir: root,
-      mode: "prebuilt",
+      appType: "prebuilt",
     });
   });
 

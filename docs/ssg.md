@@ -52,11 +52,11 @@ Dynamic pages **without** `getPrerenderPaths()` are not prerendered — the path
 
 When `output` is omitted or `"server"`, behavior is unchanged — `export const prerender = true` opts individual pages into deploy-time [edge prerendering](./cache/prerendering.md).
 
-## Relationship to `mode: "prebuilt"`
+## Relationship to `appType: "prebuilt"`
 
-The `mode` field describes app type (SPA, prebuilt, fullstack), while `output` controls rendering strategy:
+The `appType` field describes app type (SPA, prebuilt, fullstack), while `output` controls rendering strategy:
 
-|              | `mode: "prebuilt"`                              | `output: "static"`                   |
+|              | `appType: "prebuilt"`                           | `output: "static"`                   |
 | ------------ | ----------------------------------------------- | ------------------------------------ |
 | **What**     | Deploy a pre-built static site (no Void plugin) | Prerender a Void app at build time   |
 | **Worker**   | None (static assets only)                       | Yes (for non-prerendered routes)     |

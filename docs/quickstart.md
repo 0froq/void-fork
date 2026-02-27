@@ -55,11 +55,11 @@ If auto-detection fails, `void init` asks you to choose from a short list (Claud
 
 In supported agents such as Claude Code, you can invoke the `/void` skill to turn your agent into a Void export. Then, simply ask the agent to build an app with Void. See the [Coding Agents](./integrations/agents) guide for more details.
 
-## Adding to an Existing Vite App
+## Meta Frameworks
 
-::: tip 💡 Framework Compatibility
-This guide assumes you are working with a plain Vite app. If you are using a Vite-based meta framework, check out the [Framework Integration Guides](./integrations/frameworks/overview) instead.
-:::
+Void as a platform supports Vite-based meta frameworks, but the Void SDK itself is also a powerful and flexible meta framework via its [Pages routing](./pages-routing) feature. If you only want to use an existing meta framework and deploy to Void, check out the [Framework Integration Guides](./integrations/frameworks/overview).
+
+## Adding to an Existing Vite App
 
 ::: code-group
 

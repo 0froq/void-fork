@@ -23,18 +23,18 @@ export async function runProjectsCommand(): Promise<void> {
 
   const rows = projects.map((p) => ({
     slug: p.slug,
-    mode: p.mode ?? "worker",
+    appType: p.mode ?? "worker",
     url: p.custom_domain ? `https://${p.custom_domain}` : `https://${p.slug}.${getSiteDomain()}`,
   }));
 
   const slugWidth = Math.max("slug".length, ...rows.map((r) => r.slug.length));
-  const modeWidth = Math.max("mode".length, ...rows.map((r) => r.mode.length));
+  const typeWidth = Math.max("type".length, ...rows.map((r) => r.appType.length));
 
   const prefix = tablePrefix();
-  const header = `${prefix}${dim(`${"slug".padEnd(slugWidth)}  ${"mode".padEnd(modeWidth)}  url`)}`;
+  const header = `${prefix}${dim(`${"slug".padEnd(slugWidth)}  ${"type".padEnd(typeWidth)}  url`)}`;
   const lines = rows.map(
     (row) =>
-      `${prefix}${pc.green(row.slug)}${"".padEnd(slugWidth - row.slug.length)}  ${row.mode.padEnd(modeWidth)}  ${row.url}`,
+      `${prefix}${pc.green(row.slug)}${"".padEnd(slugWidth - row.slug.length)}  ${row.appType.padEnd(typeWidth)}  ${row.url}`,
   );
   console.log(prefix);
   console.log(header);

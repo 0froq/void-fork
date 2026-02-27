@@ -135,14 +135,14 @@ export function packageBuild(
 /**
  * Package a static build (no worker) into a FormData ready for upload.
  */
-export function packageStaticBuild(outputDir: string, mode: "spa" | "prebuilt"): FormData {
+export function packageStaticBuild(outputDir: string, appType: "spa" | "prebuilt"): FormData {
   const formData = new FormData();
 
   const manifest: DeployManifest = {
     version: 2,
     bindings: {},
     assetConfig: {
-      not_found_handling: mode === "spa" ? "single-page-application" : "404-page",
+      not_found_handling: appType === "spa" ? "single-page-application" : "404-page",
     },
   };
   formData.append("manifest", JSON.stringify(manifest));

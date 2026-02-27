@@ -61,10 +61,10 @@
       },
       "additionalProperties": false
     },
-    "mode": {
+    "appType": {
       "type": "string",
       "enum": ["spa", "prebuilt", "fullstack", "framework"],
-      "description": "Deployment mode. If omitted, auto-detected on first deploy."
+      "description": "App type. If omitted, auto-detected on first deploy."
     },
     "output": {
       "type": "string",

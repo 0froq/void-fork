@@ -40,7 +40,7 @@ describe("readConfig", () => {
           "/assets/*": ["Cache-Control: public, max-age=31536000, immutable"],
           "/*": ["X-Frame-Options: DENY"],
         },
-        mode: "spa",
+        appType: "spa",
         outputDir: "dist",
         wrangler: {
           compatibility_date: "2025-12-01",
@@ -55,7 +55,7 @@ describe("readConfig", () => {
       "/assets/*": ["Cache-Control: public, max-age=31536000, immutable"],
       "/*": ["X-Frame-Options: DENY"],
     });
-    expect(config.mode).toBe("spa");
+    expect(config.appType).toBe("spa");
     expect(config.outputDir).toBe("dist");
     expect(config.wrangler).toEqual({
       compatibility_date: "2025-12-01",
@@ -149,9 +149,15 @@ describe("readConfig", () => {
     cleanup();
   });
 
-  it("throws on invalid mode", () => {
-    setup(JSON.stringify({ mode: "serverless" }));
+  it("throws on invalid appType", () => {
+    setup(JSON.stringify({ appType: "serverless" }));
     expect(() => readConfig(tmpDir)).toThrow("must be one of: spa, prebuilt, full");
+    cleanup();
+  });
+
+  it("throws migration error when old mode key is used", () => {
+    setup(JSON.stringify({ mode: "spa" }));
+    expect(() => readConfig(tmpDir)).toThrow('"mode" has been renamed to "appType"');
     cleanup();
   });
 
