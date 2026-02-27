@@ -26,7 +26,7 @@ export default defineRender(async (c, assetTags) => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Void SSR Playground</title>
     <script>window.__STATE__=${stateJson}</script>
-    ${assetTags.head}
+    ${assetTags.css}${assetTags.preloads}
   </head>
   <body>
     <div id="root">${appHtml}</div>

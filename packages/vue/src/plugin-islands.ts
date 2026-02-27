@@ -26,11 +26,33 @@ function resolveSpecifier(specifier: string, importerDir: string): string | null
   return null;
 }
 
-/** Quick sync check for .island.vue files in the pages directory. */
-function hasIslandFiles(dir: string): boolean {
+/**
+ * Check whether the islands client bundle is needed by scanning file contents.
+ * Returns true if any island/layout file has island imports or CSS,
+ * or any .md file has a `<script>` block.
+ */
+function needsIslandClientBundle(dir: string): boolean {
+  const importAttrRe = /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:/;
+  const styleRe = /<style\b/;
+  const cssImportRe =
+    /import\b[^"']*["'][^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)["']/;
+  const mdScriptRe = /^<script\b/m;
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
-      if (entry.isFile() && entry.name.endsWith(".island.vue")) return true;
+      if (!entry.isFile()) continue;
+      const name = entry.name;
+      // Check island and layout files for island imports or CSS
+      if (name.endsWith(".island.vue") || name.startsWith("layout.") || name.startsWith("_")) {
+        const content = readFileSync(resolve(entry.parentPath!, name), "utf-8");
+        if (importAttrRe.test(content)) return true;
+        if (styleRe.test(content)) return true;
+        if (cssImportRe.test(content)) return true;
+      }
+      // Check markdown files for <script> blocks
+      if (name.endsWith(".md")) {
+        const content = readFileSync(resolve(entry.parentPath!, name), "utf-8");
+        if (mdScriptRe.test(content)) return true;
+      }
     }
   } catch {
     // ignore
@@ -431,12 +453,13 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
         if (env.command === "serve") {
           return { optimizeDeps: { include: ["vue"] } };
         }
-        // Only add the islands client entry when island pages exist
-        if (hasIslandFiles(pagesDir)) {
+        // Only add the islands client entry when content needs it
+        if (needsIslandClientBundle(pagesDir)) {
           return {
             environments: {
               client: {
                 build: {
+                  manifest: true,
                   rollupOptions: {
                     input: { "islands-client": ISLANDS_CLIENT_ENTRY_ID },
                   },
@@ -520,7 +543,7 @@ export async function renderIslandPage(pageObj, assetTags) {
 
   return \`<!doctype html>
 <html\${htmlAttrs}>
-<head>\${headHtml}\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\\n") : ""}\${assetTags.head}</head>
+<head>\${headHtml}\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\\n") : ""}\${assetTags.css}\${__pagesNeedingClientJS.has(pageObj.component) ? assetTags.preloads : ""}</head>
 <body\${bodyAttrs}>
   <div id="app"\${__mdScriptAttr}>\${html}</div>
   \${__pagesNeedingClientJS.has(pageObj.component) ? assetTags.body : ""}

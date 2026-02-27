@@ -105,8 +105,14 @@ export async function handlePageGet(
   headFn: ((c: any, props: Record<string, unknown>) => HeadDescriptor | undefined) | undefined,
   c: any,
   componentId: string,
-  renderFn: (pageObj: PageObject, assetTags: { head: string; body: string }) => Promise<string>,
-  getAssetTags: (req: Request, env: any) => Promise<{ head: string; body: string }>,
+  renderFn: (
+    pageObj: PageObject,
+    assetTags: { css: string; preloads: string; body: string },
+  ) => Promise<string>,
+  getAssetTags: (
+    req: Request,
+    env: any,
+  ) => Promise<{ css: string; preloads: string; body: string }>,
   configHead?: HeadConfig,
   island?: boolean,
 ): Promise<Response> {
@@ -230,8 +236,14 @@ export async function handlePageMutation(
   headFn: ((c: any, props: Record<string, unknown>) => HeadDescriptor | undefined) | undefined,
   c: any,
   componentId: string,
-  renderFn: (pageObj: PageObject, assetTags: { head: string; body: string }) => Promise<string>,
-  getAssetTags: (req: Request, env: any) => Promise<{ head: string; body: string }>,
+  renderFn: (
+    pageObj: PageObject,
+    assetTags: { css: string; preloads: string; body: string },
+  ) => Promise<string>,
+  getAssetTags: (
+    req: Request,
+    env: any,
+  ) => Promise<{ css: string; preloads: string; body: string }>,
   configHead?: HeadConfig,
   island?: boolean,
 ): Promise<Response> {

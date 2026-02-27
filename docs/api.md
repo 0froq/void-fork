@@ -171,7 +171,7 @@ import { renderToString } from "react-dom/server";
 export default defineRender((c, assetTags) => {
   const html = renderToString(<App />);
   return c.html(`<!DOCTYPE html>
-    <html><head>${assetTags.head}</head>
+    <html><head>${assetTags.css}${assetTags.preloads}</head>
     <body><div id="root">${html}</div>${assetTags.body}</body></html>`);
 });
 ```

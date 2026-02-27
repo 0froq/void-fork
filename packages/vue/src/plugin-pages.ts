@@ -1,5 +1,5 @@
 import type { Plugin } from "vite";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { scanPages } from "void/pages";
 import type { PageScanResult } from "void/pages";
@@ -16,6 +16,21 @@ interface PrefetchConfig {
 interface PagesPluginOptions {
   viewTransitions?: boolean;
   prefetch?: PrefetchConfig;
+}
+
+/** Check if the pages directory has any non-island Vue page files. */
+function hasNonIslandPages(dir: string): boolean {
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
+      if (!entry.isFile()) continue;
+      const name = entry.name;
+      if (name.startsWith("_") || name.startsWith("layout.")) continue;
+      if (name.endsWith(".vue") && !name.includes(".island.")) return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
 }
 
 export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plugin[] {
@@ -117,6 +132,9 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
           };
         }
 
+        // Skip the pages-client bundle when all pages are island pages
+        if (!hasNonIslandPages(pagesDir)) return;
+
         return {
           environments: {
             client: {
@@ -184,7 +202,7 @@ export async function renderPage(pageObj, assetTags) {
 
   return \`<!doctype html>
 <html\${htmlAttrs}>
-<head>\${headHtml}\${assetTags.head}</head>
+<head>\${headHtml}\${assetTags.css}\${assetTags.preloads}</head>
 <body\${bodyAttrs}>
   <div id="app" data-page="\${pageData}">\${html}</div>
   \${assetTags.body}

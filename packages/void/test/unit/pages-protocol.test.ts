@@ -43,7 +43,7 @@ function createTestContext(
 }
 
 const mockRenderFn = vi.fn(async (pageObj: any) => `<html>${pageObj.component}</html>`);
-const mockGetAssetTags = vi.fn(async () => ({ head: "", body: "" }));
+const mockGetAssetTags = vi.fn(async () => ({ css: "", preloads: "", body: "" }));
 
 describe("handlePageGet", () => {
   it("returns JSON page object when X-VoidPages header present", async () => {

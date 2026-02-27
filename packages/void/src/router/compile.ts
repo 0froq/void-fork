@@ -214,10 +214,10 @@ export function compileRouteTable(
     lines.push(`}`);
     lines.push("");
     lines.push(`function getDevClientTags() {`);
-    lines.push(`  const headTags = [\`<script type="module" src="/@vite/client"></script>\`];`);
-    lines.push(`  headTags.push(\`${BINDING_HINT_SCRIPT}\`);`);
+    lines.push(`  const preloadTags = [\`<script type="module" src="/@vite/client"></script>\`];`);
+    lines.push(`  preloadTags.push(\`${BINDING_HINT_SCRIPT}\`);`);
     if (options.reactRefresh) {
-      lines.push(`  headTags.push(\`<script type="module">
+      lines.push(`  preloadTags.push(\`<script type="module">
 import RefreshRuntime from "/@react-refresh";
 RefreshRuntime.injectIntoGlobalHook(window);
 window.$RefreshReg$ = () => {};
@@ -228,7 +228,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(
       `  const bodyTag = \`<script type="module" src="\${escapeHtml(SSR_CLIENT_ENTRY_URL)}"></script>\`;`,
     );
-    lines.push(`  return { head: headTags.join("\\n"), body: bodyTag };`);
+    lines.push(`  return { css: "", preloads: preloadTags.join("\\n"), body: bodyTag };`);
     lines.push(`}`);
     lines.push("");
     lines.push(`function collectManifestFiles(manifest, entryId) {`);
@@ -265,11 +265,12 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`async function getClientAssetTags(request, env) {`);
     lines.push(`  const manifest = await loadSsrManifest(request, env);`);
     lines.push(`  if (!manifest || typeof manifest !== "object") {`);
+    lines.push(`    if (!import.meta.env.DEV) return { css: "", preloads: "", body: "" };`);
     lines.push(`    return getDevClientTags();`);
     lines.push(`  }`);
     lines.push(`  const entry = manifest[SSR_CLIENT_ENTRY_ID];`);
     lines.push(`  if (!entry || typeof entry !== "object" || typeof entry.file !== "string") {`);
-    lines.push(`    return { head: "", body: "" };`);
+    lines.push(`    return { css: "", preloads: "", body: "" };`);
     lines.push(`  }`);
     lines.push(`  const ids = collectManifestFiles(manifest, SSR_CLIENT_ENTRY_ID);`);
     lines.push(`  const cssFiles = new Set();`);
@@ -284,19 +285,22 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`      preloadFiles.add(chunk.file);`);
     lines.push(`    }`);
     lines.push(`  }`);
-    lines.push(`  const headTags = [];`);
+    lines.push(`  const cssTags = [];`);
     lines.push(`  for (const cssFile of cssFiles) {`);
-    lines.push(`    headTags.push(\`<link rel="stylesheet" href="/\${escapeHtml(cssFile)}">\`);`);
+    lines.push(`    cssTags.push(\`<link rel="stylesheet" href="/\${escapeHtml(cssFile)}">\`);`);
     lines.push(`  }`);
+    lines.push(`  const preloadTags = [];`);
     lines.push(`  for (const preloadFile of preloadFiles) {`);
     lines.push(
-      `    headTags.push(\`<link rel="modulepreload" href="/\${escapeHtml(preloadFile)}">\`);`,
+      `    preloadTags.push(\`<link rel="modulepreload" href="/\${escapeHtml(preloadFile)}">\`);`,
     );
     lines.push(`  }`);
     lines.push(
       `  const bodyTag = \`<script type="module" src="/\${escapeHtml(entry.file)}"></script>\`;`,
     );
-    lines.push(`  return { head: headTags.join("\\n"), body: bodyTag };`);
+    lines.push(
+      `  return { css: cssTags.join("\\n"), preloads: preloadTags.join("\\n"), body: bodyTag };`,
+    );
     lines.push(`}`);
     lines.push("");
     lines.push(`function shouldHandleSsrRequest(c) {`);
@@ -616,12 +620,12 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push("");
   lines.push(`function getPagesDevClientTags() {`);
   lines.push(
-    `  const headTag = \`<script type="module" src="/@vite/client"></script>\\n${BINDING_HINT_SCRIPT}\`;`,
+    `  const preloads = \`<script type="module" src="/@vite/client"></script>\\n${BINDING_HINT_SCRIPT}\`;`,
   );
   lines.push(
     `  const bodyTag = \`<script type="module" src="\${escapeHtmlAttr(PAGES_CLIENT_ENTRY_URL)}"></script>\`;`,
   );
-  lines.push(`  return { head: headTag, body: bodyTag };`);
+  lines.push(`  return { css: "", preloads, body: bodyTag };`);
   lines.push(`}`);
   lines.push("");
   lines.push(`function collectPagesManifestFiles(manifest, entryId) {`);
@@ -658,11 +662,12 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`async function getPagesAssetTags(request, env) {`);
   lines.push(`  const manifest = await loadPagesManifest(request, env);`);
   lines.push(`  if (!manifest || typeof manifest !== "object") {`);
+  lines.push(`    if (!import.meta.env.DEV) return { css: "", preloads: "", body: "" };`);
   lines.push(`    return getPagesDevClientTags();`);
   lines.push(`  }`);
   lines.push(`  const entry = manifest[PAGES_CLIENT_ENTRY_ID];`);
   lines.push(`  if (!entry || typeof entry !== "object" || typeof entry.file !== "string") {`);
-  lines.push(`    return { head: "", body: "" };`);
+  lines.push(`    return { css: "", preloads: "", body: "" };`);
   lines.push(`  }`);
   lines.push(`  const ids = collectPagesManifestFiles(manifest, PAGES_CLIENT_ENTRY_ID);`);
   lines.push(`  const cssFiles = new Set();`);
@@ -677,19 +682,22 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`      preloadFiles.add(chunk.file);`);
   lines.push(`    }`);
   lines.push(`  }`);
-  lines.push(`  const headTags = [];`);
+  lines.push(`  const cssTags = [];`);
   lines.push(`  for (const cssFile of cssFiles) {`);
-  lines.push(`    headTags.push(\`<link rel="stylesheet" href="/\${escapeHtmlAttr(cssFile)}">\`);`);
+  lines.push(`    cssTags.push(\`<link rel="stylesheet" href="/\${escapeHtmlAttr(cssFile)}">\`);`);
   lines.push(`  }`);
+  lines.push(`  const preloadTags = [];`);
   lines.push(`  for (const preloadFile of preloadFiles) {`);
   lines.push(
-    `    headTags.push(\`<link rel="modulepreload" href="/\${escapeHtmlAttr(preloadFile)}">\`);`,
+    `    preloadTags.push(\`<link rel="modulepreload" href="/\${escapeHtmlAttr(preloadFile)}">\`);`,
   );
   lines.push(`  }`);
   lines.push(
     `  const bodyTag = \`<script type="module" src="/\${escapeHtmlAttr(entry.file)}"></script>\`;`,
   );
-  lines.push(`  return { head: headTags.join("\\n"), body: bodyTag };`);
+  lines.push(
+    `  return { css: cssTags.join("\\n"), preloads: preloadTags.join("\\n"), body: bodyTag };`,
+  );
   lines.push(`}`);
   lines.push("");
 
@@ -709,7 +717,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     lines.push("");
     lines.push(`function getIslandsDevClientTags() {`);
     lines.push(
-      `  const headTag = \`<script type="module" src="/@vite/client"></script>\\n${BINDING_HINT_SCRIPT}\`;`,
+      `  const preloads = \`<script type="module" src="/@vite/client"></script>\\n${BINDING_HINT_SCRIPT}\`;`,
     );
     lines.push(
       `  let bodyTag = \`<script type="module" src="\${escapeHtmlAttr(ISLANDS_CLIENT_ENTRY_URL)}"></script>\`;`,
@@ -719,17 +727,18 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
         `  bodyTag += \`\\n<script type="module" src="\${escapeHtmlAttr(MD_CLIENT_ENTRY_URL)}"></script>\`;`,
       );
     }
-    lines.push(`  return { head: headTag, body: bodyTag };`);
+    lines.push(`  return { css: "", preloads, body: bodyTag };`);
     lines.push(`}`);
     lines.push("");
     lines.push(`async function getIslandsAssetTags(request, env) {`);
     lines.push(`  const manifest = await loadPagesManifest(request, env);`);
     lines.push(`  if (!manifest || typeof manifest !== "object") {`);
+    lines.push(`    if (!import.meta.env.DEV) return { css: "", preloads: "", body: "" };`);
     lines.push(`    return getIslandsDevClientTags();`);
     lines.push(`  }`);
     lines.push(`  const entry = manifest[ISLANDS_CLIENT_ENTRY_ID];`);
     lines.push(`  if (!entry || typeof entry !== "object" || typeof entry.file !== "string") {`);
-    lines.push(`    return { head: "", body: "" };`);
+    lines.push(`    return { css: "", preloads: "", body: "" };`);
     lines.push(`  }`);
     lines.push(`  const ids = collectPagesManifestFiles(manifest, ISLANDS_CLIENT_ENTRY_ID);`);
     // Collect md entry files too
@@ -756,15 +765,16 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     lines.push(`      preloadFiles.add(chunk.file);`);
     lines.push(`    }`);
     lines.push(`  }`);
-    lines.push(`  const headTags = [];`);
+    lines.push(`  const cssTags = [];`);
     lines.push(`  for (const cssFile of cssFiles) {`);
     lines.push(
-      `    headTags.push(\`<link rel="stylesheet" href="/\${escapeHtmlAttr(cssFile)}">\`);`,
+      `    cssTags.push(\`<link rel="stylesheet" href="/\${escapeHtmlAttr(cssFile)}">\`);`,
     );
     lines.push(`  }`);
+    lines.push(`  const preloadTags = [];`);
     lines.push(`  for (const preloadFile of preloadFiles) {`);
     lines.push(
-      `    headTags.push(\`<link rel="modulepreload" href="/\${escapeHtmlAttr(preloadFile)}">\`);`,
+      `    preloadTags.push(\`<link rel="modulepreload" href="/\${escapeHtmlAttr(preloadFile)}">\`);`,
     );
     lines.push(`  }`);
     lines.push(
@@ -777,7 +787,9 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
       );
       lines.push(`  }`);
     }
-    lines.push(`  return { head: headTags.join("\\n"), body: bodyTag };`);
+    lines.push(
+      `  return { css: cssTags.join("\\n"), preloads: preloadTags.join("\\n"), body: bodyTag };`,
+    );
     lines.push(`}`);
     lines.push("");
   }

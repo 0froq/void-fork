@@ -39,11 +39,13 @@ export type CloudContext = Context<CloudEnv>;
 type HandlerFn = (c: CloudContext) => unknown | Promise<unknown>;
 type MiddlewareFn = MiddlewareHandler<CloudEnv>;
 
-/** Pre-rendered `<head>` and `<body>` asset tags injected by the SSR build. */
+/** Pre-rendered asset tags injected by the SSR build. */
 export interface RenderAssetTags {
-  /** Script and style tags to inject into `<head>` (e.g. CSS links). */
-  head: string;
-  /** Script tags to inject before `</body>` (e.g. client entry module). */
+  /** CSS stylesheet links for `<head>`. */
+  css: string;
+  /** JS modulepreload links for `<head>` (only when page needs JS). */
+  preloads: string;
+  /** Script tags for `</body>` (only when page needs JS). */
   body: string;
 }
 type RenderFn = (c: CloudContext, assetTags: RenderAssetTags) => Response | Promise<Response>;

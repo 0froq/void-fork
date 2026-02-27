@@ -23,5 +23,5 @@ blog/
 - **Server state transfer** — props serialized to `<script>window.__STATE__=...</script>` in the HTML
 - **KV integration** — stores and increments visit count via `c.env.KV`
 - **Dynamic blog routes** — matches `/blog/:slug` and loads corresponding `.md` file via `import(...?raw)`
-- **Asset injection** — uses `assetTags.head` and `assetTags.body` for Vite asset tags
+- **Asset injection** — uses `assetTags.css`, `assetTags.preloads`, and `assetTags.body` for Vite asset tags
 - **API routes** — coexists with SSR (e.g. `/api/hello`)

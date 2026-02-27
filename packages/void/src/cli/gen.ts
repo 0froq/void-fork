@@ -559,7 +559,7 @@ export default defineRender(async (c, assetTags) => {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>App</title>
-    \${assetTags.head}
+    \${assetTags.css}\${assetTags.preloads}
   </head>
   <body>
     <div id="root">\${appHtml}</div>
@@ -620,7 +620,7 @@ export default defineRender(async (c, assetTags) => {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>App</title>
-    \${assetTags.head}
+    \${assetTags.css}\${assetTags.preloads}
   </head>
   <body>
     <div id="app">\${appHtml}</div>
@@ -678,7 +678,7 @@ export default defineRender(async (c, assetTags) => {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>App</title>
-    \${assetTags.head}
+    \${assetTags.css}\${assetTags.preloads}
   </head>
   <body>
     <div id="app">\${appHtml}</div>
@@ -731,7 +731,7 @@ export default defineRender(async (c, assetTags) => {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>App</title>
-    \${assetTags.head}
+    \${assetTags.css}\${assetTags.preloads}
   </head>
   <body>
     <div id="app">\${appHtml}</div>

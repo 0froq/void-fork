@@ -60,7 +60,7 @@ export default defineRender(async (c, assetTags) => {
   return new Response(
     `<!doctype html>
 <html>
-  <head>${assetTags.head}</head>
+  <head>${assetTags.css}${assetTags.preloads}</head>
   <body>
     <div id="root">${html}</div>
     ${assetTags.body}
