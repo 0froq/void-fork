@@ -75,7 +75,18 @@ app.get("/:id", async (c) => {
           class="card mb-1"
           style="background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b"
         >
-          <h2 style="font-size: 1.125rem; margin-bottom: 0.5rem">Error</h2>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem">
+            <h2 style="font-size: 1.125rem; margin: 0">Error</h2>
+            <button
+              type="button"
+              class="copy-btn"
+              data-copy={deployment.error_message}
+              title="Copy to clipboard"
+              style="padding: 0.25rem 0.75rem; font-size: 0.8rem; cursor: pointer; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 4px; color: #991b1b"
+            >
+              Copy
+            </button>
+          </div>
           <pre style="margin: 0; white-space: pre-wrap; font-size: 0.85rem">
             {deployment.error_message}
           </pre>

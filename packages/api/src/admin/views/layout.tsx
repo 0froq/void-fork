@@ -70,6 +70,11 @@ export function Layout({
           </span>
         </nav>
         <main>{children}</main>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `document.addEventListener('click',function(e){var b=e.target.closest('.copy-btn');if(!b)return;navigator.clipboard.writeText(b.dataset.copy).then(function(){var t=b.textContent;b.textContent='Copied!';setTimeout(function(){b.textContent=t},1500)})})`,
+          }}
+        />
       </body>
     </html>
   );

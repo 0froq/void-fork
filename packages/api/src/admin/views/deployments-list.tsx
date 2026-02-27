@@ -56,8 +56,25 @@ export function DeploymentsListPage({
                   <td style="font-family: monospace; font-size: 0.8rem">
                     {d.commit ? d.commit.slice(0, 7) : "-"}
                   </td>
-                  <td style="color: #dc2626; font-size: 0.8rem; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
-                    {d.error_message ? d.error_message.slice(0, 60) : "-"}
+                  <td style="color: #dc2626; font-size: 0.8rem">
+                    {d.error_message ? (
+                      <div style="display: flex; align-items: start; gap: 0.5rem">
+                        <pre style="margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 0.8rem; flex: 1">
+                          {d.error_message}
+                        </pre>
+                        <button
+                          type="button"
+                          class="copy-btn"
+                          data-copy={d.error_message}
+                          title="Copy to clipboard"
+                          style="flex-shrink: 0; padding: 0.25rem 0.5rem; font-size: 0.7rem; cursor: pointer; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 4px; color: #991b1b"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    ) : (
+                      "-"
+                    )}
                   </td>
                   <td>{new Date(d.created_at).toLocaleString()}</td>
                 </tr>
