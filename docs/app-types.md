@@ -42,7 +42,7 @@ my-app/
   vite.config.ts            ← plugins: [voidPlugin()]
 ```
 
-Your worker handles API routes, page rendering, and (optionally) [custom SSR](./ssr.md). Static assets are served from the edge via R2. Cloudflare bindings (D1, KV, R2) are [inferred from your source code](./resource-inference.md) and provisioned automatically.
+Your worker handles API routes, page rendering, and (optionally) [custom SSR](./ssr.md). Static assets are served from the edge via per-worker assets. Cloudflare bindings (D1, KV, R2) are [inferred from your source code](./resource-inference.md) and provisioned automatically.
 
 **Detected when any of these exist:**
 
@@ -71,7 +71,7 @@ Add `voidPlugin()` to the framework's Vite config to get binding inference, type
 
 ## Pre-built Static Sites
 
-Any project that produces static files — SPAs, prebuilt sites, or plain directories. No Cloudflare Worker is deployed; assets are served directly from the edge.
+Any project that produces static files — SPAs, prebuilt sites, or plain directories. Assets are served directly from the edge. A minimal passthrough worker is generated automatically — no user code is needed.
 
 **SPAs** (client-side single-page apps) fall back all non-file paths to `index.html` with a 200 status, so client-side routing works out of the box. Detected when `vite` is a dependency and no backend files exist.
 
