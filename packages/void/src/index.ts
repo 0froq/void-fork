@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadEnv, type Plugin } from "vite";
-import { cloudflare, type WorkerConfig } from "@cloudflare/vite-plugin";
+import { cloudflare, type PluginConfig, type WorkerConfig } from "@cloudflare/vite-plugin";
 import { routingPlugin } from "./plugin-routing";
 import { migrationPlugin } from "./plugin-migration";
 import { dbTypesPlugin } from "./plugin-db-types";
@@ -175,7 +175,10 @@ async function runAiSetupPrompt(
  * that are missing. This allows `vite build && wrangler deploy` to work
  * for deploying directly to Cloudflare without the Void platform.
  */
-export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
+export function voidPlugin(options?: {
+  persistTo?: string;
+  auxiliaryWorkers?: PluginConfig["auxiliaryWorkers"];
+}): Plugin[] {
   // Resolve root relative to CWD — this runs at config time
   const root = process.cwd();
   const config = readConfig(root);
@@ -519,6 +522,7 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
       ...cloudflare({
         ...inspectorPortOption,
         persistState: { path: options?.persistTo ?? outDir },
+        auxiliaryWorkers: options?.auxiliaryWorkers,
         viteEnvironment: { name: "ssr" },
         config: mergeBindings,
       }),
@@ -572,6 +576,7 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
     ...cloudflare({
       ...inspectorPortOption,
       persistState: { path: options?.persistTo ?? outDir },
+      auxiliaryWorkers: options?.auxiliaryWorkers,
       config: mergeBindings,
     }),
   ];
