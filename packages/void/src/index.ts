@@ -394,12 +394,13 @@ export function voidPlugin(options?: {
       }
       workerConfig.vars = { ...(workerConfig.vars as Record<string, string> | undefined), ...env };
 
-      // In dev, add exclusions so Vite serves source modules directly
-      // without routing them through the worker.
+      // In dev, remove run_worker_first so Vite's middleware handles
+      // virtual modules (/@vite/*, /__uno.css, etc.) before the CF plugin's
+      // final handler routes unmatched requests to workerd.
+      // run_worker_first is only needed in production for CF edge routing.
       const assets = workerConfig.assets as { run_worker_first?: string[] } | undefined;
-      if (command === "serve" && assets?.run_worker_first) {
-        assets.run_worker_first.push("!/@*", "!/__*", "!/src/*", "!/node_modules/*");
-        if (existsSync(join(root, "pages"))) assets.run_worker_first.push("!/pages/*");
+      if (command === "serve" && assets) {
+        delete (assets as Record<string, unknown>).run_worker_first;
       }
 
       // Auto-detect OAuth providers from env vars (only if not explicitly configured)
