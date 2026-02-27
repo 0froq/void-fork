@@ -380,7 +380,7 @@ export function voidPlugin(options?: {
   // Phase 2: Also auto-detects OAuth providers from env vars.
   const envPlugin: Plugin = {
     name: "void:env",
-    config(_, { mode }) {
+    config(_, { mode, command }) {
       // loadEnv with prefix "" returns .env file vars AND all process.env vars.
       // Filter out shell env pollution (MANPATH, PATH, HOME, etc.) by keeping only
       // vars that are new or have a different value than the shell environment.
@@ -393,6 +393,14 @@ export function voidPlugin(options?: {
         }
       }
       workerConfig.vars = { ...(workerConfig.vars as Record<string, string> | undefined), ...env };
+
+      // In dev, add exclusions so Vite serves source modules directly
+      // without routing them through the worker.
+      const assets = workerConfig.assets as { run_worker_first?: string[] } | undefined;
+      if (command === "serve" && assets?.run_worker_first) {
+        assets.run_worker_first.push("!/@*", "!/__*", "!/src/*", "!/node_modules/*");
+        if (existsSync(join(root, "pages"))) assets.run_worker_first.push("!/pages/*");
+      }
 
       // Auto-detect OAuth providers from env vars (only if not explicitly configured)
       if (config.auth === undefined) {
@@ -553,15 +561,8 @@ export function voidPlugin(options?: {
       binding: "ASSETS",
       // Route document/API requests to the worker for SSR/Pages. Static assets
       // (hashed files in /assets/) bypass the worker and are served directly
-      // from the edge. Dev-only exclusions let Vite serve source modules.
-      run_worker_first: [
-        "/**",
-        "!/assets/*",
-        "!/@*",
-        "!/src/*",
-        "!/node_modules/*",
-        ...(hasPages ? ["!/pages/*"] : []),
-      ],
+      // from the edge. Dev-only exclusions are added in envPlugin's config hook.
+      run_worker_first: ["/**", "!/assets/*"],
     };
   }
 

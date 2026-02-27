@@ -158,13 +158,7 @@ describe("playground/ssr build + preview", () => {
       assets?: { run_worker_first?: boolean | string[] };
       kv_namespaces?: Array<{ binding: string }>;
     };
-    expect(wranglerConfig.assets?.run_worker_first).toEqual([
-      "/**",
-      "!/assets/*",
-      "!/@*",
-      "!/src/*",
-      "!/node_modules/*",
-    ]);
+    expect(wranglerConfig.assets?.run_worker_first).toEqual(["/**", "!/assets/*"]);
     expect(wranglerConfig.kv_namespaces?.some((b) => b.binding === "KV")).toBe(true);
   });
 
