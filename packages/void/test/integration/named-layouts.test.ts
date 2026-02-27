@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
-const DEV_PORT = 5221;
+const DEV_PORT = 5223;
 const DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
 
 async function waitForServer(url: string, timeoutMs: number): Promise<void> {

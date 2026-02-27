@@ -28,14 +28,17 @@ jobs:
       matrix:
         include:
           - suite: unit
-            pattern: test/unit
-          - suite: integration
-            pattern: void/test/integration
-          - suite: pages-adapters-react-vue
-            pattern: react/test/integration vue/test/integration
+            script: test:unit
+          - suite: core-markdown
+            script: test:integration
+          - suite: metaframeworks
+            script: test:metaframeworks
             retry: 2
-          - suite: pages-adapters-svelte-solid
-            pattern: svelte/test/integration solid/test/integration
+          - suite: pages-react-vue
+            script: test:pages:react-vue
+            retry: 2
+          - suite: pages-svelte-solid
+            script: test:pages:svelte-solid
             retry: 2
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +51,6 @@ jobs:
       - run: pnpm build
 
       - run: pnpm exec playwright install --with-deps chromium
-        if: matrix.suite == 'pages-adapters-react-vue' || matrix.suite == 'pages-adapters-svelte-solid'
+        if: matrix.suite == 'core-markdown' || startsWith(matrix.suite, 'pages-')
 
-      - run: pnpm vitest --run --retry ${{ matrix.retry || 0 }} ${{ matrix.pattern }}
+      - run: pnpm ${{ matrix.script }}${{ matrix.retry && format(' --retry {0}', matrix.retry) || '' }}
