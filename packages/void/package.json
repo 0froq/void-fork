@@ -126,7 +126,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@cloudflare/vite-plugin": "^1.25.0",
+    "@cloudflare/vite-plugin": "^1.25.6",
     "@cloudflare/workers-types": "catalog:",
     "@hono/oauth-providers": "^0.8.5",
     "better-sqlite3": "^12.6.2",
