@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "API_URL=http://localhost:8787 vite",
+    "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",

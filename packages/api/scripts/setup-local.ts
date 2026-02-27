@@ -78,12 +78,7 @@ async function main(): Promise<void> {
 
   // 5. Create .dev.vars if missing (API + dashboard)
   const apiDevVars = ["DEV_AUTH_BYPASS=true", "JWT_SECRET=dev", ""].join("\n");
-  const dashboardDevVars = [
-    "DEV_AUTH_BYPASS=true",
-    "JWT_SECRET=dev",
-    "API_URL=http://localhost:8787",
-    "",
-  ].join("\n");
+  const dashboardDevVars = ["DEV_AUTH_BYPASS=true", "JWT_SECRET=dev", ""].join("\n");
   const devVarsConfigs: [string, string][] = [
     [platformDir, apiDevVars],
     [resolve(platformDir, "../dashboard"), dashboardDevVars],

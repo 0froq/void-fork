@@ -2,7 +2,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm -F api -F dashboard --parallel dev",
+    "dev": "pnpm -F dashboard dev",
     "build": "pnpm -F dashboard build",
     "test": "vitest --run",
     "lint": "oxlint --type-aware --ignore-pattern 'framework/**'",

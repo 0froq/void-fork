@@ -7,7 +7,10 @@ import tailwind from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [
     tailwind(),
-    voidPlugin({ persistTo: resolve(__dirname, "../api/.wrangler/state") }),
+    voidPlugin({
+      persistTo: resolve(__dirname, "../api/.wrangler/state"),
+      auxiliaryWorkers: [{ configPath: resolve(__dirname, "../api/wrangler.jsonc") }],
+    }),
     voidVue(),
   ],
 });
