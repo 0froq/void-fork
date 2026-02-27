@@ -66,25 +66,25 @@ export const loader = defineHandler<Props>(async (c) => {
 
 export const action = defineHandler(async (c) => {
   const id = c.req.param("id");
-  const form = await c.req.parseBody();
-  const intent = form._intent as string;
+  const form = await c.req.json<Record<string, string>>();
+  const intent = form._intent;
 
   if (intent === "add-domain") {
     await api(c, `/projects/${id}/domains`, {
       method: "POST",
-      body: JSON.stringify({ hostname: form.hostname as string }),
+      body: JSON.stringify({ hostname: form.hostname }),
     });
   } else if (intent === "remove-domain") {
-    await api(c, `/projects/${id}/domains/${form.domainId as string}`, {
+    await api(c, `/projects/${id}/domains/${form.domainId}`, {
       method: "DELETE",
     });
   } else if (intent === "add-secret") {
-    await api(c, `/projects/${id}/secrets/${form.name as string}`, {
+    await api(c, `/projects/${id}/secrets/${form.name}`, {
       method: "PUT",
-      body: JSON.stringify({ value: form.value as string }),
+      body: JSON.stringify({ value: form.value }),
     });
   } else if (intent === "remove-secret") {
-    await api(c, `/projects/${id}/secrets/${form.name as string}`, {
+    await api(c, `/projects/${id}/secrets/${form.name}`, {
       method: "DELETE",
     });
   }

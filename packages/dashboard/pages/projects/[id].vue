@@ -53,18 +53,18 @@ const liveUrl = project.custom_domain
 const newDomain = ref("");
 
 function addDomain() {
-  const data = new FormData();
-  data.set("_intent", "add-domain");
-  data.set("hostname", newDomain.value);
-  router.post(`/projects/${project.id}`, data);
+  router.post(`/projects/${project.id}`, {
+    _intent: "add-domain",
+    hostname: newDomain.value,
+  });
   newDomain.value = "";
 }
 
 function removeDomain(domainId: string) {
-  const data = new FormData();
-  data.set("_intent", "remove-domain");
-  data.set("domainId", domainId);
-  router.post(`/projects/${project.id}`, data);
+  router.post(`/projects/${project.id}`, {
+    _intent: "remove-domain",
+    domainId,
+  });
 }
 
 // Secret form
@@ -72,20 +72,20 @@ const newSecretName = ref("");
 const newSecretValue = ref("");
 
 function addSecret() {
-  const data = new FormData();
-  data.set("_intent", "add-secret");
-  data.set("name", newSecretName.value);
-  data.set("value", newSecretValue.value);
-  router.post(`/projects/${project.id}`, data);
+  router.post(`/projects/${project.id}`, {
+    _intent: "add-secret",
+    name: newSecretName.value,
+    value: newSecretValue.value,
+  });
   newSecretName.value = "";
   newSecretValue.value = "";
 }
 
 function removeSecret(name: string) {
-  const data = new FormData();
-  data.set("_intent", "remove-secret");
-  data.set("name", name);
-  router.post(`/projects/${project.id}`, data);
+  router.post(`/projects/${project.id}`, {
+    _intent: "remove-secret",
+    name,
+  });
 }
 </script>
 
