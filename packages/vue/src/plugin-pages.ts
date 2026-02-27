@@ -226,6 +226,39 @@ import { initClientHead, applyClientHead } from "void/pages-head-client";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 const _prefetchCache = new PrefetchCache();
+
+function isFile(value) {
+  return (typeof File !== "undefined" && value instanceof File)
+    || value instanceof Blob
+    || (typeof FileList !== "undefined" && value instanceof FileList && value.length > 0);
+}
+
+function hasFiles(data) {
+  return isFile(data)
+    || (typeof data === "object" && data !== null && Object.values(data).some(hasFiles));
+}
+
+function objectToFormData(source, form, parentKey) {
+  form = form || new FormData();
+  for (const key in source) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+    const composed = parentKey ? parentKey + "[" + key + "]" : key;
+    const value = source[key];
+    if (value instanceof File) form.append(composed, value, value.name);
+    else if (value instanceof Blob) form.append(composed, value);
+    else if (typeof FileList !== "undefined" && value instanceof FileList) {
+      for (let i = 0; i < value.length; i++) form.append(composed + "[]", value[i], value[i].name);
+    } else if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) objectToFormData({ [i]: value[i] }, form, composed);
+    } else if (value instanceof Date) form.append(composed, value.toISOString());
+    else if (typeof value === "boolean") form.append(composed, value ? "1" : "0");
+    else if (typeof value === "string") form.append(composed, value);
+    else if (typeof value === "number") form.append(composed, String(value));
+    else if (value === null || value === undefined) form.append(composed, "");
+    else objectToFormData(value, form, composed);
+  }
+  return form;
+}
 const PREFETCH_HOVER_DELAY = ${prefetch?.hoverDelay ?? 75};
 const PREFETCH_DEFAULT_CACHE_FOR = parseCacheFor(${JSON.stringify(prefetch?.cacheFor ?? "30s")});
 
@@ -356,8 +389,13 @@ export const router = {
     const fetchOptions = { method, headers, signal: _abortController.signal };
 
     if (options.data && method !== "GET") {
-      headers["Content-Type"] = "application/json";
-      fetchOptions.body = JSON.stringify(options.data);
+      if (hasFiles(options.data)) {
+        fetchOptions.body = objectToFormData(options.data);
+        // Let the browser set Content-Type with multipart boundary
+      } else {
+        headers["Content-Type"] = "application/json";
+        fetchOptions.body = JSON.stringify(options.data);
+      }
     }
 
     let pageData;

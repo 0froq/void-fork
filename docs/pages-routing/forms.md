@@ -210,3 +210,113 @@ export const action = defineHandler(async (c) => {
 ```
 
 Or use `withValidator()` for automatic schema-based validation — errors are returned in the same format.
+
+## File Uploads
+
+`useForm` automatically detects `File`, `Blob`, and `FileList` values in form data and sends the request as `multipart/form-data` instead of JSON. No configuration needed — just set a file on the form data and submit.
+
+::: code-group
+
+```tsx [React]
+import { useForm } from "void/react";
+import { useRef } from "react";
+
+export default function Upload() {
+  const form = useForm("/photos", { title: "", photo: null as File | null });
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        form.post();
+      }}
+    >
+      <input value={form.data.title} onChange={(e) => form.setData("title", e.target.value)} />
+      <input
+        type="file"
+        ref={inputRef}
+        onChange={(e) => form.setData("photo", e.target.files?.[0] ?? null)}
+      />
+      <button disabled={form.processing}>Upload</button>
+    </form>
+  );
+}
+```
+
+```vue [Vue]
+<script setup lang="ts">
+import { ref } from "vue";
+import { useForm } from "void/vue";
+
+const form = useForm("/photos", { title: "", photo: null as File | null });
+const fileInput = ref<HTMLInputElement>();
+
+function onFileChange() {
+  form.data.photo = fileInput.value?.files?.[0] ?? null;
+}
+</script>
+
+<template>
+  <form @submit.prevent="form.post()">
+    <input v-model="form.data.title" />
+    <input type="file" ref="fileInput" @change="onFileChange" />
+    <button :disabled="form.processing">Upload</button>
+  </form>
+</template>
+```
+
+```svelte [Svelte]
+<script>
+  import { useForm } from "void/svelte";
+
+  const form = useForm("/photos", { title: "", photo: null });
+</script>
+
+<form onsubmit={(e) => { e.preventDefault(); form.post(); }}>
+  <input bind:value={form.data.title} />
+  <input type="file" onchange={(e) => { form.data.photo = e.target.files?.[0] ?? null; }} />
+  <button disabled={form.processing}>Upload</button>
+</form>
+```
+
+```tsx [Solid]
+import { useForm } from "void/solid";
+
+export default function Upload() {
+  const form = useForm("/photos", { title: "", photo: null as File | null });
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        form.post();
+      }}
+    >
+      <input value={form.data.title} onInput={(e) => form.setData("title", e.target.value)} />
+      <input type="file" onChange={(e) => form.setData("photo", e.target.files?.[0] ?? null)} />
+      <button disabled={form.processing}>Upload</button>
+    </form>
+  );
+}
+```
+
+:::
+
+On the server, use `c.req.parseBody()` to access the uploaded file:
+
+```ts
+// pages/photos.server.ts
+import { defineHandler } from "void";
+import { storage } from "void/storage";
+
+export const action = defineHandler(async (c) => {
+  const body = await c.req.parseBody();
+  const file = body["photo"] as File;
+  if (file && file.size > 0) {
+    await storage.put(file.name, file.stream(), {
+      httpMetadata: { contentType: file.type },
+    });
+  }
+});
+```
