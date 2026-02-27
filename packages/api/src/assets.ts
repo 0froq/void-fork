@@ -120,9 +120,7 @@ export async function computeAssetHash(content: ArrayBuffer): Promise<string> {
 /**
  * Collect assets from FormData and build the CF asset manifest + hash→entry map.
  */
-export async function collectAssets(
-  formData: FormData,
-): Promise<{
+export async function collectAssets(formData: FormData): Promise<{
   manifest: Record<string, AssetManifestEntry>;
   assetsByHash: Map<string, AssetEntry>;
 }> {
