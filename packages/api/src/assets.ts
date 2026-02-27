@@ -71,8 +71,7 @@ export async function uploadAssetBuckets(
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${apiToken}`,
-            "x-cf-assets-upload-jwt": jwt,
+            Authorization: `Bearer ${jwt}`,
           },
           body: formData,
         },
