@@ -193,6 +193,40 @@ interface RenderAssetTags {
 }
 ```
 
+### `defineHead<P>(handler)`
+
+Type-safe wrapper for the page `head()` export in `.server.ts` files. Provides [`CloudContext`](#cloudcontext) typing for the first argument and generic props typing for the second.
+
+```ts
+import { defineHandler, defineHead } from "void";
+import type { InferProps } from "void";
+
+export type Props = InferProps<typeof loader>;
+
+export const loader = defineHandler(async (c) => {
+  const post = await getPost(c.req.param("slug"));
+  return { post };
+});
+
+export const head = defineHead<Props>((c, props) => {
+  return {
+    title: props.post.title,
+    meta: [
+      { name: "description", content: props.post.excerpt },
+      { property: "og:title", content: props.post.title },
+    ],
+  };
+});
+```
+
+**Signature:**
+
+```ts
+function defineHead<P = Record<string, unknown>>(
+  handler: (c: CloudContext, props: P) => HeadDescriptor | undefined,
+): (c: CloudContext, props: P) => HeadDescriptor | undefined;
+```
+
 ## Auth
 
 Imported from `"void"` or `"void/auth"`. Client-side helpers imported from `"void/client"`.
@@ -639,6 +673,21 @@ interface TypedHandler<V extends ValidatorSlots = {}, R = unknown> {
 }
 ```
 
+### `HeadDescriptor`
+
+Shape of page head metadata returned by `defineHead`. All fields are optional.
+
+```ts
+interface HeadDescriptor {
+  title?: string;
+  meta?: Array<{ name?: string; property?: string; content?: string; charset?: string }>;
+  link?: Array<{ rel: string; href: string; [key: string]: string | undefined }>;
+  script?: Array<{ src?: string; innerHTML?: string; [key: string]: string | undefined }>;
+  htmlAttrs?: Record<string, string>;
+  bodyAttrs?: Record<string, string>;
+}
+```
+
 ### `RouteMap`
 
 Empty stub interface augmented at build time by the generated `.void/routes.d.ts`. Contains the full type information for all routes, methods, inputs, and outputs — used by the typed `fetch` client.
@@ -782,15 +831,15 @@ Imported from `"void/svelte"`.
 
 ## Subpath Exports
 
-| Import path      | Contents                                                                                     |
-| ---------------- | -------------------------------------------------------------------------------------------- |
-| `void`           | `voidPlugin` named export + all handler/type re-exports                                      |
-| `void/handler`   | `defineHandler`, `defineMiddleware`, `defineScheduled`, `defineQueue`, `defineRender`, types |
-| `void/auth`      | `requireAuth`, `AuthUser`                                                                    |
-| `void/client`    | `fetch`, `FetchError`, `auth`, `AuthError`, `AuthUser`                                       |
-| `void/response`  | `convertReturnValue`                                                                         |
-| `void/validator` | `runValidation`, `ValidatorSlots`, `HandlerInput`                                            |
-| `void/db`        | `db`, `createDb`, `QueryClient`, `DbTables`, `DbInsertTables`                                |
-| `void/routes`    | `RouteMap` stub (types only)                                                                 |
-| `void/queues`    | `queues` proxy for sending messages to typed queues                                          |
-| `void/env`       | Global Cloudflare env types (types only)                                                     |
+| Import path      | Contents                                                                                                   |
+| ---------------- | ---------------------------------------------------------------------------------------------------------- |
+| `void`           | `voidPlugin` named export + all handler/type re-exports                                                    |
+| `void/handler`   | `defineHandler`, `defineMiddleware`, `defineScheduled`, `defineQueue`, `defineRender`, `defineHead`, types |
+| `void/auth`      | `requireAuth`, `AuthUser`                                                                                  |
+| `void/client`    | `fetch`, `FetchError`, `auth`, `AuthError`, `AuthUser`                                                     |
+| `void/response`  | `convertReturnValue`                                                                                       |
+| `void/validator` | `runValidation`, `ValidatorSlots`, `HandlerInput`                                                          |
+| `void/db`        | `db`, `createDb`, `QueryClient`, `DbTables`, `DbInsertTables`                                              |
+| `void/routes`    | `RouteMap` stub (types only)                                                                               |
+| `void/queues`    | `queues` proxy for sending messages to typed queues                                                        |
+| `void/env`       | Global Cloudflare env types (types only)                                                                   |

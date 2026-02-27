@@ -1,5 +1,6 @@
 import type { Context, Env, MiddlewareHandler } from "hono";
 import type { AuthUser } from "./auth";
+import type { HeadDescriptor } from "../pages/head";
 import { convertReturnValue } from "./response";
 import { runValidation, type ValidatorSlots, type HandlerInput } from "./validator";
 
@@ -202,6 +203,16 @@ export function defineScheduled(handler: ScheduledFn): ScheduledFn {
  * The second argument includes asset tags for client scripts/styles.
  */
 export function defineRender(handler: RenderFn): RenderFn {
+  return handler;
+}
+
+/**
+ * Identity function that provides type inference for page `head()` exports.
+ * At runtime it simply returns the function passed to it.
+ */
+export function defineHead<P = Record<string, unknown>>(
+  handler: (c: CloudContext, props: P) => HeadDescriptor | undefined,
+): (c: CloudContext, props: P) => HeadDescriptor | undefined {
   return handler;
 }
 

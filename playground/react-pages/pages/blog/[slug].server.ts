@@ -1,4 +1,4 @@
-import { defineHandler } from "void";
+import { defineHandler, defineHead } from "void";
 import { POSTS } from "./_data";
 
 export interface Props {
@@ -12,8 +12,8 @@ export const loader = defineHandler<Props>((c) => {
   return { post };
 });
 
-export function head(_c: unknown, props: Props) {
+export const head = defineHead<Props>((c, props) => {
   return {
     title: props.post.title,
   };
-}
+});

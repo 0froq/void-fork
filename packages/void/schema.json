@@ -49,6 +49,70 @@
       "type": "string",
       "description": "Custom build command. Overrides the framework preset's default build command."
     },
+    "head": {
+      "type": "object",
+      "description": "Default <head> tags for all pages. Page-level head() exports override these defaults.",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Default page title"
+        },
+        "titleTemplate": {
+          "type": "string",
+          "description": "Title template — %s is replaced with the page title. Example: \"%s | My Site\""
+        },
+        "meta": {
+          "type": "array",
+          "description": "Default meta tags",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "property": { "type": "string" },
+              "content": { "type": "string" },
+              "charset": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "link": {
+          "type": "array",
+          "description": "Default link tags",
+          "items": {
+            "type": "object",
+            "properties": {
+              "rel": { "type": "string" },
+              "href": { "type": "string" }
+            },
+            "required": ["rel", "href"],
+            "additionalProperties": { "type": "string" }
+          }
+        },
+        "script": {
+          "type": "array",
+          "description": "Default script tags",
+          "items": {
+            "type": "object",
+            "properties": {
+              "src": { "type": "string" },
+              "innerHTML": { "type": "string" }
+            },
+            "additionalProperties": { "type": "string" }
+          }
+        },
+        "htmlAttrs": {
+          "type": "object",
+          "description": "Attributes to add to the <html> element. Example: { \"lang\": \"en\" }",
+          "additionalProperties": { "type": "string" }
+        },
+        "bodyAttrs": {
+          "type": "object",
+          "description": "Attributes to add to the <body> element",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
     "headers": {
       "type": "object",
       "description": "Custom response headers for static assets. Keys are URL patterns (e.g. \"/assets/*\"), values are arrays of \"Name: value\" strings.",

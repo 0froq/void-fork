@@ -43,7 +43,7 @@ src/
   queues/
     scan.ts                 # Queue file scanner (queues/ dir, name from filename + consumer options)
   runtime/
-    handler.ts              # defineHandler(), defineHandler.withValidator(), defineMiddleware(), defineQueue()
+    handler.ts              # defineHandler(), defineHandler.withValidator(), defineMiddleware(), defineHead(), defineQueue()
     queues.ts               # QueueMap stub interface + typed `queues` proxy using env.QUEUE_*
     validator.ts            # runValidation() — Standard Schema body/query/params validation
     response.ts             # convertReturnValue() — return → Response
@@ -79,18 +79,18 @@ src/
 
 ### Package Exports
 
-| Subpath          | What                                                                                                                |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `void`           | `voidPlugin()` named export + `defineHandler` + `defineMiddleware` + `defineQueue` + `CloudContext` type            |
-| `void/handler`   | `defineHandler()`, `defineHandler.withValidator()`, `defineMiddleware()`, types                                     |
-| `void/response`  | `convertReturnValue()`                                                                                              |
-| `void/validator` | `runValidation()`, `ValidatorSlots`, `HandlerInput` types                                                           |
-| `void/routes`    | Empty `RouteMap` stub interface (augmented by generated `routes.d.ts`)                                              |
-| `void/client`    | Typed `fetch()` client + `fetchStream()` SSE consumer + `FetchError`                                                |
-| `void/db`        | `db` query client + `createDb()` + `DbTables`/`DbInsertTables` stubs (augmented by generated `db.d.ts`)             |
-| `void/queues`    | `queues` typed proxy + `QueueMap` stub interface (augmented by generated `queues.d.ts`)                             |
-| `void/ai`        | `ai` proxy — `ai.run()`, `ai.stream()`, `ai.models()` with auto-detected backend (service binding / HTTPS / direct) |
-| `void/env`       | Global Cloudflare env types (`D1Database`, `KVNamespace`, `R2Bucket`, `Ai`)                                         |
+| Subpath          | What                                                                                                                    |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `void`           | `voidPlugin()` named export + `defineHandler` + `defineMiddleware` + `defineHead` + `defineQueue` + `CloudContext` type |
+| `void/handler`   | `defineHandler()`, `defineHandler.withValidator()`, `defineMiddleware()`, `defineHead()`, types                         |
+| `void/response`  | `convertReturnValue()`                                                                                                  |
+| `void/validator` | `runValidation()`, `ValidatorSlots`, `HandlerInput` types                                                               |
+| `void/routes`    | Empty `RouteMap` stub interface (augmented by generated `routes.d.ts`)                                                  |
+| `void/client`    | Typed `fetch()` client + `fetchStream()` SSE consumer + `FetchError`                                                    |
+| `void/db`        | `db` query client + `createDb()` + `DbTables`/`DbInsertTables` stubs (augmented by generated `db.d.ts`)                 |
+| `void/queues`    | `queues` typed proxy + `QueueMap` stub interface (augmented by generated `queues.d.ts`)                                 |
+| `void/ai`        | `ai` proxy — `ai.run()`, `ai.stream()`, `ai.models()` with auto-detected backend (service binding / HTTPS / direct)     |
+| `void/env`       | Global Cloudflare env types (`D1Database`, `KVNamespace`, `R2Bucket`, `Ai`)                                             |
 
 The CLI binary is at `dist/cli/cli.mjs` (declared in `bin` field of package.json).
 

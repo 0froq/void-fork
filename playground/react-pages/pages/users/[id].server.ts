@@ -1,4 +1,4 @@
-import { defineHandler } from "void";
+import { defineHandler, defineHead } from "void";
 import { USERS } from "./_data";
 
 export interface Props {
@@ -16,9 +16,9 @@ export const loader = defineHandler<Props>((c) => {
   return { user };
 });
 
-export function head(_c: unknown, props: Props) {
+export const head = defineHead<Props>((c, props) => {
   return {
     title: props.user.name,
     meta: [{ property: "og:title", content: props.user.name }],
   };
-}
+});

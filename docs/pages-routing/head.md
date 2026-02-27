@@ -12,7 +12,7 @@ Export a `head()` function from your `.server.ts` file. It receives the Hono con
 
 ```ts
 // pages/posts/[slug].server.ts
-import { defineHandler } from "void";
+import { defineHandler, defineHead } from "void";
 
 export interface Props {
   post: { title: string; excerpt: string; slug: string };
@@ -23,7 +23,7 @@ export const loader = defineHandler<Props>(async (c) => {
   return { post };
 });
 
-export function head(c, props: Props) {
+export const head = defineHead<Props>((c, props) => {
   // [!code highlight]
   return {
     title: props.post.title,
@@ -32,7 +32,7 @@ export function head(c, props: Props) {
       { property: "og:title", content: props.post.title },
     ],
   };
-}
+});
 ```
 
 `head()` runs server-side only, after the loader resolves.
@@ -101,8 +101,8 @@ interface HeadDescriptor {
     content?: string;
     charset?: string;
   }>;
-  link?: Array<{ rel: string; href: string; [key: string]: string }>;
-  script?: Array<{ src?: string; innerHTML?: string; [key: string]: string }>;
+  link?: Array<{ rel: string; href: string; [key: string]: string | undefined }>;
+  script?: Array<{ src?: string; innerHTML?: string; [key: string]: string | undefined }>;
   htmlAttrs?: Record<string, string>;
   bodyAttrs?: Record<string, string>;
 }

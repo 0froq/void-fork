@@ -1,4 +1,4 @@
-import { defineHandler } from "void";
+import { defineHandler, defineHead } from "void";
 
 export interface Props {
   title: string;
@@ -8,9 +8,9 @@ export const loader = defineHandler<Props>(() => {
   return { title: "Home" };
 });
 
-export function head(_c: unknown, props: Props) {
+export const head = defineHead<Props>((c, props) => {
   return {
     title: props.title,
     meta: [{ name: "description", content: "React Pages playground home" }],
   };
-}
+});
