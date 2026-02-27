@@ -1,0 +1,57 @@
+import type { Project } from "../../types";
+
+export type ProjectRow = Project & { owner_login: string | null; last_deploy: string | null };
+
+export function ProjectsTable({
+  projects,
+  siteDomain,
+}: {
+  projects: ProjectRow[];
+  siteDomain: string;
+}) {
+  return (
+    <>
+      <table>
+        <thead>
+          <tr>
+            <th>Slug</th>
+            <th>URL</th>
+            <th>Owner</th>
+            <th>Type</th>
+            <th>Created</th>
+            <th>Last Deploy</th>
+          </tr>
+        </thead>
+        <tbody>
+          {projects.map((p) => (
+            <tr key={p.id}>
+              <td>
+                <a href={`/admin/projects/${p.id}`}>{p.slug}</a>
+              </td>
+              <td>
+                <a
+                  href={`https://${p.slug}.${siteDomain}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {p.slug}.{siteDomain}
+                </a>
+              </td>
+              <td>
+                {p.owner_login ? <a href={`/admin/users/${p.user_id}`}>{p.owner_login}</a> : "-"}
+              </td>
+              <td>{p.mode}</td>
+              <td>{new Date(p.created_at).toLocaleDateString()}</td>
+              <td>{p.last_deploy ? new Date(p.last_deploy).toLocaleString() : "-"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {projects.length === 0 && (
+        <p>
+          <em>No projects found.</em>
+        </p>
+      )}
+    </>
+  );
+}

@@ -40,13 +40,6 @@ app.get("/:id", async (c) => {
   }
   const project = await getProject(c.get("db"), deployment.project_id);
 
-  const statusCls =
-    deployment.status === "live"
-      ? "badge-green"
-      : deployment.status === "failed"
-        ? "badge-red"
-        : "badge-gray";
-
   let manifest: DeployManifest | null = null;
   try {
     if (deployment.manifest) {
@@ -71,74 +64,69 @@ app.get("/:id", async (c) => {
       <h1>Deployment {deployment.id}</h1>
 
       {deployment.status === "failed" && deployment.error_message && (
-        <div
-          class="card mb-1"
-          style="background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b"
-        >
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem">
-            <h2 style="font-size: 1.125rem; margin: 0">Error</h2>
-            <button
-              type="button"
-              class="copy-btn"
-              data-copy={deployment.error_message}
-              title="Copy to clipboard"
-              style="padding: 0.25rem 0.75rem; font-size: 0.8rem; cursor: pointer; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 4px; color: #991b1b"
-            >
-              Copy
+        <>
+          <h2>Error</h2>
+          <pre>{deployment.error_message}</pre>
+          <p>
+            <button type="button" class="copy-btn" data-copy={deployment.error_message}>
+              Copy error
             </button>
-          </div>
-          <pre style="margin: 0; white-space: pre-wrap; font-size: 0.85rem">
-            {deployment.error_message}
-          </pre>
-        </div>
+          </p>
+        </>
       )}
 
-      <div class="card mb-1">
-        <table>
-          <tbody>
-            <tr>
-              <th>ID</th>
-              <td style="font-family: monospace; font-size: 0.8rem">{deployment.id}</td>
-            </tr>
-            <tr>
-              <th>Project</th>
-              <td>
-                {project ? (
-                  <a href={`/admin/projects/${project.id}`}>{project.slug}</a>
-                ) : (
-                  deployment.project_id
-                )}
-              </td>
-            </tr>
-            <tr>
-              <th>Status</th>
-              <td>
-                <span class={`badge ${statusCls}`}>{deployment.status}</span>
-              </td>
-            </tr>
-            <tr>
-              <th>Source</th>
-              <td>{deployment.source ?? "-"}</td>
-            </tr>
-            <tr>
-              <th>Commit</th>
-              <td style="font-family: monospace; font-size: 0.8rem">{deployment.commit ?? "-"}</td>
-            </tr>
-            <tr>
-              <th>Created</th>
-              <td>{deployment.created_at}</td>
-            </tr>
-            <tr>
-              <th>Deployed</th>
-              <td>{deployment.deployed_at ?? "-"}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <table>
+        <tbody>
+          <tr>
+            <th>ID</th>
+            <td>{deployment.id}</td>
+          </tr>
+          <tr>
+            <th>Project</th>
+            <td>
+              {project ? (
+                <a href={`/admin/projects/${project.id}`}>{project.slug}</a>
+              ) : (
+                deployment.project_id
+              )}
+            </td>
+          </tr>
+          <tr>
+            <th>Status</th>
+            <td
+              style={
+                deployment.status === "live"
+                  ? "color: green"
+                  : deployment.status === "failed"
+                    ? "color: red"
+                    : undefined
+              }
+            >
+              {deployment.status}
+            </td>
+          </tr>
+          <tr>
+            <th>Source</th>
+            <td>{deployment.source ?? "-"}</td>
+          </tr>
+          <tr>
+            <th>Commit</th>
+            <td>{deployment.commit ?? "-"}</td>
+          </tr>
+          <tr>
+            <th>Created</th>
+            <td>{deployment.created_at}</td>
+          </tr>
+          <tr>
+            <th>Deployed</th>
+            <td>{deployment.deployed_at ?? "-"}</td>
+          </tr>
+        </tbody>
+      </table>
 
       {manifest && (
-        <div class="card mb-1">
-          <h2 style="font-size: 1.125rem; margin-bottom: 1rem">Manifest</h2>
+        <>
+          <h2>Manifest</h2>
           <table>
             <tbody>
               {mode && (
@@ -153,9 +141,10 @@ app.get("/:id", async (c) => {
                     <tr key={type}>
                       <th>{type.toUpperCase()}</th>
                       <td>
-                        {value.map((n: string) => (
-                          <span key={n} class="badge badge-blue" style="margin-right: 0.25rem">
-                            {n}
+                        {value.map((n: string, i: number) => (
+                          <span key={n}>
+                            {i > 0 && ", "}
+                            <code>{n}</code>
                           </span>
                         ))}
                       </td>
@@ -163,9 +152,7 @@ app.get("/:id", async (c) => {
                   ) : value === true ? (
                     <tr key={type}>
                       <th>{type.toUpperCase()}</th>
-                      <td>
-                        <span class="badge badge-blue">enabled</span>
-                      </td>
+                      <td>enabled</td>
                     </tr>
                   ) : null,
                 )}
@@ -173,14 +160,11 @@ app.get("/:id", async (c) => {
                 <tr>
                   <th>Migrations</th>
                   <td>
-                    {manifest.migrations.map((m) => (
-                      <span
-                        key={m.name}
-                        class={`badge ${m.destructive ? "badge-red" : "badge-gray"}`}
-                        style="margin-right: 0.25rem"
-                      >
+                    {manifest.migrations.map((m, i) => (
+                      <span key={m.name}>
+                        {i > 0 && ", "}
                         {m.name}
-                        {m.destructive ? " (destructive)" : ""}
+                        {m.destructive && " (destructive)"}
                       </span>
                     ))}
                   </td>
@@ -190,8 +174,9 @@ app.get("/:id", async (c) => {
                 <tr>
                   <th>Schedules</th>
                   <td>
-                    {manifest.schedules.map((s) => (
-                      <span key={s.name} class="badge badge-gray" style="margin-right: 0.25rem">
+                    {manifest.schedules.map((s, i) => (
+                      <span key={s.name}>
+                        {i > 0 && ", "}
                         {s.name}: {s.cron}
                       </span>
                     ))}
@@ -200,20 +185,18 @@ app.get("/:id", async (c) => {
               )}
             </tbody>
           </table>
-        </div>
+        </>
       )}
 
       {deployment.manifest && (
-        <div class="card">
+        <>
           <details>
-            <summary style="cursor: pointer; font-weight: 600; font-size: 1.125rem">
-              Raw Manifest
-            </summary>
-            <pre style="margin-top: 0.5rem; font-size: 0.8rem; overflow-x: auto">
+            <summary>Raw Manifest</summary>
+            <pre style="margin-top: 10px">
               {JSON.stringify(JSON.parse(deployment.manifest), null, 2)}
             </pre>
           </details>
-        </div>
+        </>
       )}
     </Layout>,
   );

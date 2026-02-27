@@ -12,18 +12,12 @@ const app = new Hono<ApiEnv>();
 app.get("/login", (c) => {
   return c.html(`<!DOCTYPE html>
 <html>
-<head><title>Admin Login - Void</title>
-<style>
-body { font-family: system-ui; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f5f5f5; }
-.card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); text-align: center; }
-a { display: inline-block; margin: 0.5rem; padding: 0.75rem 1.5rem; background: #4285f4; color: white; text-decoration: none; border-radius: 6px; }
-</style>
-</head>
-<body>
-<div class="card">
+<head><title>Admin Login - Void</title></head>
+<body style="font-family: monospace; line-height: 1.5">
+<div style="max-width: 800px; margin: 0 auto; padding: 20px">
 <h1>Void Admin</h1>
 <p>Sign in with your admin account</p>
-<a href="/admin/login/google">Google</a>
+<p><a href="/admin/login/google">Sign in with Google</a></p>
 </div>
 </body>
 </html>`);
