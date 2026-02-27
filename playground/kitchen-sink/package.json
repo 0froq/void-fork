@@ -1,0 +1,22 @@
+{
+  "name": "playground-kitchen-sink",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.11.9",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@void-x/vue": "workspace:*",
+    "typescript": "~5.8.3",
+    "vite": "catalog:",
+    "void": "workspace:*",
+    "vue-tsc": "^3.2.4"
+  }
+}
