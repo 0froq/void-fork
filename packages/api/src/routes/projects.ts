@@ -7,7 +7,7 @@ import {
   getProjectsByUserId,
   getProjectDeployments,
   getProjectResources,
-  getDomainsByProjectId,
+  getDomainsByProjectIds,
 } from "../db";
 import { queryD1 } from "../migrations/remote-runner";
 
@@ -18,14 +18,17 @@ const app = new Hono<ApiEnv>()
     const userId = c.get("userId");
     const projects = await getProjectsByUserId(c.get("db"), userId);
 
-    // Batch-fetch active custom domains for all projects
-    const projectsWithDomains = await Promise.all(
-      projects.map(async (p) => {
-        const domains = await getDomainsByProjectId(c.get("db"), p.id);
-        const domain = domains.find((d) => d.status === "active") ?? domains[0];
-        return { ...p, custom_domain: domain?.hostname ?? null };
-      }),
-    );
+    // Batch-fetch domains for all projects in a single query
+    const projectIds = projects.map((p) => p.id);
+    const domainMap =
+      projectIds.length > 0 ? await getDomainsByProjectIds(c.get("db"), projectIds) : new Map();
+
+    const projectsWithDomains = projects.map((p) => {
+      const pDomains = domainMap.get(p.id);
+      const domain =
+        pDomains?.find((d: { status: string }) => d.status === "active") ?? pDomains?.[0];
+      return { ...p, custom_domain: domain?.hostname ?? null };
+    });
 
     return c.json(projectsWithDomains);
   })

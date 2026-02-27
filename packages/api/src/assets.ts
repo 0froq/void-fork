@@ -57,31 +57,33 @@ export async function uploadAssetBuckets(
   buckets: string[][],
   assetsByHash: Map<string, Blob>,
 ): Promise<void> {
-  for (const bucket of buckets) {
-    const formData = new FormData();
-    for (const hash of bucket) {
-      const blob = assetsByHash.get(hash);
-      if (!blob) continue;
-      formData.append(hash, blob, hash);
-    }
+  await Promise.all(
+    buckets.map(async (bucket) => {
+      const formData = new FormData();
+      for (const hash of bucket) {
+        const blob = assetsByHash.get(hash);
+        if (!blob) continue;
+        formData.append(hash, blob, hash);
+      }
 
-    const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/assets/upload`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          "x-cf-assets-upload-jwt": jwt,
+      const response = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/assets/upload`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiToken}`,
+            "x-cf-assets-upload-jwt": jwt,
+          },
+          body: formData,
         },
-        body: formData,
-      },
-    );
+      );
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`asset upload failed: ${error}`);
-    }
-  }
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`asset upload failed: ${error}`);
+      }
+    }),
+  );
 }
 
 /**
@@ -109,7 +111,7 @@ export async function collectAssets(
       const buffer = await blob.arrayBuffer();
       const hash = await computeAssetHash(buffer);
       manifest[path] = { hash, size: buffer.byteLength };
-      assetsByHash.set(hash, new Blob([buffer]));
+      assetsByHash.set(hash, blob);
     }
   }
 

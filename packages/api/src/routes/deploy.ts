@@ -42,8 +42,13 @@ app.post("/:id/deploy", async (c) => {
     return c.json({ error: "forbidden" }, 403);
   }
 
+  // Run independent pre-checks in parallel
+  const [activeDeploy, user] = await Promise.all([
+    getActiveDeployment(c.get("db"), projectId),
+    getUser(c.get("db"), c.get("userId")),
+  ]);
+
   // Reject concurrent deploys to the same project
-  const activeDeploy = await getActiveDeployment(c.get("db"), projectId);
   if (activeDeploy) {
     // SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" in UTC without a Z suffix.
     // Normalize to ISO 8601 so Date parses it as UTC, not local time.
@@ -59,7 +64,6 @@ app.post("/:id/deploy", async (c) => {
   }
 
   // Enforce deploy count limit
-  const user = await getUser(c.get("db"), c.get("userId"));
   const planLimits = getPlanLimits(user?.plan ?? "free");
   if (planLimits.deploysPerDay > 0) {
     const todayCount = await countUserDeploymentsToday(c.get("db"), c.get("userId"));
@@ -128,6 +132,9 @@ app.post("/:id/deploy", async (c) => {
       }
     }
 
+    // Fetch domains once — used in both static-only and full deploy paths
+    const projectDomains = await getDomainsByProjectId(c.get("db"), projectId);
+
     if (isStaticOnly) {
       // Static-only deploy: generate passthrough worker, skip bindings/migrations
       const assetConfig = manifest.assetConfig ?? { not_found_handling: "single-page-application" };
@@ -181,8 +188,7 @@ app.post("/:id/deploy", async (c) => {
       });
       await c.env.ROUTING.put(project.slug, routingJson);
 
-      const domains = await getDomainsByProjectId(c.get("db"), projectId);
-      for (const domain of domains) {
+      for (const domain of projectDomains) {
         if (domain.status === "active") {
           await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
         }
@@ -192,7 +198,7 @@ app.post("/:id/deploy", async (c) => {
       await updateProjectMode(c.get("db"), projectId, mode);
 
       const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-      const activeDomains = domains.filter((d) => d.status === "active");
+      const activeDomains = projectDomains.filter((d) => d.status === "active");
       const url =
         activeDomains.length > 0
           ? `https://${activeDomains[0].hostname}`
@@ -333,13 +339,7 @@ app.post("/:id/deploy", async (c) => {
 
     // Add each worker module
     for (const file of workerFiles) {
-      workerFormData.append(
-        file.name,
-        new Blob([await file.content.arrayBuffer()], {
-          type: "application/javascript+module",
-        }),
-        file.name,
-      );
+      workerFormData.append(file.name, file.content, file.name);
     }
 
     // Upload to CF Workers for Platforms API
@@ -361,36 +361,38 @@ app.post("/:id/deploy", async (c) => {
 
     // 2b. Configure queue consumers (dispatch worker relays to user workers)
     const dispatchWorkerName = c.env.DISPATCH_WORKER_NAME ?? "void-dispatch";
-    for (const q of manifest.queues ?? []) {
-      const queueBinding = workerBindings.find(
-        (b) => b.type === "queue" && b.name === q.bindingName,
-      );
-      if (queueBinding?.queue_name) {
-        try {
-          await addQueueConsumer(
-            c.env.CF_ACCOUNT_ID,
-            c.env.CF_API_TOKEN,
-            queueBinding.queue_name,
-            dispatchWorkerName,
-            {
-              ...(q.maxBatchSize != null && { max_batch_size: q.maxBatchSize }),
-              ...(q.maxBatchTimeout != null && { max_batch_timeout: q.maxBatchTimeout }),
-            },
-          );
-        } catch {
-          // Consumer may already exist — idempotent
-        }
-        // Store queue→worker mapping for relay routing
-        await c.env.ROUTING.put(
-          `queue:${queueBinding.queue_name}`,
-          JSON.stringify({
-            workerName,
-            projectId,
-            queueName: q.name,
-          }),
+    await Promise.all(
+      (manifest.queues ?? []).map(async (q) => {
+        const queueBinding = workerBindings.find(
+          (b) => b.type === "queue" && b.name === q.bindingName,
         );
-      }
-    }
+        if (queueBinding?.queue_name) {
+          try {
+            await addQueueConsumer(
+              c.env.CF_ACCOUNT_ID,
+              c.env.CF_API_TOKEN,
+              queueBinding.queue_name,
+              dispatchWorkerName,
+              {
+                ...(q.maxBatchSize != null && { max_batch_size: q.maxBatchSize }),
+                ...(q.maxBatchTimeout != null && { max_batch_timeout: q.maxBatchTimeout }),
+              },
+            );
+          } catch {
+            // Consumer may already exist — idempotent
+          }
+          // Store queue→worker mapping for relay routing
+          await c.env.ROUTING.put(
+            `queue:${queueBinding.queue_name}`,
+            JSON.stringify({
+              workerName,
+              projectId,
+              queueName: q.name,
+            }),
+          );
+        }
+      }),
+    );
 
     // 3. Clear previous ISR cache on deploy.
     // Always clear — handles both "new deploy has ISR" and "previous deploy had ISR
@@ -461,8 +463,7 @@ app.post("/:id/deploy", async (c) => {
     await c.env.ROUTING.put(project.slug, routingJson);
 
     // Update KV routing for active custom domains
-    const fullDomains = await getDomainsByProjectId(c.get("db"), projectId);
-    for (const domain of fullDomains) {
+    for (const domain of projectDomains) {
       if (domain.status === "active") {
         await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
       }
@@ -473,17 +474,17 @@ app.post("/:id/deploy", async (c) => {
     await updateProjectMode(c.get("db"), projectId, manifest.framework ? "framework" : "fullstack");
 
     const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-    const fullActiveDomains = fullDomains.filter((d) => d.status === "active");
+    const activeDomains = projectDomains.filter((d) => d.status === "active");
     const fullUrl =
-      fullActiveDomains.length > 0
-        ? `https://${fullActiveDomains[0].hostname}`
+      activeDomains.length > 0
+        ? `https://${activeDomains[0].hostname}`
         : `https://${project.slug}.${siteDomain}`;
 
     return c.json({
       deployment: deployment.id,
       url: fullUrl,
       urls: [
-        ...fullActiveDomains.map((d) => `https://${d.hostname}`),
+        ...activeDomains.map((d) => `https://${d.hostname}`),
         `https://${project.slug}.${siteDomain}`,
       ],
       assets: assetCount,

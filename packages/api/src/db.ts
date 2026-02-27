@@ -294,6 +294,26 @@ export async function getDomainsByProjectId(db: Db, projectId: string): Promise<
     .all();
 }
 
+export async function getDomainsByProjectIds(
+  db: Db,
+  projectIds: string[],
+): Promise<Map<string, Domain[]>> {
+  const allDomains = await db
+    .select()
+    .from(domains)
+    .where(inArray(domains.project_id, projectIds))
+    .orderBy(asc(domains.created_at))
+    .all();
+
+  const map = new Map<string, Domain[]>();
+  for (const d of allDomains) {
+    const list = map.get(d.project_id) ?? [];
+    list.push(d);
+    map.set(d.project_id, list);
+  }
+  return map;
+}
+
 export async function getDomainByHostname(db: Db, hostname: string): Promise<Domain | null> {
   return (await db.select().from(domains).where(eq(domains.hostname, hostname)).get()) ?? null;
 }
