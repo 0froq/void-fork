@@ -8,13 +8,20 @@ outline: deep
 
 ## Setup
 
-### 1. Install dependencies
+### 1. Create a new project
+
+```bash
+npx sv create my-app
+cd my-app
+```
+
+### 2. Install dependencies
 
 ```bash
 npm install -D @sveltejs/adapter-cloudflare void
 ```
 
-### 2. Configure `svelte.config.js`
+### 3. Configure `svelte.config.js`
 
 ```js
 import adapter from "@sveltejs/adapter-cloudflare";
@@ -24,7 +31,7 @@ export default {
 };
 ```
 
-### 3. Add `voidPlugin()` to `vite.config.ts`
+### 4. Add `voidPlugin()` to `vite.config.ts`
 
 ```ts
 import { sveltekit } from "@sveltejs/kit/vite";
@@ -36,7 +43,7 @@ export default defineConfig({
 });
 ```
 
-### 4. Create `wrangler.jsonc`
+### 5. Create `wrangler.jsonc`
 
 SvelteKit's adapter reads bindings from `wrangler.jsonc` for local dev. `voidPlugin()` auto-syncs inferred bindings into this file on dev startup, so you only need the base config:
 
@@ -48,7 +55,7 @@ SvelteKit's adapter reads bindings from `wrangler.jsonc` for local dev. `voidPlu
 }
 ```
 
-### 5. Deploy
+### 6. Deploy
 
 ```bash
 void login

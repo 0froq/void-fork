@@ -8,13 +8,20 @@ outline: deep
 
 ## Setup
 
-### 1. Install dependencies
+### 1. Create a new project
+
+```bash
+npm create @tanstack/start@latest my-app
+cd my-app
+```
+
+### 2. Install dependencies
 
 ```bash
 npm install -D void
 ```
 
-### 2. Configure `vite.config.ts`
+### 3. Configure `vite.config.ts`
 
 ```ts
 import { defineConfig } from "vite";
@@ -31,7 +38,7 @@ export default defineConfig({
 });
 ```
 
-### 3. Deploy
+### 4. Deploy
 
 ```bash
 void login

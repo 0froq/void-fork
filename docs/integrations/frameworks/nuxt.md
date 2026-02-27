@@ -8,7 +8,14 @@ outline: deep
 
 ## Setup
 
-### 1. Install dependencies
+### 1. Create a new project
+
+```bash
+npm create nuxt@latest my-app
+cd my-app
+```
+
+### 2. Install dependencies
 
 ```bash
 npm install -D void
@@ -17,7 +24,7 @@ npx nuxi module add nitro-cloudflare-dev
 
 The `nitro-cloudflare-dev` module enables `getPlatformProxy()` for local dev, giving you access to Cloudflare bindings during `nuxt dev`.
 
-### 2. Configure `nuxt.config.ts`
+### 3. Configure `nuxt.config.ts`
 
 ```ts
 import { voidPlugin } from "void";
@@ -33,7 +40,7 @@ export default defineNuxtConfig({
 
 By default, Nuxt Cloudflare dev runtime and `voidPlugin()` migrations share Wrangler's local state at `.wrangler/state/v3`, so no extra persistence configuration is required.
 
-### 3. Create `wrangler.jsonc`
+### 4. Create `wrangler.jsonc`
 
 `voidPlugin()` auto-syncs inferred bindings into this file on dev startup:
 
@@ -45,7 +52,7 @@ By default, Nuxt Cloudflare dev runtime and `voidPlugin()` migrations share Wran
 }
 ```
 
-### 4. Deploy
+### 5. Deploy
 
 ```bash
 void login

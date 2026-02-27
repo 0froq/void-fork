@@ -14,13 +14,20 @@ outline: deep
 
 ## Setup
 
-### 1. Install dependencies
+### 1. Create a new project
+
+```bash
+npm create astro@latest my-app
+cd my-app
+```
+
+### 2. Install dependencies
 
 ```bash
 npm install -D astro@^6 @astrojs/cloudflare@^13 void
 ```
 
-### 2. Configure `astro.config.mjs`
+### 3. Configure `astro.config.mjs`
 
 ```js
 import { defineConfig } from "astro/config";
@@ -35,7 +42,7 @@ export default defineConfig({
 
 By default, Astro Cloudflare runtime and `voidPlugin()` migrations share Wrangler's local state at `.wrangler/state/v3`, so no extra persistence configuration is required.
 
-### 3. Create `wrangler.jsonc`
+### 4. Create `wrangler.jsonc`
 
 `voidPlugin()` auto-syncs inferred bindings into this file on dev startup:
 
@@ -49,7 +56,7 @@ By default, Astro Cloudflare runtime and `voidPlugin()` migrations share Wrangle
 
 `nodejs_als` is required for `void/*` runtime helpers (for example `void/db`, `void/kv`) in Astro.
 
-### 4. Deploy
+### 5. Deploy
 
 ```bash
 void login
