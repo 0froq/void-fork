@@ -7,7 +7,7 @@ const emptyScan: ScanResult = {
   middleware: [],
   jobs: [],
   queues: [],
-  pages: { pages: [], layouts: [] },
+  pages: { pages: [], layouts: [], namedLayouts: [] },
 };
 
 const baseOptions = {
@@ -162,7 +162,7 @@ describe("compileRouteTable with auth", () => {
       middleware: [{ order: 1, filePath: "01.logger.ts" }],
       jobs: [],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
     const code = compileRouteTable(scan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
@@ -188,7 +188,7 @@ describe("compileRouteTable with auth", () => {
       middleware: [{ order: 1, filePath: "01.logger.ts" }],
       jobs: [],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
     const code = compileRouteTable(scan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,

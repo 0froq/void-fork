@@ -33,7 +33,7 @@ describe("compileRouteTable", () => {
       middleware: [{ order: 1, filePath: "01.logger.ts" }],
       jobs: [{ filePath: "sync.ts", name: "sync", crons: ["0 * * * *"] }],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
 
     const code = compileRouteTable(
@@ -82,7 +82,7 @@ describe("compileRouteTable", () => {
       middleware: [],
       jobs: [{ filePath: "multi.ts", name: "multi", crons: ["0 * * * *", "30 * * * *"] }],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
 
     const code = compileRouteTable(
@@ -117,7 +117,7 @@ describe("compileRouteTable", () => {
       middleware: [],
       jobs: [],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
 
     const code = compileRouteTable(
@@ -140,7 +140,7 @@ describe("compileRouteTable", () => {
       middleware: [],
       jobs: [],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
     const code = compileRouteTable(
       scan,
@@ -163,7 +163,7 @@ describe("compileRouteTable", () => {
       middleware: [],
       jobs: [],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
     const code = compileRouteTable(
       scan,
@@ -204,7 +204,7 @@ describe("compileRouteTable", () => {
           bindingName: "QUEUE_EMAILS",
         },
       ],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
 
     const code = compileRouteTable(
@@ -235,7 +235,7 @@ describe("compileRouteTable", () => {
           bindingName: "QUEUE_EMAILS",
         },
       ],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
 
     const code = compileRouteTable(
@@ -257,7 +257,7 @@ describe("compileRouteTable", () => {
       middleware: [],
       jobs: [],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
     const code = compileRouteTable(
       scan,

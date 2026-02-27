@@ -136,6 +136,155 @@ export default function Layout(props: { children: JSX.Element }) {
 
 Layouts nest automatically (e.g. root layout wraps `users/layout` wraps page component) and persist across navigations within their subtree — component state is preserved.
 
+## Named Layouts
+
+Named layouts let individual pages opt into a different layout without changing the URL structure. Define them in `_layouts/` directories within `pages/`:
+
+```
+pages/
+  _layouts/
+    landing.vue           # named "landing"
+    post.vue              # named "post"
+  layout.vue              # default root layout
+  index.vue
+  blog/
+    hello.md              # layout: post
+    archive.md            # layout: landing
+  pricing.vue             # layout: !landing (exclusive)
+```
+
+### Selecting a named layout
+
+Export a `layout` constant from any page:
+
+::: code-group
+
+```tsx [React]
+export const layout = "landing";
+
+export default function Page() {
+  return <div>This page uses the landing layout</div>;
+}
+```
+
+```vue [Vue]
+<script setup>
+export const layout = "landing";
+</script>
+
+<template>
+  <div>This page uses the landing layout</div>
+</template>
+```
+
+```svelte [Svelte]
+<script context="module">
+export const layout = "landing";
+</script>
+
+<div>This page uses the landing layout</div>
+```
+
+```tsx [Solid]
+export const layout = "landing";
+
+export default function Page() {
+  return <div>This page uses the landing layout</div>;
+}
+```
+
+:::
+
+For markdown pages, use frontmatter:
+
+```md
+---
+layout: post
+---
+
+# My Blog Post
+```
+
+### Layout modes
+
+| Value        | Behavior                                                                       |
+| ------------ | ------------------------------------------------------------------------------ |
+| `"landing"`  | Replace the innermost layout in the chain. Outer ancestor layouts still apply. |
+| `"!landing"` | Replace the **entire** chain. Only the named layout wraps the page.            |
+| `false`      | No layout wrapping at all. Page renders standalone.                            |
+
+"Innermost" means the deepest layout in the resolved chain. If the chain is `[root, docs/layout]`, the named layout replaces `docs/layout`. If the chain is only `[root]`, it replaces root.
+
+### Resolution order
+
+When a page specifies `layout: "post"`, the scanner walks up the directory tree to find `_layouts/post`:
+
+```
+pages/guide/intro.md  (layout: post)
+
+1. pages/guide/_layouts/post.vue  → not found
+2. pages/_layouts/post.vue        → found ✓
+```
+
+Closest ancestor wins, same as default layout chain. If no matching named layout is found in any ancestor, the build fails with a clear error.
+
+### Examples
+
+**Blog with shared nav but post-specific layout:**
+
+```
+pages/
+  _layouts/
+    post.vue              # sidebar, date, author
+  layout.vue              # nav + footer
+  blog/
+    layout.vue            # blog sidebar
+    hello.md              # layout: post → chain: [root, _layouts/post]
+    archive.vue           # (no layout) → chain: [root, blog/layout]
+```
+
+`layout: post` on `blog/hello.md` replaces the innermost default layout (`blog/layout`) with `_layouts/post`. The root layout still wraps.
+
+**Fullscreen page with no layout:**
+
+::: code-group
+
+```tsx [React]
+export const layout = false;
+
+export default function Landing() {
+  return (
+    <div className="hero fullscreen">
+      <h1>Welcome</h1>
+    </div>
+  );
+}
+```
+
+```vue [Vue]
+<script setup>
+export const layout = false;
+</script>
+
+<template>
+  <div class="hero fullscreen"><h1>Welcome</h1></div>
+</template>
+```
+
+:::
+
+**Exclusive layout (skip all ancestors):**
+
+```md
+---
+layout: "!landing"
+---
+
+# Standalone Landing Page
+```
+
+Only `_layouts/landing` wraps this page — the root layout is skipped entirely.
+
 ## Shared Data
 
 Middleware can inject data available on every page via `c.set("shared", {...})`. Augment `CloudContextVariables` to type the shared data, and `useShared()` will infer the type automatically:

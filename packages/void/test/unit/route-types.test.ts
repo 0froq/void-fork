@@ -18,7 +18,7 @@ describe("generateRouteTypes", () => {
       middleware: [],
       jobs: [],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
 
     const { dts } = generateRouteTypes(scan, "/project/routes", "/project/.void");
@@ -46,7 +46,7 @@ describe("generateRouteTypes", () => {
       middleware: [],
       jobs: [],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
 
     const { dts } = generateRouteTypes(scan, "/project/routes", "/project/.void");
@@ -71,7 +71,7 @@ describe("generateRouteTypes", () => {
       middleware: [],
       jobs: [],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
 
     const { dts } = generateRouteTypes(scan, "/project/routes", "/project/.void");
@@ -94,7 +94,7 @@ describe("generateRouteTypes", () => {
       middleware: [],
       jobs: [],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
 
     const { dts } = generateRouteTypes(scan, "/project/routes", "/project/.void");
@@ -109,7 +109,7 @@ describe("generateRouteTypes", () => {
       middleware: [],
       jobs: [],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
     const { dts } = generateRouteTypes(scan, "/project/routes", "/project/.void");
 
@@ -133,7 +133,7 @@ describe("generateRouteTypes", () => {
       middleware: [],
       jobs: [],
       queues: [],
-      pages: { pages: [], layouts: [] },
+      pages: { pages: [], layouts: [], namedLayouts: [] },
     };
 
     const { dts } = generateRouteTypes(scan, "/project/routes", "/project/.void");
@@ -161,6 +161,7 @@ describe("generateRouteTypes", () => {
           },
         ],
         layouts: [],
+        namedLayouts: [],
       },
     };
 
@@ -191,6 +192,7 @@ describe("generateRouteTypes", () => {
           },
         ],
         layouts: [],
+        namedLayouts: [],
       },
     };
 
@@ -219,6 +221,7 @@ describe("generateRouteTypes", () => {
           },
         ],
         layouts: [],
+        namedLayouts: [],
       },
     };
 
@@ -246,6 +249,7 @@ describe("generateRouteTypes", () => {
           },
         ],
         layouts: [],
+        namedLayouts: [],
       },
     };
 

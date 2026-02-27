@@ -1,4 +1,5 @@
-import type { PageScanResult, LayoutDefinition } from "void/pages";
+import type { PageScanResult, LayoutDefinition, NamedLayoutDefinition } from "void/pages";
+import { resolveNamedLayout } from "void/pages";
 
 /**
  * Generates the component import map and layout tree as code strings.
@@ -20,12 +21,17 @@ export function generateComponentManifest(scan: PageScanResult, pagesDir: string
     const layoutId = layout.directory ? `${layout.directory}/layout` : "layout";
     lines.push(`  ${JSON.stringify(layoutId)}: () => import(${JSON.stringify(importPath)}),`);
   }
+  for (const nl of scan.namedLayouts) {
+    const importPath = `${pagesDir}/${nl.filePath}`;
+    const layoutId = nl.directory ? `${nl.directory}/_layouts/${nl.name}` : `_layouts/${nl.name}`;
+    lines.push(`  ${JSON.stringify(layoutId)}: () => import(${JSON.stringify(importPath)}),`);
+  }
   lines.push("};");
 
   // Layout tree (component ID -> ordered layout IDs)
   lines.push("const layoutTree = {");
   for (const page of scan.pages) {
-    const chain = resolveLayoutIds(page.componentId, scan.layouts);
+    const chain = resolveLayoutIds(page, scan.layouts, scan.namedLayouts);
     if (chain.length > 0) {
       lines.push(`  ${JSON.stringify(page.componentId)}: ${JSON.stringify(chain)},`);
     }
@@ -67,16 +73,41 @@ function patternToRegex(pattern: string): string {
   return `/^${re.replace(/\//g, "\\/")}$/`;
 }
 
-function resolveLayoutIds(componentId: string, layouts: LayoutDefinition[]): string[] {
-  const parts = componentId.split("/");
-  const chain: string[] = [];
+function resolveLayoutIds(
+  page: { componentId: string; layout?: string | false },
+  layouts: LayoutDefinition[],
+  namedLayouts: NamedLayoutDefinition[],
+): string[] {
+  if (page.layout === false) return [];
+
+  // Build default chain
+  const parts = page.componentId.split("/");
+  const defaultChain: string[] = [];
   const root = layouts.find((l) => l.directory === "");
-  if (root) chain.push("layout");
+  if (root) defaultChain.push("layout");
   let dir = "";
   for (let i = 0; i < parts.length - 1; i++) {
     dir = dir ? `${dir}/${parts[i]}` : parts[i];
-    const layout = layouts.find((l) => l.directory === dir);
-    if (layout) chain.push(`${dir}/layout`);
+    if (layouts.find((l) => l.directory === dir)) defaultChain.push(`${dir}/layout`);
   }
+
+  if (page.layout === undefined) return defaultChain;
+
+  const isExclusive = page.layout.startsWith("!");
+  const name = isExclusive ? page.layout.slice(1) : page.layout;
+  if (name.startsWith(".") || name.startsWith("/")) return defaultChain;
+
+  const resolved = resolveNamedLayout(name, page.componentId, namedLayouts);
+  if (!resolved) return defaultChain;
+
+  const namedId = resolved.directory
+    ? `${resolved.directory}/_layouts/${resolved.name}`
+    : `_layouts/${resolved.name}`;
+
+  if (isExclusive) return [namedId];
+  if (defaultChain.length === 0) return [namedId];
+
+  const chain = [...defaultChain];
+  chain[chain.length - 1] = namedId;
   return chain;
 }

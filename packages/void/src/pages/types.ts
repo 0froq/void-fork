@@ -23,6 +23,8 @@ export interface PageDefinition {
   island?: boolean;
   /** Frontmatter metadata extracted from .md files (title, description) */
   metadata?: { title?: string; description?: string };
+  /** Named layout selection: "name", "!name", false, or relative path */
+  layout?: string | false;
 }
 
 export interface LayoutDefinition {
@@ -34,7 +36,19 @@ export interface LayoutDefinition {
   island?: boolean;
 }
 
+export interface NamedLayoutDefinition {
+  /** Layout name, e.g. "home", "post" */
+  name: string;
+  /** Directory containing _layouts/, e.g. "" (root) or "guide" */
+  directory: string;
+  /** File path relative to pages/, e.g. "_layouts/home.vue" */
+  filePath: string;
+  /** Whether this is an island layout */
+  island?: boolean;
+}
+
 export interface PageScanResult {
   pages: PageDefinition[];
   layouts: LayoutDefinition[];
+  namedLayouts: NamedLayoutDefinition[];
 }

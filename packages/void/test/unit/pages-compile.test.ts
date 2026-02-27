@@ -41,6 +41,7 @@ describe("compileRouteTable with pages", () => {
         },
       ],
       layouts: [],
+      namedLayouts: [],
     });
 
     const code = compileRouteTable(
@@ -73,6 +74,7 @@ describe("compileRouteTable with pages", () => {
         },
       ],
       layouts: [],
+      namedLayouts: [],
     });
 
     const code = compileRouteTable(
@@ -103,6 +105,7 @@ describe("compileRouteTable with pages", () => {
         },
       ],
       layouts: [],
+      namedLayouts: [],
     });
 
     const code = compileRouteTable(
@@ -136,6 +139,7 @@ describe("compileRouteTable with pages", () => {
         },
       ],
       layouts: [],
+      namedLayouts: [],
     });
 
     const code = compileRouteTable(
@@ -177,6 +181,7 @@ describe("compileRouteTable with pages", () => {
         },
       ],
       layouts: [],
+      namedLayouts: [],
     });
 
     const code = compileRouteTable(
@@ -196,7 +201,7 @@ describe("compileRouteTable with pages", () => {
   });
 
   it("does not generate page code when pages is null", () => {
-    const scan = makeScan({ pages: [], layouts: [] });
+    const scan = makeScan({ pages: [], layouts: [], namedLayouts: [] });
 
     const code = compileRouteTable(
       scan,
@@ -214,7 +219,7 @@ describe("compileRouteTable with pages", () => {
   });
 
   it("does not generate page code when pages array is empty", () => {
-    const scan = makeScan({ pages: [], layouts: [] });
+    const scan = makeScan({ pages: [], layouts: [], namedLayouts: [] });
 
     const code = compileRouteTable(
       scan,
@@ -246,6 +251,7 @@ describe("compileRouteTable with pages", () => {
         },
       ],
       layouts: [],
+      namedLayouts: [],
     });
 
     const islandPagesOptions: PagesCompileOptions = {
@@ -284,6 +290,7 @@ describe("compileRouteTable with pages", () => {
         },
       ],
       layouts: [],
+      namedLayouts: [],
     });
 
     const code = compileRouteTable(
@@ -326,6 +333,7 @@ describe("compileRouteTable with pages", () => {
         },
       ],
       layouts: [],
+      namedLayouts: [],
     });
 
     const islandPagesOptions: PagesCompileOptions = {
@@ -362,6 +370,7 @@ describe("compileRouteTable with pages", () => {
         },
       ],
       layouts: [],
+      namedLayouts: [],
     });
 
     const code = compileRouteTable(

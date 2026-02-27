@@ -1,8 +1,8 @@
 import type { Plugin } from "vite";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve, relative } from "node:path";
-import { scanPages } from "void/pages";
-import type { LayoutDefinition, PageScanResult } from "void/pages";
+import { scanPages, resolveEffectiveLayoutChain } from "void/pages";
+import type { PageScanResult } from "void/pages";
 import { generateComponentManifest } from "./pages-manifest";
 
 const ISLANDS_RENDERER_ID = "virtual:void-islands-renderer";
@@ -60,20 +60,6 @@ function needsIslandClientBundle(dir: string): boolean {
   return false;
 }
 
-function resolveLayoutChain(componentId: string, layouts: LayoutDefinition[]): LayoutDefinition[] {
-  const parts = componentId.split("/");
-  const chain: LayoutDefinition[] = [];
-  const root = layouts.find((l) => l.directory === "");
-  if (root) chain.push(root);
-  let dir = "";
-  for (let i = 0; i < parts.length - 1; i++) {
-    dir = dir ? `${dir}/${parts[i]}` : parts[i];
-    const layout = layouts.find((l) => l.directory === dir);
-    if (layout) chain.push(layout);
-  }
-  return chain;
-}
-
 function fileHasCss(filePath: string): boolean {
   try {
     const code = readFileSync(filePath, "utf-8");
@@ -129,7 +115,11 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
     for (const page of pageScan.pages) {
       if (!page.island) continue;
       const cssPaths: string[] = [];
-      const layoutChain = resolveLayoutChain(page.componentId, pageScan.layouts);
+      const layoutChain = resolveEffectiveLayoutChain(
+        page,
+        pageScan.layouts,
+        pageScan.namedLayouts,
+      );
       for (const layout of layoutChain) {
         const layoutPath = resolve(pagesDir, layout.filePath);
         if (fileHasCss(layoutPath)) cssPaths.push(layoutPath);
@@ -184,7 +174,11 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
       }
 
       // Check layout chain for island imports
-      const layoutChain = resolveLayoutChain(page.componentId, pageScan.layouts);
+      const layoutChain = resolveEffectiveLayoutChain(
+        page,
+        pageScan.layouts,
+        pageScan.namedLayouts,
+      );
       for (const layout of layoutChain) {
         if (layoutDirsWithIslands.has(layout.directory)) {
           result.add(page.componentId);
@@ -290,7 +284,11 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
             if (page.componentPath.endsWith(".vue")) {
               islandCssFiles.add(resolve(pagesDir, page.componentPath));
             }
-            const layoutChain = resolveLayoutChain(page.componentId, pageScan.layouts);
+            const layoutChain = resolveEffectiveLayoutChain(
+              page,
+              pageScan.layouts,
+              pageScan.namedLayouts,
+            );
             for (const layout of layoutChain) {
               islandCssFiles.add(resolve(pagesDir, layout.filePath));
             }

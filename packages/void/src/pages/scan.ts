@@ -2,7 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, dirname, basename, extname } from "node:path";
 import { glob } from "tinyglobby";
 import { parseRouteFilename } from "../router/parse-filename";
-import type { PageDefinition, LayoutDefinition, PageScanResult } from "./types";
+import type {
+  PageDefinition,
+  LayoutDefinition,
+  NamedLayoutDefinition,
+  PageScanResult,
+} from "./types";
 
 const COMPONENT_EXTENSIONS = ["vue", "tsx", "jsx", "svelte", "md"];
 const SERVER_EXTENSIONS = ["ts", "tsx", "js", "mjs", "mts"];
@@ -11,6 +16,8 @@ const REVALIDATE_RE = /export\s+const\s+revalidate\s*=\s*(\d+)\s*;/;
 const PRERENDER_RE = /export\s+const\s+prerender\s*=\s*true\s*;/;
 const PRERENDER_FALSE_RE = /export\s+const\s+prerender\s*=\s*false\s*;/;
 const GET_PRERENDER_PATHS_RE = /export\s+(?:async\s+)?function\s+getPrerenderPaths\b/;
+const LAYOUT_STRING_RE = /export\s+const\s+layout\s*=\s*["']([^"']+)["']\s*;?/;
+const LAYOUT_FALSE_RE = /export\s+const\s+layout\s*=\s*false\s*;?/;
 export const MAX_REVALIDATE = 31536000; // 1 year in seconds
 
 export async function scanPages(
@@ -18,17 +25,19 @@ export async function scanPages(
   options?: { output?: "server" | "static" },
 ): Promise<PageScanResult> {
   const pagesDir = join(root, "pages");
-  if (!existsSync(pagesDir)) return { pages: [], layouts: [] };
+  if (!existsSync(pagesDir)) return { pages: [], layouts: [], namedLayouts: [] };
 
   const pattern = `**/*.{${COMPONENT_EXTENSIONS.join(",")}}`;
   const files = await glob(pattern, { cwd: pagesDir, absolute: false });
 
   const pages: PageDefinition[] = [];
   const layouts: LayoutDefinition[] = [];
+  const namedLayouts: NamedLayoutDefinition[] = [];
 
   for (const file of files) {
-    // Skip files starting with _ in any segment
-    if (file.split("/").some((s) => s.startsWith("_"))) continue;
+    const segments = file.split("/");
+    // Skip files starting with _ in any segment (except _layouts/)
+    if (segments.some((s) => s.startsWith("_") && s !== "_layouts")) continue;
 
     const ext = extname(file);
     let base = basename(file, ext);
@@ -44,6 +53,21 @@ export async function scanPages(
     // .md files are implicitly island (static HTML, zero client JS)
     if (ext === ".md") {
       island = true;
+    }
+
+    // Named layout files: _layouts/name.vue, dir/_layouts/name.vue
+    const layoutsDirIdx = segments.indexOf("_layouts");
+    if (layoutsDirIdx !== -1) {
+      // Only files directly inside _layouts/ (not nested deeper)
+      if (layoutsDirIdx === segments.length - 2) {
+        namedLayouts.push({
+          name: base,
+          directory: segments.slice(0, layoutsDirIdx).join("/") || "",
+          filePath: file,
+          island,
+        });
+      }
+      continue;
     }
 
     // Layout files
@@ -133,11 +157,21 @@ export async function scanPages(
       revalidate = MAX_REVALIDATE;
     }
 
-    // Extract frontmatter metadata from .md files for auto-head
+    // Extract frontmatter metadata and layout from .md files, or layout from component files
     let metadata: { title?: string; description?: string } | undefined;
+    let layout: string | false | undefined;
     if (ext === ".md") {
       const mdContent = readFileSync(join(pagesDir, file), "utf-8");
       metadata = extractFrontmatterMeta(mdContent);
+      layout = extractFrontmatterLayout(mdContent);
+    } else {
+      const componentContent = readFileSync(join(pagesDir, file), "utf-8");
+      const layoutStringMatch = componentContent.match(LAYOUT_STRING_RE);
+      if (layoutStringMatch) {
+        layout = layoutStringMatch[1];
+      } else if (LAYOUT_FALSE_RE.test(componentContent)) {
+        layout = false;
+      }
     }
 
     pages.push({
@@ -153,6 +187,7 @@ export async function scanPages(
       hasGetPrerenderPaths,
       island,
       metadata,
+      layout,
     });
   }
 
@@ -188,7 +223,21 @@ export async function scanPages(
     }
   }
 
-  return { pages, layouts };
+  // Validate named layout references
+  for (const page of pages) {
+    if (page.layout === undefined || page.layout === false) continue;
+    const isExclusive = page.layout.startsWith("!");
+    const name = isExclusive ? page.layout.slice(1) : page.layout;
+    // Skip relative path layouts
+    if (name.startsWith(".") || name.startsWith("/")) continue;
+    if (!resolveNamedLayout(name, page.componentId, namedLayouts)) {
+      throw new Error(
+        `[void] Page "${page.componentPath}" specifies layout "${page.layout}" but no _layouts/${name}.vue was found in any ancestor directory.`,
+      );
+    }
+  }
+
+  return { pages, layouts, namedLayouts };
 }
 
 /** Extract title and description from YAML frontmatter in markdown source. */
@@ -208,6 +257,19 @@ function extractFrontmatterMeta(
     .replace(/^["']|["']$/g, "");
   if (!title && !description) return undefined;
   return { title, description };
+}
+
+/** Extract layout field from YAML frontmatter in markdown source. */
+function extractFrontmatterLayout(source: string): string | false | undefined {
+  const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return undefined;
+  const value = match[1]
+    .match(/^layout:\s*(.+)$/m)?.[1]
+    ?.trim()
+    .replace(/^["']|["']$/g, "");
+  if (!value) return undefined;
+  if (value === "false") return false;
+  return value;
 }
 
 /** Resolve the layout chain for a component (innermost last) */
@@ -230,5 +292,53 @@ export function resolveLayoutChain(
     if (layout) chain.push(layout);
   }
 
+  return chain;
+}
+
+/** Walk up directory tree to find closest _layouts/<name> */
+export function resolveNamedLayout(
+  name: string,
+  componentId: string,
+  namedLayouts: NamedLayoutDefinition[],
+): NamedLayoutDefinition | null {
+  const parts = componentId.split("/");
+  // Build dirs from closest to root
+  const dirs: string[] = [];
+  let dir = "";
+  for (let i = 0; i < parts.length - 1; i++) {
+    dir = dir ? `${dir}/${parts[i]}` : parts[i];
+    dirs.push(dir);
+  }
+  dirs.reverse(); // closest first
+  dirs.push(""); // root last
+  for (const d of dirs) {
+    const found = namedLayouts.find((nl) => nl.name === name && nl.directory === d);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Resolve effective layout chain accounting for named layout selection */
+export function resolveEffectiveLayoutChain(
+  page: { componentId: string; layout?: string | false },
+  layouts: LayoutDefinition[],
+  namedLayouts: NamedLayoutDefinition[],
+): (LayoutDefinition | NamedLayoutDefinition)[] {
+  if (page.layout === false) return [];
+  const defaultChain = resolveLayoutChain(page.componentId, layouts);
+  if (page.layout === undefined) return defaultChain;
+
+  const isExclusive = page.layout.startsWith("!");
+  const name = isExclusive ? page.layout.slice(1) : page.layout;
+  // Relative paths: passthrough default chain
+  if (name.startsWith(".") || name.startsWith("/")) return defaultChain;
+
+  const resolved = resolveNamedLayout(name, page.componentId, namedLayouts);
+  if (!resolved) return defaultChain;
+  if (isExclusive) return [resolved];
+  if (defaultChain.length === 0) return [resolved];
+
+  const chain = [...defaultChain];
+  chain[chain.length - 1] = resolved;
   return chain;
 }

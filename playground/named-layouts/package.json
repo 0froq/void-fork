@@ -1,0 +1,24 @@
+{
+  "name": "playground-named-layouts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "hono": "^4.11.9",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@void-x/md": "workspace:*",
+    "@void-x/react": "workspace:*",
+    "typescript": "~5.8.3",
+    "vite": "catalog:",
+    "void": "workspace:*"
+  }
+}
