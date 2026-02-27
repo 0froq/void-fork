@@ -1,6 +1,7 @@
 name: Deploy Docs Production
 
 on:
+  workflow_dispatch:
   push:
     branches: [prod]
     paths:

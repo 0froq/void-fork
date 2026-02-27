@@ -1,6 +1,7 @@
 name: Deploy Docs Staging
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
