@@ -2,6 +2,6 @@ packages:
   - packages/*
 
 catalog:
-  "@cloudflare/workers-types": ^4.20260214.0
+  "@cloudflare/workers-types": ^4.20260305.0
   "@typescript/native-preview": latest
-  wrangler: ^4.65.0
+  wrangler: ^4.69.0
