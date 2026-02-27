@@ -394,7 +394,7 @@ describe("DELETE /projects/:id/domains/:domainId", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as { ok: boolean; warnings: string[] };
     expect(body.ok).toBe(true);
     expect(body.warnings).toHaveLength(1);
     expect(body.warnings[0]).toContain("CF API down");
