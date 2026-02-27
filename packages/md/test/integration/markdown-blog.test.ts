@@ -333,7 +333,7 @@ describe("markdown-blog playground", () => {
       });
 
       await waitForServer(PREVIEW_BASE, 20_000);
-    });
+    }, 60_000);
 
     afterAll(async () => {
       if (child) {
