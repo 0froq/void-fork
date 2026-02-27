@@ -30,6 +30,6 @@ export function sendUsageEvent(
     requests: number;
     responseBytes: number;
   },
-): void {
-  void env.USAGE_QUEUE.send(data);
+): Promise<void> {
+  return env.USAGE_QUEUE.send(data);
 }

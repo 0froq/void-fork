@@ -36,9 +36,12 @@ export default {
     const slug = extractSlug(url.hostname, env.BASE_HOSTNAME);
     const routingKey = slug ?? `domain:${url.hostname}`;
 
-    const routingRaw = await env.ROUTING.get(routingKey);
+    const routingRaw = await env.ROUTING.get(routingKey, { cacheTtl: 60 });
     if (!routingRaw) {
-      return new Response("Not Found", { status: 404 });
+      return new Response("Not Found", {
+        status: 404,
+        headers: { "Cache-Control": "public, max-age=30" },
+      });
     }
 
     const routing: RoutingEntry = JSON.parse(routingRaw);
@@ -47,7 +50,7 @@ export default {
     if (routing.suspended) {
       return Response.json(
         { error: "usage limit exceeded", reason: routing.suspended },
-        { status: 429 },
+        { status: 429, headers: { "Cache-Control": "public, s-maxage=30, max-age=0" } },
       );
     }
 
@@ -55,28 +58,27 @@ export default {
     let requestType: RequestType = "static";
 
     const meter = (response: Response) => {
-      ctx.waitUntil(
-        Promise.resolve().then(() => {
-          recordRequest(env, {
+      const responseBytes = Number(response.headers.get("content-length") ?? 0);
+      recordRequest(env, {
+        projectId: routing.projectId,
+        type: requestType,
+        method: request.method,
+        status: response.status,
+        responseBytes,
+        durationMs: Date.now() - startTime,
+        slug: slug ?? url.hostname,
+      });
+      if (routing.userId) {
+        ctx.waitUntil(
+          sendUsageEvent(env, {
             projectId: routing.projectId,
-            type: requestType,
-            method: request.method,
-            status: response.status,
-            responseBytes: Number(response.headers.get("content-length") ?? 0),
-            durationMs: Date.now() - startTime,
+            userId: routing.userId,
             slug: slug ?? url.hostname,
-          });
-          if (routing.userId) {
-            sendUsageEvent(env, {
-              projectId: routing.projectId,
-              userId: routing.userId,
-              slug: slug ?? url.hostname,
-              requests: 1,
-              responseBytes: Number(response.headers.get("content-length") ?? 0),
-            });
-          }
-        }),
-      );
+            requests: 1,
+            responseBytes,
+          }),
+        );
+      }
       return response;
     };
 
@@ -143,7 +145,7 @@ export default {
 
   async queue(batch: MessageBatch, env: Env): Promise<void> {
     // Look up which user worker handles this queue
-    const routingRaw = await env.ROUTING.get(`queue:${batch.queue}`);
+    const routingRaw = await env.ROUTING.get(`queue:${batch.queue}`, { cacheTtl: 60 });
     if (!routingRaw) {
       batch.ackAll();
       return;
@@ -151,7 +153,7 @@ export default {
     const { workerName, queueName } = JSON.parse(routingRaw) as QueueRoutingEntry;
 
     // Serialize batch for relay
-    const messages = [...batch.messages].map((m) => ({
+    const messages = Array.from(batch.messages, (m) => ({
       id: m.id,
       timestamp: m.timestamp.toISOString(),
       body: m.body,
@@ -215,6 +217,5 @@ async function revalidateInBackground(
 }
 
 function hasExtension(pathname: string): boolean {
-  const lastSegment = pathname.split("/").pop() ?? "";
-  return lastSegment.includes(".");
+  return pathname.slice(pathname.lastIndexOf("/") + 1).includes(".");
 }

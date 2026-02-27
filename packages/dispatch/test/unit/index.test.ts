@@ -312,8 +312,8 @@ describe("ISR (stale-while-revalidate)", () => {
 
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(await response.text()).toBe("<html>no-cache</html>");
-    // Only the metering waitUntil call, no ISR cache write
-    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    // No waitUntil calls — analytics is sync, no userId for queue, no ISR cache write
+    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
     expect(r2Store.has("proj_1/isr/dashboard")).toBe(false);
   });
 
@@ -442,8 +442,8 @@ describe("ISR (stale-while-revalidate)", () => {
     expect(response.headers.get("x-isr-cache")).toBe("STALE");
     expect(await response.text()).toBe("<html>stale</html>");
 
-    // Background revalidation + metering should have been scheduled
-    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
+    // Background revalidation should have been scheduled (analytics is sync, no userId for queue)
+    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
 
     // Wait for background write
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
