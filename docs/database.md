@@ -6,6 +6,8 @@ outline: deep
 
 Void provides automated migration application and a typed query helper for [Cloudflare D1](https://developers.cloudflare.com/d1/) (SQLite) that covers common CRUD operations without writing SQL. Import `db` from `void/db` and start querying.
 
+D1 is suitable for most small to medium apps that are read heavy. It's also great for prototyping as Void will seamlessly create a local instance for you without any setup. That said, you are welcome to use any [ORM or external database](./integrations/orms-and-external-dbs.md) you prefer. Void provides `void/db` for convenience, with no lock-in.
+
 ## Migrations
 
 Define your schema with SQL migration files in the `migrations/` directory:
