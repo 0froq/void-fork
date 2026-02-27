@@ -1,6 +1,27 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../../src/index";
 import type { Env } from "../../src/env";
+
+// Mock caches.default (CF edge cache) with a Map-backed store
+const edgeCacheStore = new Map<string, Response>();
+vi.stubGlobal("caches", {
+  default: {
+    match: async (req: Request) => {
+      const res = edgeCacheStore.get(req.url);
+      return res ? res.clone() : undefined;
+    },
+    put: async (req: Request, res: Response) => {
+      edgeCacheStore.set(req.url, res.clone());
+    },
+    delete: async (req: Request) => {
+      return edgeCacheStore.delete(req.url);
+    },
+  },
+});
+
+beforeEach(() => {
+  edgeCacheStore.clear();
+});
 
 interface RoutingEntry {
   workerName: string;
@@ -442,12 +463,79 @@ describe("ISR (stale-while-revalidate)", () => {
     expect(response.headers.get("x-isr-cache")).toBe("STALE");
     expect(await response.text()).toBe("<html>stale</html>");
 
-    // Background revalidation should have been scheduled (analytics is sync, no userId for queue)
-    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    // Background revalidation + edge cache put
+    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
 
     // Wait for background write
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
     expect(workerFetch).toHaveBeenCalledOnce();
+  });
+
+  it("serves from edge cache on repeat ISR request (no R2 read)", async () => {
+    // Pre-populate edge cache
+    edgeCacheStore.set(
+      "https://my-app.voidcloud.dev/dashboard",
+      new Response("<html>edge</html>", {
+        headers: { "x-isr-cache": "HIT", "Content-Type": "text/html" },
+      }),
+    );
+
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+        revalidate: 60,
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.voidcloud.dev/dashboard"),
+      env,
+      createCtx(),
+    );
+
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-isr-cache")).toBe("HIT");
+    expect(await response.text()).toBe("<html>edge</html>");
+  });
+
+  it("populates edge cache after R2 hit", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+        revalidate: 60,
+      },
+      assets: {
+        "proj_1/isr/dashboard": {
+          body: "<html>r2-cached</html>",
+          customMetadata: {
+            status: "200",
+            createdAt: String(Date.now()),
+            ttl: "60",
+            headers: JSON.stringify({ "Content-Type": "text/html" }),
+          },
+        },
+      },
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(
+      new Request("https://my-app.voidcloud.dev/dashboard"),
+      env,
+      ctx,
+    );
+
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(response.headers.get("x-isr-cache")).toBe("HIT");
+    expect(await response.text()).toBe("<html>r2-cached</html>");
+
+    // Wait for edge cache population
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(edgeCacheStore.has("https://my-app.voidcloud.dev/dashboard")).toBe(true);
   });
 });
 

@@ -177,7 +177,7 @@ export function resolvePathTtl(
  */
 const SKIP_HEADERS = new Set(["cache-control", "x-isr-cache"]);
 
-function serializeHeaders(response: Response): Record<string, string> {
+export function serializeHeaders(response: Response): Record<string, string> {
   const result: Record<string, string> = {};
 
   response.headers.forEach((value, key) => {
@@ -187,4 +187,13 @@ function serializeHeaders(response: Response): Record<string, string> {
   });
 
   return result;
+}
+
+/**
+ * Build a normalized cache key Request for the edge cache (caches.default).
+ * Uses origin + pathname only (no query params) to match R2 key behavior.
+ */
+export function isrEdgeCacheKey(request: Request, pathname: string): Request {
+  const url = new URL(request.url);
+  return new Request(`${url.origin}${pathname}`, { method: "GET" });
 }

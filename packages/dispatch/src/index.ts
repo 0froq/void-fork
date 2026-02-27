@@ -6,6 +6,7 @@ import {
   deleteIsrCache,
   isStale,
   isrCacheResponse,
+  isrEdgeCacheKey,
   resolveRevalidateTtl,
   resolvePathTtl,
   shouldBypassIsr,
@@ -83,17 +84,33 @@ export default {
     };
 
     // ISR: stale-while-revalidate for configured paths
+    // Two-layer cache: Edge (per-colo, sub-ms) → R2 (global, ~50ms) → Worker (render)
     if (routing.ssr && routing.revalidate) {
       const isrTtl = resolvePathTtl(routing.revalidate, pathname);
       if (isrTtl > 0 && request.method === "GET" && !shouldBypassIsr(request)) {
+        const cacheKey = isrEdgeCacheKey(request, pathname);
+        const cache = caches.default;
+
+        // L1: Edge cache (per-colo)
+        const edgeCached = await cache.match(cacheKey);
+        if (edgeCached) {
+          requestType = "isr";
+          return meter(edgeCached);
+        }
+
+        // L2: R2 (global)
         const cached = await readIsrCache(env, routing.projectId, pathname);
         if (cached) {
           const stale = isStale(cached);
           if (stale) {
-            ctx.waitUntil(revalidateInBackground(env, routing, request, pathname, isrTtl));
+            ctx.waitUntil(
+              revalidateInBackground(env, routing, request, pathname, isrTtl, cacheKey),
+            );
           }
           requestType = "isr";
-          return meter(isrCacheResponse(cached, stale));
+          const response = isrCacheResponse(cached, stale);
+          ctx.waitUntil(cache.put(cacheKey, response.clone()));
+          return meter(response);
         }
 
         // Cache miss: render via worker, cache in background
@@ -106,9 +123,12 @@ export default {
           const headers = new Headers(workerResponse.headers);
           headers.set("Cache-Control", `public, s-maxage=${ttl}, max-age=0, must-revalidate`);
           headers.set("x-isr-cache", "MISS");
-          return meter(
-            new Response(workerResponse.body, { status: workerResponse.status, headers }),
-          );
+          const response = new Response(workerResponse.body, {
+            status: workerResponse.status,
+            headers,
+          });
+          ctx.waitUntil(cache.put(cacheKey, response.clone()));
+          return meter(response);
         }
         return meter(workerResponse);
       }
@@ -200,16 +220,31 @@ async function revalidateInBackground(
   request: Request,
   pathname: string,
   defaultTtl: number,
+  cacheKey: Request,
 ): Promise<void> {
   try {
     const worker = getWorker(env, routing);
     const response = await worker.fetch(request);
     const ttl = resolveRevalidateTtl(response, defaultTtl);
+    const cache = caches.default;
     if (ttl > 0 && response.ok) {
       await writeIsrCache(env, routing.projectId, pathname, response, ttl);
+      // Update edge cache with fresh response
+      const headers = new Headers(response.headers);
+      headers.set("x-isr-cache", "HIT");
+      headers.set("Cache-Control", `public, s-maxage=${ttl}, max-age=0, must-revalidate`);
+      headers.delete("set-cookie");
+      await cache.put(
+        cacheKey,
+        new Response(response.clone().body, {
+          status: response.status,
+          headers,
+        }),
+      );
     } else if (ttl === 0) {
-      // Worker permanently opted out — remove stale R2 entry
+      // Worker permanently opted out — remove stale R2 + edge entries
       await deleteIsrCache(env, routing.projectId, pathname);
+      await cache.delete(cacheKey);
     }
   } catch (err) {
     console.error("ISR revalidation failed:", err);
