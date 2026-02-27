@@ -108,6 +108,7 @@ export default extendConfig(
                   { text: "Forms", link: "/pages-routing/forms" },
                   { text: "Deferred Props", link: "/pages-routing/deferred-props" },
                   { text: "View Transitions", link: "/pages-routing/view-transitions" },
+                  { text: "Head Management", link: "/pages-routing/head" },
                   { text: "Islands", link: "/islands" },
                   { text: "Markdown", link: "/pages-routing/markdown" },
                 ],
