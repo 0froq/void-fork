@@ -366,9 +366,6 @@ export function voidPlugin(options?: {
         vars.__VOID_PROJECT_ID = credentials.projectId;
         if (credentials.staging) vars.__VOID_STAGING = "1";
         result.vars = vars;
-      } else if (!resolved.ai) {
-        // Fallback: set direct AI binding (requires user's own CF auth)
-        result.ai = { binding: "AI" };
       }
     }
 
