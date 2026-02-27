@@ -519,10 +519,10 @@ describe("ai-proxy worker", () => {
       );
 
       expect(res.status).toBe(502);
-      expect(await res.json()).toEqual({ error: "inference failed" });
+      expect(await res.json()).toEqual({ error: "inference error" });
     });
 
-    it("returns 502 with string error when non-Error is thrown", async () => {
+    it("returns 502 with generic error when non-Error is thrown", async () => {
       const env = createEnv({
         run: vi.fn(async () => {
           throw "string error";
@@ -541,7 +541,7 @@ describe("ai-proxy worker", () => {
       );
 
       expect(res.status).toBe(502);
-      expect(await res.json()).toEqual({ error: "string error" });
+      expect(await res.json()).toEqual({ error: "inference error" });
     });
 
     it("includes CORS headers on error responses", async () => {
