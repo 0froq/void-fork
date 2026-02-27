@@ -44,6 +44,8 @@ my-app/
 
 Your worker handles API routes, page rendering, and (optionally) [custom SSR](./ssr.md). Static assets are served from the edge via per-worker assets. Cloudflare bindings (D1, KV, R2) are [inferred from your source code](./resource-inference.md) and provisioned automatically.
 
+Void apps can also be configured with [`output: 'static'`](./ssg.md) to pre-render all pages at build time, producing a fully static site that can be deployed anywhere — no Cloudflare Workers required.
+
 **Detected when any of these exist:**
 
 - `routes/` directory
