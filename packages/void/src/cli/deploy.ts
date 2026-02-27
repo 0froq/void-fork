@@ -1,7 +1,7 @@
 import { execFileSync, execSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { intro, outro, log, note, spinner, confirm, isCancel } from "@clack/prompts";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
@@ -452,7 +452,7 @@ async function runFullDeploy(
       process.exit(1);
     }
   }
-  const workerDirName = detectWorkerDir(root, distDir);
+  const workerDirName = detectWorkerDir(distDir);
 
   const schedules = scanJobsSync(root).flatMap((job) =>
     job.crons.map((cron) => ({
@@ -640,42 +640,11 @@ function loadDeployEnv(root: string): Record<string, string> {
 
 /**
  * Detect the worker output directory name.
- * Cloudflare Vite plugin defaults worker build output to dist/<environmentName>,
- * where environmentName is workerName with "-" replaced by "_".
- * If not found, fall back to discovery for custom environment/outDir overrides.
+ * With viteEnvironment: { name: "ssr" }, output is always dist/ssr/.
  */
-export function detectWorkerDir(root: string, distDir: string): string {
-  const pkgPath = join(root, "package.json");
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-  const packageName: string = pkg.name ?? "worker";
-  const workerName = packageName.replace(/^@[^/]+\//, "");
-  const expected = workerName.replaceAll("-", "_");
+export function detectWorkerDir(distDir: string): string {
+  const ssrPath = join(distDir, "ssr");
+  if (existsSync(ssrPath)) return "ssr";
 
-  const expectedPath = join(distDir, expected);
-  if (existsSync(expectedPath)) {
-    return expected;
-  }
-
-  if (!existsSync(distDir)) {
-    throw new Error(`Build output not found: ${distDir}`);
-  }
-
-  const candidates = readdirSync(distDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .filter((name) => name !== "client" && !name.startsWith("."));
-
-  if (candidates.length === 1) {
-    return candidates[0];
-  }
-
-  if (candidates.length === 0) {
-    throw new Error(`No worker output directory found in ${distDir}. Expected ${expectedPath}.`);
-  }
-
-  throw new Error(
-    `Could not determine worker output directory in ${distDir}. Expected ${expectedPath}. Found multiple candidates: ${candidates.join(
-      ", ",
-    )}`,
-  );
+  throw new Error(`Worker output not found: expected ${ssrPath}`);
 }

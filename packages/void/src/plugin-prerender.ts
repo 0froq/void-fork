@@ -29,7 +29,7 @@ export function prerenderPlugin(root: string, config: VoidConfig): Plugin {
       // Detect the worker output directory
       let workerDirName: string;
       try {
-        workerDirName = detectWorkerDir(root, distDir);
+        workerDirName = detectWorkerDir(distDir);
       } catch (err) {
         voidWarn(`Skipping prerender: ${err instanceof Error ? err.message : String(err)}`);
         return;

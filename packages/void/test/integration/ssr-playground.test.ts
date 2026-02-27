@@ -141,7 +141,7 @@ describe("playground/ssr build + preview", () => {
   });
 
   it("emits worker entry and client manifest", () => {
-    const workerEntry = join(ROOT, "playground/ssr/dist/playground_ssr/index.js");
+    const workerEntry = join(ROOT, "playground/ssr/dist/ssr/index.js");
     const clientManifest = join(ROOT, "playground/ssr/dist/client/.vite/manifest.json");
 
     expect(existsSync(workerEntry)).toBe(true);
@@ -153,7 +153,7 @@ describe("playground/ssr build + preview", () => {
     expect(code).toContain('SSR_CLIENT_ENTRY_ID = "src/main.client.tsx"');
 
     const wranglerConfig = JSON.parse(
-      readFileSync(join(ROOT, "playground/ssr/dist/playground_ssr/wrangler.json"), "utf-8"),
+      readFileSync(join(ROOT, "playground/ssr/dist/ssr/wrangler.json"), "utf-8"),
     ) as {
       assets?: { run_worker_first?: boolean | string[] };
       kv_namespaces?: Array<{ binding: string }>;

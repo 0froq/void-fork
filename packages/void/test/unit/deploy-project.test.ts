@@ -100,47 +100,21 @@ describe("detectWorkerDir", () => {
     }
   });
 
-  it("uses expected dist/<environment-name> when present", () => {
+  it("returns 'ssr' when dist/ssr exists", () => {
     const root = mkdtempSync(join(tmpdir(), "void-test-"));
     tempDirs.push(root);
-    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "star-tracker" }));
     const dist = join(root, "dist");
-    mkdirSync(join(dist, "star_tracker"), { recursive: true });
+    mkdirSync(join(dist, "ssr"), { recursive: true });
 
-    expect(detectWorkerDir(root, dist)).toBe("star_tracker");
+    expect(detectWorkerDir(dist)).toBe("ssr");
   });
 
-  it("falls back to single non-client directory for custom output dirs", () => {
+  it("throws when dist/ssr does not exist", () => {
     const root = mkdtempSync(join(tmpdir(), "void-test-"));
     tempDirs.push(root);
-    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "star-tracker" }));
     const dist = join(root, "dist");
-    mkdirSync(join(dist, "worker"), { recursive: true });
-    mkdirSync(join(dist, "client"), { recursive: true });
+    mkdirSync(dist, { recursive: true });
 
-    expect(detectWorkerDir(root, dist)).toBe("worker");
-  });
-
-  it("throws when multiple fallback candidates exist", () => {
-    const root = mkdtempSync(join(tmpdir(), "void-test-"));
-    tempDirs.push(root);
-    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "star-tracker" }));
-    const dist = join(root, "dist");
-    mkdirSync(join(dist, "worker-a"), { recursive: true });
-    mkdirSync(join(dist, "worker-b"), { recursive: true });
-
-    expect(() => detectWorkerDir(root, dist)).toThrow(
-      "Could not determine worker output directory",
-    );
-  });
-
-  it("derives env dir for scoped package names", () => {
-    const root = mkdtempSync(join(tmpdir(), "void-test-"));
-    tempDirs.push(root);
-    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "@acme/star-tracker" }));
-    const dist = join(root, "dist");
-    mkdirSync(join(dist, "star_tracker"), { recursive: true });
-
-    expect(detectWorkerDir(root, dist)).toBe("star_tracker");
+    expect(() => detectWorkerDir(dist)).toThrow("Worker output not found");
   });
 });

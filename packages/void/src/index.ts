@@ -578,6 +578,7 @@ export function voidPlugin(options?: {
       ...inspectorPortOption,
       persistState: { path: options?.persistTo ?? outDir },
       auxiliaryWorkers: options?.auxiliaryWorkers,
+      viteEnvironment: { name: "ssr" },
       config: mergeBindings,
     }),
   ];

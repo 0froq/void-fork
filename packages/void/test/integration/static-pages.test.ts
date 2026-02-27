@@ -22,7 +22,7 @@ describe("playground/static-pages build (output: static)", () => {
   }, 120_000);
 
   it("emits worker entry and client manifest", () => {
-    const workerEntry = join(DIST, "playground_static_pages/index.js");
+    const workerEntry = join(DIST, "ssr/index.js");
     const clientManifest = join(DIST, "client/.vite/manifest.json");
 
     expect(existsSync(workerEntry)).toBe(true);
@@ -67,9 +67,7 @@ describe("playground/static-pages build (output: static)", () => {
   });
 
   it("wrangler.json has correct asset config", () => {
-    const wranglerConfig = JSON.parse(
-      readFileSync(join(DIST, "playground_static_pages/wrangler.json"), "utf-8"),
-    ) as {
+    const wranglerConfig = JSON.parse(readFileSync(join(DIST, "ssr/wrangler.json"), "utf-8")) as {
       assets?: { run_worker_first?: boolean | string[]; directory?: string };
     };
     expect(wranglerConfig.assets?.directory).toBe("../client");
