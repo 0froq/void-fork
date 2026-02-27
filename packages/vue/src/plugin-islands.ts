@@ -446,6 +446,7 @@ function generateIslandRenderer(
   return `
 import { createSSRApp, h, reactive, provide } from "vue";
 import { renderToString } from "vue/server-renderer";
+import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}
 ${cssMapCode}
@@ -483,11 +484,14 @@ export async function renderIslandPage(pageObj, assetTags) {
 
   const html = await renderToString(app);
   const __mdScriptAttr = __mdClientScriptIds.has(pageObj.component) ? \` data-md-script="\${escapeAttr(pageObj.component)}"\` : "";
+  const headHtml = pageObj.head ? renderHeadToString(pageObj.head) : "";
+  const htmlAttrs = pageObj.head ? renderHtmlAttrs(pageObj.head) : "";
+  const bodyAttrs = pageObj.head ? renderBodyAttrs(pageObj.head) : "";
 
   return \`<!doctype html>
-<html>
-<head>\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\\n") : ""}\${assetTags.head}</head>
-<body>
+<html\${htmlAttrs}>
+<head>\${headHtml}\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\\n") : ""}\${assetTags.head}</head>
+<body\${bodyAttrs}>
   <div id="app"\${__mdScriptAttr}>\${html}</div>
   \${assetTags.body}
 </body>

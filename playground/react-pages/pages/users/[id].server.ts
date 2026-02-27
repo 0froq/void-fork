@@ -15,3 +15,10 @@ export const loader = defineHandler<Props>((c) => {
 
   return { user };
 });
+
+export function head(_c: unknown, props: Props) {
+  return {
+    title: props.user.name,
+    meta: [{ property: "og:title", content: props.user.name }],
+  };
+}

@@ -365,6 +365,7 @@ function generateIslandRenderer(
 import React from "react";
 import { renderToString } from "react-dom/server";
 import { SharedContext, ErrorsContext } from "@void-x/react/runtime";
+import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}
 ${cssMapCode}
@@ -399,11 +400,14 @@ export async function renderIslandPage(pageObj, assetTags) {
   );
 
   const html = renderToString(element);
+  const headHtml = pageObj.head ? renderHeadToString(pageObj.head) : "";
+  const htmlAttrs = pageObj.head ? renderHtmlAttrs(pageObj.head) : "";
+  const bodyAttrs = pageObj.head ? renderBodyAttrs(pageObj.head) : "";
 
   return \`<!doctype html>
-<html>
-<head>\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\\n") : ""}\${PREAMBLE_SCRIPT}\${assetTags.head}</head>
-<body>
+<html\${htmlAttrs}>
+<head>\${headHtml}\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\\n") : ""}\${PREAMBLE_SCRIPT}\${assetTags.head}</head>
+<body\${bodyAttrs}>
   <div id="app">\${html}</div>
   \${assetTags.body}
 </body>

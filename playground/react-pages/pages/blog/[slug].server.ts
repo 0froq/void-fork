@@ -11,3 +11,9 @@ export const loader = defineHandler<Props>((c) => {
   if (!post) return c.notFound();
   return { post };
 });
+
+export function head(_c: unknown, props: Props) {
+  return {
+    title: props.post.title,
+  };
+}

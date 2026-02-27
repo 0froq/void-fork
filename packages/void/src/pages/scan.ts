@@ -133,6 +133,13 @@ export async function scanPages(
       revalidate = MAX_REVALIDATE;
     }
 
+    // Extract frontmatter metadata from .md files for auto-head
+    let metadata: { title?: string; description?: string } | undefined;
+    if (ext === ".md") {
+      const mdContent = readFileSync(join(pagesDir, file), "utf-8");
+      metadata = extractFrontmatterMeta(mdContent);
+    }
+
     pages.push({
       pattern: route.pattern,
       params: route.params,
@@ -145,6 +152,7 @@ export async function scanPages(
       prerender,
       hasGetPrerenderPaths,
       island,
+      metadata,
     });
   }
 
@@ -181,6 +189,25 @@ export async function scanPages(
   }
 
   return { pages, layouts };
+}
+
+/** Extract title and description from YAML frontmatter in markdown source. */
+function extractFrontmatterMeta(
+  source: string,
+): { title?: string; description?: string } | undefined {
+  const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return undefined;
+  const yaml = match[1];
+  const title = yaml
+    .match(/^title:\s*(.+)$/m)?.[1]
+    ?.trim()
+    .replace(/^["']|["']$/g, "");
+  const description = yaml
+    .match(/^description:\s*(.+)$/m)?.[1]
+    ?.trim()
+    .replace(/^["']|["']$/g, "");
+  if (!title && !description) return undefined;
+  return { title, description };
 }
 
 /** Resolve the layout chain for a component (innermost last) */

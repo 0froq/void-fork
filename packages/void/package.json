@@ -86,6 +86,14 @@
       "types": "./dist/pages/protocol.d.mts",
       "import": "./dist/pages/protocol.mjs"
     },
+    "./pages-head": {
+      "types": "./dist/pages/head.d.mts",
+      "import": "./dist/pages/head.mjs"
+    },
+    "./pages-head-client": {
+      "types": "./dist/pages/head-client.d.mts",
+      "import": "./dist/pages/head-client.mjs"
+    },
     "./env": {
       "types": "./env.d.ts"
     },

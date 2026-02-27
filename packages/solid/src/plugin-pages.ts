@@ -91,6 +91,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string): string 
 import { renderToStringAsync, generateHydrationScript } from "solid-js/web";
 import { createComponent } from "solid-js";
 import { SharedContext, ErrorsContext, RouterContext } from "@void-x/solid/runtime";
+import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -135,11 +136,14 @@ export async function renderPage(pageObj, assetTags) {
   const html = await renderToStringAsync(() => createComponent(ServerApp, {}));
 
   const pageData = escapeAttr(JSON.stringify(pageObj));
+  const headHtml = pageObj.head ? renderHeadToString(pageObj.head) : "";
+  const htmlAttrs = pageObj.head ? renderHtmlAttrs(pageObj.head) : "";
+  const bodyAttrs = pageObj.head ? renderBodyAttrs(pageObj.head) : "";
 
   return \`<!doctype html>
-<html>
-<head>\${assetTags.head}\${generateHydrationScript()}</head>
-<body>
+<html\${htmlAttrs}>
+<head>\${headHtml}\${assetTags.head}\${generateHydrationScript()}</head>
+<body\${bodyAttrs}>
   <div id="app" data-page="\${pageData}">\${html}</div>
   \${assetTags.body}
 </body>
@@ -159,6 +163,7 @@ import { createSignal, createComponent, batch } from "solid-js";
 import { hydrate } from "solid-js/web";
 import { SharedContext, ErrorsContext, RouterContext } from "@void-x/solid/runtime";
 import { parseCacheFor, PrefetchCache } from "@void-x/solid/prefetch";
+import { initClientHead, applyClientHead } from "void/pages-head-client";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 const _prefetchCache = new PrefetchCache();
@@ -408,6 +413,8 @@ const router = {
       applyUpdate();
     }
 
+    applyClientHead(pageData.head);
+
     if (!options.preserveState) {
       window.history.pushState({}, "", pageData.url);
     }
@@ -532,6 +539,7 @@ batch(() => {
 
 hydrate(() => createComponent(App, {}), appEl);
 appEl.setAttribute("data-hydrated", "true");
+initClientHead(initialPageData.head);
 
 // Drain any deferred resolutions that arrived before the module loaded (after hydration)
 if (window.__deferredQueue) {

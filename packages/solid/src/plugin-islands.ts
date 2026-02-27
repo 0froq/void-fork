@@ -383,6 +383,7 @@ function generateIslandRenderer(
 import { renderToStringAsync, generateHydrationScript } from "solid-js/web";
 import { createComponent } from "solid-js";
 import { SharedContext, ErrorsContext } from "@void-x/solid/runtime";
+import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}
 ${cssMapCode}
@@ -422,10 +423,14 @@ export async function renderIslandPage(pageObj, assetTags) {
 
   const html = await renderToStringAsync(() => createComponent(ServerApp, {}));
 
+  const headHtml = pageObj.head ? renderHeadToString(pageObj.head) : "";
+  const htmlAttrs = pageObj.head ? renderHtmlAttrs(pageObj.head) : "";
+  const bodyAttrs = pageObj.head ? renderBodyAttrs(pageObj.head) : "";
+
   return \`<!doctype html>
-<html>
-<head>\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\\n") : ""}\${assetTags.head}\${generateHydrationScript()}</head>
-<body>
+<html\${htmlAttrs}>
+<head>\${headHtml}\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\\n") : ""}\${assetTags.head}\${generateHydrationScript()}</head>
+<body\${bodyAttrs}>
   <div id="app">\${html}</div>
   \${assetTags.body}
 </body>

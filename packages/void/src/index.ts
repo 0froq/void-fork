@@ -565,7 +565,7 @@ export function voidPlugin(options?: { persistTo?: string }): Plugin[] {
     restartPlugin(),
     bindingWatchPlugin,
     envPlugin,
-    routingPlugin(root, { getAuth: () => authProviders }),
+    routingPlugin(root, { getAuth: () => authProviders, headConfig: config.head }),
     dbTypesPlugin(root, true),
     migrationPlugin(root),
     prerenderPlugin(root, config),

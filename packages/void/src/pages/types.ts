@@ -21,6 +21,8 @@ export interface PageDefinition {
   hasGetPrerenderPaths?: boolean;
   /** Whether this is an island page (.island.tsx/.island.vue) */
   island?: boolean;
+  /** Frontmatter metadata extracted from .md files (title, description) */
+  metadata?: { title?: string; description?: string };
 }
 
 export interface LayoutDefinition {

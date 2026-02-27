@@ -70,6 +70,8 @@ export default defineConfig({
     "src/runtime/ai.ts",
     "src/pages/index.ts",
     "src/pages/protocol.ts",
+    "src/pages/head.ts",
+    "src/pages/head-client.ts",
     "src/runtime/vue.ts",
     "src/runtime/react.ts",
     "src/runtime/svelte.ts",

@@ -275,6 +275,41 @@ function defineClientTests(BASE: string) {
       await page.context().close();
     }
   });
+
+  it("SPA navigation updates document.title from head()", async () => {
+    const page = await newPage();
+    try {
+      await page.goto(BASE + "/");
+      await waitForHydration(page);
+
+      // Home page title from head() + titleTemplate
+      expect(await page.title()).toBe("Home | React Pages Demo");
+
+      // Navigate to user detail — title should update
+      await page.click('a[href="/users"]');
+      await page.waitForFunction(() =>
+        document.querySelector("h1")?.textContent?.includes("Users"),
+      );
+      await page.click('a[href="/users/1"]');
+      await page.waitForFunction(() =>
+        document.querySelector("h1")?.textContent?.includes("Alice"),
+      );
+      expect(await page.title()).toBe("Alice | React Pages Demo");
+
+      // Go back — title should restore
+      await page.goBack();
+      await page.waitForFunction(() =>
+        document.querySelector("h1")?.textContent?.includes("Users"),
+      );
+      await page.goBack();
+      await page.waitForFunction(() =>
+        document.querySelector("h1")?.textContent?.includes("Welcome"),
+      );
+      expect(await page.title()).toBe("Home | React Pages Demo");
+    } finally {
+      await page.context().close();
+    }
+  });
 }
 
 function defineIslandTests(BASE: string) {
@@ -455,6 +490,12 @@ describe("react-pages client (dev)", () => {
     expect(rootHtml).toContain("Welcome");
     expect(rootHtml).toContain("React Pages Demo"); // shared data from middleware
 
+    // 1b. Head management — SSR HTML contains head tags from void.json + page head()
+    expect(rootHtml).toContain("<title>Home | React Pages Demo</title>");
+    expect(rootHtml).toContain('<meta charset="utf-8">');
+    expect(rootHtml).toContain('<meta name="description" content="React Pages playground home">');
+    expect(rootHtml).toContain('<html lang="en"');
+
     // 2. SSR content contains server-rendered props
     expect(rootHtml).toContain("This is the React Pages playground.");
 
@@ -474,6 +515,10 @@ describe("react-pages client (dev)", () => {
     expect(userHtml).toContain("Alice");
     expect(userHtml).toContain("alice@example.com");
 
+    // 4b. User detail head — dynamic title from head() export
+    expect(userHtml).toContain("<title>Alice | React Pages Demo</title>");
+    expect(userHtml).toContain('<meta property="og:title" content="Alice">');
+
     // 5. Inertia navigation — GET / with X-VoidPages header returns JSON page object
     const inertiaRoot = await fetch(`${DEV_BASE}/`, {
       headers: { "X-VoidPages": "true" },
@@ -490,6 +535,14 @@ describe("react-pages client (dev)", () => {
     expect(rootPage.props).toHaveProperty("title", "Home");
     expect(rootPage.shared).toHaveProperty("appName", "React Pages Demo");
     expect(rootPage.url).toBe("/");
+    // Head in Inertia JSON
+    expect((rootPage as any).head).toBeDefined();
+    expect((rootPage as any).head.title).toBe("Home | React Pages Demo");
+    expect((rootPage as any).head.meta).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "description", content: "React Pages playground home" }),
+      ]),
+    );
 
     // 6. Inertia navigation — GET /users returns user list in props
     const inertiaUsers = await fetch(`${DEV_BASE}/users`, {
@@ -555,6 +608,8 @@ describe("react-pages client (dev)", () => {
     };
     expect(userPage.component).toBe("users/[id]");
     expect(userPage.props.user.name).toBe("Alice");
+    // Head in user detail Inertia JSON
+    expect((userPage as any).head.title).toBe("Alice | React Pages Demo");
 
     // 11. Newly added user is accessible via detail page
     const inertiaCharlie = await fetch(`${DEV_BASE}/users/3`, {

@@ -34,6 +34,7 @@ const LOAD_ID_FILTER = /^virtual:void-(routes|client-worker)$/;
  */
 interface RoutingPluginOptions {
   getAuth: () => AuthProvider[] | null;
+  headConfig?: import("./pages/head").HeadConfig;
 }
 
 export function routingPlugin(root: string, options: RoutingPluginOptions): Plugin {
@@ -118,8 +119,10 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     return {
       pagesDir,
       protocolPath: resolveFile("void/pages-protocol"),
+      headPath: resolveFile("void/pages-head"),
       clientEntryId: "virtual:void-pages-client",
       islandClientEntryId: hasIslandPages ? "virtual:void-islands-client" : undefined,
+      headConfig: options.headConfig,
     };
   }
 

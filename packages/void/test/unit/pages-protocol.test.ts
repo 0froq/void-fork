@@ -52,7 +52,14 @@ describe("handlePageGet", () => {
     });
 
     const handler = vi.fn(() => ({ users: [1, 2, 3] }));
-    const response = await handlePageGet(handler, c, "users", mockRenderFn, mockGetAssetTags);
+    const response = await handlePageGet(
+      handler,
+      undefined,
+      c,
+      "users",
+      mockRenderFn,
+      mockGetAssetTags,
+    );
 
     expect(response.headers.get("X-VoidPages")).toBe("true");
     expect(response.headers.get("Vary")).toBe("X-VoidPages");
@@ -67,7 +74,14 @@ describe("handlePageGet", () => {
     const c = await createTestContext("GET", "/users");
 
     const handler = vi.fn(() => ({ users: [] }));
-    const response = await handlePageGet(handler, c, "users", mockRenderFn, mockGetAssetTags);
+    const response = await handlePageGet(
+      handler,
+      undefined,
+      c,
+      "users",
+      mockRenderFn,
+      mockGetAssetTags,
+    );
 
     expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
     const html = await response.text();
@@ -79,7 +93,14 @@ describe("handlePageGet", () => {
       headers: { "x-voidpages": "true" },
     });
 
-    const response = await handlePageGet(undefined, c, "index", mockRenderFn, mockGetAssetTags);
+    const response = await handlePageGet(
+      undefined,
+      undefined,
+      c,
+      "index",
+      mockRenderFn,
+      mockGetAssetTags,
+    );
 
     const body = (await response.json()) as any;
     expect(body.props).toEqual({});
@@ -95,7 +116,14 @@ describe("handlePageGet", () => {
     });
     const handler = vi.fn(() => redirect);
     const renderFn = vi.fn(async (pageObj: any) => `<html>${pageObj.component}</html>`);
-    const response = await handlePageGet(handler, c, "callback", renderFn, mockGetAssetTags);
+    const response = await handlePageGet(
+      handler,
+      undefined,
+      c,
+      "callback",
+      renderFn,
+      mockGetAssetTags,
+    );
 
     expect(response.status).toBe(302);
     expect(response.headers.get("Location")).toBe("/");
@@ -108,7 +136,16 @@ describe("handlePageGet", () => {
     });
 
     const renderFn = vi.fn(async () => "<html>island</html>");
-    const response = await handlePageGet(undefined, c, "index", renderFn, mockGetAssetTags, true);
+    const response = await handlePageGet(
+      undefined,
+      undefined,
+      c,
+      "index",
+      renderFn,
+      mockGetAssetTags,
+      undefined,
+      true,
+    );
 
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(renderFn).toHaveBeenCalled();
@@ -120,7 +157,16 @@ describe("handlePageGet", () => {
     });
 
     const renderFn = vi.fn(async () => "<html></html>");
-    const response = await handlePageGet(undefined, c, "index", renderFn, mockGetAssetTags, false);
+    const response = await handlePageGet(
+      undefined,
+      undefined,
+      c,
+      "index",
+      renderFn,
+      mockGetAssetTags,
+      undefined,
+      false,
+    );
 
     expect(response.headers.get("X-VoidPages")).toBe("true");
     expect(renderFn).not.toHaveBeenCalled();
@@ -132,7 +178,14 @@ describe("handlePageGet", () => {
       shared: { auth: { user: { name: "Test" } } },
     });
 
-    const response = await handlePageGet(undefined, c, "index", mockRenderFn, mockGetAssetTags);
+    const response = await handlePageGet(
+      undefined,
+      undefined,
+      c,
+      "index",
+      mockRenderFn,
+      mockGetAssetTags,
+    );
 
     const body = (await response.json()) as any;
     expect(body.shared).toEqual({ auth: { user: { name: "Test" } } });
@@ -148,7 +201,14 @@ describe("handlePageGet", () => {
       usage: defer(async () => ({ requests: 1200 })),
     }));
 
-    const response = await handlePageGet(handler, c, "dashboard", mockRenderFn, mockGetAssetTags);
+    const response = await handlePageGet(
+      handler,
+      undefined,
+      c,
+      "dashboard",
+      mockRenderFn,
+      mockGetAssetTags,
+    );
 
     expect(response.headers.get("content-type")).not.toContain("ndjson");
     expect(response.headers.get("X-VoidPages")).toBe("true");
@@ -173,6 +233,7 @@ describe("handlePageMutation", () => {
     const response = await handlePageMutation(
       mutationHandler,
       getHandler,
+      undefined,
       c,
       "users",
       mockRenderFn,
@@ -198,6 +259,7 @@ describe("handlePageMutation", () => {
     const response = await handlePageMutation(
       mutationHandler,
       undefined,
+      undefined,
       c,
       "users",
       mockRenderFn,
@@ -221,6 +283,7 @@ describe("handlePageMutation", () => {
     const response = await handlePageMutation(
       mutationHandler,
       getHandler,
+      undefined,
       c,
       "users",
       mockRenderFn,
@@ -254,6 +317,7 @@ describe("handlePageMutation", () => {
     const response = await handlePageMutation(
       mutationHandler,
       getHandler,
+      undefined,
       c,
       "users",
       mockRenderFn,
@@ -276,6 +340,7 @@ describe("handlePageMutation", () => {
     const response = await handlePageMutation(
       mutationHandler,
       getHandler,
+      undefined,
       c,
       "users",
       mockRenderFn,
@@ -297,7 +362,15 @@ describe("handlePageMutation", () => {
     });
 
     await expect(
-      handlePageMutation(mutationHandler, undefined, c, "users", mockRenderFn, mockGetAssetTags),
+      handlePageMutation(
+        mutationHandler,
+        undefined,
+        undefined,
+        c,
+        "users",
+        mockRenderFn,
+        mockGetAssetTags,
+      ),
     ).rejects.toThrow("boom");
   });
 
@@ -311,10 +384,12 @@ describe("handlePageMutation", () => {
     const response = await handlePageMutation(
       mutationHandler,
       undefined,
+      undefined,
       c,
       "contact",
       mockRenderFn,
       mockGetAssetTags,
+      undefined,
       true,
     );
 
@@ -342,10 +417,12 @@ describe("handlePageMutation", () => {
     const response = await handlePageMutation(
       mutationHandler,
       undefined,
+      undefined,
       c,
       "contact",
       mockRenderFn,
       mockGetAssetTags,
+      undefined,
       true,
     );
 
@@ -362,10 +439,12 @@ describe("handlePageMutation", () => {
     const response = await handlePageMutation(
       mutationHandler,
       undefined,
+      undefined,
       c,
       "contact",
       mockRenderFn,
       mockGetAssetTags,
+      undefined,
       true,
     );
 
@@ -386,10 +465,12 @@ describe("handlePageMutation", () => {
     const response = await handlePageMutation(
       mutationHandler,
       undefined,
+      undefined,
       c,
       "contact",
       mockRenderFn,
       mockGetAssetTags,
+      undefined,
       true,
     );
 
@@ -409,7 +490,14 @@ describe("handlePageGet with deferred props", () => {
       usage: defer(() => Promise.resolve({ requests: 100 })),
     }));
 
-    const response = await handlePageGet(handler, c, "dashboard", mockRenderFn, mockGetAssetTags);
+    const response = await handlePageGet(
+      handler,
+      undefined,
+      c,
+      "dashboard",
+      mockRenderFn,
+      mockGetAssetTags,
+    );
 
     expect(response.headers.get("content-type")).toBe("application/x-ndjson");
     const text = await response.text();
@@ -439,7 +527,14 @@ describe("handlePageGet with deferred props", () => {
       usage: defer(() => Promise.reject(new Error("timeout"))),
     }));
 
-    const response = await handlePageGet(handler, c, "dashboard", mockRenderFn, mockGetAssetTags);
+    const response = await handlePageGet(
+      handler,
+      undefined,
+      c,
+      "dashboard",
+      mockRenderFn,
+      mockGetAssetTags,
+    );
 
     const text = await response.text();
     const lines = text.trim().split("\n");
@@ -456,7 +551,14 @@ describe("handlePageGet with deferred props", () => {
     });
 
     const handler = vi.fn(() => ({ users: [1] }));
-    const response = await handlePageGet(handler, c, "users", mockRenderFn, mockGetAssetTags);
+    const response = await handlePageGet(
+      handler,
+      undefined,
+      c,
+      "users",
+      mockRenderFn,
+      mockGetAssetTags,
+    );
 
     const body = (await response.json()) as any;
     expect(body.props).toEqual({ users: [1] });
@@ -475,7 +577,14 @@ describe("handlePageGet with deferred props", () => {
       async (pageObj: any) => `<div id="app" data-page='${JSON.stringify(pageObj)}'></div>`,
     );
 
-    const response = await handlePageGet(handler, c, "dashboard", renderFn, mockGetAssetTags);
+    const response = await handlePageGet(
+      handler,
+      undefined,
+      c,
+      "dashboard",
+      renderFn,
+      mockGetAssetTags,
+    );
 
     const text = await response.text();
     expect(text).toContain("data-page=");
@@ -488,7 +597,14 @@ describe("handlePageGet with deferred props", () => {
     const c = await createTestContext("GET", "/users");
 
     const handler = vi.fn(() => ({ users: [1] }));
-    const response = await handlePageGet(handler, c, "users", mockRenderFn, mockGetAssetTags);
+    const response = await handlePageGet(
+      handler,
+      undefined,
+      c,
+      "users",
+      mockRenderFn,
+      mockGetAssetTags,
+    );
 
     expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
   });
@@ -508,7 +624,14 @@ describe("handlePageGet with deferred props", () => {
       chart: analytics,
     }));
 
-    const response = await handlePageGet(handler, c, "dashboard", mockRenderFn, mockGetAssetTags);
+    const response = await handlePageGet(
+      handler,
+      undefined,
+      c,
+      "dashboard",
+      mockRenderFn,
+      mockGetAssetTags,
+    );
 
     const text = await response.text();
     const lines = text.trim().split("\n");
@@ -532,7 +655,14 @@ describe("handlePageGet with deferred props", () => {
       headers: { Location: "/login" },
     });
     const handler = vi.fn(() => redirect);
-    const response = await handlePageGet(handler, c, "dashboard", mockRenderFn, mockGetAssetTags);
+    const response = await handlePageGet(
+      handler,
+      undefined,
+      c,
+      "dashboard",
+      mockRenderFn,
+      mockGetAssetTags,
+    );
 
     expect(response.status).toBe(302);
   });

@@ -1,5 +1,6 @@
 import { ValidationError } from "./validation-error";
 import { DEFERRED, separateDeferred, type ResolvedDeferredGroup } from "./defer";
+import { resolveHead, type HeadDescriptor, type HeadConfig } from "./head";
 
 export { ValidationError };
 
@@ -9,6 +10,7 @@ export interface PageObject {
   shared: Record<string, unknown>;
   url: string;
   errors: Record<string, string> | null;
+  head?: HeadDescriptor;
   deferred?: string[];
   deferredKeys?: Record<string, string>;
 }
@@ -100,10 +102,12 @@ function streamDeferredResponse(
 /** Handle GET page request — run handler, return page object or SSR HTML */
 export async function handlePageGet(
   handler: Function | undefined,
+  headFn: ((c: any, props: Record<string, unknown>) => HeadDescriptor | undefined) | undefined,
   c: any,
   componentId: string,
   renderFn: (pageObj: PageObject, assetTags: { head: string; body: string }) => Promise<string>,
   getAssetTags: (req: Request, env: any) => Promise<{ head: string; body: string }>,
+  configHead?: HeadConfig,
   island?: boolean,
 ): Promise<Response> {
   const shared = c.get("shared") || {};
@@ -118,6 +122,11 @@ export async function handlePageGet(
     }
     props = await extractProps(result);
   }
+
+  // Resolve head metadata
+  const pageHead = headFn ? headFn(c, props) : undefined;
+  const middlewareHead = c.get("headDefaults") as HeadDescriptor | undefined;
+  const head = resolveHead(configHead, middlewareHead, pageHead);
 
   // Separate immediate props from deferred sentinels
   const { immediateProps, deferredMap } = separateDeferred(props);
@@ -139,6 +148,7 @@ export async function handlePageGet(
     shared,
     url: c.req.path,
     errors: null,
+    ...(head && { head }),
     ...(hasDeferred && {
       deferred: Object.keys(deferredMap),
       deferredKeys,
@@ -217,13 +227,32 @@ export async function handlePageGet(
 export async function handlePageMutation(
   mutationHandler: Function | undefined,
   getHandler: Function | undefined,
+  headFn: ((c: any, props: Record<string, unknown>) => HeadDescriptor | undefined) | undefined,
   c: any,
   componentId: string,
   renderFn: (pageObj: PageObject, assetTags: { head: string; body: string }) => Promise<string>,
   getAssetTags: (req: Request, env: any) => Promise<{ head: string; body: string }>,
+  configHead?: HeadConfig,
   island?: boolean,
 ): Promise<Response> {
   const shared = c.get("shared") || {};
+  const middlewareHead = c.get("headDefaults") as HeadDescriptor | undefined;
+
+  function buildMutationPageObj(
+    props: Record<string, unknown>,
+    errors: Record<string, string> | null,
+  ): PageObject {
+    const pageHead = headFn ? headFn(c, props) : undefined;
+    const head = resolveHead(configHead, middlewareHead, pageHead);
+    return {
+      component: componentId,
+      props,
+      shared,
+      url: c.req.path,
+      errors,
+      ...(head && { head }),
+    };
+  }
 
   let result: unknown;
   try {
@@ -235,13 +264,7 @@ export async function handlePageMutation(
       }
       const rawProps = getHandler ? await extractProps(await getHandler(c)) : {};
       const props = stripDeferred(rawProps);
-      const pageObj: PageObject = {
-        component: componentId,
-        props,
-        shared,
-        url: c.req.path,
-        errors: e.errors,
-      };
+      const pageObj = buildMutationPageObj(props, e.errors);
       if (isPagesRequest(c)) return pageJsonResponse(pageObj);
       const assetTags = await getAssetTags(c.req.raw, c.env);
       return new Response(await renderFn(pageObj, assetTags), {
@@ -265,13 +288,7 @@ export async function handlePageMutation(
       }
       const rawProps = getHandler ? await extractProps(await getHandler(c)) : {};
       const props = stripDeferred(rawProps);
-      const pageObj: PageObject = {
-        component: componentId,
-        props,
-        shared,
-        url: c.req.path,
-        errors,
-      };
+      const pageObj = buildMutationPageObj(props, errors);
       if (isPagesRequest(c)) return pageJsonResponse(pageObj);
       const assetTags = await getAssetTags(c.req.raw, c.env);
       return new Response(await renderFn(pageObj, assetTags), {
@@ -288,13 +305,7 @@ export async function handlePageMutation(
   }
   const rawProps = getHandler ? await extractProps(await getHandler(c)) : {};
   const props = stripDeferred(rawProps);
-  const pageObj: PageObject = {
-    component: componentId,
-    props,
-    shared,
-    url: c.req.path,
-    errors: null,
-  };
+  const pageObj = buildMutationPageObj(props, null);
   if (isPagesRequest(c)) return pageJsonResponse(pageObj);
   const assetTags = await getAssetTags(c.req.raw, c.env);
   return new Response(await renderFn(pageObj, assetTags), {

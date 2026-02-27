@@ -114,6 +114,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string, isDev: b
 import React from "react";
 import { renderToString } from "react-dom/server";
 import { SharedContext, ErrorsContext, RouterContext } from "@void-x/react/runtime";
+import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -153,11 +154,14 @@ export async function renderPage(pageObj, assetTags) {
 
   const html = renderToString(element);
   const pageData = escapeAttr(JSON.stringify(pageObj));
+  const headHtml = pageObj.head ? renderHeadToString(pageObj.head) : "";
+  const htmlAttrs = pageObj.head ? renderHtmlAttrs(pageObj.head) : "";
+  const bodyAttrs = pageObj.head ? renderBodyAttrs(pageObj.head) : "";
 
   return \`<!doctype html>
-<html>
-<head>\${PREAMBLE_SCRIPT}\${assetTags.head}</head>
-<body>
+<html\${htmlAttrs}>
+<head>\${headHtml}\${PREAMBLE_SCRIPT}\${assetTags.head}</head>
+<body\${bodyAttrs}>
   <div id="app" data-page="\${pageData}">\${html}</div>
   \${assetTags.body}
 </body>
@@ -178,6 +182,7 @@ import { hydrateRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { SharedContext, ErrorsContext, RouterContext } from "@void-x/react/runtime";
 import { parseCacheFor, PrefetchCache } from "@void-x/react/prefetch";
+import { initClientHead, applyClientHead } from "void/pages-head-client";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 const _prefetchCache = new PrefetchCache();
@@ -444,6 +449,8 @@ export const router = {
       applyUpdate();
     }
 
+    applyClientHead(pageData.head);
+
     if (!options.preserveState) {
       window.history.pushState({}, "", pageData.url);
     }
@@ -564,6 +571,7 @@ state = {
 
 hydrateRoot(appEl, React.createElement(App));
 appEl.setAttribute("data-hydrated", "true");
+initClientHead(initialPageData.head);
 
 // Drain any deferred resolutions that arrived before the module loaded (after hydration)
 if (window.__deferredQueue) {

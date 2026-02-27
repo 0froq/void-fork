@@ -1,4 +1,9 @@
 {
   "$schema": "./node_modules/void/schema.json",
-  "output": "static"
+  "output": "static",
+  "head": {
+    "titleTemplate": "%s | MD Blog",
+    "htmlAttrs": { "lang": "en" },
+    "meta": [{ "charset": "utf-8" }]
+  }
 }

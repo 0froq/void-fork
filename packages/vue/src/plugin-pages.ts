@@ -138,6 +138,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string): string 
   return `
 import { createSSRApp, h, reactive, provide } from "vue";
 import { renderToString } from "vue/server-renderer";
+import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -177,11 +178,14 @@ export async function renderPage(pageObj, assetTags) {
 
   const html = await renderToString(app);
   const pageData = escapeAttr(JSON.stringify(pageObj));
+  const headHtml = pageObj.head ? renderHeadToString(pageObj.head) : "";
+  const htmlAttrs = pageObj.head ? renderHtmlAttrs(pageObj.head) : "";
+  const bodyAttrs = pageObj.head ? renderBodyAttrs(pageObj.head) : "";
 
   return \`<!doctype html>
-<html>
-<head>\${assetTags.head}</head>
-<body>
+<html\${htmlAttrs}>
+<head>\${headHtml}\${assetTags.head}</head>
+<body\${bodyAttrs}>
   <div id="app" data-page="\${pageData}">\${html}</div>
   \${assetTags.body}
 </body>
@@ -200,6 +204,7 @@ function generateClientEntry(
 import { createSSRApp, h, reactive, provide, shallowRef, nextTick } from "vue";
 import { createDeferred, resolveDeferred, rejectDeferred } from "@void-x/vue/deferred";
 import { parseCacheFor, PrefetchCache } from "@void-x/vue/prefetch";
+import { initClientHead, applyClientHead } from "void/pages-head-client";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 const _prefetchCache = new PrefetchCache();
@@ -466,6 +471,8 @@ export const router = {
       applyUpdate();
     }
 
+    applyClientHead(pageData.head);
+
     if (!options.preserveState) {
       window.history.pushState({}, "", pageData.url);
     }
@@ -570,6 +577,7 @@ const app = createSSRApp({
 
 app.mount("#app");
 document.getElementById("app").setAttribute("data-hydrated", "true");
+initClientHead(initialPageData.head);
 
 // Drain any deferred resolutions that arrived before the module loaded (after hydration)
 if (window.__deferredQueue) {

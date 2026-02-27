@@ -12,6 +12,7 @@ import { runValidation, type ValidatorSlots, type HandlerInput } from "./validat
  */
 export interface CloudContextVariables {
   user: AuthUser | null;
+  headDefaults?: import("../pages/head").HeadDescriptor;
   [key: string]: unknown;
 }
 

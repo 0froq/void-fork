@@ -223,6 +223,26 @@ describe("markdown-blog playground", () => {
       expect(hasThemeStyle).toBe(true);
     });
 
+    it("renders head tags from frontmatter and config", async () => {
+      const res = await fetch(`${DEV_BASE}/posts/getting-started`);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+
+      // titleTemplate from void.json + frontmatter title
+      expect(html).toContain("<title>Getting Started | MD Blog</title>");
+      // frontmatter description → <meta name="description">
+      expect(html).toContain('<meta name="description" content="Learn how to use Void">');
+      // htmlAttrs from void.json config
+      expect(html).toContain('<html lang="en"');
+      // meta from void.json config
+      expect(html).toContain('<meta charset="utf-8">');
+
+      // Different post has its own title
+      const res2 = await fetch(`${DEV_BASE}/posts/code-examples`);
+      const html2 = await res2.text();
+      expect(html2).toContain("<title>Code Examples | MD Blog</title>");
+    });
+
     it("renders markdown content correctly", async () => {
       const res = await fetch(`${DEV_BASE}/posts/getting-started`);
       expect(res.status).toBe(200);
@@ -310,6 +330,20 @@ describe("markdown-blog playground", () => {
 
       // No Vite client script in production
       expect(html).not.toContain("/@vite/client");
+    });
+
+    it("pre-rendered pages contain head tags from frontmatter and config", async () => {
+      const res = await fetch(`${PREVIEW_BASE}/posts/getting-started`);
+      const html = await res.text();
+
+      expect(html).toContain("<title>Getting Started | MD Blog</title>");
+      expect(html).toContain('<meta name="description" content="Learn how to use Void">');
+      expect(html).toContain('<html lang="en"');
+      expect(html).toContain('<meta charset="utf-8">');
+
+      const res2 = await fetch(`${PREVIEW_BASE}/posts/code-examples`);
+      const html2 = await res2.text();
+      expect(html2).toContain("<title>Code Examples | MD Blog</title>");
     });
 
     it("includes theme styles", async () => {

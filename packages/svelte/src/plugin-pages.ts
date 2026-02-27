@@ -92,6 +92,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string, _isDev: 
   return `
 import { render } from "svelte/server";
 import App from "@void-x/svelte/App.svelte";
+import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}
 
@@ -119,11 +120,14 @@ export async function renderPage(pageObj, assetTags) {
   });
 
   const pageData = escapeAttr(JSON.stringify(pageObj));
+  const headHtml = pageObj.head ? renderHeadToString(pageObj.head) : "";
+  const htmlAttrs = pageObj.head ? renderHtmlAttrs(pageObj.head) : "";
+  const bodyAttrs = pageObj.head ? renderBodyAttrs(pageObj.head) : "";
 
   return \`<!doctype html>
-<html>
-<head>\${head}\${assetTags.head}</head>
-<body>
+<html\${htmlAttrs}>
+<head>\${headHtml}\${head}\${assetTags.head}</head>
+<body\${bodyAttrs}>
   <div id="app" data-page="\${pageData}">\${html}</div>
   \${assetTags.body}
 </body>
@@ -143,6 +147,7 @@ import { hydrate } from "svelte";
 import { writable } from "svelte/store";
 import App from "@void-x/svelte/App.svelte";
 import { parseCacheFor, PrefetchCache } from "@void-x/svelte/prefetch";
+import { initClientHead, applyClientHead } from "void/pages-head-client";
 
 const VIEW_TRANSITIONS_ENABLED = ${!!viewTransitions};
 const _prefetchCache = new PrefetchCache();
@@ -391,6 +396,8 @@ const router = {
       applyUpdate();
     }
 
+    applyClientHead(pageData.head);
+
     if (!options.preserveState) {
       window.history.pushState({}, "", pageData.url);
     }
@@ -500,6 +507,7 @@ hydrate(App, {
 });
 
 appEl.setAttribute("data-hydrated", "true");
+initClientHead(initialPageData.head);
 
 // Drain any deferred resolutions that arrived before the module loaded (after hydration)
 if (window.__deferredQueue) {

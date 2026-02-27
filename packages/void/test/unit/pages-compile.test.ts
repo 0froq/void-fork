@@ -12,6 +12,7 @@ const testOptions = {
 const pagesOptions: PagesCompileOptions = {
   pagesDir: "/project/pages",
   protocolPath: "/resolved/void/pages/protocol.mjs",
+  headPath: "/resolved/void/pages/head.mjs",
   clientEntryId: "virtual:void-pages-client",
 };
 
@@ -116,7 +117,9 @@ describe("compileRouteTable with pages", () => {
     );
 
     expect(code).toContain('app.get("/about"');
-    expect(code).toContain('handlePageGet(undefined, c, "about", renderPage, getPagesAssetTags)');
+    expect(code).toContain(
+      'handlePageGet(undefined, undefined, c, "about", renderPage, getPagesAssetTags',
+    );
   });
 
   it("generates lazy loader for companion .server.ts", () => {
@@ -153,11 +156,11 @@ describe("compileRouteTable with pages", () => {
 
     // GET handler uses loader
     expect(code).toContain('app.get("/users"');
-    expect(code).toContain("mod.loader, c");
+    expect(code).toContain("mod.loader, mod.head, c");
 
     // Action mutation handler (POST, PUT, PATCH, DELETE)
     expect(code).toContain('app.on(["POST", "PUT", "PATCH", "DELETE"], "/users"');
-    expect(code).toContain("handlePageMutation(mod.action, mod.loader");
+    expect(code).toContain("handlePageMutation(mod.action, mod.loader, mod.head");
   });
 
   it("generates catch-all for SPA navigation", () => {

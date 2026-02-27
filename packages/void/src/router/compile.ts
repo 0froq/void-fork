@@ -43,10 +43,14 @@ export interface PagesCompileOptions {
   pagesDir: string;
   /** Absolute path to void/pages-protocol module */
   protocolPath: string;
+  /** Absolute path to void/pages-head module */
+  headPath: string;
   /** Virtual module ID for the client entry (used for asset tags) */
   clientEntryId: string;
   /** Virtual module ID for the islands client entry (used for island asset tags) */
   islandClientEntryId?: string;
+  /** Head config from void.json */
+  headConfig?: import("../pages/head").HeadConfig;
 }
 
 /**
@@ -582,6 +586,9 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(
     `import { handlePageGet, handlePageMutation } from ${JSON.stringify(pages.protocolPath)};`,
   );
+  lines.push(
+    `import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from ${JSON.stringify(pages.headPath)};`,
+  );
   lines.push(`import { renderPage } from "virtual:void-pages-renderer";`);
 
   // Import island renderer if any island pages exist
@@ -589,6 +596,10 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   if (hasIslandPages) {
     lines.push(`import { renderIslandPage } from "virtual:void-islands-renderer";`);
   }
+  lines.push("");
+
+  // Emit head config constant from void.json
+  lines.push(`const __voidHeadConfig = ${JSON.stringify(pages.headConfig ?? null)};`);
   lines.push("");
 
   // Asset tags — reuse the SSR asset tags pattern with the pages client entry
@@ -764,6 +775,19 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
       lines.push(`}`);
     }
 
+    // Generate inline head function for markdown pages without .server.ts
+    let mdHeadRef: string | null = null;
+    if (!serverImportPath && page.metadata && (page.metadata.title || page.metadata.description)) {
+      const headObj: Record<string, unknown> = {};
+      if (page.metadata.title) headObj.title = page.metadata.title;
+      if (page.metadata.description) {
+        headObj.meta = [{ name: "description", content: page.metadata.description }];
+      }
+      const headVarName = `__mdHead_${safeId}`;
+      lines.push(`const ${headVarName} = () => (${JSON.stringify(headObj)});`);
+      mdHeadRef = headVarName;
+    }
+
     // Choose renderer and asset tags based on island flag
     const renderer = page.island ? "renderIslandPage" : "renderPage";
     const assetTags =
@@ -776,11 +800,12 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
       const loaderName = `_pload_${safeId}`;
       lines.push(`  const mod = await ${loaderName}();`);
       lines.push(
-        `  return handlePageGet(mod.loader, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}${islandFlag});`,
+        `  return handlePageGet(mod.loader, mod.head, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}, __voidHeadConfig${islandFlag});`,
       );
     } else {
+      const headArg = mdHeadRef ?? "undefined";
       lines.push(
-        `  return handlePageGet(undefined, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}${islandFlag});`,
+        `  return handlePageGet(undefined, ${headArg}, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}, __voidHeadConfig${islandFlag});`,
       );
     }
     lines.push(`});`);
@@ -793,7 +818,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
       );
       lines.push(`  const mod = await ${loaderName}();`);
       lines.push(
-        `  return handlePageMutation(mod.action, mod.loader, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}${islandFlag});`,
+        `  return handlePageMutation(mod.action, mod.loader, mod.head, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}, __voidHeadConfig${islandFlag});`,
       );
       lines.push(`});`);
     }
@@ -820,7 +845,9 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`  if (/\\/[^/]+\\.[^/]+$/.test(path)) {`);
   lines.push(`    return fetchPagesAsset(c);`);
   lines.push(`  }`);
-  lines.push(`  return handlePageGet(undefined, c, "index", renderPage, getPagesAssetTags);`);
+  lines.push(
+    `  return handlePageGet(undefined, undefined, c, "index", renderPage, getPagesAssetTags, __voidHeadConfig);`,
+  );
   lines.push(`});`);
   lines.push("");
 }

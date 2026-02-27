@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HeaderRule } from "./cli/types";
+import type { HeadConfig } from "./pages/head";
 
 /** Supported authentication providers. */
 export type AuthProvider = "github" | "google" | "email";
@@ -35,6 +36,7 @@ export interface VoidConfig {
   scanDirs?: string[];
   headers?: Record<string, string[]>;
   redirects?: Record<string, RedirectDestination>;
+  head?: HeadConfig;
   mode?: "spa" | "prebuilt" | "fullstack" | "framework";
   output?: "server" | "static";
   outputDir?: string;
@@ -176,6 +178,50 @@ export function readConfig(root: string): VoidConfig {
         throw new Error(
           `Redirect for "${source}" in ${CONFIG_FILE} must be a string or an object with "to" and optional "status"`,
         );
+      }
+    }
+  }
+
+  // Validate head
+  if (obj.head !== undefined) {
+    if (typeof obj.head !== "object" || obj.head === null || Array.isArray(obj.head)) {
+      throw new Error(`"head" in ${CONFIG_FILE} must be an object`);
+    }
+    const h = obj.head as Record<string, unknown>;
+    if (h.title !== undefined && typeof h.title !== "string") {
+      throw new Error(`"head.title" in ${CONFIG_FILE} must be a string`);
+    }
+    if (h.titleTemplate !== undefined && typeof h.titleTemplate !== "string") {
+      throw new Error(`"head.titleTemplate" in ${CONFIG_FILE} must be a string`);
+    }
+    if (h.meta !== undefined) {
+      if (!Array.isArray(h.meta)) {
+        throw new Error(`"head.meta" in ${CONFIG_FILE} must be an array`);
+      }
+      for (const entry of h.meta) {
+        if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+          throw new Error(`"head.meta" entries in ${CONFIG_FILE} must be objects`);
+        }
+      }
+    }
+    if (h.link !== undefined) {
+      if (!Array.isArray(h.link)) {
+        throw new Error(`"head.link" in ${CONFIG_FILE} must be an array`);
+      }
+    }
+    if (h.script !== undefined) {
+      if (!Array.isArray(h.script)) {
+        throw new Error(`"head.script" in ${CONFIG_FILE} must be an array`);
+      }
+    }
+    if (h.htmlAttrs !== undefined) {
+      if (typeof h.htmlAttrs !== "object" || h.htmlAttrs === null || Array.isArray(h.htmlAttrs)) {
+        throw new Error(`"head.htmlAttrs" in ${CONFIG_FILE} must be an object`);
+      }
+    }
+    if (h.bodyAttrs !== undefined) {
+      if (typeof h.bodyAttrs !== "object" || h.bodyAttrs === null || Array.isArray(h.bodyAttrs)) {
+        throw new Error(`"head.bodyAttrs" in ${CONFIG_FILE} must be an object`);
       }
     }
   }
