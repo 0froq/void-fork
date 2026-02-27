@@ -417,6 +417,10 @@ export async function updateUserRole(db: Db, id: string, role: "user" | "admin")
   await db.update(users).set({ role }).where(eq(users.id, id));
 }
 
+export async function deleteUser(db: Db, id: string): Promise<void> {
+  await db.delete(users).where(eq(users.id, id));
+}
+
 export async function getAllProjects(db: Db, limit: number, offset: number): Promise<Project[]> {
   return db
     .select()

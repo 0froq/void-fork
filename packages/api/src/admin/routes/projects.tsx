@@ -8,7 +8,9 @@ import {
   getProjectResources,
   getUser,
   getDomainsByProjectId,
+  deleteProjectCascade,
 } from "../../db";
+import { cleanupProjectResources } from "../../provisioning/cleanup";
 import { ProjectsListPage } from "../views/projects-list";
 import { Layout } from "../views/layout";
 import { SITE_DOMAIN } from "../../constants";
@@ -172,7 +174,7 @@ app.get("/:id", async (c) => {
         )}
       </div>
 
-      <div class="card">
+      <div class="card mb-1">
         <h2 style="font-size: 1.125rem; margin-bottom: 1rem">
           Recent Deployments ({deployments.length})
         </h2>
@@ -217,8 +219,33 @@ app.get("/:id", async (c) => {
           <p style="color: #6b7280">No deployments.</p>
         )}
       </div>
+
+      <div class="card" style="border: 1px solid #dc2626">
+        <h2 style="font-size: 1.125rem; margin-bottom: 1rem; color: #dc2626">Danger Zone</h2>
+        <form
+          method="post"
+          action={`/admin/projects/${project.id}/delete`}
+          onsubmit="return confirm('Permanently delete project &quot;' + this.dataset.slug + '&quot; and all its resources? This cannot be undone.')"
+          data-slug={project.slug}
+        >
+          <button class="btn btn-danger" type="submit">
+            Delete Project
+          </button>
+        </form>
+      </div>
     </Layout>,
   );
+});
+
+// POST /projects/:id/delete
+app.post("/:id/delete", async (c) => {
+  const project = await getProject(c.get("db"), c.req.param("id"));
+  if (!project) {
+    return c.html("<h1>Project not found</h1>", 404);
+  }
+  await cleanupProjectResources(c, project.id, project);
+  await deleteProjectCascade(c.get("db"), project.id);
+  return c.redirect("/admin/projects");
 });
 
 export default app;

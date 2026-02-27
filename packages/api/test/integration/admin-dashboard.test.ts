@@ -1,6 +1,6 @@
-import { describe, test, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, test, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { app } from "../../src/index";
-import { deployments } from "../../src/schema";
+import { deployments, projects, users } from "../../src/schema";
 import {
   setupEnv,
   teardownEnv,
@@ -8,6 +8,7 @@ import {
   createTestUser,
   createTestProject,
   createTestDeployment,
+  mockCfApi,
   type TestEnv,
 } from "./helpers";
 
@@ -432,5 +433,102 @@ describe("GET /admin/logout", () => {
     expect(res.headers.get("Location")).toBe("/admin/login");
     const setCookie = res.headers.get("Set-Cookie");
     expect(setCookie).toContain("admin_token=");
+  });
+});
+
+describe("POST /admin/projects/:id/delete", () => {
+  test("deletes project and redirects to list", async () => {
+    mockCfApi();
+    const admin = await createTestUser(env.db, "admin-pdel1", "github", undefined, "free", "admin");
+    const user = await createTestUser(env.db, "projdel-owner");
+    const project = await createTestProject(env.db, user.id, "del-proj");
+    await createTestDeployment(env.db, project.id, "live");
+
+    const res = await req(`/admin/projects/${project.id}/delete`, admin.jwt, {
+      method: "POST",
+      body: "",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("/admin/projects");
+
+    // Verify project is gone from DB
+    const remaining = await env.db.select().from(projects).all();
+    expect(remaining.find((p) => p.id === project.id)).toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
+  test("returns 404 for unknown project", async () => {
+    const admin = await createTestUser(env.db, "admin-pdel2", "github", undefined, "free", "admin");
+    const res = await req("/admin/projects/proj_nonexistent/delete", admin.jwt, {
+      method: "POST",
+      body: "",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  test("shows delete button on project detail page", async () => {
+    const admin = await createTestUser(env.db, "admin-pdel3", "github", undefined, "free", "admin");
+    const project = await createTestProject(env.db, admin.id, "delbtn-proj");
+
+    const res = await req(`/admin/projects/${project.id}`, admin.jwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Danger Zone");
+    expect(html).toContain("Delete Project");
+    expect(html).toContain(`/admin/projects/${project.id}/delete`);
+  });
+});
+
+describe("POST /admin/users/:id/delete", () => {
+  test("deletes user and cascades to projects, redirects to list", async () => {
+    mockCfApi();
+    const admin = await createTestUser(env.db, "admin-udel1", "github", undefined, "free", "admin");
+    const user = await createTestUser(env.db, "delusertarget");
+    const project1 = await createTestProject(env.db, user.id, "udel-proj1");
+    const project2 = await createTestProject(env.db, user.id, "udel-proj2");
+    await createTestDeployment(env.db, project1.id, "live");
+    await createTestDeployment(env.db, project2.id, "live");
+
+    const res = await req(`/admin/users/${user.id}/delete`, admin.jwt, {
+      method: "POST",
+      body: "",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("/admin/users");
+
+    // Verify user and projects are gone
+    const remainingUsers = await env.db.select().from(users).all();
+    expect(remainingUsers.find((u) => u.id === user.id)).toBeUndefined();
+    const remainingProjects = await env.db.select().from(projects).all();
+    expect(remainingProjects.find((p) => p.id === project1.id)).toBeUndefined();
+    expect(remainingProjects.find((p) => p.id === project2.id)).toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
+  test("returns 404 for unknown user", async () => {
+    const admin = await createTestUser(env.db, "admin-udel2", "github", undefined, "free", "admin");
+    const res = await req("/admin/users/user_nonexistent/delete", admin.jwt, {
+      method: "POST",
+      body: "",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  test("shows delete button on user detail page", async () => {
+    const admin = await createTestUser(env.db, "admin-udel3", "github", undefined, "free", "admin");
+    const user = await createTestUser(env.db, "delbtnuser");
+    await createTestProject(env.db, user.id, "ubtn-proj");
+
+    const res = await req(`/admin/users/${user.id}`, admin.jwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Danger Zone");
+    expect(html).toContain("Delete User");
+    expect(html).toContain(`/admin/users/${user.id}/delete`);
+    expect(html).toContain("1 project(s)");
   });
 });

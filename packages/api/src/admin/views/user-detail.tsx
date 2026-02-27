@@ -209,7 +209,7 @@ export function UserDetailPage({
         )}
       </div>
 
-      <div class="card">
+      <div class="card mb-1">
         <h2 style="font-size: 1.125rem; margin-bottom: 1rem">Projects ({projects.length})</h2>
         {projects.length > 0 ? (
           <table>
@@ -235,6 +235,19 @@ export function UserDetailPage({
         ) : (
           <p style="color: #6b7280">No projects.</p>
         )}
+      </div>
+
+      <div class="card" style="border: 1px solid #dc2626">
+        <h2 style="font-size: 1.125rem; margin-bottom: 1rem; color: #dc2626">Danger Zone</h2>
+        <form
+          method="post"
+          action={`/admin/users/${user.id}/delete`}
+          onsubmit={`return confirm('Permanently delete user "${user.login}" and all ${projects.length} project(s)? This cannot be undone.')`}
+        >
+          <button class="btn btn-danger" type="submit">
+            Delete User
+          </button>
+        </form>
       </div>
     </Layout>
   );

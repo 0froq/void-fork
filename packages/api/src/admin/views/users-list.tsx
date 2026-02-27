@@ -60,6 +60,7 @@ export function UsersListPage({
               <th>Role</th>
               <th>Status</th>
               <th>Created</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -80,6 +81,22 @@ export function UsersListPage({
                   )}
                 </td>
                 <td>{new Date(user.created_at).toLocaleDateString()}</td>
+                <td>
+                  <form
+                    method="post"
+                    action={`/admin/users/${user.id}/delete`}
+                    style="display: inline"
+                    onsubmit={`return confirm('Delete user "${user.login}" and all their projects?')`}
+                  >
+                    <button
+                      class="btn btn-danger"
+                      type="submit"
+                      style="font-size: 0.75rem; padding: 0.2rem 0.5rem"
+                    >
+                      Delete
+                    </button>
+                  </form>
+                </td>
               </tr>
             ))}
           </tbody>

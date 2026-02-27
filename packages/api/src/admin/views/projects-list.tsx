@@ -27,6 +27,7 @@ export function ProjectsListPage({
               <th>Owner</th>
               <th>Mode</th>
               <th>Created</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -49,6 +50,22 @@ export function ProjectsListPage({
                 </td>
                 <td>{p.mode}</td>
                 <td>{new Date(p.created_at).toLocaleDateString()}</td>
+                <td>
+                  <form
+                    method="post"
+                    action={`/admin/projects/${p.id}/delete`}
+                    style="display: inline"
+                    onsubmit={`return confirm('Delete project "${p.slug}"?')`}
+                  >
+                    <button
+                      class="btn btn-danger"
+                      type="submit"
+                      style="font-size: 0.75rem; padding: 0.2rem 0.5rem"
+                    >
+                      Delete
+                    </button>
+                  </form>
+                </td>
               </tr>
             ))}
           </tbody>

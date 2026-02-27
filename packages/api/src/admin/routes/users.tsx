@@ -10,7 +10,10 @@ import {
   suspendUser,
   unsuspendUser,
   countUserDeploymentsToday,
+  deleteProjectCascade,
+  deleteUser,
 } from "../../db";
+import { cleanupProjectResources } from "../../provisioning/cleanup";
 import { PLAN_LIMITS, getCurrentBillingPeriodStart, type PlanId } from "../../tiers";
 import { queryProjectUsage } from "../../routes/usage";
 import { UsersListPage } from "../views/users-list";
@@ -139,6 +142,21 @@ app.post("/:id/unsuspend", async (c) => {
   }
 
   return c.redirect(`/admin/users/${user.id}`);
+});
+
+// POST /users/:id/delete
+app.post("/:id/delete", async (c) => {
+  const user = await getUser(c.get("db"), c.req.param("id"));
+  if (!user) {
+    return c.html("<h1>User not found</h1>", 404);
+  }
+  const projects = await getProjectsByUserId(c.get("db"), user.id);
+  for (const project of projects) {
+    await cleanupProjectResources(c, project.id, project);
+    await deleteProjectCascade(c.get("db"), project.id);
+  }
+  await deleteUser(c.get("db"), user.id);
+  return c.redirect("/admin/users");
 });
 
 export default app;
