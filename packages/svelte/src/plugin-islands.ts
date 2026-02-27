@@ -90,6 +90,7 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
   let isDev = false;
   let viteRoot = "";
   const islandCssMap = new Map<string, string[]>();
+  let resolvedConfig: any;
 
   /** Rebuild islandCssMap from current file contents (re-runs fileHasCssImports). */
   function rebuildIslandCssMap(): void {
@@ -111,12 +112,64 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
     }
   }
 
+  function computePagesNeedingClientJS(): Set<string> {
+    if (!pageScan) return new Set();
+
+    // Query md plugin for pages with client scripts
+    const mdPlugin = resolvedConfig?.plugins?.find((p: any) => p.name === "void-md");
+    const mdScriptIds: Set<string> = new Set(mdPlugin?.api?.getClientScripts?.()?.keys() ?? []);
+
+    const importAttrRe =
+      /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
+
+    const layoutDirsWithIslands = new Set<string>();
+    for (const layout of pageScan.layouts) {
+      if (!layout.island) continue;
+      const filePath = resolve(pagesDir, layout.filePath);
+      const code = readFileSync(filePath, "utf-8");
+      importAttrRe.lastIndex = 0;
+      if (importAttrRe.test(code)) {
+        layoutDirsWithIslands.add(layout.directory);
+      }
+    }
+
+    const result = new Set<string>();
+    for (const page of pageScan.pages) {
+      if (!page.island) continue;
+
+      // Check md client scripts
+      if (mdScriptIds.has(page.componentId)) {
+        result.add(page.componentId);
+        continue;
+      }
+
+      const filePath = resolve(pagesDir, page.componentPath);
+      const code = readFileSync(filePath, "utf-8");
+      importAttrRe.lastIndex = 0;
+      if (importAttrRe.test(code)) {
+        result.add(page.componentId);
+        continue;
+      }
+
+      const layoutChain = resolveLayoutChain(page.componentId, pageScan.layouts);
+      for (const layout of layoutChain) {
+        if (layoutDirsWithIslands.has(layout.directory)) {
+          result.add(page.componentId);
+          break;
+        }
+      }
+    }
+
+    return result;
+  }
+
   return [
     {
       name: "void-svelte:islands",
       enforce: "pre",
 
       configResolved(config) {
+        resolvedConfig = config;
         viteRoot = config.root;
         isDev = config.command === "serve";
       },
@@ -247,7 +300,20 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
             if (!pageScan) {
               return "export function renderIslandPage() { throw new Error('No pages found'); }";
             }
-            return generateIslandRenderer(pageScan, pagesDir, isDev, islandCssMap, viteRoot);
+            const mdPlugin = resolvedConfig?.plugins?.find((p: any) => p.name === "void-md");
+            const mdScriptIds: Set<string> = new Set(
+              mdPlugin?.api?.getClientScripts?.()?.keys() ?? [],
+            );
+            const needsJS = computePagesNeedingClientJS();
+            return generateIslandRenderer(
+              pageScan,
+              pagesDir,
+              isDev,
+              islandCssMap,
+              viteRoot,
+              mdScriptIds,
+              needsJS,
+            );
           }
           if (id === "\0" + ISLANDS_CLIENT_ENTRY_ID) {
             if (!pageScan) return "";
@@ -406,6 +472,8 @@ function generateIslandRenderer(
   isDev: boolean,
   islandCssMap: Map<string, string[]>,
   viteRoot: string,
+  mdScriptIds: Set<string>,
+  pagesNeedingClientJS: Set<string>,
 ): string {
   // Build CSS link map for dev FOUC prevention
   let cssMapCode = "";
@@ -417,6 +485,9 @@ function generateIslandRenderer(
     cssMapCode = `const __cssPaths = ${JSON.stringify(cssMapObj)};`;
   }
 
+  const mdScriptIdsCode = `const __mdClientScriptIds = new Set(${JSON.stringify([...mdScriptIds])});`;
+  const needsJSCode = `const __pagesNeedingClientJS = new Set(${JSON.stringify([...pagesNeedingClientJS])});`;
+
   return `
 import { render } from "svelte/server";
 import App from "@void-x/svelte/App.svelte";
@@ -424,6 +495,8 @@ import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages
 
 ${generateComponentManifest(scan, pagesDir)}
 ${cssMapCode}
+${mdScriptIdsCode}
+${needsJSCode}
 
 function escapeAttr(s) {
   return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -448,6 +521,7 @@ export async function renderIslandPage(pageObj, assetTags) {
     },
   });
 
+  const __mdScriptAttr = __mdClientScriptIds.has(pageObj.component) ? \` data-md-script="\${escapeAttr(pageObj.component)}"\` : "";
   const headHtml = pageObj.head ? renderHeadToString(pageObj.head) : "";
   const htmlAttrs = pageObj.head ? renderHtmlAttrs(pageObj.head) : "";
   const bodyAttrs = pageObj.head ? renderBodyAttrs(pageObj.head) : "";
@@ -456,8 +530,8 @@ export async function renderIslandPage(pageObj, assetTags) {
 <html\${htmlAttrs}>
 <head>\${headHtml}\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\\n") : ""}\${head}\${assetTags.head}</head>
 <body\${bodyAttrs}>
-  <div id="app">\${html}</div>
-  \${assetTags.body}
+  <div id="app"\${__mdScriptAttr}>\${html}</div>
+  \${__pagesNeedingClientJS.has(pageObj.component) ? assetTags.body : ""}
 </body>
 </html>\`;
 }

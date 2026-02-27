@@ -1,6 +1,6 @@
 import type { Plugin, ResolvedConfig, ViteDevServer } from "vite";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { glob } from "tinyglobby";
 import type { CompileOptions } from "./compile";
@@ -10,6 +10,8 @@ import { emitReactComponent, emitReactComponentWithIslands } from "./emit-react"
 import { emitSolidComponent, emitSolidComponentWithIslands } from "./emit-solid";
 import { emitSvelteComponent, emitSvelteComponentWithIslands } from "./emit-svelte";
 import { emitVueComponent, emitVueComponentWithIslands } from "./emit-vue";
+
+const MD_CLIENT_ENTRY_ID = "virtual:void-md-client";
 
 type FrameworkAdapter = "vue" | "react" | "svelte" | "solid";
 
@@ -32,6 +34,32 @@ interface MdPage {
 
 export interface MarkdownOptions {
   shiki?: CompileOptions["shiki"];
+}
+
+function hasMdFilesWithScript(dir: string): boolean {
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
+      if (entry.isFile() && entry.name.endsWith(".md")) {
+        const fullPath = join(entry.parentPath, entry.name);
+        const content = readFileSync(fullPath, "utf-8");
+        if (/^<script\b/m.test(content)) return true;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+function hasIslandFiles(dir: string): boolean {
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
+      if (entry.isFile() && /\.island\./.test(entry.name)) return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
 }
 
 export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
@@ -97,9 +125,35 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
       enforce: "pre",
 
       api: {
+        clientEntryId: MD_CLIENT_ENTRY_ID,
         getClientScripts(): Map<string, string> {
           return clientScripts;
         },
+        getClientScriptIds(): Set<string> {
+          return new Set(clientScripts.keys());
+        },
+      },
+
+      config(config, env) {
+        if (env.command === "serve") return;
+        const configRoot = config.root || process.cwd();
+        const pagesDir = join(configRoot, "pages");
+        if (!existsSync(pagesDir)) return;
+        // Add md client entry to build inputs when md files with scripts exist
+        // AND island pages exist (md client entry only runs on island-rendered pages)
+        if (hasMdFilesWithScript(pagesDir) && hasIslandFiles(pagesDir)) {
+          return {
+            environments: {
+              client: {
+                build: {
+                  rollupOptions: {
+                    input: { "md-client": MD_CLIENT_ENTRY_ID },
+                  },
+                },
+              },
+            },
+          };
+        }
       },
 
       configResolved(config: ResolvedConfig) {
@@ -126,55 +180,35 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
       },
 
       configureServer(server: ViteDevServer) {
-        server.watcher.on("change", async (file: string) => {
-          if (file.endsWith(".md") && file.includes("/pages/")) {
-            mdPages = await scanMdPages();
-            const mod = server.moduleGraph.getModuleById("\0void-md-pages");
-            if (mod) server.moduleGraph.invalidateModule(mod);
-            // Also invalidate md client script virtual modules
-            for (const [compId] of clientScripts) {
-              const scriptMod = server.moduleGraph.getModuleById(
-                "\0virtual:void-md-script:" + compId,
-              );
-              if (scriptMod) server.moduleGraph.invalidateModule(scriptMod);
-            }
+        const handleMdChange = async (file: string) => {
+          if (!file.endsWith(".md") || !file.includes("/pages/")) return;
+          mdPages = await scanMdPages();
+          const mod = server.moduleGraph.getModuleById("\0void-md-pages");
+          if (mod) server.moduleGraph.invalidateModule(mod);
+          // Invalidate md client script virtual modules
+          for (const [compId] of clientScripts) {
+            const scriptMod = server.moduleGraph.getModuleById(
+              "\0virtual:void-md-script:" + compId,
+            );
+            if (scriptMod) server.moduleGraph.invalidateModule(scriptMod);
           }
-        });
-        server.watcher.on("add", async (file: string) => {
-          if (file.endsWith(".md") && file.includes("/pages/")) {
-            mdPages = await scanMdPages();
-            const mod = server.moduleGraph.getModuleById("\0void-md-pages");
-            if (mod) server.moduleGraph.invalidateModule(mod);
-            // Also invalidate md client script virtual modules
-            for (const [compId] of clientScripts) {
-              const scriptMod = server.moduleGraph.getModuleById(
-                "\0virtual:void-md-script:" + compId,
-              );
-              if (scriptMod) server.moduleGraph.invalidateModule(scriptMod);
-            }
-          }
-        });
-        server.watcher.on("unlink", async (file: string) => {
-          if (file.endsWith(".md") && file.includes("/pages/")) {
-            mdPages = await scanMdPages();
-            const mod = server.moduleGraph.getModuleById("\0void-md-pages");
-            if (mod) server.moduleGraph.invalidateModule(mod);
-            // Also invalidate md client script virtual modules
-            for (const [compId] of clientScripts) {
-              const scriptMod = server.moduleGraph.getModuleById(
-                "\0virtual:void-md-script:" + compId,
-              );
-              if (scriptMod) server.moduleGraph.invalidateModule(scriptMod);
-            }
-          }
-        });
+          // Invalidate the md client entry so it picks up new/removed scripts
+          const clientMod = server.moduleGraph.getModuleById("\0" + MD_CLIENT_ENTRY_ID);
+          if (clientMod) server.moduleGraph.invalidateModule(clientMod);
+        };
+        server.watcher.on("change", handleMdChange);
+        server.watcher.on("add", handleMdChange);
+        server.watcher.on("unlink", handleMdChange);
       },
 
       resolveId: {
         filter: {
-          id: /^(void\/md(\/pages)?|@void-x\/md\/runtime|\/@void-md-(svelte|solid)\/|virtual:void-md-script:)/,
+          id: /^(void\/md(\/pages)?|@void-x\/md\/runtime|\/@void-md-(svelte|solid)\/|virtual:void-md-(script:|client))/,
         },
         handler(source: string) {
+          if (source === MD_CLIENT_ENTRY_ID) {
+            return "\0" + MD_CLIENT_ENTRY_ID;
+          }
           if (source.startsWith("virtual:void-md-script:")) {
             return "\0" + source;
           }
@@ -192,8 +226,13 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
 
       load: {
         // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
-        filter: { id: /^(\0void-md|\/@void-md-(svelte|solid)\/|\0virtual:void-md-script:)/ },
+        filter: {
+          id: /^(\0void-md|\/@void-md-(svelte|solid)\/|\0virtual:void-md-(script:|client))/,
+        },
         handler(id: string) {
+          if (id === "\0" + MD_CLIENT_ENTRY_ID) {
+            return generateMdClientEntry(clientScripts);
+          }
           if (id.startsWith("\0virtual:void-md-script:")) {
             const componentId = id.slice("\0virtual:void-md-script:".length);
             const code = clientScripts.get(componentId);
@@ -323,6 +362,21 @@ export function useFrontmatter() { return useContext(FrontmatterContext) ?? {}; 
       },
     },
   ];
+}
+
+function generateMdClientEntry(scripts: Map<string, string>): string {
+  if (scripts.size === 0) return "";
+  const lines: string[] = [];
+  lines.push("const mdScripts = {");
+  for (const id of scripts.keys()) {
+    lines.push(
+      `  ${JSON.stringify(id)}: () => import(${JSON.stringify("virtual:void-md-script:" + id)}),`,
+    );
+  }
+  lines.push("};");
+  lines.push(`const mdScriptId = document.getElementById("app")?.getAttribute("data-md-script");`);
+  lines.push(`if (mdScriptId && mdScripts[mdScriptId]) mdScripts[mdScriptId]();`);
+  return lines.join("\n");
 }
 
 export type { CompileOptions, CompileResult } from "./compile";

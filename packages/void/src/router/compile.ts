@@ -49,6 +49,8 @@ export interface PagesCompileOptions {
   clientEntryId: string;
   /** Virtual module ID for the islands client entry (used for island asset tags) */
   islandClientEntryId?: string;
+  /** Virtual module ID for the md plugin's client entry (script execution) */
+  mdClientEntryId?: string;
   /** Head config from void.json */
   headConfig?: import("../pages/head").HeadConfig;
 }
@@ -698,14 +700,25 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     lines.push(
       `const ISLANDS_CLIENT_ENTRY_URL = ${JSON.stringify("/@id/__x00__" + islandEntryId)};`,
     );
+    if (pages.mdClientEntryId) {
+      lines.push(`const MD_CLIENT_ENTRY_ID = ${JSON.stringify(pages.mdClientEntryId)};`);
+      lines.push(
+        `const MD_CLIENT_ENTRY_URL = ${JSON.stringify("/@id/__x00__" + pages.mdClientEntryId)};`,
+      );
+    }
     lines.push("");
     lines.push(`function getIslandsDevClientTags() {`);
     lines.push(
       `  const headTag = \`<script type="module" src="/@vite/client"></script>\\n${BINDING_HINT_SCRIPT}\`;`,
     );
     lines.push(
-      `  const bodyTag = \`<script type="module" src="\${escapeHtmlAttr(ISLANDS_CLIENT_ENTRY_URL)}"></script>\`;`,
+      `  let bodyTag = \`<script type="module" src="\${escapeHtmlAttr(ISLANDS_CLIENT_ENTRY_URL)}"></script>\`;`,
     );
+    if (pages.mdClientEntryId) {
+      lines.push(
+        `  bodyTag += \`\\n<script type="module" src="\${escapeHtmlAttr(MD_CLIENT_ENTRY_URL)}"></script>\`;`,
+      );
+    }
     lines.push(`  return { head: headTag, body: bodyTag };`);
     lines.push(`}`);
     lines.push("");
@@ -719,6 +732,14 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     lines.push(`    return { head: "", body: "" };`);
     lines.push(`  }`);
     lines.push(`  const ids = collectPagesManifestFiles(manifest, ISLANDS_CLIENT_ENTRY_ID);`);
+    // Collect md entry files too
+    if (pages.mdClientEntryId) {
+      lines.push(`  const mdEntry = manifest[MD_CLIENT_ENTRY_ID];`);
+      lines.push(`  if (mdEntry && typeof mdEntry.file === "string") {`);
+      lines.push(`    const mdIds = collectPagesManifestFiles(manifest, MD_CLIENT_ENTRY_ID);`);
+      lines.push(`    for (const mdId of mdIds) ids.push(mdId);`);
+      lines.push(`  }`);
+    }
     lines.push(`  const cssFiles = new Set();`);
     lines.push(`  const preloadFiles = new Set();`);
     lines.push(`  for (const id of ids) {`);
@@ -727,7 +748,11 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     lines.push(`    if (Array.isArray(chunk.css)) {`);
     lines.push(`      for (const cssFile of chunk.css) cssFiles.add(cssFile);`);
     lines.push(`    }`);
-    lines.push(`    if (id !== ISLANDS_CLIENT_ENTRY_ID && typeof chunk.file === "string") {`);
+    // Exclude entry points from preloads (they get their own <script> tags)
+    const excludeFromPreload = pages.mdClientEntryId
+      ? `id !== ISLANDS_CLIENT_ENTRY_ID && id !== MD_CLIENT_ENTRY_ID`
+      : `id !== ISLANDS_CLIENT_ENTRY_ID`;
+    lines.push(`    if (${excludeFromPreload} && typeof chunk.file === "string") {`);
     lines.push(`      preloadFiles.add(chunk.file);`);
     lines.push(`    }`);
     lines.push(`  }`);
@@ -743,8 +768,15 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     );
     lines.push(`  }`);
     lines.push(
-      `  const bodyTag = \`<script type="module" src="/\${escapeHtmlAttr(entry.file)}"></script>\`;`,
+      `  let bodyTag = \`<script type="module" src="/\${escapeHtmlAttr(entry.file)}"></script>\`;`,
     );
+    if (pages.mdClientEntryId) {
+      lines.push(`  if (mdEntry && typeof mdEntry.file === "string") {`);
+      lines.push(
+        `    bodyTag += \`\\n<script type="module" src="/\${escapeHtmlAttr(mdEntry.file)}"></script>\`;`,
+      );
+      lines.push(`  }`);
+    }
     lines.push(`  return { head: headTags.join("\\n"), body: bodyTag };`);
     lines.push(`}`);
     lines.push("");

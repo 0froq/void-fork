@@ -1,6 +1,6 @@
 import type { Plugin } from "vite";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join, resolve, relative } from "node:path";
+import { dirname, resolve, relative } from "node:path";
 import { scanPages } from "void/pages";
 import type { LayoutDefinition, PageScanResult } from "void/pages";
 import { generateComponentManifest } from "./pages-manifest";
@@ -31,21 +31,6 @@ function hasIslandFiles(dir: string): boolean {
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
       if (entry.isFile() && entry.name.endsWith(".island.vue")) return true;
-    }
-  } catch {
-    // ignore
-  }
-  return false;
-}
-
-function hasMdFilesWithScript(dir: string): boolean {
-  try {
-    for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
-      if (entry.isFile() && entry.name.endsWith(".md")) {
-        const fullPath = join(entry.parentPath, entry.name);
-        const content = readFileSync(fullPath, "utf-8");
-        if (/^<script\b/m.test(content)) return true;
-      }
     }
   } catch {
     // ignore
@@ -114,7 +99,6 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
   let viteRoot = "";
   const islandCssMap = new Map<string, string[]>();
   let resolvedConfig: any;
-  let mdClientScriptIds = new Set<string>();
 
   /** Rebuild islandCssMap from current file contents (re-runs fileHasCss). */
   function rebuildIslandCssMap(): void {
@@ -136,14 +120,58 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
     }
   }
 
-  /** Lazily read md client scripts from the md plugin API.
-   *  Must be called from load() hooks (not buildStart) because the md plugin's
-   *  buildStart may not have run yet when the islands plugin's buildStart runs. */
-  function refreshMdClientScriptIds(): Set<string> {
+  function computePagesNeedingClientJS(): Set<string> {
+    if (!pageScan) return new Set();
+
+    // Query md plugin for pages with client scripts
     const mdPlugin = resolvedConfig?.plugins?.find((p: any) => p.name === "void-md");
-    const mdScripts: Map<string, string> | undefined = mdPlugin?.api?.getClientScripts?.();
-    mdClientScriptIds = new Set(mdScripts?.keys() ?? []);
-    return mdClientScriptIds;
+    const mdScriptIds: Set<string> = new Set(mdPlugin?.api?.getClientScripts?.()?.keys() ?? []);
+
+    const importAttrRe =
+      /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
+
+    // Check which layout directories have island imports
+    const layoutDirsWithIslands = new Set<string>();
+    for (const layout of pageScan.layouts) {
+      if (!layout.island) continue;
+      const filePath = resolve(pagesDir, layout.filePath);
+      const code = readFileSync(filePath, "utf-8");
+      importAttrRe.lastIndex = 0;
+      if (importAttrRe.test(code)) {
+        layoutDirsWithIslands.add(layout.directory);
+      }
+    }
+
+    const result = new Set<string>();
+    for (const page of pageScan.pages) {
+      if (!page.island) continue;
+
+      // Check md client scripts
+      if (mdScriptIds.has(page.componentId)) {
+        result.add(page.componentId);
+        continue;
+      }
+
+      // Check page file for island imports
+      const filePath = resolve(pagesDir, page.componentPath);
+      const code = readFileSync(filePath, "utf-8");
+      importAttrRe.lastIndex = 0;
+      if (importAttrRe.test(code)) {
+        result.add(page.componentId);
+        continue;
+      }
+
+      // Check layout chain for island imports
+      const layoutChain = resolveLayoutChain(page.componentId, pageScan.layouts);
+      for (const layout of layoutChain) {
+        if (layoutDirsWithIslands.has(layout.directory)) {
+          result.add(page.componentId);
+          break;
+        }
+      }
+    }
+
+    return result;
   }
 
   return [
@@ -278,25 +306,24 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
             if (!pageScan) {
               return "export function renderIslandPage() { throw new Error('No pages found'); }";
             }
-            refreshMdClientScriptIds();
+            const mdPlugin = resolvedConfig?.plugins?.find((p: any) => p.name === "void-md");
+            const mdScriptIds: Set<string> = new Set(
+              mdPlugin?.api?.getClientScripts?.()?.keys() ?? [],
+            );
+            const needsJS = computePagesNeedingClientJS();
             return generateIslandRenderer(
               pageScan,
               pagesDir,
               isDev,
               islandCssMap,
               viteRoot,
-              mdClientScriptIds,
+              mdScriptIds,
+              needsJS,
             );
           }
           if (id === "\0" + ISLANDS_CLIENT_ENTRY_ID) {
             if (!pageScan) return "";
-            refreshMdClientScriptIds();
-            return generateIslandClientEntry(
-              islandManifest,
-              islandCssFiles,
-              isDev,
-              mdClientScriptIds,
-            );
+            return generateIslandClientEntry(islandManifest, islandCssFiles, isDev);
           }
           // Virtual island CSS module — resolveId returns absolute path
           if (id.endsWith(".css") && !id.startsWith("\0")) {
@@ -404,8 +431,8 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
         if (env.command === "serve") {
           return { optimizeDeps: { include: ["vue"] } };
         }
-        // Only add the islands client entry when island pages or md scripts exist
-        if (hasIslandFiles(pagesDir) || hasMdFilesWithScript(pagesDir)) {
+        // Only add the islands client entry when island pages exist
+        if (hasIslandFiles(pagesDir)) {
           return {
             environments: {
               client: {
@@ -430,6 +457,7 @@ function generateIslandRenderer(
   islandCssMap: Map<string, string[]>,
   viteRoot: string,
   mdScriptIds: Set<string>,
+  pagesNeedingClientJS: Set<string>,
 ): string {
   // Build CSS link map for dev FOUC prevention
   let cssMapCode = "";
@@ -442,6 +470,7 @@ function generateIslandRenderer(
   }
 
   const mdScriptIdsCode = `const __mdClientScriptIds = new Set(${JSON.stringify([...mdScriptIds])});`;
+  const needsJSCode = `const __pagesNeedingClientJS = new Set(${JSON.stringify([...pagesNeedingClientJS])});`;
 
   return `
 import { createSSRApp, h, reactive, provide } from "vue";
@@ -451,6 +480,7 @@ import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages
 ${generateComponentManifest(scan, pagesDir)}
 ${cssMapCode}
 ${mdScriptIdsCode}
+${needsJSCode}
 
 function escapeAttr(s) {
   return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -493,7 +523,7 @@ export async function renderIslandPage(pageObj, assetTags) {
 <head>\${headHtml}\${typeof __cssPaths !== "undefined" ? (__cssPaths[pageObj.component] || []).map(url => '<link rel="stylesheet" href="' + url + '">').join("\\n") : ""}\${assetTags.head}</head>
 <body\${bodyAttrs}>
   <div id="app"\${__mdScriptAttr}>\${html}</div>
-  \${assetTags.body}
+  \${__pagesNeedingClientJS.has(pageObj.component) ? assetTags.body : ""}
 </body>
 </html>\`;
 }
@@ -504,7 +534,6 @@ function generateIslandClientEntry(
   manifest: Map<string, IslandEntry>,
   cssFiles: Set<string>,
   isDev: boolean,
-  mdScriptIds: Set<string>,
 ): string {
   const entries = [...manifest.values()];
   const uniqueIslands = new Map<string, string>();
@@ -600,22 +629,6 @@ document.querySelectorAll("[data-island]").forEach(el => {
   if (loader) scheduleHydration(el, loader, props, strategy);
 });
 `);
-
-  if (mdScriptIds.size > 0) {
-    lines.push("");
-    lines.push("// Markdown client scripts");
-    lines.push("const mdScripts = {");
-    for (const id of mdScriptIds) {
-      lines.push(
-        `  ${JSON.stringify(id)}: () => import(${JSON.stringify("virtual:void-md-script:" + id)}),`,
-      );
-    }
-    lines.push("};");
-    lines.push(
-      `const mdScriptId = document.getElementById("app")?.getAttribute("data-md-script");`,
-    );
-    lines.push(`if (mdScriptId && mdScripts[mdScriptId]) mdScripts[mdScriptId]();`);
-  }
 
   return lines.join("\n");
 }

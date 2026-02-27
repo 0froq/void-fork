@@ -41,6 +41,39 @@ async function newPage(): Promise<Page> {
   return page;
 }
 
+function defineMdClientEntryTests(BASE: string) {
+  it("md page with client script has data-md-script attribute", async () => {
+    const res = await fetch(`${BASE}/posts/client-script-test`);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+
+    // data-md-script should be present on the app container
+    expect(html).toMatch(/<div id="app" data-md-script="/);
+  });
+
+  it("static md page without script has no data-md-script attribute", async () => {
+    const res = await fetch(`${BASE}/posts/getting-started`);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+
+    // No data-md-script on pages without client scripts
+    expect(html).not.toContain("data-md-script");
+  });
+
+  it("md page with client script includes script tags in body", async () => {
+    const res = await fetch(`${BASE}/posts/client-script-test`);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/);
+    expect(bodyMatch).not.toBeNull();
+    const body = bodyMatch![1];
+
+    // Page with client scripts SHOULD have script tags
+    expect(body).toMatch(/<script\s+type="module"/);
+  });
+}
+
 function defineClientScriptTests(BASE: string) {
   it("executes client script in markdown page", async () => {
     const page = await newPage();
@@ -261,6 +294,7 @@ describe("markdown-blog playground", () => {
     });
 
     defineSidebarTests(DEV_BASE);
+    defineMdClientEntryTests(DEV_BASE);
     defineClientScriptTests(DEV_BASE);
   }, 60_000);
 
@@ -356,7 +390,26 @@ describe("markdown-blog playground", () => {
       expect(hasThemeCSS).toBe(true);
     });
 
+    it("md client entry is a separate script from islands client entry", async () => {
+      const res = await fetch(`${PREVIEW_BASE}/posts/client-script-test`);
+      const html = await res.text();
+      const body = html.match(/<body[^>]*>([\s\S]*)<\/body>/)![1];
+      const tags = body.match(/<script\s+type="module"\s+src="[^"]+"><\/script>/g);
+
+      // Should have at least 2 script tags: islands-client + md-client
+      expect(tags).not.toBeNull();
+      expect(tags!.length).toBeGreaterThanOrEqual(2);
+
+      // One should be the islands client, another the md client (separate entries)
+      const srcs = tags!.map((t) => t.match(/src="([^"]+)"/)?.[1] ?? "");
+      const hasIslands = srcs.some((s) => s.includes("islands-client"));
+      const hasMdClient = srcs.some((s) => s.includes("md-client"));
+      expect(hasIslands).toBe(true);
+      expect(hasMdClient).toBe(true);
+    });
+
     defineSidebarTests(PREVIEW_BASE);
+    defineMdClientEntryTests(PREVIEW_BASE);
     defineClientScriptTests(PREVIEW_BASE);
   }, 60_000);
 }, 60_000);

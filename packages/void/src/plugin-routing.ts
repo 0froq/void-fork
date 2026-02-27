@@ -113,15 +113,24 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     };
   }
 
+  let resolvedConfig: import("vite").ResolvedConfig | null = null;
+
   function getPagesCompileOptions(): PagesCompileOptions | null {
     if (!scan || scan.pages.pages.length === 0) return null;
     const hasIslandPages = scan.pages.pages.some((p) => p.island);
+    // Detect md plugin and read its client entry ID for island pages
+    const mdPlugin = resolvedConfig?.plugins?.find((p: any) => p.name === "void-md");
+    const mdClientEntryId =
+      hasIslandPages && mdPlugin?.api?.clientEntryId
+        ? (mdPlugin.api.clientEntryId as string)
+        : undefined;
     return {
       pagesDir,
       protocolPath: resolveFile("void/pages-protocol"),
       headPath: resolveFile("void/pages-head"),
       clientEntryId: "virtual:void-pages-client",
       islandClientEntryId: hasIslandPages ? "virtual:void-islands-client" : undefined,
+      mdClientEntryId,
       headConfig: options.headConfig,
     };
   }
@@ -140,6 +149,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     name: "void:routing",
     enforce: "pre",
     configResolved(config) {
+      resolvedConfig = config;
       compileOptions.reactRefresh = config.plugins.some(
         (plugin) =>
           plugin.name === "vite:react-babel" ||
