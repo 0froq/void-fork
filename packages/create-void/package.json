@@ -1,0 +1,21 @@
+{
+  "name": "create-void",
+  "version": "0.0.1",
+  "bin": {
+    "create-void": "dist/index.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsgo --noEmit"
+  },
+  "devDependencies": {
+    "@clack/prompts": "catalog:",
+    "@types/node": "catalog:",
+    "picocolors": "^1.1.1",
+    "tsdown": "catalog:"
+  }
+}
