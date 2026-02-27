@@ -119,16 +119,19 @@ app.post("/:id/deploy", async (c) => {
         workerName,
         assetManifest,
       );
-      completionJwt = session.jwt;
 
       if (session.buckets.length > 0) {
-        await uploadAssetBuckets(
+        // Upload returns the completion JWT (different from the session JWT)
+        completionJwt = await uploadAssetBuckets(
           c.env.CF_ACCOUNT_ID,
           c.env.CF_API_TOKEN,
           session.jwt,
           session.buckets,
           assetsByHash,
         );
+      } else {
+        // No buckets = all assets already uploaded; session JWT doubles as completion JWT
+        completionJwt = session.jwt;
       }
     }
 
