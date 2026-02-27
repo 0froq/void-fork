@@ -10,7 +10,7 @@ await db.raw("INSERT OR IGNORE INTO users (id, name) VALUES (1, 'Alice')");
 const rows = await db.raw<{ name: string }>("SELECT name FROM users LIMIT 1");
 const result = rows[0] ?? null;
 
-await kv.set("smoke", "ok");
+await kv.put("smoke", "ok");
 const kvValue = await kv.get<string>("smoke");
 ---
 <html lang="en">

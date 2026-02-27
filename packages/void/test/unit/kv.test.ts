@@ -45,29 +45,29 @@ describe("createKV", () => {
     });
   });
 
-  describe("set", () => {
+  describe("put", () => {
     it("stores JSON-stringified objects", async () => {
-      await kv.set("user:1", { name: "Alice" });
+      await kv.put("user:1", { name: "Alice" });
       expect(mockNS.put).toHaveBeenCalledWith("user:1", '{"name":"Alice"}', {});
     });
 
     it("stores strings as-is", async () => {
-      await kv.set("key", "hello");
+      await kv.put("key", "hello");
       expect(mockNS.put).toHaveBeenCalledWith("key", "hello", {});
     });
 
     it("passes ttl option as expirationTtl", async () => {
-      await kv.set("key", "val", { ttl: 3600 });
+      await kv.put("key", "val", { ttl: 3600 });
       expect(mockNS.put).toHaveBeenCalledWith("key", "val", { expirationTtl: 3600 });
     });
 
     it("passes expiration option", async () => {
-      await kv.set("key", "val", { expiration: 1700000000 });
+      await kv.put("key", "val", { expiration: 1700000000 });
       expect(mockNS.put).toHaveBeenCalledWith("key", "val", { expiration: 1700000000 });
     });
 
     it("passes metadata option", async () => {
-      await kv.set("key", "val", { metadata: { role: "admin" } });
+      await kv.put("key", "val", { metadata: { role: "admin" } });
       expect(mockNS.put).toHaveBeenCalledWith("key", "val", { metadata: { role: "admin" } });
     });
   });
@@ -136,9 +136,9 @@ describe("createKV", () => {
       expect(result).toEqual({ token: "abc" });
     });
 
-    it("prefixes keys on set", async () => {
+    it("prefixes keys on put", async () => {
       const sessions = kv.map<{ token: string }>("sessions");
-      await sessions.set("xyz", { token: "abc" }, { ttl: 3600 });
+      await sessions.put("xyz", { token: "abc" }, { ttl: 3600 });
       expect(mockNS.put).toHaveBeenCalledWith("sessions:xyz", '{"token":"abc"}', {
         expirationTtl: 3600,
       });

@@ -7,7 +7,7 @@ const getSmokeData = createServerFn().handler(async () => {
   const users = await db.list("users", { limit: 1 });
   const user = users[0] ?? null;
 
-  await kv.set("smoke", "ok");
+  await kv.put("smoke", "ok");
   const kvValue = await kv.get<string>("smoke");
 
   return { d1User: user, kvValue };

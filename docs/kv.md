@@ -19,25 +19,25 @@ const user = await kv.get<User>("user:123");
 
 Values are automatically parsed as JSON. If the stored value isn't valid JSON, the raw string is returned.
 
-### Set
+### Put
 
 ```ts
-await kv.set("user:123", { name: "Alice", role: "admin" });
+await kv.put("user:123", { name: "Alice", role: "admin" });
 ```
 
 Objects are automatically JSON-stringified. Strings are stored as-is.
 
-Set a TTL (in seconds) or absolute expiration (Unix timestamp):
+Add a TTL (in seconds) or absolute expiration (Unix timestamp):
 
 ```ts
-await kv.set("session:abc", sessionData, { ttl: 3600 });
-await kv.set("token:xyz", tokenData, { expiration: 1700000000 });
+await kv.put("session:abc", sessionData, { ttl: 3600 });
+await kv.put("token:xyz", tokenData, { expiration: 1700000000 });
 ```
 
 Attach metadata to a key:
 
 ```ts
-await kv.set("user:123", userData, {
+await kv.put("user:123", userData, {
   metadata: { updatedBy: "admin" },
 });
 ```
@@ -78,7 +78,7 @@ For collections of the same type, use `kv.map()` to create a scoped, typed clien
 ```ts
 const sessions = kv.map<Session>("sessions");
 
-await sessions.set("abc", { userId: 1, token: "..." }, { ttl: 3600 });
+await sessions.put("abc", { userId: 1, token: "..." }, { ttl: 3600 });
 // KV key: "sessions:abc"
 
 const session = await sessions.get("abc");
@@ -94,13 +94,13 @@ const result = await sessions.list();
 // keys: [{ name: "abc" }, { name: "def" }]  (prefix stripped)
 ```
 
-Maps have the same methods as the base client (`get`, `set`, `delete`, `list`, `getWithMetadata`) but with a typed value and automatic prefixing.
+Maps have the same methods as the base client (`get`, `put`, `delete`, `list`, `getWithMetadata`) but with a typed value and automatic prefixing.
 
 ## How It Works
 
 The KV client is a thin wrapper over the Cloudflare KV API that adds two things:
 
-1. **Auto serialization** — `set()` calls `JSON.stringify()` on non-string values. `get()` calls `JSON.parse()` with a fallback to the raw string for values that aren't JSON. This means you can store and retrieve objects without manual serialization.
+1. **Auto serialization** — `put()` calls `JSON.stringify()` on non-string values. `get()` calls `JSON.parse()` with a fallback to the raw string for values that aren't JSON. This means you can store and retrieve objects without manual serialization.
 
 2. **Typed maps** — `kv.map<T>(prefix)` returns a scoped client where all keys are prefixed with `"prefix:"` and values are typed as `T`. This is useful for organizing related data (sessions, cache entries, feature flags) without manually managing key prefixes.
 

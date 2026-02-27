@@ -1,4 +1,4 @@
-export interface SetOptions {
+export interface PutOptions {
   ttl?: number;
   expiration?: number;
   metadata?: Record<string, unknown>;
@@ -24,7 +24,7 @@ export interface ListResult<M = unknown> {
 
 export interface KVMap<T> {
   get(key: string): Promise<T | null>;
-  set(key: string, value: T, options?: SetOptions): Promise<void>;
+  put(key: string, value: T, options?: PutOptions): Promise<void>;
   delete(key: string): Promise<void>;
   list<M = unknown>(options?: Omit<ListOptions, "prefix">): Promise<ListResult<M>>;
   getWithMetadata<M = unknown>(key: string): Promise<{ value: T | null; metadata: M | null }>;
@@ -32,7 +32,7 @@ export interface KVMap<T> {
 
 export interface KVClient {
   get<T = unknown>(key: string): Promise<T | null>;
-  set(key: string, value: unknown, options?: SetOptions): Promise<void>;
+  put(key: string, value: unknown, options?: PutOptions): Promise<void>;
   delete(key: string): Promise<void>;
   list<M = unknown>(options?: ListOptions): Promise<ListResult<M>>;
   getWithMetadata<T = unknown, M = unknown>(
@@ -64,7 +64,7 @@ function createKVMap<T>(getNS: () => KVNamespace, prefix: string): KVMap<T> {
       return parseValue<T>(raw);
     },
 
-    async set(key, value, options) {
+    async put(key, value, options) {
       const opts: KVNamespacePutOptions = {};
       if (options?.ttl) opts.expirationTtl = options.ttl;
       if (options?.expiration) opts.expiration = options.expiration;
@@ -110,7 +110,7 @@ function createKVClient(getNS: () => KVNamespace): KVClient {
       return parseValue<T>(raw);
     },
 
-    async set(key, value, options) {
+    async put(key, value, options) {
       const opts: KVNamespacePutOptions = {};
       if (options?.ttl) opts.expirationTtl = options.ttl;
       if (options?.expiration) opts.expiration = options.expiration;

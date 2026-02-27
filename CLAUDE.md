@@ -7,6 +7,10 @@ Full-stack framework for Cloudflare Workers, powered by Vite.
 - **Important**: The source of truth for agent instructions is `CLAUDE.md` (this file). `AGENTS.md` is a symlink to this file. `README.md` is a separate public-facing file. When asked to update agent instructions, always update `CLAUDE.md`.
 - Documentation source lives in `docs/`.
 
+## Important Note for Release Workflows
+
+The `void` package on npm has these previous versions: '0.0.1', '0.1.0', '0.1.2', '0.1.3', '0.1.5', '0.1.6', '1.0.0', '1.0.1', '1.0.2', '3.0.0', '3.0.1'. We have unpublished these versions but they cannot be published again. In package release workflows, make sure to avoid / skip these versions for `packages/void`.
+
 ## Best Practices That Must Be Followed
 
 - **Never** commit without asking for confirmation.
