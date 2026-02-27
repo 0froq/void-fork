@@ -32,7 +32,7 @@ const integrationLinks = {
     { text: "Coding Agents", link: "integrations/agents" },
     { text: "Hono", link: "integrations/hono" },
     { text: "Cloudflare", link: "integrations/cloudflare" },
-    { text: "ORMs", link: "integrations/orms" },
+    { text: "ORMs and External Databases", link: "integrations/orms-and-external-dbs" },
     { text: "Auth Providers", link: "integrations/auth-providers" },
     { text: "Payment Processors", link: "integrations/payment-processors" },
   ],
@@ -122,7 +122,7 @@ export default extendConfig(
             collapsed: false,
             items: [
               { text: "Type Safety", link: "/type-safety" },
-              { text: "Database", link: "/db" },
+              { text: "Database", link: "/database" },
               { text: "Typed Fetch", link: "/typed-fetch" },
               { text: "Key-Value Storage", link: "/kv" },
               { text: "Blob Storage", link: "/storage" },

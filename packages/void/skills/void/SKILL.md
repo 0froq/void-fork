@@ -39,7 +39,7 @@ Then ask what to do next.
 | App type detection and mode behavior      | `docs/app-types.md`, `docs/config.md`                             |
 | Server/API routing and middleware         | `docs/server-routing.md`, `docs/hono.md`                          |
 | Pages mode, loader/action, forms, layouts | `docs/pages-routing.md`, `docs/type-safety.md`                    |
-| Database and migrations                   | `docs/db.md`, `docs/type-safety.md`                               |
+| Database and migrations                   | `docs/database.md`, `docs/type-safety.md`                         |
 | Typed fetch and end-to-end typing         | `docs/typed-fetch.md`, `docs/type-safety.md`                      |
 | Authentication                            | `docs/auth.md`, `docs/env-vars.md`                                |
 | Cloudflare runtime bindings and config    | `docs/cloudflare.md`, `docs/config.md`, `docs/env-vars.md`        |

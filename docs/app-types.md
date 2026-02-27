@@ -57,7 +57,7 @@ Void apps can also be configured with [`output: 'static'`](./ssg.md) to pre-rend
 
 ## Meta Frameworks
 
-Void supports deploying Vite-based meta-framework apps via `void deploy`. The framework owns routing and SSR — Void handles [binding inference](./resource-inference.md), [typed DB queries](./db.md), migrations, and deployment.
+Void supports deploying Vite-based meta-framework apps via `void deploy`. The framework owns routing and SSR — Void handles [binding inference](./resource-inference.md), [typed DB queries](./database.md), migrations, and deployment.
 
 | Framework                                           | Detected from package   | Setup guide                                          |
 | --------------------------------------------------- | ----------------------- | ---------------------------------------------------- |

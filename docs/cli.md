@@ -200,7 +200,7 @@ Creates:
 - `routes/api/posts/[id].ts` — GET by id with 404 handling
 - Regenerated `.void/db.d.ts`
 
-The generated routes automatically detect your validation library from `package.json` (valibot, zod, or arktype). If none is found, you'll be prompted to choose one or skip validation. See [Database — Scaffolding](./db.md#scaffolding) for the full type mapping.
+The generated routes automatically detect your validation library from `package.json` (valibot, zod, or arktype). If none is found, you'll be prompted to choose one or skip validation. See [Database — Scaffolding](./database.md#scaffolding) for the full type mapping.
 
 Column format: `name:type` or `name:type?` (nullable). Types: `string`, `text`, `datetime`, `integer`, `boolean`, `real`, `blob`.
 

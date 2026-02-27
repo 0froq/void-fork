@@ -451,7 +451,7 @@ The typed client is built on [ofetch](https://github.com/unjs/ofetch) with a typ
 
 ## Database
 
-Imported from `"void/db"`. See [Database](./db.md) for usage guide.
+Imported from `"void/db"`. See [Database](./database.md) for usage guide.
 
 ### `db`
 

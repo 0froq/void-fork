@@ -114,7 +114,7 @@ export default defineRender(async (c, assetTags) => {
 
 ## Using Your Own ORM
 
-The built-in [database helper](./db.md) covers simple CRUD, but you're not locked into it. Any ORM or query builder that works with D1 works with Void — just pass the D1 binding.
+The built-in [database helper](./database.md) covers simple CRUD, but you're not locked into it. Any ORM or query builder that works with D1 works with Void — just pass the D1 binding.
 
 For example, with [Drizzle](https://orm.drizzle.team/docs/get-started/d1-new):
 

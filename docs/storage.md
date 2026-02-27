@@ -62,6 +62,6 @@ export const GET = defineHandler(async (c) => {
 
 ## How It Works
 
-Unlike the [database](./db.md) and [KV](./kv.md) clients, `storage` doesn't add any abstraction over the underlying API. The R2 API is already well-designed for direct use, so `storage` is simply a lazy reference to `env.STORAGE` that you can import without manually accessing bindings.
+Unlike the [database](./database.md) and [KV](./kv.md) clients, `storage` doesn't add any abstraction over the underlying API. The R2 API is already well-designed for direct use, so `storage` is simply a lazy reference to `env.STORAGE` that you can import without manually accessing bindings.
 
 The `createStorage()` factory exists for testing and for frameworks that manage their own routing — it accepts an `R2Bucket` and returns it directly.
