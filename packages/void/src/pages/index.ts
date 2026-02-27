@@ -12,3 +12,4 @@ export type {
 } from "./types";
 export { resolveHead, renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "./head";
 export type { HeadDescriptor, HeadConfig } from "./head";
+export { generateComponentManifest } from "./manifest";

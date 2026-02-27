@@ -1,64 +1,21 @@
 import type { Plugin } from "vite";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve, relative } from "node:path";
 import { scanPages, resolveEffectiveLayoutChain } from "void/pages";
 import type { PageScanResult } from "void/pages";
+import {
+  resolveSpecifier,
+  needsIslandClientBundle,
+  rebuildIslandCssMap as rebuildIslandCssMapShared,
+  computePagesNeedingClientJS as computePagesNeedingClientJSShared,
+  configureIslandCssServer,
+  ISLANDS_RENDERER_ID,
+  ISLANDS_CLIENT_ENTRY_ID,
+} from "void/pages-islands-plugin";
+import type { IslandEntry } from "void/pages-islands-plugin";
 import { generateComponentManifest } from "./pages-manifest";
 
-const ISLANDS_RENDERER_ID = "virtual:void-islands-renderer";
-const ISLANDS_CLIENT_ENTRY_ID = "virtual:void-islands-client";
-
 const COMPONENT_EXTENSIONS = [".vue", ".tsx", ".jsx", ".ts", ".js"];
-
-interface IslandEntry {
-  componentPath: string;
-  islandId: string;
-  hydrate: string;
-}
-
-/** Resolve a relative import specifier to an absolute path by checking extensions. */
-function resolveSpecifier(specifier: string, importerDir: string): string | null {
-  const base = resolve(importerDir, specifier);
-  for (const ext of COMPONENT_EXTENSIONS) {
-    if (existsSync(base + ext)) return base + ext;
-  }
-  if (existsSync(base)) return base;
-  return null;
-}
-
-/**
- * Check whether the islands client bundle is needed by scanning file contents.
- * Returns true if any island/layout file has island imports or CSS,
- * or any .md file has a `<script>` block.
- */
-function needsIslandClientBundle(dir: string): boolean {
-  const importAttrRe = /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:/;
-  const styleRe = /<style\b/;
-  const cssImportRe =
-    /import\b[^"']*["'][^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)["']/;
-  const mdScriptRe = /^<script\b/m;
-  try {
-    for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
-      if (!entry.isFile()) continue;
-      const name = entry.name;
-      // Check island and layout files for island imports or CSS
-      if (name.endsWith(".island.vue") || name.startsWith("layout.") || name.startsWith("_")) {
-        const content = readFileSync(resolve(entry.parentPath!, name), "utf-8");
-        if (importAttrRe.test(content)) return true;
-        if (styleRe.test(content)) return true;
-        if (cssImportRe.test(content)) return true;
-      }
-      // Check markdown files for <script> blocks
-      if (name.endsWith(".md")) {
-        const content = readFileSync(resolve(entry.parentPath!, name), "utf-8");
-        if (mdScriptRe.test(content)) return true;
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return false;
-}
 
 function fileHasCss(filePath: string): boolean {
   try {
@@ -111,83 +68,12 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
   /** Rebuild islandCssMap from current file contents (re-runs fileHasCss). */
   function rebuildIslandCssMap(): void {
     if (!pageScan) return;
-    islandCssMap.clear();
-    for (const page of pageScan.pages) {
-      if (!page.island) continue;
-      const cssPaths: string[] = [];
-      const layoutChain = resolveEffectiveLayoutChain(
-        page,
-        pageScan.layouts,
-        pageScan.namedLayouts,
-      );
-      for (const layout of layoutChain) {
-        const layoutPath = resolve(pagesDir, layout.filePath);
-        if (fileHasCss(layoutPath)) cssPaths.push(layoutPath);
-      }
-      const pagePath = resolve(pagesDir, page.componentPath);
-      if (fileHasCss(pagePath)) cssPaths.push(pagePath);
-      if (cssPaths.length > 0) {
-        islandCssMap.set(page.componentId, cssPaths);
-      }
-    }
+    rebuildIslandCssMapShared(pageScan, pagesDir, islandCssMap, fileHasCss);
   }
 
   function computePagesNeedingClientJS(): Set<string> {
     if (!pageScan) return new Set();
-
-    // Query md plugin for pages with client scripts
-    const mdPlugin = resolvedConfig?.plugins?.find((p: any) => p.name === "void-md");
-    const mdScriptIds: Set<string> = new Set(mdPlugin?.api?.getClientScripts?.()?.keys() ?? []);
-
-    const importAttrRe =
-      /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
-
-    // Check which layout directories have island imports
-    const layoutDirsWithIslands = new Set<string>();
-    for (const layout of pageScan.layouts) {
-      if (!layout.island) continue;
-      const filePath = resolve(pagesDir, layout.filePath);
-      const code = readFileSync(filePath, "utf-8");
-      importAttrRe.lastIndex = 0;
-      if (importAttrRe.test(code)) {
-        layoutDirsWithIslands.add(layout.directory);
-      }
-    }
-
-    const result = new Set<string>();
-    for (const page of pageScan.pages) {
-      if (!page.island) continue;
-
-      // Check md client scripts
-      if (mdScriptIds.has(page.componentId)) {
-        result.add(page.componentId);
-        continue;
-      }
-
-      // Check page file for island imports
-      const filePath = resolve(pagesDir, page.componentPath);
-      const code = readFileSync(filePath, "utf-8");
-      importAttrRe.lastIndex = 0;
-      if (importAttrRe.test(code)) {
-        result.add(page.componentId);
-        continue;
-      }
-
-      // Check layout chain for island imports
-      const layoutChain = resolveEffectiveLayoutChain(
-        page,
-        pageScan.layouts,
-        pageScan.namedLayouts,
-      );
-      for (const layout of layoutChain) {
-        if (layoutDirsWithIslands.has(layout.directory)) {
-          result.add(page.componentId);
-          break;
-        }
-      }
-    }
-
-    return result;
+    return computePagesNeedingClientJSShared(pageScan, pagesDir, resolvedConfig);
   }
 
   return [
@@ -205,47 +91,7 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
       // produces a JS module with `__vite__css = "..."` for HMR — we extract
       // the CSS string and serve it directly for render-blocking <link> tags.
       configureServer(server) {
-        // When an island CSS file changes, rebuild the CSS map and invalidate
-        // the renderer so the next SSR render picks up added/removed styles.
-        server.watcher.on("change", (path) => {
-          if (!islandCssFiles.has(path)) return;
-          rebuildIslandCssMap();
-          // Invalidate the renderer virtual module so it regenerates __cssPaths
-          for (const env of Object.values(server.environments)) {
-            const mod = env.moduleGraph.getModuleById("\0" + ISLANDS_RENDERER_ID);
-            if (mod) env.moduleGraph.invalidateModule(mod);
-          }
-          // Invalidate the CSS virtual module so fresh content is served
-          const cssMod = server.environments.client?.moduleGraph.getModuleById(path + ".css");
-          if (cssMod) server.environments.client.moduleGraph.invalidateModule(cssMod);
-        });
-
-        server.middlewares.use(async (req, res, next) => {
-          if (!req.url) return next();
-          const url = req.url.split("?")[0];
-          if (!url.endsWith(".css")) return next();
-          const srcPath = resolve(viteRoot, url.slice(1, -4));
-          if (!islandCssFiles.has(srcPath)) return next();
-          try {
-            const result = await server.environments.client.transformRequest(url);
-            if (result) {
-              // Vite 8 client CSS: `const __vite__css = "..."`
-              // Vite 7 SSR CSS: `export default "..."`
-              const m =
-                result.code.match(/\b__vite__css\s*=\s*("(?:[^"\\]|\\.)*")/) ||
-                result.code.match(/export\s+default\s+("(?:[^"\\]|\\.)*")/);
-              if (m) {
-                res.setHeader("Content-Type", "text/css");
-                res.statusCode = 200;
-                res.end(JSON.parse(m[1]));
-                return;
-              }
-            }
-          } catch {
-            // fall through
-          }
-          next();
-        });
+        configureIslandCssServer(server, islandCssFiles, viteRoot, rebuildIslandCssMap);
       },
 
       async buildStart() {
@@ -266,7 +112,7 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
             while ((m = importAttrRe.exec(code)) !== null) {
               const spec = m[1].slice(1, -1);
               const strategy = m[2].slice(1, -1);
-              const absPath = resolveSpecifier(spec, importerDir);
+              const absPath = resolveSpecifier(spec, importerDir, COMPONENT_EXTENSIONS);
               if (absPath) {
                 const islandId = relative(root, absPath).replace(/\.[^.]+$/, "");
                 islandManifest.set(islandId, {
@@ -388,7 +234,7 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
             const rawName = `_raw_island_${idx++}`;
 
             // Resolve to absolute path for the island manifest
-            const absPath = resolveSpecifier(spec, importerDir);
+            const absPath = resolveSpecifier(spec, importerDir, COMPONENT_EXTENSIONS);
             if (absPath) {
               const islandId = relative(root, absPath).replace(/\.[^.]+$/, "");
               islandManifest.set(islandId, {
@@ -452,7 +298,7 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
           return { optimizeDeps: { include: ["vue"] } };
         }
         // Only add the islands client entry when content needs it
-        if (needsIslandClientBundle(pagesDir)) {
+        if (needsIslandClientBundle(pagesDir, /\.island\.vue$/, true)) {
           return {
             environments: {
               client: {
@@ -564,6 +410,8 @@ function generateIslandClientEntry(
 
   const lines: string[] = [];
 
+  lines.push('import { initIslands } from "void/pages-client";');
+
   // In dev, page/layout CSS is served via render-blocking <link> tags
   // injected in the SSR HTML (see generateIslandRenderer). Skip the
   // ?vue&type=style imports here to avoid duplicate injection.
@@ -612,43 +460,7 @@ async function hydrateIsland(el, mod, props) {
   el.setAttribute("data-hydrated", "true");
 }
 
-function scheduleHydration(el, loader, props, strategy) {
-  const hydrate = () => loader().then(mod => hydrateIsland(el, mod, props));
-
-  if (strategy === "load") {
-    hydrate();
-  } else if (strategy === "visible") {
-    const observer = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting) {
-        observer.disconnect();
-        hydrate();
-      }
-    });
-    observer.observe(el);
-  } else if (strategy === "idle") {
-    const schedule = window.requestIdleCallback || ((cb) => setTimeout(cb, 1));
-    schedule(() => hydrate());
-  } else if (strategy.startsWith("media:")) {
-    const query = strategy.slice(6);
-    const mql = matchMedia(query);
-    const check = () => {
-      if (mql.matches) {
-        mql.removeEventListener("change", check);
-        hydrate();
-      }
-    };
-    mql.addEventListener("change", check);
-    check();
-  }
-}
-
-document.querySelectorAll("[data-island]").forEach(el => {
-  const id = el.getAttribute("data-island");
-  const props = JSON.parse(el.getAttribute("data-props") || "{}");
-  const strategy = el.getAttribute("data-hydrate") || "load";
-  const loader = islands[id];
-  if (loader) scheduleHydration(el, loader, props, strategy);
-});
+initIslands(islands, hydrateIsland);
 `);
 
   return lines.join("\n");

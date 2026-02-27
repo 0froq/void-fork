@@ -94,6 +94,18 @@
       "types": "./dist/pages/head-client.d.mts",
       "import": "./dist/pages/head-client.mjs"
     },
+    "./pages-prefetch": {
+      "types": "./dist/pages/prefetch.d.mts",
+      "import": "./dist/pages/prefetch.mjs"
+    },
+    "./pages-client": {
+      "types": "./dist/pages/client.d.mts",
+      "import": "./dist/pages/client.mjs"
+    },
+    "./pages-islands-plugin": {
+      "types": "./dist/pages/islands-plugin.d.mts",
+      "import": "./dist/pages/islands-plugin.mjs"
+    },
     "./env": {
       "types": "./env.d.ts"
     },
