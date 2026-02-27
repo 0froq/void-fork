@@ -20,7 +20,7 @@
       "services": [{ "binding": "API", "service": "void-api-staging" }],
       "vars": {
         "API_URL": "https://api.staging.void.cloud",
-        "SITE_DOMAIN": "staging.voidcloud.dev",
+        "SITE_DOMAIN": "staging.void.app",
       },
       "d1_databases": [
         {

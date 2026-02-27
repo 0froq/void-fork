@@ -113,7 +113,7 @@
         "DISPATCH_NAMESPACE": "void-users-staging",
         "DISPATCH_WORKER_NAME": "void-dispatch-staging",
         "AI_PROXY_SERVICE": "void-ai-proxy-staging",
-        "SITE_DOMAIN": "staging.voidcloud.dev",
+        "SITE_DOMAIN": "staging.void.app",
         "DASHBOARD_URL": "https://dash.staging.void.cloud",
         "AUTH_REDIRECT_URI": "https://api.staging.void.cloud/auth/callback",
         "SIGNUP_ALLOWLIST": "@voidzero.dev",

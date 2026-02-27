@@ -3,27 +3,27 @@ import { extractSlug } from "../../src/hostname";
 
 describe("extractSlug", () => {
   it("extracts slug from valid hostname", () => {
-    expect(extractSlug("my-app.voidcloud.dev")).toBe("my-app");
+    expect(extractSlug("my-app.void.app")).toBe("my-app");
   });
 
   it("extracts single-word slug", () => {
-    expect(extractSlug("hello.voidcloud.dev")).toBe("hello");
+    expect(extractSlug("hello.void.app")).toBe("hello");
   });
 
   it("extracts slug with numbers", () => {
-    expect(extractSlug("app123.voidcloud.dev")).toBe("app123");
+    expect(extractSlug("app123.void.app")).toBe("app123");
   });
 
   it("extracts single-char slug", () => {
-    expect(extractSlug("x.voidcloud.dev")).toBe("x");
+    expect(extractSlug("x.void.app")).toBe("x");
   });
 
   it("returns null for bare domain", () => {
-    expect(extractSlug("voidcloud.dev")).toBeNull();
+    expect(extractSlug("void.app")).toBeNull();
   });
 
   it("returns null for nested subdomain", () => {
-    expect(extractSlug("foo.bar.voidcloud.dev")).toBeNull();
+    expect(extractSlug("foo.bar.void.app")).toBeNull();
   });
 
   it("returns null for unrelated domain", () => {
@@ -35,44 +35,44 @@ describe("extractSlug", () => {
   });
 
   it("returns null for slug with leading dash", () => {
-    expect(extractSlug("-bad.voidcloud.dev")).toBeNull();
+    expect(extractSlug("-bad.void.app")).toBeNull();
   });
 
   it("returns null for slug with trailing dash", () => {
-    expect(extractSlug("bad-.voidcloud.dev")).toBeNull();
+    expect(extractSlug("bad-.void.app")).toBeNull();
   });
 
   it("returns null for slug with uppercase", () => {
-    expect(extractSlug("MyApp.voidcloud.dev")).toBeNull();
+    expect(extractSlug("MyApp.void.app")).toBeNull();
   });
 
   it("returns null for slug with underscores", () => {
-    expect(extractSlug("my_app.voidcloud.dev")).toBeNull();
+    expect(extractSlug("my_app.void.app")).toBeNull();
   });
 
   describe("custom baseHostname", () => {
     it("extracts slug from staging hostname", () => {
-      expect(extractSlug("my-app.staging.voidcloud.dev", "staging.voidcloud.dev")).toBe("my-app");
+      expect(extractSlug("my-app.staging.void.app", "staging.void.app")).toBe("my-app");
     });
 
     it("returns null for production hostname when expecting staging", () => {
-      expect(extractSlug("my-app.voidcloud.dev", "staging.voidcloud.dev")).toBeNull();
+      expect(extractSlug("my-app.void.app", "staging.void.app")).toBeNull();
     });
 
     it("returns null for staging hostname when expecting production", () => {
-      expect(extractSlug("my-app.staging.voidcloud.dev", "voidcloud.dev")).toBeNull();
+      expect(extractSlug("my-app.staging.void.app", "void.app")).toBeNull();
     });
 
     it("returns null for bare staging domain", () => {
-      expect(extractSlug("staging.voidcloud.dev", "staging.voidcloud.dev")).toBeNull();
+      expect(extractSlug("staging.void.app", "staging.void.app")).toBeNull();
     });
 
     it("rejects nested subdomains on staging", () => {
-      expect(extractSlug("foo.bar.staging.voidcloud.dev", "staging.voidcloud.dev")).toBeNull();
+      expect(extractSlug("foo.bar.staging.void.app", "staging.void.app")).toBeNull();
     });
 
     it("uses default baseHostname when omitted", () => {
-      expect(extractSlug("my-app.voidcloud.dev")).toBe("my-app");
+      expect(extractSlug("my-app.void.app")).toBe("my-app");
     });
   });
 });

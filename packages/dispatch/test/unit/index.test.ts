@@ -118,7 +118,7 @@ describe("dispatch fetch handler", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/api/hello", { method: "GET" }),
+      new Request("https://my-app.void.app/api/hello", { method: "GET" }),
       env,
       createCtx(),
     );
@@ -136,7 +136,7 @@ describe("dispatch fetch handler", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/dashboard"),
+      new Request("https://my-app.void.app/dashboard"),
       env,
       createCtx(),
     );
@@ -152,7 +152,7 @@ describe("dispatch fetch handler", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/dashboard"),
+      new Request("https://my-app.void.app/dashboard"),
       env,
       createCtx(),
     );
@@ -228,11 +228,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const ctx = createCtx();
-    const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/dashboard"),
-      env,
-      ctx,
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
 
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(response.status).toBe(200);
@@ -265,7 +261,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/dashboard"),
+      new Request("https://my-app.void.app/dashboard"),
       env,
       createCtx(),
     );
@@ -299,7 +295,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/dashboard", {
+      new Request("https://my-app.void.app/dashboard", {
         headers: { Cookie: "session=abc" },
       }),
       env,
@@ -325,11 +321,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const ctx = createCtx();
-    const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/dashboard"),
-      env,
-      ctx,
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
 
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(await response.text()).toBe("<html>no-cache</html>");
@@ -349,7 +341,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/dashboard"),
+      new Request("https://my-app.void.app/dashboard"),
       env,
       createCtx(),
     );
@@ -376,7 +368,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/dashboard"),
+      new Request("https://my-app.void.app/dashboard"),
       env,
       createCtx(),
     );
@@ -413,11 +405,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const ctx = createCtx();
-    const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/dashboard"),
-      env,
-      ctx,
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
 
     expect(response.headers.get("x-isr-cache")).toBe("STALE");
 
@@ -453,11 +441,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const ctx = createCtx();
-    const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/dashboard"),
-      env,
-      ctx,
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
 
     // Should return stale content immediately
     expect(response.headers.get("x-isr-cache")).toBe("STALE");
@@ -474,7 +458,7 @@ describe("ISR (stale-while-revalidate)", () => {
   it("serves from edge cache on repeat ISR request (no R2 read)", async () => {
     // Pre-populate edge cache
     edgeCacheStore.set(
-      "https://my-app.voidcloud.dev/dashboard",
+      "https://my-app.void.app/dashboard",
       new Response("<html>edge</html>", {
         headers: { "x-isr-cache": "HIT", "Content-Type": "text/html" },
       }),
@@ -490,7 +474,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/dashboard"),
+      new Request("https://my-app.void.app/dashboard"),
       env,
       createCtx(),
     );
@@ -523,11 +507,7 @@ describe("ISR (stale-while-revalidate)", () => {
     });
 
     const ctx = createCtx();
-    const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/dashboard"),
-      env,
-      ctx,
-    );
+    const response = await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
 
     expect(workerFetch).not.toHaveBeenCalled();
     expect(response.headers.get("x-isr-cache")).toBe("HIT");
@@ -535,7 +515,7 @@ describe("ISR (stale-while-revalidate)", () => {
 
     // Wait for edge cache population
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
-    expect(edgeCacheStore.has("https://my-app.voidcloud.dev/dashboard")).toBe(true);
+    expect(edgeCacheStore.has("https://my-app.void.app/dashboard")).toBe(true);
   });
 });
 
@@ -550,7 +530,7 @@ describe("suspension check", () => {
     });
 
     const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/api/hello"),
+      new Request("https://my-app.void.app/api/hello"),
       env,
       createCtx(),
     );
@@ -573,7 +553,7 @@ describe("custom limits", () => {
       workerResponse: new Response("api"),
     });
 
-    await app.fetch(new Request("https://my-app.voidcloud.dev/api/hello"), env, createCtx());
+    await app.fetch(new Request("https://my-app.void.app/api/hello"), env, createCtx());
 
     expect(dispatchGet).toHaveBeenCalledWith(
       "user-app",
@@ -588,7 +568,7 @@ describe("custom limits", () => {
       workerResponse: new Response("api"),
     });
 
-    await app.fetch(new Request("https://my-app.voidcloud.dev/api/hello"), env, createCtx());
+    await app.fetch(new Request("https://my-app.void.app/api/hello"), env, createCtx());
 
     expect(dispatchGet).toHaveBeenCalledWith("user-app");
   });
@@ -614,7 +594,7 @@ describe("custom limits", () => {
     } as unknown as Env;
 
     const response = await app.fetch(
-      new Request("https://my-app.voidcloud.dev/api/hello"),
+      new Request("https://my-app.void.app/api/hello"),
       env,
       createCtx(),
     );
@@ -635,7 +615,7 @@ describe("custom limits", () => {
       workerResponse: new Response("<html>ssr</html>"),
     });
 
-    await app.fetch(new Request("https://my-app.voidcloud.dev/dashboard"), env, createCtx());
+    await app.fetch(new Request("https://my-app.void.app/dashboard"), env, createCtx());
 
     expect(dispatchGet).toHaveBeenCalledWith(
       "user-app",
