@@ -12,6 +12,7 @@ import {
 } from "../../db";
 import { cleanupProjectResources } from "../../provisioning/cleanup";
 import { ProjectsListPage } from "../views/projects-list";
+import { DeploymentTable } from "../views/deployment-table";
 import { Layout } from "../views/layout";
 import { SITE_DOMAIN } from "../../constants";
 
@@ -169,46 +170,7 @@ app.get("/:id", async (c) => {
       )}
 
       <h2>Recent Deployments ({deployments.length})</h2>
-      {deployments.length > 0 ? (
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Status</th>
-              <th>Source</th>
-              <th>Error</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {deployments.map((d) => (
-              <tr key={d.id}>
-                <td>
-                  <a href={`/admin/deployments/${d.id}`}>{d.id}</a>
-                </td>
-                <td
-                  style={
-                    d.status === "live"
-                      ? "color: green"
-                      : d.status === "failed"
-                        ? "color: red"
-                        : undefined
-                  }
-                >
-                  {d.status}
-                </td>
-                <td>{d.source ?? "-"}</td>
-                <td>{d.error_message ? d.error_message.slice(0, 60) : "-"}</td>
-                <td>{new Date(d.created_at).toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <p>
-          <em>No deployments.</em>
-        </p>
-      )}
+      <DeploymentTable deployments={deployments} />
 
       <h2>Danger Zone</h2>
       <form
