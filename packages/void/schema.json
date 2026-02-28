@@ -175,6 +175,10 @@
       },
       "additionalProperties": false
     },
+    "remote": {
+      "type": "boolean",
+      "description": "Connect to remote D1/KV/R2 bindings during local development. Can also be set via VOID_REMOTE=1 environment variable."
+    },
     "wrangler": {
       "type": "object",
       "description": "Curated wrangler config passthrough. Binding arrays (d1_databases, kv_namespaces, r2_buckets) are not allowed here — bindings are fully managed by void.",

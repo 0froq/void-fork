@@ -130,6 +130,26 @@ App type. If omitted, auto-detected on first deploy. See [Supported App Types](.
 
 Output directory for static deploys, relative to the project root. Only relevant when `appType` is `"spa"` or `"prebuilt"`. Defaults to `"dist"`.
 
+### `remote`
+
+Use remote D1/KV/R2 bindings during local development instead of local miniflare. When enabled, the Void plugin replaces local bindings with proxy-backed versions that forward operations to your deployed project's real resources via the Void proxy.
+
+```json
+{ "remote": true }
+```
+
+**Requirements:**
+
+- Must be logged in (`void login`)
+- Must have a linked project (`void link`)
+- Only affects D1 (`DB`), KV (`KV`, `AUTH_KV`), and R2 (`STORAGE`) bindings
+
+You can also enable remote mode via the `VOID_REMOTE=1` environment variable without modifying `void.json`:
+
+```bash
+VOID_REMOTE=1 pnpm dev
+```
+
 ### `wrangler`
 
 Curated Cloudflare Workers configuration. Binding arrays (`d1_databases`, `kv_namespaces`, `r2_buckets`) are not allowed here — bindings are fully managed by void via inference and the `bindings` field. Users wanting custom bindings should use a `wrangler.json` with real binding IDs and `wrangler deploy`.

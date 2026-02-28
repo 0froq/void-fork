@@ -70,6 +70,7 @@ The `void` package contains two parts:
 - **Cron jobs** — scheduled handlers via `defineScheduled`
 - **Queues** — typed producers and consumers via `defineQueue`
 - **AI** — `import { ai } from "void/ai"` for Workers AI inference, metered via AI Gateway proxy
+- **Remote bindings** — `remote: true` in `void.json` to use real D1/KV/R2 during local dev via proxy
 - **Binding inference** — auto-detects D1, KV, R2, AI, queues from source code
 - **Migration runner** — applies SQL migrations to local D1 on dev startup
 

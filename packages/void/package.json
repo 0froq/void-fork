@@ -78,6 +78,10 @@
       "types": "./dist/runtime/ai.d.mts",
       "import": "./dist/runtime/ai.mjs"
     },
+    "./remote": {
+      "types": "./dist/runtime/remote/index.d.mts",
+      "import": "./dist/runtime/remote/index.mjs"
+    },
     "./pages": {
       "types": "./dist/pages/index.d.mts",
       "import": "./dist/pages/index.mjs"

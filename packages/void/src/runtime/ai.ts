@@ -1,7 +1,7 @@
 import { getRuntimeEnv, type RuntimeEnv } from "./env";
 
-const PROXY_URL = "https://ai-proxy.void.cloud";
-const STAGING_PROXY_URL = "https://ai-proxy.staging.void.cloud";
+const PROXY_URL = "https://proxy.void.cloud/ai";
+const STAGING_PROXY_URL = "https://proxy.staging.void.cloud/ai";
 
 interface AiBackend {
   run(model: string, inputs: unknown, options?: unknown): Promise<unknown>;

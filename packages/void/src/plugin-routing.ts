@@ -35,6 +35,7 @@ const LOAD_ID_FILTER = /^virtual:void-(routes|client-worker)$/;
 interface RoutingPluginOptions {
   getAuth: () => AuthProvider[] | null;
   headConfig?: import("./pages/head").HeadConfig;
+  remoteMode?: boolean;
 }
 
 export function routingPlugin(root: string, options: RoutingPluginOptions): Plugin {
@@ -84,6 +85,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
 
   const handlerFile = resolveFile("void/handler");
   const authClientPath = join(dirname(resolveFile("void/client")), "auth-client.mjs");
+  const remote = options.remoteMode
+    ? { remotePath: resolveFile("void/remote"), envPath: resolveFile("void/_env") }
+    : undefined;
   const compileOptions: CompileOptions = {
     honoPath: resolveFile("hono"),
     responsePath: resolveFile("void/response"),
@@ -143,7 +147,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   const outDir = join(root, ".void");
   mkdirSync(outDir, { recursive: true });
   // Write initial entry — will be re-written with hasQueues once scan completes
-  writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry());
+  writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(false, remote));
 
   return {
     name: "void:routing",
@@ -177,7 +181,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       writeRouteTypes();
       writeQueueTypes();
       // Re-write entry with queue handler if needed
-      writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(scan!.queues.length > 0));
+      writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(scan!.queues.length > 0, remote));
     },
 
     resolveId: {
@@ -251,7 +255,10 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         await rescan();
         writeRouteTypes();
         writeQueueTypes();
-        writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(scan!.queues.length > 0));
+        writeFileSync(
+          join(outDir, "entry.ts"),
+          compileWorkerEntry(scan!.queues.length > 0, remote),
+        );
 
         // For structural changes (file add/remove), send full-reload to trigger
         // a program reload so the workerd picks up new/removed routes.

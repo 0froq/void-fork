@@ -68,6 +68,7 @@ export default defineConfig({
     "src/runtime/storage.ts",
     "src/runtime/isr.ts",
     "src/runtime/ai.ts",
+    "src/runtime/remote/index.ts",
     "src/pages/index.ts",
     "src/pages/protocol.ts",
     "src/pages/head.ts",

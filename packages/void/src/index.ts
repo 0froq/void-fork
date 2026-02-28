@@ -73,6 +73,8 @@ function readVoidDevCredentials(root: string): CredentialStatus {
 
 const DEFAULT_API_URL = "https://api.void.cloud";
 const STAGING_API_URL = "https://api.staging.void.cloud";
+const DEFAULT_PROXY_URL = "https://proxy.void.cloud";
+const STAGING_PROXY_URL = "https://proxy.staging.void.cloud";
 
 /**
  * Interactive AI setup prompt shown during dev server startup when the user
@@ -272,6 +274,9 @@ export function voidPlugin(options?: {
     authProviders = bindings.needsAuth ? ["email"] : null;
   }
 
+  // Remote mode — use platform proxy for D1/KV/R2 instead of local miniflare.
+  const remoteMode = config.remote === true || process.env.VOID_REMOTE === "1";
+
   // Core worker config — always set by voidPlugin (main, triggers, assets).
   // Bindings are handled separately in the config function below.
   const workerConfig: Record<string, unknown> = {};
@@ -369,6 +374,21 @@ export function voidPlugin(options?: {
       }
     }
 
+    // Remote bindings — inject proxy credentials when remote mode is enabled.
+    // In remote mode, D1/KV/R2 bindings are replaced with proxy-backed versions
+    // that forward operations to the platform proxy over HTTPS.
+    if (remoteMode && (bindings.needsD1 || bindings.needsKV || bindings.needsR2)) {
+      const credentials = readVoidDevCredentials(root);
+      if (credentials.status === "ok") {
+        const vars = (result.vars as Record<string, string>) ?? {};
+        vars.__VOID_PROXY_URL = credentials.staging ? STAGING_PROXY_URL : DEFAULT_PROXY_URL;
+        vars.__VOID_TOKEN = credentials.token;
+        vars.__VOID_PROJECT_ID = credentials.projectId;
+        vars.__VOID_REMOTE = "1";
+        result.vars = vars;
+      }
+    }
+
     return result as Partial<WorkerConfig>;
   }
 
@@ -413,6 +433,24 @@ export function voidPlugin(options?: {
       }
     },
     configureServer(server) {
+      // Remote mode status — log which bindings are using the proxy
+      if (remoteMode && (bindings.needsD1 || bindings.needsKV || bindings.needsR2)) {
+        const credentials = readVoidDevCredentials(root);
+        if (credentials.status === "ok") {
+          const lines = ["\x1b[36mRemote bindings active\x1b[39m"];
+          if (bindings.needsD1) lines.push("  DB      \x1b[2m→ remote D1\x1b[22m");
+          if (bindings.needsKV) lines.push("  KV      \x1b[2m→ remote KV\x1b[22m");
+          if (bindings.needsR2) lines.push("  STORAGE \x1b[2m→ remote R2\x1b[22m");
+          voidLog(lines.join("\n         "));
+        } else if (credentials.status === "no-token") {
+          voidWarn("Remote mode requires authentication. Run `void login`, then restart.");
+          voidWarn("Falling back to local bindings.");
+        } else {
+          voidWarn("Remote mode requires a linked project. Run `void link` first.");
+          voidWarn("Falling back to local bindings.");
+        }
+      }
+
       // AI onboarding: detect missing credentials early and guide users
       if (bindings.needsAI) {
         const credentials = readVoidDevCredentials(root);
@@ -568,7 +606,7 @@ export function voidPlugin(options?: {
     restartPlugin(),
     bindingWatchPlugin,
     envPlugin,
-    routingPlugin(root, { getAuth: () => authProviders, headConfig: config.head }),
+    routingPlugin(root, { getAuth: () => authProviders, headConfig: config.head, remoteMode }),
     dbTypesPlugin(root, true),
     migrationPlugin(root),
     prerenderPlugin(root, config),

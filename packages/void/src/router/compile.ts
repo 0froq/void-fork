@@ -904,11 +904,42 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
  * serializes the native MessageBatch and dispatches it to the
  * `/__queue` Hono route. In local dev Miniflare delivers batches
  * natively to this export; in production the relay worker does it.
+ *
+ * When `remotePath` is provided, wraps the fetch handler to detect
+ * remote mode (`__VOID_REMOTE`) and replace local bindings with
+ * proxy-backed versions.
  */
-export function compileWorkerEntry(hasQueues = false): string {
+export function compileWorkerEntry(
+  hasQueues = false,
+  remote?: { remotePath: string; envPath: string },
+): string {
+  const remotePath = remote?.remotePath;
+  const remoteImport = remote
+    ? `import { createRemoteEnv } from ${JSON.stringify(remote.remotePath)};\nimport { withRuntimeEnv } from ${JSON.stringify(remote.envPath)};\n`
+    : "";
+
+  const fetchHandler = remotePath
+    ? `async (request, env, ctx) => {
+  if (env.__VOID_REMOTE === "1") {
+    env = createRemoteEnv(env);
+    return withRuntimeEnv(env, () => app.fetch(request, env, ctx));
+  }
+  return app.fetch(request, env, ctx);
+}`
+    : "app.fetch";
+
+  const queueFetchCall = remotePath
+    ? `if (env.__VOID_REMOTE === "1") {
+    env = createRemoteEnv(env);
+    await withRuntimeEnv(env, () => app.fetch(req, env, ctx));
+  } else {
+    await app.fetch(req, env, ctx);
+  }`
+    : "await app.fetch(req, env, ctx);";
+
   if (hasQueues) {
     return `import app, { scheduled } from 'virtual:void-routes';
-
+${remoteImport}
 async function queue(batch, env, ctx) {
   const messages = [...batch.messages].map(m => ({
     id: m.id, timestamp: m.timestamp.toISOString(),
@@ -919,14 +950,14 @@ async function queue(batch, env, ctx) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ queue: batch.queue, messages }),
   });
-  await app.fetch(req, env, ctx);
+  ${queueFetchCall}
 }
 
-export default { fetch: app.fetch, scheduled, queue };`;
+export default { fetch: ${fetchHandler}, scheduled, queue };`;
   }
   return `import app, { scheduled } from 'virtual:void-routes';
-
-export default { fetch: app.fetch, scheduled };`;
+${remoteImport}
+export default { fetch: ${fetchHandler}, scheduled };`;
 }
 
 /**

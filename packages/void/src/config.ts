@@ -40,6 +40,7 @@ export interface VoidConfig {
   appType?: "spa" | "prebuilt" | "fullstack" | "framework";
   output?: "server" | "static";
   outputDir?: string;
+  remote?: boolean;
   wrangler?: WranglerConfig;
 }
 
@@ -304,6 +305,11 @@ export function readConfig(root: string): VoidConfig {
         }
       }
     }
+  }
+
+  // Validate remote
+  if (obj.remote !== undefined && typeof obj.remote !== "boolean") {
+    throw new Error(`"remote" in ${CONFIG_FILE} must be a boolean`);
   }
 
   // Validate wrangler
