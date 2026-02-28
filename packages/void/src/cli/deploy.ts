@@ -5,7 +5,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { intro, outro, log, note, spinner, confirm, isCancel } from "@clack/prompts";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
-import { packageBuild, packageStaticBuild, packageFrameworkBuild } from "./package";
+import {
+  packageBuild,
+  packageStaticBuild,
+  packageFrameworkBuild,
+  collectAndHashAssets,
+} from "./package";
 import { PlatformClient } from "./client";
 import {
   inferProjectBindings,
@@ -193,11 +198,20 @@ async function runStaticDeploy(
     process.exit(1);
   }
 
-  // Package & Upload
   const s = spinner();
 
-  s.start("Packaging...");
-  const formData = packageStaticBuild(preset.outputDir, preset.appType);
+  // Preflight: hash assets and check which ones changed
+  s.start("Checking for changes...");
+  const { assetManifest } = collectAndHashAssets(preset.outputDir);
+  const { needed, skipped } = await client.preflight(config.projectId, assetManifest);
+
+  if (skipped > 0) {
+    log.info(`Skipping ${skipped} unchanged asset(s)`);
+  }
+
+  s.message("Packaging...");
+  const neededSet = skipped > 0 ? new Set(needed) : null;
+  const formData = packageStaticBuild(preset.outputDir, preset.appType, neededSet);
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
 
@@ -205,7 +219,12 @@ async function runStaticDeploy(
   const result = await client.deploy(config.projectId, formData);
   s.stop("Deployed!");
 
-  const summary = [`${typeLabel} — ${result.assets} static asset(s)`];
+  const uploaded = result.assets - skipped;
+  const assetSummary =
+    skipped > 0
+      ? `${result.assets} static asset(s) (${skipped} unchanged, ${uploaded} uploaded)`
+      : `${result.assets} static asset(s)`;
+  const summary = [`${typeLabel} — ${assetSummary}`];
   note(summary.join("\n"), result.url);
 
   outro("Done!");
@@ -326,7 +345,17 @@ async function runFrameworkDeploy(
   // 11. Package & deploy
   const s = spinner();
 
-  s.start("Packaging...");
+  // Preflight: hash assets and check which ones changed
+  s.start("Checking for changes...");
+  const { assetManifest } = collectAndHashAssets(assetsDir);
+  const { needed, skipped } = await client.preflight(config.projectId, assetManifest);
+
+  if (skipped > 0) {
+    log.info(`Skipping ${skipped} unchanged asset(s)`);
+  }
+
+  s.message("Packaging...");
+  const neededSet = skipped > 0 ? new Set(needed) : null;
   const formData = packageFrameworkBuild({
     workerDir: actualWorkerDir,
     workerMain: actualWorkerMain,
@@ -345,6 +374,7 @@ async function runFrameworkDeploy(
       compatibilityDate: wranglerCompat.compatibilityDate,
       compatibilityFlags: wranglerCompat.compatibilityFlags,
     },
+    neededAssets: neededSet,
   });
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
@@ -353,7 +383,12 @@ async function runFrameworkDeploy(
   const result = await client.deploy(config.projectId, formData);
   s.stop("Deployed!");
 
-  const summary = [`${result.workers} worker module(s), ${result.assets} static asset(s)`];
+  const uploaded = result.assets - skipped;
+  const assetSummary =
+    skipped > 0
+      ? `${result.assets} static asset(s) (${skipped} unchanged, ${uploaded} uploaded)`
+      : `${result.assets} static asset(s)`;
+  const summary = [`${result.workers} worker module(s), ${assetSummary}`];
   if (result.migrations) {
     summary.push(`${result.migrations} migration(s) applied`);
   }
@@ -521,7 +556,17 @@ async function runFullDeploy(
     ? { not_found_handling: "none" }
     : { not_found_handling: "single-page-application" };
 
-  s.start("Packaging...");
+  // Preflight: hash assets and check which ones changed
+  s.start("Checking for changes...");
+  const { assetManifest } = collectAndHashAssets(clientDir);
+  const { needed, skipped } = await client.preflight(config.projectId, assetManifest);
+
+  if (skipped > 0) {
+    log.info(`Skipping ${skipped} unchanged asset(s)`);
+  }
+
+  s.message("Packaging...");
+  const neededSet = skipped > 0 ? new Set(needed) : null;
   const formData = packageBuild(
     distDir,
     workerDirName,
@@ -539,6 +584,7 @@ async function runFullDeploy(
       compatibilityDate: wranglerCompat.compatibilityDate,
       compatibilityFlags: wranglerCompat.compatibilityFlags,
     },
+    neededSet,
   );
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
@@ -547,7 +593,12 @@ async function runFullDeploy(
   const result = await client.deploy(config.projectId, formData);
   s.stop("Deployed!");
 
-  const summary = [`${result.workers} worker module(s), ${result.assets} static asset(s)`];
+  const uploaded = result.assets - skipped;
+  const assetSummary =
+    skipped > 0
+      ? `${result.assets} static asset(s) (${skipped} unchanged, ${uploaded} uploaded)`
+      : `${result.assets} static asset(s)`;
+  const summary = [`${result.workers} worker module(s), ${assetSummary}`];
   if (result.migrations) {
     summary.push(`${result.migrations} migration(s) applied`);
   }

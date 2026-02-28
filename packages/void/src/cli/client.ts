@@ -134,6 +134,33 @@ export class PlatformClient {
     return res.json();
   }
 
+  async preflight(
+    projectId: string,
+    assetManifest: Record<string, { hash: string; size: number }>,
+  ): Promise<{ needed: string[]; total: number; skipped: number }> {
+    const total = Object.keys(assetManifest).length;
+    try {
+      const res = await fetch(`${this.baseUrl}/projects/${projectId}/deploy/preflight`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.token}`,
+        },
+        body: JSON.stringify({ assetManifest }),
+      });
+
+      if (!res.ok) {
+        // Preflight not supported or error — fall back to uploading everything
+        return { needed: Object.keys(assetManifest), total, skipped: 0 };
+      }
+
+      return res.json();
+    } catch {
+      // Network error — fall back to uploading everything
+      return { needed: Object.keys(assetManifest), total, skipped: 0 };
+    }
+  }
+
   async deploy(projectId: string, formData: FormData): Promise<DeployResponse> {
     const res = await fetch(`${this.baseUrl}/projects/${projectId}/deploy`, {
       method: "POST",

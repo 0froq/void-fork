@@ -1,8 +1,67 @@
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { InferredBindings } from "../inference/walk";
 import type { MigrationFile } from "../migrations/validate";
 import type { AssetConfig, DeployManifest, QueueMeta, ScheduleMeta } from "./types";
+
+/**
+ * Compute a CF-compatible asset hash: SHA-256, first 32 hex chars.
+ * Must match the API's computeAssetHash algorithm exactly.
+ */
+export function computeAssetHash(content: Buffer): string {
+  return createHash("sha256").update(content).digest("hex").slice(0, 32);
+}
+
+export interface AssetManifestEntry {
+  hash: string;
+  size: number;
+}
+
+/**
+ * Collect all files in a directory, compute hashes, and return both the
+ * manifest (for preflight) and the raw file map (for selective packaging).
+ */
+export function collectAndHashAssets(dir: string): {
+  assetManifest: Record<string, AssetManifestEntry>;
+  assetFiles: Map<string, Buffer>;
+} {
+  const assetManifest: Record<string, AssetManifestEntry> = {};
+  const assetFiles = new Map<string, Buffer>();
+
+  try {
+    const files = collectFiles(dir);
+    for (const filePath of files) {
+      const relativePath = "/" + relative(dir, filePath);
+      const content = readFileSync(filePath);
+      assetManifest[relativePath] = {
+        hash: computeAssetHash(content),
+        size: content.length,
+      };
+      assetFiles.set(relativePath, content);
+    }
+  } catch {
+    // Directory doesn't exist — no assets
+  }
+
+  return { assetManifest, assetFiles };
+}
+
+/**
+ * Append asset files to FormData, filtered by the set of needed paths.
+ * If neededPaths is null, all assets are included (no preflight).
+ */
+export function appendAssets(
+  formData: FormData,
+  assetFiles: Map<string, Buffer>,
+  neededPaths: Set<string> | null,
+): void {
+  for (const [path, content] of assetFiles) {
+    if (neededPaths && !neededPaths.has(path)) continue;
+    const key = path.startsWith("/") ? path.slice(1) : path;
+    formData.append(`asset:${key}`, new Blob([new Uint8Array(content)]), key);
+  }
+}
 
 /**
  * Package the build output into a FormData ready for upload.
@@ -38,6 +97,7 @@ export function packageBuild(
   prerender?: string[],
   assetConfig?: AssetConfig,
   options?: PackageOptions,
+  neededAssets?: Set<string> | null,
 ): FormData {
   const formData = new FormData();
 
@@ -122,6 +182,7 @@ export function packageBuild(
     const clientFiles = collectFiles(clientDir);
     for (const filePath of clientFiles) {
       const relativePath = relative(clientDir, filePath);
+      if (neededAssets && !neededAssets.has("/" + relativePath)) continue;
       const content = readFileSync(filePath);
       formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
     }
@@ -129,13 +190,19 @@ export function packageBuild(
     // No client directory — API-only project
   }
 
+  if (neededAssets) formData.append("preflight", "true");
+
   return formData;
 }
 
 /**
  * Package a static build (no worker) into a FormData ready for upload.
  */
-export function packageStaticBuild(outputDir: string, appType: "spa" | "prebuilt"): FormData {
+export function packageStaticBuild(
+  outputDir: string,
+  appType: "spa" | "prebuilt",
+  neededAssets?: Set<string> | null,
+): FormData {
   const formData = new FormData();
 
   const manifest: DeployManifest = {
@@ -150,9 +217,12 @@ export function packageStaticBuild(outputDir: string, appType: "spa" | "prebuilt
   const files = collectFiles(outputDir);
   for (const filePath of files) {
     const relativePath = relative(outputDir, filePath);
+    if (neededAssets && !neededAssets.has("/" + relativePath)) continue;
     const content = readFileSync(filePath);
     formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
   }
+
+  if (neededAssets) formData.append("preflight", "true");
 
   return formData;
 }
@@ -178,6 +248,7 @@ export function packageFrameworkBuild(opts: {
   assetConfig?: AssetConfig;
   vars?: Record<string, string>;
   packageOptions?: PackageOptions;
+  neededAssets?: Set<string> | null;
 }): FormData {
   const formData = new FormData();
   const po = opts.packageOptions;
@@ -238,12 +309,15 @@ export function packageFrameworkBuild(opts: {
       // Skip worker files when workerDir is inside assetsDir
       if (isOverlap && filePath.replace(/\\/g, "/").startsWith(workerDirNorm)) continue;
       const relativePath = relative(opts.assetsDir, filePath);
+      if (opts.neededAssets && !opts.neededAssets.has("/" + relativePath)) continue;
       const content = readFileSync(filePath);
       formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
     }
   } catch {
     // No assets directory
   }
+
+  if (opts.neededAssets) formData.append("preflight", "true");
 
   return formData;
 }
