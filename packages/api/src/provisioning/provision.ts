@@ -130,7 +130,7 @@ async function createCfResource(
     }
     case "queue": {
       const result = await createQueue(accountId, apiToken, resourceName);
-      return result.queue_id;
+      return result.queue_name;
     }
   }
 }
@@ -155,7 +155,7 @@ async function lookupCfResource(
       return resourceName;
     case "queue": {
       const result = await getQueueByName(accountId, apiToken, resourceName);
-      return result.queue_id;
+      return result.queue_name;
     }
   }
 }

@@ -642,7 +642,7 @@ describe("POST /projects/:id/deploy", () => {
       .where(eq(resources.project_id, project.id))
       .get();
     expect(resource).toBeDefined();
-    expect(resource!.cf_id).toBe("queue-test-id");
+    expect(resource!.cf_id).toBe("test-queue");
     expect(resource!.binding_name).toBe("emails");
 
     // Verify addQueueConsumer was called
@@ -689,7 +689,7 @@ describe("POST /projects/:id/deploy", () => {
 
     const queueBindings = (metadata.bindings ?? []).filter((b) => b.type === "queue");
     expect(queueBindings).toEqual([
-      { type: "queue", name: "QUEUE_EMAILS", queue_name: "queue-test-id" },
+      { type: "queue", name: "QUEUE_EMAILS", queue_name: "test-queue" },
     ]);
   });
 
@@ -715,7 +715,7 @@ describe("POST /projects/:id/deploy", () => {
     expect(res.status).toBe(200);
 
     // Verify queue routing KV entry
-    const queueRouting = await env.ROUTING.get("queue:queue-test-id", "json");
+    const queueRouting = await env.ROUTING.get("queue:test-queue", "json");
     expect(queueRouting).toEqual({
       workerName: "user-queue-kv-app",
       projectId: project.id,
