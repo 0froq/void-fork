@@ -8,6 +8,7 @@ import {
   clearTables,
   createTestUser,
   createTestProject,
+  createTestDeployment,
   mockCfApi,
   cfSuccess,
   CF_ACCOUNT_ID,
@@ -1087,5 +1088,170 @@ describe("Deploy with prerendering", () => {
     );
     expect(res.status).toBe(200);
     expect(statusDuringPrerender).toBe("prerendering");
+  });
+});
+
+describe("asset_hashes storage", () => {
+  it("stores asset_hashes in deployment record after successful deploy", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    mockCfApi();
+
+    const form = buildDeployForm({ assets: { "index.html": "<html>hello</html>" } });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { deployment: string };
+
+    const row = await env.db
+      .select({ asset_hashes: deployments.asset_hashes })
+      .from(deployments)
+      .where(eq(deployments.id, data.deployment))
+      .get();
+
+    expect(row?.asset_hashes).toBeTruthy();
+    const hashes = JSON.parse(row!.asset_hashes!);
+    expect(hashes["/index.html"]).toBeDefined();
+    expect(hashes["/index.html"].hash).toHaveLength(32);
+    expect(hashes["/index.html"].size).toBeGreaterThan(0);
+  });
+});
+
+describe("POST /projects/:id/deploy/preflight", () => {
+  it("returns 401 without auth", async () => {
+    const res = await app.fetch(
+      new Request("http://localhost/projects/proj_fake/deploy/preflight", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assetManifest: {} }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns all assets as needed on first deploy", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          assetManifest: {
+            "/index.html": { hash: "a".repeat(32), size: 100 },
+            "/app.js": { hash: "b".repeat(32), size: 200 },
+          },
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { needed: string[]; total: number; skipped: number };
+    expect(data.needed.sort()).toEqual(["/app.js", "/index.html"]);
+    expect(data.total).toBe(2);
+    expect(data.skipped).toBe(0);
+  });
+
+  it("skips unchanged assets from previous deploy", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+
+    // Create a previous deployment with known asset hashes
+    const prevManifest = {
+      "/index.html": { hash: "a".repeat(32), size: 100 },
+      "/app.js": { hash: "b".repeat(32), size: 200 },
+      "/style.css": { hash: "c".repeat(32), size: 300 },
+    };
+    const prevDeploy = await createTestDeployment(env.db, project.id, "live");
+    await env.db
+      .update(deployments)
+      .set({ asset_hashes: JSON.stringify(prevManifest) })
+      .where(eq(deployments.id, prevDeploy.id));
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          assetManifest: {
+            "/index.html": { hash: "a".repeat(32), size: 100 }, // unchanged
+            "/app.js": { hash: "x".repeat(32), size: 250 }, // changed
+            "/new.js": { hash: "d".repeat(32), size: 400 }, // new
+            // style.css removed
+          },
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { needed: string[]; total: number; skipped: number };
+    expect(data.needed.sort()).toEqual(["/app.js", "/new.js"]);
+    expect(data.total).toBe(3);
+    expect(data.skipped).toBe(1);
+  });
+
+  it("merges previous asset manifest when preflight flag is set on deploy", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+
+    // Set up a previous deploy with known asset hashes
+    const prevManifest = {
+      "/index.html": { hash: "a".repeat(32), size: 100 },
+      "/app.js": { hash: "b".repeat(32), size: 200 },
+    };
+    const prevDeploy = await createTestDeployment(env.db, project.id, "live");
+    await env.db
+      .update(deployments)
+      .set({ asset_hashes: JSON.stringify(prevManifest) })
+      .where(eq(deployments.id, prevDeploy.id));
+
+    // Deploy with preflight=true, only sending the changed asset
+    let sessionManifest: Record<string, unknown> | null = null;
+    mockCfApi({
+      assetUploadSession: (_url, init) => {
+        const body = JSON.parse(init?.body as string);
+        sessionManifest = body.manifest;
+        return cfSuccess({ jwt: "test-asset-jwt", buckets: [] });
+      },
+    });
+
+    const form = new FormData();
+    form.append("manifest", JSON.stringify({ version: 2, bindings: {} }));
+    form.append("preflight", "true");
+    form.append("asset:app.js", new Blob(["new content"]), "app.js");
+    form.append("worker:index.js", new Blob(["export default {}"]), "index.js");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+
+    // CF session should have received the COMPLETE manifest (merged)
+    expect(sessionManifest).toBeDefined();
+    expect(Object.keys(sessionManifest!).sort()).toEqual(["/app.js", "/index.html"]);
   });
 });

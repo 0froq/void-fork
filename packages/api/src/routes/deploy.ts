@@ -10,7 +10,10 @@ import {
   getDomainsByProjectId,
   countUserDeploymentsToday,
   getActiveDeployment,
+  getLastLiveAssetManifest,
 } from "../db";
+import { eq } from "drizzle-orm";
+import { deployments } from "../schema";
 import { provisionBindings } from "../provisioning/provision";
 import { addQueueConsumer } from "../provisioning/cloudflare-api";
 import { runRemoteMigrations, type RemoteMigration } from "../migrations/remote-runner";
@@ -103,6 +106,20 @@ app.post("/:id/deploy", async (c) => {
 
     // Collect assets from FormData and compute CF-compatible hashes
     const { manifest: assetManifest, assetsByHash } = await collectAssets(formData);
+
+    // When preflight was used, merge previous deploy's manifest for skipped assets
+    const preflightUsed = formData.get("preflight") === "true";
+    if (preflightUsed) {
+      const prevManifest = await getLastLiveAssetManifest(c.get("db"), projectId);
+      if (prevManifest) {
+        for (const [path, entry] of Object.entries(prevManifest)) {
+          if (!(path in assetManifest)) {
+            assetManifest[path] = entry;
+          }
+        }
+      }
+    }
+
     const assetCount = Object.keys(assetManifest).length;
 
     // Determine if this is a static-only deploy (no worker files in FormData)
@@ -199,6 +216,15 @@ app.post("/:id/deploy", async (c) => {
 
       await updateDeploymentStatus(c.get("db"), deployment.id, "live");
       await updateProjectMode(c.get("db"), projectId, mode);
+
+      // Store asset manifest for future preflight dedup
+      if (assetCount > 0) {
+        await c
+          .get("db")
+          .update(deployments)
+          .set({ asset_hashes: JSON.stringify(assetManifest) })
+          .where(eq(deployments.id, deployment.id));
+      }
 
       const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
       const activeDomains = projectDomains.filter((d) => d.status === "active");
@@ -478,6 +504,15 @@ app.post("/:id/deploy", async (c) => {
     await updateDeploymentStatus(c.get("db"), deployment.id, "live");
     await updateProjectMode(c.get("db"), projectId, manifest.framework ? "framework" : "fullstack");
 
+    // Store asset manifest for future preflight dedup
+    if (assetCount > 0) {
+      await c
+        .get("db")
+        .update(deployments)
+        .set({ asset_hashes: JSON.stringify(assetManifest) })
+        .where(eq(deployments.id, deployment.id));
+    }
+
     const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
     const activeDomains = projectDomains.filter((d) => d.status === "active");
     const fullUrl =
@@ -501,6 +536,41 @@ app.post("/:id/deploy", async (c) => {
     await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
     throw err;
   }
+});
+
+// Deploy preflight — returns which assets need uploading based on diff with last deploy
+app.post("/:id/deploy/preflight", async (c) => {
+  const projectId = c.req.param("id");
+  const project = await getProject(c.get("db"), projectId);
+  if (!project) {
+    return c.json({ error: "project not found" }, 404);
+  }
+
+  if (project.user_id !== c.get("userId")) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+
+  const body = await c.req.json<{
+    assetManifest: Record<string, { hash: string; size: number }>;
+  }>();
+  const { assetManifest } = body;
+  const total = Object.keys(assetManifest).length;
+
+  const prevManifest = await getLastLiveAssetManifest(c.get("db"), projectId);
+
+  if (!prevManifest) {
+    return c.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
+  }
+
+  const needed: string[] = [];
+  for (const [path, entry] of Object.entries(assetManifest)) {
+    const prev = prevManifest[path];
+    if (!prev || prev.hash !== entry.hash) {
+      needed.push(path);
+    }
+  }
+
+  return c.json({ needed, total, skipped: total - needed.length });
 });
 
 async function uploadPool<T>(

@@ -73,6 +73,7 @@ export const deployments = sqliteTable(
     source: text("source"),
     commit: text("commit"),
     error_message: text("error_message"),
+    asset_hashes: text("asset_hashes"),
     created_at: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`),

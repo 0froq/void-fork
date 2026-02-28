@@ -160,6 +160,7 @@ export async function createDeployment(
     commit: commit ?? null,
     manifest,
     error_message: null,
+    asset_hashes: null,
     created_at: new Date().toISOString(),
     deployed_at: null,
   };
@@ -234,6 +235,22 @@ export async function getActiveDeployment(db: Db, projectId: string): Promise<De
       .limit(1)
       .get()) ?? null
   );
+}
+
+export async function getLastLiveAssetManifest(
+  db: Db,
+  projectId: string,
+): Promise<Record<string, { hash: string; size: number }> | null> {
+  const row = await db
+    .select({ asset_hashes: deployments.asset_hashes })
+    .from(deployments)
+    .where(and(eq(deployments.project_id, projectId), eq(deployments.status, "live")))
+    .orderBy(desc(deployments.created_at))
+    .limit(1)
+    .get();
+
+  if (!row?.asset_hashes) return null;
+  return JSON.parse(row.asset_hashes);
 }
 
 // --- Resources ---

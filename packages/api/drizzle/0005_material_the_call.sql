@@ -1,0 +1,1 @@
+ALTER TABLE `deployments` ADD `asset_hashes` text;
