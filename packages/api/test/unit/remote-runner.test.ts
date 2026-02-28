@@ -5,8 +5,8 @@ const ACCOUNT_ID = "test-account";
 const API_TOKEN = "test-token";
 const DATABASE_ID = "d1-uuid-123";
 
-// Track all queries made to D1 (may be single objects or batched arrays)
-let queries: ({ sql: string; params?: unknown[] } | { sql: string; params?: unknown[] }[])[] = [];
+// Track all queries made to D1
+let queries: { sql: string; params?: unknown[] }[] = [];
 
 // Applied migrations state (simulates _migrations table)
 let appliedMigrations: string[] = [];
@@ -19,26 +19,13 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_url: string, init: RequestInit) => {
-      const body = JSON.parse(init.body as string);
+      const body = JSON.parse(init.body as string) as { sql: string; params?: unknown[] };
       queries.push(body);
 
-      // Handle batched queries (array of statements)
-      if (Array.isArray(body)) {
-        for (const stmt of body) {
-          if (stmt.sql?.startsWith("INSERT INTO _migrations")) {
-            appliedMigrations.push(stmt.params[0]);
-          }
-        }
-        return new Response(
-          JSON.stringify({
-            success: true,
-            errors: [],
-            result: body.map(() => ({ results: [] })),
-          }),
-        );
+      if (body.sql?.startsWith("INSERT INTO _migrations")) {
+        appliedMigrations.push(body.params![0] as string);
       }
 
-      // Handle single queries (CREATE TABLE, SELECT)
       if (body.sql === "SELECT name FROM _migrations") {
         return new Response(
           JSON.stringify({
@@ -73,23 +60,18 @@ describe("runRemoteMigrations", () => {
     expect(queries[1]).toEqual(expect.objectContaining({ sql: "SELECT name FROM _migrations" }));
   });
 
-  it("applies pending migrations in a batched request", async () => {
+  it("applies pending migrations as individual queries", async () => {
     const result = await runRemoteMigrations(ACCOUNT_ID, API_TOKEN, DATABASE_ID, [
       { name: "001_create.sql", sql: "CREATE TABLE users (id TEXT);" },
     ]);
 
     expect(result.applied).toEqual(["001_create.sql"]);
     expect(result.skipped).toEqual([]);
-    // Should have: CREATE TABLE, SELECT, batched [migration SQL, INSERT]
-    expect(queries).toHaveLength(3);
-    // Third query should be a batch (array) with migration + INSERT
-    const batch = queries[2];
-    expect(Array.isArray(batch)).toBe(true);
-    const batchArr = batch as { sql: string; params?: unknown[] }[];
-    expect(batchArr).toHaveLength(2);
-    expect(batchArr[0].sql).toBe("CREATE TABLE users (id TEXT);");
-    expect(batchArr[1].sql).toContain("INSERT INTO _migrations");
-    expect(batchArr[1].params![0]).toBe("001_create.sql");
+    // Should have: CREATE TABLE, SELECT, migration SQL, INSERT
+    expect(queries).toHaveLength(4);
+    expect(queries[2].sql).toBe("CREATE TABLE users (id TEXT);");
+    expect(queries[3].sql).toContain("INSERT INTO _migrations");
+    expect(queries[3].params![0]).toBe("001_create.sql");
   });
 
   it("skips already-applied migrations", async () => {
@@ -111,11 +93,12 @@ describe("runRemoteMigrations", () => {
     ]);
 
     expect(result.applied).toEqual(["001_create.sql", "002_more.sql"]);
-    // CREATE TABLE IF NOT EXISTS, SELECT, batch1, batch2
-    expect(queries).toHaveLength(4);
-    // Each migration is a batch of [SQL, INSERT]
-    expect(Array.isArray(queries[2])).toBe(true);
-    expect(Array.isArray(queries[3])).toBe(true);
+    // CREATE TABLE IF NOT EXISTS, SELECT, SQL1, INSERT1, SQL2, INSERT2
+    expect(queries).toHaveLength(6);
+    expect(queries[2].sql).toBe("CREATE TABLE a;");
+    expect(queries[3].sql).toContain("INSERT INTO _migrations");
+    expect(queries[4].sql).toBe("CREATE TABLE b;");
+    expect(queries[5].sql).toContain("INSERT INTO _migrations");
   });
 
   it("handles empty migrations list", async () => {
