@@ -3,6 +3,8 @@
 **Date:** 2026-02-22
 **Status:** Implemented
 
+> **Note:** The standalone `ai-proxy` worker described in this doc has been consolidated into the unified `proxy` worker (`packages/proxy`, deployed at `proxy.void.cloud`). AI functionality is preserved; the proxy now also handles D1/KV/R2 remote bindings. See [0036-remote-bindings.md](./0036-remote-bindings.md).
+
 ---
 
 ## Summary
