@@ -32,6 +32,7 @@ const integrationLinks = {
     { text: "Coding Agents", link: "integrations/agents" },
     { text: "Hono", link: "integrations/hono" },
     { text: "Cloudflare", link: "integrations/cloudflare" },
+    { text: "Node.js / Bun / Deno", link: "integrations/nodejs-bun-deno" },
     { text: "ORMs and External Databases", link: "integrations/orms-and-external-dbs" },
     { text: "Auth Providers", link: "integrations/auth-providers" },
     { text: "Payment Processors", link: "integrations/payment-processors" },
