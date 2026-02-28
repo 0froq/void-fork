@@ -63,7 +63,8 @@
 - [ ] Pages mode: React adapter
 - [ ] Pages mode: update agent prompts for pages
 - [ ] Pre-rendering (bring back with new architecture)
-- [ ] AI binding (tier limit / pricing TBD)
+- [x] AI binding (`void/ai` with metered proxy)
+- [x] Remote bindings (`remote: true` — D1/KV/R2 via proxy for local dev)
 - [ ] Drizzle integration
 - [ ] Better-auth integration
 - [ ] More framework adapters (React Router, Astro, SvelteKit, Nuxt, SolidStart)

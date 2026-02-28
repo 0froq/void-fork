@@ -82,11 +82,14 @@ function createEnv(aiOverrides?: Partial<MockAi>, kvData?: Record<string, string
     },
     JWT_SECRET,
     ROUTING: createMockKv(kvData),
+    DB: {} as any,
+    CF_ACCOUNT_ID: "test-account-id",
+    CF_API_TOKEN: "test-api-token",
   };
 }
 
 function post(path: string, body: unknown, headers?: Record<string, string>): Request {
-  return new Request(`https://ai-proxy.void.cloud${path}`, {
+  return new Request(`https://proxy.void.cloud${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
@@ -95,13 +98,12 @@ function post(path: string, body: unknown, headers?: Record<string, string>): Re
 
 // --- Tests ---
 
-describe("ai-proxy worker", () => {
+describe("proxy worker", () => {
   let validToken: string;
   const aiTokens: Record<string, string> = {};
 
   beforeAll(async () => {
     validToken = await signJwt({ sub: "user_1", login: "testuser" }, JWT_SECRET);
-    // Pre-compute AI tokens for project IDs used in tests
     for (const pid of ["proj_1", "proj_42", "proj_99", "p"]) {
       aiTokens[pid] = await signAiToken(pid, JWT_SECRET);
     }
@@ -109,7 +111,7 @@ describe("ai-proxy worker", () => {
 
   describe("CORS", () => {
     it("returns 204 with CORS headers on OPTIONS", async () => {
-      const req = new Request("https://ai-proxy.void.cloud/run", { method: "OPTIONS" });
+      const req = new Request("https://proxy.void.cloud/ai/run", { method: "OPTIONS" });
       const res = await worker.fetch(req, createEnv());
 
       expect(res.status).toBe(204);
@@ -121,7 +123,7 @@ describe("ai-proxy worker", () => {
 
   describe("method validation", () => {
     it("rejects non-POST requests with 405", async () => {
-      const req = new Request("https://ai-proxy.void.cloud/run", { method: "GET" });
+      const req = new Request("https://proxy.void.cloud/ai/run", { method: "GET" });
       const res = await worker.fetch(req, createEnv());
 
       expect(res.status).toBe(405);
@@ -134,11 +136,9 @@ describe("ai-proxy worker", () => {
       const env = createEnv();
       const res = await worker.fetch(
         post(
-          "/run",
-          { action: "run", model: "test-model", inputs: {}, projectId: "proj_1" },
-          {
-            authorization: `Bearer ${validToken}`,
-          },
+          "/ai/run",
+          { model: "test-model", inputs: {}, projectId: "proj_1" },
+          { authorization: `Bearer ${validToken}` },
         ),
         env,
       );
@@ -155,11 +155,9 @@ describe("ai-proxy worker", () => {
 
       const res = await worker.fetch(
         post(
-          "/run",
-          { action: "run", model: "m", inputs: {}, projectId: "p" },
-          {
-            authorization: `Bearer ${expiredToken}`,
-          },
+          "/ai/run",
+          { model: "m", inputs: {}, projectId: "p" },
+          { authorization: `Bearer ${expiredToken}` },
         ),
         createEnv(),
       );
@@ -173,11 +171,9 @@ describe("ai-proxy worker", () => {
 
       const res = await worker.fetch(
         post(
-          "/run",
-          { action: "run", model: "m", inputs: {}, projectId: "p" },
-          {
-            authorization: `Bearer ${badToken}`,
-          },
+          "/ai/run",
+          { model: "m", inputs: {}, projectId: "p" },
+          { authorization: `Bearer ${badToken}` },
         ),
         createEnv(),
       );
@@ -188,11 +184,9 @@ describe("ai-proxy worker", () => {
     it("rejects malformed JWT with 401", async () => {
       const res = await worker.fetch(
         post(
-          "/run",
-          { action: "run", model: "m", inputs: {}, projectId: "p" },
-          {
-            authorization: "Bearer not.a.valid.jwt.at.all",
-          },
+          "/ai/run",
+          { model: "m", inputs: {}, projectId: "p" },
+          { authorization: "Bearer not.a.valid.jwt.at.all" },
         ),
         createEnv(),
       );
@@ -202,13 +196,7 @@ describe("ai-proxy worker", () => {
 
     it("requires projectId with JWT auth", async () => {
       const res = await worker.fetch(
-        post(
-          "/run",
-          { action: "run", model: "m", inputs: {} },
-          {
-            authorization: `Bearer ${validToken}`,
-          },
-        ),
+        post("/ai/run", { model: "m", inputs: {} }, { authorization: `Bearer ${validToken}` }),
         createEnv(),
       );
 
@@ -221,8 +209,7 @@ describe("ai-proxy worker", () => {
     it("accepts requests with valid aiToken", async () => {
       const env = createEnv();
       const res = await worker.fetch(
-        post("/run", {
-          action: "run",
+        post("/ai/run", {
           model: "test-model",
           inputs: {},
           projectId: "proj_1",
@@ -236,10 +223,7 @@ describe("ai-proxy worker", () => {
     });
 
     it("requires projectId and aiToken", async () => {
-      const res = await worker.fetch(
-        post("/run", { action: "run", model: "m", inputs: {} }),
-        createEnv(),
-      );
+      const res = await worker.fetch(post("/ai/run", { model: "m", inputs: {} }), createEnv());
 
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "projectId and aiToken required" });
@@ -247,7 +231,7 @@ describe("ai-proxy worker", () => {
 
     it("rejects request with missing aiToken", async () => {
       const res = await worker.fetch(
-        post("/run", { action: "run", model: "m", inputs: {}, projectId: "proj_1" }),
+        post("/ai/run", { model: "m", inputs: {}, projectId: "proj_1" }),
         createEnv(),
       );
 
@@ -257,8 +241,7 @@ describe("ai-proxy worker", () => {
 
     it("rejects request with wrong aiToken", async () => {
       const res = await worker.fetch(
-        post("/run", {
-          action: "run",
+        post("/ai/run", {
           model: "m",
           inputs: {},
           projectId: "proj_1",
@@ -273,12 +256,11 @@ describe("ai-proxy worker", () => {
 
     it("rejects request with aiToken for different projectId", async () => {
       const res = await worker.fetch(
-        post("/run", {
-          action: "run",
+        post("/ai/run", {
           model: "m",
           inputs: {},
           projectId: "proj_1",
-          aiToken: aiTokens["proj_42"], // Token for different project
+          aiToken: aiTokens["proj_42"],
         }),
         createEnv(),
       );
@@ -292,8 +274,7 @@ describe("ai-proxy worker", () => {
     it("returns 429 when ai-block key exists (service binding path)", async () => {
       const env = createEnv({}, { "ai-block:proj_1": "1" });
       const res = await worker.fetch(
-        post("/run", {
-          action: "run",
+        post("/ai/run", {
           model: "m",
           inputs: {},
           projectId: "proj_1",
@@ -311,8 +292,8 @@ describe("ai-proxy worker", () => {
       const env = createEnv({}, { "ai-block:proj_1": "1" });
       const res = await worker.fetch(
         post(
-          "/run",
-          { action: "run", model: "m", inputs: {}, projectId: "proj_1" },
+          "/ai/run",
+          { model: "m", inputs: {}, projectId: "proj_1" },
           { authorization: `Bearer ${validToken}` },
         ),
         env,
@@ -325,8 +306,7 @@ describe("ai-proxy worker", () => {
     it("allows request when ai-block key does not exist", async () => {
       const env = createEnv({}, {});
       const res = await worker.fetch(
-        post("/run", {
-          action: "run",
+        post("/ai/run", {
           model: "m",
           inputs: {},
           projectId: "proj_1",
@@ -339,12 +319,11 @@ describe("ai-proxy worker", () => {
     });
   });
 
-  describe("action: run", () => {
+  describe("AI: /ai/run", () => {
     it("calls AI.run with model, inputs, and gateway metadata", async () => {
       const env = createEnv();
       const res = await worker.fetch(
-        post("/run", {
-          action: "run",
+        post("/ai/run", {
           model: "@cf/meta/llama-3-8b-instruct",
           inputs: { prompt: "hi" },
           options: { max_tokens: 100 },
@@ -367,7 +346,7 @@ describe("ai-proxy worker", () => {
 
     it("returns 400 when model is missing", async () => {
       const res = await worker.fetch(
-        post("/run", { action: "run", inputs: {}, projectId: "p", aiToken: aiTokens["p"] }),
+        post("/ai/run", { inputs: {}, projectId: "p", aiToken: aiTokens["p"] }),
         createEnv(),
       );
 
@@ -385,8 +364,7 @@ describe("ai-proxy worker", () => {
       const env = createEnv({ run: vi.fn(async () => stream) });
 
       const res = await worker.fetch(
-        post("/run", {
-          action: "run",
+        post("/ai/run", {
           model: "m",
           inputs: { prompt: "hi", stream: true },
           projectId: "p",
@@ -407,8 +385,7 @@ describe("ai-proxy worker", () => {
       const env = createEnv({ run: vi.fn(async () => ({ response: "world" })) });
 
       const res = await worker.fetch(
-        post("/run", {
-          action: "run",
+        post("/ai/run", {
           model: "m",
           inputs: { prompt: "hi" },
           projectId: "p",
@@ -424,8 +401,7 @@ describe("ai-proxy worker", () => {
     it("injects gateway metadata even without user options", async () => {
       const env = createEnv();
       await worker.fetch(
-        post("/run", {
-          action: "run",
+        post("/ai/run", {
           model: "m",
           inputs: {},
           projectId: "proj_99",
@@ -444,14 +420,13 @@ describe("ai-proxy worker", () => {
     });
   });
 
-  describe("action: models", () => {
+  describe("AI: /ai/models", () => {
     it("calls AI.models and returns result", async () => {
       const models = [{ name: "model-a" }, { name: "model-b" }];
       const env = createEnv({ models: vi.fn(async () => models) });
 
       const res = await worker.fetch(
-        post("/models", {
-          action: "models",
+        post("/ai/models", {
           inputs: { search: "llama" },
           projectId: "p",
           aiToken: aiTokens["p"],
@@ -465,14 +440,13 @@ describe("ai-proxy worker", () => {
     });
   });
 
-  describe("action: toMarkdown", () => {
+  describe("AI: /ai/toMarkdown", () => {
     it("calls AI.toMarkdown and returns result", async () => {
       const result = { markdown: "# Hello" };
       const env = createEnv({ toMarkdown: vi.fn(async () => result) });
 
       const res = await worker.fetch(
-        post("/run", {
-          action: "toMarkdown",
+        post("/ai/toMarkdown", {
           inputs: { content: "hello" },
           options: { format: "md" },
           projectId: "p",
@@ -487,18 +461,6 @@ describe("ai-proxy worker", () => {
     });
   });
 
-  describe("unknown action", () => {
-    it("returns 400 for unknown action", async () => {
-      const res = await worker.fetch(
-        post("/run", { action: "unknown", projectId: "p", aiToken: aiTokens["p"] }),
-        createEnv(),
-      );
-
-      expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({ error: "unknown action" });
-    });
-  });
-
   describe("error handling", () => {
     it("returns 502 when AI binding throws", async () => {
       const env = createEnv({
@@ -508,8 +470,7 @@ describe("ai-proxy worker", () => {
       });
 
       const res = await worker.fetch(
-        post("/run", {
-          action: "run",
+        post("/ai/run", {
           model: "m",
           inputs: {},
           projectId: "p",
@@ -530,8 +491,7 @@ describe("ai-proxy worker", () => {
       });
 
       const res = await worker.fetch(
-        post("/run", {
-          action: "run",
+        post("/ai/run", {
           model: "m",
           inputs: {},
           projectId: "p",
@@ -552,8 +512,7 @@ describe("ai-proxy worker", () => {
       });
 
       const res = await worker.fetch(
-        post("/run", {
-          action: "run",
+        post("/ai/run", {
           model: "m",
           inputs: {},
           projectId: "p",

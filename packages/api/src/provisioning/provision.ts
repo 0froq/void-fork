@@ -72,7 +72,7 @@ export async function provisionBindings(
   // AI — add service binding to proxy + signed project token (no CF API call)
   if (manifest.bindings.ai) {
     const aiToken = await hmacSignState(projectId, jwtSecret);
-    bindings.push({ type: "service", name: "__AI_PROXY", service: "void-ai-proxy" });
+    bindings.push({ type: "service", name: "__AI_PROXY", service: "void-proxy" });
     bindings.push({ type: "plain_text", name: "__PROJECT_ID", text: projectId });
     bindings.push({ type: "plain_text", name: "__AI_TOKEN", text: aiToken });
   }

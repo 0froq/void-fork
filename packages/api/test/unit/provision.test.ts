@@ -198,7 +198,7 @@ describe("provisionBindings", () => {
     );
 
     expect(bindings).toHaveLength(3);
-    expect(bindings[0]).toEqual({ type: "service", name: "__AI_PROXY", service: "void-ai-proxy" });
+    expect(bindings[0]).toEqual({ type: "service", name: "__AI_PROXY", service: "void-proxy" });
     expect(bindings[1]).toEqual({ type: "plain_text", name: "__PROJECT_ID", text: PROJECT_ID });
     expect(bindings[2].type).toBe("plain_text");
     expect(bindings[2].name).toBe("__AI_TOKEN");

@@ -16,7 +16,7 @@ Four Cloudflare Workers:
 
 | Worker           | Package              | Purpose                                                                                                                   |
 | ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `void-ai-proxy`  | `packages/ai-proxy`  | AI inference proxy — holds the real `AI` binding, injects AI Gateway metadata for metering                                |
+| `void-proxy`     | `packages/proxy`     | Unified proxy — AI inference metering + D1/KV/R2 remote bindings for local dev                                            |
 | `void-api`       | `packages/api`       | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering                                |
 | `void-dashboard` | `packages/dashboard` | User-facing dashboard — project management, deployments, usage                                                            |
 | `void-dispatch`  | `packages/dispatch`  | Edge router — routes `*.void.app` + custom domain traffic to user workers (via Workers for Platforms) or R2 static assets |
@@ -57,13 +57,13 @@ Two fully isolated environments. Each has its own CF resources (D1, KV, R2, disp
 | Queue (producer)   | `USAGE_QUEUE` | `void-usage-events`                                         |
 | Routes             | —             | `*.void.app/*`, `*.void.app`, `*/*`, `*` (zone: `void.app`) |
 
-**AI proxy worker** (`void-ai-proxy`):
+**Proxy worker** (`void-proxy`):
 
-| Resource   | Binding | Name / ID                                                           |
-| ---------- | ------- | ------------------------------------------------------------------- |
-| Workers AI | `AI`    | (account-level)                                                     |
-| AI Gateway | —       | `void` (shared, account-level)                                      |
-| Routes     | —       | `ai-proxy.void.cloud/*`, `ai-proxy.void.cloud` (zone: `void.cloud`) |
+| Resource   | Binding | Name / ID                                                     |
+| ---------- | ------- | ------------------------------------------------------------- |
+| Workers AI | `AI`    | (account-level)                                               |
+| AI Gateway | —       | `void` (shared, account-level)                                |
+| Routes     | —       | `proxy.void.cloud/*`, `proxy.void.cloud` (zone: `void.cloud`) |
 
 **Dashboard worker** (`void-dashboard`):
 
@@ -80,17 +80,17 @@ All workers: `compatibility_date: 2026-02-12`, `compatibility_flags: ["nodejs_co
 
 Same resource types with `-staging` suffixes:
 
-| Resource    | API                                                         | Dashboard                 | Dispatch                                                 | AI Proxy                                                       |
-| ----------- | ----------------------------------------------------------- | ------------------------- | -------------------------------------------------------- | -------------------------------------------------------------- |
-| D1          | `void-api-staging` (`e78b32c1-497a-40ad-8f83-7049e139983e`) | —                         | —                                                        | —                                                              |
-| R2          | `void-assets-staging`                                       | —                         | `void-assets-staging`                                    | —                                                              |
-| KV          | `60240eecea804f39bf8b7395cd6c6b08`                          | —                         | `60240eecea804f39bf8b7395cd6c6b08`                       | —                                                              |
-| Dispatch NS | `void-users-staging`                                        | —                         | `void-users-staging`                                     | —                                                              |
-| Analytics   | —                                                           | —                         | `vite_cloud_requests_staging`                            | —                                                              |
-| Queue       | `void-usage-events-staging` (consumer)                      | —                         | `void-usage-events-staging` (producer)                   | —                                                              |
-| DO          | `UsageCounter` (same class, staging-isolated)               | —                         | —                                                        | —                                                              |
-| Workers AI  | —                                                           | —                         | —                                                        | `AI` (account-level)                                           |
-| Routes      | —                                                           | `dash.staging.void.cloud` | `*.staging.void.app/*`, `*.staging.void.app`, `*/*`, `*` | `ai-proxy.staging.void.cloud/*`, `ai-proxy.staging.void.cloud` |
+| Resource    | API                                                         | Dashboard                 | Dispatch                                                 | Proxy                                                    |
+| ----------- | ----------------------------------------------------------- | ------------------------- | -------------------------------------------------------- | -------------------------------------------------------- |
+| D1          | `void-api-staging` (`e78b32c1-497a-40ad-8f83-7049e139983e`) | —                         | —                                                        | —                                                        |
+| R2          | `void-assets-staging`                                       | —                         | `void-assets-staging`                                    | —                                                        |
+| KV          | `60240eecea804f39bf8b7395cd6c6b08`                          | —                         | `60240eecea804f39bf8b7395cd6c6b08`                       | —                                                        |
+| Dispatch NS | `void-users-staging`                                        | —                         | `void-users-staging`                                     | —                                                        |
+| Analytics   | —                                                           | —                         | `vite_cloud_requests_staging`                            | —                                                        |
+| Queue       | `void-usage-events-staging` (consumer)                      | —                         | `void-usage-events-staging` (producer)                   | —                                                        |
+| DO          | `UsageCounter` (same class, staging-isolated)               | —                         | —                                                        | —                                                        |
+| Workers AI  | —                                                           | —                         | —                                                        | `AI` (account-level)                                     |
+| Routes      | —                                                           | `dash.staging.void.cloud` | `*.staging.void.app/*`, `*.staging.void.app`, `*/*`, `*` | `proxy.staging.void.cloud/*`, `proxy.staging.void.cloud` |
 
 ## Secrets and Environment Variables
 
@@ -130,13 +130,15 @@ Zone-level (on `void.app`):
 | -------------------- | ------ | ------------------------------------------- |
 | SSL and Certificates | Edit   | Custom hostname DV certificate provisioning |
 
-### AI Proxy Worker Secrets
+### Proxy Worker Secrets
 
-Set via `wrangler secret put <NAME>` (same value as API worker's `JWT_SECRET`):
+Set via `wrangler secret put <NAME>`:
 
-| Secret       | Purpose                                   |
-| ------------ | ----------------------------------------- |
-| `JWT_SECRET` | Verifies auth JWTs from local dev clients |
+| Secret          | Purpose                                                        |
+| --------------- | -------------------------------------------------------------- |
+| `JWT_SECRET`    | Verifies auth JWTs from local dev clients (same as API worker) |
+| `CF_ACCOUNT_ID` | Cloudflare account ID (for D1/KV/R2 REST API calls)            |
+| `CF_API_TOKEN`  | Cloudflare API token (for D1/KV/R2 REST API calls)             |
 
 ### Configurable Environment Variables
 
@@ -197,7 +199,7 @@ Internal-only toggle for pointing the CLI at staging. Not documented in public d
 Root `package.json` orchestrates deployment:
 
 ```
-pnpm run deploy           # Production: deploy ai-proxy, dispatch, then migrate + deploy api
+pnpm run deploy           # Production: deploy proxy, dispatch, then migrate + deploy api
 pnpm run deploy:staging   # Staging: same with --env staging
 ```
 
@@ -205,21 +207,21 @@ Broken down:
 
 ```
 deploy
-├── deploy:ai-proxy     → pnpm -F ai-proxy run deploy    (wrangler deploy)
+├── deploy:proxy        → pnpm -F proxy run deploy        (wrangler deploy)
 ├── deploy:dispatch     → pnpm -F dispatch run deploy     (wrangler deploy)
 ├── deploy:api          → pnpm -F api migrate             (wrangler d1 migrations apply --remote)
 │                       → pnpm -F api run deploy          (wrangler deploy)
 └── deploy:dashboard    → pnpm -F dashboard run deploy    (wrangler deploy)
 
 deploy:staging
-├── deploy:staging:ai-proxy  → pnpm -F ai-proxy run deploy --env staging
+├── deploy:staging:proxy     → pnpm -F proxy run deploy --env staging
 ├── deploy:staging:dispatch  → pnpm -F dispatch run deploy --env staging
 ├── deploy:staging:api       → pnpm -F api migrate:staging  (wrangler d1 migrations apply --env staging --remote)
 │                            → pnpm -F api run deploy --env staging
 └── deploy:staging:dashboard → pnpm -F dashboard run deploy:staging
 ```
 
-Deploy order matters: ai-proxy deploys first (user workers depend on it via service binding), dispatch deploys next (stateless router), then api runs D1 migrations before deploying (ensures schema is ready for new code), and dashboard deploys last.
+Deploy order matters: proxy deploys first (user workers depend on it via service binding), dispatch deploys next (stateless router), then api runs D1 migrations before deploying (ensures schema is ready for new code), and dashboard deploys last.
 
 ### GitHub Actions
 
@@ -237,7 +239,7 @@ Three workflows in `.github/workflows/`:
 **`deploy.yml`** — runs on push to `prod` (production, environment: `Prod`):
 
 1. Runs CI workflow first
-2. `pnpm run deploy` (ai-proxy, dispatch, api, dashboard workers)
+2. `pnpm run deploy` (proxy, dispatch, api, dashboard workers)
 
 **`deploy-staging.yml`** — runs on push to `main` (staging, environment: `Staging`):
 
@@ -253,17 +255,17 @@ pnpm health:staging    # Check staging API health
 
 ## DNS Setup
 
-| Record                        | Zone         | Points To                                  |
-| ----------------------------- | ------------ | ------------------------------------------ |
-| `api.void.cloud`              | `void.cloud` | API worker                                 |
-| `dash.void.cloud`             | `void.cloud` | Dashboard worker                           |
-| `*.void.app`                  | `void.app`   | Dispatch worker (wildcard route)           |
-| `cname.void.app`              | `void.app`   | CF for SaaS fallback origin (AAAA `100::`) |
-| `ai-proxy.void.cloud`         | `void.cloud` | AI proxy worker                            |
-| `api.staging.void.cloud`      | `void.cloud` | Staging API worker                         |
-| `dash.staging.void.cloud`     | `void.cloud` | Staging dashboard worker                   |
-| `*.staging.void.app`          | `void.app`   | Staging dispatch worker (wildcard route)   |
-| `ai-proxy.staging.void.cloud` | `void.cloud` | Staging AI proxy worker                    |
+| Record                     | Zone         | Points To                                  |
+| -------------------------- | ------------ | ------------------------------------------ |
+| `api.void.cloud`           | `void.cloud` | API worker                                 |
+| `dash.void.cloud`          | `void.cloud` | Dashboard worker                           |
+| `*.void.app`               | `void.app`   | Dispatch worker (wildcard route)           |
+| `cname.void.app`           | `void.app`   | CF for SaaS fallback origin (AAAA `100::`) |
+| `proxy.void.cloud`         | `void.cloud` | Proxy worker                               |
+| `api.staging.void.cloud`   | `void.cloud` | Staging API worker                         |
+| `dash.staging.void.cloud`  | `void.cloud` | Staging dashboard worker                   |
+| `*.staging.void.app`       | `void.app`   | Staging dispatch worker (wildcard route)   |
+| `proxy.staging.void.cloud` | `void.cloud` | Staging proxy worker                       |
 
 ## Fresh Environment Setup
 
@@ -278,7 +280,7 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    - AI Gateway named `void`
    - Queue: `wrangler queues create void-usage-events-<env>` (usage enforcement events)
 
-2. **Update wrangler configs** — add an `env.<name>` section in `packages/api/wrangler.jsonc`, `packages/dashboard/wrangler.jsonc`, `packages/dispatch/wrangler.jsonc`, and `packages/ai-proxy/wrangler.jsonc` with the new resource IDs.
+2. **Update wrangler configs** — add an `env.<name>` section in `packages/api/wrangler.jsonc`, `packages/dashboard/wrangler.jsonc`, `packages/dispatch/wrangler.jsonc`, and `packages/proxy/wrangler.jsonc` with the new resource IDs.
 
 3. **Set worker secrets** — for the API worker:
 
@@ -304,9 +306,9 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
 
    **`void.cloud` zone:**
 
-   | Record           | Type  | Content                                    | Purpose               |
-   | ---------------- | ----- | ------------------------------------------ | --------------------- |
-   | `ai-proxy.<env>` | CNAME | `void-ai-proxy-<env>.voidzer0.workers.dev` | AI proxy worker route |
+   | Record        | Type  | Content                                 | Purpose            |
+   | ------------- | ----- | --------------------------------------- | ------------------ |
+   | `proxy.<env>` | CNAME | `void-proxy-<env>.voidzer0.workers.dev` | Proxy worker route |
 
    **CF for SaaS (Custom Hostnames):** Enabled on the `void.app` zone. Fallback origin set to `cname.void.app`. The dispatch worker's `*/*` catch-all route intercepts custom hostname traffic before CF reaches the dummy `100::` origin. Users CNAME their custom domain to `cname.void.app`.
 

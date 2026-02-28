@@ -2,7 +2,7 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/ai-proxy" },
+    { "path": "packages/proxy" },
     { "path": "packages/api" },
     { "path": "packages/dashboard" },
     { "path": "packages/dispatch" }

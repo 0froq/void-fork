@@ -76,7 +76,7 @@ pnpm test                           # Run vitest (unit + integration tests)
 pnpm lint                           # oxlint
 pnpm fmt                            # oxfmt
 pnpm check                          # Typecheck all packages (tsc --noEmit)
-pnpm run deploy                     # Build all + deploy ai-proxy, dispatch, api & dashboard (production)
+pnpm run deploy                     # Build all + deploy proxy, dispatch, api & dashboard (production)
 pnpm run deploy:staging             # Deploy all workers to staging environment
 ```
 
@@ -90,7 +90,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | ------------------------------------------------------ | -------------------------------- | -------------------------------------------------------------- |
 | [`packages/api`](./packages/api/README.md)             | `@voidcloud/api` (private)       | Control Plane API + Admin Dashboard                            |
 | [`packages/dispatch`](./packages/dispatch/README.md)   | `@voidcloud/dispatch` (private)  | Routes `*.void.app` to user workers + R2 assets                |
-| [`packages/ai-proxy`](./packages/ai-proxy/README.md)   | `@voidcloud/ai-proxy` (private)  | AI inference proxy — metered Workers AI via AI Gateway         |
+| [`packages/proxy`](./packages/proxy/README.md)         | `@voidcloud/proxy` (private)     | Proxy worker — AI inference, D1/KV/R2 remote bindings          |
 | [`packages/dashboard`](./packages/dashboard/README.md) | `@voidcloud/dashboard` (private) | User-facing dashboard — project management, deployments, usage |
 | [`packages/ui`](./packages/ui)                         | `@voidcloud/ui` (private)        | Shared CSS/design tokens (used by dashboard)                   |
 
@@ -112,11 +112,11 @@ CF Worker serving the Control Plane API + Admin Dashboard. Handles OAuth (GitHub
 
 See [`packages/api/README.md`](./packages/api/README.md) for API endpoints, auth flow, deploy flow, tiers, secrets, and CF API token permissions.
 
-## `ai-proxy` Overview
+## `proxy` Overview
 
-CF Worker proxying all Workers AI inference for metered billing. User workers never receive the `AI` binding directly — all calls route through this proxy, which injects AI Gateway metadata (`projectId`) for tamper-proof token counting and cost tracking. Two auth paths: service binding (production, trusted) and HTTPS with JWT (local dev).
+Unified proxy worker at `proxy.void.cloud`. Proxies all Workers AI inference for metered billing (user workers never get the `AI` binding directly) and provides D1/KV/R2 remote binding access for local development via CF REST APIs. Two auth paths: service binding (production, trusted) and HTTPS with JWT (local dev).
 
-See [`packages/ai-proxy/README.md`](./packages/ai-proxy/README.md) for request format, authentication, and deployment.
+See [`packages/proxy/README.md`](./packages/proxy/README.md) for request format, authentication, and deployment.
 
 ## `dispatch` Overview
 
@@ -143,7 +143,7 @@ Tests run from root with `pnpm test` (vitest). See each package README for detai
 
 ## Operations
 
-Four workers: `void-api`, `void-dashboard`, `void-dispatch`, `void-ai-proxy`. Two environments: **production** (`api.void.cloud`, `dash.void.cloud`, `*.void.app`) and **staging** (`api.staging.void.cloud`, `dash.staging.void.cloud`, `*.staging.void.app`). Each has fully isolated CF resources (D1, KV, R2, dispatch namespace, analytics engine).
+Four workers: `void-api`, `void-dashboard`, `void-dispatch`, `void-proxy`. Two environments: **production** (`api.void.cloud`, `dash.void.cloud`, `*.void.app`) and **staging** (`api.staging.void.cloud`, `dash.staging.void.cloud`, `*.staging.void.app`). Each has fully isolated CF resources (D1, KV, R2, dispatch namespace, analytics engine).
 
 ```
 pnpm run deploy           # Production
