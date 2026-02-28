@@ -46,6 +46,8 @@ Your worker handles API routes, page rendering, and (optionally) [custom SSR](./
 
 Void apps can also be configured with [`output: 'static'`](./ssg.md) to pre-render all pages at build time, producing a fully static site that can be deployed anywhere — no Cloudflare Workers required.
 
+**Deploy:** `void deploy` builds via Vite, infers bindings, provisions D1/KV/R2 resources, applies migrations, uploads assets and worker, and makes the site live at `{slug}.void.app`. See [Deployment](./deployment.md) for details.
+
 **Detected when any of these exist:**
 
 - `routes/` directory
@@ -67,7 +69,9 @@ Void supports deploying Vite-based meta-framework apps via `void deploy`. The fr
 | [Nuxt](https://nuxt.com/)                           | `nuxt`                  | [Guide](./integrations/frameworks/nuxt.md)           |
 | [Astro](https://astro.build/)                       | `astro`                 | [Guide](./integrations/frameworks/astro.md)          |
 
-Add `voidPlugin()` to the framework's Vite config to get binding inference, typed DB generation, and migration management during dev. See the [Meta Frameworks Integration](./integrations/frameworks/overview.md) for the full feature matrix, deploy pipeline, and per-framework setup guides.
+Add `voidPlugin()` to the framework's Vite config to get binding inference, typed DB generation, migration management, auth, cron jobs, queues, and caching. See the [Meta Frameworks Integration](./integrations/frameworks/overview.md) for the full feature matrix, deploy pipeline, and per-framework setup guides.
+
+**Deploy:** `void deploy` runs the framework's build, packages the output, and deploys to Void. The framework owns routing and SSR — Void handles resource provisioning, migrations, and edge hosting.
 
 **Detected when** any of the above packages is in your dependencies.
 
@@ -85,6 +89,8 @@ At the edge, the resolution order is:
 2. Nested index (`/about` → `about/index.html`)
 3. `404.html` with **status 404** (if the file exists)
 4. Plain 404 response
+
+**Deploy:** `void deploy` (or `void deploy --dir <path>`) uploads static files directly — no worker code needed. Assets are served from the edge with automatic caching.
 
 ## Auto-Detection
 

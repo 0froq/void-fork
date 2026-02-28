@@ -4,7 +4,11 @@ outline: deep
 
 # Meta-Frameworks
 
-Void supports deploying meta-framework apps to Cloudflare Workers via `void deploy`. Add `voidPlugin()` to your framework's Vite config to get binding inference, typed DB generation, migration management, and wrangler sync during development.
+Void supports deploying meta-framework apps to the Void platform via `void deploy`. Add `voidPlugin()` to your framework's Vite config to get binding inference, typed DB generation, migration management, auth, cron jobs, queues, and caching.
+
+Some frameworks (TanStack Start, React Router) compose directly with `@cloudflare/vite-plugin`, which Void already depends on and covers. Others (SvelteKit, Nuxt, Astro) have their own Cloudflare integrations, which Void respects. In both cases, the framework owns routing and rendering — Void serves as the platform SDK that enhances backend DX.
+
+![void relationships with meta frameworks and deployment targets](./void-relationships.svg)
 
 ## Supported Frameworks
 
@@ -123,13 +127,3 @@ void deploy
   └─ 6. Live
        https://my-app.void.app
 ```
-
-### Build Output Conventions
-
-Each framework has known output paths that the CLI uses to locate the worker and assets:
-
-| Framework | Worker Entry                        | Assets                    |
-| --------- | ----------------------------------- | ------------------------- |
-| SvelteKit | `.svelte-kit/cloudflare/_worker.js` | `.svelte-kit/cloudflare/` |
-| Nuxt      | `.output/server/index.mjs`          | `.output/public/`         |
-| Astro     | `dist/_worker.js/index.js`          | `dist/`                   |
