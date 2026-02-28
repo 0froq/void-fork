@@ -37,6 +37,7 @@ export interface VoidConfig {
   headers?: Record<string, string[]>;
   redirects?: Record<string, RedirectDestination>;
   head?: HeadConfig;
+  target?: "cloudflare" | "node" | "bun" | "deno";
   appType?: "spa" | "prebuilt" | "fullstack" | "framework";
   output?: "server" | "static";
   outputDir?: string;
@@ -46,6 +47,7 @@ export interface VoidConfig {
 
 const CONFIG_FILE = "void.json";
 
+const VALID_TARGETS = new Set(["cloudflare", "node", "bun", "deno"]);
 const VALID_AUTH_PROVIDERS = new Set(["github", "google", "email"]);
 const VALID_APP_TYPES = new Set(["spa", "prebuilt", "fullstack", "framework"]);
 const VALID_OUTPUTS = new Set(["server", "static"]);
@@ -227,6 +229,13 @@ export function readConfig(root: string): VoidConfig {
     }
   }
 
+  // Validate target
+  if (obj.target !== undefined) {
+    if (typeof obj.target !== "string" || !VALID_TARGETS.has(obj.target)) {
+      throw new Error(`"target" in ${CONFIG_FILE} must be one of: cloudflare, node, bun, deno`);
+    }
+  }
+
   // Migration error for old "mode" key
   if (obj.mode !== undefined) {
     throw new Error(`"mode" has been renamed to "appType" in ${CONFIG_FILE}`);
@@ -341,6 +350,11 @@ export function readConfig(root: string): VoidConfig {
   }
 
   return obj as VoidConfig;
+}
+
+/** Returns true if the target is a non-Cloudflare runtime (Node.js, Bun, Deno). */
+export function isNodeTarget(target: VoidConfig["target"]): boolean {
+  return target === "node" || target === "bun" || target === "deno";
 }
 
 /**

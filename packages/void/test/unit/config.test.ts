@@ -7,6 +7,7 @@ import {
   convertRedirectsConfig,
   normalizeAuth,
   resolveBindingNames,
+  isNodeTarget,
 } from "../../src/config";
 
 const tmpDir = join(import.meta.dirname, ".tmp-config-test");
@@ -329,6 +330,38 @@ describe("readConfig", () => {
     setup(JSON.stringify({ scanDirs: ["../secrets"] }));
     expect(() => readConfig(tmpDir)).toThrow("must be a relative directory");
     cleanup();
+  });
+});
+
+describe("readConfig target", () => {
+  it("accepts valid target values", () => {
+    for (const target of ["cloudflare", "node", "bun", "deno"]) {
+      setup(JSON.stringify({ target }));
+      const config = readConfig(tmpDir);
+      expect(config.target).toBe(target);
+      cleanup();
+    }
+  });
+
+  it("defaults target to undefined (cloudflare is implicit default)", () => {
+    setup(JSON.stringify({}));
+    const config = readConfig(tmpDir);
+    expect(config.target).toBeUndefined();
+    cleanup();
+  });
+
+  it("rejects invalid target value", () => {
+    setup(JSON.stringify({ target: "lambda" }));
+    expect(() => readConfig(tmpDir)).toThrow('"target" in void.json must be one of');
+    cleanup();
+  });
+
+  it("warns on CF-only fields with non-CF target via isNodeTarget", () => {
+    expect(isNodeTarget("node")).toBe(true);
+    expect(isNodeTarget("bun")).toBe(true);
+    expect(isNodeTarget("deno")).toBe(true);
+    expect(isNodeTarget(undefined)).toBe(false);
+    expect(isNodeTarget("cloudflare")).toBe(false);
   });
 });
 

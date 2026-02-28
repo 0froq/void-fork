@@ -7,6 +7,9 @@ import {
   compileRouteTable,
   compileWorkerEntry,
   compileWorkerClient,
+  compileNodeApp,
+  compileNodeServer,
+  compileNodeClient,
   type CompileOptions,
   type SsrCompileOptions,
   type PagesCompileOptions,
@@ -36,6 +39,7 @@ interface RoutingPluginOptions {
   getAuth: () => AuthProvider[] | null;
   headConfig?: import("./pages/head").HeadConfig;
   remoteMode?: boolean;
+  target?: "node" | "bun" | "deno";
 }
 
 export function routingPlugin(root: string, options: RoutingPluginOptions): Plugin {
@@ -93,6 +97,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     responsePath: resolveFile("void/response"),
     reactRefresh: false,
     auth: null,
+    nodeTarget: !!options.target,
   };
 
   // Auth compile options are set up lazily in buildStart (after env plugin
@@ -147,7 +152,12 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   const outDir = join(root, ".void");
   mkdirSync(outDir, { recursive: true });
   // Write initial entry — will be re-written with hasQueues once scan completes
-  writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(false, remote));
+  if (options.target) {
+    writeFileSync(join(outDir, "app.ts"), compileNodeApp(options.target));
+    writeFileSync(join(outDir, "index.ts"), compileNodeServer(options.target));
+  } else {
+    writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(false, remote));
+  }
 
   return {
     name: "void:routing",
@@ -181,7 +191,15 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       writeRouteTypes();
       writeQueueTypes();
       // Re-write entry with queue handler if needed
-      writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(scan!.queues.length > 0, remote));
+      if (options.target) {
+        writeFileSync(join(outDir, "app.ts"), compileNodeApp(options.target));
+        writeFileSync(join(outDir, "index.ts"), compileNodeServer(options.target));
+      } else {
+        writeFileSync(
+          join(outDir, "entry.ts"),
+          compileWorkerEntry(scan!.queues.length > 0, remote),
+        );
+      }
     },
 
     resolveId: {
@@ -214,6 +232,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       filter: { id: LOAD_ID_FILTER },
       async handler(id) {
         if (id === VIRTUAL_CLIENT_WORKER_ID) {
+          if (options.target) {
+            return compileNodeClient();
+          }
           return compileWorkerClient(authClientPath);
         }
         if (id !== VIRTUAL_ROUTES_ID) return;
@@ -255,10 +276,15 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         await rescan();
         writeRouteTypes();
         writeQueueTypes();
-        writeFileSync(
-          join(outDir, "entry.ts"),
-          compileWorkerEntry(scan!.queues.length > 0, remote),
-        );
+        if (options.target) {
+          writeFileSync(join(outDir, "app.ts"), compileNodeApp(options.target));
+          writeFileSync(join(outDir, "index.ts"), compileNodeServer(options.target));
+        } else {
+          writeFileSync(
+            join(outDir, "entry.ts"),
+            compileWorkerEntry(scan!.queues.length > 0, remote),
+          );
+        }
 
         // For structural changes (file add/remove), send full-reload to trigger
         // a program reload so the workerd picks up new/removed routes.

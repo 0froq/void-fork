@@ -4,11 +4,17 @@ Core Vite plugin — routing, inference, migrations, CLI.
 
 ## Architecture
 
-The main export `voidPlugin()` returns an array of Vite plugins + the `cloudflare()` plugin:
+The main export `voidPlugin()` returns an array of Vite plugins. For the default Cloudflare target, this includes the `cloudflare()` plugin. For non-CF targets (`node`, `bun`, `deno`), it replaces `cloudflare()` with `nodeTargetPlugin()`:
 
 ```
+# Cloudflare (default)
 voidPlugin() → [routingPlugin, migrationPlugin, cloudflare({...inferredBindings})]
+
+# Node.js / Bun / Deno
+voidPlugin() → [routingPlugin, prerenderPlugin, nodeTargetPlugin()]
 ```
+
+Non-CF targets disable CF-only bindings (`void/db`, `void/kv`, `void/auth`, `void/storage`, `void/ai`, `void/env`) at compile time. The `nodeTargetPlugin` provides a binding guard (compile-time errors for CF imports), a Vite dev server middleware (SSR-loads the Hono app), and a build entry generator for the target runtime.
 
 ### Runtime Framework
 
@@ -27,6 +33,7 @@ src/
   index.ts                  # Main export: voidPlugin() → Plugin[]
   config.ts                 # readConfig(), VoidConfig, convertHeadersConfig(), normalizeAuth()
   plugin-routing.ts         # Virtual module resolution, file watching, HMR, type codegen
+  plugin-node-target.ts     # Non-CF deploy targets (Node.js, Bun, Deno) — binding guard, dev server, build entry
   plugin-inference.ts       # Binding inference orchestration (calls walk.ts)
   plugin-migration.ts       # Local migration runner on dev startup
   standard-schema.ts        # Inlined Standard Schema V1 types (no @standard-schema/spec dep)
@@ -178,4 +185,6 @@ Agent instructions use versioned markers (`<!--injected-by-void-v0.0.1-->` / `<!
 | `test/unit/db-types.test.ts`                | DB type codegen output (8 tests)                               |
 | `test/unit/db.test.ts`                      | Typed query client + type-level inference (25 tests)           |
 | `test/unit/queue-types.test.ts`             | Queue type codegen output (3 tests)                            |
+| `test/unit/plugin-node-target.test.ts`      | Node target plugin — binding guard, plugin creation (5 tests)  |
+| `test/integration/node-target.test.ts`      | Node app playground — dev server + production build (5 tests)  |
 | `test/integration/queue-playground.test.ts` | Queue send → consumer → KV round-trip (1 test)                 |

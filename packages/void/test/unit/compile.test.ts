@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { compileRouteTable, compileWorkerEntry } from "../../src/router/compile";
+import {
+  compileRouteTable,
+  compileWorkerEntry,
+  compileNodeApp,
+  compileNodeServer,
+} from "../../src/router/compile";
 import type { ScanResult } from "../../src/router/scan";
 
 const testOptions = {
@@ -296,5 +301,52 @@ describe("compileWorkerEntry", () => {
     const code = compileWorkerEntry(false);
 
     expect(code).not.toContain("queue");
+  });
+});
+
+describe("compileNodeApp", () => {
+  it("generates node app with serveStatic and default export", () => {
+    const code = compileNodeApp("node");
+    expect(code).toContain('import { serveStatic } from "@hono/node-server/serve-static"');
+    expect(code).toContain("export default app");
+    expect(code).toContain('import app from "virtual:void-routes"');
+  });
+
+  it("generates bun app with hono/bun serveStatic", () => {
+    const code = compileNodeApp("bun");
+    expect(code).toContain('import { serveStatic } from "hono/bun"');
+    expect(code).toContain("export default app");
+    expect(code).not.toContain("@hono/node-server");
+  });
+
+  it("generates deno app with hono/deno serveStatic", () => {
+    const code = compileNodeApp("deno");
+    expect(code).toContain('import { serveStatic } from "hono/deno"');
+    expect(code).toContain("export default app");
+    expect(code).not.toContain("@hono/node-server");
+  });
+});
+
+describe("compileNodeServer", () => {
+  it("generates node server with @hono/node-server", () => {
+    const code = compileNodeServer("node");
+    expect(code).toContain('import { serve } from "@hono/node-server"');
+    expect(code).toContain('import app from "./app.js"');
+    expect(code).toContain("app.fetch");
+    expect(code).toContain("process.env.PORT");
+  });
+
+  it("generates bun server with Bun.serve", () => {
+    const code = compileNodeServer("bun");
+    expect(code).toContain("Bun.serve");
+    expect(code).toContain('import app from "./app.js"');
+    expect(code).not.toContain("@hono/node-server");
+  });
+
+  it("generates deno server with Deno.serve", () => {
+    const code = compileNodeServer("deno");
+    expect(code).toContain("Deno.serve");
+    expect(code).toContain('import app from "./app.js"');
+    expect(code).not.toContain("@hono/node-server");
   });
 });

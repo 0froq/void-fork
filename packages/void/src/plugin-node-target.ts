@@ -1,0 +1,202 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import type { Plugin } from "vite";
+import type { IncomingMessage, ServerResponse } from "node:http";
+
+/** Imports that require CF bindings and are not available in Node.js mode. */
+export const CF_ONLY_IMPORTS = [
+  "void/db",
+  "void/kv",
+  "void/auth",
+  "void/storage",
+  "void/ai",
+  "void/env",
+];
+
+const CF_ONLY_REGEX = new RegExp(
+  `^(${CF_ONLY_IMPORTS.map((s) => s.replace("/", "\\/")).join("|")})$`,
+);
+
+type NodeTarget = "node" | "bun" | "deno";
+
+/**
+ * Bridge Node.js HTTP to Web API and serve via a Hono app.
+ * Used by both dev server and preview server middleware.
+ */
+function honoMiddleware(
+  getApp: () => Promise<{ fetch: (req: Request) => Promise<Response> } | null>,
+) {
+  return async (req: IncomingMessage, res: ServerResponse, next: (err?: unknown) => void) => {
+    try {
+      // Let Vite handle its own internal requests (HMR, modules, etc.)
+      if (
+        !req.url ||
+        req.url.startsWith("/@") ||
+        req.url.startsWith("/__") ||
+        req.url.startsWith("/node_modules/")
+      ) {
+        next();
+        return;
+      }
+
+      const app = await getApp();
+      if (!app?.fetch) {
+        next();
+        return;
+      }
+
+      // Build a Request from the incoming Node.js http.IncomingMessage
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      const headers = new Headers();
+      for (const [key, value] of Object.entries(req.headers)) {
+        if (value) headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+      }
+
+      const hasBody = req.method !== "GET" && req.method !== "HEAD";
+      const request = new Request(url.toString(), {
+        method: req.method,
+        headers,
+        body: hasBody ? (req as unknown as BodyInit) : undefined,
+        // @ts-ignore Node.js specific
+        duplex: hasBody ? "half" : undefined,
+      });
+
+      const response = await app.fetch(request);
+
+      // If Hono returned 404 (no matching route), fall through to Vite
+      // so static assets and dev-time resources are served normally.
+      if (response.status === 404) {
+        next();
+        return;
+      }
+
+      // Write the Response back to Node.js http.ServerResponse
+      res.statusCode = response.status;
+      response.headers.forEach((value: string, key: string) => {
+        res.setHeader(key, value);
+      });
+
+      if (response.body) {
+        const reader = response.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+        res.end();
+      } else {
+        res.end();
+      }
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+/**
+ * Vite plugin for non-Cloudflare deploy targets (Node.js, Bun, Deno).
+ *
+ * Replaces `@cloudflare/vite-plugin` in the plugin composition. Provides:
+ * 1. Binding guard — compile-time errors for CF-only void/* imports
+ * 2. Dev server — Vite SSR middleware to run Hono in Node.js
+ * 3. Preview server — serves from the built SSR entry
+ * 4. Build — dual-environment build (client + SSR) for pages apps,
+ *    single SSR build for API-only apps
+ */
+export function nodeTargetPlugin(target: NodeTarget): Plugin[] {
+  const guardPlugin: Plugin = {
+    name: "void:node-target",
+    enforce: "pre",
+
+    resolveId: {
+      filter: { id: CF_ONLY_REGEX },
+      handler(id) {
+        throw new Error(
+          `'${id}' is not available with target: "${target}". ` +
+            `CF bindings require target: "cloudflare".`,
+        );
+      },
+    },
+
+    config(_, { command }) {
+      if (command !== "build") return;
+
+      const root = process.cwd();
+      const voidDir = join(root, ".void");
+      const ssrBuildOptions = {
+        outDir: "dist/ssr",
+        rollupOptions: {
+          input: {
+            app: join(voidDir, "app.ts"),
+            index: join(voidDir, "index.ts"),
+          },
+          external: [/^node:/, "@hono/node-server", "@hono/node-server/serve-static"],
+        },
+      };
+
+      // Pages apps need dual builds: client (React hydration) + SSR (server entry).
+      // API-only apps need a single SSR build.
+      if (existsSync(join(root, "pages"))) {
+        return {
+          build: { outDir: "dist/client" },
+          environments: {
+            ssr: { build: ssrBuildOptions },
+          },
+          // Opt into Vite's multi-environment builder (without this,
+          // Vite uses the legacy single-environment builder).
+          builder: {},
+        };
+      }
+
+      return {
+        build: {
+          ssr: true,
+          ...ssrBuildOptions,
+        },
+      };
+    },
+
+    // Orchestrate dual-environment build for pages apps.
+    // For API-only apps (no `environments.ssr`), this hook is not triggered
+    // because Vite's builder is only created when extra environments exist.
+    async buildApp(builder) {
+      await builder.build(builder.environments.client);
+      await builder.build(builder.environments.ssr);
+    },
+
+    configureServer(server) {
+      // Middleware runs BEFORE Vite's built-in middleware so API routes
+      // and SSR pages are handled before Vite's SPA fallback sends a 404.
+      // The honoMiddleware helper skips /@, /__, and /node_modules/ paths
+      // so Vite's HMR and module serving still work normally.
+      server.middlewares.use(
+        honoMiddleware(async () => {
+          const mod = await server.ssrLoadModule("virtual:void-routes");
+          return mod.default;
+        }),
+      );
+    },
+
+    configurePreviewServer(server) {
+      // Import the built app module (not index.js which starts a server).
+      const entryPath = join(process.cwd(), "dist", "ssr", "app.js");
+      let appPromise: Promise<{ fetch: (req: Request) => Promise<Response> } | null> | null = null;
+
+      server.middlewares.use(
+        honoMiddleware(() => {
+          if (!appPromise) {
+            const entryUrl = pathToFileURL(entryPath).href;
+            appPromise = import(/* @vite-ignore */ entryUrl).then(
+              (m) => m.default,
+              () => null,
+            );
+          }
+          return appPromise;
+        }),
+      );
+    },
+  };
+
+  return [guardPlugin];
+}

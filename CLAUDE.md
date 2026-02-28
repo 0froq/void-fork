@@ -60,7 +60,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 
 The `void` package contains two parts:
 
-**Vite plugin** — `voidPlugin()` returns `[routingPlugin, migrationPlugin, cloudflare({...inferredBindings})]`. Depends on `@cloudflare/vite-plugin` and transitively on wrangler/miniflare.
+**Vite plugin** — `voidPlugin()` returns `[routingPlugin, migrationPlugin, cloudflare({...inferredBindings})]` for the default Cloudflare target, or `[routingPlugin, prerenderPlugin, nodeTargetPlugin()]` for non-CF targets (`node`, `bun`, `deno`). Depends on `@cloudflare/vite-plugin` and transitively on wrangler/miniflare (Cloudflare target only).
 
 - **Routing** — file-based API routing on Hono with named HTTP method exports
 - **Validation** — request body/query/params validation via any Standard Schema library
@@ -149,6 +149,7 @@ Local apps for testing features end-to-end. Run scripts with `pnpm -C playground
 | [`svelte-pages`](./playground/svelte-pages)               | Svelte 5 Pages mode — companion `.server.ts` files, Inertia protocol, SSR, layouts, `useForm`         |
 | [`solid-pages`](./playground/solid-pages)                 | SolidJS Pages mode — companion `.server.ts` files, Inertia protocol, SSR, layouts, `useForm`          |
 | [`tanstack-start`](./playground/tanstack-start/README.md) | TanStack Start meta-framework — server functions, D1 queries, SSR via TanStack                        |
+| [`node-app`](./playground/node-app)                       | Node.js target — Hono API routes without CF bindings, `@hono/node-server` for production              |
 
 `playground-local/` is gitignored and used for ad-hoc local testing apps that are not part of the codebase.
 

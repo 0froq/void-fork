@@ -29,6 +29,8 @@ export interface CompileOptions {
   reactRefresh: boolean;
   /** Auth configuration (null = disabled) */
   auth: AuthCompileOptions | null;
+  /** Non-CF target — omits executionCtx from ALS context */
+  nodeTarget?: boolean;
 }
 
 export interface SsrCompileOptions {
@@ -114,9 +116,13 @@ export function compileRouteTable(
 
   // Request context middleware — threads outer request into ALS for isomorphic fetch
   lines.push("app.use(async (c, next) => {");
-  lines.push(
-    "  await requestContext.run({ request: c.req.raw, executionCtx: c.executionCtx }, next);",
-  );
+  if (options.nodeTarget) {
+    lines.push("  await requestContext.run({ request: c.req.raw }, next);");
+  } else {
+    lines.push(
+      "  await requestContext.run({ request: c.req.raw, executionCtx: c.executionCtx }, next);",
+    );
+  }
   lines.push("});");
   lines.push("");
 
@@ -961,15 +967,126 @@ export default { fetch: ${fetchHandler}, scheduled };`;
 }
 
 /**
- * Generate the worker-side fetch client module (virtual:void-client-worker).
- *
- * In the worker environment, `void/client` is redirected here instead of
- * the ofetch-based client. This calls `app.fetch()` directly (no HTTP round-trip),
- * enabling isomorphic fetch during SSR and in route handlers.
- *
- * Cookie and authorization headers from the outer request are auto-forwarded
- * via AsyncLocalStorage context. User-specified headers take precedence.
+ * Generate the app module — exports the Hono app with static asset serving.
+ * This is the entry imported by `vite preview` and can be used programmatically.
  */
+export function compileNodeApp(target: "node" | "bun" | "deno"): string {
+  const staticImport =
+    target === "bun"
+      ? `import { serveStatic } from "hono/bun";`
+      : target === "deno"
+        ? `import { serveStatic } from "hono/deno";`
+        : `import { serveStatic } from "@hono/node-server/serve-static";`;
+
+  return `${staticImport}
+import app from "virtual:void-routes";
+
+app.use("/assets/*", serveStatic({ root: "./client" }));
+export default app;`;
+}
+
+/**
+ * Generate the server entry — imports the app and starts an HTTP server.
+ * This is what users run with `node dist/ssr/index.js`.
+ */
+export function compileNodeServer(target: "node" | "bun" | "deno"): string {
+  if (target === "bun") {
+    return `import app from "./app.js";
+
+const port = Number(process.env.PORT || 3000);
+Bun.serve({ fetch: app.fetch, port });
+console.log("Listening on http://localhost:" + port);`;
+  }
+
+  if (target === "deno") {
+    return `import app from "./app.js";
+
+const port = Number(Deno.env.get("PORT") || 3000);
+Deno.serve({ port }, app.fetch);`;
+  }
+
+  // Node.js (default)
+  return `import { serve } from "@hono/node-server";
+import app from "./app.js";
+
+const port = Number(process.env.PORT || 3000);
+serve({ fetch: app.fetch, port }, (info) => {
+  console.log("Listening on http://localhost:" + info.port);
+});`;
+}
+
+/**
+ * Generate the server-side fetch client module for non-CF targets.
+ * Same as compileWorkerClient but without cloudflare:workers dependency.
+ * Calls app.fetch() directly (no HTTP round-trip) with ALS context forwarding.
+ */
+export function compileNodeClient(): string {
+  return `import app, { requestContext } from "virtual:void-routes";
+
+export class FetchError extends Error {
+  constructor(status, statusText, data) {
+    super(\`Request failed with status \${status}\`);
+    this.name = "FetchError";
+    this.status = status;
+    this.statusText = statusText;
+    this.data = data;
+  }
+}
+
+export async function fetch(path, options) {
+  let url = path;
+  if (options?.params) {
+    for (const [key, value] of Object.entries(options.params)) {
+      url = url.replace(":" + key, encodeURIComponent(value));
+    }
+  }
+
+  if (options?.query) {
+    const qs = new URLSearchParams(options.query).toString();
+    if (qs) url += "?" + qs;
+  }
+
+  const method = options?.method ?? "GET";
+  const headers = new Headers(options?.headers);
+
+  const store = requestContext.getStore();
+  if (store?.request) {
+    const outerReq = store.request;
+    if (!headers.has("cookie")) {
+      const cookie = outerReq.headers.get("cookie");
+      if (cookie) headers.set("cookie", cookie);
+    }
+    if (!headers.has("authorization")) {
+      const auth = outerReq.headers.get("authorization");
+      if (auth) headers.set("authorization", auth);
+    }
+  }
+
+  if (options?.body != null && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+
+  const request = new Request("http://localhost" + url, {
+    method,
+    headers,
+    body: options?.body != null ? JSON.stringify(options.body) : undefined,
+  });
+
+  const response = await app.fetch(request);
+
+  if (response.status === 204) return undefined;
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const data = contentType.includes("application/json") ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    throw new FetchError(response.status, response.statusText, data);
+  }
+
+  return data;
+}`;
+}
+
 export function compileWorkerClient(authClientPath: string): string {
   return `import app, { requestContext } from "virtual:void-routes";
 import { env } from "cloudflare:workers";

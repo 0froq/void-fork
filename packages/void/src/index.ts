@@ -16,10 +16,11 @@ import { inferBindingsFromSource } from "./inference/walk";
 import { scanJobsSync } from "./crons/scan";
 import { scanQueuesSync } from "./queues/scan";
 import { validateSsrEntry } from "./ssr/entry";
-import { readConfig, normalizeAuth, resolveBindingNames } from "./config";
+import { readConfig, normalizeAuth, resolveBindingNames, isNodeTarget } from "./config";
 import { ensureWranglerNodejsAlsFlag, syncWranglerBindings } from "./cli/wrangler";
 import { restartPlugin } from "./plugin-restart";
 import { prerenderPlugin } from "./plugin-prerender";
+import { nodeTargetPlugin } from "./plugin-node-target";
 import { voidLog, voidWarn, voidError } from "./log";
 
 export type { AuthProvider } from "./config";
@@ -574,6 +575,37 @@ export function voidPlugin(options?: {
   }
 
   // Default mode: full Hono routing + generated entry
+
+  // Non-CF targets: skip binding inference, D1, migrations, wrangler
+  if (isNodeTarget(config.target)) {
+    if (config.bindings)
+      voidWarn('"bindings" in void.json is ignored with target: "' + config.target + '"');
+    if (config.auth)
+      voidWarn('"auth" in void.json is ignored with target: "' + config.target + '"');
+    if (config.wrangler)
+      voidWarn('"wrangler" in void.json is ignored with target: "' + config.target + '"');
+    if (config.remote)
+      voidWarn('"remote" in void.json is ignored with target: "' + config.target + '"');
+    if (config.cache?.revalidate)
+      voidWarn(
+        '"cache.revalidate" in void.json is ignored with target: "' +
+          config.target +
+          '" (edge caching is CF-only)',
+      );
+
+    return [
+      restartPlugin(),
+      envPlugin,
+      routingPlugin(root, {
+        getAuth: () => null,
+        headConfig: config.head,
+        target: config.target as "node" | "bun" | "deno",
+      }),
+      prerenderPlugin(root, config),
+      ...nodeTargetPlugin(config.target as "node" | "bun" | "deno"),
+    ];
+  }
+
   // Add nodejs_als for AsyncLocalStorage (used by isomorphic fetch context threading)
   const existingFlags = (workerConfig.compatibility_flags as string[] | undefined) ?? [];
   if (!existingFlags.includes("nodejs_als") && !existingFlags.includes("nodejs_compat")) {

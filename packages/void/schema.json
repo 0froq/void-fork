@@ -8,6 +8,11 @@
       "type": "string",
       "description": "JSON Schema URL for IDE support"
     },
+    "target": {
+      "type": "string",
+      "enum": ["cloudflare", "node", "bun", "deno"],
+      "description": "Deploy target runtime. Defaults to \"cloudflare\". Non-CF targets disable bindings (D1, KV, R2, AI) and produce a plain Hono app."
+    },
     "auth": {
       "description": "Enable built-in auth routes and session management. `true` enables email-only auth. An array enables specific providers.",
       "oneOf": [
