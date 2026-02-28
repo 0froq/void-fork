@@ -65,7 +65,7 @@ describe("provisionBindings", () => {
       JWT_SECRET,
     );
 
-    expect(createD1Database).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, `${PROJECT_ID}-DB`);
+    expect(createD1Database).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-db");
     expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, "d1", "d1-uuid-123", "DB");
     expect(bindings).toEqual([{ type: "d1", name: "DB", id: "d1-uuid-123" }]);
   });
@@ -82,7 +82,7 @@ describe("provisionBindings", () => {
       JWT_SECRET,
     );
 
-    expect(createKVNamespace).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, `${PROJECT_ID}-KV`);
+    expect(createKVNamespace).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-kv");
     expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, "kv", "kv-id-456", "KV");
     expect(bindings).toEqual([{ type: "kv_namespace", name: "KV", namespace_id: "kv-id-456" }]);
   });
@@ -99,7 +99,7 @@ describe("provisionBindings", () => {
       JWT_SECRET,
     );
 
-    expect(createR2Bucket).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, `${PROJECT_ID}-STORAGE`);
+    expect(createR2Bucket).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-storage");
     expect(createResource).toHaveBeenCalledWith(
       mockDb,
       PROJECT_ID,
@@ -259,7 +259,7 @@ describe("ensureResource — already exists fallback", () => {
     );
 
     expect(createD1Database).toHaveBeenCalledOnce();
-    expect(getD1DatabaseByName).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, `${PROJECT_ID}-DB`);
+    expect(getD1DatabaseByName).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-db");
     expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, "d1", "d1-looked-up", "DB");
     expect(bindings).toEqual([{ type: "d1", name: "DB", id: "d1-looked-up" }]);
   });
@@ -280,7 +280,7 @@ describe("ensureResource — already exists fallback", () => {
     );
 
     expect(createKVNamespace).toHaveBeenCalledOnce();
-    expect(getKVNamespaceByTitle).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, `${PROJECT_ID}-KV`);
+    expect(getKVNamespaceByTitle).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-kv");
     expect(bindings).toEqual([{ type: "kv_namespace", name: "KV", namespace_id: "kv-looked-up" }]);
   });
 

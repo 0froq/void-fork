@@ -92,7 +92,8 @@ async function ensureResource(
   const found = existing.find((r) => r.type === type && r.binding_name === bindingName);
   if (found) return found;
 
-  const resourceName = `${projectId}-${bindingName}`;
+  // R2 bucket names only allow lowercase alphanumeric + hyphens
+  const resourceName = `${projectId}-${bindingName}`.toLowerCase().replaceAll("_", "-");
   let cfId: string;
 
   try {
