@@ -1,5 +1,7 @@
 import type { DeployManifest, Resource } from "../types";
 import { getProjectResources, createResource, type Db } from "../db";
+import { resources as resourcesTable } from "../schema";
+import { eq } from "drizzle-orm";
 import {
   createD1Database,
   createKVNamespace,
@@ -89,11 +91,21 @@ async function ensureResource(
   bindingName: string,
   existing: Resource[],
 ): Promise<Resource> {
-  const found = existing.find((r) => r.type === type && r.binding_name === bindingName);
-  if (found) return found;
-
-  // R2 bucket names only allow lowercase alphanumeric + hyphens
+  // Normalize: R2 bucket names only allow lowercase alphanumeric + hyphens
   const resourceName = `${projectId}-${bindingName}`.toLowerCase().replaceAll("_", "-");
+
+  const found = existing.find((r) => r.type === type && r.binding_name === bindingName);
+  if (found) {
+    // Fix legacy queue resources that stored queue_id (UUID) instead of queue_name
+    if (type === "queue" && found.cf_id !== resourceName) {
+      await db
+        .update(resourcesTable)
+        .set({ cf_id: resourceName })
+        .where(eq(resourcesTable.id, found.id));
+      found.cf_id = resourceName;
+    }
+    return found;
+  }
   let cfId: string;
 
   try {

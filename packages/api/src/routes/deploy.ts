@@ -340,9 +340,11 @@ app.post("/:id/deploy", async (c) => {
       new Blob([JSON.stringify(metadata)], { type: "application/json" }),
     );
 
-    // Add each worker module
+    // Add each worker module with correct content type for CF API
     for (const file of workerFiles) {
-      workerFormData.append(file.name, file.content, file.name);
+      const type = moduleContentType(file.name);
+      const blob = new Blob([file.content], { type });
+      workerFormData.append(file.name, blob, file.name);
     }
 
     // Upload to CF Workers for Platforms API
@@ -601,6 +603,13 @@ function serializePrerenderHeaders(response: Response): Record<string, string> {
   });
 
   return result;
+}
+
+function moduleContentType(filename: string): string {
+  if (filename.endsWith(".wasm")) return "application/wasm";
+  if (filename.endsWith(".json")) return "application/json";
+  if (filename.endsWith(".txt")) return "text/plain";
+  return "application/javascript+module";
 }
 
 export default app;
