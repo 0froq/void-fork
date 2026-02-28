@@ -111,35 +111,86 @@ You can set non-binding wrangler fields like `compatibility_date`, `compatibilit
 }
 ```
 
-Binding arrays (`d1_databases`, `kv_namespaces`, `r2_buckets`) are not allowed in the `wrangler` field — bindings are fully managed by void. Users wanting custom bindings should use a `wrangler.json` with real binding IDs and `wrangler deploy`.
+Binding arrays (`d1_databases`, `kv_namespaces`, `r2_buckets`) are not allowed in the `wrangler` field — bindings are fully managed by Void. To use custom bindings with real resource IDs, add a `wrangler.jsonc` to your project root instead. See [Wrangler config merging](#wrangler-config-merging) for how Void handles this.
 
 ## Wrangler config merging
 
-By default, Void configures the Cloudflare plugin entirely programmatically -- you don't need a `wrangler.json`. Bindings are inferred from your source code and provisioned with local placeholder IDs for development.
+By default, Void configures the Cloudflare plugin entirely programmatically -- you don't need a `wrangler.jsonc`. Bindings are inferred from your source code and provisioned with local placeholder IDs for development.
 
-If you add a `wrangler.json` (or `wrangler.toml`) to your project root, the Cloudflare Vite plugin reads it automatically. Void merges its inferred bindings with your config:
+If you add a `wrangler.jsonc` (or `wrangler.json`) to your project root, Void respects it -- but **how** depends on whether Void owns the Cloudflare integration or a meta-framework does.
 
-- **Bindings you define** in `wrangler.json` (with real resource IDs) are preserved as-is.
-- **Inferred bindings** that are missing from your config are added with local placeholder IDs.
+### Void-only mode, TanStack Start, and React Router
 
-For example, if your code uses `c.env.DB` and `c.env.KV`, and your `wrangler.json` only defines D1:
+In Void's default mode and when using TanStack Start or React Router, Void controls the `@cloudflare/vite-plugin` directly. It passes a `config` callback that merges inferred bindings into whatever the plugin resolves from your `wrangler.jsonc`:
 
-```json
+1. The plugin reads your `wrangler.jsonc` and resolves it into a config object with `d1_databases`, `kv_namespaces`, `r2_buckets`, etc.
+2. Void checks each inferred binding **by name** (e.g. `"DB"`, `"KV"`, `"STORAGE"`). If a binding with that name already exists in your config, it is left untouched.
+3. Only bindings that are **missing** from your config are added with local placeholder IDs (e.g. `database_id: "local"`).
+4. The merged config is used for both `vite dev` (Miniflare) and `vite build` (output `wrangler.json` in `dist/`).
+
+All other fields in your `wrangler.jsonc` -- `name`, `routes`, `services`, `vars`, `env`, `compatibility_date`, etc. -- are preserved in the resolved config and flow through to the build output.
+
+Fields that Void always sets (`main`, `triggers`, `assets`) don't need to be in your wrangler config -- they're added programmatically based on your project structure.
+
+In this mode, Void does **not** modify your `wrangler.jsonc` file on disk. The merge is purely in-memory.
+
+### SvelteKit, Nuxt, and Astro
+
+When using SvelteKit, Nuxt, or Astro, the framework's own Cloudflare adapter owns the worker build and dev server. Void does **not** provide the `@cloudflare/vite-plugin` -- instead, it only contributes DB type codegen, migration management, and binding sync.
+
+Because Void doesn't control the CF plugin in this mode, it can't merge bindings via a config callback. Instead, on dev startup Void syncs inferred bindings directly to your `wrangler.jsonc` file on disk:
+
+- Only adds bindings that are **missing** by name -- existing bindings are never modified or removed.
+- Also ensures the `nodejs_als` compatibility flag is present.
+- The framework adapter then reads this `wrangler.jsonc` normally.
+
+This means your `wrangler.jsonc` is the single source of truth for bindings in this mode. Void keeps it up to date as you add new resource imports to your code, but you're responsible for replacing placeholder IDs with real ones before deploying.
+
+### Merge precedence
+
+| Source                       | Priority             | What it controls                                                    |
+| ---------------------------- | -------------------- | ------------------------------------------------------------------- |
+| Your `wrangler.jsonc`        | Highest for bindings | Real resource IDs, service bindings, routes, vars, environments     |
+| `void.json` `wrangler` field | Highest for compat   | `compatibility_date`, `compatibility_flags`, `vars`                 |
+| Void inference               | Fills gaps only      | Adds placeholder bindings for inferred resources not in your config |
+| Built-in defaults            | Lowest               | `compatibility_date: "2026-02-12"` when nothing else is set         |
+
+### Example
+
+If your code uses `c.env.DB` and `c.env.KV`, and your `wrangler.jsonc` only defines D1:
+
+```jsonc
 {
   "name": "my-app",
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "my-app-db",
-      "database_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-    }
-  ]
+      "database_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    },
+  ],
+  // Service bindings, routes, etc. are also preserved
+  "services": [{ "binding": "API", "service": "my-api-worker" }],
 }
 ```
 
-Void sees that `DB` is already configured and leaves it alone, but adds a local placeholder for `KV` since it's missing. This means `pnpm dev` works out of the box (Miniflare creates local instances for all bindings), while `wrangler deploy` uses your real D1 database ID.
+Void sees that `DB` is already configured and leaves it alone (including your real `database_id`), but adds a local placeholder for `KV` since it's missing. The `services` array passes through unchanged.
 
-Settings like `main`, `triggers`, and `assets` are always set by Void and don't need to be in your wrangler config.
+This means `pnpm dev` works out of the box (Miniflare creates local instances of all bindings), while `wrangler deploy` uses your real D1 database ID and service bindings.
+
+### What ends up in the build output
+
+After `vite build`, the Cloudflare Vite plugin writes a merged `wrangler.json` to the `dist/` directory. This file contains:
+
+- All fields from your `wrangler.jsonc` (bindings with real IDs, routes, services, vars, environments)
+- Any inferred bindings Void added (with placeholder IDs -- replace these before deploying)
+- Fields set by Void (`main`, `assets`, `triggers`)
+
+When you run `wrangler deploy`, it picks up this generated `wrangler.json` and deploys everything.
+
+::: tip
+When deploying via `void deploy` (to the Void platform), the `wrangler.json` in the build output is **skipped** -- the platform manages worker configuration via its own deploy manifest. The merge behavior described here only applies to direct `wrangler deploy`.
+:::
 
 ## Deploy to your own Cloudflare account
 
@@ -160,11 +211,11 @@ wrangler kv namespace create KV
 wrangler r2 bucket create my-app-storage
 ```
 
-### 2. Add a `wrangler.json`
+### 2. Add a `wrangler.jsonc`
 
-Create `wrangler.json` in your project root with the resource IDs from step 1:
+Create `wrangler.jsonc` in your project root with the resource IDs from step 1:
 
-```json
+```jsonc
 {
   "name": "my-app",
   "compatibility_date": "2025-12-01",
@@ -172,25 +223,25 @@ Create `wrangler.json` in your project root with the resource IDs from step 1:
     {
       "binding": "DB",
       "database_name": "my-app-db",
-      "database_id": "<your-database-id>"
-    }
+      "database_id": "<your-database-id>",
+    },
   ],
   "kv_namespaces": [
     {
       "binding": "KV",
-      "id": "<your-namespace-id>"
-    }
+      "id": "<your-namespace-id>",
+    },
   ],
   "r2_buckets": [
     {
       "binding": "STORAGE",
-      "bucket_name": "my-app-storage"
-    }
-  ]
+      "bucket_name": "my-app-storage",
+    },
+  ],
 }
 ```
 
-Only include the bindings your app actually uses. You don't need `main` or `assets` -- those are set by the plugin.
+Only include the bindings your app actually uses. You can also add service bindings, custom routes, environment overrides, and any other standard wrangler fields -- they all flow through to the build output. You don't need `main` or `assets` -- those are set by the plugin.
 
 ### 3. Run migrations
 
@@ -208,8 +259,8 @@ This uses the same `migrations/` directory that Void uses locally.
 vite build && wrangler deploy
 ```
 
-That's it. The Cloudflare Vite plugin produces a complete build output with a generated `wrangler.json` in the dist directory, and `wrangler deploy` picks it up.
+That's it. The Cloudflare Vite plugin produces a complete build output with a merged `wrangler.json` in the dist directory (containing your real resource IDs and any inferred bindings), and `wrangler deploy` picks it up.
 
 ### Local development
 
-`pnpm dev` continues to work as before -- Miniflare creates local instances of all bindings regardless of the IDs in your `wrangler.json`. Your real resource IDs are only used when you run `wrangler deploy`.
+`pnpm dev` continues to work as before -- Miniflare creates local instances of all bindings regardless of the IDs in your `wrangler.jsonc`. Your real resource IDs are only used when you run `wrangler deploy`.
