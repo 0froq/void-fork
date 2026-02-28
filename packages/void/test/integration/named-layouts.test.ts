@@ -1,31 +1,20 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { join } from "node:path";
+import { getPort, waitForServer, killChild } from "../../../../test/integration-helpers";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
-const DEV_PORT = 5223;
-const DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
-
-async function waitForServer(url: string, timeoutMs: number): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.status > 0) return;
-    } catch {
-      // retry
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(`Timed out waiting for server at ${url}`);
-}
+let DEV_PORT: number;
+let DEV_BASE: string;
 
 describe("named-layouts integration", () => {
   let child: ReturnType<typeof spawn>;
   let stderr = "";
 
   beforeAll(async () => {
+    DEV_PORT = await getPort();
+    DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
+
     child = spawn(
       "pnpm",
       [
@@ -37,7 +26,6 @@ describe("named-layouts integration", () => {
         "127.0.0.1",
         "--port",
         String(DEV_PORT),
-        "--strictPort",
       ],
       {
         cwd: ROOT,
@@ -57,18 +45,7 @@ describe("named-layouts integration", () => {
   }, 30_000);
 
   afterAll(async () => {
-    if (child) {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGTERM");
-        await Promise.race([
-          once(child, "exit"),
-          new Promise((resolve) => setTimeout(resolve, 5_000)),
-        ]);
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGKILL");
-        }
-      }
-    }
+    if (child) await killChild(child);
     if (stderr.includes("error when starting dev server")) {
       throw new Error(stderr);
     }

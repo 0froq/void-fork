@@ -1,29 +1,15 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { execSync, spawn } from "node:child_process";
-import { once } from "node:events";
 import { join } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
 import { chromium, type Browser, type Page } from "playwright";
+import { getPort, waitForServer, killChild } from "../../../../test/integration-helpers";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
-const DEV_PORT = 5213;
-const DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
-const PREVIEW_PORT = 5214;
-const PREVIEW_BASE = `http://127.0.0.1:${PREVIEW_PORT}`;
-
-async function waitForServer(url: string, timeoutMs: number): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.status > 0) return;
-    } catch {
-      // retry
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(`Timed out waiting for server at ${url}`);
-}
+let DEV_PORT: number;
+let DEV_BASE: string;
+let PREVIEW_PORT: number;
+let PREVIEW_BASE: string;
 
 let browser: Browser;
 
@@ -35,7 +21,12 @@ afterAll(async () => {
   await browser?.close();
 });
 
-function defineClientTests(BASE: string) {
+function defineClientTests(getBase: () => string) {
+  let BASE: string;
+  beforeAll(() => {
+    BASE = getBase();
+  });
+
   async function newPage(): Promise<Page> {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -277,7 +268,12 @@ function defineClientTests(BASE: string) {
   });
 }
 
-function defineIslandTests(BASE: string) {
+function defineIslandTests(getBase: () => string) {
+  let BASE: string;
+  beforeAll(() => {
+    BASE = getBase();
+  });
+
   async function newPage(): Promise<Page> {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -398,6 +394,9 @@ describe("svelte-pages client (dev)", () => {
   let stderr = "";
 
   beforeAll(async () => {
+    DEV_PORT = await getPort();
+    DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
+
     child = spawn(
       "pnpm",
       [
@@ -409,7 +408,6 @@ describe("svelte-pages client (dev)", () => {
         "127.0.0.1",
         "--port",
         String(DEV_PORT),
-        "--strictPort",
       ],
       {
         cwd: ROOT,
@@ -429,18 +427,7 @@ describe("svelte-pages client (dev)", () => {
   }, 30_000);
 
   afterAll(async () => {
-    if (child) {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGTERM");
-        await Promise.race([
-          once(child, "exit"),
-          new Promise((resolve) => setTimeout(resolve, 5_000)),
-        ]);
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGKILL");
-        }
-      }
-    }
+    if (child) await killChild(child);
     if (stderr.includes("error when starting dev server")) {
       throw new Error(stderr);
     }
@@ -649,8 +636,8 @@ describe("svelte-pages client (dev)", () => {
     expect(deferredHtml).toContain('"count":42');
   });
 
-  defineClientTests(DEV_BASE);
-  defineIslandTests(DEV_BASE);
+  defineClientTests(() => DEV_BASE);
+  defineIslandTests(() => DEV_BASE);
 
   it("island component HMR updates without full page reload", async () => {
     const counterFile = join(ROOT, "playground/svelte-pages/pages/blog/_Counter.svelte");
@@ -740,6 +727,9 @@ describe("svelte-pages client (preview)", () => {
   let stderr = "";
 
   beforeAll(async () => {
+    PREVIEW_PORT = await getPort();
+    PREVIEW_BASE = `http://127.0.0.1:${PREVIEW_PORT}`;
+
     execSync("pnpm --dir playground/svelte-pages build", {
       cwd: ROOT,
       stdio: "pipe",
@@ -757,7 +747,6 @@ describe("svelte-pages client (preview)", () => {
         "127.0.0.1",
         "--port",
         String(PREVIEW_PORT),
-        "--strictPort",
       ],
       {
         cwd: ROOT,
@@ -773,23 +762,12 @@ describe("svelte-pages client (preview)", () => {
   });
 
   afterAll(async () => {
-    if (child) {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGTERM");
-        await Promise.race([
-          once(child, "exit"),
-          new Promise((resolve) => setTimeout(resolve, 5_000)),
-        ]);
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGKILL");
-        }
-      }
-    }
+    if (child) await killChild(child);
     if (stderr.includes("error when starting preview server")) {
       throw new Error(stderr);
     }
   });
 
-  defineClientTests(PREVIEW_BASE);
-  defineIslandTests(PREVIEW_BASE);
+  defineClientTests(() => PREVIEW_BASE);
+  defineIslandTests(() => PREVIEW_BASE);
 }, 60_000);

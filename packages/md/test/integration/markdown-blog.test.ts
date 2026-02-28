@@ -1,28 +1,14 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { execSync, spawn } from "node:child_process";
-import { once } from "node:events";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
+import { getPort, waitForServer, killChild } from "../../../../test/integration-helpers";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
-const DEV_PORT = 5221;
-const DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
-const PREVIEW_PORT = 5222;
-const PREVIEW_BASE = `http://127.0.0.1:${PREVIEW_PORT}`;
-
-async function waitForServer(url: string, timeoutMs: number): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.status > 0) return;
-    } catch {
-      // retry
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(`Timed out waiting for server at ${url}`);
-}
+let DEV_PORT: number;
+let DEV_BASE: string;
+let PREVIEW_PORT: number;
+let PREVIEW_BASE: string;
 
 let browser: Browser;
 
@@ -41,7 +27,12 @@ async function newPage(): Promise<Page> {
   return page;
 }
 
-function defineMdClientEntryTests(BASE: string) {
+function defineMdClientEntryTests(getBase: () => string) {
+  let BASE: string;
+  beforeAll(() => {
+    BASE = getBase();
+  });
+
   it("md page with client script has data-md-script attribute", async () => {
     const res = await fetch(`${BASE}/posts/client-script-test`);
     expect(res.status).toBe(200);
@@ -74,7 +65,12 @@ function defineMdClientEntryTests(BASE: string) {
   });
 }
 
-function defineClientScriptTests(BASE: string) {
+function defineClientScriptTests(getBase: () => string) {
+  let BASE: string;
+  beforeAll(() => {
+    BASE = getBase();
+  });
+
   it("executes client script in markdown page", async () => {
     const page = await newPage();
     try {
@@ -130,7 +126,12 @@ function defineClientScriptTests(BASE: string) {
   });
 }
 
-function defineSidebarTests(BASE: string) {
+function defineSidebarTests(getBase: () => string) {
+  let BASE: string;
+  beforeAll(() => {
+    BASE = getBase();
+  });
+
   it("renders sidebar with post links", async () => {
     const page = await newPage();
     try {
@@ -194,6 +195,9 @@ describe("markdown-blog playground", () => {
     let stderr = "";
 
     beforeAll(async () => {
+      DEV_PORT = await getPort();
+      DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
+
       child = spawn(
         "pnpm",
         [
@@ -205,7 +209,6 @@ describe("markdown-blog playground", () => {
           "127.0.0.1",
           "--port",
           String(DEV_PORT),
-          "--strictPort",
         ],
         {
           cwd: ROOT,
@@ -225,18 +228,7 @@ describe("markdown-blog playground", () => {
     }, 30_000);
 
     afterAll(async () => {
-      if (child) {
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGTERM");
-          await Promise.race([
-            once(child, "exit"),
-            new Promise((resolve) => setTimeout(resolve, 5_000)),
-          ]);
-          if (child.exitCode === null && child.signalCode === null) {
-            child.kill("SIGKILL");
-          }
-        }
-      }
+      if (child) await killChild(child);
       if (stderr.includes("error when starting dev server")) {
         throw new Error(stderr);
       }
@@ -293,9 +285,9 @@ describe("markdown-blog playground", () => {
       expect(html).toContain("<span");
     });
 
-    defineSidebarTests(DEV_BASE);
-    defineMdClientEntryTests(DEV_BASE);
-    defineClientScriptTests(DEV_BASE);
+    defineSidebarTests(() => DEV_BASE);
+    defineMdClientEntryTests(() => DEV_BASE);
+    defineClientScriptTests(() => DEV_BASE);
   }, 60_000);
 
   describe("production (build + preview)", () => {
@@ -303,6 +295,9 @@ describe("markdown-blog playground", () => {
     let stderr = "";
 
     beforeAll(async () => {
+      PREVIEW_PORT = await getPort();
+      PREVIEW_BASE = `http://127.0.0.1:${PREVIEW_PORT}`;
+
       execSync("pnpm --dir playground/markdown-blog build", {
         cwd: ROOT,
         stdio: "pipe",
@@ -320,7 +315,6 @@ describe("markdown-blog playground", () => {
           "127.0.0.1",
           "--port",
           String(PREVIEW_PORT),
-          "--strictPort",
         ],
         {
           cwd: ROOT,
@@ -336,18 +330,7 @@ describe("markdown-blog playground", () => {
     }, 60_000);
 
     afterAll(async () => {
-      if (child) {
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGTERM");
-          await Promise.race([
-            once(child, "exit"),
-            new Promise((resolve) => setTimeout(resolve, 5_000)),
-          ]);
-          if (child.exitCode === null && child.signalCode === null) {
-            child.kill("SIGKILL");
-          }
-        }
-      }
+      if (child) await killChild(child);
       if (stderr.includes("error when starting preview server")) {
         throw new Error(stderr);
       }
@@ -408,8 +391,8 @@ describe("markdown-blog playground", () => {
       expect(hasMdClient).toBe(true);
     });
 
-    defineSidebarTests(PREVIEW_BASE);
-    defineMdClientEntryTests(PREVIEW_BASE);
-    defineClientScriptTests(PREVIEW_BASE);
+    defineSidebarTests(() => PREVIEW_BASE);
+    defineMdClientEntryTests(() => PREVIEW_BASE);
+    defineClientScriptTests(() => PREVIEW_BASE);
   }, 60_000);
 }, 60_000);

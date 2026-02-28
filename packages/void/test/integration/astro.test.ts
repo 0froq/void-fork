@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execSync, spawn } from "node:child_process";
-import { once } from "node:events";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { getPort, waitForServer, killChild } from "../../../../test/integration-helpers";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
 const PLAYGROUND = "playground/astro";
-const DEV_PORT = 5220;
-const DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
+let DEV_PORT: number;
+let DEV_BASE: string;
 
 function removeWranglerConfig(root: string) {
   rmSync(join(root, "wrangler.jsonc"), { force: true });
@@ -27,30 +27,6 @@ function readWranglerConfig(root: string): {
     d1_databases?: Array<{ binding: string }>;
     kv_namespaces?: Array<{ binding: string }>;
   };
-}
-
-async function waitForServer(url: string, timeoutMs: number): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.status > 0) return;
-    } catch {
-      // retry
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(`Timed out waiting for server at ${url}`);
-}
-
-async function killChild(child: ReturnType<typeof spawn>) {
-  if (child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGTERM");
-    await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-  }
 }
 
 describe("playground/astro build", () => {
@@ -73,6 +49,9 @@ describe("playground/astro dev", () => {
   let stderr = "";
 
   const startDev = async () => {
+    DEV_PORT = await getPort();
+    DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
+
     child = spawn(
       "pnpm",
       [

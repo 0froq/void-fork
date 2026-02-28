@@ -1,36 +1,12 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
+import { getPort, waitForServer, killChild } from "../../../../test/integration-helpers";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
-const DEV_PORT = 5193;
-const BASE = `http://127.0.0.1:${DEV_PORT}`;
-
-async function waitForServer(url: string, timeoutMs: number): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.status > 0) return;
-    } catch {
-      // retry
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(`Timed out waiting for dev server at ${url}`);
-}
-
-async function killChild(child: ReturnType<typeof spawn>) {
-  if (child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGTERM");
-    await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-  }
-}
+let DEV_PORT: number;
+let BASE: string;
 
 let browser: Browser;
 
@@ -58,6 +34,9 @@ describe("playground/kitchen-sink", () => {
   let stderr = "";
 
   beforeAll(async () => {
+    DEV_PORT = await getPort();
+    BASE = `http://127.0.0.1:${DEV_PORT}`;
+
     child = spawn(
       "pnpm",
       [
@@ -69,7 +48,6 @@ describe("playground/kitchen-sink", () => {
         "127.0.0.1",
         "--port",
         String(DEV_PORT),
-        "--strictPort",
       ],
       {
         cwd: ROOT,

@@ -1,44 +1,23 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execSync, spawn } from "node:child_process";
-import { once } from "node:events";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { getPort, waitForServer, killChild } from "../../../../test/integration-helpers";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
-const DEV_PORT = 5191;
-const DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
-const PREVIEW_PORT = 5192;
-const PREVIEW_BASE = `http://127.0.0.1:${PREVIEW_PORT}`;
-
-async function waitForServer(url: string, timeoutMs: number): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.status > 0) return;
-    } catch {
-      // retry
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(`Timed out waiting for server at ${url}`);
-}
-
-async function killChild(child: ReturnType<typeof spawn>) {
-  if (child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGTERM");
-    await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-  }
-}
+let DEV_PORT: number;
+let DEV_BASE: string;
+let PREVIEW_PORT: number;
+let PREVIEW_BASE: string;
 
 describe("playground/ssr dev", () => {
   let child: ReturnType<typeof spawn>;
   let stderr = "";
 
   beforeAll(async () => {
+    DEV_PORT = await getPort();
+    DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
+
     child = spawn(
       "pnpm",
       [
@@ -50,7 +29,6 @@ describe("playground/ssr dev", () => {
         "127.0.0.1",
         "--port",
         String(DEV_PORT),
-        "--strictPort",
       ],
       {
         cwd: ROOT,
@@ -103,6 +81,9 @@ describe("playground/ssr build + preview", () => {
   let stderr = "";
 
   beforeAll(async () => {
+    PREVIEW_PORT = await getPort();
+    PREVIEW_BASE = `http://127.0.0.1:${PREVIEW_PORT}`;
+
     rmSync(join(ROOT, "playground/ssr/dist"), { recursive: true, force: true });
     execSync("pnpm --dir playground/ssr build", { cwd: ROOT, stdio: "pipe" });
 
@@ -118,7 +99,6 @@ describe("playground/ssr build + preview", () => {
         "127.0.0.1",
         "--port",
         String(PREVIEW_PORT),
-        "--strictPort",
       ],
       {
         cwd: ROOT,

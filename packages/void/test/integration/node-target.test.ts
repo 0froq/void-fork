@@ -1,44 +1,23 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execSync, spawn } from "node:child_process";
-import { once } from "node:events";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { getPort, waitForServer, killChild } from "../../../../test/integration-helpers";
 
 const ROOT = new URL("../../../..", import.meta.url).pathname;
-const DEV_PORT = 5197;
-const DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
-const PROD_PORT = 5198;
-const PROD_BASE = `http://127.0.0.1:${PROD_PORT}`;
-
-async function waitForServer(url: string, timeoutMs: number): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.status > 0) return;
-    } catch {
-      // retry
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(`Timed out waiting for server at ${url}`);
-}
-
-async function killChild(child: ReturnType<typeof spawn>) {
-  if (child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGTERM");
-    await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-  }
-}
+let DEV_PORT: number;
+let DEV_BASE: string;
+let PROD_PORT: number;
+let PROD_BASE: string;
 
 describe("playground/node-app dev", () => {
   let child: ReturnType<typeof spawn>;
   let stderr = "";
 
   beforeAll(async () => {
+    DEV_PORT = await getPort();
+    DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
+
     child = spawn(
       "pnpm",
       [
@@ -50,7 +29,6 @@ describe("playground/node-app dev", () => {
         "127.0.0.1",
         "--port",
         String(DEV_PORT),
-        "--strictPort",
       ],
       {
         cwd: ROOT,
@@ -114,6 +92,9 @@ describe("playground/node-app build + production", () => {
   let child: ReturnType<typeof spawn>;
 
   beforeAll(async () => {
+    PROD_PORT = await getPort();
+    PROD_BASE = `http://127.0.0.1:${PROD_PORT}`;
+
     rmSync(join(ROOT, "playground/node-app/dist"), { recursive: true, force: true });
     execSync("pnpm --dir playground/node-app build", { cwd: ROOT, stdio: "pipe" });
 
