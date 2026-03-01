@@ -161,8 +161,10 @@ export function nodeTargetPlugin(target: NodeTarget): Plugin[] {
     // For API-only apps (no `environments.ssr`), this hook is not triggered
     // because Vite's builder is only created when extra environments exist.
     async buildApp(builder) {
-      await builder.build(builder.environments.client);
+      // SSR must build first so that dist/ssr/app.js exists when the
+      // prerender plugin runs in the client environment's closeBundle hook.
       await builder.build(builder.environments.ssr);
+      await builder.build(builder.environments.client);
     },
 
     configureServer(server) {

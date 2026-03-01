@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, dirname } from "node:path";
 import { loadEnv } from "vite";
 import { voidLog, voidWarn } from "./log";
 
-interface PrerenderResult {
+export interface PrerenderResult {
   rendered: string[];
   failed: Array<{ path: string; error: string }>;
 }
@@ -143,4 +144,116 @@ export async function prerenderPages(options: {
   }
 
   return result;
+}
+
+/**
+ * Prerender pages for Node.js targets by spawning a child process.
+ *
+ * Uses a child process to avoid mutating `process.env` in the parent Vite
+ * build process. Writes a temp runner script to `.void/`, spawns it with
+ * the loaded env vars, and parses the JSON result from stdout.
+ */
+export async function prerenderPagesNode(options: {
+  root: string;
+  ssrDir: string; // absolute path to dist/ssr
+  clientDir: string; // absolute path to dist/client
+  paths: string[];
+}): Promise<PrerenderResult> {
+  const { root, ssrDir, clientDir, paths } = options;
+
+  if (paths.length === 0) return { rendered: [], failed: [] };
+
+  // Load .env vars (pure function — does not touch process.env)
+  const env = loadEnv("production", root, "");
+
+  // Write a temp runner script that imports the built app and fetches each path
+  const runnerPath = join(root, ".void", "prerender-runner.mjs");
+  mkdirSync(dirname(runnerPath), { recursive: true });
+  writeFileSync(
+    runnerPath,
+    `
+import { pathToFileURL } from "node:url";
+import { join, dirname } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+
+const config = JSON.parse(process.argv[2]);
+const { ssrDir, clientDir, paths } = config;
+
+// Inject the Vite manifest so the SSR renderer can generate production
+// asset tags (script/link). loadPagesManifest() checks this global first.
+try {
+  const manifestPath = join(clientDir, ".vite", "manifest.json");
+  globalThis.__VITE_MANIFEST__ = JSON.parse(readFileSync(manifestPath, "utf-8"));
+} catch {}
+
+const appUrl = pathToFileURL(join(ssrDir, "app.js")).href;
+const app = await import(appUrl);
+const fetch = app.default?.fetch;
+if (!fetch) {
+  console.error("[void] No default export with fetch() found in app.js");
+  process.exit(1);
+}
+
+const result = { rendered: [], failed: [] };
+
+for (const path of paths) {
+  try {
+    const response = await fetch(new Request("http://localhost" + path));
+    const html = await response.text();
+    if (!response.ok) {
+      result.failed.push({ path, error: "HTTP " + response.status });
+      continue;
+    }
+    const outputFile = path === "/" ? "index.html" : path.slice(1) + ".html";
+    const outputPath = join(clientDir, outputFile);
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(outputPath, html);
+    result.rendered.push(path);
+  } catch (err) {
+    result.failed.push({ path, error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+process.stdout.write(JSON.stringify(result));
+`,
+  );
+
+  const configJson = JSON.stringify({ ssrDir, clientDir, paths });
+
+  try {
+    const result = await new Promise<PrerenderResult>((resolve, reject) => {
+      execFile(
+        process.execPath,
+        [runnerPath, configJson],
+        { env: { ...process.env, ...env }, cwd: root, maxBuffer: 10 * 1024 * 1024 },
+        (error, stdout, stderr) => {
+          if (stderr) process.stderr.write(stderr);
+          if (error) {
+            reject(new Error(`Prerender child process failed: ${error.message}`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(stdout));
+          } catch {
+            reject(new Error(`Failed to parse prerender output: ${stdout}`));
+          }
+        },
+      );
+    });
+
+    // Log results in the parent process
+    for (const path of result.rendered) {
+      const outputFile = path === "/" ? "index.html" : `${path.slice(1)}.html`;
+      voidLog(`prerender \x1b[36m${outputFile}\x1b[39m`);
+    }
+    for (const { path, error } of result.failed) {
+      voidWarn(`prerender ${path} failed: ${error}`);
+    }
+
+    return result;
+  } finally {
+    try {
+      unlinkSync(runnerPath);
+    } catch {}
+  }
 }

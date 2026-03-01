@@ -1,9 +1,9 @@
 import { join } from "node:path";
 import type { Plugin } from "vite";
-import type { VoidConfig } from "./config";
+import { isNodeTarget, type VoidConfig } from "./config";
 import { detectWorkerDir } from "./cli/deploy";
 import { collectPrerenderPaths } from "./prerender-paths";
-import { prerenderPages } from "./prerender";
+import { prerenderPages, prerenderPagesNode } from "./prerender";
 import { voidLog, voidWarn, setShowTimestamp } from "./log";
 
 /**
@@ -24,17 +24,6 @@ export function prerenderPlugin(root: string, config: VoidConfig): Plugin {
 
       const distDir = join(root, "dist");
       const clientDir = join(distDir, "client");
-      const persistDir = join(root, ".void");
-
-      // Detect the worker output directory
-      let workerDirName: string;
-      try {
-        workerDirName = detectWorkerDir(distDir);
-      } catch (err) {
-        voidWarn(`Skipping prerender: ${err instanceof Error ? err.message : String(err)}`);
-        return;
-      }
-      const workerDir = join(distDir, workerDirName);
 
       // Collect paths to prerender
       const paths = await collectPrerenderPaths({ root, config });
@@ -45,14 +34,36 @@ export function prerenderPlugin(root: string, config: VoidConfig): Plugin {
 
       voidLog(`Prerendering ${paths.length} page(s)...`);
 
-      // Render
-      const result = await prerenderPages({
-        root,
-        workerDir,
-        clientDir,
-        paths,
-        persistDir,
-      });
+      let result;
+
+      if (isNodeTarget(config.target)) {
+        // Node/Bun/Deno: run prerender in a child process
+        result = await prerenderPagesNode({
+          root,
+          ssrDir: join(distDir, "ssr"),
+          clientDir,
+          paths,
+        });
+      } else {
+        // Cloudflare: use Miniflare
+        const persistDir = join(root, ".void");
+        let workerDirName: string;
+        try {
+          workerDirName = detectWorkerDir(distDir);
+        } catch (err) {
+          voidWarn(`Skipping prerender: ${err instanceof Error ? err.message : String(err)}`);
+          return;
+        }
+        const workerDir = join(distDir, workerDirName);
+
+        result = await prerenderPages({
+          root,
+          workerDir,
+          clientDir,
+          paths,
+          persistDir,
+        });
+      }
 
       if (result.failed.length > 0) {
         voidWarn(`${result.failed.length} page(s) failed to prerender`);
