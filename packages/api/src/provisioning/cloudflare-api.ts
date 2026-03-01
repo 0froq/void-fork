@@ -217,23 +217,40 @@ export async function queryWorkerLogs(
   },
 ): Promise<ObservabilityQueryResult> {
   const filters: Record<string, unknown>[] = [
-    { key: "$workers.scriptName", operation: "eq", value: scriptName },
+    { key: "$workers.scriptName", operation: "eq", value: scriptName, type: "string" },
   ];
   if (options.level && options.level !== "all") {
-    filters.push({ key: "$workers.event.log.level", operation: "eq", value: options.level });
+    filters.push({
+      key: "$workers.event.log.level",
+      operation: "eq",
+      value: options.level,
+      type: "string",
+    });
   }
   if (options.outcome && options.outcome !== "all") {
-    filters.push({ key: "$workers.outcome", operation: "eq", value: options.outcome });
+    filters.push({
+      key: "$workers.outcome",
+      operation: "eq",
+      value: options.outcome,
+      type: "string",
+    });
   }
 
+  // CF Observability API uses unix timestamps (seconds) and a query.parameters structure
+  const fromSec = Math.floor(options.sinceMs / 1000);
+  const toSec = Math.floor((options.untilMs ?? Date.now()) / 1000);
+
   const body = {
-    timeRange: {
-      start: new Date(options.sinceMs).toISOString(),
-      end: new Date(options.untilMs ?? Date.now()).toISOString(),
+    timeframe: { from: fromSec, to: toSec },
+    query: {
+      parameters: {
+        datasets: ["workers:events"],
+        filters,
+        filterCombination: "and",
+        limit: options.limit ?? 100,
+        orderBy: { value: "timestamp", order: "desc" },
+      },
     },
-    filters,
-    limit: options.limit ?? 100,
-    orderBy: [{ key: "timestamp", direction: "desc" }],
   };
 
   const response = await fetch(
@@ -253,7 +270,7 @@ export async function queryWorkerLogs(
     throw new Error(`Observability query failed (${response.status}): ${text}`);
   }
 
-  const json = (await response.json()) as { result?: { data?: unknown[] } };
+  const json = (await response.json()) as { result?: { data?: unknown[]; run?: unknown } };
   const rawData = json.result?.data ?? [];
 
   // Normalize CF response into our log entry format

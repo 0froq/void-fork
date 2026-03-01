@@ -166,7 +166,7 @@ app.post("/:id/deploy", async (c) => {
         compatibility_flags: ["nodejs_compat"],
         bindings: [{ name: "ASSETS", type: "assets" }],
         ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
-        observability: { enabled: true, head_sampling_rate: 1 },
+        observability: { enabled: true, logs: { invocation_logs: true, head_sampling_rate: 1 } },
       };
       workerFormData.append(
         "metadata",
@@ -205,6 +205,7 @@ app.post("/:id/deploy", async (c) => {
         projectId,
         userId: project.user_id,
         version: deployment.id,
+        ...(manifest.hashedAssetsPrefix ? { hashedAssetsPrefix: manifest.hashedAssetsPrefix } : {}),
         ...(existingEntry?.suspended ? { suspended: existingEntry.suspended } : {}),
       });
       await c.env.ROUTING.put(project.slug, routingJson);
@@ -361,7 +362,7 @@ app.post("/:id/deploy", async (c) => {
           ? { crons: manifest.schedules.map((schedule) => schedule.cron) }
           : undefined,
       ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
-      observability: { enabled: true, head_sampling_rate: 1 },
+      observability: { enabled: true, logs: { invocation_logs: true, head_sampling_rate: 1 } },
     };
     workerFormData.append(
       "metadata",
@@ -489,6 +490,7 @@ app.post("/:id/deploy", async (c) => {
       userId: project.user_id,
       ...(manifest.ssr ? { ssr: true } : {}),
       ...(manifest.revalidate ? { revalidate: manifest.revalidate } : {}),
+      ...(manifest.hashedAssetsPrefix ? { hashedAssetsPrefix: manifest.hashedAssetsPrefix } : {}),
       version: deployment.id,
       ...dispatchLimits,
       ...(existingEntry?.suspended ? { suspended: existingEntry.suspended } : {}),

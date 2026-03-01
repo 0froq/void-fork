@@ -1280,6 +1280,9 @@ describe("POST /projects/:id/deploy/preflight", () => {
     );
     expect(res.status).toBe(200);
     expect(capturedMetadata).toBeDefined();
-    expect(capturedMetadata!.observability).toEqual({ enabled: true, head_sampling_rate: 1 });
+    expect(capturedMetadata!.observability).toEqual({
+      enabled: true,
+      logs: { invocation_logs: true, head_sampling_rate: 1 },
+    });
   });
 });
