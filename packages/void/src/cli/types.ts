@@ -46,4 +46,5 @@ export interface DeployManifest {
   compatibilityDate?: string;
   compatibilityFlags?: string[];
   hashedAssetsPrefix?: string;
+  headerRules?: HeaderRule[];
 }

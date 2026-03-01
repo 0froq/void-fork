@@ -50,10 +50,10 @@ Define custom response headers in [`void.json`](../config.md) using the `headers
 
 ## Scope
 
-Header rules apply to **static asset responses only** — files served from R2 (including SPA `index.html` fallbacks and SSG pages). They do not apply to:
+Header rules apply to **all responses** served through the dispatch worker — static assets, SSR pages, and API routes. They do not apply to:
 
-- API route responses (`/api/*` dispatched to your worker)
-- SSR-rendered responses (when a static asset is not found and the request falls through to your worker)
+- Hashed asset cache hits (these use immutable caching set by the dispatch worker itself)
+- ISR cache responses (these have their own cache-control headers)
 
 ## Framework `_headers` files
 

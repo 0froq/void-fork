@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { InferredBindings } from "../inference/walk";
 import type { MigrationFile } from "../migrations/validate";
-import type { AssetConfig, DeployManifest, QueueMeta, ScheduleMeta } from "./types";
+import type { AssetConfig, DeployManifest, HeaderRule, QueueMeta, ScheduleMeta } from "./types";
 
 /**
  * Compute a CF-compatible asset hash: SHA-256, first 32 hex chars.
@@ -99,6 +99,7 @@ export function packageBuild(
   options?: PackageOptions,
   neededAssets?: Set<string> | null,
   hashedAssetsPrefix?: string,
+  headerRules?: HeaderRule[],
 ): FormData {
   const formData = new FormData();
 
@@ -166,6 +167,10 @@ export function packageBuild(
     manifest.hashedAssetsPrefix = hashedAssetsPrefix;
   }
 
+  if (headerRules && headerRules.length > 0) {
+    manifest.headerRules = headerRules;
+  }
+
   formData.append("manifest", JSON.stringify(manifest));
 
   // Add worker files
@@ -208,6 +213,7 @@ export function packageStaticBuild(
   appType: "spa" | "static",
   neededAssets?: Set<string> | null,
   hashedAssetsPrefix?: string,
+  headerRules?: HeaderRule[],
 ): FormData {
   const formData = new FormData();
 
@@ -221,6 +227,10 @@ export function packageStaticBuild(
 
   if (hashedAssetsPrefix) {
     manifest.hashedAssetsPrefix = hashedAssetsPrefix;
+  }
+
+  if (headerRules && headerRules.length > 0) {
+    manifest.headerRules = headerRules;
   }
 
   formData.append("manifest", JSON.stringify(manifest));
@@ -261,6 +271,7 @@ export function packageFrameworkBuild(opts: {
   packageOptions?: PackageOptions;
   neededAssets?: Set<string> | null;
   hashedAssetsPrefix?: string;
+  headerRules?: HeaderRule[];
 }): FormData {
   const formData = new FormData();
   const po = opts.packageOptions;
@@ -299,6 +310,10 @@ export function packageFrameworkBuild(opts: {
 
   if (opts.hashedAssetsPrefix) {
     manifest.hashedAssetsPrefix = opts.hashedAssetsPrefix;
+  }
+
+  if (opts.headerRules && opts.headerRules.length > 0) {
+    manifest.headerRules = opts.headerRules;
   }
 
   formData.append("manifest", JSON.stringify(manifest));

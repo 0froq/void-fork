@@ -65,37 +65,6 @@ export function parseHeadersFile(dir: string): HeaderRule[] | undefined {
 }
 
 /**
- * Generate a `_headers` file in the client output directory.
- *
- * Writes default cache-control rules plus any headers from void.json config.
- * Does nothing if a `_headers` file already exists (user-provided takes precedence).
- */
-export function generateHeadersFile(
-  clientDir: string,
-  headers: Record<string, string[]> | undefined,
-  assetsPrefix: string,
-): void {
-  const headersFilePath = join(clientDir, "_headers");
-  if (existsSync(headersFilePath)) return;
-
-  let content = `/${assetsPrefix}/*\n  Cache-Control: public, max-age=31536000, immutable\n\n/*\n  Cache-Control: public, s-maxage=60, max-age=0, must-revalidate\n`;
-
-  if (headers) {
-    for (const [pattern, values] of Object.entries(headers)) {
-      const validHeaders = values.filter((v) => v.includes(":"));
-      if (validHeaders.length > 0) {
-        content += `\n${pattern}\n`;
-        for (const header of validHeaders) {
-          content += `  ${header}\n`;
-        }
-      }
-    }
-  }
-
-  writeFileSync(headersFilePath, content);
-}
-
-/**
  * Generate a `_redirects` file in the client output directory.
  *
  * Converts void.json `redirects` config into Cloudflare `_redirects` format.

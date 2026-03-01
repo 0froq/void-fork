@@ -37,8 +37,9 @@ import {
 } from "./wrapper";
 import { getRequestedProjectSlug, resolveProjectBySlug, inferDefaultSlug } from "./resolve-project";
 import { cliTitle } from "./output";
-import { generateHeadersFile, generateRedirectsFile } from "./headers";
-import type { AssetConfig } from "./types";
+import { parseHeadersFile, generateRedirectsFile } from "./headers";
+import { convertHeadersConfig } from "../config";
+import type { AssetConfig, HeaderRule } from "./types";
 
 export interface RunDeployOptions {
   projectSlug?: string;
@@ -170,7 +171,16 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   const gitCommit = options?.skipBuild ? null : getGitCommit(root);
 
   if (preset) {
-    await runStaticDeploy(root, config, client, preset, options?.skipBuild, gitCommit);
+    await runStaticDeploy(
+      root,
+      config,
+      client,
+      preset,
+      options?.skipBuild,
+      gitCommit,
+      undefined,
+      convertHeadersConfig(vcConfig.headers) ?? [],
+    );
   } else {
     await runFullDeploy(root, config, client, options?.skipBuild, gitCommit);
   }
@@ -184,6 +194,7 @@ async function runStaticDeploy(
   skipBuild?: boolean,
   commit?: string | null,
   hashedAssetsPrefix?: string,
+  headerRules?: HeaderRule[],
 ): Promise<void> {
   const typeLabel = preset.appType === "spa" ? "Static SPA" : "Static Site";
   log.info(`${typeLabel} deploy`);
@@ -217,6 +228,7 @@ async function runStaticDeploy(
     preset.appType,
     neededSet,
     hashedAssetsPrefix ?? "assets",
+    headerRules,
   );
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
@@ -262,9 +274,13 @@ async function runFrameworkDeploy(
   const workerDir = join(root, fwPreset.workerDir);
   const assetsDir = join(root, fwPreset.assetsDir);
 
-  // Generate _headers and _redirects from void.json (unless user files already exist)
+  // Collect header rules: parse framework-generated _headers file + void.json config
+  const fwHeaderRules = existsSync(assetsDir) ? parseHeadersFile(assetsDir) : undefined;
+  const cfgHeaderRules = convertHeadersConfig(vcConfig.headers);
+  const headerRules: HeaderRule[] = [...(fwHeaderRules ?? []), ...(cfgHeaderRules ?? [])];
+
+  // Generate _redirects from void.json (unless user file already exists)
   if (existsSync(assetsDir)) {
-    generateHeadersFile(assetsDir, vcConfig.headers, "assets");
     generateRedirectsFile(assetsDir, vcConfig.redirects);
   }
 
@@ -382,6 +398,7 @@ async function runFrameworkDeploy(
     },
     neededAssets: neededSet,
     hashedAssetsPrefix: fwPreset.hashedAssetsPrefix ?? "assets",
+    headerRules,
   });
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
@@ -474,10 +491,14 @@ async function runFullDeploy(
     deployConfig.scanDirs ?? (isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined);
   const bindings = inferProjectBindings(root, undefined, deployScanDirs);
 
-  // Generate _headers and _redirects from void.json (unless user files already exist)
+  // Collect header rules: parse user/framework _headers file + void.json config
   const clientDir = join(distDir, "client");
+  const userHeaderRules = existsSync(clientDir) ? parseHeadersFile(clientDir) : undefined;
+  const cfgHeaderRules = convertHeadersConfig(deployConfig.headers);
+  const headerRules: HeaderRule[] = [...(userHeaderRules ?? []), ...(cfgHeaderRules ?? [])];
+
+  // Generate _redirects from void.json (unless user file already exists)
   if (existsSync(clientDir)) {
-    generateHeadersFile(clientDir, deployConfig.headers, assetsPrefix);
     generateRedirectsFile(clientDir, deployConfig.redirects);
   }
 
@@ -565,6 +586,7 @@ async function runFullDeploy(
         true,
         commit,
         assetsPrefix,
+        headerRules,
       );
     }
   }
@@ -619,6 +641,7 @@ async function runFullDeploy(
     },
     neededSet,
     assetsPrefix,
+    headerRules,
   );
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
