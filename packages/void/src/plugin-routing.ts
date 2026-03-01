@@ -197,7 +197,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       } else {
         writeFileSync(
           join(outDir, "entry.ts"),
-          compileWorkerEntry(scan!.queues.length > 0, remote),
+          compileWorkerEntry(scan!.queues.length > 0, remote, resolvedConfig?.build.assetsDir),
         );
       }
     },
@@ -282,7 +282,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         } else {
           writeFileSync(
             join(outDir, "entry.ts"),
-            compileWorkerEntry(scan!.queues.length > 0, remote),
+            compileWorkerEntry(scan!.queues.length > 0, remote, resolvedConfig?.build.assetsDir),
           );
         }
 

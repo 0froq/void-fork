@@ -904,7 +904,9 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
 
 /**
  * Generate the Worker entry module code.
- * Simply re-exports the Hono app from the virtual module.
+ * Re-exports the Hono app from the virtual module with an asset-serving
+ * fallthrough: when the app returns 404, the entry tries env.ASSETS.fetch()
+ * and adds proper Cache-Control headers (immutable for Vite-hashed /assets/*).
  *
  * When `hasQueues` is true, also exports a `queue()` handler that
  * serializes the native MessageBatch and dispatches it to the
@@ -918,21 +920,41 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
 export function compileWorkerEntry(
   hasQueues = false,
   remote?: { remotePath: string; envPath: string },
+  assetsDir = "assets",
 ): string {
   const remotePath = remote?.remotePath;
   const remoteImport = remote
     ? `import { createRemoteEnv } from ${JSON.stringify(remote.remotePath)};\nimport { withRuntimeEnv } from ${JSON.stringify(remote.envPath)};\n`
     : "";
 
+  // Asset fallthrough helper — if the app returns 404, check ASSETS binding
+  // for static files and set cache headers. Edge caching of hashed assets
+  // happens at the dispatch layer (see design doc 0042).
+  // Safe for workers without ASSETS binding (env.ASSETS check short-circuits).
+  const assetHelper = `
+async function serveWithAssets(request, env, response) {
+  if (response.status !== 404 || !env.ASSETS) return response;
+  const asset = await env.ASSETS.fetch(request);
+  if (asset.status === 404) return response;
+  const res = new Response(asset.body, asset);
+  if (new URL(request.url).pathname.startsWith(${JSON.stringify("/" + assetsDir + "/")})) {
+    res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  } else {
+    res.headers.set("Cache-Control", "public, s-maxage=60, max-age=0, must-revalidate");
+  }
+  return res;
+}
+`;
+
   const fetchHandler = remotePath
     ? `async (request, env, ctx) => {
   if (env.__VOID_REMOTE === "1") {
     env = createRemoteEnv(env);
-    return withRuntimeEnv(env, () => app.fetch(request, env, ctx));
+    return serveWithAssets(request, env, await withRuntimeEnv(env, () => app.fetch(request, env, ctx)));
   }
-  return app.fetch(request, env, ctx);
+  return serveWithAssets(request, env, await app.fetch(request, env, ctx));
 }`
-    : "app.fetch";
+    : `async (request, env, ctx) => serveWithAssets(request, env, await app.fetch(request, env, ctx))`;
 
   const queueFetchCall = remotePath
     ? `if (env.__VOID_REMOTE === "1") {
@@ -945,7 +967,7 @@ export function compileWorkerEntry(
 
   if (hasQueues) {
     return `import app, { scheduled } from 'virtual:void-routes';
-${remoteImport}
+${remoteImport}${assetHelper}
 async function queue(batch, env, ctx) {
   const messages = [...batch.messages].map(m => ({
     id: m.id, timestamp: m.timestamp.toISOString(),
@@ -962,7 +984,7 @@ async function queue(batch, env, ctx) {
 export default { fetch: ${fetchHandler}, scheduled, queue };`;
   }
   return `import app, { scheduled } from 'virtual:void-routes';
-${remoteImport}
+${remoteImport}${assetHelper}
 export default { fetch: ${fetchHandler}, scheduled };`;
 }
 

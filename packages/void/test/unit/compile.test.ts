@@ -283,7 +283,8 @@ describe("compileWorkerEntry", () => {
     const code = compileWorkerEntry();
 
     expect(code).toContain("import app, { scheduled } from 'virtual:void-routes'");
-    expect(code).toContain("export default { fetch: app.fetch, scheduled }");
+    expect(code).toContain("serveWithAssets");
+    expect(code).toContain("export default { fetch:");
     expect(code).not.toContain("queue");
   });
 
@@ -291,7 +292,8 @@ describe("compileWorkerEntry", () => {
     const code = compileWorkerEntry(true);
 
     expect(code).toContain("async function queue(batch, env, ctx)");
-    expect(code).toContain("export default { fetch: app.fetch, scheduled, queue }");
+    expect(code).toContain("serveWithAssets");
+    expect(code).toContain("scheduled, queue }");
     expect(code).toContain("/__queue");
     expect(code).toContain("batch.queue");
     expect(code).toContain("m.timestamp.toISOString()");
@@ -301,6 +303,28 @@ describe("compileWorkerEntry", () => {
     const code = compileWorkerEntry(false);
 
     expect(code).not.toContain("queue");
+  });
+
+  it("generates serveWithAssets helper with cache headers", () => {
+    const code = compileWorkerEntry();
+
+    expect(code).toContain("async function serveWithAssets(request, env, response)");
+    expect(code).toContain("env.ASSETS");
+    expect(code).toContain('"/assets/"');
+    // Both cache-control values (hashed + non-hashed)
+    expect(code).toContain("public, max-age=31536000, immutable");
+    expect(code).toContain("public, s-maxage=60, max-age=0, must-revalidate");
+    // No Cache API usage (edge caching happens at dispatch layer)
+    expect(code).not.toContain("caches.default");
+    expect(code).not.toContain("cache.match");
+    expect(code).not.toContain("cache.put");
+  });
+
+  it("uses custom assetsDir in serveWithAssets path check", () => {
+    const code = compileWorkerEntry(false, undefined, "_astro");
+
+    expect(code).toContain('"/_astro/"');
+    expect(code).not.toContain('"/assets/"');
   });
 });
 

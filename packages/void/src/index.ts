@@ -627,10 +627,13 @@ export function voidPlugin(options?: {
   if (ssrEntry || hasPages) {
     workerConfig.assets = {
       binding: "ASSETS",
-      // Route document/API requests to the worker for SSR/Pages. Static assets
-      // (hashed files in /assets/) bypass the worker and are served directly
-      // from the edge. Dev-only exclusions are added in envPlugin's config hook.
-      run_worker_first: ["/**", "!/assets/*"],
+      // Route all requests through the worker so the entry can set proper
+      // Cache-Control headers on static asset responses (CF's default is
+      // max-age=0 and _headers files don't work for WfP dispatch uploads).
+      // The worker entry falls through to env.ASSETS.fetch() for paths that
+      // don't match any app route. Dev-mode exclusions are handled in
+      // envPlugin's config hook (deletes run_worker_first entirely).
+      run_worker_first: ["/**"],
     };
   }
 
