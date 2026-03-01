@@ -104,14 +104,14 @@ async function queryProjectUsage(
   projectId: string,
   since: Date,
 ): Promise<{ requests: number; bandwidthBytes: number }> {
-  const sinceStr = since.toISOString().replace("T", " ").replace("Z", "");
+  const sinceStr = since.toISOString().replace("T", " ").slice(0, 19);
   const query = `
     SELECT
       SUM(_sample_interval * double1) as requests,
       SUM(_sample_interval * double2) as bandwidth_bytes
     FROM vite_cloud_requests
     WHERE blob1 = '${projectId}'
-      AND timestamp >= '${sinceStr}'
+      AND timestamp >= toDateTime('${sinceStr}')
   `;
 
   const response = await fetch(

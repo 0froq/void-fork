@@ -230,7 +230,7 @@ app.get("/:id/logs", async (c) => {
   const sinceMs = parseSince(since);
   const limit = Math.min(parseInt(c.req.query("limit") ?? "100", 10) || 100, 500);
 
-  const sinceStr = new Date(sinceMs).toISOString().replace("T", " ").replace("Z", "");
+  const sinceStr = new Date(sinceMs).toISOString().replace("T", " ").slice(0, 19);
   const dataset = c.env.LOGS_DATASET ?? "void_logs";
   const query = `
     SELECT
@@ -240,11 +240,11 @@ app.get("/:id/logs", async (c) => {
       blob4 as url,
       blob5 as method,
       blob6 as status,
-      double1 as timestamp
+      double1 as ts
     FROM ${dataset}
     WHERE index1 = '${workerName}'
-      AND timestamp >= '${sinceStr}'
-    ORDER BY double1 DESC
+      AND timestamp >= toDateTime('${sinceStr}')
+    ORDER BY timestamp DESC
     LIMIT ${limit}
   `;
 
@@ -266,7 +266,7 @@ app.get("/:id/logs", async (c) => {
 
   const result = (await response.json()) as { data: LogRow[] };
   const data = (result.data ?? []).map((row) => ({
-    timestamp: row.timestamp,
+    timestamp: row.ts,
     outcome: row.outcome,
     logs: tryParse(row.logs),
     exceptions: tryParse(row.exceptions),
@@ -304,7 +304,7 @@ interface LogRow {
   url: string;
   method: string;
   status: string;
-  timestamp: number;
+  ts: number;
 }
 
 function tryParse(json: string): unknown[] {
