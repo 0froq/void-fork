@@ -64,12 +64,26 @@ async function main(): Promise<void> {
 
   const s = p.spinner();
 
-  // 1. Create local dev database (idempotent)
+  // 1. Create void_dev role and database (idempotent)
   s.start("Creating local database void_api_dev");
   try {
-    run("createdb void_api_dev 2>/dev/null", platformDir);
+    run(
+      `psql -d postgres -c "CREATE ROLE void_dev WITH LOGIN PASSWORD 'void_dev'" 2>/dev/null`,
+      platformDir,
+    );
+  } catch {
+    // Role already exists — fine
+  }
+  try {
+    run("createdb -O void_dev void_api_dev 2>/dev/null", platformDir);
   } catch {
     // Already exists — fine
+  }
+  // Ensure void_dev owns the database even if it was created before the role
+  try {
+    run(`psql -d postgres -c "ALTER DATABASE void_api_dev OWNER TO void_dev"`, platformDir);
+  } catch {
+    // Fine
   }
   s.stop("Database void_api_dev ready");
 

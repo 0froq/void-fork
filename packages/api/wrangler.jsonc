@@ -13,6 +13,8 @@
     {
       "binding": "HYPERDRIVE",
       "id": "7bd6b2a606a347819ad3421867840736",
+      // Local dev: `pnpm setup` creates the void_dev role and database
+      "localConnectionString": "postgresql://void_dev:void_dev@localhost:5432/void_api_dev",
     },
   ],
   "r2_buckets": [
@@ -63,6 +65,7 @@
   // Secrets (via `wrangler secret put`): CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID, JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
   // Optional env var: AUTH_REDIRECT_URI (defaults to https://api.void.cloud/auth/callback)
   // For local dev, set AUTH_REDIRECT_URI=http://localhost:8787/auth/callback and DEV_AUTH_BYPASS=true in .dev.vars
+  // For local Hyperdrive, set CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://user:pass@localhost:5432/void_api_dev in .dev.vars (run `pnpm setup` to auto-configure)
   "env": {
     "staging": {
       "name": "void-api-staging",
