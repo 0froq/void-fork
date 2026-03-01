@@ -166,6 +166,7 @@ app.post("/:id/deploy", async (c) => {
         compatibility_flags: ["nodejs_compat"],
         bindings: [{ name: "ASSETS", type: "assets" }],
         ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
+        observability: { enabled: true, head_sampling_rate: 1 },
       };
       workerFormData.append(
         "metadata",
@@ -360,6 +361,7 @@ app.post("/:id/deploy", async (c) => {
           ? { crons: manifest.schedules.map((schedule) => schedule.cron) }
           : undefined,
       ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
+      observability: { enabled: true, head_sampling_rate: 1 },
     };
     workerFormData.append(
       "metadata",

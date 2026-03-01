@@ -1254,4 +1254,32 @@ describe("POST /projects/:id/deploy/preflight", () => {
     expect(sessionManifest).toBeDefined();
     expect(Object.keys(sessionManifest!).sort()).toEqual(["/app.js", "/index.html"]);
   });
+
+  it("includes observability metadata in worker upload", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "obs-proj");
+
+    let capturedMetadata: Record<string, unknown> | undefined;
+    mockCfApi({
+      uploadWorker: async (_url: string, init?: RequestInit) => {
+        const body = init?.body as FormData;
+        const metadataBlob = body.get("metadata") as Blob;
+        capturedMetadata = JSON.parse(await metadataBlob.text());
+        return new Response("ok", { status: 200 });
+      },
+    });
+
+    const form = buildDeployForm();
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(capturedMetadata).toBeDefined();
+    expect(capturedMetadata!.observability).toEqual({ enabled: true, head_sampling_rate: 1 });
+  });
 });

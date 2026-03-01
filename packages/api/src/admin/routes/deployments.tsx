@@ -7,7 +7,13 @@ import {
   getProject,
 } from "../../db";
 import type { DeployManifest } from "../../types";
+import {
+  queryWorkerLogs,
+  createTailSession,
+  deleteTailSession,
+} from "../../provisioning/cloudflare-api";
 import { DeploymentsListPage } from "../views/deployments-list";
+import { DeploymentLogs } from "../views/deployment-logs";
 import { Layout } from "../views/layout";
 
 const PAGE_SIZE = 20;
@@ -198,8 +204,125 @@ app.get("/:id", async (c) => {
           </details>
         </>
       )}
+
+      {deployment.status === "live" && project && (
+        <DeploymentLogs
+          deploymentId={deployment.id}
+          workerName={`user-${project.slug}`}
+          since={c.req.query("since") ?? "1h"}
+          level={c.req.query("level") ?? "all"}
+        />
+      )}
     </Layout>,
   );
 });
+
+// GET /deployments/:id/logs — query historical logs via CF Observability API
+app.get("/:id/logs", async (c) => {
+  const deployment = await getDeployment(c.get("db"), c.req.param("id"));
+  if (!deployment) {
+    return c.json({ error: "deployment not found" }, 404);
+  }
+  const project = await getProject(c.get("db"), deployment.project_id);
+  if (!project) {
+    return c.json({ error: "project not found" }, 404);
+  }
+
+  const workerName = `user-${project.slug}`;
+  const since = c.req.query("since") ?? "1h";
+  const sinceMs = parseSince(since);
+  const level = c.req.query("level") ?? "all";
+  const outcome = c.req.query("outcome") ?? "all";
+  const limit = Math.min(parseInt(c.req.query("limit") ?? "100", 10) || 100, 500);
+
+  try {
+    const result = await queryWorkerLogs(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, workerName, {
+      sinceMs,
+      level,
+      outcome,
+      limit,
+    });
+    return c.json(result);
+  } catch (err) {
+    return c.json(
+      { error: "log query failed", details: err instanceof Error ? err.message : String(err) },
+      502,
+    );
+  }
+});
+
+const DEFAULT_DISPATCH_NAMESPACE = "void-users";
+
+// POST /deployments/:id/tail — create a real-time tail session
+app.post("/:id/tail", async (c) => {
+  const deployment = await getDeployment(c.get("db"), c.req.param("id"));
+  if (!deployment) {
+    return c.json({ error: "deployment not found" }, 404);
+  }
+  const project = await getProject(c.get("db"), deployment.project_id);
+  if (!project) {
+    return c.json({ error: "project not found" }, 404);
+  }
+
+  const workerName = `user-${project.slug}`;
+  const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
+
+  try {
+    const session = await createTailSession(
+      c.env.CF_ACCOUNT_ID,
+      c.env.CF_API_TOKEN,
+      dispatchNamespace,
+      workerName,
+    );
+    return c.json({ url: session.url, id: session.id });
+  } catch (err) {
+    return c.json(
+      { error: "tail session failed", details: err instanceof Error ? err.message : String(err) },
+      502,
+    );
+  }
+});
+
+// DELETE /deployments/:id/tail/:tailId — clean up a tail session
+app.delete("/:id/tail/:tailId", async (c) => {
+  const deployment = await getDeployment(c.get("db"), c.req.param("id"));
+  if (!deployment) {
+    return c.json({ error: "deployment not found" }, 404);
+  }
+  const project = await getProject(c.get("db"), deployment.project_id);
+  if (!project) {
+    return c.json({ error: "project not found" }, 404);
+  }
+
+  const workerName = `user-${project.slug}`;
+  const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
+
+  try {
+    await deleteTailSession(
+      c.env.CF_ACCOUNT_ID,
+      c.env.CF_API_TOKEN,
+      dispatchNamespace,
+      workerName,
+      c.req.param("tailId"),
+    );
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json(
+      { error: "tail cleanup failed", details: err instanceof Error ? err.message : String(err) },
+      502,
+    );
+  }
+});
+
+function parseSince(since: string): number {
+  const now = Date.now();
+  const units: Record<string, number> = {
+    "1h": 60 * 60 * 1000,
+    "6h": 6 * 60 * 60 * 1000,
+    "24h": 24 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
+  };
+  return now - (units[since] ?? units["1h"]);
+}
 
 export default app;

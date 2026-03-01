@@ -185,6 +185,141 @@ export async function deleteQueue(
   });
 }
 
+// --- Workers Observability ---
+
+export interface ObservabilityLogEntry {
+  timestamp: number;
+  level: string;
+  message: string;
+  outcome: string;
+  scriptName: string;
+  request?: { url: string; method: string };
+  response?: { status: number };
+  exception?: { name: string; message: string };
+  cpuTimeMs?: number;
+  wallTimeMs?: number;
+}
+
+export interface ObservabilityQueryResult {
+  data: ObservabilityLogEntry[];
+}
+
+export async function queryWorkerLogs(
+  accountId: string,
+  apiToken: string,
+  scriptName: string,
+  options: {
+    sinceMs: number;
+    untilMs?: number;
+    level?: string;
+    outcome?: string;
+    limit?: number;
+  },
+): Promise<ObservabilityQueryResult> {
+  const filters: Record<string, unknown>[] = [
+    { key: "$workers.scriptName", operation: "eq", value: scriptName },
+  ];
+  if (options.level && options.level !== "all") {
+    filters.push({ key: "$workers.event.log.level", operation: "eq", value: options.level });
+  }
+  if (options.outcome && options.outcome !== "all") {
+    filters.push({ key: "$workers.outcome", operation: "eq", value: options.outcome });
+  }
+
+  const body = {
+    timeRange: {
+      start: new Date(options.sinceMs).toISOString(),
+      end: new Date(options.untilMs ?? Date.now()).toISOString(),
+    },
+    filters,
+    limit: options.limit ?? 100,
+    orderBy: [{ key: "timestamp", direction: "desc" }],
+  };
+
+  const response = await fetch(
+    `${CF_API_BASE}/${accountId}/workers/observability/telemetry/query`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Observability query failed (${response.status}): ${text}`);
+  }
+
+  const json = (await response.json()) as { result?: { data?: unknown[] } };
+  const rawData = json.result?.data ?? [];
+
+  // Normalize CF response into our log entry format
+  const data: ObservabilityLogEntry[] = rawData.map((entry: any) => ({
+    timestamp: entry.$workers?.eventTimestamp ?? entry.timestamp ?? 0,
+    level: entry.$workers?.event?.log?.level ?? entry.$metadata?.level ?? "log",
+    message: entry.$metadata?.message ?? entry.$workers?.event?.log?.message?.join(" ") ?? "",
+    outcome: entry.$workers?.outcome ?? "unknown",
+    scriptName: entry.$workers?.scriptName ?? scriptName,
+    ...(entry.$workers?.event?.request && {
+      request: {
+        url: entry.$workers.event.request.url,
+        method: entry.$workers.event.request.method,
+      },
+    }),
+    ...(entry.$workers?.event?.response && {
+      response: { status: entry.$workers.event.response.status },
+    }),
+    ...(entry.$workers?.exceptions?.[0] && {
+      exception: {
+        name: entry.$workers.exceptions[0].name,
+        message: entry.$workers.exceptions[0].message,
+      },
+    }),
+    cpuTimeMs: entry.$workers?.cpuTimeMs,
+    wallTimeMs: entry.$workers?.wallTimeMs,
+  }));
+
+  return { data };
+}
+
+// --- Tail API ---
+
+export interface TailSession {
+  id: string;
+  url: string;
+  expires_at: string;
+}
+
+export async function createTailSession(
+  accountId: string,
+  apiToken: string,
+  dispatchNamespace: string,
+  scriptName: string,
+): Promise<TailSession> {
+  return cfFetch<TailSession>(
+    `${CF_API_BASE}/${accountId}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${scriptName}/tails`,
+    apiToken,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export async function deleteTailSession(
+  accountId: string,
+  apiToken: string,
+  dispatchNamespace: string,
+  scriptName: string,
+  tailId: string,
+): Promise<void> {
+  await cfFetch(
+    `${CF_API_BASE}/${accountId}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${scriptName}/tails/${tailId}`,
+    apiToken,
+    { method: "DELETE" },
+  );
+}
+
 // --- Custom Hostnames (CF for SaaS) ---
 
 export interface CustomHostnameInfo {

@@ -188,6 +188,9 @@ export interface CfApiMocks {
   getCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
   deleteCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
   analyticsQuery: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  observabilityQuery: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  createTail: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  deleteTail: (url: string, init?: RequestInit) => Response | Promise<Response>;
 }
 
 const defaultMocks: CfApiMocks = {
@@ -223,6 +226,14 @@ const defaultMocks: CfApiMocks = {
     }),
   deleteCustomHostname: () => cfSuccess(null),
   analyticsQuery: () => Response.json({ data: [{ requests: 0, bandwidth_bytes: 0 }] }),
+  observabilityQuery: () => Response.json({ success: true, result: { data: [] } }),
+  createTail: () =>
+    cfSuccess({
+      id: "tail-test-id",
+      url: "wss://tail.example.com/test",
+      expires_at: "2099-01-01T00:00:00Z",
+    }),
+  deleteTail: () => cfSuccess(null),
 };
 
 export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeof vi.fn> {
@@ -234,6 +245,15 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
     const method = init?.method ?? "GET";
 
     // Order matters: more specific patterns first
+    if (method === "POST" && url.includes("/workers/observability/telemetry/query")) {
+      return mocks.observabilityQuery(url, init);
+    }
+    if (method === "POST" && url.includes("/dispatch/namespaces/") && url.includes("/tails")) {
+      return mocks.createTail(url, init);
+    }
+    if (method === "DELETE" && url.includes("/tails/")) {
+      return mocks.deleteTail(url, init);
+    }
     if (method === "POST" && url.includes("/custom_hostnames")) {
       return mocks.createCustomHostname(url, init);
     }
