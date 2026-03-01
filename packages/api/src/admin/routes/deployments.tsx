@@ -15,6 +15,7 @@ import {
 import { DeploymentsListPage } from "../views/deployments-list";
 import { DeploymentLogs } from "../views/deployment-logs";
 import { Layout } from "../views/layout";
+import { formatDateTime } from "../views/format";
 
 const PAGE_SIZE = 20;
 const app = new Hono<ApiEnv>();
@@ -23,6 +24,7 @@ const app = new Hono<ApiEnv>();
 app.get("/", async (c) => {
   const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
+  const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
   const [deployments, total] = await Promise.all([
     getAllDeploymentsWithProject(c.get("db"), PAGE_SIZE, offset),
     countDeployments(c.get("db")),
@@ -34,6 +36,7 @@ app.get("/", async (c) => {
       page={page}
       totalPages={totalPages}
       username={c.get("userLogin")}
+      tz={tz}
     />,
   );
 });
@@ -45,6 +48,7 @@ app.get("/:id", async (c) => {
     return c.html("<h1>Deployment not found</h1>", 404);
   }
   const project = await getProject(c.get("db"), deployment.project_id);
+  const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
 
   let manifest: DeployManifest | null = null;
   try {
@@ -115,11 +119,11 @@ app.get("/:id", async (c) => {
             <th>Commit</th>
             <td>{deployment.commit ?? "-"}</td>
             <th>Created</th>
-            <td>{deployment.created_at}</td>
+            <td>{formatDateTime(deployment.created_at, tz)}</td>
           </tr>
           <tr>
             <th>Deployed</th>
-            <td>{deployment.deployed_at ?? "-"}</td>
+            <td>{deployment.deployed_at ? formatDateTime(deployment.deployed_at, tz) : "-"}</td>
             {mode ? (
               <>
                 <th>Mode</th>

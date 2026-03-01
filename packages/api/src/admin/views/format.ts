@@ -1,3 +1,23 @@
+export function formatDateTime(iso: string, tz?: string): string {
+  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
+  if (isNaN(d.getTime())) return iso;
+  const formatted = d.toLocaleString("en-US", {
+    timeZone: tz || "UTC",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
+  let ago: string;
+  if (seconds < 60) ago = `${seconds}s ago`;
+  else if (seconds < 3600) ago = `${Math.floor(seconds / 60)}m ago`;
+  else if (seconds < 86400) ago = `${Math.floor(seconds / 3600)}h ago`;
+  else ago = `${Math.floor(seconds / 86400)}d ago`;
+  return `${formatted} (${ago})`;
+}
+
 export function formatBytes(n: number): string {
   if (n === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
