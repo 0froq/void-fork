@@ -12,13 +12,14 @@ How we deploy, what we provision, and how the system is configured.
 
 ## What We Deploy
 
-Four Cloudflare Workers:
+Five Cloudflare Workers:
 
 | Worker           | Package              | Purpose                                                                                                                   |
 | ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `void-proxy`     | `packages/proxy`     | Unified proxy — AI inference metering + D1/KV/R2 remote bindings for local dev                                            |
 | `void-api`       | `packages/api`       | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering                                |
 | `void-dashboard` | `packages/dashboard` | User-facing dashboard — project management, deployments, usage                                                            |
+| `void-tail`      | `packages/tail`      | Tail worker — captures user worker logs to Analytics Engine + live tailing via Durable Object WebSockets                  |
 | `void-dispatch`  | `packages/dispatch`  | Edge router — routes `*.void.app` + custom domain traffic to user workers (via Workers for Platforms) or R2 static assets |
 
 ## Environments
@@ -56,6 +57,13 @@ Two fully isolated environments. Each has its own CF resources (D1, KV, R2, disp
 | Analytics Engine   | `ANALYTICS`   | `vite_cloud_requests`                                       |
 | Queue (producer)   | `USAGE_QUEUE` | `void-usage-events`                                         |
 | Routes             | —             | `*.void.app/*`, `*.void.app`, `*/*`, `*` (zone: `void.app`) |
+
+**Tail worker** (`void-tail`):
+
+| Resource         | Binding      | Name / ID                                   |
+| ---------------- | ------------ | ------------------------------------------- |
+| Analytics Engine | `ANALYTICS`  | `void_logs`                                 |
+| Durable Object   | `LOG_STREAM` | `LogStream` (per-worker live log broadcast) |
 
 **Proxy worker** (`void-proxy`):
 

@@ -90,6 +90,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | ------------------------------------------------------ | -------------------------------- | -------------------------------------------------------------- |
 | [`packages/api`](./packages/api/README.md)             | `@voidcloud/api` (private)       | Control Plane API + Admin Dashboard                            |
 | [`packages/dispatch`](./packages/dispatch/README.md)   | `@voidcloud/dispatch` (private)  | Routes `*.void.app` to user workers + R2 assets                |
+| [`packages/tail`](./packages/tail/README.md)           | `@voidcloud/tail` (private)      | Tail worker — user worker logs + live tailing via DO WebSocket |
 | [`packages/proxy`](./packages/proxy/README.md)         | `@voidcloud/proxy` (private)     | Proxy worker — AI inference, D1/KV/R2 remote bindings          |
 | [`packages/dashboard`](./packages/dashboard/README.md) | `@voidcloud/dashboard` (private) | User-facing dashboard — project management, deployments, usage |
 | [`packages/ui`](./packages/ui)                         | `@voidcloud/ui` (private)        | Shared CSS/design tokens (used by dashboard)                   |

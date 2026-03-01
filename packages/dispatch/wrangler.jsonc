@@ -44,6 +44,7 @@
       },
     ],
   },
+  "tail_consumers": [{ "service": "void-tail" }],
   "env": {
     "staging": {
       "name": "void-dispatch-staging",
@@ -54,6 +55,7 @@
         },
         { "pattern": "*.staging.void.app", "zone_name": "void.app" },
       ],
+      "tail_consumers": [{ "service": "void-tail-staging" }],
       "vars": {
         "BASE_HOSTNAME": "staging.void.app",
       },

@@ -208,10 +208,121 @@ app.get("/:id", async (c) => {
       </table>
 
       {deployment.status === "live" && project && (
-        <DeploymentLogs workerName={`user-${project.slug}`} />
+        <DeploymentLogs deploymentId={deployment.id} workerName={`user-${project.slug}`} />
       )}
     </Layout>,
   );
 });
+
+// GET /deployments/:id/logs — query historical logs via Analytics Engine
+app.get("/:id/logs", async (c) => {
+  const deployment = await getDeployment(c.get("db"), c.req.param("id"));
+  if (!deployment) {
+    return c.json({ error: "deployment not found" }, 404);
+  }
+  const project = await getProject(c.get("db"), deployment.project_id);
+  if (!project) {
+    return c.json({ error: "project not found" }, 404);
+  }
+
+  const workerName = `user-${project.slug}`;
+  const since = c.req.query("since") ?? "1h";
+  const sinceMs = parseSince(since);
+  const limit = Math.min(parseInt(c.req.query("limit") ?? "100", 10) || 100, 500);
+
+  const sinceStr = new Date(sinceMs).toISOString().replace("T", " ").replace("Z", "");
+  const query = `
+    SELECT
+      blob1 as outcome,
+      blob2 as logs,
+      blob3 as exceptions,
+      blob4 as url,
+      blob5 as method,
+      blob6 as status,
+      double1 as timestamp
+    FROM void_logs
+    WHERE index1 = '${workerName}'
+      AND timestamp >= '${sinceStr}'
+    ORDER BY double1 DESC
+    LIMIT ${limit}
+  `;
+
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/analytics_engine/sql`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${c.env.CF_API_TOKEN}`,
+        "Content-Type": "text/plain",
+      },
+      body: query,
+    },
+  );
+
+  if (!response.ok) {
+    return c.json({ error: "log query failed", status: response.status }, 502);
+  }
+
+  const result = (await response.json()) as { data: LogRow[] };
+  const data = (result.data ?? []).map((row) => ({
+    timestamp: row.timestamp,
+    outcome: row.outcome,
+    logs: tryParse(row.logs),
+    exceptions: tryParse(row.exceptions),
+    url: row.url,
+    method: row.method,
+    status: row.status,
+  }));
+
+  return c.json({ data });
+});
+
+// GET /deployments/:id/tail — proxy WebSocket upgrade to tail worker DO
+app.get("/:id/tail", async (c) => {
+  if (c.req.header("Upgrade") !== "websocket") {
+    return c.json({ error: "expected websocket upgrade" }, 426);
+  }
+
+  const deployment = await getDeployment(c.get("db"), c.req.param("id"));
+  if (!deployment) {
+    return c.json({ error: "deployment not found" }, 404);
+  }
+  const project = await getProject(c.get("db"), deployment.project_id);
+  if (!project) {
+    return c.json({ error: "project not found" }, 404);
+  }
+
+  const scriptName = `user-${project.slug}`;
+  return c.env.TAIL.fetch(new Request(`https://tail/tail/${scriptName}`, c.req.raw));
+});
+
+interface LogRow {
+  outcome: string;
+  logs: string;
+  exceptions: string;
+  url: string;
+  method: string;
+  status: string;
+  timestamp: number;
+}
+
+function tryParse(json: string): unknown[] {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return [];
+  }
+}
+
+function parseSince(since: string): number {
+  const now = Date.now();
+  const units: Record<string, number> = {
+    "1h": 60 * 60 * 1000,
+    "6h": 6 * 60 * 60 * 1000,
+    "24h": 24 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
+  };
+  return now - (units[since] ?? units["1h"]);
+}
 
 export default app;

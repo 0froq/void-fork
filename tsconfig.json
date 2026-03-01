@@ -5,6 +5,7 @@
     { "path": "packages/proxy" },
     { "path": "packages/api" },
     { "path": "packages/dashboard" },
-    { "path": "packages/dispatch" }
+    { "path": "packages/dispatch" },
+    { "path": "packages/tail" }
   ]
 }

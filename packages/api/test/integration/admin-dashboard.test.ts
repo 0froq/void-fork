@@ -533,6 +533,64 @@ describe("POST /admin/users/:id/delete", () => {
   });
 });
 
+describe("GET /admin/deployments/:id/logs", () => {
+  test("returns logs from Analytics Engine for a live deployment", async () => {
+    const admin = await createTestUser(env.db, "admin-logs1", "github", undefined, "free", "admin");
+    const project = await createTestProject(env.db, admin.id, "logs-proj");
+    const deployment = await createTestDeployment(env.db, project.id, "live");
+
+    mockCfApi({
+      analyticsQuery: () =>
+        Response.json({
+          data: [
+            {
+              outcome: "ok",
+              logs: '[{"timestamp":1709312585000,"level":"error","message":"test error"}]',
+              exceptions: "[]",
+              url: "https://logs-proj.void.app/",
+              method: "GET",
+              status: "200",
+              timestamp: 1709312585000,
+            },
+          ],
+        }),
+    });
+
+    const res = await req(`/admin/deployments/${deployment.id}/logs`, admin.jwt);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { data: { outcome: string; logs: unknown[] }[] };
+    expect(json.data).toHaveLength(1);
+    expect(json.data[0].outcome).toBe("ok");
+    expect(json.data[0].logs).toHaveLength(1);
+    vi.restoreAllMocks();
+  });
+
+  test("returns 404 for unknown deployment", async () => {
+    const admin = await createTestUser(env.db, "admin-logs2", "github", undefined, "free", "admin");
+    const res = await req("/admin/deployments/dpl_unknown/logs", admin.jwt);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /admin/deployments/:id/tail", () => {
+  test("returns 426 without websocket upgrade header", async () => {
+    const admin = await createTestUser(env.db, "admin-tail1", "github", undefined, "free", "admin");
+    const project = await createTestProject(env.db, admin.id, "tail-proj");
+    const deployment = await createTestDeployment(env.db, project.id, "live");
+
+    const res = await req(`/admin/deployments/${deployment.id}/tail`, admin.jwt);
+    expect(res.status).toBe(426);
+  });
+
+  test("returns 404 for unknown deployment", async () => {
+    const admin = await createTestUser(env.db, "admin-tail2", "github", undefined, "free", "admin");
+    const res = await req("/admin/deployments/dpl_unknown/tail", admin.jwt, {
+      headers: { Upgrade: "websocket" } as Record<string, string>,
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("GET /admin/deployments/:id (logs section)", () => {
   test("renders runtime logs section for live deployment", async () => {
     const admin = await createTestUser(
@@ -551,6 +609,8 @@ describe("GET /admin/deployments/:id (logs section)", () => {
     const html = await res.text();
     expect(html).toContain("Runtime Logs");
     expect(html).toContain(`user-${project.slug}`);
+    expect(html).toContain("Live Tail");
+    expect(html).toContain("log-entries");
   });
 
   test("does not render logs section for failed deployment", async () => {
