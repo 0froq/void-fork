@@ -81,28 +81,26 @@ Copies your auth token to the system clipboard. Useful for setting up CI secrets
 
 ## Project commands
 
-### `void projects`
+### `void list [name]`
 
-List all your projects (slug, mode, URL).
+Show the last 5 deployments for a project.
+
+- If `[name]` is provided, looks up the project by slug
+- Otherwise uses the linked project from `.void/project.json`
 
 ### `void link [name]`
 
 Link current directory to an existing project by slug, or select interactively if omitted. State is stored in `.void/project.json`.
 
-### `void delete [name]`
+### `void project list`
+
+List all your projects (slug, mode, URL).
+
+### `void project rm [name]`
 
 Permanently delete a project and all its resources (databases, KV namespaces, R2 buckets, deployments). Requires typing the project slug to confirm.
 
 If `[name]` is omitted, uses the linked project.
-
-## Deployment history
-
-### `void list [name]`
-
-Show the last 5 deployments for a project. Alias: `void ls`.
-
-- If `[name]` is provided, looks up the project by slug
-- Otherwise uses the linked project from `.void/project.json`
 
 ## Deploy
 
@@ -335,10 +333,10 @@ void domain add <hostname> [--project <name>]
 
 Add a custom domain to a project. Prints the CNAME target you need to add in your DNS provider.
 
-### `void domain remove`
+### `void domain rm`
 
 ```
-void domain remove <hostname> [--project <name>]
+void domain rm <hostname> [--project <name>]
 ```
 
 Remove a custom domain from a project.

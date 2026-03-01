@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { log, outro, note } from "@clack/prompts";
 import { runLink } from "./link";
 import { runLoginCommand } from "./login";
-import { runProjectsCommand } from "./projects";
+import { projectSubcommands, parseProjectArgs } from "./project-args";
 import { getToken, removeToken, isStagingMode, setStagingMode, printStagingBanner } from "./auth";
 import { PlatformClient } from "./client";
 import { parseDeployArgs } from "./args";
@@ -128,7 +128,7 @@ if (command === "staging") {
       log.error(err.message ?? err);
       process.exit(1);
     });
-} else if (command === "list" || command === "ls") {
+} else if (command === "list") {
   const root = process.cwd();
   import("./list").then(({ runListCommand }) => {
     runListCommand(root, args[1]).catch((err) => {
@@ -136,11 +136,10 @@ if (command === "staging") {
       process.exit(1);
     });
   });
-} else if (command === "projects") {
-  runProjectsCommand().catch((err) => {
-    log.error(err.message ?? err);
-    process.exit(1);
-  });
+} else if (command === "project") {
+  runSubcommandGroup("project", projectSubcommands, parseProjectArgs, (root, parsed) =>
+    import("./project-cmd").then(({ runProjectCommand }) => runProjectCommand(root, parsed)),
+  );
 } else if (command === "secret") {
   runSubcommandGroup("secret", secretSubcommands, parseSecretArgs, (root, parsed) =>
     import("./secret").then(({ runSecretCommand }) => runSecretCommand(root, parsed)),
@@ -171,14 +170,6 @@ if (command === "staging") {
   })().catch((err) => {
     log.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
-  });
-} else if (command === "delete") {
-  const root = process.cwd();
-  import("./delete").then(({ runDeleteCommand }) => {
-    runDeleteCommand(root, args[1]).catch((err) => {
-      log.error(err.message ?? err);
-      process.exit(1);
-    });
   });
 } else if (command === "domain") {
   runSubcommandGroup("domain", domainSubcommands, parseDomainArgs, (root, parsed) =>
@@ -241,10 +232,10 @@ if (command === "staging") {
       helpLine("void token", "Copy auth token to clipboard"),
       "",
       categoryTitle("projects"),
-      helpLine("void projects", "List your projects"),
-      helpLine("void list, ls [name]", "List deployments for a project"),
-      helpLine("void delete [name]", "Delete a project and all its resources"),
+      helpLine("void list [name]", "List deployments for a project"),
       helpLine("void link [name]", "Link to an existing project"),
+      helpLine("void project list", "List your projects"),
+      helpLine("void project rm [name]", "Delete a project and all its resources"),
       "",
       categoryTitle("secrets"),
       helpLine("void secret put <name> [--project]", "Set a project secret"),
@@ -253,7 +244,7 @@ if (command === "staging") {
       "",
       categoryTitle("domains"),
       helpLine("void domain add <hostname>", "Add a custom domain"),
-      helpLine("void domain remove <hostname>", "Remove a custom domain"),
+      helpLine("void domain rm <hostname>", "Remove a custom domain"),
       helpLine("void domain list", "List custom domains + status"),
       helpLine("void domain status <hostname>", "Check domain verification status"),
       "",
