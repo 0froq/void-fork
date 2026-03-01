@@ -31,6 +31,7 @@ export interface SubcommandDef {
   name: string;
   description: string;
   arg?: string; // e.g. "<name>" — shown as dim hint, enables inline text input
+  hint?: string; // e.g. "login | logout | whoami" — shown dim after name
   flags?: FlagDef[];
   followUp?: FollowUpDef;
 }
@@ -90,10 +91,12 @@ export function promptSubcommand(
       else renderRepeatInput();
     }
 
+    const title = command ? `void ${command}` : "void";
+
     // Header for post-select phases
     function headerLine(): string {
       const argPart = selectedArg ? ` ${selectedArg}` : "";
-      return `${pc.cyan(S_STEP_ACTIVE)}  ${pc.cyan(`void ${command}`)} ${pc.dim("·")} ${pc.cyan(`${selectedSub!.name}${argPart}`)}`;
+      return `${pc.cyan(S_STEP_ACTIVE)}  ${pc.cyan(title)} ${pc.dim("·")} ${pc.cyan(`${selectedSub!.name}${argPart}`)}`;
     }
 
     // --- Renderers ---
@@ -102,7 +105,7 @@ export function promptSubcommand(
       const lines: string[] = [];
       const focused = subcommands[cursor];
 
-      lines.push(`${pc.cyan(S_STEP_ACTIVE)}  ${pc.cyan(`void ${command}`)}`);
+      lines.push(`${pc.cyan(S_STEP_ACTIVE)}  ${pc.cyan(title)}`);
       lines.push(pc.gray(S_BAR));
 
       const maxName = Math.max(...subcommands.map((s) => s.name.length));
@@ -113,19 +116,21 @@ export function promptSubcommand(
         const radio = isFocused ? pc.green(S_RADIO_ACTIVE) : pc.dim(S_RADIO_INACTIVE);
         const name = sub.name.padEnd(maxName);
 
-        let argText = "";
+        let suffix = "";
         if (sub.arg) {
           if (isFocused && input.length > 0) {
-            argText = `  ${pc.cyan(input)}`;
+            suffix = `  ${pc.cyan(input)}`;
           } else {
-            argText = `  ${pc.dim(sub.arg)}`;
+            suffix = `  ${pc.dim(sub.arg)}`;
           }
+        } else if (sub.hint) {
+          suffix = `  ${pc.dim(sub.hint)}`;
         }
 
         if (isFocused) {
-          lines.push(`${pc.gray(S_BAR)}  ${radio} ${pc.reset(name)}${argText}`);
+          lines.push(`${pc.gray(S_BAR)}  ${radio} ${pc.reset(name)}${suffix}`);
         } else {
-          lines.push(`${pc.gray(S_BAR)}  ${radio} ${pc.dim(name)}${argText}`);
+          lines.push(`${pc.gray(S_BAR)}  ${radio} ${pc.dim(name)}${suffix}`);
         }
       }
 
@@ -273,7 +278,7 @@ export function promptSubcommand(
           summary += ` ${result.extraArgs.join(" ")}`;
         }
         stdout.write(
-          `${pc.gray(S_STEP_SUBMIT)}  ${pc.dim(`void ${command}`)} ${pc.dim("·")} ${pc.dim(summary)}\n`,
+          `${pc.gray(S_STEP_SUBMIT)}  ${pc.dim(title)} ${pc.dim("·")} ${pc.dim(summary)}\n`,
         );
       }
 

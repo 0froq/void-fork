@@ -16,6 +16,85 @@ import { categoryTitle, helpLine, pc, sectionTitle } from "./output";
 import { getPackageDir } from "./agents";
 import { asciiArts } from "./ascii";
 
+function printHelp() {
+  const version = JSON.parse(readFileSync(join(getPackageDir(), "package.json"), "utf-8")).version;
+  const art = asciiArts[Math.floor(Math.random() * asciiArts.length)];
+  console.log(pc.blue(`${art}  v${version}\n`));
+  note(
+    [
+      helpLine("void init", "Set up void in a new or existing project"),
+      helpLine("  --agents", "Set up agent instructions, skills, and MCP config"),
+      helpLine("  --tsconfig", "Only update tsconfig.json"),
+      helpLine("  --github", "Only create GitHub Actions workflow"),
+      "",
+      helpLine("void deploy", "Build and deploy to Void"),
+      helpLine("  --project <name>", "Deploy target project name"),
+      helpLine("  --dir <path>", "Deploy a static directory (skip build)"),
+      helpLine("  --spa", "Use SPA mode (default: SSG)"),
+      helpLine("  --skip-build", "Skip the build step (use existing output)"),
+      "",
+      categoryTitle("auth"),
+      helpLine("void auth login", "Log in with GitHub or Google"),
+      helpLine("void auth logout", "Log out and remove credentials"),
+      helpLine("void auth whoami", "Show the logged-in username"),
+      helpLine("void auth token", "Copy auth token to clipboard"),
+      "",
+      categoryTitle("project"),
+      helpLine("void project status [name]", "Show deployments for a project"),
+      helpLine("void project link [name]", "Link directory to a project"),
+      helpLine("void project list", "List your projects"),
+      helpLine("void project rm [name]", "Delete a project and all its resources"),
+      "",
+      categoryTitle("secrets"),
+      helpLine("void secret put <name> [--project]", "Set a project secret"),
+      helpLine("void secret delete <name>", "Delete a project secret"),
+      helpLine("void secret sync <file>", "Sync secrets from a dotenv file"),
+      "",
+      categoryTitle("domains"),
+      helpLine("void domain add <hostname>", "Add a custom domain"),
+      helpLine("void domain rm <hostname>", "Remove a custom domain"),
+      helpLine("void domain list", "List custom domains + status"),
+      helpLine("void domain status <hostname>", "Check domain verification status"),
+      "",
+      categoryTitle("database"),
+      helpLine("void db status", "Show migration status (local + remote)"),
+      helpLine("void db reset", "Reset local DB and re-run migrations"),
+      helpLine("void db seed [--file <path>]", "Reset local DB, run migrations, and seed"),
+      helpLine("void db execute <sql>", "Run SQL against the local database"),
+      helpLine("  --file <path>", "Run SQL from a file instead"),
+      helpLine("void db migrate", "Apply pending migrations locally"),
+      helpLine("void db export [--output <path>]", "Export local database as SQL"),
+      helpLine("  --no-data", "Schema only (no INSERT statements)"),
+      helpLine("  --no-schema", "Data only (no CREATE TABLE)"),
+      helpLine("  --table <name>", "Export a single table"),
+      "",
+      categoryTitle("codegen"),
+      helpLine("void gen model <name> [cols...]", "Generate migration + CRUD routes + db types"),
+      helpLine("void gen migration <name>", "Generate an empty migration file"),
+      helpLine("void gen route <path> [--methods]", "Generate a route with handler exports"),
+      helpLine("void gen middleware <name>", "Generate a numbered middleware file"),
+      helpLine("void gen ssr [--react|--vue|...]", "Generate SSR entry + client + App component"),
+      helpLine("void gen cron <name>", "Generate a cron job file"),
+      helpLine("void gen queue <name>", "Generate a queue consumer file"),
+      "",
+      categoryTitle("agent"),
+      helpLine("void init --agents", "Set up agent instructions, skills, and MCP config"),
+      helpLine("void mcp", "Start MCP server (stdio, for AI agents)"),
+    ].join("\n"),
+    sectionTitle("Commands"),
+  );
+
+  note(
+    [
+      helpLine("VOID_TOKEN", "Auth token (or use ~/.void/config.json)"),
+      helpLine("VOID_PROJECT", "Deploy target project name override"),
+    ].join("\n"),
+    sectionTitle("Environment"),
+  );
+
+  outro("https://void.cloud");
+}
+
 function buildArgs(result: SubcommandResult, trailingArgs: string[]): string[] {
   const out = [result.subcommand];
   if (result.arg) out.push(result.arg);
@@ -141,81 +220,99 @@ if (command === "staging") {
 } else if (command && command !== "help" && command !== "--help" && command !== "-h") {
   log.error(`Unknown command: ${command}. Run \`void --help\` for usage.`);
   process.exit(1);
+} else if (!command && process.stdin.isTTY) {
+  // Interactive top-level prompt
+  const topLevelCommands: SubcommandDef[] = [
+    { name: "init", description: "Set up void in a new or existing project" },
+    { name: "deploy", description: "Build and deploy to Void" },
+    {
+      name: "auth",
+      hint: "login | logout | whoami | token",
+      description: "Login, logout, and token management",
+    },
+    {
+      name: "project",
+      hint: "status | link | list | rm",
+      description: "Manage projects and deployments",
+    },
+    { name: "secret", hint: "put | delete | sync", description: "Manage project secrets" },
+    { name: "domain", hint: "add | rm | list | status", description: "Configure custom domains" },
+    {
+      name: "db",
+      hint: "status | reset | seed | execute | migrate | export",
+      description: "Database migrations and management",
+    },
+    {
+      name: "gen",
+      hint: "model | migration | route | middleware | ssr | cron | queue",
+      description: "Scaffold routes, models, and more",
+    },
+    { name: "mcp", description: "Start MCP server (for AI agents)" },
+    { name: "help", description: "Show help message" },
+  ];
+
+  (async () => {
+    const version = JSON.parse(
+      readFileSync(join(getPackageDir(), "package.json"), "utf-8"),
+    ).version;
+    const art = asciiArts[Math.floor(Math.random() * asciiArts.length)];
+    console.log(pc.blue(`${art}  v${version}\n`));
+
+    const { promptSubcommand } = await import("./subcommand-prompt");
+    const result = await promptSubcommand("", topLevelCommands);
+    if (!result) process.exit(0);
+
+    const cmd = result.subcommand;
+    const root = process.cwd();
+
+    switch (cmd) {
+      case "init": {
+        const { runInitCommand, parseInitArgs } = await import("./init");
+        await runInitCommand(root, parseInitArgs([]));
+        return;
+      }
+      case "deploy": {
+        const { runDeploy } = await import("./deploy");
+        await runDeploy(root);
+        return;
+      }
+      case "mcp": {
+        const { runMcp } = await import("./mcp");
+        runMcp();
+        return;
+      }
+      case "auth":
+        return runSubcommandGroup("auth", authSubcommands, parseAuthArgs, (r, p) =>
+          import("./auth-cmd").then(({ runAuthCommand }) => runAuthCommand(r, p)),
+        );
+      case "project":
+        return runSubcommandGroup("project", projectSubcommands, parseProjectArgs, (r, p) =>
+          import("./project-cmd").then(({ runProjectCommand }) => runProjectCommand(r, p)),
+        );
+      case "secret":
+        return runSubcommandGroup("secret", secretSubcommands, parseSecretArgs, (r, p) =>
+          import("./secret").then(({ runSecretCommand }) => runSecretCommand(r, p)),
+        );
+      case "domain":
+        return runSubcommandGroup("domain", domainSubcommands, parseDomainArgs, (r, p) =>
+          import("./domain").then(({ runDomainCommand }) => runDomainCommand(r, p)),
+        );
+      case "db":
+        return runSubcommandGroup("db", dbSubcommands, parseDbArgs, (r, p) =>
+          import("./db").then(({ runDbCommand }) => runDbCommand(r, p)),
+        );
+      case "gen":
+        return runSubcommandGroup("gen", genSubcommands, parseGenArgs, (r, p) =>
+          import("./gen").then(({ runGenCommand }) => runGenCommand(r, p)),
+        );
+      case "help":
+        printHelp();
+        return;
+    }
+  })().catch((err) => {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
 } else {
-  const version = JSON.parse(readFileSync(join(getPackageDir(), "package.json"), "utf-8")).version;
-  const art = asciiArts[Math.floor(Math.random() * asciiArts.length)];
-  console.log(pc.blue(`${art}  v${version}\n`));
-  note(
-    [
-      helpLine("void init", "Set up void in a new or existing project"),
-      helpLine("  --agents", "Set up agent instructions, skills, and MCP config"),
-      helpLine("  --tsconfig", "Only update tsconfig.json"),
-      helpLine("  --github", "Only create GitHub Actions workflow"),
-      "",
-      helpLine("void deploy", "Build and deploy to Void"),
-      helpLine("  --project <name>", "Deploy target project name"),
-      helpLine("  --dir <path>", "Deploy a static directory (skip build)"),
-      helpLine("  --spa", "Use SPA mode (default: SSG)"),
-      helpLine("  --skip-build", "Skip the build step (use existing output)"),
-      "",
-      categoryTitle("auth"),
-      helpLine("void auth login", "Log in with GitHub or Google"),
-      helpLine("void auth logout", "Log out and remove credentials"),
-      helpLine("void auth whoami", "Show the logged-in username"),
-      helpLine("void auth token", "Copy auth token to clipboard"),
-      "",
-      categoryTitle("project"),
-      helpLine("void project status [name]", "Show deployments for a project"),
-      helpLine("void project link [name]", "Link directory to a project"),
-      helpLine("void project list", "List your projects"),
-      helpLine("void project rm [name]", "Delete a project and all its resources"),
-      "",
-      categoryTitle("secrets"),
-      helpLine("void secret put <name> [--project]", "Set a project secret"),
-      helpLine("void secret delete <name>", "Delete a project secret"),
-      helpLine("void secret sync <file>", "Sync secrets from a dotenv file"),
-      "",
-      categoryTitle("domains"),
-      helpLine("void domain add <hostname>", "Add a custom domain"),
-      helpLine("void domain rm <hostname>", "Remove a custom domain"),
-      helpLine("void domain list", "List custom domains + status"),
-      helpLine("void domain status <hostname>", "Check domain verification status"),
-      "",
-      categoryTitle("database"),
-      helpLine("void db status", "Show migration status (local + remote)"),
-      helpLine("void db reset", "Reset local DB and re-run migrations"),
-      helpLine("void db seed [--file <path>]", "Reset local DB, run migrations, and seed"),
-      helpLine("void db execute <sql>", "Run SQL against the local database"),
-      helpLine("  --file <path>", "Run SQL from a file instead"),
-      helpLine("void db migrate", "Apply pending migrations locally"),
-      helpLine("void db export [--output <path>]", "Export local database as SQL"),
-      helpLine("  --no-data", "Schema only (no INSERT statements)"),
-      helpLine("  --no-schema", "Data only (no CREATE TABLE)"),
-      helpLine("  --table <name>", "Export a single table"),
-      "",
-      categoryTitle("codegen"),
-      helpLine("void gen model <name> [cols...]", "Generate migration + CRUD routes + db types"),
-      helpLine("void gen migration <name>", "Generate an empty migration file"),
-      helpLine("void gen route <path> [--methods]", "Generate a route with handler exports"),
-      helpLine("void gen middleware <name>", "Generate a numbered middleware file"),
-      helpLine("void gen ssr [--react|--vue|...]", "Generate SSR entry + client + App component"),
-      helpLine("void gen cron <name>", "Generate a cron job file"),
-      helpLine("void gen queue <name>", "Generate a queue consumer file"),
-      "",
-      categoryTitle("agent"),
-      helpLine("void init --agents", "Set up agent instructions, skills, and MCP config"),
-      helpLine("void mcp", "Start MCP server (stdio, for AI agents)"),
-    ].join("\n"),
-    sectionTitle("Commands"),
-  );
-
-  note(
-    [
-      helpLine("VOID_TOKEN", "Auth token (or use ~/.void/config.json)"),
-      helpLine("VOID_PROJECT", "Deploy target project name override"),
-    ].join("\n"),
-    sectionTitle("Environment"),
-  );
-
-  outro("https://void.cloud");
+  printHelp();
 }
