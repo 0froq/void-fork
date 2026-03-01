@@ -32,6 +32,7 @@ interface RoutingEntry {
   version?: string;
   limits?: Record<string, number>;
   suspended?: string;
+  hashedAssetsPrefix?: string;
 }
 
 function createCtx(): ExecutionContext {
@@ -622,5 +623,128 @@ describe("custom limits", () => {
       {},
       { limits: { cpuMs: 30, subRequests: 50 } },
     );
+  });
+});
+
+describe("hashed asset caching", () => {
+  it("serves hashed asset from edge cache on hit", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      hashedAssetsPrefix: "assets",
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("asset-body") });
+    const ctx = createCtx();
+
+    const url = "https://test.void.app/assets/main-abc123.js";
+
+    // First request — cache miss, hits worker
+    const res1 = await app.fetch(new Request(url), env, ctx);
+    expect(res1.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+    expect(res1.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+
+    // Wait for background cache.put
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Second request — cache hit, worker NOT invoked
+    const ctx2 = createCtx();
+    const res2 = await app.fetch(new Request(url), env, ctx2);
+    expect(res2.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledTimes(1); // still 1
+  });
+
+  it("does not cache non-hashed asset paths", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      hashedAssetsPrefix: "assets",
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("page") });
+    const ctx = createCtx();
+
+    // Request for a non-hashed path
+    const res = await app.fetch(new Request("https://test.void.app/about"), env, ctx);
+    expect(res.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+
+    // Second request — should still hit worker (no caching)
+    const ctx2 = createCtx();
+    await app.fetch(new Request("https://test.void.app/about"), env, ctx2);
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips cache for non-GET requests to hashed paths", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      hashedAssetsPrefix: "assets",
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("ok") });
+    const ctx = createCtx();
+
+    const res = await app.fetch(
+      new Request("https://test.void.app/assets/main.js", { method: "POST" }),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+    // Should not write to cache
+    expect(edgeCacheStore.size).toBe(0);
+  });
+
+  it("does not cache non-ok worker responses", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      hashedAssetsPrefix: "assets",
+    };
+    const { env } = createEnv({
+      routing,
+      workerResponse: new Response("not found", { status: 404 }),
+    });
+    const ctx = createCtx();
+
+    const res = await app.fetch(new Request("https://test.void.app/assets/missing.js"), env, ctx);
+    expect(res.status).toBe(404);
+    expect(edgeCacheStore.size).toBe(0);
+  });
+
+  it("skips caching when hashedAssetsPrefix is not set", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      // no hashedAssetsPrefix
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("ok") });
+    const ctx = createCtx();
+
+    await app.fetch(new Request("https://test.void.app/assets/main.js"), env, ctx);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+
+    // Second request — still hits worker (no caching)
+    const ctx2 = createCtx();
+    await app.fetch(new Request("https://test.void.app/assets/main.js"), env, ctx2);
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("works with custom prefix like _nuxt", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      hashedAssetsPrefix: "_nuxt",
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("nuxt-asset") });
+    const ctx = createCtx();
+
+    const res = await app.fetch(
+      new Request("https://test.void.app/_nuxt/entry.abc123.js"),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+    expect(workerFetch).toHaveBeenCalledTimes(1);
   });
 });

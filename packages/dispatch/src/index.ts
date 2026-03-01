@@ -22,6 +22,7 @@ interface RoutingEntry {
   version?: string;
   limits?: Record<string, number>;
   suspended?: string;
+  hashedAssetsPrefix?: string;
 }
 
 interface QueueRoutingEntry {
@@ -82,6 +83,27 @@ export default {
       }
       return response;
     };
+
+    // Edge-cache hashed static assets (immutable, content-addressed URLs)
+    if (request.method === "GET" && routing.hashedAssetsPrefix) {
+      const prefix = "/" + routing.hashedAssetsPrefix + "/";
+      if (pathname.startsWith(prefix)) {
+        const cache = caches.default;
+        const cached = await cache.match(request);
+        if (cached) return meter(cached);
+        // Cache miss — invoke worker, cache immutable response
+        const worker = getWorker(env, routing);
+        const response = await worker.fetch(request);
+        if (response.ok) {
+          const res = new Response(response.body, response);
+          res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+          ctx.waitUntil(cache.put(request, res.clone()));
+          requestType = "static";
+          return meter(res);
+        }
+        return meter(response);
+      }
+    }
 
     // ISR: stale-while-revalidate for configured paths
     // Two-layer cache: Edge (per-colo, sub-ms) → R2 (global, ~50ms) → Worker (render)
