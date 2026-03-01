@@ -79,6 +79,18 @@ describe("detectPreset", () => {
     });
   });
 
+  it("detects Docusaurus", () => {
+    const root = setupProject({
+      pkg: { dependencies: { "@docusaurus/core": "^3.0.0" } },
+    });
+    const result = detectPreset(root);
+    expect(result).toEqual({
+      buildCommand: "docusaurus build",
+      outputDir: resolve(root, "build"),
+      appType: "static",
+    });
+  });
+
   it("returns null when routes/ dir exists (backend files)", () => {
     const root = setupProject({
       pkg: { dependencies: { vite: "^6.0.0" } },

@@ -81,7 +81,7 @@ Any project that produces static files — SPAs, static sites, or plain director
 
 **SPAs** (client-side single-page apps) fall back all non-file paths to `index.html` with a 200 status, so client-side routing works out of the box. Detected when `vite` is a dependency and no backend files exist.
 
-**Static sites** (static site generators like VitePress, or any pre-built directory) produce per-page HTML files. Detected when `vitepress` is a dependency, or when using the `--dir` flag.
+**Static sites** (static site generators like VitePress, Docusaurus, or any pre-built directory) produce per-page HTML files. Detected when a known SSG is a dependency, or when using the `--dir` flag.
 
 At the edge, the resolution order is:
 
@@ -96,14 +96,14 @@ At the edge, the resolution order is:
 
 When running `void deploy` and no `appType` is set in `void.json`, the detection logic runs in this order:
 
-| Priority | Condition                                                                                 | Type                                  |
-| -------- | ----------------------------------------------------------------------------------------- | ------------------------------------- |
-| 1        | `--dir` flag                                                                              | Static (or SPA with `--spa`)          |
-| 2        | `vitepress` in dependencies                                                               | Static, builds with `vitepress build` |
-| 3        | `@tanstack/react-start`, `@react-router/dev`, `@sveltejs/kit`, `nuxt`, or `astro` in deps | Framework                             |
-| 4        | Backend files exist (`routes/`, `pages/`, `middleware/`, `crons/`, `queues/`, SSR entry)  | Void app                              |
-| 5        | `vite` in dependencies, no backend files                                                  | SPA, builds with `vite build`         |
-| 6        | `dist/index.html` or `./index.html` exists                                                | Static (no build step)                |
+| Priority | Condition                                                                                 | Type                          |
+| -------- | ----------------------------------------------------------------------------------------- | ----------------------------- |
+| 1        | `--dir` flag                                                                              | Static (or SPA with `--spa`)  |
+| 2        | Known SSG in dependencies (`vitepress`, `@docusaurus/core`)                               | Static, builds with SSG CLI   |
+| 3        | `@tanstack/react-start`, `@react-router/dev`, `@sveltejs/kit`, `nuxt`, or `astro` in deps | Framework                     |
+| 4        | Backend files exist (`routes/`, `pages/`, `middleware/`, `crons/`, `queues/`, SSR entry)  | Void app                      |
+| 5        | `vite` in dependencies, no backend files                                                  | SPA, builds with `vite build` |
+| 6        | `dist/index.html` or `./index.html` exists                                                | Static (no build step)        |
 
 ## Explicit Configuration
 

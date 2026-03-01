@@ -2,6 +2,47 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { hasSsrEntry } from "../ssr/entry";
 
+/** Build output conventions for a known SSG (static site generator). */
+export interface SsgPreset {
+  /** Package name to detect in package.json dependencies. */
+  dep: string;
+  /** Default build command (binary name — localBin resolves the full path). */
+  buildCommand: string;
+  /** Default output directory, relative to project root. */
+  outputDir: string;
+  /** App type for the deploy manifest. */
+  appType: "static" | "spa";
+  /** Optional project-aware overrides. */
+  resolve?: (root: string) => Partial<Pick<StaticPreset, "buildCommand" | "outputDir">> | undefined;
+}
+
+/**
+ * Known output conventions for SSGs.
+ * Keyed by the SSG name — detection iterates in insertion order.
+ */
+export const SSG_PRESETS: Record<string, SsgPreset> = {
+  vitepress: {
+    dep: "vitepress",
+    buildCommand: "vitepress build",
+    outputDir: ".vitepress/dist",
+    appType: "static",
+    resolve(root) {
+      if (existsSync(join(root, "docs/.vitepress"))) {
+        return {
+          buildCommand: "vitepress build docs",
+          outputDir: "docs/.vitepress/dist",
+        };
+      }
+    },
+  },
+  docusaurus: {
+    dep: "@docusaurus/core",
+    buildCommand: "docusaurus build",
+    outputDir: "build",
+    appType: "static",
+  },
+};
+
 /** Build output conventions for a meta-framework (Class B/C). */
 export interface FrameworkPreset {
   /** Default build command (overridable via void.json `build`). */
@@ -67,16 +108,24 @@ export function detectPreset(
     };
   }
 
-  // 2. VitePress detected
+  // 2. Known SSG detected
   const pkg = readPackageJson(root);
-  if (pkg && hasVitePress(pkg)) {
-    const srcDir = detectVitePressSourceDir(root);
-    const buildArg = srcDir === "." ? "" : ` ${srcDir}`;
-    return {
-      buildCommand: `${localBin(root, "vitepress")} build${buildArg}`,
-      outputDir: resolve(root, srcDir, ".vitepress/dist"),
-      appType: "static",
-    };
+  if (pkg) {
+    const allDeps = getAllDeps(pkg);
+    for (const preset of Object.values(SSG_PRESETS)) {
+      if (preset.dep in allDeps) {
+        const overrides = preset.resolve?.(root);
+        const cmd = overrides?.buildCommand ?? preset.buildCommand;
+        const out = overrides?.outputDir ?? preset.outputDir;
+        const bin = cmd.split(" ")[0];
+        const args = cmd.slice(bin.length);
+        return {
+          buildCommand: `${localBin(root, bin)}${args}`,
+          outputDir: resolve(root, out),
+          appType: preset.appType,
+        };
+      }
+    }
   }
 
   // 3. Has backend files → full deploy
@@ -137,23 +186,8 @@ function getAllDeps(pkg: Record<string, unknown>): Record<string, string> {
   };
 }
 
-function hasVitePress(pkg: Record<string, unknown>): boolean {
-  return "vitepress" in getAllDeps(pkg);
-}
-
 function hasVite(pkg: Record<string, unknown>): boolean {
   return "vite" in getAllDeps(pkg);
-}
-
-/**
- * Detect the VitePress source directory.
- * VitePress docs can live at root (has `.vitepress/`) or in `docs/` (has `docs/.vitepress/`).
- */
-function detectVitePressSourceDir(root: string): string {
-  if (existsSync(join(root, "docs/.vitepress"))) {
-    return "docs";
-  }
-  return ".";
 }
 
 /**
