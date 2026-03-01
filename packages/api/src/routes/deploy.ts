@@ -206,6 +206,7 @@ app.post("/:id/deploy", async (c) => {
         userId: project.user_id,
         version: deployment.id,
         ...(manifest.hashedAssetsPrefix ? { hashedAssetsPrefix: manifest.hashedAssetsPrefix } : {}),
+        ...(manifest.headerRules?.length ? { headerRules: manifest.headerRules } : {}),
         ...(existingEntry?.suspended ? { suspended: existingEntry.suspended } : {}),
       });
       await c.env.ROUTING.put(project.slug, routingJson);
@@ -491,6 +492,7 @@ app.post("/:id/deploy", async (c) => {
       ...(manifest.ssr ? { ssr: true } : {}),
       ...(manifest.revalidate ? { revalidate: manifest.revalidate } : {}),
       ...(manifest.hashedAssetsPrefix ? { hashedAssetsPrefix: manifest.hashedAssetsPrefix } : {}),
+      ...(manifest.headerRules?.length ? { headerRules: manifest.headerRules } : {}),
       version: deployment.id,
       ...dispatchLimits,
       ...(existingEntry?.suspended ? { suspended: existingEntry.suspended } : {}),

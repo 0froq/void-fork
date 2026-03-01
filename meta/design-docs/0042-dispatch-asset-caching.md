@@ -1,7 +1,7 @@
 # Dispatch-Level Hashed Asset Caching
 
 **Date:** 2026-03-01
-**Status:** Proposed
+**Status:** Implemented
 
 ---
 
@@ -32,11 +32,13 @@ Request → Dispatch
   → KV lookup (already happens) → get hashedAssetsPrefix
   → GET request + path starts with /{hashedAssetsPrefix}/?
     → YES:
-      → caches.default.match(request)
-      → HIT: return cached response (user worker never invoked)
+      → Normalize cache key (strip query string)
+      → caches.default.match(cacheKey)
+      → HIT (with immutable header): return cached response (user worker never invoked)
+      → HIT (stale/non-immutable): treat as miss (Workers Assets may have pre-existing entries)
       → MISS: invoke user worker → get response
         → set Cache-Control: public, max-age=31536000, immutable
-        → ctx.waitUntil(cache.put(request, response.clone()))
+        → ctx.waitUntil(cache.put(cacheKey, response.clone()))
         → return response
     → NO: normal flow (invoke user worker)
 ```
@@ -97,19 +99,36 @@ Before routing to the user worker, check if the request is a GET for a hashed as
 ```typescript
 if (request.method === "GET" && routing.hashedAssetsPrefix) {
   const prefix = "/" + routing.hashedAssetsPrefix + "/";
-  if (url.pathname.startsWith(prefix)) {
+  if (pathname.startsWith(prefix)) {
+    // Normalize cache key: strip query strings — hashed filenames are content-addressed
+    const cacheUrl = new URL(request.url);
+    cacheUrl.search = "";
+    const cacheKey = new Request(cacheUrl.toString());
+
     const cache = caches.default;
-    const cached = await cache.match(request);
-    if (cached) return cached;
-    // Cache miss — invoke worker, cache response
-    const response = await worker.fetch(request);
-    if (response.ok) {
-      const res = new Response(response.body, response);
-      res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
-      ctx.waitUntil(cache.put(request, res.clone()));
-      return res;
+    const cached = await cache.match(cacheKey);
+    // Only serve from cache if it's our entry (has immutable header).
+    // Workers Assets may have pre-existing entries with short-lived cache headers.
+    if (cached?.headers.get("Cache-Control")?.includes("immutable")) {
+      return meter(cached);
     }
-    return response;
+    // Cache miss — invoke worker, cache immutable response
+    try {
+      const worker = getWorker(env, routing);
+      const response = await worker.fetch(request);
+      if (response.ok) {
+        const res = new Response(response.body, response);
+        res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+        ctx.waitUntil(cache.put(cacheKey, res.clone()));
+        return meter(res);
+      }
+      return meter(response);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("Worker exceeded")) {
+        return meter(Response.json({ error: "CPU limit exceeded" }, { status: 429 }));
+      }
+      throw err;
+    }
   }
 }
 ```
@@ -140,7 +159,7 @@ async function serveWithAssets(request, env, response) {
 - **ISR** — untouched, separate L1/L2 cache in dispatch
 - **Non-hashed assets** — served by user worker via ASSETS binding
 - **Metering** — dispatch still records the request before the cache check returns
-- **`_headers` generation** — kept for direct wrangler deploys
+- **`_headers` files** — parsed at deploy time (not generated), rules sent through manifest → KV → dispatch
 - **Cache invalidation** — not needed; hashed URLs change on content change
 - **Node/Bun/Deno targets** — don't use `serveWithAssets` or dispatch
 
@@ -152,3 +171,21 @@ async function serveWithAssets(request, env, response) {
 - **Cache eviction** — CF edge caches evict based on popularity. Low-traffic assets get evicted → cache miss → user worker → re-cache. Fine.
 - **HEAD/OPTIONS requests** — only cache GETs. Everything else goes through the user worker.
 - **Worker returns non-200** — don't cache error responses. Only cache `response.ok`.
+- **Query string fragmentation** — cache keys are normalized to strip query strings. Hashed filenames are content-addressed, so `?v=1` and `?v=2` resolve to the same cache entry.
+- **Stale `caches.default` entries** — Workers Assets writes its own entries to the zone CDN cache (same as `caches.default`) with short-lived `Cache-Control` headers. On cache hit, dispatch checks for the `immutable` directive before serving — stale Workers Assets entries are treated as cache misses.
+- **Worker CPU limit exceeded** — the worker fetch in the hashed-asset block is wrapped in try/catch. CPU limit errors return a metered 429, consistent with the main dispatch path.
+- **Static-only sites** — `packageStaticBuild` sets `hashedAssetsPrefix` on the manifest (defaults to `"assets"`), so purely static deployments (VitePress, SPAs) also benefit from dispatch-level caching.
+
+---
+
+## Deploy path coverage
+
+All three packaging functions set `hashedAssetsPrefix` on the manifest:
+
+| Deploy path                | Packaging function      | Prefix source                                                                  |
+| -------------------------- | ----------------------- | ------------------------------------------------------------------------------ |
+| Class A (void native)      | `packageBuild`          | Detected from Vite client manifest (`build.assetsDir`), defaults to `"assets"` |
+| Class B/C (meta-framework) | `packageFrameworkBuild` | `fwPreset.hashedAssetsPrefix ?? "assets"`                                      |
+| Static (SPA/VitePress)     | `packageStaticBuild`    | Passed through `runStaticDeploy`, defaults to `"assets"`                       |
+
+The API writes `hashedAssetsPrefix` to both slug and custom domain KV routing entries. All read-modify-write mutations (suspend, unsuspend, userId backfill, domain activation) preserve the field.

@@ -41,6 +41,7 @@ interface RoutingEntry {
   limits?: Record<string, number>;
   suspended?: string;
   hashedAssetsPrefix?: string;
+  headerRules?: { pattern: string; headers: [string, string][] }[];
 }
 
 function createCtx(): ExecutionContext {
@@ -827,5 +828,73 @@ describe("hashed asset caching", () => {
     const res = await app.fetch(new Request("https://test.void.app/assets/main-abc.js"), env, ctx);
     expect(res.status).toBe(429);
     expect(await res.json()).toEqual({ error: "CPU limit exceeded" });
+  });
+});
+
+describe("header rules", () => {
+  it("applies header rules to worker responses", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      headerRules: [
+        { pattern: "/*", headers: [["X-Frame-Options", "DENY"]] },
+        {
+          pattern: "/assets/*",
+          headers: [["Cache-Control", "public, max-age=31536000, immutable"]],
+        },
+      ],
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response("ok") });
+    const ctx = createCtx();
+
+    const res = await app.fetch(new Request("https://test.void.app/assets/app.js"), env, ctx);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY");
+    expect(res.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+  });
+
+  it("does not apply header rules to hashed asset cache hits", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      hashedAssetsPrefix: "assets",
+      headerRules: [{ pattern: "/*", headers: [["X-Custom", "from-rules"]] }],
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response("asset-body") });
+    const ctx = createCtx();
+
+    // First request — cache miss, goes through hashed asset path
+    const res1 = await app.fetch(new Request("https://test.void.app/assets/main-abc.js"), env, ctx);
+    expect(res1.status).toBe(200);
+    // Hashed asset path sets its own Cache-Control, header rules don't apply
+    expect(res1.headers.get("X-Custom")).toBeNull();
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Second request — cache hit, also bypasses header rules
+    const ctx2 = createCtx();
+    const res2 = await app.fetch(
+      new Request("https://test.void.app/assets/main-abc.js"),
+      env,
+      ctx2,
+    );
+    expect(res2.status).toBe(200);
+    expect(res2.headers.get("X-Custom")).toBeNull();
+  });
+
+  it("last-match-wins for overlapping patterns", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      headerRules: [
+        { pattern: "/*", headers: [["Cache-Control", "no-cache"]] },
+        { pattern: "/assets/*", headers: [["Cache-Control", "immutable"]] },
+      ],
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response("ok") });
+    const ctx = createCtx();
+
+    const res = await app.fetch(new Request("https://test.void.app/assets/app.js"), env, ctx);
+    expect(res.headers.get("Cache-Control")).toBe("immutable");
   });
 });

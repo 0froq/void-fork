@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { applyHeaderRules, type HeaderRule } from "./headers";
 import { extractSlug } from "./hostname";
 import {
   readIsrCache,
@@ -23,6 +24,7 @@ interface RoutingEntry {
   limits?: Record<string, number>;
   suspended?: string;
   hashedAssetsPrefix?: string;
+  headerRules?: HeaderRule[];
 }
 
 interface QueueRoutingEntry {
@@ -189,7 +191,7 @@ export default {
         }
       }
 
-      return meter(response);
+      return meter(applyHeaderRules(response, pathname, routing.headerRules));
     } catch (err) {
       if (err instanceof Error && err.message.includes("Worker exceeded")) {
         return meter(Response.json({ error: "CPU limit exceeded" }, { status: 429 }));
