@@ -375,6 +375,7 @@ async function runFrameworkDeploy(
       compatibilityFlags: wranglerCompat.compatibilityFlags,
     },
     neededAssets: neededSet,
+    hashedAssetsPrefix: fwPreset.hashedAssetsPrefix ?? "assets",
   });
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
@@ -585,6 +586,7 @@ async function runFullDeploy(
       compatibilityFlags: wranglerCompat.compatibilityFlags,
     },
     neededSet,
+    assetsPrefix,
   );
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);

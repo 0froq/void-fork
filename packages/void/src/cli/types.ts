@@ -45,4 +45,5 @@ export interface DeployManifest {
   workerMain?: string;
   compatibilityDate?: string;
   compatibilityFlags?: string[];
+  hashedAssetsPrefix?: string;
 }

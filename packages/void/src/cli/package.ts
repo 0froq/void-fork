@@ -98,6 +98,7 @@ export function packageBuild(
   assetConfig?: AssetConfig,
   options?: PackageOptions,
   neededAssets?: Set<string> | null,
+  hashedAssetsPrefix?: string,
 ): FormData {
   const formData = new FormData();
 
@@ -159,6 +160,10 @@ export function packageBuild(
   }
   if (options?.compatibilityFlags && options.compatibilityFlags.length > 0) {
     manifest.compatibilityFlags = options.compatibilityFlags;
+  }
+
+  if (hashedAssetsPrefix) {
+    manifest.hashedAssetsPrefix = hashedAssetsPrefix;
   }
 
   formData.append("manifest", JSON.stringify(manifest));
@@ -249,6 +254,7 @@ export function packageFrameworkBuild(opts: {
   vars?: Record<string, string>;
   packageOptions?: PackageOptions;
   neededAssets?: Set<string> | null;
+  hashedAssetsPrefix?: string;
 }): FormData {
   const formData = new FormData();
   const po = opts.packageOptions;
@@ -283,6 +289,10 @@ export function packageFrameworkBuild(opts: {
   if (po?.compatibilityDate) manifest.compatibilityDate = po.compatibilityDate;
   if (po?.compatibilityFlags && po.compatibilityFlags.length > 0) {
     manifest.compatibilityFlags = po.compatibilityFlags;
+  }
+
+  if (opts.hashedAssetsPrefix) {
+    manifest.hashedAssetsPrefix = opts.hashedAssetsPrefix;
   }
 
   formData.append("manifest", JSON.stringify(manifest));
