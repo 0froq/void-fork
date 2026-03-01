@@ -116,7 +116,7 @@ export class UsageCounter extends DurableObject<ApiEnv["Bindings"]> {
     if (exceedsLimit && !state.requestsSuspended) {
       state.requestsSuspended = true;
       await this.suspendProjects(state.projectSlugs, "requests_exceeded");
-      const db = createDb(this.env.DB);
+      const db = createDb(this.env.HYPERDRIVE.connectionString);
       await suspendUser(db, body.userId, "requests_exceeded");
     }
 

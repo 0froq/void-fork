@@ -15,9 +15,10 @@ declare module "void" {
 export default defineMiddleware(async (c, next) => {
   const path = c.req.path;
 
-  // Init DB from D1 binding (available on all routes)
-  const d1 = (c.env as { DB: D1Database }).DB;
-  c.set("db", createDb(d1));
+  // Init DB from Hyperdrive binding (available on all routes)
+  const connectionString = (c.env as unknown as { HYPERDRIVE: Hyperdrive }).HYPERDRIVE
+    .connectionString;
+  c.set("db", createDb(connectionString));
 
   // Dev bypass — skip auth entirely, platform also bypasses when DEV_AUTH_BYPASS is set
   const devBypass = (c.env as Record<string, string>).DEV_AUTH_BYPASS;

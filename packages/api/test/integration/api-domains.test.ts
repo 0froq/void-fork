@@ -304,11 +304,10 @@ describe("GET /projects/:id/domains/:domainId", () => {
     expect(body.status).toBe("active");
 
     // Verify DB was updated
-    const row = await env.db
+    const [row] = await env.db
       .select({ status: domains.status })
       .from(domains)
-      .where(eq(domains.id, "dom_activate"))
-      .get();
+      .where(eq(domains.id, "dom_activate"));
     expect(row?.status).toBe("active");
 
     // Verify KV routing entry was written
@@ -349,7 +348,7 @@ describe("DELETE /projects/:id/domains/:domainId", () => {
     expect(await res.json()).toMatchObject({ ok: true });
 
     // Verify DB record deleted
-    const row = await env.db.select().from(domains).where(eq(domains.id, "dom_remove")).get();
+    const [row] = await env.db.select().from(domains).where(eq(domains.id, "dom_remove"));
     expect(row).toBeUndefined();
 
     // Verify KV routing entry deleted
@@ -400,7 +399,7 @@ describe("DELETE /projects/:id/domains/:domainId", () => {
     expect(body.warnings[0]).toContain("CF API down");
 
     // DB record should still be deleted
-    const row = await env.db.select().from(domains).where(eq(domains.id, "dom_cf_fail")).get();
+    const [row] = await env.db.select().from(domains).where(eq(domains.id, "dom_cf_fail"));
     expect(row).toBeUndefined();
 
     // KV routing entry should still be deleted

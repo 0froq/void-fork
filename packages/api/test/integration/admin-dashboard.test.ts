@@ -453,7 +453,7 @@ describe("POST /admin/projects/:id/delete", () => {
     expect(res.headers.get("Location")).toBe("/admin/projects");
 
     // Verify project is gone from DB
-    const remaining = await env.db.select().from(projects).all();
+    const remaining = await env.db.select().from(projects);
     expect(remaining.find((p) => p.id === project.id)).toBeUndefined();
     vi.restoreAllMocks();
   });
@@ -500,9 +500,9 @@ describe("POST /admin/users/:id/delete", () => {
     expect(res.headers.get("Location")).toBe("/admin/users");
 
     // Verify user and projects are gone
-    const remainingUsers = await env.db.select().from(users).all();
+    const remainingUsers = await env.db.select().from(users);
     expect(remainingUsers.find((u) => u.id === user.id)).toBeUndefined();
-    const remainingProjects = await env.db.select().from(projects).all();
+    const remainingProjects = await env.db.select().from(projects);
     expect(remainingProjects.find((p) => p.id === project1.id)).toBeUndefined();
     expect(remainingProjects.find((p) => p.id === project2.id)).toBeUndefined();
     vi.restoreAllMocks();

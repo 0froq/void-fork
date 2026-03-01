@@ -3,7 +3,7 @@ import type { Db } from "./db";
 
 export interface ApiEnv extends Env {
   Bindings: {
-    DB: D1Database;
+    HYPERDRIVE: Hyperdrive;
     ASSETS: R2Bucket;
     ROUTING: KVNamespace;
     DISPATCH: DispatchNamespace;

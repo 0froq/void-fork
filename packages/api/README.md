@@ -1,13 +1,13 @@
 # @voidcloud/api
 
-Control Plane API + Admin Dashboard. CF Worker using Hono, Drizzle ORM + D1, R2, KV, and Workers for Platforms (dispatch namespaces). No tsdown — wrangler handles TS bundling.
+Control Plane API + Admin Dashboard. CF Worker using Hono, Drizzle ORM + PostgreSQL (via Hyperdrive), R2, KV, and Workers for Platforms (dispatch namespaces). No tsdown — wrangler handles TS bundling.
 
 ## Source Layout
 
 ```
 src/
   index.ts                  # Hono app + scheduled handler (cron), mounts route groups + auth middleware
-  env.ts                    # ApiEnv type (D1, R2, KV, DISPATCH, secrets, Variables)
+  env.ts                    # ApiEnv type (Hyperdrive, R2, KV, DISPATCH, secrets, Variables)
   schema.ts                 # Drizzle schema — source of truth for all DB tables + types
   types.ts                  # DB types (inferred from schema) + DeployManifest, QueueMeta, etc.
   id.ts                     # generateId(prefix) → "proj_a1b2c3d4e5f6"
@@ -36,7 +36,7 @@ src/
     views/pagination.tsx    # Reusable pagination component
     views/format.ts         # Shared formatting helpers (formatBytes, formatNumber, formatLimit)
   migrations/
-    remote-runner.ts        # Executes migrations on remote D1 via CF REST API
+    remote-runner.ts        # Executes migrations on remote D1 via CF REST API (user project D1s)
     validate.ts             # Server-side destructive-op validation (defense in depth)
   routes/
     auth.ts                 # OAuth login + callback (GitHub/Google)
@@ -48,8 +48,7 @@ src/
     domains.ts              # Custom domain CRUD + CF for SaaS
     usage.ts                # Usage queries (per-project + aggregate)
 drizzle/
-  0000_lush_rhodey.sql      # Baseline migration (all 5 tables)
-  0001_supreme_the_twelve.sql # Add composite indexes on deployments(project_id, created_at) and domains(project_id, created_at)
+  0000_numerous_tarot.sql   # Baseline PG migration (all 5 tables + indexes + FKs)
   meta/_journal.json        # Drizzle migration journal
 ```
 
@@ -223,7 +222,7 @@ Used by the platform worker at runtime to provision and manage user resources vi
 
 ### Integration Tests
 
-Integration tests call the Hono app via `app.fetch(request, env)` with **real** Miniflare D1/KV/R2 bindings and **mocked** external fetch calls (GitHub API, CF API). This tests the full request→middleware→route→DB→response chain.
+Integration tests call the Hono app via `app.fetch(request, env)` with **PGlite** (in-process WASM PostgreSQL) for the database, **Miniflare** KV/R2 bindings, and **mocked** external fetch calls (GitHub API, CF API). This tests the full request→middleware→route→DB→response chain.
 
 | Test file                                  | Covers                                                                                                                                                          |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -236,7 +235,7 @@ Integration tests call the Hono app via `app.fetch(request, env)` with **real** 
 
 Shared helpers in `test/integration/helpers.ts`:
 
-- `setupEnv()` / `teardownEnv()` — Miniflare lifecycle (D1, KV, R2 bindings) + Drizzle migration
+- `setupEnv()` / `teardownEnv()` — PGlite + Miniflare lifecycle (KV, R2 bindings) + Drizzle migration
 - `clearTables()` — Drizzle delete in FK order
 - `createTestUser()` / `createTestProject()` / `createTestDeployment()` — Drizzle insert factories with JWT signing
 - `mockCfApi()` — URL-based fetch mock for CF API with configurable overrides

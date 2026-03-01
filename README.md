@@ -98,7 +98,7 @@ The dashboard depends on `void` and `@void-x/vue`, resolved via `pnpm.overrides`
 
 ## `dashboard` Overview
 
-Vue Pages mode app serving the user-facing Void dashboard at `dash.void.cloud`. Built with `@void-x/vue` (SSR + `<script server>` blocks), Hono, and Tailwind CSS v4 with shared design tokens from `@voidcloud/ui`. Has its own D1 binding to the API database — read-only loaders use direct Drizzle queries, while mutations and non-D1 reads (usage metrics, secrets) go through the API via HTTP.
+Vue Pages mode app serving the user-facing Void dashboard at `dash.void.cloud`. Built with `@void-x/vue` (SSR + `<script server>` blocks), Hono, and Tailwind CSS v4 with shared design tokens from `@voidcloud/ui`. Has a Hyperdrive binding to the API database (PlanetScale PostgreSQL) — read-only loaders use direct Drizzle queries, while mutations and non-DB reads (usage metrics, secrets) go through the API via HTTP.
 
 - **Auth**: OAuth (GitHub/Google) via API, JWT in httpOnly `void_token` cookie
 - **Pages**: login, project list with aggregate usage, project detail (deployments, domains, secrets, usage metrics), settings
@@ -108,7 +108,7 @@ See [`packages/dashboard/README.md`](./packages/dashboard/README.md) for details
 
 ## `api` Overview
 
-CF Worker serving the Control Plane API + Admin Dashboard. Handles OAuth (GitHub/Google), project CRUD, deploy pipeline (migrations → assets → worker upload), usage metering via Analytics Engine, and plan tier enforcement. Admin dashboard uses Hono JSX with cookie-based auth. Uses Drizzle ORM with D1 for type-safe database queries — schema defined in `src/schema.ts`, types inferred via `InferSelectModel`.
+CF Worker serving the Control Plane API + Admin Dashboard. Handles OAuth (GitHub/Google), project CRUD, deploy pipeline (migrations → assets → worker upload), usage metering via Analytics Engine, and plan tier enforcement. Admin dashboard uses Hono JSX with cookie-based auth. Uses Drizzle ORM with PlanetScale PostgreSQL (via Cloudflare Hyperdrive) for type-safe database queries — schema defined in `src/schema.ts`, types inferred via `InferSelectModel`.
 
 See [`packages/api/README.md`](./packages/api/README.md) for API endpoints, auth flow, deploy flow, tiers, secrets, and CF API token permissions.
 
@@ -131,7 +131,7 @@ See [`packages/dispatch/README.md`](./packages/dispatch/README.md) for request f
 | Node.js  | 24.13.1       | Runtime (TS type stripping enabled natively — no `tsx` or `--experimental-strip-types` needed) |
 | pnpm     | 10.x          | Package manager with workspaces + catalog                                                      |
 | wrangler | 4.x           | CF Worker dev/deploy (api, dispatch)                                                           |
-| drizzle  | 0.45.x        | Type-safe ORM for API D1 (schema + queries + migrations)                                       |
+| drizzle  | 0.45.x        | Type-safe ORM for API PostgreSQL (schema + queries + migrations)                               |
 | vitest   | 4.x           | Unit + integration tests                                                                       |
 | oxlint   | 1.47.x        | Linting                                                                                        |
 | oxfmt    | 0.32.x        | Formatting (double quotes, semis)                                                              |
@@ -143,7 +143,7 @@ Tests run from root with `pnpm test` (vitest). See each package README for detai
 
 ## Operations
 
-Four workers: `void-api`, `void-dashboard`, `void-dispatch`, `void-proxy`. Two environments: **production** (`api.void.cloud`, `dash.void.cloud`, `*.void.app`) and **staging** (`api.staging.void.cloud`, `dash.staging.void.cloud`, `*.staging.void.app`). Each has fully isolated CF resources (D1, KV, R2, dispatch namespace, analytics engine).
+Four workers: `void-api`, `void-dashboard`, `void-dispatch`, `void-proxy`. Two environments: **production** (`api.void.cloud`, `dash.void.cloud`, `*.void.app`) and **staging** (`api.staging.void.cloud`, `dash.staging.void.cloud`, `*.staging.void.app`). Each has fully isolated CF resources (KV, R2, dispatch namespace, analytics engine) plus a shared Hyperdrive binding to PlanetScale PostgreSQL.
 
 ```
 pnpm run deploy           # Production
@@ -154,8 +154,8 @@ See [`meta/operations.md`](./meta/operations.md) for the full operations referen
 
 ## Pitfalls / Things That Broke
 
-- **API DB uses Drizzle ORM** — schema is the source of truth in `src/schema.ts`. To add columns or tables: update schema → `pnpm db:generate` → apply migration. Types are inferred via `InferSelectModel`, not hand-maintained. Use `.$type<T>()` on text columns to narrow to union types (e.g., `PlanId`, deployment status).
+- **API DB uses Drizzle ORM with PostgreSQL** — PlanetScale PostgreSQL accessed via Cloudflare Hyperdrive. Schema is the source of truth in `src/schema.ts`. To add columns or tables: update schema → `pnpm db:generate` → apply migration with `drizzle-kit migrate` (requires `DATABASE_URL` env var). Types are inferred via `InferSelectModel`, not hand-maintained. Use `.$type<T>()` on text columns to narrow to union types (e.g., `PlanId`, deployment status). Note: user project D1 databases are still provisioned via the CF API — only the platform's own database uses PostgreSQL.
+- **Hyperdrive binding** — Both `api` and `dashboard` workers use a `HYPERDRIVE` binding (same Hyperdrive configuration ID) to connect to PlanetScale. The `drizzle-orm/node-postgres` adapter accepts the `connectionString` from `env.HYPERDRIVE.connectionString`. Tests use PGlite (in-process WASM PostgreSQL) instead.
 - **tsconfig `lib` must be explicit** for CF Workers packages. Without `"lib": ["ES2022"]`, TS defaults to including `lib.dom.d.ts` which shadows `@cloudflare/workers-types` globals (e.g. `CacheStorage.default`). Applied to `dispatch`. Not applied to `api` (its tests use Miniflare/Node which needs DOM-compatible `URL` types).
 - **OAuth env vars use `_CLIENT_` prefix** (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`). These are passed explicitly to `@hono/oauth-providers` middleware, overriding its default `GITHUB_ID`/`GOOGLE_ID` convention, to avoid naming collisions and make the purpose clear.
-- **D1 does not allow `PRAGMA foreign_keys=OFF`** — D1 enforces `foreign_keys=ON` always. Drizzle-generated migrations that do table rebuilds (e.g. adding NOT NULL to an existing column) use `PRAGMA foreign_keys=OFF/ON`, which silently fails on D1. Hand-edit these to `PRAGMA defer_foreign_keys=on/off` instead, which defers FK checks to the end of the current transaction.
 - **Deploy protocol versioning** — The `DeployManifest` interface has a `version` field. The API validates it and rejects unknown versions with a clear error. See `meta/design-docs/0018-open-source-split.md` for the versioning policy.

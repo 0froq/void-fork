@@ -134,7 +134,7 @@ app.get("/:id", async (c) => {
           </tr>
           {manifest && (
             <tr>
-              <td colspan="4" style="padding: 0">
+              <td colspan={4} style="padding: 0">
                 <details>
                   <summary style="padding: 8px; cursor: pointer; font-weight: 600">
                     Manifest

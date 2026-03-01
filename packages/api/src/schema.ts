@@ -1,11 +1,10 @@
-import { sql } from "drizzle-orm";
-import { index, sqliteTable, text, unique, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, pgTable, text, timestamp, unique, uniqueIndex } from "drizzle-orm/pg-core";
 import type { PlanId } from "./tiers";
 
 // ---------------------------------------------------------------------------
 // users
 // ---------------------------------------------------------------------------
-export const users = sqliteTable(
+export const users = pgTable(
   "users",
   {
     id: text("id").primaryKey(),
@@ -15,13 +14,11 @@ export const users = sqliteTable(
     email: text("email"),
     plan: text("plan").notNull().default("free").$type<PlanId>(),
     role: text("role").notNull().default("user").$type<"user" | "admin">(),
-    billing_cycle_start: text("billing_cycle_start")
+    billing_cycle_start: timestamp("billing_cycle_start", { mode: "string" })
       .notNull()
-      .default(sql`(datetime('now'))`),
+      .defaultNow(),
     suspended_reason: text("suspended_reason"),
-    created_at: text("created_at")
-      .notNull()
-      .default(sql`(datetime('now'))`),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("idx_users_provider_id").on(t.provider, t.provider_id),
@@ -32,7 +29,7 @@ export const users = sqliteTable(
 // ---------------------------------------------------------------------------
 // projects
 // ---------------------------------------------------------------------------
-export const projects = sqliteTable(
+export const projects = pgTable(
   "projects",
   {
     id: text("id").primaryKey(),
@@ -43,10 +40,8 @@ export const projects = sqliteTable(
     mode: text("mode")
       .notNull()
       .default("worker")
-      .$type<"fullstack" | "spa" | "ssg" | "framework">(),
-    created_at: text("created_at")
-      .notNull()
-      .default(sql`(datetime('now'))`),
+      .$type<"worker" | "fullstack" | "spa" | "ssg" | "framework">(),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   },
   (t) => [
     unique().on(t.user_id, t.slug),
@@ -58,7 +53,7 @@ export const projects = sqliteTable(
 // ---------------------------------------------------------------------------
 // deployments
 // ---------------------------------------------------------------------------
-export const deployments = sqliteTable(
+export const deployments = pgTable(
   "deployments",
   {
     id: text("id").primaryKey(),
@@ -74,10 +69,8 @@ export const deployments = sqliteTable(
     commit: text("commit"),
     error_message: text("error_message"),
     asset_hashes: text("asset_hashes"),
-    created_at: text("created_at")
-      .notNull()
-      .default(sql`(datetime('now'))`),
-    deployed_at: text("deployed_at"),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+    deployed_at: timestamp("deployed_at", { mode: "string" }),
   },
   (t) => [
     index("idx_deployments_project_id").on(t.project_id, t.created_at),
@@ -88,7 +81,7 @@ export const deployments = sqliteTable(
 // ---------------------------------------------------------------------------
 // resources
 // ---------------------------------------------------------------------------
-export const resources = sqliteTable(
+export const resources = pgTable(
   "resources",
   {
     id: text("id").primaryKey(),
@@ -98,9 +91,7 @@ export const resources = sqliteTable(
     type: text("type").notNull().$type<"d1" | "kv" | "r2" | "queue">(),
     cf_id: text("cf_id").notNull(),
     binding_name: text("binding_name").notNull(),
-    created_at: text("created_at")
-      .notNull()
-      .default(sql`(datetime('now'))`),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   },
   (t) => [unique().on(t.project_id, t.type, t.binding_name)],
 );
@@ -108,7 +99,7 @@ export const resources = sqliteTable(
 // ---------------------------------------------------------------------------
 // domains
 // ---------------------------------------------------------------------------
-export const domains = sqliteTable(
+export const domains = pgTable(
   "domains",
   {
     id: text("id").primaryKey(),
@@ -118,9 +109,7 @@ export const domains = sqliteTable(
     hostname: text("hostname").notNull().unique(),
     cf_hostname_id: text("cf_hostname_id").notNull(),
     status: text("status").notNull().default("pending").$type<"pending" | "active">(),
-    created_at: text("created_at")
-      .notNull()
-      .default(sql`(datetime('now'))`),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   },
   (t) => [index("idx_domains_project_id").on(t.project_id, t.created_at)],
 );

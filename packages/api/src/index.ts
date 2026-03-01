@@ -18,15 +18,14 @@ import adminUsers from "./admin/routes/users";
 import adminProjects from "./admin/routes/projects";
 import adminDeployments from "./admin/routes/deployments";
 import me from "./routes/me";
-import { createDb, getUsersWithProjectsBatch, unsuspendUserIfReason } from "./db";
-import type { Db } from "./db";
+import { createDb, getUsersWithProjectsBatch, unsuspendUserIfReason, type Db } from "./db";
 import { getCurrentBillingPeriodStart, getPlanLimits } from "./tiers";
 
 const app = new Hono<ApiEnv>()
 
   // Drizzle middleware — creates a Db instance per request
   .use("*", async (c, next) => {
-    c.set("db", createDb(c.env.DB));
+    c.set("db", createDb(c.env.HYPERDRIVE.connectionString));
     await next();
   })
 
@@ -60,7 +59,7 @@ async function scheduled(
   env: ApiEnv["Bindings"],
   _ctx: ExecutionContext,
 ): Promise<void> {
-  const db = createDb(env.DB);
+  const db = createDb(env.HYPERDRIVE.connectionString);
 
   let offset = 0;
   while (true) {
@@ -111,7 +110,7 @@ async function processUserRollover(
       unsuspendAi?: boolean;
     }>();
 
-    // If period rolled and user was request-suspended, unsuspend in D1
+    // If period rolled and user was request-suspended, unsuspend in DB
     if (result.rolled && result.unsuspendRequests) {
       await unsuspendUserIfReason(db, user.id, "requests_exceeded");
     }

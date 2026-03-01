@@ -17,8 +17,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "migrate": "wrangler d1 migrations apply void-api --remote",
-    "migrate:staging": "wrangler d1 migrations apply void-api-staging --env staging --remote",
+    "migrate": "drizzle-kit migrate",
+    "migrate:staging": "DATABASE_URL=$STAGING_DATABASE_URL drizzle-kit migrate",
     "typecheck": "tsgo --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
@@ -26,10 +26,13 @@
   },
   "dependencies": {
     "drizzle-orm": "^0.45.1",
-    "hono": "^4.11.9"
+    "hono": "^4.11.9",
+    "pg": "8.19.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
+    "@electric-sql/pglite": "0.3.15",
+    "@types/pg": "8.16.0",
     "@typescript/native-preview": "catalog:",
     "drizzle-kit": "^0.31.9",
     "miniflare": "^4",

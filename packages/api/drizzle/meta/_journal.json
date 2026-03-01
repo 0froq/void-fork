@@ -1,47 +1,12 @@
 {
   "version": "7",
-  "dialect": "sqlite",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "6",
-      "when": 1771555257078,
-      "tag": "0000_lush_rhodey",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1771585524406,
-      "tag": "0001_supreme_the_twelve",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1771588467664,
-      "tag": "0002_high_imperial_guard",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1771911124647,
-      "tag": "0003_curved_star_brand",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1772176113222,
-      "tag": "0004_overconfident_madripoor",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1772274313424,
-      "tag": "0005_material_the_call",
+      "version": "7",
+      "when": 1772336954171,
+      "tag": "0000_confused_starjammers",
       "breakpoints": true
     }
   ]

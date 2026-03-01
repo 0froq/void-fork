@@ -1,11 +1,15 @@
 import { Miniflare } from "miniflare";
+import { PGlite } from "@electric-sql/pglite";
+import { drizzle } from "drizzle-orm/pglite";
+import { migrate } from "drizzle-orm/pglite/migrator";
 import { fileURLToPath } from "node:url";
 import { vi } from "vitest";
-import { migrate } from "drizzle-orm/d1/migrator";
-import { createDb, type Db } from "../../src/db";
+import type { Db } from "../../src/db";
+import * as schema from "../../src/schema";
 import { users, projects, deployments, resources, domains } from "../../src/schema";
 import { signJwt } from "../../src/auth/jwt";
 import type { PlanId } from "../../src/tiers";
+import { setTestDb, clearTestDb } from "./setup";
 
 export const JWT_SECRET = "test-jwt-secret";
 export const CF_API_TOKEN = "test-cf-token";
@@ -13,8 +17,8 @@ export const CF_ACCOUNT_ID = "test-account-id";
 export const CF_ZONE_ID = "test-zone-id";
 
 export type TestEnv = {
-  DB: D1Database;
   db: Db;
+  HYPERDRIVE: { connectionString: string };
   ASSETS: R2Bucket;
   ROUTING: KVNamespace;
   DISPATCH: DispatchNamespace;
@@ -48,28 +52,32 @@ function createMockDoNamespace(): DurableObjectNamespace {
 }
 
 let mf: Miniflare;
+let pglite: PGlite | undefined;
 
 export async function setupEnv(): Promise<TestEnv> {
   mf = new Miniflare({
     modules: true,
     script: "export default { fetch() { return new Response(''); } }",
-    d1Databases: ["DB"],
     kvNamespaces: ["ROUTING"],
     r2Buckets: ["ASSETS"],
   });
 
-  const d1 = await mf.getD1Database("DB");
   const kv = await mf.getKVNamespace("ROUTING");
   const r2 = await mf.getR2Bucket("ASSETS");
 
-  const db = createDb(d1);
-  await migrate(db, {
+  pglite = new PGlite();
+  const db = drizzle(pglite, { schema }) as unknown as Db;
+
+  await migrate(drizzle(pglite, { schema }), {
     migrationsFolder: fileURLToPath(new URL("../../drizzle", import.meta.url)),
   });
 
+  // Register the test db so the vi.mock in setup.ts routes createDb() here
+  setTestDb(db);
+
   return {
-    DB: d1,
     db,
+    HYPERDRIVE: { connectionString: "test://mock" },
     ASSETS: r2 as unknown as R2Bucket,
     ROUTING: kv as unknown as KVNamespace,
     DISPATCH: {} as DispatchNamespace,
@@ -86,7 +94,12 @@ export async function setupEnv(): Promise<TestEnv> {
 }
 
 export async function teardownEnv(): Promise<void> {
+  clearTestDb();
   await mf.dispose();
+  if (pglite) {
+    await pglite.close();
+    pglite = undefined;
+  }
 }
 
 export async function clearTables(db: Db): Promise<void> {

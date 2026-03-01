@@ -53,8 +53,8 @@ app.post("/:id/deploy", async (c) => {
 
   // Reject concurrent deploys to the same project
   if (activeDeploy) {
-    // SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" in UTC without a Z suffix.
-    // Normalize to ISO 8601 so Date parses it as UTC, not local time.
+    // Normalize timestamp to ISO 8601 for safe Date parsing.
+    // PostgreSQL returns ISO format; also handles legacy format (space separator, no Z).
     const createdAt = activeDeploy.created_at.includes("T")
       ? activeDeploy.created_at
       : activeDeploy.created_at.replace(" ", "T") + "Z";

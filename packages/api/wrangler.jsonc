@@ -6,12 +6,13 @@
   "observability": {
     "enabled": true,
   },
-  "d1_databases": [
+  "placement": {
+    "mode": "smart",
+  },
+  "hyperdrive": [
     {
-      "binding": "DB",
-      "database_name": "void-api",
-      "database_id": "b559aaf5-e70b-47f3-998e-af502abed7eb",
-      "migrations_dir": "drizzle",
+      "binding": "HYPERDRIVE",
+      "id": "7bd6b2a606a347819ad3421867840736",
     },
   ],
   "r2_buckets": [
@@ -65,12 +66,10 @@
   "env": {
     "staging": {
       "name": "void-api-staging",
-      "d1_databases": [
+      "hyperdrive": [
         {
-          "binding": "DB",
-          "database_name": "void-api-staging",
-          "database_id": "dd8eebb3-fe07-44dd-aadc-09675eb7b581",
-          "migrations_dir": "drizzle",
+          "binding": "HYPERDRIVE",
+          "id": "7cde35825e6249d0b60b9de69feb29dd",
         },
       ],
       "r2_buckets": [

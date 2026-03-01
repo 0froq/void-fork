@@ -106,7 +106,7 @@ describe("DELETE /projects/:id", () => {
     expect(body).toEqual({ ok: true, id: project.id, slug: "empty-app" });
 
     // Verify project is gone from DB
-    const dbProject = await env.db.select().from(projects).where(eq(projects.id, project.id)).get();
+    const [dbProject] = await env.db.select().from(projects).where(eq(projects.id, project.id));
     expect(dbProject).toBeUndefined();
   });
 
@@ -149,21 +149,19 @@ describe("DELETE /projects/:id", () => {
     expect(body).toEqual({ ok: true, id: project.id, slug: "full-app" });
 
     // Verify DB records are gone
-    const dbProject = await env.db.select().from(projects).where(eq(projects.id, project.id)).get();
+    const [dbProject] = await env.db.select().from(projects).where(eq(projects.id, project.id));
     expect(dbProject).toBeUndefined();
 
     const dbResources = await env.db
       .select()
       .from(resources)
-      .where(eq(resources.project_id, project.id))
-      .all();
+      .where(eq(resources.project_id, project.id));
     expect(dbResources).toHaveLength(0);
 
     const dbDeployments = await env.db
       .select()
       .from(deployments)
-      .where(eq(deployments.project_id, project.id))
-      .all();
+      .where(eq(deployments.project_id, project.id));
     expect(dbDeployments).toHaveLength(0);
 
     // Verify R2 assets cleaned up
@@ -199,7 +197,7 @@ describe("DELETE /projects/:id", () => {
     expect(body.warnings![0]).toContain("d1");
 
     // Project should still be deleted from DB despite warnings
-    const dbProject = await env.db.select().from(projects).where(eq(projects.id, project.id)).get();
+    const [dbProject] = await env.db.select().from(projects).where(eq(projects.id, project.id));
     expect(dbProject).toBeUndefined();
   });
 
@@ -265,8 +263,7 @@ describe("DELETE /projects/:id", () => {
     const dbResources = await env.db
       .select()
       .from(resources)
-      .where(eq(resources.project_id, project.id))
-      .all();
+      .where(eq(resources.project_id, project.id));
     expect(dbResources).toHaveLength(0);
   });
 

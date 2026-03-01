@@ -22,7 +22,7 @@ export async function processUsageEventBatch(
 ): Promise<void> {
   const events = batch.messages.map((m) => m.body as UsageEvent);
   const grouped = groupEventsByUser(events);
-  const db = createDb(env.DB);
+  const db = createDb(env.HYPERDRIVE.connectionString);
 
   const results = await Promise.allSettled(
     [...grouped.entries()].map(async ([userId, userEvents]) => {

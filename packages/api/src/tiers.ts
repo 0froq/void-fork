@@ -92,7 +92,7 @@ export function isWithinLimit(limit: number, current: number): boolean {
 export function getCurrentBillingPeriodStart(billingCycleStart: string | null | undefined): Date {
   // Handle missing or invalid billing_cycle_start (e.g. legacy rows before column existed)
   if (!billingCycleStart) return new Date();
-  // Handle SQLite datetime format (space instead of T, no Z)
+  // Normalize timestamp format (also handles legacy rows with space separator, no Z)
   const normalized = billingCycleStart.includes("T")
     ? billingCycleStart
     : billingCycleStart.replace(" ", "T") + "Z";

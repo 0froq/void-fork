@@ -128,12 +128,11 @@ describe("POST /projects/:id/deploy", () => {
     expect(body.deployment).toMatch(/^dpl_/);
     expect(body.url).toBe("https://minimal-app.void.app");
 
-    // Verify deployment is marked live in D1
-    const dpl = await env.db
+    // Verify deployment is marked live in DB
+    const [dpl] = await env.db
       .select({ status: deployments.status })
       .from(deployments)
-      .where(eq(deployments.id, body.deployment))
-      .get();
+      .where(eq(deployments.id, body.deployment));
     expect(dpl?.status).toBe("live");
   });
 
@@ -272,12 +271,11 @@ describe("POST /projects/:id/deploy", () => {
     );
     expect(res.status).toBe(200);
 
-    // Verify resource row was created in D1
-    const resource = await env.db
+    // Verify resource row was created in DB
+    const [resource] = await env.db
       .select({ cf_id: resources.cf_id, binding_name: resources.binding_name })
       .from(resources)
-      .where(eq(resources.project_id, project.id))
-      .get();
+      .where(eq(resources.project_id, project.id));
     expect(resource).toBeDefined();
     expect(resource!.cf_id).toBe("d1-test-uuid");
     expect(resource!.binding_name).toBe("DB");
@@ -387,11 +385,10 @@ describe("POST /projects/:id/deploy", () => {
     expect(body.error).toContain("destructive migration rejected");
 
     // Verify deployment is marked failed with error message
-    const dpl = await env.db
+    const [dpl] = await env.db
       .select({ status: deployments.status, error_message: deployments.error_message })
       .from(deployments)
-      .where(eq(deployments.project_id, project.id))
-      .get();
+      .where(eq(deployments.project_id, project.id));
     expect(dpl?.status).toBe("failed");
     expect(dpl?.error_message).toContain("destructive migration rejected: 002_drop.sql");
   });
@@ -459,7 +456,7 @@ describe("POST /projects/:id/deploy", () => {
         id: `dpl_limit_${i}`,
         project_id: project.id,
         status: "live",
-        created_at: sql`datetime('now')`,
+        created_at: sql`now()`,
       });
     }
 
@@ -488,7 +485,7 @@ describe("POST /projects/:id/deploy", () => {
         id: `dpl_under_${i}`,
         project_id: project.id,
         status: "live",
-        created_at: sql`datetime('now')`,
+        created_at: sql`now()`,
       });
     }
 
@@ -606,11 +603,10 @@ describe("POST /projects/:id/deploy", () => {
     expect(body.error).toBe("worker upload failed");
 
     // Verify deployment is marked failed with error message
-    const dpl = await env.db
+    const [dpl] = await env.db
       .select({ status: deployments.status, error_message: deployments.error_message })
       .from(deployments)
-      .where(eq(deployments.project_id, project.id))
-      .get();
+      .where(eq(deployments.project_id, project.id));
     expect(dpl?.status).toBe("failed");
     expect(dpl?.error_message).toContain("worker upload failed:");
   });
@@ -636,12 +632,11 @@ describe("POST /projects/:id/deploy", () => {
     );
     expect(res.status).toBe(200);
 
-    // Verify queue resource was created in D1
-    const resource = await env.db
+    // Verify queue resource was created in DB
+    const [resource] = await env.db
       .select({ cf_id: resources.cf_id, binding_name: resources.binding_name })
       .from(resources)
-      .where(eq(resources.project_id, project.id))
-      .get();
+      .where(eq(resources.project_id, project.id));
     expect(resource).toBeDefined();
     expect(resource!.cf_id).toBe("test-queue");
     expect(resource!.binding_name).toBe("emails");
@@ -736,7 +731,7 @@ describe("Deploy serialization (concurrent deploy guard)", () => {
       id: "dpl_active",
       project_id: project.id,
       status: "uploading",
-      created_at: sql`datetime('now')`,
+      created_at: sql`now()`,
     });
 
     const res = await app.fetch(
@@ -778,11 +773,10 @@ describe("Deploy serialization (concurrent deploy guard)", () => {
     expect(res.status).toBe(200);
 
     // Verify stale deployment was auto-failed
-    const stale = await env.db
+    const [stale] = await env.db
       .select({ status: deployments.status, error_message: deployments.error_message })
       .from(deployments)
-      .where(eq(deployments.id, "dpl_stale"))
-      .get();
+      .where(eq(deployments.id, "dpl_stale"));
     expect(stale?.status).toBe("failed");
     expect(stale?.error_message).toBe("timed out");
   });
@@ -797,7 +791,7 @@ describe("Deploy serialization (concurrent deploy guard)", () => {
       id: "dpl_done",
       project_id: project.id,
       status: "live",
-      created_at: sql`datetime('now')`,
+      created_at: sql`now()`,
     });
 
     const res = await app.fetch(
@@ -902,11 +896,10 @@ describe("POST /projects/:id/deploy (static)", () => {
     );
     expect(res.status).toBe(200);
 
-    const row = await env.db
+    const [row] = await env.db
       .select({ mode: projects.mode })
       .from(projects)
-      .where(eq(projects.id, project.id))
-      .get();
+      .where(eq(projects.id, project.id));
     expect(row?.mode).toBe("ssg");
   });
 });
@@ -960,11 +953,10 @@ describe("Deploy with prerendering", () => {
     expect(await aboutEntry!.text()).toBe("<html>Prerendered</html>");
 
     // Verify deployment is live
-    const dpl = await env.db
+    const [dpl] = await env.db
       .select({ status: deployments.status })
       .from(deployments)
-      .where(eq(deployments.project_id, project.id))
-      .get();
+      .where(eq(deployments.project_id, project.id));
     expect(dpl?.status).toBe("live");
   });
 
@@ -1042,11 +1034,10 @@ describe("Deploy with prerendering", () => {
     expect(res.status).toBe(200);
 
     // Deployment should still be live despite prerender failure
-    const dpl = await env.db
+    const [dpl] = await env.db
       .select({ status: deployments.status })
       .from(deployments)
-      .where(eq(deployments.project_id, project.id))
-      .get();
+      .where(eq(deployments.project_id, project.id));
     expect(dpl?.status).toBe("live");
   });
 
@@ -1058,11 +1049,10 @@ describe("Deploy with prerendering", () => {
     const dispatchGet = vi.fn().mockReturnValue({
       fetch: vi.fn().mockImplementation(async () => {
         // Check deployment status during prerender
-        const dpl = await env.db
+        const [dpl] = await env.db
           .select({ status: deployments.status })
           .from(deployments)
-          .where(eq(deployments.project_id, project.id))
-          .get();
+          .where(eq(deployments.project_id, project.id));
         statusDuringPrerender = dpl?.status;
         return new Response("<html>ok</html>", { status: 200 });
       }),
@@ -1111,11 +1101,10 @@ describe("asset_hashes storage", () => {
     expect(res.status).toBe(200);
     const data = (await res.json()) as { deployment: string };
 
-    const row = await env.db
+    const [row] = await env.db
       .select({ asset_hashes: deployments.asset_hashes })
       .from(deployments)
-      .where(eq(deployments.id, data.deployment))
-      .get();
+      .where(eq(deployments.id, data.deployment));
 
     expect(row?.asset_hashes).toBeTruthy();
     const hashes = JSON.parse(row!.asset_hashes!);
