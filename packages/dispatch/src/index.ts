@@ -90,7 +90,9 @@ export default {
       if (pathname.startsWith(prefix)) {
         const cache = caches.default;
         const cached = await cache.match(request);
-        if (cached) return meter(cached);
+        if (cached?.headers.get("Cache-Control")?.includes("immutable")) {
+          return meter(cached);
+        }
         // Cache miss — invoke worker, cache immutable response
         const worker = getWorker(env, routing);
         const response = await worker.fetch(request);

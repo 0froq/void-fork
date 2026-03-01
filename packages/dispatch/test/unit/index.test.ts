@@ -654,6 +654,29 @@ describe("hashed asset caching", () => {
     expect(workerFetch).toHaveBeenCalledTimes(1); // still 1
   });
 
+  it("bypasses stale cache entry without immutable header", async () => {
+    // Simulate pre-existing Workers Assets cache entry (no immutable header)
+    edgeCacheStore.set(
+      "https://test.void.app/assets/stale.js",
+      new Response("stale", {
+        headers: { "Cache-Control": "public, max-age=0, must-revalidate" },
+      }),
+    );
+
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      hashedAssetsPrefix: "assets",
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("fresh") });
+    const ctx = createCtx();
+
+    const res = await app.fetch(new Request("https://test.void.app/assets/stale.js"), env, ctx);
+    expect(res.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledTimes(1); // bypassed stale entry, hit worker
+    expect(res.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+  });
+
   it("does not cache non-hashed asset paths", async () => {
     const routing: RoutingEntry = {
       workerName: "test-worker",
