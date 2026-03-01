@@ -5,11 +5,11 @@ import { cliTitle, dim, pc, tablePrefix } from "./output";
 
 export async function runProjectsCommand(): Promise<void> {
   console.log();
-  intro(cliTitle("projects"));
+  intro(cliTitle("project list"));
 
   const token = getToken();
   if (!token) {
-    log.error("Not logged in. Run `void login` first.");
+    log.error("Not logged in. Run `void auth login` first.");
     process.exit(1);
   }
 

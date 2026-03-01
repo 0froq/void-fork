@@ -100,7 +100,7 @@ async function runAiSetupPrompt(
   try {
     projects = await client.listProjects();
   } catch {
-    voidWarn("Failed to fetch projects. Run `void link` to link a project manually.");
+    voidWarn("Failed to fetch projects. Run `void project link` to link a project manually.");
     return;
   }
 
@@ -444,10 +444,10 @@ export function voidPlugin(options?: {
           if (bindings.needsR2) lines.push("  STORAGE \x1b[2m→ remote R2\x1b[22m");
           voidLog(lines.join("\n         "));
         } else if (credentials.status === "no-token") {
-          voidWarn("Remote mode requires authentication. Run `void login`, then restart.");
+          voidWarn("Remote mode requires authentication. Run `void auth login`, then restart.");
           voidWarn("Falling back to local bindings.");
         } else {
-          voidWarn("Remote mode requires a linked project. Run `void link` first.");
+          voidWarn("Remote mode requires a linked project. Run `void project link` first.");
           voidWarn("Falling back to local bindings.");
         }
       }
@@ -456,13 +456,15 @@ export function voidPlugin(options?: {
       if (bindings.needsAI) {
         const credentials = readVoidDevCredentials(root);
         if (credentials.status === "no-token") {
-          voidWarn("AI requires authentication. Run `void login`, then restart the dev server.");
+          voidWarn(
+            "AI requires authentication. Run `void auth login`, then restart the dev server.",
+          );
         } else if (credentials.status === "no-project") {
           if (process.stdin.isTTY) {
             // Fire-and-forget interactive setup
             runAiSetupPrompt(root, credentials.token, credentials.staging, server);
           } else {
-            voidWarn("AI requires a linked project. Run `void link` to set one up.");
+            voidWarn("AI requires a linked project. Run `void project link` to set one up.");
           }
         }
       }

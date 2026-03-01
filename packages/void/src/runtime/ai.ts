@@ -39,7 +39,9 @@ function resolveBackend(): AiBackend {
     };
   }
 
-  throw new Error("AI not available. Run `void login` and `void link` to get started.");
+  throw new Error(
+    "AI not available. Run `void auth login` and `void project link` to get started.",
+  );
 }
 
 function unsupported(method: string): () => never {

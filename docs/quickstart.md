@@ -142,7 +142,7 @@ Then visit:
 ### 3. Log in
 
 ```sh
-void login
+void auth login
 ```
 
 ### 4. Deploy

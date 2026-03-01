@@ -11,7 +11,7 @@ Void apps run on Cloudflare's infrastructure but you don't need to use your own 
 ### First deploy
 
 ```bash
-void login              # OAuth via GitHub or Google
+void auth login         # OAuth via GitHub or Google
 void deploy             # auto-detects app type, builds, deploys
 ```
 
@@ -73,7 +73,7 @@ jobs:
           VOID_PROJECT: my-app
 ```
 
-To get a deploy token, run `void token` to copy it to your clipboard, then add it as a GitHub Actions secret.
+To get a deploy token, run `void auth token` to copy it to your clipboard, then add it as a GitHub Actions secret.
 
 ## Other Targets
 

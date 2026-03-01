@@ -55,7 +55,7 @@ By default, Nuxt Cloudflare dev runtime and `voidPlugin()` migrations share Wran
 ### 5. Deploy
 
 ```bash
-void login
+void auth login
 void deploy
 ```
 

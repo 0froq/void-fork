@@ -11,7 +11,7 @@ export async function runDeleteCommand(root: string, slug?: string): Promise<voi
 
   const token = getToken();
   if (!token) {
-    log.error("Not logged in. Run `void login` first.");
+    log.error("Not logged in. Run `void auth login` first.");
     process.exit(1);
   }
 

@@ -71,7 +71,7 @@ const result = await ai.toMarkdown([{ name: "document.pdf", blob: pdfBytes }]);
 
 ## Local Development
 
-AI requires Void credentials for local development. Run `void login` and `void link` (or follow the interactive setup during `vite dev`) to connect your project.
+AI requires Void credentials for local development. Run `void auth login` and `void project link` (or follow the interactive setup during `vite dev`) to connect your project.
 
 Once linked, credentials are injected automatically as worker bindings — no manual configuration needed. All inference traffic routes through the Void AI proxy over HTTPS, so usage is tracked and metered the same way as in production.
 

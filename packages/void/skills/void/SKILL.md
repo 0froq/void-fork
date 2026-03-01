@@ -26,7 +26,7 @@ If invoked without a concrete task, do a brief app status check and report:
 3. Runtime signals (`void/db`, `void/kv`, `void/storage`, queue usage).
 4. Auth signals (`void/auth`, `auth` client imports, OAuth env vars).
 5. Project linkage (`.void/project.json`) and config readiness (`void.json`, tsconfig extends).
-6. Optional health checks (`void whoami`, `void db status` when relevant).
+6. Optional health checks (`void auth whoami`, `void db status` when relevant).
 
 Then ask what to do next.
 

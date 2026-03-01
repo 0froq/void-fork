@@ -59,7 +59,7 @@ By default, Astro Cloudflare runtime and `voidPlugin()` migrations share Wrangle
 ### 5. Deploy
 
 ```bash
-void login
+void auth login
 void deploy
 ```
 

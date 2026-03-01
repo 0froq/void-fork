@@ -39,7 +39,7 @@ export default defineConfig({
 ### 4. Deploy
 
 ```bash
-void login
+void auth login
 void deploy
 ```
 

@@ -58,7 +58,7 @@ SvelteKit's adapter reads bindings from `wrangler.jsonc` for local dev. `voidPlu
 ### 6. Deploy
 
 ```bash
-void login
+void auth login
 void deploy
 ```
 

@@ -8,7 +8,7 @@ import { cliTitle } from "./output";
 
 export async function runLink(root: string, slug?: string): Promise<void> {
   console.log();
-  intro(cliTitle("link"));
+  intro(cliTitle("project link"));
 
   // Check if already linked
   const existing = readProjectConfig(root);
@@ -21,7 +21,7 @@ export async function runLink(root: string, slug?: string): Promise<void> {
   // Auth
   const token = getToken();
   if (!token) {
-    cancel("No auth token found. Run `void login` first.");
+    cancel("No auth token found. Run `void auth login` first.");
     process.exit(1);
   }
 

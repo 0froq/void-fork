@@ -46,7 +46,7 @@ export function parseDomainArgs(args: string[]): DomainArgs {
 export async function runDomainCommand(root: string, args: DomainArgs): Promise<void> {
   const token = getToken();
   if (!token) {
-    log.error("Not logged in. Run `void login` first.");
+    log.error("Not logged in. Run `void auth login` first.");
     process.exit(1);
   }
 
@@ -67,7 +67,7 @@ export async function runDomainCommand(root: string, args: DomainArgs): Promise<
   } else {
     const config = readProjectConfig(root);
     if (!config) {
-      log.error("No linked project. Run `void link` or pass --project <name>.");
+      log.error("No linked project. Run `void project link` or pass --project <name>.");
       process.exit(1);
     }
     projectId = config.projectId;

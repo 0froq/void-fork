@@ -13,7 +13,7 @@ export async function runSecretCommand(root: string, args: SecretArgs): Promise<
 
   const token = getToken();
   if (!token) {
-    log.error("Not logged in. Run `void login` first.");
+    log.error("Not logged in. Run `void auth login` first.");
     process.exit(1);
   }
 
@@ -31,7 +31,7 @@ export async function runSecretCommand(root: string, args: SecretArgs): Promise<
     const config = readProjectConfig(root);
     if (!config) {
       throw new Error(
-        "No linked project found. Run `void link`, `void deploy`, or pass --project <name>.",
+        "No linked project found. Run `void project link`, `void deploy`, or pass --project <name>.",
       );
     }
     projectId = config.projectId;

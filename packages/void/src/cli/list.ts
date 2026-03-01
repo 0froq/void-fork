@@ -7,11 +7,11 @@ import { cliTitle, dim, pc, tablePrefix } from "./output";
 
 export async function runListCommand(root: string, slug?: string): Promise<void> {
   console.log();
-  intro(cliTitle("list"));
+  intro(cliTitle("project status"));
 
   const token = getToken();
   if (!token) {
-    log.error("Not logged in. Run `void login` first.");
+    log.error("Not logged in. Run `void auth login` first.");
     process.exit(1);
   }
 
@@ -32,7 +32,7 @@ export async function runListCommand(root: string, slug?: string): Promise<void>
   } else {
     const linked = readProjectConfig(root);
     if (!linked) {
-      log.error("No linked project found. Pass a project name: void list <name>");
+      log.error("No linked project found. Pass a project name: void project status <name>");
       process.exit(1);
     }
     projectId = linked.projectId;
