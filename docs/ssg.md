@@ -52,12 +52,23 @@ Dynamic pages **without** `getPrerenderPaths()` are not prerendered — the path
 
 When `output` is omitted or `"server"`, behavior is unchanged — `export const prerender = true` opts individual pages into deploy-time [edge prerendering](./cache/prerendering.md).
 
+## Deployment behavior
+
+When you run `void deploy` with `output: "static"`, Void inspects the build output to decide the optimal deploy strategy:
+
+- **Fully static** — if every page is prerendered and there are no API routes, middleware, cron jobs, or queues, Void deploys as a pure static site with no worker. This is faster and has zero cold starts.
+- **Hybrid** — if any pages are not prerenderable (e.g. dynamic pages without `getPrerenderPaths()`, or pages with `export const prerender = false`), a worker is deployed to handle those routes at runtime. Prerendered pages are still served as static assets.
+
+You don't need to configure this — it's detected automatically based on your pages and project structure.
+
 ## Relationship to `appType: "static"`
 
 The `appType` field describes app type (SPA, static, void), while `output` controls rendering strategy:
 
-|              | `appType: "static"`                             | `output: "static"`                   |
-| ------------ | ----------------------------------------------- | ------------------------------------ |
-| **What**     | Deploy a pre-built static site (no Void plugin) | Prerender a Void app at build time   |
-| **Worker**   | None (static assets only)                       | Yes (for non-prerendered routes)     |
-| **Use case** | VitePress, plain HTML, external SSG tools       | Void apps with mostly static content |
+|              | `appType: "static"`                             | `output: "static"`                            |
+| ------------ | ----------------------------------------------- | --------------------------------------------- |
+| **What**     | Deploy a pre-built static site (no Void plugin) | Prerender a Void app at build time            |
+| **Worker**   | None (static assets only)                       | Only if some pages can't be prerendered       |
+| **Use case** | VitePress, plain HTML, external SSG tools       | Void apps with mostly or fully static content |
+
+When all pages are prerendered and there are no backend features, `output: "static"` produces the same deploy result as `appType: "static"` — pure static assets, no worker. The difference is that `output: "static"` does this automatically by analyzing your build output, while `appType: "static"` is a manual declaration for non-Void projects.

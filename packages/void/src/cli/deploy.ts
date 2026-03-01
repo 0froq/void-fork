@@ -537,6 +537,31 @@ async function runFullDeploy(
     }
   }
 
+  // Fully-static optimization: if output: "static" and all pages are prerendered
+  // with no backend features, deploy as a static site (no worker needed)
+  if (deployConfig.output === "static" && pageScan && !isSsr) {
+    const allPrerenderable = pageScan.pages.every(
+      (p) => p.prerender && ((p.params.length === 0 && !p.catchAll) || p.hasGetPrerenderPaths),
+    );
+    const hasNonPageBackend =
+      existsSync(join(root, "routes")) || existsSync(join(root, "middleware"));
+    if (allPrerenderable && !hasNonPageBackend && schedules.length === 0 && queues.length === 0) {
+      log.info("All pages prerendered — deploying as static site");
+      return runStaticDeploy(
+        root,
+        config,
+        client,
+        {
+          buildCommand: null,
+          outputDir: clientDir,
+          appType: "static",
+        },
+        true,
+        commit,
+      );
+    }
+  }
+
   // Resolve prerender paths (skip when output: "static" — pages are already built as static assets)
   const uniquePrerenderPaths =
     deployConfig.output === "static"
