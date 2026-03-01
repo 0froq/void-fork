@@ -1,35 +1,58 @@
 import { describe, it, expect } from "vitest";
-import { isEmailAllowed } from "../../src/routes/auth";
+import { isSignupAllowed, type AllowlistEntry } from "../../src/signup-allowlist";
 
-describe("isEmailAllowed", () => {
+describe("isSignupAllowed", () => {
+  it("allows any signup when entries list is empty", () => {
+    expect(isSignupAllowed("github", "octocat", null, [])).toBe(true);
+  });
+
+  it("matches github username (case-insensitive)", () => {
+    const entries: AllowlistEntry[] = [{ type: "github", pattern: "Octocat" }];
+    expect(isSignupAllowed("github", "octocat", null, entries)).toBe(true);
+  });
+
+  it("rejects unmatched github username", () => {
+    const entries: AllowlistEntry[] = [{ type: "github", pattern: "octocat" }];
+    expect(isSignupAllowed("github", "someone-else", null, entries)).toBe(false);
+  });
+
+  it("does not match github entry against google provider", () => {
+    const entries: AllowlistEntry[] = [{ type: "github", pattern: "octocat" }];
+    expect(isSignupAllowed("google", "octocat", "octocat@gmail.com", entries)).toBe(false);
+  });
+
   it("matches exact email (case-insensitive)", () => {
-    expect(isEmailAllowed("alice@example.com", "Alice@Example.com")).toBe(true);
+    const entries: AllowlistEntry[] = [{ type: "email", pattern: "Alice@Example.com" }];
+    expect(isSignupAllowed("google", "alice", "alice@example.com", entries)).toBe(true);
   });
 
-  it("matches domain with @ prefix (case-insensitive)", () => {
-    expect(isEmailAllowed("alice@voidzero.dev", "@VoidZero.Dev")).toBe(true);
+  it("matches wildcard domain pattern", () => {
+    const entries: AllowlistEntry[] = [{ type: "email", pattern: "*@voidzero.dev" }];
+    expect(isSignupAllowed("google", "alice", "alice@voidzero.dev", entries)).toBe(true);
   });
 
-  it("rejects email not in allowlist", () => {
-    expect(isEmailAllowed("alice@gmail.com", "@voidzero.dev")).toBe(false);
+  it("rejects email not matching wildcard domain", () => {
+    const entries: AllowlistEntry[] = [{ type: "email", pattern: "*@voidzero.dev" }];
+    expect(isSignupAllowed("google", "alice", "alice@gmail.com", entries)).toBe(false);
   });
 
-  it("returns false for null email", () => {
-    expect(isEmailAllowed(null, "@voidzero.dev")).toBe(false);
+  it("rejects google signup with null email", () => {
+    const entries: AllowlistEntry[] = [{ type: "email", pattern: "*@voidzero.dev" }];
+    expect(isSignupAllowed("google", "alice", null, entries)).toBe(false);
   });
 
-  it("handles multiple comma-separated entries", () => {
-    const allowlist = "@voidzero.dev, bob@gmail.com";
-    expect(isEmailAllowed("alice@voidzero.dev", allowlist)).toBe(true);
-    expect(isEmailAllowed("bob@gmail.com", allowlist)).toBe(true);
-    expect(isEmailAllowed("eve@gmail.com", allowlist)).toBe(false);
+  it("github user can also match via email entries if they have an email", () => {
+    const entries: AllowlistEntry[] = [{ type: "email", pattern: "*@voidzero.dev" }];
+    expect(isSignupAllowed("github", "alice", "alice@voidzero.dev", entries)).toBe(true);
   });
 
-  it("trims whitespace around entries", () => {
-    expect(isEmailAllowed("alice@voidzero.dev", "  @voidzero.dev  ")).toBe(true);
-  });
-
-  it("ignores empty entries from extra commas", () => {
-    expect(isEmailAllowed("alice@voidzero.dev", ",@voidzero.dev,,")).toBe(true);
+  it("matches when any entry matches (github username OR email)", () => {
+    const entries: AllowlistEntry[] = [
+      { type: "github", pattern: "octocat" },
+      { type: "email", pattern: "*@voidzero.dev" },
+    ];
+    expect(isSignupAllowed("github", "octocat", null, entries)).toBe(true);
+    expect(isSignupAllowed("google", "alice", "alice@voidzero.dev", entries)).toBe(true);
+    expect(isSignupAllowed("google", "bob", "bob@gmail.com", entries)).toBe(false);
   });
 });

@@ -22,7 +22,6 @@ export interface ApiEnv extends Env {
     AI_PROXY_SERVICE?: string;
     SITE_DOMAIN?: string;
     DASHBOARD_URL?: string;
-    SIGNUP_ALLOWLIST?: string;
     USAGE_COUNTER: DurableObjectNamespace;
     LOGS_DATASET?: string;
   };

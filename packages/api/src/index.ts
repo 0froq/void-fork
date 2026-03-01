@@ -17,6 +17,7 @@ import { dashboardHandler } from "./admin/routes/system";
 import adminUsers from "./admin/routes/users";
 import adminProjects from "./admin/routes/projects";
 import adminDeployments from "./admin/routes/deployments";
+import adminSignupControl from "./admin/routes/signup-control";
 import me from "./routes/me";
 import { createDb, getUsersWithProjectsBatch, unsuspendUserIfReason, type Db } from "./db";
 import { getCurrentBillingPeriodStart, getPlanLimits } from "./tiers";
@@ -30,6 +31,17 @@ const app = new Hono<ApiEnv>()
   })
 
   .get("/health", (c) => c.json({ status: "ok" }))
+  .get("/signup-restricted", (c) =>
+    c.html(`<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Private Beta - Void</title>
+<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa}.card{text-align:center;max-width:400px;padding:40px}h1{font-size:1.25rem;margin-bottom:12px}p{color:#666}</style>
+</head><body>
+<div class="card"><h1>Private Beta</h1><p>Sorry, we are still in private beta and your login is not currently in the allowed list. Check back later!</p></div>
+</body></html>`),
+  )
   .route("/auth", auth)
   .use("/me", authMiddleware)
   .route("/me", me)
@@ -51,6 +63,7 @@ app.get("/admin/", adminAuthMiddleware, dashboardHandler);
 app.route("/admin/users", adminUsers);
 app.route("/admin/projects", adminProjects);
 app.route("/admin/deployments", adminDeployments);
+app.route("/admin/signup-control", adminSignupControl);
 
 const BATCH_SIZE = 50;
 

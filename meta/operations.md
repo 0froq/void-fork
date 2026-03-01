@@ -158,7 +158,6 @@ Set via `vars` in `wrangler.jsonc` (production uses defaults, staging overrides)
 | api       | `DISPATCH_NAMESPACE` | `void-users`                           | `void-users-staging`                           | CF dispatch namespace name                        |
 | api       | `SITE_DOMAIN`        | `void.app`                             | `staging.void.app`                             | Base domain for deploy URL output                 |
 | api       | `AUTH_REDIRECT_URI`  | `https://api.void.cloud/auth/callback` | `https://api.staging.void.cloud/auth/callback` | OAuth callback URL                                |
-| api       | `SIGNUP_ALLOWLIST`   | (unset)                                | `@voidzero.dev`                                | Comma-separated emails/domains for new signups    |
 | api       | `DEV_AUTH_BYPASS`    | (unset)                                | —                                              | Skip admin OAuth for local dev (`.dev.vars` only) |
 | dashboard | `API_URL`            | (unset, defaults to production)        | `https://api.staging.void.cloud`               | API base URL for BFF server-side loaders          |
 | dispatch  | `BASE_HOSTNAME`      | `void.app`                             | `staging.void.app`                             | Base hostname for slug extraction                 |
@@ -339,6 +338,31 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
 6. **GitHub Actions** — if CI/CD should deploy to this environment, add a workflow file and configure GitHub environment secrets (`CF_API_TOKEN`, `CF_ACCOUNT_ID`).
 
 7. **Deploy** — run `pnpm run deploy --env <name>` or equivalent.
+
+## Signup Allowlist (Private Beta)
+
+Temporary mechanism to restrict signups during private beta. Managed via the admin dashboard at `/admin/signup-control`.
+
+**Storage:** Two keys in the existing `ROUTING` KV namespace (shared by API and dispatch workers):
+
+| Key                | Value                                                        | Default   |
+| ------------------ | ------------------------------------------------------------ | --------- |
+| `signup:enabled`   | `"true"` or `"false"` — global toggle for signup restriction | `"false"` |
+| `signup:allowlist` | JSON array of `{ type, pattern, note? }` entries             | `[]`      |
+
+**Entry types:**
+
+| Type     | Pattern examples    | Matches                                           |
+| -------- | ------------------- | ------------------------------------------------- |
+| `github` | `octocat`           | GitHub username (case-insensitive)                |
+| `email`  | `alice@example.com` | Exact email address (case-insensitive)            |
+| `email`  | `*@voidzero.dev`    | All emails at domain (wildcard, case-insensitive) |
+
+**Behavior:** When `signup:enabled` is `"true"`, new user signups are checked against the allowlist. GitHub signups match against `github` entries by username. Google signups match against `email` entries. If no entry matches, the user is redirected to `/signup-restricted` (a static page saying "Sorry, we are still in private beta. Check back later!"). Existing users are never blocked — the check only applies to new account creation.
+
+**Admin UI:** Toggle on/off, add/remove entries at `/admin/signup-control` (requires admin role).
+
+**Cleanup (post-beta):** Delete KV keys `signup:enabled` and `signup:allowlist`, then remove the admin route (`src/admin/routes/signup-control.tsx`), view (`src/admin/views/signup-control.tsx`), matching logic (`src/signup-allowlist.ts`), the auth check in `src/routes/auth.ts`, the `/signup-restricted` route in `src/index.ts`, and the nav link in `src/admin/views/layout.tsx`.
 
 ## Domain Migration History
 

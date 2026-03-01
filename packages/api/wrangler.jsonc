@@ -115,7 +115,6 @@
         "SITE_DOMAIN": "staging.void.app",
         "DASHBOARD_URL": "https://dash.staging.void.cloud",
         "AUTH_REDIRECT_URI": "https://api.staging.void.cloud/auth/callback",
-        "SIGNUP_ALLOWLIST": "@voidzero.dev",
         "LOGS_DATASET": "void_logs_staging",
       },
     },

@@ -38,7 +38,8 @@ export function Layout({
             <span>
               <strong>Void Admin</strong> &mdash; <a href="/admin/">Dashboard</a> |{" "}
               <a href="/admin/users">Users</a> | <a href="/admin/projects">Projects</a> |{" "}
-              <a href="/admin/deployments">Deployments</a>
+              <a href="/admin/deployments">Deployments</a> |{" "}
+              <a href="/admin/signup-control">Signup</a>
             </span>
             <span>
               {username && <>{username} | </>}

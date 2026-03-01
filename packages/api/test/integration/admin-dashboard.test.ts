@@ -617,3 +617,128 @@ describe("GET /admin/deployments/:id (logs section)", () => {
     expect(html).not.toContain("Runtime Logs");
   });
 });
+
+describe("GET /admin/signup-control", () => {
+  test("renders signup control page with toggle off by default", async () => {
+    const admin = await createTestUser(env.db, "admin-sc1", "github", undefined, "free", "admin");
+    const res = await req("/admin/signup-control", admin.jwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Signup Control");
+    expect(html).toContain("OFF (open)");
+  });
+
+  test("shows entries when they exist", async () => {
+    const admin = await createTestUser(env.db, "admin-sc2", "github", undefined, "free", "admin");
+    await env.ROUTING.put(
+      "signup:allowlist",
+      JSON.stringify([{ type: "github", pattern: "octocat", note: "Test" }]),
+    );
+    const res = await req("/admin/signup-control", admin.jwt);
+    const html = await res.text();
+    expect(html).toContain("octocat");
+    expect(html).toContain("Test");
+    await env.ROUTING.delete("signup:allowlist");
+  });
+
+  test("nav bar includes Signup link", async () => {
+    const admin = await createTestUser(env.db, "admin-sc2b", "github", undefined, "free", "admin");
+    const res = await req("/admin/signup-control", admin.jwt);
+    const html = await res.text();
+    expect(html).toContain('href="/admin/signup-control"');
+  });
+});
+
+describe("POST /admin/signup-control/toggle", () => {
+  test("toggles restriction on and off", async () => {
+    const admin = await createTestUser(env.db, "admin-sc3", "github", undefined, "free", "admin");
+
+    // Toggle ON
+    const res1 = await req("/admin/signup-control/toggle", admin.jwt, {
+      method: "POST",
+      body: "",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
+    });
+    expect(res1.status).toBe(302);
+    expect(await env.ROUTING.get("signup:enabled")).toBe("true");
+
+    // Toggle OFF
+    const res2 = await req("/admin/signup-control/toggle", admin.jwt, {
+      method: "POST",
+      body: "",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
+    });
+    expect(res2.status).toBe(302);
+    expect(await env.ROUTING.get("signup:enabled")).toBe("false");
+
+    await env.ROUTING.delete("signup:enabled");
+  });
+});
+
+describe("POST /admin/signup-control/add + delete", () => {
+  test("adds and removes entries", async () => {
+    const admin = await createTestUser(env.db, "admin-sc4", "github", undefined, "free", "admin");
+
+    // Add entry
+    const addBody = new URLSearchParams({ type: "github", pattern: "testuser", note: "Test" });
+    const addRes = await req("/admin/signup-control/add", admin.jwt, {
+      method: "POST",
+      body: addBody.toString(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
+    });
+    expect(addRes.status).toBe(302);
+
+    const raw = await env.ROUTING.get("signup:allowlist");
+    const entries = JSON.parse(raw!);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toEqual({ type: "github", pattern: "testuser", note: "Test" });
+
+    // Delete entry
+    const delBody = new URLSearchParams({ index: "0" });
+    const delRes = await req("/admin/signup-control/delete", admin.jwt, {
+      method: "POST",
+      body: delBody.toString(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
+    });
+    expect(delRes.status).toBe(302);
+
+    const rawAfter = await env.ROUTING.get("signup:allowlist");
+    expect(JSON.parse(rawAfter!)).toHaveLength(0);
+
+    await env.ROUTING.delete("signup:allowlist");
+  });
+
+  test("rejects invalid entry type", async () => {
+    const admin = await createTestUser(env.db, "admin-sc5", "github", undefined, "free", "admin");
+
+    const body = new URLSearchParams({ type: "invalid", pattern: "test" });
+    const res = await req("/admin/signup-control/add", admin.jwt, {
+      method: "POST",
+      body: body.toString(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test("rejects delete with out-of-bounds index", async () => {
+    const admin = await createTestUser(env.db, "admin-sc6", "github", undefined, "free", "admin");
+
+    const body = new URLSearchParams({ index: "99" });
+    const res = await req("/admin/signup-control/delete", admin.jwt, {
+      method: "POST",
+      body: body.toString(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /signup-restricted", () => {
+  test("renders private beta page without auth", async () => {
+    const res = await app.fetch(new Request("http://localhost/signup-restricted"), env);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Private Beta");
+    expect(html).toContain("Sorry, we are still in private beta");
+  });
+});

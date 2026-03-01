@@ -9,6 +9,7 @@ import {
 import { signJwt } from "../auth/jwt";
 import { hmacSignState, hmacVerifyState } from "../auth/hmac";
 import { getUserByProvider, getUserByEmail, createUser, updateUser } from "../db";
+import { isSignupAllowed, type AllowlistEntry } from "../signup-allowlist";
 
 const DEFAULT_REDIRECT_URI = "https://api.void.cloud/auth/callback";
 
@@ -151,11 +152,12 @@ app.get("/callback", async (c) => {
       }
     }
     // Check signup allowlist (new users only)
-    if (c.env.SIGNUP_ALLOWLIST) {
-      if (!isEmailAllowed(email, c.env.SIGNUP_ALLOWLIST)) {
-        const redirectUrl = new URL(redirect);
-        redirectUrl.searchParams.set("error", "signup_restricted");
-        return c.redirect(redirectUrl.toString());
+    const enabled = await c.env.ROUTING.get("signup:enabled");
+    if (enabled === "true") {
+      const raw = await c.env.ROUTING.get("signup:allowlist");
+      const entries: AllowlistEntry[] = raw ? JSON.parse(raw) : [];
+      if (!isSignupAllowed(resolvedProvider, login, email, entries)) {
+        return c.redirect("/signup-restricted");
       }
     }
     user = await createUser(c.get("db"), resolvedProvider, providerId, login, email);
@@ -169,19 +171,5 @@ app.get("/callback", async (c) => {
   redirectUrl.searchParams.set("token", jwt);
   return c.redirect(redirectUrl.toString());
 });
-
-export function isEmailAllowed(email: string | null, allowlist: string): boolean {
-  if (!email) return false;
-  const entries = allowlist
-    .split(",")
-    .map((e) => e.trim())
-    .filter(Boolean);
-  const domain = "@" + email.split("@")[1];
-  return entries.some((entry) =>
-    entry.startsWith("@")
-      ? entry.toLowerCase() === domain.toLowerCase()
-      : entry.toLowerCase() === email.toLowerCase(),
-  );
-}
 
 export default app;
