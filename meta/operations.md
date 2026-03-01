@@ -157,12 +157,14 @@ Set via `vars` in `wrangler.jsonc` (production uses defaults, staging overrides)
 
 ### GitHub Actions Secrets
 
-Two GitHub environments (`Prod` and `Staging`) share the same repo-level secrets:
+Two GitHub environments (`Prod` and `Staging`) share the same repo-level secrets plus environment-specific database URLs:
 
-| Secret          | Purpose                                                   |
-| --------------- | --------------------------------------------------------- |
-| `CF_API_TOKEN`  | Cloudflare API token (see permissions below)              |
-| `CF_ACCOUNT_ID` | Cloudflare account ID (passed as `CLOUDFLARE_ACCOUNT_ID`) |
+| Secret                 | Environment | Purpose                                                         |
+| ---------------------- | ----------- | --------------------------------------------------------------- |
+| `CF_API_TOKEN`         | Both        | Cloudflare API token (see permissions below)                    |
+| `CF_ACCOUNT_ID`        | Both        | Cloudflare account ID (passed as `CLOUDFLARE_ACCOUNT_ID`)       |
+| `DATABASE_URL`         | Prod        | PlanetScale direct connection string for drizzle-kit migrations |
+| `STAGING_DATABASE_URL` | Staging     | PlanetScale direct connection string for drizzle-kit migrations |
 
 `deploy.yml` (push to `prod`) uses the `Prod` environment; `deploy-staging.yml` (push to `main`) uses `Staging`.
 
@@ -170,12 +172,12 @@ Two GitHub environments (`Prod` and `Staging`) share the same repo-level secrets
 
 Account-level:
 
-| Permission         | Access | Operations                                             |
-| ------------------ | ------ | ------------------------------------------------------ |
-| Workers Scripts    | Edit   | Deploy API and dispatch workers                        |
-| D1                 | Edit   | Run remote migrations (`wrangler d1 migrations apply`) |
-| Workers KV Storage | Edit   | Bind KV namespaces during deploy                       |
-| Workers R2 Storage | Edit   | Bind R2 buckets during deploy                          |
+| Permission         | Access | Operations                                     |
+| ------------------ | ------ | ---------------------------------------------- |
+| Workers Scripts    | Edit   | Deploy API and dispatch workers                |
+| D1                 | Edit   | Provision user project D1 databases via CF API |
+| Workers KV Storage | Edit   | Bind KV namespaces during deploy               |
+| Workers R2 Storage | Edit   | Bind R2 buckets during deploy                  |
 
 Zone-level (on `void.app`):
 
