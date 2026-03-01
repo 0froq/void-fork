@@ -56,6 +56,7 @@ app.get("/:id", async (c) => {
   const cfAccountId = c.env.CF_ACCOUNT_ID;
   const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
   const deployUrl = `https://${project.slug}.${siteDomain}`;
+  const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
 
   return c.html(
     <Layout title={project.slug} username={c.get("userLogin")}>
@@ -170,7 +171,7 @@ app.get("/:id", async (c) => {
       )}
 
       <h2>Recent Deployments ({deployments.length})</h2>
-      <DeploymentTable deployments={deployments} />
+      <DeploymentTable deployments={deployments} tz={tz} />
 
       <h2>Danger Zone</h2>
       <form

@@ -1,11 +1,14 @@
 import type { Deployment } from "../../types";
+import { formatDateTime } from "./format";
 
 export function DeploymentTable({
   deployments,
   showProject,
+  tz,
 }: {
   deployments: (Deployment & { project_slug?: string | null })[];
   showProject?: boolean;
+  tz?: string;
 }) {
   if (deployments.length === 0) {
     return (
@@ -75,7 +78,7 @@ export function DeploymentTable({
                 "-"
               )}
             </td>
-            <td>{new Date(d.created_at).toLocaleString()}</td>
+            <td>{formatDateTime(d.created_at, tz)}</td>
           </tr>
         ))}
       </tbody>

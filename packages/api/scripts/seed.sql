@@ -9,12 +9,12 @@ INSERT INTO users (id, provider, provider_id, login, email, plan, billing_cycle_
 INSERT INTO users (id, provider, provider_id, login, email, plan, billing_cycle_start, suspended_reason, role, created_at) VALUES ('user_seed5', 'google', '100005', 'eve', 'eve@example.com', 'free', '2026-01-21T00:00:00.000Z', 'usage_limit_exceeded', 'user', '2026-01-21T00:00:00.000Z') ON CONFLICT (id) DO NOTHING;
 
 -- Projects
-INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed1', 'user_seed1', 'my-app', 'fullstack', now() - interval '60 days') ON CONFLICT (id) DO NOTHING;
-INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed2', 'user_seed1', 'docs-site', 'ssg', now() - interval '60 days') ON CONFLICT (id) DO NOTHING;
-INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed3', 'user_seed2', 'api-service', 'fullstack', now() - interval '60 days') ON CONFLICT (id) DO NOTHING;
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed1', 'user_seed1', 'my-app', 'void', now() - interval '60 days') ON CONFLICT (id) DO NOTHING;
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed2', 'user_seed1', 'docs-site', 'static', now() - interval '60 days') ON CONFLICT (id) DO NOTHING;
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed3', 'user_seed2', 'api-service', 'void', now() - interval '60 days') ON CONFLICT (id) DO NOTHING;
 INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed4', 'user_seed2', 'landing-page', 'spa', now() - interval '60 days') ON CONFLICT (id) DO NOTHING;
 INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed5', 'user_seed3', 'dashboard', 'framework', now() - interval '60 days') ON CONFLICT (id) DO NOTHING;
-INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed6', 'user_seed4', 'blog', 'ssg', now() - interval '60 days') ON CONFLICT (id) DO NOTHING;
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed6', 'user_seed4', 'blog', 'static', now() - interval '60 days') ON CONFLICT (id) DO NOTHING;
 
 -- Deployments (live)
 INSERT INTO deployments (id, project_id, status, manifest, error_message, created_at, deployed_at) VALUES ('dpl_seed1', 'proj_seed1', 'live', '{"bindings":{"d1":["DB"],"kv":["CACHE"]},"migrations":[{"name":"001_create_users.sql","destructive":false}]}', NULL, now() - interval '30 days', now() - interval '30 days') ON CONFLICT (id) DO NOTHING;

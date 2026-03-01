@@ -37,10 +37,7 @@ export const projects = pgTable(
       .notNull()
       .references(() => users.id),
     slug: text("slug").notNull(),
-    mode: text("mode")
-      .notNull()
-      .default("worker")
-      .$type<"worker" | "fullstack" | "spa" | "ssg" | "framework">(),
+    mode: text("mode").notNull().default("worker").$type<"void" | "spa" | "static" | "framework">(),
     created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   },
   (t) => [

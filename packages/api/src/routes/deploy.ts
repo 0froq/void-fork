@@ -195,7 +195,7 @@ app.post("/:id/deploy", async (c) => {
       }
 
       // Derive project mode from assetConfig
-      const mode = assetConfig.not_found_handling === "single-page-application" ? "spa" : "ssg";
+      const mode = assetConfig.not_found_handling === "single-page-application" ? "spa" : "static";
 
       // Update KV routing
       const existingRouting = await c.env.ROUTING.get(project.slug);
@@ -206,6 +206,8 @@ app.post("/:id/deploy", async (c) => {
         userId: project.user_id,
         version: deployment.id,
         ...(manifest.hashedAssetsPrefix ? { hashedAssetsPrefix: manifest.hashedAssetsPrefix } : {}),
+        ...(manifest.headerRules?.length ? { headerRules: manifest.headerRules } : {}),
+        ...(manifest.redirectRules?.length ? { redirectRules: manifest.redirectRules } : {}),
         ...(existingEntry?.suspended ? { suspended: existingEntry.suspended } : {}),
       });
       await c.env.ROUTING.put(project.slug, routingJson);
@@ -491,6 +493,8 @@ app.post("/:id/deploy", async (c) => {
       ...(manifest.ssr ? { ssr: true } : {}),
       ...(manifest.revalidate ? { revalidate: manifest.revalidate } : {}),
       ...(manifest.hashedAssetsPrefix ? { hashedAssetsPrefix: manifest.hashedAssetsPrefix } : {}),
+      ...(manifest.headerRules?.length ? { headerRules: manifest.headerRules } : {}),
+      ...(manifest.redirectRules?.length ? { redirectRules: manifest.redirectRules } : {}),
       version: deployment.id,
       ...dispatchLimits,
       ...(existingEntry?.suspended ? { suspended: existingEntry.suspended } : {}),
@@ -506,7 +510,7 @@ app.post("/:id/deploy", async (c) => {
 
     // 5. Mark deployment as live + update project mode
     await updateDeploymentStatus(c.get("db"), deployment.id, "live");
-    await updateProjectMode(c.get("db"), projectId, manifest.framework ? "framework" : "fullstack");
+    await updateProjectMode(c.get("db"), projectId, manifest.framework ? "framework" : "void");
 
     // Store asset manifest for future preflight dedup
     if (assetCount > 0) {

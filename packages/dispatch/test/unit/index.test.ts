@@ -4,17 +4,25 @@ import type { Env } from "../../src/env";
 
 // Mock caches.default (CF edge cache) with a Map-backed store
 const edgeCacheStore = new Map<string, Response>();
+
+/** Normalize cache key URL: strip query string (mirrors production behavior for hashed assets). */
+function cacheKeyUrl(req: Request): string {
+  const u = new URL(req.url);
+  u.search = "";
+  return u.toString();
+}
+
 vi.stubGlobal("caches", {
   default: {
     match: async (req: Request) => {
-      const res = edgeCacheStore.get(req.url);
+      const res = edgeCacheStore.get(cacheKeyUrl(req));
       return res ? res.clone() : undefined;
     },
     put: async (req: Request, res: Response) => {
-      edgeCacheStore.set(req.url, res.clone());
+      edgeCacheStore.set(cacheKeyUrl(req), res.clone());
     },
     delete: async (req: Request) => {
-      return edgeCacheStore.delete(req.url);
+      return edgeCacheStore.delete(cacheKeyUrl(req));
     },
   },
 });
@@ -33,6 +41,8 @@ interface RoutingEntry {
   limits?: Record<string, number>;
   suspended?: string;
   hashedAssetsPrefix?: string;
+  headerRules?: { pattern: string; headers: [string, string][] }[];
+  redirectRules?: { source: string; destination: string; status: number }[];
 }
 
 function createCtx(): ExecutionContext {
@@ -654,6 +664,29 @@ describe("hashed asset caching", () => {
     expect(workerFetch).toHaveBeenCalledTimes(1); // still 1
   });
 
+  it("bypasses stale cache entry without immutable header", async () => {
+    // Simulate pre-existing Workers Assets cache entry (no immutable header)
+    edgeCacheStore.set(
+      "https://test.void.app/assets/stale.js",
+      new Response("stale", {
+        headers: { "Cache-Control": "public, max-age=0, must-revalidate" },
+      }),
+    );
+
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      hashedAssetsPrefix: "assets",
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("fresh") });
+    const ctx = createCtx();
+
+    const res = await app.fetch(new Request("https://test.void.app/assets/stale.js"), env, ctx);
+    expect(res.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledTimes(1); // bypassed stale entry, hit worker
+    expect(res.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+  });
+
   it("does not cache non-hashed asset paths", async () => {
     const routing: RoutingEntry = {
       workerName: "test-worker",
@@ -746,5 +779,177 @@ describe("hashed asset caching", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
     expect(workerFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("normalizes query strings for cache key", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      hashedAssetsPrefix: "assets",
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("asset-body") });
+    const ctx = createCtx();
+
+    // First request with query string — cache miss, hits worker
+    const res1 = await app.fetch(
+      new Request("https://test.void.app/assets/main-abc.js?v=1"),
+      env,
+      ctx,
+    );
+    expect(res1.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Second request with different query string — should still be a cache hit
+    const ctx2 = createCtx();
+    const res2 = await app.fetch(
+      new Request("https://test.void.app/assets/main-abc.js?v=2"),
+      env,
+      ctx2,
+    );
+    expect(res2.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledTimes(1); // still 1 — cache hit
+  });
+
+  it("returns 429 when worker exceeds CPU limit", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      hashedAssetsPrefix: "assets",
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response("ok") });
+    // Override worker.fetch to throw CPU limit error
+    const dispatchGet = env.DISPATCH.get as ReturnType<typeof vi.fn>;
+    dispatchGet.mockReturnValue({
+      fetch: vi.fn().mockRejectedValue(new Error("Worker exceeded CPU time limit")),
+    });
+    const ctx = createCtx();
+
+    const res = await app.fetch(new Request("https://test.void.app/assets/main-abc.js"), env, ctx);
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "CPU limit exceeded" });
+  });
+});
+
+describe("header rules", () => {
+  it("applies header rules to worker responses", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      headerRules: [
+        { pattern: "/*", headers: [["X-Frame-Options", "DENY"]] },
+        {
+          pattern: "/assets/*",
+          headers: [["Cache-Control", "public, max-age=31536000, immutable"]],
+        },
+      ],
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response("ok") });
+    const ctx = createCtx();
+
+    const res = await app.fetch(new Request("https://test.void.app/assets/app.js"), env, ctx);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY");
+    expect(res.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+  });
+
+  it("does not apply header rules to hashed asset cache hits", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      hashedAssetsPrefix: "assets",
+      headerRules: [{ pattern: "/*", headers: [["X-Custom", "from-rules"]] }],
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response("asset-body") });
+    const ctx = createCtx();
+
+    // First request — cache miss, goes through hashed asset path
+    const res1 = await app.fetch(new Request("https://test.void.app/assets/main-abc.js"), env, ctx);
+    expect(res1.status).toBe(200);
+    // Hashed asset path sets its own Cache-Control, header rules don't apply
+    expect(res1.headers.get("X-Custom")).toBeNull();
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Second request — cache hit, also bypasses header rules
+    const ctx2 = createCtx();
+    const res2 = await app.fetch(
+      new Request("https://test.void.app/assets/main-abc.js"),
+      env,
+      ctx2,
+    );
+    expect(res2.status).toBe(200);
+    expect(res2.headers.get("X-Custom")).toBeNull();
+  });
+
+  it("last-match-wins for overlapping patterns", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      headerRules: [
+        { pattern: "/*", headers: [["Cache-Control", "no-cache"]] },
+        { pattern: "/assets/*", headers: [["Cache-Control", "immutable"]] },
+      ],
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response("ok") });
+    const ctx = createCtx();
+
+    const res = await app.fetch(new Request("https://test.void.app/assets/app.js"), env, ctx);
+    expect(res.headers.get("Cache-Control")).toBe("immutable");
+  });
+});
+
+describe("redirect rules", () => {
+  it("applies redirect rules before invoking worker", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "test-worker",
+        projectId: "proj-1",
+        redirectRules: [{ source: "/old", destination: "/new", status: 301 }],
+      },
+    });
+
+    const response = await app.fetch(new Request("https://test.void.app/old"), env, createCtx());
+
+    expect(response.status).toBe(301);
+    expect(response.headers.get("Location")).toBe("/new");
+    expect(workerFetch).not.toHaveBeenCalled();
+  });
+
+  it("does not redirect non-matching paths", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "test-worker",
+        projectId: "proj-1",
+        redirectRules: [{ source: "/old", destination: "/new", status: 301 }],
+      },
+      workerResponse: new Response("ok"),
+    });
+
+    const response = await app.fetch(new Request("https://test.void.app/other"), env, createCtx());
+
+    expect(response.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledOnce();
+  });
+
+  it("redirects with :splat substitution", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "test-worker",
+        projectId: "proj-1",
+        redirectRules: [{ source: "/blog/*", destination: "/posts/:splat", status: 301 }],
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://test.void.app/blog/hello-world"),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(301);
+    expect(response.headers.get("Location")).toBe("/posts/hello-world");
+    expect(workerFetch).not.toHaveBeenCalled();
   });
 });
