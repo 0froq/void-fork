@@ -98,7 +98,7 @@ function formatDeploymentRow(d: DeploymentResponse): DeploymentRow {
     }
   }
 
-  const appType = manifest?.static ?? (manifest?.framework ? "framework" : "fullstack");
+  const appType = manifest?.static ?? (manifest?.framework ? "framework" : "void");
   const isr = manifest?.revalidate && manifest.revalidate > 0 ? `${manifest.revalidate}s` : "-";
   const source = d.source ?? "-";
   const commit = d.commit ? d.commit.slice(0, 7) : "-";

@@ -38,7 +38,7 @@ export interface VoidConfig {
   redirects?: Record<string, RedirectDestination>;
   head?: HeadConfig;
   target?: "cloudflare" | "node" | "bun" | "deno";
-  appType?: "spa" | "prebuilt" | "fullstack" | "framework";
+  appType?: "spa" | "static" | "void" | "framework";
   output?: "server" | "static";
   outputDir?: string;
   remote?: boolean;
@@ -49,7 +49,7 @@ const CONFIG_FILE = "void.json";
 
 const VALID_TARGETS = new Set(["cloudflare", "node", "bun", "deno"]);
 const VALID_AUTH_PROVIDERS = new Set(["github", "google", "email"]);
-const VALID_APP_TYPES = new Set(["spa", "prebuilt", "fullstack", "framework"]);
+const VALID_APP_TYPES = new Set(["spa", "static", "void", "framework"]);
 const VALID_OUTPUTS = new Set(["server", "static"]);
 const VALID_REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
 
@@ -244,9 +244,7 @@ export function readConfig(root: string): VoidConfig {
   // Validate appType
   if (obj.appType !== undefined) {
     if (typeof obj.appType !== "string" || !VALID_APP_TYPES.has(obj.appType)) {
-      throw new Error(
-        `"appType" in ${CONFIG_FILE} must be one of: spa, prebuilt, fullstack, framework`,
-      );
+      throw new Error(`"appType" in ${CONFIG_FILE} must be one of: spa, static, void, framework`);
     }
   }
 

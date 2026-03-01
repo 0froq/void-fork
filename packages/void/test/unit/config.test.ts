@@ -152,7 +152,7 @@ describe("readConfig", () => {
 
   it("throws on invalid appType", () => {
     setup(JSON.stringify({ appType: "serverless" }));
-    expect(() => readConfig(tmpDir)).toThrow("must be one of: spa, prebuilt, full");
+    expect(() => readConfig(tmpDir)).toThrow("must be one of: spa, static, void");
     cleanup();
   });
 

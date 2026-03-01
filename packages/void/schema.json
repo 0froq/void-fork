@@ -132,7 +132,7 @@
     },
     "appType": {
       "type": "string",
-      "enum": ["spa", "prebuilt", "fullstack", "framework"],
+      "enum": ["spa", "static", "void", "framework"],
       "description": "App type. If omitted, auto-detected on first deploy."
     },
     "output": {

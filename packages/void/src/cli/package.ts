@@ -205,7 +205,7 @@ export function packageBuild(
  */
 export function packageStaticBuild(
   outputDir: string,
-  appType: "spa" | "prebuilt",
+  appType: "spa" | "static",
   neededAssets?: Set<string> | null,
 ): FormData {
   const formData = new FormData();

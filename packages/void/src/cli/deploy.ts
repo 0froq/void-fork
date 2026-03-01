@@ -145,7 +145,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
 
   let preset: StaticPreset | null = null;
 
-  if (vcConfig.appType && vcConfig.appType !== "fullstack" && vcConfig.appType !== "framework") {
+  if (vcConfig.appType && vcConfig.appType !== "void" && vcConfig.appType !== "framework") {
     // void.json has an explicit static app type
     preset = {
       buildCommand: null,
@@ -164,7 +164,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
     // No configured app type — detect from CLI flags + project structure
     preset = detectPreset(root, { dir: options?.dir, spa: options?.spa });
   }
-  // vcConfig.appType === "fullstack" or "framework" → preset stays null → full deploy
+  // vcConfig.appType === "void" or "framework" → preset stays null → full deploy
 
   // Detect git commit before build (only when not skipping build)
   const gitCommit = options?.skipBuild ? null : getGitCommit(root);
@@ -184,7 +184,7 @@ async function runStaticDeploy(
   skipBuild?: boolean,
   commit?: string | null,
 ): Promise<void> {
-  const typeLabel = preset.appType === "spa" ? "Static SPA" : "Static Prebuilt";
+  const typeLabel = preset.appType === "spa" ? "Static SPA" : "Static Site";
   log.info(`${typeLabel} deploy`);
 
   // Build (if needed)

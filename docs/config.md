@@ -139,14 +139,14 @@ Custom response headers for static assets. Keys are URL patterns, values are arr
 
 App type. If omitted, auto-detected on first deploy. See [Supported App Types](./app-types.md).
 
-- `"spa"` — static single-page app
-- `"prebuilt"` — prebuilt static site (VitePress, plain HTML, external tools)
-- `"fullstack"` — worker + assets (API routes, SSR, jobs)
+- `"void"` — worker + assets (API routes, SSR, jobs)
 - `"framework"` — meta framework (TanStack Start, React Router, SvelteKit, Nuxt, Astro)
+- `"static"` — fully rendered HTML files (VitePress, plain HTML, external tools). Non-matching paths return `404.html` or a 404 response.
+- `"spa"` — static with SPA fallback. All non-file paths fall back to `index.html` with a 200 status, so client-side routing works out of the box.
 
 ### `outputDir`
 
-Output directory for static deploys, relative to the project root. Only relevant when `appType` is `"spa"` or `"prebuilt"`. Defaults to `"dist"`.
+Output directory for static deploys, relative to the project root. Only relevant when `appType` is `"spa"` or `"static"`. Defaults to `"dist"`.
 
 ### `remote`
 

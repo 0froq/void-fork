@@ -39,7 +39,7 @@ describe("detectPreset", () => {
     expect(result).toEqual({
       buildCommand: null,
       outputDir: resolve(root, "public"),
-      appType: "prebuilt",
+      appType: "static",
     });
   });
 
@@ -62,7 +62,7 @@ describe("detectPreset", () => {
     expect(result).toEqual({
       buildCommand: "vitepress build",
       outputDir: resolve(root, ".vitepress/dist"),
-      appType: "prebuilt",
+      appType: "static",
     });
   });
 
@@ -75,7 +75,7 @@ describe("detectPreset", () => {
     expect(result).toEqual({
       buildCommand: "vitepress build docs",
       outputDir: resolve(root, "docs/.vitepress/dist"),
-      appType: "prebuilt",
+      appType: "static",
     });
   });
 
@@ -136,7 +136,7 @@ describe("detectPreset", () => {
     });
   });
 
-  it("detects pre-built dist/index.html as prebuilt", () => {
+  it("detects pre-built dist/index.html as static", () => {
     const root = setupProject({
       files: { "dist/index.html": "<html></html>" },
     });
@@ -144,11 +144,11 @@ describe("detectPreset", () => {
     expect(result).toEqual({
       buildCommand: null,
       outputDir: resolve(root, "dist"),
-      appType: "prebuilt",
+      appType: "static",
     });
   });
 
-  it("detects root index.html as prebuilt", () => {
+  it("detects root index.html as static", () => {
     const root = setupProject({
       files: { "index.html": "<html></html>" },
     });
@@ -156,7 +156,7 @@ describe("detectPreset", () => {
     expect(result).toEqual({
       buildCommand: null,
       outputDir: root,
-      appType: "prebuilt",
+      appType: "static",
     });
   });
 

@@ -57,10 +57,10 @@ describe("packageStaticBuild", () => {
     });
   });
 
-  it("sets assetConfig for prebuilt mode", () => {
+  it("sets assetConfig for static mode", () => {
     writeFileSync(join(TMP, "index.html"), "x");
 
-    const form = packageStaticBuild(TMP, "prebuilt");
+    const form = packageStaticBuild(TMP, "static");
 
     const manifestRaw = form.get("manifest") as string;
     const manifest = JSON.parse(manifestRaw);
