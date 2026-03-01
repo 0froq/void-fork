@@ -34,7 +34,6 @@ export type TestEnv = {
   SITE_DOMAIN?: string;
   SIGNUP_ALLOWLIST?: string;
   USAGE_COUNTER: DurableObjectNamespace;
-  TAIL: Fetcher;
 };
 
 function createMockDoNamespace(): DurableObjectNamespace {
@@ -91,7 +90,6 @@ export async function setupEnv(): Promise<TestEnv> {
     GOOGLE_CLIENT_ID: "test-google-client-id",
     GOOGLE_CLIENT_SECRET: "test-google-client-secret",
     USAGE_COUNTER: createMockDoNamespace(),
-    TAIL: { fetch: async () => new Response("ok") } as unknown as Fetcher,
   };
 }
 

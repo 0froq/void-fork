@@ -572,25 +572,6 @@ describe("GET /admin/deployments/:id/logs", () => {
   });
 });
 
-describe("GET /admin/deployments/:id/tail", () => {
-  test("returns 426 without websocket upgrade header", async () => {
-    const admin = await createTestUser(env.db, "admin-tail1", "github", undefined, "free", "admin");
-    const project = await createTestProject(env.db, admin.id, "tail-proj");
-    const deployment = await createTestDeployment(env.db, project.id, "live");
-
-    const res = await req(`/admin/deployments/${deployment.id}/tail`, admin.jwt);
-    expect(res.status).toBe(426);
-  });
-
-  test("returns 404 for unknown deployment", async () => {
-    const admin = await createTestUser(env.db, "admin-tail2", "github", undefined, "free", "admin");
-    const res = await req("/admin/deployments/dpl_unknown/tail", admin.jwt, {
-      headers: { Upgrade: "websocket" } as Record<string, string>,
-    });
-    expect(res.status).toBe(404);
-  });
-});
-
 describe("GET /admin/deployments/:id (logs section)", () => {
   test("renders runtime logs section for live deployment", async () => {
     const admin = await createTestUser(
@@ -608,7 +589,6 @@ describe("GET /admin/deployments/:id (logs section)", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Runtime Logs");
-    expect(html).toContain(`user-${project.slug}`);
     expect(html).toContain("Live Tail");
     expect(html).toContain("log-entries");
   });

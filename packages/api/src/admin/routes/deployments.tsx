@@ -207,9 +207,7 @@ app.get("/:id", async (c) => {
         </tbody>
       </table>
 
-      {deployment.status === "live" && project && (
-        <DeploymentLogs deploymentId={deployment.id} workerName={`user-${project.slug}`} />
-      )}
+      {deployment.status === "live" && project && <DeploymentLogs deploymentId={deployment.id} />}
     </Layout>,
   );
 });
@@ -280,25 +278,6 @@ app.get("/:id/logs", async (c) => {
   return c.json({ data });
 });
 
-// GET /deployments/:id/tail — proxy WebSocket upgrade to tail worker DO
-app.get("/:id/tail", async (c) => {
-  if (c.req.header("Upgrade") !== "websocket") {
-    return c.json({ error: "expected websocket upgrade" }, 426);
-  }
-
-  const deployment = await getDeployment(c.get("db"), c.req.param("id"));
-  if (!deployment) {
-    return c.json({ error: "deployment not found" }, 404);
-  }
-  const project = await getProject(c.get("db"), deployment.project_id);
-  if (!project) {
-    return c.json({ error: "project not found" }, 404);
-  }
-
-  const scriptName = `user-${project.slug}`;
-  return c.env.TAIL.fetch(new Request(`https://tail/tail/${scriptName}`, c.req.raw));
-});
-
 interface LogRow {
   outcome: string;
   logData: string;
@@ -320,6 +299,8 @@ function tryParse(json: string): unknown[] {
 function parseSince(since: string): number {
   const now = Date.now();
   const units: Record<string, number> = {
+    "1m": 60 * 1000,
+    "5m": 5 * 60 * 1000,
     "1h": 60 * 60 * 1000,
     "6h": 6 * 60 * 60 * 1000,
     "24h": 24 * 60 * 60 * 1000,

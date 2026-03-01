@@ -32,7 +32,6 @@ function makeBindings(e: TestEnv) {
     GOOGLE_CLIENT_ID: e.GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET: e.GOOGLE_CLIENT_SECRET,
     USAGE_COUNTER: e.USAGE_COUNTER,
-    TAIL: e.TAIL,
   };
 }
 

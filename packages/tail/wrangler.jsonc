@@ -2,24 +2,13 @@
   "name": "void-tail",
   "main": "src/index.ts",
   "compatibility_date": "2026-02-12",
+  "observability": {
+    "enabled": true,
+  },
   "analytics_engine_datasets": [
     {
       "binding": "ANALYTICS",
       "dataset": "void_logs",
-    },
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "LOG_STREAM",
-        "class_name": "LogStream",
-      },
-    ],
-  },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_classes": ["LogStream"],
     },
   ],
   "env": {

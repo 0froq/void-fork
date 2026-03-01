@@ -24,7 +24,6 @@ export interface ApiEnv extends Env {
     DASHBOARD_URL?: string;
     SIGNUP_ALLOWLIST?: string;
     USAGE_COUNTER: DurableObjectNamespace;
-    TAIL: Fetcher;
     LOGS_DATASET?: string;
   };
   Variables: {

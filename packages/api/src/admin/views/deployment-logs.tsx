@@ -1,18 +1,9 @@
-export function DeploymentLogs({
-  deploymentId,
-  workerName,
-}: {
-  deploymentId: string;
-  workerName: string;
-}) {
+export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
   const basePath = `/admin/deployments/${deploymentId}`;
 
   return (
     <>
       <h2>Runtime Logs</h2>
-      <p style="margin-bottom: 10px; color: #666; font-size: 0.8rem">
-        Worker: <code>{workerName}</code>
-      </p>
 
       {/* Filter bar */}
       <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center">
@@ -29,10 +20,25 @@ export function DeploymentLogs({
         <button type="button" id="load-logs-btn">
           Load
         </button>
+        <label>
+          Count:{" "}
+          <select id="log-count">
+            {[100, 200, 300, 400, 500].map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </label>
+        <input
+          type="text"
+          id="log-filter-text"
+          placeholder="Filter..."
+          style="font-size: 0.85rem; padding: 2px 6px"
+        />
         <button
           type="button"
           id="live-tail-btn"
-          data-deployment-id={deploymentId}
           data-base-path={basePath}
           style="margin-left: auto"
         >
@@ -45,7 +51,7 @@ export function DeploymentLogs({
         <p style="color: #999; font-size: 0.8rem">Loading logs...</p>
       </div>
 
-      {/* Inline script: fetch logs on load + live tail via WebSocket */}
+      {/* Inline script: fetch logs on load + polling-based live tail */}
       <script
         dangerouslySetInnerHTML={{
           __html: `
@@ -54,10 +60,13 @@ export function DeploymentLogs({
   var btn = document.getElementById('live-tail-btn');
   var loadBtn = document.getElementById('load-logs-btn');
   var sinceSelect = document.getElementById('log-since');
-  var deploymentId = btn.dataset.deploymentId;
+  var filterText = document.getElementById('log-filter-text');
+  var countSelect = document.getElementById('log-count');
   var basePath = btn.dataset.basePath;
-  var ws = null;
+  var pollTimer = null;
   var tailing = false;
+  var lastData = [];
+  var seenTimestamps = {};
 
   var levelColors = { error: '#dc2626', warn: '#d97706', info: '#6b7280', log: '#6b7280', debug: '#9ca3af' };
 
@@ -118,32 +127,72 @@ export function DeploymentLogs({
     return d.innerHTML;
   }
 
+  function entryText(e) {
+    var parts = [e.outcome, e.method, e.url, e.status];
+    if (e.logs) e.logs.forEach(function(l) { parts.push(l.message); });
+    if (e.exceptions) e.exceptions.forEach(function(x) { parts.push(x.name, x.message); });
+    return parts.join(' ').toLowerCase();
+  }
+
+  function renderData(data) {
+    var q = filterText.value.toLowerCase().trim();
+    var filtered = q ? data.filter(function(e) { return entryText(e).indexOf(q) !== -1; }) : data;
+    container.innerHTML = '';
+    if (filtered.length === 0) {
+      container.innerHTML = '<p style="color:#999;font-size:0.8rem">No logs found' + (q ? ' matching filter' : ' for this time range') + '.</p>';
+      return;
+    }
+    filtered.forEach(function(entry) {
+      container.appendChild(renderLogEntry(entry));
+    });
+  }
+
   function loadLogs() {
     var since = sinceSelect.value;
     container.innerHTML = '<p style="color:#999;font-size:0.8rem">Loading logs...</p>';
-    fetch(basePath + '/logs?since=' + since)
+    fetch(basePath + '/logs?since=' + since + '&limit=' + countSelect.value)
       .then(function(r) { return r.json(); })
       .then(function(result) {
-        container.innerHTML = '';
-        if (!result.data || result.data.length === 0) {
-          container.innerHTML = '<p style="color:#999;font-size:0.8rem">No logs found for this time range.</p>';
-          return;
-        }
-        result.data.forEach(function(entry) {
-          container.appendChild(renderLogEntry(entry));
-        });
+        lastData = result.data || [];
+        renderData(lastData);
       })
       .catch(function(err) {
         container.innerHTML = '<p style="color:red;font-size:0.8rem">Failed to load logs: ' + err.message + '</p>';
       });
   }
 
+  function pollTail() {
+    fetch(basePath + '/logs?since=1m&limit=50')
+      .then(function(r) { return r.json(); })
+      .then(function(result) {
+        if (!tailing) return;
+        var entries = result.data || [];
+        var newEntries = [];
+        entries.forEach(function(entry) {
+          var key = entry.timestamp + ':' + entry.url + ':' + entry.status;
+          if (!seenTimestamps[key]) {
+            seenTimestamps[key] = true;
+            newEntries.push(entry);
+          }
+        });
+        if (newEntries.length > 0) {
+          if (container.querySelector('p')) container.innerHTML = '';
+          newEntries.reverse().forEach(function(entry) {
+            container.insertBefore(renderLogEntry(entry), container.firstChild);
+          });
+        }
+      })
+      .catch(function() { /* ignore poll errors */ });
+  }
+
   loadBtn.addEventListener('click', loadLogs);
+  countSelect.addEventListener('change', loadLogs);
+  filterText.addEventListener('input', function() { renderData(lastData); });
 
   btn.addEventListener('click', function() {
     if (tailing) {
-      if (ws) ws.close();
-      ws = null;
+      clearInterval(pollTimer);
+      pollTimer = null;
       tailing = false;
       btn.textContent = 'Live Tail';
       btn.style.borderColor = '';
@@ -151,38 +200,14 @@ export function DeploymentLogs({
       return;
     }
 
-    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    var wsUrl = proto + '//' + location.host + basePath + '/tail';
-    ws = new WebSocket(wsUrl);
-    btn.textContent = 'Connecting...';
-
-    ws.addEventListener('open', function() {
-      tailing = true;
-      btn.textContent = 'Stop Tail';
-      btn.style.borderColor = 'red';
-      btn.style.color = 'red';
-      container.innerHTML = '<p style="color:#999;font-size:0.8rem">Waiting for events...</p>';
-    });
-
-    ws.addEventListener('message', function(event) {
-      try {
-        var entry = JSON.parse(event.data);
-        if (container.querySelector('p')) container.innerHTML = '';
-        container.insertBefore(renderLogEntry(entry), container.firstChild);
-      } catch(e) { /* ignore parse errors */ }
-    });
-
-    ws.addEventListener('close', function() {
-      tailing = false;
-      btn.textContent = 'Live Tail';
-      btn.style.borderColor = '';
-      btn.style.color = '';
-    });
-
-    ws.addEventListener('error', function() {
-      btn.textContent = 'Live Tail';
-      container.innerHTML = '<p style="color:red;font-size:0.8rem">WebSocket connection failed.</p>';
-    });
+    tailing = true;
+    seenTimestamps = {};
+    btn.textContent = 'Stop Tail';
+    btn.style.borderColor = 'red';
+    btn.style.color = 'red';
+    container.innerHTML = '<p style="color:#999;font-size:0.8rem">Polling for new events...</p>';
+    pollTail();
+    pollTimer = setInterval(pollTail, 3000);
   });
 
   loadLogs();

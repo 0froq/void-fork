@@ -59,7 +59,6 @@
   "triggers": {
     "crons": ["0 * * * *"],
   },
-  "services": [{ "binding": "TAIL", "service": "void-tail" }],
   "routes": [{ "pattern": "api.void.cloud", "custom_domain": true }],
   // Secrets (via `wrangler secret put`): CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID, JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
   // Optional env var: AUTH_REDIRECT_URI (defaults to https://api.void.cloud/auth/callback)
@@ -108,7 +107,6 @@
           },
         ],
       },
-      "services": [{ "binding": "TAIL", "service": "void-tail-staging" }],
       "routes": [{ "pattern": "api.staging.void.cloud", "custom_domain": true }],
       "vars": {
         "DISPATCH_NAMESPACE": "void-users-staging",
