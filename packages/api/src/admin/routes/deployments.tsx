@@ -231,6 +231,7 @@ app.get("/:id/logs", async (c) => {
   const limit = Math.min(parseInt(c.req.query("limit") ?? "100", 10) || 100, 500);
 
   const sinceStr = new Date(sinceMs).toISOString().replace("T", " ").replace("Z", "");
+  const dataset = c.env.LOGS_DATASET ?? "void_logs";
   const query = `
     SELECT
       blob1 as outcome,
@@ -240,7 +241,7 @@ app.get("/:id/logs", async (c) => {
       blob5 as method,
       blob6 as status,
       double1 as timestamp
-    FROM void_logs
+    FROM ${dataset}
     WHERE index1 = '${workerName}'
       AND timestamp >= '${sinceStr}'
     ORDER BY double1 DESC

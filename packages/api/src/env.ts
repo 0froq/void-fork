@@ -25,6 +25,7 @@ export interface ApiEnv extends Env {
     SIGNUP_ALLOWLIST?: string;
     USAGE_COUNTER: DurableObjectNamespace;
     TAIL: Fetcher;
+    LOGS_DATASET?: string;
   };
   Variables: {
     userId: string;
