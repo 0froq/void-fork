@@ -321,6 +321,8 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    | ------------- | ----- | --------------------------------------- | ------------------ |
    | `proxy.<env>` | CNAME | `void-proxy-<env>.voidzer0.workers.dev` | Proxy worker route |
 
+   **Advanced Certificate Manager (ACM):** Each environment's wildcard subdomain needs an edge certificate. In the `void.app` zone, go to SSL/TLS > Edge Certificates > Advanced Certificate Manager and create a certificate covering `*.<env>.void.app`. Without this, HTTPS requests to `*.<env>.void.app` will fail even if DNS resolves correctly.
+
    **CF for SaaS (Custom Hostnames):** Enabled on the `void.app` zone. Fallback origin set to `cname.void.app`. The dispatch worker's `*/*` catch-all route intercepts custom hostname traffic before CF reaches the dummy `100::` origin. Users CNAME their custom domain to `cname.void.app`.
 
    **`void.cloud` zone** (API and dashboard use Worker Custom Domains — CF creates the DNS records automatically when you add the custom domain to the worker):
