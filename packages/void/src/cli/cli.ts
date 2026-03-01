@@ -1,14 +1,11 @@
 #!/usr/bin/env node
 
-import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { log, outro, note } from "@clack/prompts";
-import { runLink } from "./link";
-import { runLoginCommand } from "./login";
 import { projectSubcommands, parseProjectArgs } from "./project-args";
-import { getToken, removeToken, isStagingMode, setStagingMode, printStagingBanner } from "./auth";
-import { PlatformClient } from "./client";
+import { authSubcommands, parseAuthArgs } from "./auth-args";
+import { isStagingMode, setStagingMode, printStagingBanner } from "./auth";
 import { parseDeployArgs } from "./args";
 import type { SubcommandDef, SubcommandResult } from "./subcommand-prompt";
 import { secretSubcommands, parseSecretArgs } from "./secret-args";
@@ -22,6 +19,7 @@ import { asciiArts } from "./ascii";
 function buildArgs(result: SubcommandResult, trailingArgs: string[]): string[] {
   const out = [result.subcommand];
   if (result.arg) out.push(result.arg);
+  if (result.extraArgs) out.push(...result.extraArgs);
   if (result.flags) {
     for (const [flag, value] of Object.entries(result.flags)) {
       out.push(flag);
@@ -94,48 +92,10 @@ if (command === "staging") {
       process.exit(1);
     });
   });
-} else if (command === "link") {
-  const root = process.cwd();
-  const slug = args[1];
-  runLink(root, slug).catch((err) => {
-    log.error(err.message ?? err);
-    process.exit(1);
-  });
-} else if (command === "login") {
-  runLoginCommand().catch((err) => {
-    log.error(err.message ?? err);
-    process.exit(1);
-  });
-} else if (command === "logout") {
-  if (removeToken()) {
-    log.success("Logged out.");
-  } else {
-    log.info("Not logged in.");
-  }
-} else if (command === "whoami") {
-  const token = getToken();
-  if (!token) {
-    log.error("Not logged in. Run `void login` first.");
-    process.exit(1);
-  }
-  const client = new PlatformClient(token);
-  client
-    .whoami()
-    .then((user) => {
-      log.info(user.login);
-    })
-    .catch((err) => {
-      log.error(err.message ?? err);
-      process.exit(1);
-    });
-} else if (command === "list") {
-  const root = process.cwd();
-  import("./list").then(({ runListCommand }) => {
-    runListCommand(root, args[1]).catch((err) => {
-      log.error(err.message ?? err);
-      process.exit(1);
-    });
-  });
+} else if (command === "auth") {
+  runSubcommandGroup("auth", authSubcommands, parseAuthArgs, (root, parsed) =>
+    import("./auth-cmd").then(({ runAuthCommand }) => runAuthCommand(root, parsed)),
+  );
 } else if (command === "project") {
   runSubcommandGroup("project", projectSubcommands, parseProjectArgs, (root, parsed) =>
     import("./project-cmd").then(({ runProjectCommand }) => runProjectCommand(root, parsed)),
@@ -144,33 +104,6 @@ if (command === "staging") {
   runSubcommandGroup("secret", secretSubcommands, parseSecretArgs, (root, parsed) =>
     import("./secret").then(({ runSecretCommand }) => runSecretCommand(root, parsed)),
   );
-} else if (command === "token") {
-  (async () => {
-    if (!getToken()) {
-      await runLoginCommand();
-    }
-    const token = getToken();
-    if (!token) {
-      log.error("Login failed. Run `void login` to try again.");
-      process.exit(1);
-    }
-    const platform = process.platform;
-    const cmd =
-      platform === "darwin"
-        ? "pbcopy"
-        : platform === "win32"
-          ? "clip"
-          : "xclip -selection clipboard";
-    try {
-      execSync(cmd, { input: token });
-      log.success("Token copied to clipboard.");
-    } catch {
-      log.warn("Could not copy to clipboard. Copy the token manually from ~/.void/config.json");
-    }
-  })().catch((err) => {
-    log.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  });
 } else if (command === "domain") {
   runSubcommandGroup("domain", domainSubcommands, parseDomainArgs, (root, parsed) =>
     import("./domain").then(({ runDomainCommand }) => runDomainCommand(root, parsed)),
@@ -226,14 +159,14 @@ if (command === "staging") {
       helpLine("  --skip-build", "Skip the build step (use existing output)"),
       "",
       categoryTitle("auth"),
-      helpLine("void login", "Log in with GitHub or Google"),
-      helpLine("void logout", "Log out and remove credentials"),
-      helpLine("void whoami", "Show the logged-in username"),
-      helpLine("void token", "Copy auth token to clipboard"),
+      helpLine("void auth login", "Log in with GitHub or Google"),
+      helpLine("void auth logout", "Log out and remove credentials"),
+      helpLine("void auth whoami", "Show the logged-in username"),
+      helpLine("void auth token", "Copy auth token to clipboard"),
       "",
-      categoryTitle("projects"),
-      helpLine("void list [name]", "List deployments for a project"),
-      helpLine("void link [name]", "Link to an existing project"),
+      categoryTitle("project"),
+      helpLine("void project status [name]", "Show deployments for a project"),
+      helpLine("void project link [name]", "Link directory to a project"),
       helpLine("void project list", "List your projects"),
       helpLine("void project rm [name]", "Delete a project and all its resources"),
       "",

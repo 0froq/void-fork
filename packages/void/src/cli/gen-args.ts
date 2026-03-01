@@ -2,19 +2,28 @@ import { parseArgs } from "node:util";
 import type { SubcommandDef } from "./subcommand-prompt";
 
 export const genSubcommands: SubcommandDef[] = [
-  { name: "model", arg: "<name>", description: "Generate migration + CRUD routes + db types" },
+  {
+    name: "model",
+    arg: "<name>",
+    description: "Generate migration + CRUD routes + db types",
+    followUp: { type: "repeat-input", placeholder: "name:type or name:type?" },
+  },
   { name: "migration", arg: "<name>", description: "Generate an empty migration file" },
   {
     name: "route",
     arg: "<path>",
     description: "Generate a route with handler exports",
-    flags: [
-      {
-        name: "--methods",
-        arg: "<methods>",
-        description: "HTTP methods (comma-separated, e.g. get,post)",
-      },
-    ],
+    followUp: {
+      type: "multi-select",
+      flag: "--methods",
+      options: [
+        { value: "get", label: "GET", selected: true },
+        { value: "post", label: "POST" },
+        { value: "put", label: "PUT" },
+        { value: "patch", label: "PATCH" },
+        { value: "delete", label: "DELETE" },
+      ],
+    },
   },
   { name: "middleware", arg: "<name>", description: "Generate a numbered middleware file" },
   {

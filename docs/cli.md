@@ -18,8 +18,8 @@ outline: deep
 | `void db seed`                    | Reset + seed local database          |
 | `void secret put <name=value>`    | Set a production secret              |
 | `void secret sync .env.local`     | Bulk upload secrets from dotenv file |
-| `void login`                      | Authenticate with Void               |
-| `void link`                       | Link directory to a project          |
+| `void auth login`                 | Authenticate with Void               |
+| `void project link`               | Link directory to a project          |
 | `void init`                       | Setup wizard (tsconfig, agents, CI)  |
 
 ## Binary Invocation
@@ -63,32 +63,32 @@ Flags can be combined. When any flag is provided, only the specified steps run a
 
 ## Auth
 
-### `void login`
+### `void auth login`
 
 OAuth login (GitHub or Google — you choose at the prompt). Saves token to `~/.void/config.json`.
 
-### `void logout`
+### `void auth logout`
 
 Removes saved credentials.
 
-### `void whoami`
+### `void auth whoami`
 
 Prints your current login.
 
-### `void token`
+### `void auth token`
 
 Copies your auth token to the system clipboard. Useful for setting up CI secrets.
 
 ## Project commands
 
-### `void list [name]`
+### `void project status [name]`
 
 Show the last 5 deployments for a project.
 
 - If `[name]` is provided, looks up the project by slug
 - Otherwise uses the linked project from `.void/project.json`
 
-### `void link [name]`
+### `void project link [name]`
 
 Link current directory to an existing project by slug, or select interactively if omitted. State is stored in `.void/project.json`.
 
