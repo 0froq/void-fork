@@ -183,6 +183,7 @@ async function runStaticDeploy(
   preset: StaticPreset,
   skipBuild?: boolean,
   commit?: string | null,
+  hashedAssetsPrefix?: string,
 ): Promise<void> {
   const typeLabel = preset.appType === "spa" ? "Static SPA" : "Static Site";
   log.info(`${typeLabel} deploy`);
@@ -211,7 +212,12 @@ async function runStaticDeploy(
 
   s.message("Packaging...");
   const neededSet = skipped > 0 ? new Set(needed) : null;
-  const formData = packageStaticBuild(preset.outputDir, preset.appType, neededSet);
+  const formData = packageStaticBuild(
+    preset.outputDir,
+    preset.appType,
+    neededSet,
+    hashedAssetsPrefix ?? "assets",
+  );
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
 
@@ -558,6 +564,7 @@ async function runFullDeploy(
         },
         true,
         commit,
+        assetsPrefix,
       );
     }
   }

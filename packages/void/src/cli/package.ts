@@ -207,6 +207,7 @@ export function packageStaticBuild(
   outputDir: string,
   appType: "spa" | "static",
   neededAssets?: Set<string> | null,
+  hashedAssetsPrefix?: string,
 ): FormData {
   const formData = new FormData();
 
@@ -217,6 +218,11 @@ export function packageStaticBuild(
       not_found_handling: appType === "spa" ? "single-page-application" : "404-page",
     },
   };
+
+  if (hashedAssetsPrefix) {
+    manifest.hashedAssetsPrefix = hashedAssetsPrefix;
+  }
+
   formData.append("manifest", JSON.stringify(manifest));
 
   const files = collectFiles(outputDir);
