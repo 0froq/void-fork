@@ -118,6 +118,7 @@ describe("playground/astro dev", () => {
   it("smoke route exercises D1 and KV", async () => {
     const response = await fetch(`${DEV_BASE}/smoke`);
     const html = await response.text();
+    // eslint-disable-next-line jest/valid-expect -- vitest custom error message
     expect(response.status, html).toBe(200);
     expect(html).toMatch(/<span[^>]*data-testid="d1-user"[^>]*>Alice<\/span>/);
     expect(html).toMatch(/<span[^>]*data-testid="kv-value"[^>]*>ok<\/span>/);

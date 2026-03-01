@@ -225,8 +225,8 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
       },
 
       load: {
-        // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
         filter: {
+          // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
           id: /^(\0void-md|\/@void-md-(svelte|solid)\/|\0virtual:void-md-(script:|client))/,
         },
         handler(id: string) {

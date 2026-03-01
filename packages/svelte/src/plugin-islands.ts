@@ -143,8 +143,8 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
       },
 
       load: {
-        // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
         filter: {
+          // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
           id: /^(\0virtual:void-islands-(renderer|client)|\/@void-island-wrap\/)|\.svelte\.css$/,
         },
         handler(id) {

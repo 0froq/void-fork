@@ -72,6 +72,7 @@ export function restartPlugin(): Plugin {
     },
 
     load: {
+      // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
       filter: { id: /^\0virtual:void\/binding-hint$/ },
       handler() {
         return CLIENT_MODULE;
