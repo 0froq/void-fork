@@ -1,4 +1,27 @@
 import { parseArgs } from "node:util";
+import type { SubcommandDef } from "./subcommand-prompt";
+
+export const dbSubcommands: SubcommandDef[] = [
+  { name: "status", description: "Show migration status (local + remote)" },
+  { name: "reset", description: "Reset local DB and re-run migrations" },
+  {
+    name: "seed",
+    description: "Reset local DB, run migrations, and seed",
+    flags: [{ name: "--file", arg: "<path>", description: "Seed from a specific file" }],
+  },
+  { name: "execute", arg: "<sql>", description: "Run SQL against the local database" },
+  { name: "migrate", description: "Apply pending migrations locally" },
+  {
+    name: "export",
+    description: "Export local database as SQL",
+    flags: [
+      { name: "--output", arg: "<path>", description: "Export to a specific file path" },
+      { name: "--no-data", description: "Schema only (no INSERT statements)" },
+      { name: "--no-schema", description: "Data only (no CREATE TABLE)" },
+      { name: "--table", arg: "<name>", description: "Export a single table" },
+    ],
+  },
+];
 
 export type DbArgs =
   | { action: "status" }

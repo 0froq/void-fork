@@ -1,4 +1,11 @@
 import { parseArgs } from "node:util";
+import type { SubcommandDef } from "./subcommand-prompt";
+
+export const secretSubcommands: SubcommandDef[] = [
+  { name: "put", arg: "<name>", description: "Set a project secret" },
+  { name: "delete", arg: "<name>", description: "Delete a project secret" },
+  { name: "sync", arg: "<file>", description: "Sync secrets from a dotenv file" },
+];
 
 export type SecretArgs =
   | { action: "put"; name: string; value?: string; projectName?: string }

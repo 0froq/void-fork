@@ -10,13 +10,52 @@ import { runProjectsCommand } from "./projects";
 import { getToken, removeToken, isStagingMode, setStagingMode, printStagingBanner } from "./auth";
 import { PlatformClient } from "./client";
 import { parseDeployArgs } from "./args";
-import { parseSecretArgs } from "./secret-args";
-import { parseDbArgs } from "./db-args";
-import { parseGenArgs } from "./gen-args";
-import { parseDomainArgs } from "./domain";
+import type { SubcommandDef, SubcommandResult } from "./subcommand-prompt";
+import { secretSubcommands, parseSecretArgs } from "./secret-args";
+import { dbSubcommands, parseDbArgs } from "./db-args";
+import { genSubcommands, parseGenArgs } from "./gen-args";
+import { domainSubcommands, parseDomainArgs } from "./domain";
 import { categoryTitle, helpLine, pc, sectionTitle } from "./output";
 import { getPackageDir } from "./agents";
 import { asciiArts } from "./ascii";
+
+function buildArgs(result: SubcommandResult, trailingArgs: string[]): string[] {
+  const out = [result.subcommand];
+  if (result.arg) out.push(result.arg);
+  if (result.flags) {
+    for (const [flag, value] of Object.entries(result.flags)) {
+      out.push(flag);
+      if (typeof value === "string") out.push(value);
+    }
+  }
+  for (const a of trailingArgs) if (a.startsWith("-")) out.push(a);
+  return out;
+}
+
+async function runSubcommandGroup<T>(
+  command: string,
+  subcommands: SubcommandDef[],
+  parse: (args: string[]) => T,
+  run: (root: string, parsed: T) => Promise<void>,
+) {
+  const root = process.cwd();
+  const sub = args[1];
+  try {
+    if ((!sub || sub.startsWith("-")) && process.stdin.isTTY) {
+      const { promptSubcommand } = await import("./subcommand-prompt");
+      const result = await promptSubcommand(command, subcommands);
+      if (!result) process.exit(0);
+      const parsed = parse(buildArgs(result, args.slice(1)));
+      await run(root, parsed);
+    } else {
+      const parsed = parse(args.slice(1));
+      await run(root, parsed);
+    }
+  } catch (err) {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+}
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -103,21 +142,9 @@ if (command === "staging") {
     process.exit(1);
   });
 } else if (command === "secret") {
-  const root = process.cwd();
-  let secretArgs;
-  try {
-    secretArgs = parseSecretArgs(args.slice(1));
-  } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  }
-
-  import("./secret").then(({ runSecretCommand }) => {
-    runSecretCommand(root, secretArgs).catch((err) => {
-      log.error(err.message ?? err);
-      process.exit(1);
-    });
-  });
+  runSubcommandGroup("secret", secretSubcommands, parseSecretArgs, (root, parsed) =>
+    import("./secret").then(({ runSecretCommand }) => runSecretCommand(root, parsed)),
+  );
 } else if (command === "token") {
   (async () => {
     if (!getToken()) {
@@ -154,53 +181,17 @@ if (command === "staging") {
     });
   });
 } else if (command === "domain") {
-  const root = process.cwd();
-  let domainArgs;
-  try {
-    domainArgs = parseDomainArgs(args.slice(1));
-  } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  }
-
-  import("./domain").then(({ runDomainCommand }) => {
-    runDomainCommand(root, domainArgs!).catch((err) => {
-      log.error(err.message ?? err);
-      process.exit(1);
-    });
-  });
+  runSubcommandGroup("domain", domainSubcommands, parseDomainArgs, (root, parsed) =>
+    import("./domain").then(({ runDomainCommand }) => runDomainCommand(root, parsed)),
+  );
 } else if (command === "db") {
-  const root = process.cwd();
-  let dbArgs;
-  try {
-    dbArgs = parseDbArgs(args.slice(1));
-  } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  }
-
-  import("./db").then(({ runDbCommand }) => {
-    runDbCommand(root, dbArgs!).catch((err) => {
-      log.error(err.message ?? err);
-      process.exit(1);
-    });
-  });
+  runSubcommandGroup("db", dbSubcommands, parseDbArgs, (root, parsed) =>
+    import("./db").then(({ runDbCommand }) => runDbCommand(root, parsed)),
+  );
 } else if (command === "gen") {
-  const root = process.cwd();
-  let genArgs;
-  try {
-    genArgs = parseGenArgs(args.slice(1));
-  } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  }
-
-  import("./gen").then(({ runGenCommand }) => {
-    runGenCommand(root, genArgs!).catch((err) => {
-      log.error(err.message ?? err);
-      process.exit(1);
-    });
-  });
+  runSubcommandGroup("gen", genSubcommands, parseGenArgs, (root, parsed) =>
+    import("./gen").then(({ runGenCommand }) => runGenCommand(root, parsed)),
+  );
 } else if (command === "init") {
   const root = process.cwd();
   import("./init").then(({ runInitCommand, parseInitArgs }) => {

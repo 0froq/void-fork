@@ -1,4 +1,35 @@
 import { parseArgs } from "node:util";
+import type { SubcommandDef } from "./subcommand-prompt";
+
+export const genSubcommands: SubcommandDef[] = [
+  { name: "model", arg: "<name>", description: "Generate migration + CRUD routes + db types" },
+  { name: "migration", arg: "<name>", description: "Generate an empty migration file" },
+  {
+    name: "route",
+    arg: "<path>",
+    description: "Generate a route with handler exports",
+    flags: [
+      {
+        name: "--methods",
+        arg: "<methods>",
+        description: "HTTP methods (comma-separated, e.g. get,post)",
+      },
+    ],
+  },
+  { name: "middleware", arg: "<name>", description: "Generate a numbered middleware file" },
+  {
+    name: "ssr",
+    description: "Generate SSR entry + client + App component",
+    flags: [
+      { name: "--react", description: "Use React" },
+      { name: "--vue", description: "Use Vue" },
+      { name: "--svelte", description: "Use Svelte" },
+      { name: "--solid", description: "Use Solid" },
+    ],
+  },
+  { name: "cron", arg: "<name>", description: "Generate a cron job file" },
+  { name: "queue", arg: "<name>", description: "Generate a queue consumer file" },
+];
 
 export type GenArgs =
   | {

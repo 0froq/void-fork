@@ -1,8 +1,16 @@
 import { log, note } from "@clack/prompts";
+import type { SubcommandDef } from "./subcommand-prompt";
 import { getToken } from "./auth";
 import { PlatformClient } from "./client";
 import { readProjectConfig } from "./project";
 import { pc } from "./output";
+
+export const domainSubcommands: SubcommandDef[] = [
+  { name: "add", arg: "<hostname>", description: "Add a custom domain" },
+  { name: "remove", arg: "<hostname>", description: "Remove a custom domain" },
+  { name: "list", description: "List custom domains + status" },
+  { name: "status", arg: "<hostname>", description: "Check domain verification status" },
+];
 
 export interface DomainArgs {
   subcommand: "add" | "remove" | "list" | "status";
