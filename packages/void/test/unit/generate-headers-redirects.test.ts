@@ -1,16 +1,15 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { generateRedirectsFile } from "../../src/cli/headers";
+import { parseRedirectsFile } from "../../src/cli/headers";
 
-const tmpDir = join(import.meta.dirname, ".tmp-generate-static-files-test");
-const clientDir = join(tmpDir, "client");
+const tmpDir = join(import.meta.dirname, ".tmp-parse-redirects-test");
 
-function setup(opts?: { existingRedirects?: string }) {
+function setup(content?: string) {
   rmSync(tmpDir, { recursive: true, force: true });
-  mkdirSync(clientDir, { recursive: true });
-  if (opts?.existingRedirects) {
-    writeFileSync(join(clientDir, "_redirects"), opts.existingRedirects);
+  mkdirSync(tmpDir, { recursive: true });
+  if (content !== undefined) {
+    writeFileSync(join(tmpDir, "_redirects"), content);
   }
 }
 
@@ -18,34 +17,52 @@ afterEach(() => {
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
-describe("generateRedirectsFile", () => {
-  it("generates _redirects from config", () => {
-    setup();
-    generateRedirectsFile(clientDir, {
-      "/old": "/new",
-      "/blog/*": { to: "/posts/:splat", status: 301 },
-    });
-    const content = readFileSync(join(clientDir, "_redirects"), "utf-8");
-    expect(content).toContain("/old /new 302");
-    expect(content).toContain("/blog/* /posts/:splat 301");
+describe("parseRedirectsFile", () => {
+  it("parses standard _redirects file", () => {
+    setup("/old /new 301\n/blog/* /posts/:splat 302\n");
+    const rules = parseRedirectsFile(tmpDir);
+    expect(rules).toEqual([
+      { source: "/old", destination: "/new", status: 301 },
+      { source: "/blog/*", destination: "/posts/:splat", status: 302 },
+    ]);
   });
 
-  it("does nothing when no config provided", () => {
-    setup();
-    generateRedirectsFile(clientDir, undefined);
-    expect(existsSync(join(clientDir, "_redirects"))).toBe(false);
+  it("returns undefined when file does not exist", () => {
+    setup(); // no file
+    expect(parseRedirectsFile(tmpDir)).toBeUndefined();
   });
 
-  it("does nothing when config is empty", () => {
-    setup();
-    generateRedirectsFile(clientDir, {});
-    expect(existsSync(join(clientDir, "_redirects"))).toBe(false);
+  it("skips comments and blank lines", () => {
+    setup("# comment\n\n/old /new 301\n# another comment\n");
+    const rules = parseRedirectsFile(tmpDir);
+    expect(rules).toEqual([{ source: "/old", destination: "/new", status: 301 }]);
   });
 
-  it("does not overwrite existing _redirects file", () => {
-    setup({ existingRedirects: "/user-rule /dest 301\n" });
-    generateRedirectsFile(clientDir, { "/old": "/new" });
-    const content = readFileSync(join(clientDir, "_redirects"), "utf-8");
-    expect(content).toBe("/user-rule /dest 301\n");
+  it("defaults status to 302 when omitted", () => {
+    setup("/old /new\n");
+    const rules = parseRedirectsFile(tmpDir);
+    expect(rules).toEqual([{ source: "/old", destination: "/new", status: 302 }]);
+  });
+
+  it("skips 200 rewrites (only includes 3xx)", () => {
+    setup("/app/* /index.html 200\n/old /new 301\n");
+    const rules = parseRedirectsFile(tmpDir);
+    expect(rules).toEqual([{ source: "/old", destination: "/new", status: 301 }]);
+  });
+
+  it("handles :splat destinations (preserved as-is)", () => {
+    setup("/blog/* /posts/:splat 301\n");
+    const rules = parseRedirectsFile(tmpDir);
+    expect(rules).toEqual([{ source: "/blog/*", destination: "/posts/:splat", status: 301 }]);
+  });
+
+  it("returns undefined for file with only comments", () => {
+    setup("# just a comment\n# another one\n");
+    expect(parseRedirectsFile(tmpDir)).toBeUndefined();
+  });
+
+  it("returns undefined for file with only 200 rewrites", () => {
+    setup("/app/* /index.html 200\n");
+    expect(parseRedirectsFile(tmpDir)).toBeUndefined();
   });
 });

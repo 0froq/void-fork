@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { HeaderRule } from "./cli/types";
+import type { HeaderRule, RedirectRule } from "./cli/types";
+export type { RedirectRule };
 import type { HeadConfig } from "./pages/head";
 
 /** Supported authentication providers. */
@@ -420,12 +421,6 @@ export function convertHeadersConfig(
   }
 
   return rules.length > 0 ? rules : undefined;
-}
-
-export interface RedirectRule {
-  source: string;
-  destination: string;
-  status: number;
 }
 
 /**

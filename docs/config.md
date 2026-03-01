@@ -100,7 +100,7 @@ Override which directories are scanned for [binding inference](./resource-infere
 
 ### `cache`
 
-Caching configuration. See [Revalidation](./cache/revalidation.md) and [Custom Headers](./cache/headers.md) for details.
+Caching configuration. See [Revalidation](./cache/revalidation.md) and [Custom Headers](./headers.md) for details.
 
 | Sub-field    | Type                               | Description                                         |
 | ------------ | ---------------------------------- | --------------------------------------------------- |
@@ -124,13 +124,26 @@ Each path in `prerender` must start with `/`.
 
 ### `headers`
 
-Custom response headers for static assets. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Custom Headers](./cache/headers.md) for details.
+Custom response headers for static assets. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Custom Headers](./headers.md) for details.
 
 ```json
 {
   "headers": {
     "/assets/*": ["Cache-Control: public, max-age=31536000, immutable"],
     "/*": ["X-Frame-Options: DENY", "X-Content-Type-Options: nosniff"]
+  }
+}
+```
+
+### `redirects`
+
+URL redirects. Keys are source URL patterns, values are destination strings (302 default) or objects with `to` and optional `status`. See [Redirects](./redirects.md) for details.
+
+```json
+{
+  "redirects": {
+    "/old": "/new",
+    "/blog/*": { "to": "/posts/:splat", "status": 301 }
   }
 }
 ```

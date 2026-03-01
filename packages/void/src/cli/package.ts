@@ -3,7 +3,14 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { InferredBindings } from "../inference/walk";
 import type { MigrationFile } from "../migrations/validate";
-import type { AssetConfig, DeployManifest, HeaderRule, QueueMeta, ScheduleMeta } from "./types";
+import type {
+  AssetConfig,
+  DeployManifest,
+  HeaderRule,
+  QueueMeta,
+  RedirectRule,
+  ScheduleMeta,
+} from "./types";
 
 /**
  * Compute a CF-compatible asset hash: SHA-256, first 32 hex chars.
@@ -100,6 +107,7 @@ export function packageBuild(
   neededAssets?: Set<string> | null,
   hashedAssetsPrefix?: string,
   headerRules?: HeaderRule[],
+  redirectRules?: RedirectRule[],
 ): FormData {
   const formData = new FormData();
 
@@ -171,6 +179,10 @@ export function packageBuild(
     manifest.headerRules = headerRules;
   }
 
+  if (redirectRules && redirectRules.length > 0) {
+    manifest.redirectRules = redirectRules;
+  }
+
   formData.append("manifest", JSON.stringify(manifest));
 
   // Add worker files
@@ -214,6 +226,7 @@ export function packageStaticBuild(
   neededAssets?: Set<string> | null,
   hashedAssetsPrefix?: string,
   headerRules?: HeaderRule[],
+  redirectRules?: RedirectRule[],
 ): FormData {
   const formData = new FormData();
 
@@ -231,6 +244,10 @@ export function packageStaticBuild(
 
   if (headerRules && headerRules.length > 0) {
     manifest.headerRules = headerRules;
+  }
+
+  if (redirectRules && redirectRules.length > 0) {
+    manifest.redirectRules = redirectRules;
   }
 
   formData.append("manifest", JSON.stringify(manifest));
@@ -272,6 +289,7 @@ export function packageFrameworkBuild(opts: {
   neededAssets?: Set<string> | null;
   hashedAssetsPrefix?: string;
   headerRules?: HeaderRule[];
+  redirectRules?: RedirectRule[];
 }): FormData {
   const formData = new FormData();
   const po = opts.packageOptions;
@@ -314,6 +332,10 @@ export function packageFrameworkBuild(opts: {
 
   if (opts.headerRules && opts.headerRules.length > 0) {
     manifest.headerRules = opts.headerRules;
+  }
+
+  if (opts.redirectRules && opts.redirectRules.length > 0) {
+    manifest.redirectRules = opts.redirectRules;
   }
 
   formData.append("manifest", JSON.stringify(manifest));

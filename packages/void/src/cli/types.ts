@@ -20,6 +20,12 @@ export interface HeaderRule {
   headers: [string, string][];
 }
 
+export interface RedirectRule {
+  source: string;
+  destination: string;
+  status: number;
+}
+
 export interface AssetConfig {
   not_found_handling?: "none" | "single-page-application" | "404-page";
   html_handling?: "auto-trailing-slash" | "force-trailing-slash" | "drop-trailing-slash" | "none";
@@ -47,4 +53,5 @@ export interface DeployManifest {
   compatibilityFlags?: string[];
   hashedAssetsPrefix?: string;
   headerRules?: HeaderRule[];
+  redirectRules?: RedirectRule[];
 }

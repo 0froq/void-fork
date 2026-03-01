@@ -1,7 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { HeaderRule } from "./types";
-import { convertRedirectsConfig, type RedirectDestination } from "../config";
+import type { HeaderRule, RedirectRule } from "./types";
 
 /**
  * Parse a Cloudflare/Netlify `_headers` file into HeaderRule[].
@@ -65,22 +64,32 @@ export function parseHeadersFile(dir: string): HeaderRule[] | undefined {
 }
 
 /**
- * Generate a `_redirects` file in the client output directory.
- *
- * Converts void.json `redirects` config into Cloudflare `_redirects` format.
- * Does nothing if a `_redirects` file already exists (user-provided takes precedence)
- * or if no redirects are configured.
+ * Parse a `_redirects` file into RedirectRule[].
+ * Format: `source destination [status]` per line (status defaults to 302).
+ * Lines starting with # are comments. Only 3xx redirects are included (200 rewrites skipped).
  */
-export function generateRedirectsFile(
-  clientDir: string,
-  redirects: Record<string, RedirectDestination> | undefined,
-): void {
-  const rules = convertRedirectsConfig(redirects);
-  if (!rules) return;
+export function parseRedirectsFile(dir: string): RedirectRule[] | undefined {
+  const filePath = join(dir, "_redirects");
+  if (!existsSync(filePath)) return undefined;
 
-  const redirectsFilePath = join(clientDir, "_redirects");
-  if (existsSync(redirectsFilePath)) return;
+  const content = readFileSync(filePath, "utf-8");
+  const rules: RedirectRule[] = [];
 
-  const lines = rules.map((r) => `${r.source} ${r.destination} ${r.status}`);
-  writeFileSync(redirectsFilePath, lines.join("\n") + "\n");
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 2) continue;
+
+    const [source, destination, statusStr] = parts;
+    const status = statusStr ? parseInt(statusStr, 10) : 302;
+
+    // Only include actual redirects (3xx), skip rewrites (200)
+    if (status >= 300 && status < 400) {
+      rules.push({ source, destination, status });
+    }
+  }
+
+  return rules.length > 0 ? rules : undefined;
 }
