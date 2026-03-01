@@ -49,3 +49,13 @@ environments: {
   }
 }
 ```
+
+## Cloudflare Analytics Engine SQL Quirks
+
+AE SQL is ClickHouse-based with several non-obvious limitations:
+
+1. **`timestamp` must be in SELECT** — If you reference the built-in `timestamp` column in WHERE or ORDER BY, you must also include it in the SELECT clause. Otherwise: `unable to find type of column: "timestamp"`.
+2. **No `SELECT DISTINCT`** — Use `GROUP BY` instead.
+3. **No auto-cast string→DateTime** — `timestamp >= '2026-01-01 00:00:00'` fails with "cannot combine DateTime and String types". Use `timestamp >= toDateTime('...')`.
+4. **Don't alias over `timestamp`** — `double1 as timestamp` shadows the built-in column, causing type errors in WHERE clauses. Use a different alias like `ts`.
+5. **DateTime format** — Use `YYYY-MM-DD HH:MM:SS` (no milliseconds, no `T`, no `Z`). Trim with `.toISOString().replace("T", " ").slice(0, 19)`.

@@ -235,12 +235,13 @@ app.get("/:id/logs", async (c) => {
   const query = `
     SELECT
       blob1 as outcome,
-      blob2 as logs,
-      blob3 as exceptions,
+      blob2 as logData,
+      blob3 as exceptionData,
       blob4 as url,
       blob5 as method,
-      blob6 as status,
-      double1 as ts
+      blob6 as statusCode,
+      double1 as ts,
+      timestamp
     FROM ${dataset}
     WHERE index1 = '${workerName}'
       AND timestamp >= toDateTime('${sinceStr}')
@@ -261,18 +262,19 @@ app.get("/:id/logs", async (c) => {
   );
 
   if (!response.ok) {
-    return c.json({ error: "log query failed", status: response.status }, 502);
+    const body = await response.text();
+    return c.json({ error: "log query failed", status: response.status, detail: body, query }, 502);
   }
 
   const result = (await response.json()) as { data: LogRow[] };
   const data = (result.data ?? []).map((row) => ({
     timestamp: row.ts,
     outcome: row.outcome,
-    logs: tryParse(row.logs),
-    exceptions: tryParse(row.exceptions),
+    logs: tryParse(row.logData),
+    exceptions: tryParse(row.exceptionData),
     url: row.url,
     method: row.method,
-    status: row.status,
+    status: row.statusCode,
   }));
 
   return c.json({ data });
@@ -299,11 +301,11 @@ app.get("/:id/tail", async (c) => {
 
 interface LogRow {
   outcome: string;
-  logs: string;
-  exceptions: string;
+  logData: string;
+  exceptionData: string;
   url: string;
   method: string;
-  status: string;
+  statusCode: string;
   ts: number;
 }
 

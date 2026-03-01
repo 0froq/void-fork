@@ -545,12 +545,12 @@ describe("GET /admin/deployments/:id/logs", () => {
           data: [
             {
               outcome: "ok",
-              logs: '[{"timestamp":1709312585000,"level":"error","message":"test error"}]',
-              exceptions: "[]",
+              logData: '[{"timestamp":1709312585000,"level":"error","message":"test error"}]',
+              exceptionData: "[]",
               url: "https://logs-proj.void.app/",
               method: "GET",
-              status: "200",
-              timestamp: 1709312585000,
+              statusCode: "200",
+              ts: 1709312585000,
             },
           ],
         }),
