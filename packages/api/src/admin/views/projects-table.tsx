@@ -1,6 +1,10 @@
 import type { Project } from "../../types";
 
-export type ProjectRow = Project & { owner_login: string | null; last_deploy: string | null };
+export type ProjectRow = Project & {
+  owner_login: string | null;
+  last_deploy: string | null;
+  last_deploy_id: string | null;
+};
 
 export function ProjectsTable({
   projects,
@@ -42,7 +46,19 @@ export function ProjectsTable({
               </td>
               <td>{p.mode}</td>
               <td>{new Date(p.created_at).toLocaleDateString()}</td>
-              <td>{p.last_deploy ? new Date(p.last_deploy).toLocaleString() : "-"}</td>
+              <td>
+                {p.last_deploy ? (
+                  p.last_deploy_id ? (
+                    <a href={`/admin/deployments/${p.last_deploy_id}`}>
+                      {new Date(p.last_deploy).toLocaleString()}
+                    </a>
+                  ) : (
+                    new Date(p.last_deploy).toLocaleString()
+                  )
+                ) : (
+                  "-"
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

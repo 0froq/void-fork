@@ -86,8 +86,6 @@ app.get("/:id", async (c) => {
           <tr>
             <th>ID</th>
             <td>{deployment.id}</td>
-          </tr>
-          <tr>
             <th>Project</th>
             <td>
               {project ? (
@@ -110,100 +108,105 @@ app.get("/:id", async (c) => {
             >
               {deployment.status}
             </td>
-          </tr>
-          <tr>
             <th>Source</th>
             <td>{deployment.source ?? "-"}</td>
           </tr>
           <tr>
             <th>Commit</th>
             <td>{deployment.commit ?? "-"}</td>
-          </tr>
-          <tr>
             <th>Created</th>
             <td>{deployment.created_at}</td>
           </tr>
           <tr>
             <th>Deployed</th>
             <td>{deployment.deployed_at ?? "-"}</td>
+            {mode ? (
+              <>
+                <th>Mode</th>
+                <td>{mode}</td>
+              </>
+            ) : (
+              <>
+                <th />
+                <td />
+              </>
+            )}
           </tr>
+          {manifest && (
+            <tr>
+              <td colspan="4" style="padding: 0">
+                <details>
+                  <summary style="padding: 8px; cursor: pointer; font-weight: 600">
+                    Manifest
+                  </summary>
+                  <div style="padding: 0 8px 8px">
+                    <table style="margin: 0">
+                      <tbody>
+                        {manifest.bindings &&
+                          Object.entries(manifest.bindings).map(([type, value]) =>
+                            Array.isArray(value) && value.length > 0 ? (
+                              <tr key={type}>
+                                <th>{type.toUpperCase()}</th>
+                                <td>
+                                  {value.map((n: string, i: number) => (
+                                    <span key={n}>
+                                      {i > 0 && ", "}
+                                      <code>{n}</code>
+                                    </span>
+                                  ))}
+                                </td>
+                              </tr>
+                            ) : value === true ? (
+                              <tr key={type}>
+                                <th>{type.toUpperCase()}</th>
+                                <td>enabled</td>
+                              </tr>
+                            ) : null,
+                          )}
+                        {manifest.migrations && manifest.migrations.length > 0 && (
+                          <tr>
+                            <th>Migrations</th>
+                            <td>
+                              {manifest.migrations.map((m, i) => (
+                                <span key={m.name}>
+                                  {i > 0 && ", "}
+                                  {m.name}
+                                  {m.destructive && " (destructive)"}
+                                </span>
+                              ))}
+                            </td>
+                          </tr>
+                        )}
+                        {manifest.schedules && manifest.schedules.length > 0 && (
+                          <tr>
+                            <th>Schedules</th>
+                            <td>
+                              {manifest.schedules.map((s, i) => (
+                                <span key={s.name}>
+                                  {i > 0 && ", "}
+                                  {s.name}: {s.cron}
+                                </span>
+                              ))}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                    {deployment.manifest && (
+                      <details style="margin-top: 8px">
+                        <summary style="cursor: pointer; font-size: 0.85rem">Raw JSON</summary>
+                        <pre style="margin-top: 8px; font-size: 0.8rem">
+                          {JSON.stringify(JSON.parse(deployment.manifest), null, 2)}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
+                </details>
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
-
-      {manifest && (
-        <>
-          <h2>Manifest</h2>
-          <table>
-            <tbody>
-              {mode && (
-                <tr>
-                  <th>Mode</th>
-                  <td>{mode}</td>
-                </tr>
-              )}
-              {manifest.bindings &&
-                Object.entries(manifest.bindings).map(([type, value]) =>
-                  Array.isArray(value) && value.length > 0 ? (
-                    <tr key={type}>
-                      <th>{type.toUpperCase()}</th>
-                      <td>
-                        {value.map((n: string, i: number) => (
-                          <span key={n}>
-                            {i > 0 && ", "}
-                            <code>{n}</code>
-                          </span>
-                        ))}
-                      </td>
-                    </tr>
-                  ) : value === true ? (
-                    <tr key={type}>
-                      <th>{type.toUpperCase()}</th>
-                      <td>enabled</td>
-                    </tr>
-                  ) : null,
-                )}
-              {manifest.migrations && manifest.migrations.length > 0 && (
-                <tr>
-                  <th>Migrations</th>
-                  <td>
-                    {manifest.migrations.map((m, i) => (
-                      <span key={m.name}>
-                        {i > 0 && ", "}
-                        {m.name}
-                        {m.destructive && " (destructive)"}
-                      </span>
-                    ))}
-                  </td>
-                </tr>
-              )}
-              {manifest.schedules && manifest.schedules.length > 0 && (
-                <tr>
-                  <th>Schedules</th>
-                  <td>
-                    {manifest.schedules.map((s, i) => (
-                      <span key={s.name}>
-                        {i > 0 && ", "}
-                        {s.name}: {s.cron}
-                      </span>
-                    ))}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </>
-      )}
-
-      {deployment.manifest && (
-        <>
-          <details>
-            <summary>Raw Manifest</summary>
-            <pre style="margin-top: 10px">
-              {JSON.stringify(JSON.parse(deployment.manifest), null, 2)}
-            </pre>
-          </details>
-        </>
-      )}
 
       {deployment.status === "live" && project && (
         <DeploymentLogs

@@ -118,6 +118,7 @@ Account-level:
 | Permission         | Access | Operations                                             |
 | ------------------ | ------ | ------------------------------------------------------ |
 | Workers Scripts    | Edit   | Upload/delete user workers in dispatch namespace       |
+| Workers Tail       | Read   | Create/delete tail sessions for live log streaming     |
 | D1                 | Edit   | Create databases, execute migrations, delete databases |
 | Workers KV Storage | Edit   | Create/delete KV namespaces                            |
 | Workers R2 Storage | Edit   | Create/delete R2 buckets                               |

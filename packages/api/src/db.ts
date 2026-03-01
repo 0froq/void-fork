@@ -452,11 +452,21 @@ export async function getAllProjectsWithOwner(
   db: Db,
   limit: number,
   offset: number,
-): Promise<(Project & { owner_login: string | null; last_deploy: string | null })[]> {
+): Promise<
+  (Project & {
+    owner_login: string | null;
+    last_deploy: string | null;
+    last_deploy_id: string | null;
+  })[]
+> {
   const lastDeploy = db
     .select({
       project_id: deployments.project_id,
       last_deploy: sql<string>`max(${deployments.created_at})`.as("last_deploy"),
+      last_deploy_id:
+        sql<string>`(SELECT id FROM deployments d2 WHERE d2.project_id = ${deployments.project_id} ORDER BY d2.created_at DESC LIMIT 1)`.as(
+          "last_deploy_id",
+        ),
     })
     .from(deployments)
     .groupBy(deployments.project_id)
@@ -467,6 +477,7 @@ export async function getAllProjectsWithOwner(
       ...getTableColumns(projects),
       owner_login: users.login,
       last_deploy: lastDeploy.last_deploy,
+      last_deploy_id: lastDeploy.last_deploy_id,
     })
     .from(projects)
     .leftJoin(users, eq(projects.user_id, users.id))

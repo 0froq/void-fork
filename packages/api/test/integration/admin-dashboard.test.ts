@@ -405,7 +405,7 @@ describe("GET /admin/deployments/:id", () => {
     expect(html).toContain("001_init.sql");
     expect(html).toContain("sync");
     expect(html).toContain("0 * * * *");
-    expect(html).toContain("Raw Manifest");
+    expect(html).toContain("Raw JSON");
   });
 
   test("returns 404 for unknown deployment", async () => {
