@@ -10,12 +10,12 @@ INSERT INTO users (id, provider, provider_id, login, email, plan, billing_cycle_
 INSERT INTO users (id, provider, provider_id, login, email, plan, billing_cycle_start, suspended_reason, role, created_at) VALUES ('user_seed5', 'google', '100005', 'eve', 'eve@example.com', 'free', '2026-01-21T00:00:00.000Z', 'usage_limit_exceeded', 'user', '2026-01-21T00:00:00.000Z');
 
 -- Projects
-INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed1', 'user_seed1', 'my-app', 'fullstack', datetime('now', '-60 days'));
-INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed2', 'user_seed1', 'docs-site', 'ssg', datetime('now', '-60 days'));
-INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed3', 'user_seed2', 'api-service', 'fullstack', datetime('now', '-60 days'));
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed1', 'user_seed1', 'my-app', 'void', datetime('now', '-60 days'));
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed2', 'user_seed1', 'docs-site', 'static', datetime('now', '-60 days'));
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed3', 'user_seed2', 'api-service', 'void', datetime('now', '-60 days'));
 INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed4', 'user_seed2', 'landing-page', 'spa', datetime('now', '-60 days'));
 INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed5', 'user_seed3', 'dashboard', 'framework', datetime('now', '-60 days'));
-INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed6', 'user_seed4', 'blog', 'ssg', datetime('now', '-60 days'));
+INSERT INTO projects (id, user_id, slug, mode, created_at) VALUES ('proj_seed6', 'user_seed4', 'blog', 'static', datetime('now', '-60 days'));
 
 -- Deployments (live)
 INSERT INTO deployments (id, project_id, status, manifest, error_message, created_at, deployed_at) VALUES ('dpl_seed1', 'proj_seed1', 'live', '{"bindings":{"d1":["DB"],"kv":["CACHE"]},"migrations":[{"name":"001_create_users.sql","destructive":false}]}', NULL, datetime('now', '-30 days'), datetime('now', '-30 days'));

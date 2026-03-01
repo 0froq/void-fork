@@ -813,7 +813,7 @@ describe("Deploy serialization (concurrent deploy guard)", () => {
 });
 
 function buildStaticDeployForm(opts: {
-  mode: "spa" | "ssg";
+  mode: "spa" | "static";
   assets?: Record<string, string>;
 }): FormData {
   const form = new FormData();
@@ -896,7 +896,7 @@ describe("POST /projects/:id/deploy (static)", () => {
       new Request(`http://localhost/projects/${project.id}/deploy`, {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildStaticDeployForm({ mode: "ssg" }),
+        body: buildStaticDeployForm({ mode: "static" }),
       }),
       env,
     );
@@ -907,7 +907,7 @@ describe("POST /projects/:id/deploy (static)", () => {
       .from(projects)
       .where(eq(projects.id, project.id))
       .get();
-    expect(row?.mode).toBe("ssg");
+    expect(row?.mode).toBe("static");
   });
 });
 

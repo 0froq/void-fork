@@ -109,7 +109,7 @@ export async function createProject(db: Db, userId: string, slug: string): Promi
     id,
     user_id: userId,
     slug,
-    mode: "fullstack",
+    mode: "void",
     created_at: new Date().toISOString(),
   };
 }

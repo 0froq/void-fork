@@ -40,10 +40,7 @@ export const projects = sqliteTable(
       .notNull()
       .references(() => users.id),
     slug: text("slug").notNull(),
-    mode: text("mode")
-      .notNull()
-      .default("worker")
-      .$type<"fullstack" | "spa" | "ssg" | "framework">(),
+    mode: text("mode").notNull().default("worker").$type<"void" | "spa" | "static" | "framework">(),
     created_at: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`),

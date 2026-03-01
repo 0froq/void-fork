@@ -195,7 +195,7 @@ app.post("/:id/deploy", async (c) => {
       }
 
       // Derive project mode from assetConfig
-      const mode = assetConfig.not_found_handling === "single-page-application" ? "spa" : "ssg";
+      const mode = assetConfig.not_found_handling === "single-page-application" ? "spa" : "static";
 
       // Update KV routing
       const existingRouting = await c.env.ROUTING.get(project.slug);
@@ -506,7 +506,7 @@ app.post("/:id/deploy", async (c) => {
 
     // 5. Mark deployment as live + update project mode
     await updateDeploymentStatus(c.get("db"), deployment.id, "live");
-    await updateProjectMode(c.get("db"), projectId, manifest.framework ? "framework" : "fullstack");
+    await updateProjectMode(c.get("db"), projectId, manifest.framework ? "framework" : "void");
 
     // Store asset manifest for future preflight dedup
     if (assetCount > 0) {
