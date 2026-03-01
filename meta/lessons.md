@@ -13,3 +13,39 @@ After any change that modifies the configuration options (`void.json`), make sur
 - Update `framework/packages/void/schema.json`
 - Update public-facing docs (`framework/docs/config.md`)
 - Update anything else relevant (e.g. types, validation, README references)
+
+## Drizzle Migration Tracking (push → migrate transition)
+
+**Problem:** `drizzle-kit push` creates tables directly without recording entries in the `drizzle.__drizzle_migrations` tracking table. When switching to `drizzle-kit migrate` (which CI uses), it tries to re-run all migrations because it doesn't know the schema already exists.
+
+**Solution:** Seed the tracking table manually:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS "drizzle";
+CREATE TABLE IF NOT EXISTS "drizzle"."__drizzle_migrations" (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint);
+INSERT INTO "drizzle"."__drizzle_migrations" (hash, created_at) VALUES ('<migration_tag>', <when_timestamp>);
+```
+
+The `hash` and `created_at` values come from `drizzle/meta/_journal.json`.
+
+## CJS require() in Cloudflare Workers (Vite/Rolldown bundling)
+
+**Problem:** CJS packages like `pg` use `require("events")` etc. When bundled by Vite/Rolldown for a CF Worker, Rolldown wraps these in `__require()` which fails at runtime because Workers don't have `require()` (even with `nodejs_compat`). The `@cloudflare/vite-plugin`'s built-in `esmExternalRequirePlugin` should handle this but doesn't apply correctly when the environment name doesn't match.
+
+**Solution:** Add `esmExternalRequirePlugin` explicitly to the worker environment's Rolldown plugins in `vite.config.ts`. The environment name matches the wrangler worker name (e.g. `void_dashboard`), NOT `"ssr"`.
+
+```ts
+import { builtinModules } from "node:module";
+import { esmExternalRequirePlugin } from "vite";
+const nodeBuiltins = builtinModules.flatMap((m) => [m, `node:${m}`]);
+// in defineConfig:
+environments: {
+  void_dashboard: {
+    build: {
+      rolldownOptions: {
+        plugins: [esmExternalRequirePlugin({ external: nodeBuiltins, skipDuplicateCheck: true })];
+      }
+    }
+  }
+}
+```
