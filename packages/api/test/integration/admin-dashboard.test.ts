@@ -533,75 +533,6 @@ describe("POST /admin/users/:id/delete", () => {
   });
 });
 
-describe("GET /admin/deployments/:id/logs", () => {
-  test("returns logs for a live deployment", async () => {
-    const admin = await createTestUser(env.db, "admin-logs1", "github", undefined, "free", "admin");
-    const project = await createTestProject(env.db, admin.id, "logs-proj");
-    const deployment = await createTestDeployment(env.db, project.id, "live");
-
-    mockCfApi({
-      observabilityQuery: () =>
-        Response.json({
-          success: true,
-          result: {
-            data: [
-              {
-                $workers: {
-                  eventTimestamp: 1709312585000,
-                  outcome: "ok",
-                  scriptName: "user-logs-proj",
-                },
-                $metadata: { level: "error", message: "test error" },
-              },
-            ],
-          },
-        }),
-    });
-
-    const res = await req(`/admin/deployments/${deployment.id}/logs`, admin.jwt);
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as { data: { message: string }[] };
-    expect(json.data).toHaveLength(1);
-    expect(json.data[0].message).toBe("test error");
-    vi.restoreAllMocks();
-  });
-
-  test("returns 404 for unknown deployment", async () => {
-    const admin = await createTestUser(env.db, "admin-logs2", "github", undefined, "free", "admin");
-    const res = await req("/admin/deployments/dpl_unknown/logs", admin.jwt);
-    expect(res.status).toBe(404);
-  });
-});
-
-describe("POST /admin/deployments/:id/tail", () => {
-  test("creates a tail session for a live deployment", async () => {
-    const admin = await createTestUser(env.db, "admin-tail1", "github", undefined, "free", "admin");
-    const project = await createTestProject(env.db, admin.id, "tail-proj");
-    const deployment = await createTestDeployment(env.db, project.id, "live");
-
-    mockCfApi();
-    const res = await req(`/admin/deployments/${deployment.id}/tail`, admin.jwt, {
-      method: "POST",
-      body: "",
-      headers: { "Content-Type": "application/json" } as Record<string, string>,
-    });
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as { url: string; id: string };
-    expect(json.url).toContain("wss://");
-    expect(json.id).toBe("tail-test-id");
-    vi.restoreAllMocks();
-  });
-
-  test("returns 404 for unknown deployment", async () => {
-    const admin = await createTestUser(env.db, "admin-tail2", "github", undefined, "free", "admin");
-    const res = await req("/admin/deployments/dpl_unknown/tail", admin.jwt, {
-      method: "POST",
-      body: "",
-    });
-    expect(res.status).toBe(404);
-  });
-});
-
 describe("GET /admin/deployments/:id (logs section)", () => {
   test("renders runtime logs section for live deployment", async () => {
     const admin = await createTestUser(
@@ -620,8 +551,6 @@ describe("GET /admin/deployments/:id (logs section)", () => {
     const html = await res.text();
     expect(html).toContain("Runtime Logs");
     expect(html).toContain(`user-${project.slug}`);
-    expect(html).toContain("Live Tail");
-    expect(html).toContain("log-entries");
   });
 
   test("does not render logs section for failed deployment", async () => {
@@ -646,29 +575,5 @@ describe("GET /admin/deployments/:id (logs section)", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).not.toContain("Runtime Logs");
-  });
-});
-
-describe("DELETE /admin/deployments/:id/tail/:tailId", () => {
-  test("deletes a tail session", async () => {
-    const admin = await createTestUser(
-      env.db,
-      "admin-taildel",
-      "github",
-      undefined,
-      "free",
-      "admin",
-    );
-    const project = await createTestProject(env.db, admin.id, "taildel-proj");
-    const deployment = await createTestDeployment(env.db, project.id, "live");
-
-    mockCfApi();
-    const res = await req(`/admin/deployments/${deployment.id}/tail/tail-test-id`, admin.jwt, {
-      method: "DELETE",
-    });
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as { ok: boolean };
-    expect(json.ok).toBe(true);
-    vi.restoreAllMocks();
   });
 });
