@@ -88,22 +88,33 @@ export default {
     if (request.method === "GET" && routing.hashedAssetsPrefix) {
       const prefix = "/" + routing.hashedAssetsPrefix + "/";
       if (pathname.startsWith(prefix)) {
+        // Normalize cache key: strip query strings — hashed filenames are content-addressed
+        const cacheUrl = new URL(request.url);
+        cacheUrl.search = "";
+        const cacheKey = new Request(cacheUrl.toString());
+
         const cache = caches.default;
-        const cached = await cache.match(request);
+        const cached = await cache.match(cacheKey);
         if (cached?.headers.get("Cache-Control")?.includes("immutable")) {
           return meter(cached);
         }
         // Cache miss — invoke worker, cache immutable response
-        const worker = getWorker(env, routing);
-        const response = await worker.fetch(request);
-        if (response.ok) {
-          const res = new Response(response.body, response);
-          res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
-          ctx.waitUntil(cache.put(request, res.clone()));
-          requestType = "static";
-          return meter(res);
+        try {
+          const worker = getWorker(env, routing);
+          const response = await worker.fetch(request);
+          if (response.ok) {
+            const res = new Response(response.body, response);
+            res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+            ctx.waitUntil(cache.put(cacheKey, res.clone()));
+            return meter(res);
+          }
+          return meter(response);
+        } catch (err) {
+          if (err instanceof Error && err.message.includes("Worker exceeded")) {
+            return meter(Response.json({ error: "CPU limit exceeded" }, { status: 429 }));
+          }
+          throw err;
         }
-        return meter(response);
       }
     }
 

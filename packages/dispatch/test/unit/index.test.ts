@@ -4,17 +4,25 @@ import type { Env } from "../../src/env";
 
 // Mock caches.default (CF edge cache) with a Map-backed store
 const edgeCacheStore = new Map<string, Response>();
+
+/** Normalize cache key URL: strip query string (mirrors production behavior for hashed assets). */
+function cacheKeyUrl(req: Request): string {
+  const u = new URL(req.url);
+  u.search = "";
+  return u.toString();
+}
+
 vi.stubGlobal("caches", {
   default: {
     match: async (req: Request) => {
-      const res = edgeCacheStore.get(req.url);
+      const res = edgeCacheStore.get(cacheKeyUrl(req));
       return res ? res.clone() : undefined;
     },
     put: async (req: Request, res: Response) => {
-      edgeCacheStore.set(req.url, res.clone());
+      edgeCacheStore.set(cacheKeyUrl(req), res.clone());
     },
     delete: async (req: Request) => {
-      return edgeCacheStore.delete(req.url);
+      return edgeCacheStore.delete(cacheKeyUrl(req));
     },
   },
 });
@@ -769,5 +777,55 @@ describe("hashed asset caching", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
     expect(workerFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("normalizes query strings for cache key", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      hashedAssetsPrefix: "assets",
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("asset-body") });
+    const ctx = createCtx();
+
+    // First request with query string — cache miss, hits worker
+    const res1 = await app.fetch(
+      new Request("https://test.void.app/assets/main-abc.js?v=1"),
+      env,
+      ctx,
+    );
+    expect(res1.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Second request with different query string — should still be a cache hit
+    const ctx2 = createCtx();
+    const res2 = await app.fetch(
+      new Request("https://test.void.app/assets/main-abc.js?v=2"),
+      env,
+      ctx2,
+    );
+    expect(res2.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledTimes(1); // still 1 — cache hit
+  });
+
+  it("returns 429 when worker exceeds CPU limit", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      hashedAssetsPrefix: "assets",
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response("ok") });
+    // Override worker.fetch to throw CPU limit error
+    const dispatchGet = env.DISPATCH.get as ReturnType<typeof vi.fn>;
+    dispatchGet.mockReturnValue({
+      fetch: vi.fn().mockRejectedValue(new Error("Worker exceeded CPU time limit")),
+    });
+    const ctx = createCtx();
+
+    const res = await app.fetch(new Request("https://test.void.app/assets/main-abc.js"), env, ctx);
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "CPU limit exceeded" });
   });
 });
