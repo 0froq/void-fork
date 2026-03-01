@@ -53,4 +53,5 @@ export interface DeployManifest {
   compatibilityFlags?: string[];
   hashedAssetsPrefix?: string;
   headerRules?: { pattern: string; headers: [string, string][] }[];
+  redirectRules?: { source: string; destination: string; status: number }[];
 }

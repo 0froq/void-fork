@@ -1,5 +1,6 @@
 import type { Env } from "./env";
 import { applyHeaderRules, type HeaderRule } from "./headers";
+import { applyRedirectRules, type RedirectRule } from "./redirects";
 import { extractSlug } from "./hostname";
 import {
   readIsrCache,
@@ -25,6 +26,7 @@ interface RoutingEntry {
   suspended?: string;
   hashedAssetsPrefix?: string;
   headerRules?: HeaderRule[];
+  redirectRules?: RedirectRule[];
 }
 
 interface QueueRoutingEntry {
@@ -85,6 +87,12 @@ export default {
       }
       return response;
     };
+
+    // Redirect rules — short-circuit before any worker invocation
+    if (routing.redirectRules?.length) {
+      const redirect = applyRedirectRules(pathname, routing.redirectRules);
+      if (redirect) return meter(redirect);
+    }
 
     // Edge-cache hashed static assets (immutable, content-addressed URLs)
     if (request.method === "GET" && routing.hashedAssetsPrefix) {

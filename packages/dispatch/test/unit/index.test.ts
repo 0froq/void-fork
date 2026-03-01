@@ -42,6 +42,7 @@ interface RoutingEntry {
   suspended?: string;
   hashedAssetsPrefix?: string;
   headerRules?: { pattern: string; headers: [string, string][] }[];
+  redirectRules?: { source: string; destination: string; status: number }[];
 }
 
 function createCtx(): ExecutionContext {
@@ -896,5 +897,59 @@ describe("header rules", () => {
 
     const res = await app.fetch(new Request("https://test.void.app/assets/app.js"), env, ctx);
     expect(res.headers.get("Cache-Control")).toBe("immutable");
+  });
+});
+
+describe("redirect rules", () => {
+  it("applies redirect rules before invoking worker", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "test-worker",
+        projectId: "proj-1",
+        redirectRules: [{ source: "/old", destination: "/new", status: 301 }],
+      },
+    });
+
+    const response = await app.fetch(new Request("https://test.void.app/old"), env, createCtx());
+
+    expect(response.status).toBe(301);
+    expect(response.headers.get("Location")).toBe("/new");
+    expect(workerFetch).not.toHaveBeenCalled();
+  });
+
+  it("does not redirect non-matching paths", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "test-worker",
+        projectId: "proj-1",
+        redirectRules: [{ source: "/old", destination: "/new", status: 301 }],
+      },
+      workerResponse: new Response("ok"),
+    });
+
+    const response = await app.fetch(new Request("https://test.void.app/other"), env, createCtx());
+
+    expect(response.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledOnce();
+  });
+
+  it("redirects with :splat substitution", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "test-worker",
+        projectId: "proj-1",
+        redirectRules: [{ source: "/blog/*", destination: "/posts/:splat", status: 301 }],
+      },
+    });
+
+    const response = await app.fetch(
+      new Request("https://test.void.app/blog/hello-world"),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(301);
+    expect(response.headers.get("Location")).toBe("/posts/hello-world");
+    expect(workerFetch).not.toHaveBeenCalled();
   });
 });
