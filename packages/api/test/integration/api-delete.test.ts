@@ -204,8 +204,8 @@ describe("DELETE /projects/:id", () => {
   it("does not warn when worker 404s (static project)", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "static-app");
-    // Set mode to spa (static project — no worker deployed)
-    await env.db.update(projects).set({ mode: "spa" }).where(eq(projects.id, project.id));
+    // Set type to spa (static project — no worker deployed)
+    await env.db.update(projects).set({ type: "spa" }).where(eq(projects.id, project.id));
     mockCfApi({
       deleteWorker: () => new Response("not found", { status: 404 }),
     });

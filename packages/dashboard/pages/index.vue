@@ -58,7 +58,7 @@ function formatBytes(bytes: number): string {
         <div>
           <span class="font-mono text-sm">{{ project.slug }}</span>
           <span class="ml-3 border border-border px-1.5 py-0.5 text-xs text-text-muted">
-            {{ project.mode }}
+            {{ project.type }}
           </span>
         </div>
         <div class="flex items-center gap-4 font-mono text-xs text-text-muted">

@@ -111,8 +111,8 @@ export async function getProjectsByUserId(db: Db, userId: string): Promise<Proje
     .orderBy(desc(projects.created_at));
 }
 
-export async function updateProjectMode(db: Db, id: string, mode: Project["mode"]): Promise<void> {
-  await db.update(projects).set({ mode }).where(eq(projects.id, id));
+export async function updateProjectType(db: Db, id: string, type: Project["type"]): Promise<void> {
+  await db.update(projects).set({ type }).where(eq(projects.id, id));
 }
 
 // --- Deployments ---

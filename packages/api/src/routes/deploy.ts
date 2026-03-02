@@ -6,7 +6,7 @@ import {
   getUser,
   createDeployment,
   updateDeploymentStatus,
-  updateProjectMode,
+  updateProjectType,
   getDomainsByProjectId,
   countUserDeploymentsToday,
   getActiveDeployment,
@@ -194,8 +194,10 @@ app.post("/:id/deploy", async (c) => {
         return c.json({ error: "worker upload failed", details: error }, 502);
       }
 
-      // Derive project mode from assetConfig
-      const mode = assetConfig.not_found_handling === "single-page-application" ? "spa" : "static";
+      // Use manifest type when present, fall back to assetConfig-based derivation for older CLIs
+      const type =
+        manifest.type ??
+        (assetConfig.not_found_handling === "single-page-application" ? "spa" : "static");
 
       // Update KV routing
       const existingRouting = await c.env.ROUTING.get(project.slug);
@@ -219,7 +221,7 @@ app.post("/:id/deploy", async (c) => {
       }
 
       await updateDeploymentStatus(c.get("db"), deployment.id, "live");
-      await updateProjectMode(c.get("db"), projectId, mode);
+      await updateProjectType(c.get("db"), projectId, type);
 
       // Store asset manifest for future preflight dedup
       if (assetCount > 0) {
@@ -511,7 +513,11 @@ app.post("/:id/deploy", async (c) => {
 
     // 5. Mark deployment as live + update project mode
     await updateDeploymentStatus(c.get("db"), deployment.id, "live");
-    await updateProjectMode(c.get("db"), projectId, manifest.framework ? "framework" : "void");
+    await updateProjectType(
+      c.get("db"),
+      projectId,
+      manifest.type ?? (manifest.framework ? "framework" : "void"),
+    );
 
     // Store asset manifest for future preflight dedup
     if (assetCount > 0) {

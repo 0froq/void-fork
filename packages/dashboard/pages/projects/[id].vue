@@ -98,7 +98,7 @@ function removeSecret(name: string) {
           <Link href="/" class="text-sm text-text-muted hover:text-text">&larr;</Link>
           <h1 class="font-mono text-lg">{{ project.slug }}</h1>
           <span class="border border-border px-1.5 py-0.5 text-xs text-text-muted">
-            {{ project.mode }}
+            {{ project.type }}
           </span>
         </div>
         <a

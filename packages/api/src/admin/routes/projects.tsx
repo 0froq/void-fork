@@ -117,7 +117,7 @@ app.get("/:id", async (c) => {
           </tr>
           <tr>
             <th>Type</th>
-            <td>{project.mode}</td>
+            <td>{project.type}</td>
           </tr>
           <tr>
             <th>Created</th>

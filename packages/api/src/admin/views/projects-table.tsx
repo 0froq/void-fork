@@ -45,7 +45,7 @@ export function ProjectsTable({
               <td>
                 {p.owner_login ? <a href={`/admin/users/${p.user_id}`}>{p.owner_login}</a> : "-"}
               </td>
-              <td>{p.mode}</td>
+              <td>{p.type}</td>
               <td>{new Date(p.created_at).toLocaleDateString()}</td>
               <td>
                 {p.last_deploy ? (

@@ -54,16 +54,6 @@ app.get("/:id", async (c) => {
     // invalid JSON — skip manifest display
   }
 
-  const mode = manifest
-    ? manifest.framework
-      ? "framework"
-      : manifest.ssr
-        ? "ssr"
-        : manifest.assetConfig
-          ? "static"
-          : "void"
-    : null;
-
   return c.html(
     <Layout title={`Deployment ${deployment.id}`} username={c.get("userLogin")}>
       <h1>Deployment {deployment.id}</h1>
@@ -119,17 +109,8 @@ app.get("/:id", async (c) => {
           <tr>
             <th>Deployed</th>
             <td>{deployment.deployed_at ? formatDateTime(deployment.deployed_at, tz) : "-"}</td>
-            {mode ? (
-              <>
-                <th>Mode</th>
-                <td>{mode}</td>
-              </>
-            ) : (
-              <>
-                <th />
-                <td />
-              </>
-            )}
+            <th>Type</th>
+            <td>{project?.type ?? "-"}</td>
           </tr>
           {manifest && (
             <tr>

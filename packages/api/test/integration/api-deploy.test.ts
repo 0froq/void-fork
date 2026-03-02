@@ -807,12 +807,12 @@ describe("Deploy serialization (concurrent deploy guard)", () => {
 });
 
 function buildStaticDeployForm(opts: {
-  mode: "spa" | "static";
+  type: "spa" | "static";
   assets?: Record<string, string>;
 }): FormData {
   const form = new FormData();
   const assetConfig =
-    opts.mode === "spa"
+    opts.type === "spa"
       ? { not_found_handling: "single-page-application" }
       : { not_found_handling: "404-page" };
   form.append("manifest", JSON.stringify({ version: 2, bindings: {}, assetConfig }));
@@ -835,7 +835,7 @@ describe("POST /projects/:id/deploy (static)", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildStaticDeployForm({
-          mode: "spa",
+          type: "spa",
           assets: {
             "index.html": "<html>SPA</html>",
             "assets/app-abc123.js": "console.log('spa')",
@@ -866,7 +866,7 @@ describe("POST /projects/:id/deploy (static)", () => {
       new Request(`http://localhost/projects/${project.id}/deploy`, {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildStaticDeployForm({ mode: "spa" }),
+        body: buildStaticDeployForm({ type: "spa" }),
       }),
       env,
     );
@@ -881,7 +881,7 @@ describe("POST /projects/:id/deploy (static)", () => {
     });
   });
 
-  it("updates project mode column on static deploy", async () => {
+  it("updates project type column on static deploy", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "mode-update");
     mockCfApi();
@@ -890,17 +890,17 @@ describe("POST /projects/:id/deploy (static)", () => {
       new Request(`http://localhost/projects/${project.id}/deploy`, {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildStaticDeployForm({ mode: "static" }),
+        body: buildStaticDeployForm({ type: "static" }),
       }),
       env,
     );
     expect(res.status).toBe(200);
 
     const [row] = await env.db
-      .select({ mode: projects.mode })
+      .select({ type: projects.type })
       .from(projects)
       .where(eq(projects.id, project.id));
-    expect(row?.mode).toBe("static");
+    expect(row?.type).toBe("static");
   });
 });
 

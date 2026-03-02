@@ -181,7 +181,7 @@ export function UserDetailPage({
                 <td>
                   <a href={`/admin/projects/${p.id}`}>{p.slug}</a>
                 </td>
-                <td>{p.mode}</td>
+                <td>{p.type}</td>
                 <td>{new Date(p.created_at).toLocaleDateString()}</td>
               </tr>
             ))}
