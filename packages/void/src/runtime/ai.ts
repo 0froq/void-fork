@@ -10,8 +10,8 @@ interface AiBackend {
 }
 
 function getProxyUrl(runtimeEnv: RuntimeEnv): string {
-  const custom = runtimeEnv.__AI_PROXY_URL;
-  if (typeof custom === "string" && custom.length > 0) return custom;
+  const custom = runtimeEnv.__VOID_PROXY_URL;
+  if (typeof custom === "string" && custom.length > 0) return custom + "/ai";
   return runtimeEnv.__VOID_STAGING ? STAGING_PROXY_URL : PROXY_URL;
 }
 
@@ -19,7 +19,7 @@ function resolveBackend(): AiBackend {
   const runtimeEnv = getRuntimeEnv();
 
   // Priority 1: Service binding (production via Void)
-  const proxy = runtimeEnv.__AI_PROXY as Fetcher | undefined;
+  const proxy = runtimeEnv.__VOID_PROXY as Fetcher | undefined;
   if (proxy) return makeServiceBindingBackend(proxy, runtimeEnv);
 
   // Priority 2: HTTPS to our proxy (local dev with Void auth)
@@ -67,20 +67,20 @@ function makeServiceBindingBackend(proxy: Fetcher, runtimeEnv: RuntimeEnv): AiBa
   return {
     async run(model, inputs, options) {
       const projectId = runtimeEnv.__PROJECT_ID;
-      const aiToken = runtimeEnv.__AI_TOKEN;
+      const aiToken = runtimeEnv.__VOID_PROXY_TOKEN;
       const res = await proxyFetch("run", { model, inputs, options, projectId, aiToken });
       if ((inputs as any)?.stream) return res.body;
       return res.json();
     },
     async models(params) {
       const projectId = runtimeEnv.__PROJECT_ID;
-      const aiToken = runtimeEnv.__AI_TOKEN;
+      const aiToken = runtimeEnv.__VOID_PROXY_TOKEN;
       const res = await proxyFetch("models", { inputs: params, projectId, aiToken });
       return res.json();
     },
     async toMarkdown(items, options) {
       const projectId = runtimeEnv.__PROJECT_ID;
-      const aiToken = runtimeEnv.__AI_TOKEN;
+      const aiToken = runtimeEnv.__VOID_PROXY_TOKEN;
       const res = await proxyFetch("toMarkdown", { inputs: items, options, projectId, aiToken });
       return res.json();
     },

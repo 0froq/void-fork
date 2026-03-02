@@ -17,8 +17,8 @@ export const loader = defineHandler(async () => {
 export const action = defineHandler(async () => {
   try {
     await reval({ paths: ["/revalidate"] });
-  } catch {
-    // revalidate() requires production bindings — skip in dev
+  } catch (err) {
+    console.error("revalidate() failed:", err);
   }
   await kv.put("revalidate:last", new Date().toISOString());
 });

@@ -432,7 +432,7 @@ export function voidPlugin(options?: {
     }
 
     // AI — in local dev, inject VC credentials for HTTPS proxy path.
-    // In production, the platform adds a __AI_PROXY service binding instead.
+    // In production, the platform adds a __VOID_PROXY service binding instead.
     if (bindings.needsAI) {
       const credentials = readVoidDevCredentials(root);
       if (credentials.status === "ok") {

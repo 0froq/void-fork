@@ -1,7 +1,5 @@
 import { getRuntimeBinding } from "./env";
 
-const PLATFORM_URL = "https://api.void.cloud";
-
 export interface RevalidateOptions {
   paths?: string[];
   all?: boolean;
@@ -10,7 +8,9 @@ export interface RevalidateOptions {
 /**
  * Revalidate ISR-cached pages on demand.
  *
- * Requires `VOID_PROJECT_ID` and `VOID_REVALIDATE_TOKEN` env bindings.
+ * In production, calls the platform proxy via service binding which forwards
+ * to the API for R2 deletion + edge cache purge. In local dev, this is a
+ * no-op (no ISR cache to purge).
  *
  * @example
  * ```ts
@@ -24,23 +24,23 @@ export interface RevalidateOptions {
  * ```
  */
 export async function revalidate(options: RevalidateOptions): Promise<void> {
-  const projectId = getRuntimeBinding<string>("VOID_PROJECT_ID");
-  const token = getRuntimeBinding<string>("VOID_REVALIDATE_TOKEN");
-
-  if (!projectId) {
-    throw new Error("VOID_PROJECT_ID env binding is not set.");
-  }
-  if (!token) {
-    throw new Error("VOID_REVALIDATE_TOKEN env binding is not set.");
+  const proxy = getRuntimeBinding<Fetcher>("__VOID_PROXY");
+  if (!proxy) {
+    // Local dev — no ISR cache to purge, no-op
+    return;
   }
 
-  const response = await fetch(`${PLATFORM_URL}/projects/${projectId}/revalidate`, {
+  const projectId = getRuntimeBinding<string>("__PROJECT_ID");
+  const token = getRuntimeBinding<string>("__VOID_PROXY_TOKEN");
+
+  if (!projectId || !token) {
+    throw new Error("ISR revalidation requires __PROJECT_ID and __VOID_PROXY_TOKEN bindings.");
+  }
+
+  const response = await proxy.fetch("https://proxy/revalidate", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(options),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectId, aiToken: token, ...options }),
   });
 
   if (!response.ok) {

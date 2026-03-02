@@ -9,24 +9,20 @@ declare namespace Cloudflare {
     AI: Ai;
 
     // Platform-injected bindings (present when deployed on Void)
-    /** @internal Service binding to ai-proxy worker */
-    __AI_PROXY?: Fetcher;
-    /** @internal Custom AI proxy URL override */
-    __AI_PROXY_URL?: string;
-    /** @internal Auth token for HTTP AI proxy */
+    /** @internal Service binding to proxy worker (AI, revalidation, future features) */
+    __VOID_PROXY?: Fetcher;
+    /** @internal Custom proxy URL override */
+    __VOID_PROXY_URL?: string;
+    /** @internal Auth token for HTTP proxy (local dev) */
     __VOID_TOKEN?: string;
-    /** @internal Project ID for HTTP AI proxy */
+    /** @internal Project ID for HTTP proxy (local dev) */
     __VOID_PROJECT_ID?: string;
     /** @internal Staging environment flag */
     __VOID_STAGING?: string;
     /** @internal Project ID (service binding path) */
     __PROJECT_ID?: string;
-    /** @internal AI token (service binding path) */
-    __AI_TOKEN?: string;
-
-    // ISR bindings (user-configured for on-demand revalidation)
-    VOID_PROJECT_ID?: string;
-    VOID_REVALIDATE_TOKEN?: string;
+    /** @internal Proxy token (service binding path) */
+    __VOID_PROXY_TOKEN?: string;
 
     // Queue bindings (QUEUE_<name>)
     [key: `QUEUE_${string}`]: Queue<unknown> | undefined;
