@@ -127,10 +127,6 @@ describe("DELETE /projects/:id", () => {
       status: "live",
     });
 
-    // Add R2 assets
-    await env.ASSETS.put(`${project.id}/current/index.html`, "<h1>Hello</h1>");
-    await env.ASSETS.put(`${project.id}/current/assets/app.js`, "console.log('hi')");
-
     // Add KV routing entry
     await env.ROUTING.put(
       "full-app",
@@ -163,10 +159,6 @@ describe("DELETE /projects/:id", () => {
       .from(deployments)
       .where(eq(deployments.project_id, project.id));
     expect(dbDeployments).toHaveLength(0);
-
-    // Verify R2 assets cleaned up
-    const listed = await env.ASSETS.list({ prefix: `${project.id}/` });
-    expect(listed.objects).toHaveLength(0);
 
     // Verify KV routing removed
     const routing = await env.ROUTING.get("full-app");

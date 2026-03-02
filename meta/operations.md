@@ -41,7 +41,6 @@ Two fully isolated environments. Each has its own CF resources (KV, R2, dispatch
 | Resource           | Binding         | Name / ID                                                     |
 | ------------------ | --------------- | ------------------------------------------------------------- |
 | Hyperdrive         | `HYPERDRIVE`    | `7bd6b2a606a347819ad3421867840736` (→ PlanetScale PostgreSQL) |
-| R2 Bucket          | `ASSETS`        | `void-assets`                                                 |
 | KV Namespace       | `ROUTING`       | `9250c33f3db6494ebe8ad6272812c8c0`                            |
 | KV Namespace       | `ISR_CACHE`     | `7a0284b2390b42218901919579aadf0e`                            |
 | Dispatch Namespace | `DISPATCH`      | `void-users`                                                  |
@@ -96,7 +95,6 @@ Same resource types with `-staging` suffixes:
 | Resource    | API                                                           | Dashboard                                                     | Dispatch                                                 | Proxy                                                    |
 | ----------- | ------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------- |
 | Hyperdrive  | `7cde35825e6249d0b60b9de69feb29dd` (→ PlanetScale PostgreSQL) | `7cde35825e6249d0b60b9de69feb29dd` (→ PlanetScale PostgreSQL) | —                                                        | —                                                        |
-| R2          | `void-assets-staging`                                         | —                                                             | —                                                        | —                                                        |
 | KV ROUTING  | `60240eecea804f39bf8b7395cd6c6b08`                            | —                                                             | `60240eecea804f39bf8b7395cd6c6b08`                       | —                                                        |
 | KV ISR      | `7f13ef3a3745445c883a5bbc72f031b7`                            | —                                                             | `7f13ef3a3745445c883a5bbc72f031b7`                       | —                                                        |
 | Dispatch NS | `void-users-staging`                                          | —                                                             | `void-users-staging`                                     | —                                                        |
@@ -296,7 +294,6 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    - Hyperdrive configuration (pointing to the PlanetScale PgBouncer URL)
    - KV namespace for ROUTING
    - KV namespace for ISR_CACHE (`wrangler kv namespace create void-isr-cache-<env>`)
-   - R2 bucket (for static deploy assets)
    - Dispatch namespace (Workers for Platforms)
    - Analytics Engine dataset
    - AI Gateway named `void`

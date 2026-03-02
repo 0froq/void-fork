@@ -33,7 +33,7 @@ export async function cleanupProjectResources(
 
   const cleanup: Promise<void>[] = [];
 
-  // CF resource cleanup (D1, KV, R2, Queue)
+  // CF resource cleanup (D1, KV, R2, Queue — user-provisioned resources)
   for (const resource of resources) {
     const del =
       resource.type === "d1"
@@ -60,20 +60,6 @@ export async function cleanupProjectResources(
         }
       })
       .catch(warn(`Failed to delete worker ${workerName}`)),
-  );
-
-  // R2 assets (paginated, batch delete per page)
-  cleanup.push(
-    (async () => {
-      let cursor: string | undefined;
-      do {
-        const listed = await c.env.ASSETS.list({ prefix: `${projectId}/`, cursor });
-        if (listed.objects.length > 0) {
-          await c.env.ASSETS.delete(listed.objects.map((obj) => obj.key));
-        }
-        cursor = listed.truncated ? listed.cursor : undefined;
-      } while (cursor);
-    })().catch(warn("Failed to clean up R2 assets")),
   );
 
   // Clear cron scheduler DO if project had crons

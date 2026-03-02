@@ -19,7 +19,6 @@ export const CF_ZONE_ID = "test-zone-id";
 export type TestEnv = {
   db: Db;
   HYPERDRIVE: { connectionString: string };
-  ASSETS: R2Bucket;
   ISR_CACHE: KVNamespace;
   ROUTING: KVNamespace;
   DISPATCH: DispatchNamespace;
@@ -60,12 +59,10 @@ export async function setupEnv(): Promise<TestEnv> {
     modules: true,
     script: "export default { fetch() { return new Response(''); } }",
     kvNamespaces: ["ROUTING", "ISR_CACHE"],
-    r2Buckets: ["ASSETS"],
   });
 
   const kv = await mf.getKVNamespace("ROUTING");
   const isrCache = await mf.getKVNamespace("ISR_CACHE");
-  const r2 = await mf.getR2Bucket("ASSETS");
 
   pglite = new PGlite();
   const db = drizzle(pglite, { schema }) as unknown as Db;
@@ -80,7 +77,6 @@ export async function setupEnv(): Promise<TestEnv> {
   return {
     db,
     HYPERDRIVE: { connectionString: "test://mock" },
-    ASSETS: r2 as unknown as R2Bucket,
     ISR_CACHE: isrCache as unknown as KVNamespace,
     ROUTING: kv as unknown as KVNamespace,
     DISPATCH: {} as DispatchNamespace,

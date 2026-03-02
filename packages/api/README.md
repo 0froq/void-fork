@@ -1,13 +1,13 @@
 # @voidcloud/api
 
-Control Plane API + Admin Dashboard. CF Worker using Hono, Drizzle ORM + PostgreSQL (via Hyperdrive), R2, KV, and Workers for Platforms (dispatch namespaces). No tsdown — wrangler handles TS bundling.
+Control Plane API + Admin Dashboard. CF Worker using Hono, Drizzle ORM + PostgreSQL (via Hyperdrive), KV, and Workers for Platforms (dispatch namespaces). No tsdown — wrangler handles TS bundling.
 
 ## Source Layout
 
 ```
 src/
   index.ts                  # Hono app + scheduled handler (cron), mounts route groups + auth middleware
-  env.ts                    # ApiEnv type (Hyperdrive, R2, KV, DISPATCH, secrets, Variables)
+  env.ts                    # ApiEnv type (Hyperdrive, KV, DISPATCH, secrets, Variables)
   schema.ts                 # Drizzle schema — source of truth for all DB tables + types
   types.ts                  # DB types (inferred from schema) + DeployManifest, QueueMeta, etc.
   id.ts                     # generateId(prefix) → "proj_a1b2c3d4e5f6"
@@ -121,7 +121,7 @@ Auth middleware on `/projects/*` extracts Bearer token, verifies JWT, sets `c.ge
 2. **Deploy count enforcement**: Look up user plan, check `countUserDeploymentsToday()` against `planLimits.deploysPerDay` → 429 if exceeded
 3. Provision bindings (D1, KV, R2) — creates CF resources if needed
 4. `migration:<name>` fields → validated, then executed on D1 via CF REST API (status: `"migrating"`)
-5. `asset:<path>` fields → stored in R2 at `{projectId}/current/{path}`
+5. `asset:<path>` fields → uploaded via CF Workers Assets API
 6. `worker:<path>` fields → uploaded to CF dispatch namespace via API
 7. Queue provisioning: creates CF Queues, adds producer bindings, registers dispatch worker as consumer, writes `queue:<queueId>` routing entries to KV
 8. KV routing updated: `slug → { workerName, projectId, version, limits?, suspended? }`
@@ -180,7 +180,6 @@ Used by `pnpm run deploy` and GitHub Actions to deploy platform and dispatch wor
 | Workers Scripts    | Edit   | Deploy platform and dispatch workers |
 | Workers KV Storage | Edit   | KV namespace bindings (ROUTING)      |
 | D1                 | Edit   | D1 database bindings (DB)            |
-| Workers R2 Storage | Edit   | R2 bucket bindings (ASSETS)          |
 
 **Zone permissions** (on `void.app`):
 
@@ -224,20 +223,20 @@ Used by the platform worker at runtime to provision and manage user resources vi
 
 ### Integration Tests
 
-Integration tests call the Hono app via `app.fetch(request, env)` with **PGlite** (in-process WASM PostgreSQL) for the database, **Miniflare** KV/R2 bindings, and **mocked** external fetch calls (GitHub API, CF API). This tests the full request→middleware→route→DB→response chain.
+Integration tests call the Hono app via `app.fetch(request, env)` with **PGlite** (in-process WASM PostgreSQL) for the database, **Miniflare** KV bindings, and **mocked** external fetch calls (GitHub API, CF API). This tests the full request→middleware→route→DB→response chain.
 
 | Test file                                  | Covers                                                                                                                                                          |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `test/integration/api-health.test.ts`      | Health endpoint smoke test (1 test)                                                                                                                             |
 | `test/integration/api-me.test.ts`          | Auth middleware: missing/invalid/expired JWT, valid (4)                                                                                                         |
 | `test/integration/api-projects.test.ts`    | Projects CRUD: auth, list, create, validation, dupes (12)                                                                                                       |
-| `test/integration/api-deploy.test.ts`      | Deploy pipeline: auth, provisioning, migrations, R2, KV, limits, queues, failure modes (36)                                                                     |
+| `test/integration/api-deploy.test.ts`      | Deploy pipeline: auth, provisioning, migrations, assets, KV, limits, queues, failure modes (36)                                                                 |
 | `test/integration/admin-dashboard.test.ts` | Admin dashboard: auth, pages, forms, search, pagination, deployments, error display, plan limits, login/logout (28)                                             |
 | `test/integration/scheduled.test.ts`       | Cron handler: empty DB, unlimited skip, no-projects skip, within limits, exceeds limits, unsuspend, admin-suspended preserved, error isolation, multi-batch (9) |
 
 Shared helpers in `test/integration/helpers.ts`:
 
-- `setupEnv()` / `teardownEnv()` — PGlite + Miniflare lifecycle (KV, R2 bindings) + Drizzle migration
+- `setupEnv()` / `teardownEnv()` — PGlite + Miniflare lifecycle (KV bindings) + Drizzle migration
 - `clearTables()` — Drizzle delete in FK order
 - `createTestUser()` / `createTestProject()` / `createTestDeployment()` — Drizzle insert factories with JWT signing
 - `mockCfApi()` — URL-based fetch mock for CF API with configurable overrides

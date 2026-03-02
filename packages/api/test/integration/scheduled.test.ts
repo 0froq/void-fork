@@ -20,7 +20,6 @@ const mockCtx = {
 function makeBindings(e: TestEnv) {
   return {
     HYPERDRIVE: e.HYPERDRIVE as unknown as Hyperdrive,
-    ASSETS: e.ASSETS,
     ISR_CACHE: e.ISR_CACHE,
     ROUTING: e.ROUTING,
     DISPATCH: e.DISPATCH,

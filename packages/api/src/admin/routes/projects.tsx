@@ -98,18 +98,6 @@ app.get("/:id", async (c) => {
             </td>
           </tr>
           <tr>
-            <th>Assets</th>
-            <td>
-              <a
-                href={`https://dash.cloudflare.com/${cfAccountId}/r2/default/buckets/void-assets?prefix=${encodeURIComponent(project.id + "/")}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                R2: void-assets/{project.id}/
-              </a>
-            </td>
-          </tr>
-          <tr>
             <th>Owner</th>
             <td>
               {owner ? <a href={`/admin/users/${owner.id}`}>{owner.login}</a> : project.user_id}

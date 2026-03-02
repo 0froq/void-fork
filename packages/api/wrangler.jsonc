@@ -17,12 +17,6 @@
       "localConnectionString": "postgresql://void_dev:void_dev@localhost:5432/void_api_dev",
     },
   ],
-  "r2_buckets": [
-    {
-      "binding": "ASSETS",
-      "bucket_name": "void-assets",
-    },
-  ],
   "kv_namespaces": [
     {
       "binding": "ROUTING",
@@ -86,12 +80,6 @@
         {
           "binding": "HYPERDRIVE",
           "id": "7cde35825e6249d0b60b9de69feb29dd",
-        },
-      ],
-      "r2_buckets": [
-        {
-          "binding": "ASSETS",
-          "bucket_name": "void-assets-staging",
         },
       ],
       "kv_namespaces": [
