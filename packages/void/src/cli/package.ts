@@ -97,7 +97,7 @@ export function packageBuild(
   migrations?: MigrationFile[],
   schedules?: ScheduleMeta[],
   ssr?: boolean,
-  framework?: boolean,
+  framework?: string,
   revalidate?: number | Record<string, number>,
   vars?: Record<string, string>,
   queues?: QueueMeta[],
@@ -146,7 +146,7 @@ export function packageBuild(
   }
 
   if (framework) {
-    manifest.framework = true;
+    manifest.framework = framework;
   }
 
   manifest.type = framework ? "framework" : "void";
@@ -281,6 +281,7 @@ export function packageStaticBuild(
  * from asset collection when directories overlap.
  */
 export function packageFrameworkBuild(opts: {
+  frameworkName: string;
   workerDir: string;
   workerMain: string;
   assetsDir: string;
@@ -330,7 +331,7 @@ export function packageFrameworkBuild(opts: {
   if (opts.vars && Object.keys(opts.vars).length > 0) manifest.vars = opts.vars;
 
   manifest.ssr = true;
-  manifest.framework = true;
+  manifest.framework = opts.frameworkName;
   manifest.type = "framework";
   manifest.workerMain = po?.workerMain ?? opts.workerMain;
   if (po?.compatibilityDate) manifest.compatibilityDate = po.compatibilityDate;

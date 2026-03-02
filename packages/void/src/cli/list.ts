@@ -92,7 +92,7 @@ function formatDeploymentRow(d: DeploymentResponse): DeploymentRow {
   let manifest: {
     type?: string;
     static?: string;
-    framework?: boolean;
+    framework?: string;
     revalidate?: number;
   } | null = null;
   if (d.manifest) {

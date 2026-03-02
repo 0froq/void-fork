@@ -382,6 +382,7 @@ async function runFrameworkDeploy(
   s.message("Packaging...");
   const neededSet = skipped > 0 ? new Set(needed) : null;
   const formData = packageFrameworkBuild({
+    frameworkName: detected.name,
     workerDir: actualWorkerDir,
     workerMain: actualWorkerMain,
     assetsDir,
@@ -634,7 +635,7 @@ async function runFullDeploy(
     validatedMigrations,
     schedules,
     isSsr,
-    isFrameworkMode,
+    isFrameworkMode ? detected!.name : undefined,
     revalidate,
     envVars,
     queues,

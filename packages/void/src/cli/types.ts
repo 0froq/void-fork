@@ -43,7 +43,7 @@ export interface DeployManifest {
   schedules?: ScheduleMeta[];
   queues?: QueueMeta[];
   ssr?: boolean;
-  framework?: boolean;
+  framework?: string;
   type?: "void" | "spa" | "static" | "framework";
   revalidate?: number | Record<string, number>;
   prerender?: string[];
