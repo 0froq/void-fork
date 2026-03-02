@@ -199,6 +199,7 @@ export interface CfApiMocks {
   createCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
   getCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
   deleteCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  purgeCache: (url: string, init?: RequestInit) => Response | Promise<Response>;
   analyticsQuery: (url: string, init?: RequestInit) => Response | Promise<Response>;
 }
 
@@ -234,6 +235,7 @@ const defaultMocks: CfApiMocks = {
       ssl: { status: "pending" },
     }),
   deleteCustomHostname: () => cfSuccess(null),
+  purgeCache: () => cfSuccess({ id: "purge-test-id" }),
   analyticsQuery: () => Response.json({ data: [{ requests: 0, bandwidth_bytes: 0 }] }),
 };
 
@@ -246,6 +248,9 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
     const method = init?.method ?? "GET";
 
     // Order matters: more specific patterns first
+    if (method === "POST" && url.includes("/purge_cache")) {
+      return mocks.purgeCache(url, init);
+    }
     if (method === "POST" && url.includes("/custom_hostnames")) {
       return mocks.createCustomHostname(url, init);
     }

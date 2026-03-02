@@ -226,3 +226,20 @@ export async function deleteCustomHostname(
     method: "DELETE",
   });
 }
+
+// --- Cache Purge ---
+
+export async function purgeZoneCache(
+  zoneId: string,
+  apiToken: string,
+  files: string[],
+): Promise<void> {
+  // CF API allows max 100 URLs per purge request (Free/Pro/Business)
+  for (let i = 0; i < files.length; i += 100) {
+    const batch = files.slice(i, i + 100);
+    await cfFetch(`${CF_ZONE_API_BASE}/${zoneId}/purge_cache`, apiToken, {
+      method: "POST",
+      body: JSON.stringify({ files: batch }),
+    });
+  }
+}
