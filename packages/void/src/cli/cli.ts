@@ -138,7 +138,10 @@ async function runSubcommandGroup<T>(
 const args = process.argv.slice(2);
 const command = args[0];
 
-printStagingBanner();
+// MCP uses stdout for JSON-RPC — don't print anything to stdout before it starts
+if (command !== "mcp") {
+  printStagingBanner();
+}
 
 if (command === "staging") {
   const sub = args[1];
