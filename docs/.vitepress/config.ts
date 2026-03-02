@@ -27,6 +27,7 @@ const integrationLinks = {
         { text: "Astro", link: "/integrations/frameworks/astro" },
         { text: "SvelteKit", link: "/integrations/frameworks/sveltekit" },
         { text: "Nuxt", link: "/integrations/frameworks/nuxt" },
+        { text: "Vinext", link: "/integrations/frameworks/vinext" },
       ],
     },
     { text: "Coding Agents", link: "integrations/agents" },
