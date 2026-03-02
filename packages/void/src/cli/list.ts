@@ -89,7 +89,12 @@ interface DeploymentRow {
 }
 
 function formatDeploymentRow(d: DeploymentResponse): DeploymentRow {
-  let manifest: { static?: string; framework?: boolean; revalidate?: number } | null = null;
+  let manifest: {
+    type?: string;
+    static?: string;
+    framework?: boolean;
+    revalidate?: number;
+  } | null = null;
   if (d.manifest) {
     try {
       manifest = JSON.parse(d.manifest);
@@ -98,7 +103,7 @@ function formatDeploymentRow(d: DeploymentResponse): DeploymentRow {
     }
   }
 
-  const appType = manifest?.static ?? (manifest?.framework ? "framework" : "void");
+  const appType = manifest?.type ?? (manifest?.framework ? "framework" : "void");
   const isr = manifest?.revalidate && manifest.revalidate > 0 ? `${manifest.revalidate}s` : "-";
   const source = d.source ?? "-";
   const commit = d.commit ? d.commit.slice(0, 7) : "-";

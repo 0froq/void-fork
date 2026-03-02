@@ -4,7 +4,7 @@ export interface ProjectResponse {
   id: string;
   user_id: string;
   slug: string;
-  mode: string;
+  type: string;
   created_at: string;
   custom_domain: string | null;
 }

@@ -44,6 +44,7 @@ export interface DeployManifest {
   queues?: QueueMeta[];
   ssr?: boolean;
   framework?: boolean;
+  type?: "void" | "spa" | "static" | "framework";
   revalidate?: number | Record<string, number>;
   prerender?: string[];
   assetConfig?: AssetConfig;

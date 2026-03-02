@@ -149,6 +149,8 @@ export function packageBuild(
     manifest.framework = true;
   }
 
+  manifest.type = framework ? "framework" : "void";
+
   if (revalidate != null && revalidate !== 0) {
     manifest.revalidate = revalidate;
   }
@@ -237,6 +239,7 @@ export function packageStaticBuild(
   const manifest: DeployManifest = {
     version: 2,
     bindings: {},
+    type: appType,
     assetConfig: {
       not_found_handling: appType === "spa" ? "single-page-application" : "404-page",
     },
@@ -328,6 +331,7 @@ export function packageFrameworkBuild(opts: {
 
   manifest.ssr = true;
   manifest.framework = true;
+  manifest.type = "framework";
   manifest.workerMain = po?.workerMain ?? opts.workerMain;
   if (po?.compatibilityDate) manifest.compatibilityDate = po.compatibilityDate;
   if (po?.compatibilityFlags && po.compatibilityFlags.length > 0) {

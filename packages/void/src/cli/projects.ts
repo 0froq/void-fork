@@ -23,7 +23,7 @@ export async function runProjectsCommand(): Promise<void> {
 
   const rows = projects.map((p) => ({
     slug: p.slug,
-    appType: p.mode ?? "worker",
+    appType: p.type ?? "worker",
     url: p.custom_domain ? `https://${p.custom_domain}` : `https://${p.slug}.${getSiteDomain()}`,
   }));
 
