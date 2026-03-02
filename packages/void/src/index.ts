@@ -272,7 +272,7 @@ export function voidPlugin(options?: {
   if (config.auth !== undefined) {
     authProviders = normalizeAuth(config.auth);
   } else {
-    authProviders = bindings.needsAuth ? ["email"] : null;
+    authProviders = bindings.needsAuth ? ["email", "github", "google"] : null;
   }
 
   // Remote mode — use platform proxy for D1/KV/R2 instead of local miniflare.

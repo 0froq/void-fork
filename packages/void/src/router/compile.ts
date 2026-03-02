@@ -487,12 +487,17 @@ function compileAuthRoutes(lines: string[], auth: AuthCompileOptions): void {
 
   if (hasGitHub) {
     lines.push('app.get("/auth/login/github",');
-    lines.push("  (c, next) => githubAuth({");
-    lines.push("    client_id: c.env.GITHUB_OAUTH_ID,");
-    lines.push("    client_secret: c.env.GITHUB_OAUTH_SECRET,");
-    lines.push('    scope: ["read:user", "user:email"],');
-    lines.push("    oauthApp: true,");
-    lines.push("  })(c, next),");
+    lines.push("  (c, next) => {");
+    lines.push(
+      '    if (!c.env.GITHUB_OAUTH_ID || !c.env.GITHUB_OAUTH_SECRET) return c.json({ error: "GitHub OAuth not configured. Set GITHUB_OAUTH_ID and GITHUB_OAUTH_SECRET secrets." }, 500);',
+    );
+    lines.push("    return githubAuth({");
+    lines.push("      client_id: c.env.GITHUB_OAUTH_ID,");
+    lines.push("      client_secret: c.env.GITHUB_OAUTH_SECRET,");
+    lines.push('      scope: ["read:user", "user:email"],');
+    lines.push("      oauthApp: true,");
+    lines.push("    })(c, next);");
+    lines.push("  },");
     lines.push("  async (c) => {");
     lines.push('    const ghUser = c.get("user-github");');
     lines.push("    const providerId = String(ghUser.id);");
@@ -532,11 +537,16 @@ function compileAuthRoutes(lines: string[], auth: AuthCompileOptions): void {
 
   if (hasGoogle) {
     lines.push('app.get("/auth/login/google",');
-    lines.push("  (c, next) => googleAuth({");
-    lines.push("    client_id: c.env.GOOGLE_OAUTH_ID,");
-    lines.push("    client_secret: c.env.GOOGLE_OAUTH_SECRET,");
-    lines.push('    scope: ["openid", "email", "profile"],');
-    lines.push("  })(c, next),");
+    lines.push("  (c, next) => {");
+    lines.push(
+      '    if (!c.env.GOOGLE_OAUTH_ID || !c.env.GOOGLE_OAUTH_SECRET) return c.json({ error: "Google OAuth not configured. Set GOOGLE_OAUTH_ID and GOOGLE_OAUTH_SECRET secrets." }, 500);',
+    );
+    lines.push("    return googleAuth({");
+    lines.push("      client_id: c.env.GOOGLE_OAUTH_ID,");
+    lines.push("      client_secret: c.env.GOOGLE_OAUTH_SECRET,");
+    lines.push('      scope: ["openid", "email", "profile"],');
+    lines.push("    })(c, next);");
+    lines.push("  },");
     lines.push("  async (c) => {");
     lines.push('    const googleUser = c.get("user-google");');
     lines.push("    const providerId = String(googleUser.id);");

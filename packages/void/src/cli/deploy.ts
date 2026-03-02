@@ -314,10 +314,10 @@ async function runFrameworkDeploy(
   // 5. Resolve auth config (explicit config takes precedence, otherwise infer from source)
   const authProviders: AuthProvider[] | null = vcConfig.auth
     ? vcConfig.auth === true
-      ? (["email"] as AuthProvider[])
+      ? (["email", "github", "google"] as AuthProvider[])
       : vcConfig.auth
     : bindings.needsAuth
-      ? ["email"]
+      ? ["email", "github", "google"]
       : null;
 
   // 7. Generate wrapper if needed (auth, crons, or queues present)

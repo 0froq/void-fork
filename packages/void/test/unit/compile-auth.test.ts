@@ -234,6 +234,47 @@ describe("compileRouteTable with auth", () => {
     expect(code).not.toContain("GOOGLE_SECRET");
   });
 
+  it("generates env var guard for GitHub OAuth route", () => {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
+      ...baseOptions,
+      auth: githubAuth,
+    });
+    expect(code).toContain("!c.env.GITHUB_OAUTH_ID || !c.env.GITHUB_OAUTH_SECRET");
+    expect(code).toContain("GitHub OAuth not configured");
+  });
+
+  it("generates env var guard for Google OAuth route", () => {
+    const googleAuth: AuthCompileOptions = {
+      providers: ["google"],
+      sessionPath: "/resolved/auth/session.mjs",
+      passwordPath: null,
+      schemaPath: "/resolved/auth/schema.mjs",
+      githubProviderPath: null,
+      googleProviderPath: "/resolved/oauth/google.mjs",
+      authRuntimePath: "/resolved/void/runtime/auth.mjs",
+    };
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
+      ...baseOptions,
+      auth: googleAuth,
+    });
+    expect(code).toContain("!c.env.GOOGLE_OAUTH_ID || !c.env.GOOGLE_OAUTH_SECRET");
+    expect(code).toContain("Google OAuth not configured");
+  });
+
+  it("returns 500 JSON with reason when OAuth secrets are missing", () => {
+    const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
+      ...baseOptions,
+      auth: allAuth,
+    });
+    // Both guards should return 500 with actionable error messages
+    expect(code).toContain(
+      'c.json({ error: "GitHub OAuth not configured. Set GITHUB_OAUTH_ID and GITHUB_OAUTH_SECRET secrets." }, 500)',
+    );
+    expect(code).toContain(
+      'c.json({ error: "Google OAuth not configured. Set GOOGLE_OAUTH_ID and GOOGLE_OAUTH_SECRET secrets." }, 500)',
+    );
+  });
+
   it("passes OAuth credentials explicitly to provider middleware", () => {
     const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,

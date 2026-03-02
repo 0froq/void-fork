@@ -1,4 +1,4 @@
-const ITERATIONS = 310000;
+const ITERATIONS = 100000;
 const KEY_LENGTH = 32;
 
 function toBase64(buffer: ArrayBuffer): string {
@@ -36,7 +36,7 @@ async function deriveKey(password: string, salt: Uint8Array<ArrayBuffer>): Promi
 }
 
 /**
- * Hash a plaintext password using PBKDF2-SHA256 (310 000 iterations).
+ * Hash a plaintext password using PBKDF2-SHA256 (100 000 iterations).
  * Returns a string in the format `{saltBase64}:{hashBase64}`.
  */
 export async function hashPassword(password: string): Promise<string> {
