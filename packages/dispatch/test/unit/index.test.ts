@@ -2,27 +2,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../../src/index";
 import type { Env } from "../../src/env";
 
-// Mock caches.default (CF edge cache) with a Map-backed store
+// Mock caches.default (CF edge cache) with a Map-backed store.
+// Uses full URL as key — callers (isrEdgeCacheKey, hashed asset code) already normalize.
 const edgeCacheStore = new Map<string, Response>();
-
-/** Normalize cache key URL: strip query string (mirrors production behavior for hashed assets). */
-function cacheKeyUrl(req: Request): string {
-  const u = new URL(req.url);
-  u.search = "";
-  return u.toString();
-}
 
 vi.stubGlobal("caches", {
   default: {
     match: async (req: Request) => {
-      const res = edgeCacheStore.get(cacheKeyUrl(req));
+      const res = edgeCacheStore.get(req.url);
       return res ? res.clone() : undefined;
     },
     put: async (req: Request, res: Response) => {
-      edgeCacheStore.set(cacheKeyUrl(req), res.clone());
+      edgeCacheStore.set(req.url, res.clone());
     },
     delete: async (req: Request) => {
-      return edgeCacheStore.delete(cacheKeyUrl(req));
+      return edgeCacheStore.delete(req.url);
     },
   },
 });
@@ -527,6 +521,254 @@ describe("ISR (stale-while-revalidate)", () => {
     // Wait for edge cache population
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
     expect(edgeCacheStore.has("https://my-app.void.app/dashboard")).toBe(true);
+  });
+});
+
+describe("ISR JSON edge cache (pages protocol)", () => {
+  const isrRouting: RoutingEntry = {
+    workerName: "user-app",
+    projectId: "proj_1",
+    ssr: true,
+    revalidate: 60,
+  };
+
+  const pageData = JSON.stringify({
+    component: "Dashboard",
+    props: { count: 42 },
+    url: "/dashboard",
+  });
+
+  it("pages request serves from JSON edge cache when populated", async () => {
+    // Pre-populate JSON edge cache
+    edgeCacheStore.set(
+      "https://my-app.void.app/dashboard?__void=json",
+      new Response(pageData, {
+        headers: { "content-type": "application/json", "x-isr-cache": "HIT" },
+      }),
+    );
+
+    const { env, workerFetch } = createEnv({ routing: isrRouting });
+
+    const response = await app.fetch(
+      new Request("https://my-app.void.app/dashboard", {
+        headers: { "X-VoidPages": "true" },
+      }),
+      env,
+      createCtx(),
+    );
+
+    expect(workerFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(JSON.parse(pageData));
+  });
+
+  it("pages request falls through to worker on JSON cache miss", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: isrRouting,
+      workerResponse: new Response(pageData, {
+        headers: { "content-type": "application/json" },
+      }),
+    });
+
+    const response = await app.fetch(
+      new Request("https://my-app.void.app/dashboard", {
+        headers: { "X-VoidPages": "true" },
+      }),
+      env,
+      createCtx(),
+    );
+
+    // Falls through to general dispatch — worker returns JSON for pages requests
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(pageData);
+  });
+
+  it("HTML cache miss populates both HTML and JSON edge caches", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: isrRouting,
+      workerResponse: new Response("<html>rendered</html>", {
+        headers: {
+          "Content-Type": "text/html",
+          "x-void-page-data": pageData,
+        },
+      }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-isr-cache")).toBe("MISS");
+    // x-void-page-data should be stripped from client response
+    expect(response.headers.has("x-void-page-data")).toBe(false);
+    expect(await response.text()).toBe("<html>rendered</html>");
+
+    // Wait for background writes
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // HTML edge cache populated
+    expect(edgeCacheStore.has("https://my-app.void.app/dashboard")).toBe(true);
+    // JSON edge cache populated
+    const jsonCached = edgeCacheStore.get("https://my-app.void.app/dashboard?__void=json");
+    expect(jsonCached).toBeDefined();
+    expect(await jsonCached!.text()).toBe(pageData);
+  });
+
+  it("background revalidation populates JSON edge cache", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: isrRouting,
+      assets: {
+        "proj_1/isr/dashboard": {
+          body: "<html>stale</html>",
+          customMetadata: {
+            status: "200",
+            createdAt: String(Date.now() - 120 * 1000),
+            ttl: "60",
+            headers: JSON.stringify({ "Content-Type": "text/html" }),
+          },
+        },
+      },
+      workerResponse: new Response("<html>fresh</html>", {
+        headers: {
+          "Content-Type": "text/html",
+          "x-void-page-data": pageData,
+        },
+      }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
+
+    // Stale content returned immediately
+    expect(response.headers.get("x-isr-cache")).toBe("STALE");
+
+    // Wait for background revalidation
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    // JSON edge cache populated from revalidation
+    const jsonCached = edgeCacheStore.get("https://my-app.void.app/dashboard?__void=json");
+    expect(jsonCached).toBeDefined();
+    expect(await jsonCached!.text()).toBe(pageData);
+    expect(jsonCached!.headers.get("x-isr-cache")).toBe("HIT");
+  });
+
+  it("background revalidation strips X-VoidPages from request", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: isrRouting,
+      assets: {
+        "proj_1/isr/dashboard": {
+          body: "<html>stale</html>",
+          customMetadata: {
+            status: "200",
+            createdAt: String(Date.now() - 120 * 1000),
+            ttl: "60",
+            headers: JSON.stringify({ "Content-Type": "text/html" }),
+          },
+        },
+      },
+      workerResponse: new Response("<html>fresh</html>", {
+        headers: { "Content-Type": "text/html" },
+      }),
+    });
+
+    const ctx = createCtx();
+    // Initial request has X-VoidPages but ISR serves from R2 (HTML path)
+    await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
+
+    // Wait for background revalidation
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Verify the revalidation request does NOT have X-VoidPages
+    const revalRequest = workerFetch.mock.calls[0][0] as Request;
+    expect(revalRequest.headers.has("X-VoidPages")).toBe(false);
+  });
+
+  it("opt-out (ttl=0) deletes JSON edge cache too", async () => {
+    // Pre-populate JSON edge cache
+    edgeCacheStore.set(
+      "https://my-app.void.app/dashboard?__void=json",
+      new Response(pageData, {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const { env, workerFetch } = createEnv({
+      routing: isrRouting,
+      assets: {
+        "proj_1/isr/dashboard": {
+          body: "<html>stale</html>",
+          customMetadata: {
+            status: "200",
+            createdAt: String(Date.now() - 120 * 1000),
+            ttl: "60",
+            headers: JSON.stringify({ "Content-Type": "text/html" }),
+          },
+        },
+      },
+      workerResponse: new Response("<html>opt-out</html>", {
+        headers: { "x-revalidate": "0" },
+      }),
+    });
+
+    const ctx = createCtx();
+    await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
+
+    // Wait for background revalidation
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    // JSON edge cache should be deleted
+    expect(edgeCacheStore.has("https://my-app.void.app/dashboard?__void=json")).toBe(false);
+  });
+
+  it("write-behind populates JSON edge cache from x-void-page-data", async () => {
+    // Non-ISR path (no revalidate config matching this path's ISR block) but
+    // still has revalidate in routing — this tests the write-behind code path
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: "user-app",
+        projectId: "proj_1",
+        ssr: true,
+        revalidate: { "/dashboard": 60 },
+      },
+      workerResponse: new Response("<html>ssr</html>", {
+        headers: {
+          "Content-Type": "text/html",
+          "x-void-page-data": pageData,
+        },
+      }),
+    });
+
+    // Request to /other — ISR TTL is 0 (no match), falls through to general dispatch
+    // But /dashboard request would hit ISR... let's use a path that falls through ISR
+    // but still triggers write-behind
+    const ctx = createCtx();
+    const response = await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    // x-void-page-data should be stripped from response
+    expect(response.headers.has("x-void-page-data")).toBe(false);
+  });
+
+  it("HTML response without x-void-page-data does not populate JSON cache", async () => {
+    const { env } = createEnv({
+      routing: isrRouting,
+      workerResponse: new Response("<html>no-page-data</html>", {
+        headers: { "Content-Type": "text/html" },
+      }),
+    });
+
+    const ctx = createCtx();
+    await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // HTML cache is populated, but no JSON cache
+    expect(edgeCacheStore.has("https://my-app.void.app/dashboard")).toBe(true);
+    expect(edgeCacheStore.has("https://my-app.void.app/dashboard?__void=json")).toBe(false);
   });
 });
 

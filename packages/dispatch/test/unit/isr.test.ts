@@ -6,6 +6,8 @@ import {
   resolvePathTtl,
   shouldBypassIsr,
   isrCacheResponse,
+  isrEdgeCacheKeyJson,
+  serializeHeaders,
   type IsrCacheEntry,
 } from "../../src/isr";
 
@@ -158,6 +160,13 @@ describe("shouldBypassIsr", () => {
     expect(shouldBypassIsr(request)).toBe(true);
   });
 
+  it("returns false for X-VoidPages header (uses JSON edge cache instead)", () => {
+    const request = new Request("https://example.com", {
+      headers: { "X-VoidPages": "true" },
+    });
+    expect(shouldBypassIsr(request)).toBe(false);
+  });
+
   it("returns false for plain GET request", () => {
     const request = new Request("https://example.com");
     expect(shouldBypassIsr(request)).toBe(false);
@@ -210,5 +219,50 @@ describe("isrCacheResponse", () => {
     expect(response.headers.get("Cache-Control")).toBe(
       "public, s-maxage=5, max-age=0, must-revalidate",
     );
+  });
+});
+
+describe("isrEdgeCacheKeyJson", () => {
+  it("appends ?__void=json suffix", () => {
+    const request = new Request("https://app.void.app/about?q=1");
+    const key = isrEdgeCacheKeyJson(request, "/about");
+    expect(key.url).toBe("https://app.void.app/about?__void=json");
+    expect(key.method).toBe("GET");
+  });
+
+  it("handles root path", () => {
+    const request = new Request("https://app.void.app/");
+    const key = isrEdgeCacheKeyJson(request, "/");
+    expect(key.url).toBe("https://app.void.app/?__void=json");
+  });
+});
+
+describe("serializeHeaders", () => {
+  it("skips x-void-page-data header", () => {
+    const response = new Response("ok", {
+      headers: {
+        "content-type": "text/html",
+        "x-void-page-data": '{"component":"Index"}',
+        "x-custom": "keep",
+      },
+    });
+    const result = serializeHeaders(response);
+    expect(result["content-type"]).toBe("text/html");
+    expect(result["x-custom"]).toBe("keep");
+    expect(result["x-void-page-data"]).toBeUndefined();
+  });
+
+  it("skips cache-control and x-isr-cache", () => {
+    const response = new Response("ok", {
+      headers: {
+        "cache-control": "public",
+        "x-isr-cache": "HIT",
+        "content-type": "text/html",
+      },
+    });
+    const result = serializeHeaders(response);
+    expect(result["cache-control"]).toBeUndefined();
+    expect(result["x-isr-cache"]).toBeUndefined();
+    expect(result["content-type"]).toBe("text/html");
   });
 });

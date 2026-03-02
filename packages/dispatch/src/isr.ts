@@ -150,6 +150,7 @@ export function resolveRevalidateTtl(response: Response, defaultTtl: number): nu
 
 /**
  * ISR should be bypassed for requests with credentials.
+ * Pages protocol navigation (X-VoidPages) now uses a separate JSON edge cache.
  */
 export function shouldBypassIsr(request: Request): boolean {
   return request.headers.has("Cookie") || request.headers.has("Authorization");
@@ -175,7 +176,7 @@ export function resolvePathTtl(
 /**
  * Extract response headers as a plain object, skipping ISR-managed headers.
  */
-const SKIP_HEADERS = new Set(["cache-control", "x-isr-cache"]);
+const SKIP_HEADERS = new Set(["cache-control", "x-isr-cache", "x-void-page-data"]);
 
 export function serializeHeaders(response: Response): Record<string, string> {
   const result: Record<string, string> = {};
@@ -196,4 +197,13 @@ export function serializeHeaders(response: Response): Record<string, string> {
 export function isrEdgeCacheKey(request: Request, pathname: string): Request {
   const url = new URL(request.url);
   return new Request(`${url.origin}${pathname}`, { method: "GET" });
+}
+
+/**
+ * Build an edge cache key for the JSON variant (pages protocol navigation).
+ * Uses `?__void=json` suffix to separate from the HTML edge cache.
+ */
+export function isrEdgeCacheKeyJson(request: Request, pathname: string): Request {
+  const url = new URL(request.url);
+  return new Request(`${url.origin}${pathname}?__void=json`, { method: "GET" });
 }
