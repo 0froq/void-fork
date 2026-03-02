@@ -5,6 +5,7 @@ import { ai } from "./ai";
 import { d1 } from "./d1";
 import { kv } from "./kv";
 import { r2 } from "./r2";
+import { revalidate } from "./revalidate";
 
 const app = new Hono<ProxyEnv>();
 
@@ -88,6 +89,7 @@ app.route("/ai", ai);
 app.route("/d1", d1);
 app.route("/kv", kv);
 app.route("/r2", r2);
+app.route("/revalidate", revalidate);
 
 export default app;
 

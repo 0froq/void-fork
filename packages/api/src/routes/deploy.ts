@@ -304,7 +304,7 @@ app.post("/:id/deploy", async (c) => {
           projectId,
           manifest,
           c.env.JWT_SECRET,
-          c.env.AI_PROXY_SERVICE ?? "void-proxy",
+          c.env.VOID_PROXY_SERVICE ?? "void-proxy",
         );
 
         if (bindingLabels.length > 0) {
@@ -372,9 +372,9 @@ app.post("/:id/deploy", async (c) => {
         // Build combined bindings: user vars + provisioned (d1/kv/r2) + ASSETS
         // Platform bindings come LAST so they win on name collision (CF uses last-wins semantics)
         const RESERVED_BINDING_NAMES = new Set([
-          "__AI_PROXY",
+          "__VOID_PROXY",
           "__PROJECT_ID",
-          "__AI_TOKEN",
+          "__VOID_PROXY_TOKEN",
           "ASSETS",
         ]);
 

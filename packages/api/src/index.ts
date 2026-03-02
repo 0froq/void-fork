@@ -8,6 +8,7 @@ import projects from "./routes/projects";
 import deploy from "./routes/deploy";
 import deleteRoute from "./routes/delete";
 import revalidate from "./routes/revalidate";
+import internalRevalidate from "./routes/internal-revalidate";
 import secrets from "./routes/secrets";
 import domains from "./routes/domains";
 import { projectUsage, accountUsage } from "./routes/usage";
@@ -44,6 +45,7 @@ const app = new Hono<ApiEnv>()
 </body></html>`),
   )
   .route("/auth", auth)
+  .route("/internal/revalidate", internalRevalidate)
   .use("/me", authMiddleware)
   .route("/me", me)
   .use("/projects/*", authMiddleware)

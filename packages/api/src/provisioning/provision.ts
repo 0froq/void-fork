@@ -79,13 +79,12 @@ export async function provisionBindings(
 
   const bindings = await Promise.all(tasks);
 
-  // AI — add service binding to proxy + signed project token (no CF API call)
-  if (manifest.bindings.ai) {
-    const aiToken = await hmacSignState(projectId, jwtSecret);
-    bindings.push({ type: "service", name: "__AI_PROXY", service: aiProxyService });
-    bindings.push({ type: "plain_text", name: "__PROJECT_ID", text: projectId });
-    bindings.push({ type: "plain_text", name: "__AI_TOKEN", text: aiToken });
-  }
+  // Always inject proxy bindings — used by AI, revalidation, and future platform features.
+  // The AI-specific usage limit check stays in the proxy (/ai/* middleware).
+  const proxyToken = await hmacSignState(projectId, jwtSecret);
+  bindings.push({ type: "service", name: "__VOID_PROXY", service: aiProxyService });
+  bindings.push({ type: "plain_text", name: "__PROJECT_ID", text: projectId });
+  bindings.push({ type: "plain_text", name: "__VOID_PROXY_TOKEN", text: proxyToken });
 
   return bindings;
 }

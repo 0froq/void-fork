@@ -70,7 +70,9 @@ describe("provisionBindings", () => {
 
     expect(createD1Database).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-db");
     expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, "d1", "d1-uuid-123", "DB");
-    expect(bindings).toEqual([{ type: "d1", name: "DB", id: "d1-uuid-123" }]);
+    expect(bindings[0]).toEqual({ type: "d1", name: "DB", id: "d1-uuid-123" });
+    // + 3 always-injected proxy bindings
+    expect(bindings).toHaveLength(4);
   });
 
   it("provisions KV when manifest requires it", async () => {
@@ -88,7 +90,8 @@ describe("provisionBindings", () => {
 
     expect(createKVNamespace).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-kv");
     expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, "kv", "kv-id-456", "KV");
-    expect(bindings).toEqual([{ type: "kv_namespace", name: "KV", namespace_id: "kv-id-456" }]);
+    expect(bindings[0]).toEqual({ type: "kv_namespace", name: "KV", namespace_id: "kv-id-456" });
+    expect(bindings).toHaveLength(4);
   });
 
   it("provisions R2 when manifest requires it", async () => {
@@ -112,7 +115,12 @@ describe("provisionBindings", () => {
       "test-STORAGE",
       "STORAGE",
     );
-    expect(bindings).toEqual([{ type: "r2_bucket", name: "STORAGE", bucket_name: "test-STORAGE" }]);
+    expect(bindings[0]).toEqual({
+      type: "r2_bucket",
+      name: "STORAGE",
+      bucket_name: "test-STORAGE",
+    });
+    expect(bindings).toHaveLength(4);
   });
 
   it("provisions queue and stores queue_id (UUID) as cf_id", async () => {
@@ -140,14 +148,13 @@ describe("provisionBindings", () => {
       "queue-id-789",
       "emails",
     );
-    expect(bindings).toEqual([
-      {
-        type: "queue",
-        name: "QUEUE_EMAILS",
-        queue_name: "proj-abc123-emails",
-        queue_id: "queue-id-789",
-      },
-    ]);
+    expect(bindings[0]).toEqual({
+      type: "queue",
+      name: "QUEUE_EMAILS",
+      queue_name: "proj-abc123-emails",
+      queue_id: "queue-id-789",
+    });
+    expect(bindings).toHaveLength(4);
   });
 
   it("skips provisioning when resources already exist", async () => {
@@ -176,7 +183,8 @@ describe("provisionBindings", () => {
 
     expect(createD1Database).not.toHaveBeenCalled();
     expect(createResource).not.toHaveBeenCalled();
-    expect(bindings).toEqual([{ type: "d1", name: "DB", id: "existing-d1-id" }]);
+    expect(bindings[0]).toEqual({ type: "d1", name: "DB", id: "existing-d1-id" });
+    expect(bindings).toHaveLength(4);
   });
 
   it("handles multiple bindings in one deploy", async () => {
@@ -198,7 +206,8 @@ describe("provisionBindings", () => {
     expect(createD1Database).toHaveBeenCalledOnce();
     expect(createKVNamespace).toHaveBeenCalledOnce();
     expect(createR2Bucket).toHaveBeenCalledOnce();
-    expect(bindings).toHaveLength(3);
+    // 3 provisioned + 3 always-injected proxy bindings
+    expect(bindings).toHaveLength(6);
     expect(bindings[0]).toEqual({ type: "d1", name: "DB", id: "d1-uuid-123" });
     expect(bindings[1]).toEqual({ type: "kv_namespace", name: "KV", namespace_id: "kv-id-456" });
     expect(bindings[2]).toEqual({
@@ -208,7 +217,7 @@ describe("provisionBindings", () => {
     });
   });
 
-  it("handles empty manifest (no bindings needed)", async () => {
+  it("handles empty manifest (only proxy bindings injected)", async () => {
     const manifest: DeployManifest = { version: 1, bindings: {} };
 
     const bindings = await provisionBindings(
@@ -225,11 +234,13 @@ describe("provisionBindings", () => {
     expect(createKVNamespace).not.toHaveBeenCalled();
     expect(createR2Bucket).not.toHaveBeenCalled();
     expect(createResource).not.toHaveBeenCalled();
-    expect(bindings).toEqual([]);
+    // Proxy bindings are always injected
+    expect(bindings).toHaveLength(3);
+    expect(bindings[0]).toEqual({ type: "service", name: "__VOID_PROXY", service: "void-proxy" });
   });
 
-  it("provisions AI bindings with signed token when manifest requires ai", async () => {
-    const manifest: DeployManifest = { version: 1, bindings: { ai: true } };
+  it("always injects proxy bindings with signed token", async () => {
+    const manifest: DeployManifest = { version: 1, bindings: {} };
 
     const bindings = await provisionBindings(
       mockDb,
@@ -242,13 +253,34 @@ describe("provisionBindings", () => {
     );
 
     expect(bindings).toHaveLength(3);
-    expect(bindings[0]).toEqual({ type: "service", name: "__AI_PROXY", service: "void-proxy" });
+    expect(bindings[0]).toEqual({ type: "service", name: "__VOID_PROXY", service: "void-proxy" });
     expect(bindings[1]).toEqual({ type: "plain_text", name: "__PROJECT_ID", text: PROJECT_ID });
     expect(bindings[2].type).toBe("plain_text");
-    expect(bindings[2].name).toBe("__AI_TOKEN");
+    expect(bindings[2].name).toBe("__VOID_PROXY_TOKEN");
     // Token should be a non-empty string (HMAC signature)
     expect(typeof bindings[2].text).toBe("string");
     expect(bindings[2].text!.length).toBeGreaterThan(0);
+  });
+
+  it("injects proxy bindings alongside other provisioned bindings", async () => {
+    const manifest: DeployManifest = { version: 1, bindings: { d1: ["DB"], ai: true } };
+
+    const bindings = await provisionBindings(
+      mockDb,
+      ACCOUNT_ID,
+      API_TOKEN,
+      PROJECT_ID,
+      manifest,
+      JWT_SECRET,
+      "void-proxy",
+    );
+
+    // D1 + 3 proxy bindings
+    expect(bindings).toHaveLength(4);
+    expect(bindings[0]).toEqual({ type: "d1", name: "DB", id: "d1-uuid-123" });
+    expect(bindings[1]).toEqual({ type: "service", name: "__VOID_PROXY", service: "void-proxy" });
+    expect(bindings[2]).toEqual({ type: "plain_text", name: "__PROJECT_ID", text: PROJECT_ID });
+    expect(bindings[3].name).toBe("__VOID_PROXY_TOKEN");
   });
 
   it("provisions only missing resources when some already exist", async () => {
@@ -281,7 +313,8 @@ describe("provisionBindings", () => {
 
     expect(createD1Database).not.toHaveBeenCalled();
     expect(createKVNamespace).toHaveBeenCalledOnce();
-    expect(bindings).toHaveLength(2);
+    // 2 provisioned + 3 always-injected proxy bindings
+    expect(bindings).toHaveLength(5);
     expect(bindings[0]).toEqual({ type: "d1", name: "DB", id: "existing-d1-id" });
     expect(bindings[1]).toEqual({ type: "kv_namespace", name: "KV", namespace_id: "kv-id-456" });
   });
@@ -307,7 +340,7 @@ describe("ensureResource — already exists fallback", () => {
     expect(createD1Database).toHaveBeenCalledOnce();
     expect(getD1DatabaseByName).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-db");
     expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, "d1", "d1-looked-up", "DB");
-    expect(bindings).toEqual([{ type: "d1", name: "DB", id: "d1-looked-up" }]);
+    expect(bindings[0]).toEqual({ type: "d1", name: "DB", id: "d1-looked-up" });
   });
 
   it("falls back to lookup when KV create returns 'already exists'", async () => {
@@ -328,7 +361,7 @@ describe("ensureResource — already exists fallback", () => {
 
     expect(createKVNamespace).toHaveBeenCalledOnce();
     expect(getKVNamespaceByTitle).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-kv");
-    expect(bindings).toEqual([{ type: "kv_namespace", name: "KV", namespace_id: "kv-looked-up" }]);
+    expect(bindings[0]).toEqual({ type: "kv_namespace", name: "KV", namespace_id: "kv-looked-up" });
   });
 
   it("falls back to lookup when queue create returns 'already exists'", async () => {
@@ -353,14 +386,12 @@ describe("ensureResource — already exists fallback", () => {
 
     expect(createQueue).toHaveBeenCalledOnce();
     expect(getQueueByName).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-emails");
-    expect(bindings).toEqual([
-      {
-        type: "queue",
-        name: "QUEUE_EMAILS",
-        queue_name: "proj-abc123-emails",
-        queue_id: "queue-looked-up",
-      },
-    ]);
+    expect(bindings[0]).toEqual({
+      type: "queue",
+      name: "QUEUE_EMAILS",
+      queue_name: "proj-abc123-emails",
+      queue_id: "queue-looked-up",
+    });
   });
 
   it("propagates non-'already exists' errors", async () => {

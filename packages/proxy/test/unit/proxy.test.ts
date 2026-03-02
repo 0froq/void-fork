@@ -72,7 +72,24 @@ function createMockKv(data: Record<string, string> = {}) {
   };
 }
 
-function createEnv(aiOverrides?: Partial<MockAi>, kvData?: Record<string, string>) {
+function createMockApi(handler?: (req: Request) => Promise<Response>) {
+  return {
+    fetch:
+      handler ??
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ purged: 1 }), {
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+  };
+}
+
+function createEnv(
+  aiOverrides?: Partial<MockAi>,
+  kvData?: Record<string, string>,
+  apiOverride?: { fetch: ReturnType<typeof vi.fn> | ((req: Request) => Promise<Response>) },
+) {
   return {
     AI: {
       run: vi.fn(async () => ({ response: "hello" })),
@@ -85,6 +102,7 @@ function createEnv(aiOverrides?: Partial<MockAi>, kvData?: Record<string, string
     DB: {} as any,
     CF_ACCOUNT_ID: "test-account-id",
     CF_API_TOKEN: "test-api-token",
+    API: apiOverride ?? createMockApi(),
   };
 }
 
@@ -458,6 +476,69 @@ describe("proxy worker", () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual(result);
       expect(env.AI.toMarkdown).toHaveBeenCalledWith({ content: "hello" }, { format: "md" });
+    });
+  });
+
+  describe("revalidate: /revalidate", () => {
+    it("forwards revalidation to API via service binding", async () => {
+      const apiFetch = vi.fn(
+        async () =>
+          new Response(JSON.stringify({ purged: 2 }), {
+            headers: { "content-type": "application/json" },
+          }),
+      );
+      const env = createEnv({}, {}, { fetch: apiFetch });
+
+      const res = await worker.fetch(
+        post("/revalidate", {
+          paths: ["/", "/blog"],
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_1"],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ purged: 2 });
+
+      expect(apiFetch).toHaveBeenCalledOnce();
+      // Fetcher.fetch() receives (url: string, init: RequestInit)
+      const [url, init] = apiFetch.mock.calls[0];
+      expect(url).toBe("https://api/internal/revalidate/proj_1");
+      expect(init.method).toBe("POST");
+      expect(new Headers(init.headers).get("x-void-internal")).toBe(aiTokens["proj_1"]);
+      expect(JSON.parse(init.body)).toEqual({ paths: ["/", "/blog"] });
+    });
+
+    it("forwards all:true revalidation", async () => {
+      const apiFetch = vi.fn(
+        async () =>
+          new Response(JSON.stringify({ purged: 10 }), {
+            headers: { "content-type": "application/json" },
+          }),
+      );
+      const env = createEnv({}, {}, { fetch: apiFetch });
+
+      const res = await worker.fetch(
+        post("/revalidate", {
+          all: true,
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_1"],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ purged: 10 });
+
+      const [, init] = apiFetch.mock.calls[0];
+      expect(JSON.parse(init.body)).toEqual({ all: true });
+    });
+
+    it("rejects unauthenticated revalidation requests", async () => {
+      const res = await worker.fetch(post("/revalidate", { paths: ["/"] }), createEnv());
+
+      expect(res.status).toBe(400);
     });
   });
 
