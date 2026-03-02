@@ -9,11 +9,55 @@ export interface IsrCacheEntry {
   ttl: number;
 }
 
+export interface IsrCacheMetadata {
+  /** HTTP status code */
+  s: number;
+  /** createdAt (ms) */
+  c: number;
+  /** TTL (seconds) */
+  t: number;
+}
+
 /**
- * Build the R2 key for an ISR-cached page.
+ * Pack response headers + body into a single ArrayBuffer.
+ * Format: [4 bytes uint32 LE header length][UTF-8 header JSON][raw body]
+ */
+export function packIsrValue(headers: Record<string, string>, body: ArrayBuffer): ArrayBuffer {
+  const headerJson = new TextEncoder().encode(JSON.stringify(headers));
+  const buffer = new ArrayBuffer(4 + headerJson.byteLength + body.byteLength);
+  const view = new DataView(buffer);
+  view.setUint32(0, headerJson.byteLength, true); // little-endian
+  new Uint8Array(buffer, 4, headerJson.byteLength).set(headerJson);
+  new Uint8Array(buffer, 4 + headerJson.byteLength).set(new Uint8Array(body));
+  return buffer;
+}
+
+/**
+ * Unpack headers + body from a packed ArrayBuffer.
+ * Returns null if the buffer is too small or malformed.
+ */
+export function unpackIsrValue(
+  buffer: ArrayBuffer,
+): { headers: Record<string, string>; body: ArrayBuffer } | null {
+  if (buffer.byteLength < 4) return null;
+  const view = new DataView(buffer);
+  const headerLen = view.getUint32(0, true);
+  if (buffer.byteLength < 4 + headerLen) return null;
+  try {
+    const headerBytes = new Uint8Array(buffer, 4, headerLen);
+    const headers: Record<string, string> = JSON.parse(new TextDecoder().decode(headerBytes));
+    const body = buffer.slice(4 + headerLen);
+    return { headers, body };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build the cache key for an ISR-cached page.
  * Root path `/` maps to `__index__` to avoid trailing-slash ambiguity.
  */
-export function isrR2Key(projectId: string, pathname: string): string {
+export function isrCacheKey(projectId: string, pathname: string): string {
   let normalized = pathname;
   if (normalized === "/") {
     normalized = "__index__";
@@ -29,7 +73,7 @@ export function isrR2Key(projectId: string, pathname: string): string {
 }
 
 /**
- * Read an ISR cache entry from R2.
+ * Read an ISR cache entry from KV.
  * Returns null on cache miss or if metadata is malformed.
  */
 export async function readIsrCache(
@@ -37,44 +81,43 @@ export async function readIsrCache(
   projectId: string,
   pathname: string,
 ): Promise<IsrCacheEntry | null> {
-  const key = isrR2Key(projectId, pathname);
-  const object = await env.ASSETS.get(key);
-  if (!object) return null;
+  const key = isrCacheKey(projectId, pathname);
+  const { value, metadata } = await env.ISR_CACHE.getWithMetadata<IsrCacheMetadata>(
+    key,
+    "arrayBuffer",
+  );
+  if (!value || !metadata) return null;
 
-  const meta = object.customMetadata ?? {};
-  const status = parseInt(meta.status ?? "200", 10);
-  const createdAt = parseInt(meta.createdAt ?? "0", 10);
-  const ttl = parseInt(meta.ttl ?? "0", 10);
+  const unpacked = unpackIsrValue(value);
+  if (!unpacked) return null;
 
-  if (!createdAt || !ttl) return null;
-
-  let headers: Record<string, string> = {};
-  try {
-    headers = meta.headers ? JSON.parse(meta.headers) : {};
-  } catch {
-    // Malformed headers metadata — treat as empty
-  }
+  if (!metadata.c || !metadata.t) return null;
 
   return {
-    body: object.body,
-    status,
-    headers,
-    createdAt,
-    ttl,
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(unpacked.body));
+        controller.close();
+      },
+    }),
+    status: metadata.s,
+    headers: unpacked.headers,
+    createdAt: metadata.c,
+    ttl: metadata.t,
   };
 }
 
 /**
- * Delete an ISR cache entry from R2.
+ * Delete an ISR cache entry from KV.
  * Used when a worker permanently opts out via x-revalidate: 0.
  */
 export async function deleteIsrCache(env: Env, projectId: string, pathname: string): Promise<void> {
-  const key = isrR2Key(projectId, pathname);
-  await env.ASSETS.delete(key);
+  const key = isrCacheKey(projectId, pathname);
+  await env.ISR_CACHE.delete(key);
 }
 
 /**
- * Write an ISR cache entry to R2.
+ * Write an ISR cache entry to KV.
  */
 export async function writeIsrCache(
   env: Env,
@@ -83,16 +126,17 @@ export async function writeIsrCache(
   response: Response,
   ttl: number,
 ): Promise<void> {
-  const key = isrR2Key(projectId, pathname);
+  const key = isrCacheKey(projectId, pathname);
   const headers = serializeHeaders(response);
+  const body = await response.clone().arrayBuffer();
+  const packed = packIsrValue(headers, body);
 
-  await env.ASSETS.put(key, response.clone().body!, {
-    customMetadata: {
-      status: String(response.status),
-      createdAt: String(Date.now()),
-      ttl: String(ttl),
-      headers: JSON.stringify(headers),
-    },
+  await env.ISR_CACHE.put(key, packed, {
+    metadata: {
+      s: response.status,
+      c: Date.now(),
+      t: ttl,
+    } satisfies IsrCacheMetadata,
   });
 }
 
@@ -192,7 +236,7 @@ export function serializeHeaders(response: Response): Record<string, string> {
 
 /**
  * Build a normalized cache key Request for the edge cache (caches.default).
- * Uses origin + pathname only (no query params) to match R2 key behavior.
+ * Uses origin + pathname only (no query params) to match cache key behavior.
  */
 export function isrEdgeCacheKey(request: Request, pathname: string): Request {
   const url = new URL(request.url);

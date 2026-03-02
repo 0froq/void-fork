@@ -18,16 +18,14 @@
       "namespace": "void-users",
     },
   ],
-  "r2_buckets": [
-    {
-      "binding": "ASSETS",
-      "bucket_name": "void-assets",
-    },
-  ],
   "kv_namespaces": [
     {
       "binding": "ROUTING",
       "id": "9250c33f3db6494ebe8ad6272812c8c0",
+    },
+    {
+      "binding": "ISR_CACHE",
+      "id": "7a0284b2390b42218901919579aadf0e",
     },
   ],
   "analytics_engine_datasets": [
@@ -65,16 +63,14 @@
           "namespace": "void-users-staging",
         },
       ],
-      "r2_buckets": [
-        {
-          "binding": "ASSETS",
-          "bucket_name": "void-assets-staging",
-        },
-      ],
       "kv_namespaces": [
         {
           "binding": "ROUTING",
           "id": "60240eecea804f39bf8b7395cd6c6b08",
+        },
+        {
+          "binding": "ISR_CACHE",
+          "id": "7f13ef3a3745445c883a5bbc72f031b7",
         },
       ],
       "analytics_engine_datasets": [

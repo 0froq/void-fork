@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
-  isrR2Key,
+  isrCacheKey,
   isStale,
   resolveRevalidateTtl,
   resolvePathTtl,
@@ -8,28 +8,30 @@ import {
   isrCacheResponse,
   isrEdgeCacheKeyJson,
   serializeHeaders,
+  packIsrValue,
+  unpackIsrValue,
   type IsrCacheEntry,
 } from "../../src/isr";
 
-describe("isrR2Key", () => {
+describe("isrCacheKey", () => {
   it("maps root path to __index__", () => {
-    expect(isrR2Key("proj_1", "/")).toBe("proj_1/isr/__index__");
+    expect(isrCacheKey("proj_1", "/")).toBe("proj_1/isr/__index__");
   });
 
   it("strips leading slash", () => {
-    expect(isrR2Key("proj_1", "/about")).toBe("proj_1/isr/about");
+    expect(isrCacheKey("proj_1", "/about")).toBe("proj_1/isr/about");
   });
 
   it("strips trailing slash", () => {
-    expect(isrR2Key("proj_1", "/about/")).toBe("proj_1/isr/about");
+    expect(isrCacheKey("proj_1", "/about/")).toBe("proj_1/isr/about");
   });
 
   it("handles nested paths", () => {
-    expect(isrR2Key("proj_1", "/blog/hello-world")).toBe("proj_1/isr/blog/hello-world");
+    expect(isrCacheKey("proj_1", "/blog/hello-world")).toBe("proj_1/isr/blog/hello-world");
   });
 
   it("handles path without leading slash", () => {
-    expect(isrR2Key("proj_1", "about")).toBe("proj_1/isr/about");
+    expect(isrCacheKey("proj_1", "about")).toBe("proj_1/isr/about");
   });
 });
 
@@ -264,5 +266,47 @@ describe("serializeHeaders", () => {
     expect(result["cache-control"]).toBeUndefined();
     expect(result["x-isr-cache"]).toBeUndefined();
     expect(result["content-type"]).toBe("text/html");
+  });
+});
+
+describe("packIsrValue / unpackIsrValue", () => {
+  it("round-trips headers and body", () => {
+    const headers = { "content-type": "text/html", etag: '"abc"' };
+    const body = new TextEncoder().encode("<html>hello</html>").buffer as ArrayBuffer;
+    const packed = packIsrValue(headers, body);
+    const result = unpackIsrValue(packed);
+    expect(result).not.toBeNull();
+    expect(result!.headers).toEqual(headers);
+    expect(new TextDecoder().decode(result!.body)).toBe("<html>hello</html>");
+  });
+
+  it("handles empty body", () => {
+    const headers = { "content-type": "text/html" };
+    const body = new ArrayBuffer(0);
+    const packed = packIsrValue(headers, body);
+    const result = unpackIsrValue(packed);
+    expect(result).not.toBeNull();
+    expect(result!.headers).toEqual(headers);
+    expect(result!.body.byteLength).toBe(0);
+  });
+
+  it("handles empty headers", () => {
+    const headers = {};
+    const body = new TextEncoder().encode("hello").buffer as ArrayBuffer;
+    const packed = packIsrValue(headers, body);
+    const result = unpackIsrValue(packed);
+    expect(result).not.toBeNull();
+    expect(result!.headers).toEqual({});
+    expect(new TextDecoder().decode(result!.body)).toBe("hello");
+  });
+
+  it("returns null for buffer too small", () => {
+    expect(unpackIsrValue(new ArrayBuffer(2))).toBeNull();
+  });
+
+  it("returns null for truncated header", () => {
+    const buf = new ArrayBuffer(4);
+    new DataView(buf).setUint32(0, 999, true); // claims 999 bytes of headers
+    expect(unpackIsrValue(buf)).toBeNull();
   });
 });

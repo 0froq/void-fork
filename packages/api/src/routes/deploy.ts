@@ -523,8 +523,8 @@ app.post("/:id/deploy", async (c) => {
 
         // 3. Clear previous ISR cache on deploy.
         // Always clear — handles both "new deploy has ISR" and "previous deploy had ISR
-        // but new one doesn't" (avoids orphaned R2 entries). No-op for empty prefixes.
-        await clearIsrCache(c.env.ASSETS, projectId);
+        // but new one doesn't" (avoids orphaned KV entries). No-op for empty prefixes.
+        await clearIsrCache(c.env.ISR_CACHE, projectId);
 
         // 3b. Prerender pages (write ISR cache entries before going live)
         currentStep = "prerender";
@@ -544,16 +544,16 @@ app.post("/:id/deploy", async (c) => {
               const response = await userWorker.fetch(new Request(url));
 
               if (response.ok) {
-                const r2Key = isrR2Key(projectId, pathname);
+                const key = isrCacheKey(projectId, pathname);
                 const headers = serializePrerenderHeaders(response);
                 const body = await response.arrayBuffer();
+                const packed = packIsrValue(headers, body);
 
-                await c.env.ASSETS.put(r2Key, body, {
-                  customMetadata: {
-                    status: String(response.status),
-                    createdAt: String(Date.now()),
-                    ttl: String(ttl),
-                    headers: JSON.stringify(headers),
+                await c.env.ISR_CACHE.put(key, packed, {
+                  metadata: {
+                    s: response.status,
+                    c: Date.now(),
+                    t: ttl,
                   },
                 });
               }
@@ -706,26 +706,40 @@ async function uploadPool<T>(
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
 }
 
-async function clearIsrCache(assets: R2Bucket, projectId: string): Promise<void> {
+async function clearIsrCache(kv: KVNamespace, projectId: string): Promise<void> {
   const prefix = `${projectId}/isr/`;
   let cursor: string | undefined;
 
   do {
-    const listed = await assets.list({ prefix, cursor });
-    if (listed.objects.length > 0) {
-      await uploadPool(listed.objects, R2_CONCURRENCY, (obj) => assets.delete(obj.key));
+    const listed = await kv.list({ prefix, cursor });
+    if (listed.keys.length > 0) {
+      await uploadPool(listed.keys, R2_CONCURRENCY, (key) => kv.delete(key.name));
     }
-    cursor = listed.truncated ? listed.cursor : undefined;
+    cursor = listed.list_complete ? undefined : listed.cursor;
   } while (cursor);
 }
 
 // --- ISR prerender helpers (inlined from dispatch to avoid cross-package dependency) ---
 
 /**
- * Build the R2 key for an ISR-cached page.
+ * Pack response headers + body into a single ArrayBuffer.
+ * Format: [4 bytes uint32 LE header length][UTF-8 header JSON][raw body]
+ */
+function packIsrValue(headers: Record<string, string>, body: ArrayBuffer): ArrayBuffer {
+  const headerJson = new TextEncoder().encode(JSON.stringify(headers));
+  const buffer = new ArrayBuffer(4 + headerJson.byteLength + body.byteLength);
+  const view = new DataView(buffer);
+  view.setUint32(0, headerJson.byteLength, true);
+  new Uint8Array(buffer, 4, headerJson.byteLength).set(headerJson);
+  new Uint8Array(buffer, 4 + headerJson.byteLength).set(new Uint8Array(body));
+  return buffer;
+}
+
+/**
+ * Build the cache key for an ISR-cached page.
  * Root path `/` maps to `__index__` to avoid trailing-slash ambiguity.
  */
-function isrR2Key(projectId: string, pathname: string): string {
+function isrCacheKey(projectId: string, pathname: string): string {
   let normalized = pathname;
   if (normalized === "/") {
     normalized = "__index__";

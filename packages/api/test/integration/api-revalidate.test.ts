@@ -96,21 +96,15 @@ describe("POST /projects/:id/revalidate", () => {
     expect(res.status).toBe(400);
   });
 
-  it("purges specific paths from R2 and edge cache", async () => {
+  it("purges specific paths from KV and edge cache", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
     const fetchMock = mockCfApi();
 
     // Seed ISR cache entries
-    await env.ASSETS.put(`${project.id}/isr/__index__`, "home", {
-      customMetadata: { status: "200", createdAt: String(Date.now()), ttl: "60", headers: "{}" },
-    });
-    await env.ASSETS.put(`${project.id}/isr/about`, "about", {
-      customMetadata: { status: "200", createdAt: String(Date.now()), ttl: "60", headers: "{}" },
-    });
-    await env.ASSETS.put(`${project.id}/isr/blog/hello`, "blog post", {
-      customMetadata: { status: "200", createdAt: String(Date.now()), ttl: "60", headers: "{}" },
-    });
+    await env.ISR_CACHE.put(`${project.id}/isr/__index__`, "home");
+    await env.ISR_CACHE.put(`${project.id}/isr/about`, "about");
+    await env.ISR_CACHE.put(`${project.id}/isr/blog/hello`, "blog post");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -129,12 +123,12 @@ describe("POST /projects/:id/revalidate", () => {
     expect(body.purged).toBe(2);
 
     // Verify purged entries are gone
-    const home = await env.ASSETS.get(`${project.id}/isr/__index__`);
+    const home = await env.ISR_CACHE.get(`${project.id}/isr/__index__`);
     expect(home).toBeNull();
-    const about = await env.ASSETS.get(`${project.id}/isr/about`);
+    const about = await env.ISR_CACHE.get(`${project.id}/isr/about`);
     expect(about).toBeNull();
     // blog/hello should still exist
-    const blog = await env.ASSETS.get(`${project.id}/isr/blog/hello`);
+    const blog = await env.ISR_CACHE.get(`${project.id}/isr/blog/hello`);
     expect(blog).not.toBeNull();
 
     // Verify edge cache purge was called with correct URLs
@@ -158,12 +152,8 @@ describe("POST /projects/:id/revalidate", () => {
     const fetchMock = mockCfApi();
 
     // Seed ISR cache entries
-    await env.ASSETS.put(`${project.id}/isr/__index__`, "home", {
-      customMetadata: { status: "200", createdAt: String(Date.now()), ttl: "60", headers: "{}" },
-    });
-    await env.ASSETS.put(`${project.id}/isr/about`, "about", {
-      customMetadata: { status: "200", createdAt: String(Date.now()), ttl: "60", headers: "{}" },
-    });
+    await env.ISR_CACHE.put(`${project.id}/isr/__index__`, "home");
+    await env.ISR_CACHE.put(`${project.id}/isr/about`, "about");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -182,12 +172,12 @@ describe("POST /projects/:id/revalidate", () => {
     expect(body.purged).toBe(2);
 
     // Verify all ISR entries are gone
-    const home = await env.ASSETS.get(`${project.id}/isr/__index__`);
+    const home = await env.ISR_CACHE.get(`${project.id}/isr/__index__`);
     expect(home).toBeNull();
-    const about = await env.ASSETS.get(`${project.id}/isr/about`);
+    const about = await env.ISR_CACHE.get(`${project.id}/isr/about`);
     expect(about).toBeNull();
 
-    // Verify edge cache purge with correct pathnames derived from R2 keys
+    // Verify edge cache purge with correct pathnames derived from KV keys
     const purgeCalls = fetchMock.mock.calls.filter(
       (call: unknown[]) =>
         (call[1] as RequestInit | undefined)?.method === "POST" &&
@@ -215,9 +205,7 @@ describe("POST /projects/:id/revalidate", () => {
       status: "active",
     });
 
-    await env.ASSETS.put(`${project.id}/isr/about`, "about", {
-      customMetadata: { status: "200", createdAt: String(Date.now()), ttl: "60", headers: "{}" },
-    });
+    await env.ISR_CACHE.put(`${project.id}/isr/about`, "about");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -258,9 +246,7 @@ describe("POST /projects/:id/revalidate", () => {
     for (let i = 0; i < 51; i++) {
       const path = `/page-${i}`;
       paths.push(path);
-      await env.ASSETS.put(`${project.id}/isr/page-${i}`, `content-${i}`, {
-        customMetadata: { status: "200", createdAt: String(Date.now()), ttl: "60", headers: "{}" },
-      });
+      await env.ISR_CACHE.put(`${project.id}/isr/page-${i}`, `content-${i}`);
     }
 
     const res = await app.fetch(
@@ -299,9 +285,7 @@ describe("POST /projects/:id/revalidate", () => {
         Response.json({ success: false, errors: [{ code: 1000, message: "fail" }] }),
     });
 
-    await env.ASSETS.put(`${project.id}/isr/about`, "about", {
-      customMetadata: { status: "200", createdAt: String(Date.now()), ttl: "60", headers: "{}" },
-    });
+    await env.ISR_CACHE.put(`${project.id}/isr/about`, "about");
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -315,13 +299,13 @@ describe("POST /projects/:id/revalidate", () => {
       env,
     );
 
-    // Should still succeed — R2 deletion happened, edge purge is best-effort
+    // Should still succeed — KV deletion happened, edge purge is best-effort
     expect(res.status).toBe(200);
     const body = (await res.json()) as { purged: number };
     expect(body.purged).toBe(1);
 
-    // R2 entry should still be deleted
-    const about = await env.ASSETS.get(`${project.id}/isr/about`);
+    // KV entry should still be deleted
+    const about = await env.ISR_CACHE.get(`${project.id}/isr/about`);
     expect(about).toBeNull();
   });
 });

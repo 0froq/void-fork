@@ -29,16 +29,16 @@ app.post("/:id/revalidate", async (c) => {
     const pathnames: string[] = [];
 
     do {
-      const listed = await c.env.ASSETS.list({ prefix, cursor });
-      if (listed.objects.length > 0) {
-        for (const obj of listed.objects) {
-          const normalized = obj.key.slice(prefix.length);
+      const listed = await c.env.ISR_CACHE.list({ prefix, cursor });
+      if (listed.keys.length > 0) {
+        for (const key of listed.keys) {
+          const normalized = key.name.slice(prefix.length);
           pathnames.push(normalized === "__index__" ? "/" : `/${normalized}`);
         }
-        await uploadPool(listed.objects, R2_CONCURRENCY, (obj) => c.env.ASSETS.delete(obj.key));
-        purged += listed.objects.length;
+        await uploadPool(listed.keys, R2_CONCURRENCY, (key) => c.env.ISR_CACHE.delete(key.name));
+        purged += listed.keys.length;
       }
-      cursor = listed.truncated ? listed.cursor : undefined;
+      cursor = listed.list_complete ? undefined : listed.cursor;
     } while (cursor);
 
     await purgeEdgeCache(c, projectId, project.slug, pathnames);
@@ -62,7 +62,7 @@ app.post("/:id/revalidate", async (c) => {
       }
     }
     const key = `${projectId}/isr/${normalized}`;
-    await c.env.ASSETS.delete(key);
+    await c.env.ISR_CACHE.delete(key);
     purged++;
   }
 
@@ -97,7 +97,7 @@ async function purgeEdgeCache(
 
     await purgeZoneCache(c.env.CF_ZONE_ID, c.env.CF_API_TOKEN, urls);
   } catch {
-    // Best-effort: R2 is already purged, worst case is stale edge for remaining TTL
+    // Best-effort: KV is already purged, worst case is stale edge for remaining TTL
   }
 }
 

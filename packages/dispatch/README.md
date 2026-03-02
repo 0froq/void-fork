@@ -9,7 +9,7 @@ Routes `*.void.app` traffic to user workers and static assets. CF Worker using p
 3. **Suspension check**: If `routing.suspended` is set → return 429 `{ error: "usage limit exceeded", reason }`
 4. Edge cache check via `caches.default` with versioned cache key (`?_v={version}`)
 5. `/api/*` → `getWorker(env, routing).fetch(request)` with custom limits (Workers for Platforms, not cached). CPU limit errors caught → 429
-6. Everything else → serve static assets from R2 (SPA fallback to `index.html`), cache response at edge
+6. Everything else → serve static assets from R2 (SPA fallback to `index.html`) or ISR cache from KV, cache response at edge
 7. **Metering**: Every request (except 404/suspended) records an Analytics Engine data point via `ctx.waitUntil` (fire-and-forget, zero latency impact)
 
 ## Queue Relay
@@ -27,9 +27,10 @@ The dispatch worker also exports a `queue()` handler for Cloudflare Queue batch 
 ```
 src/
   index.ts                  # Main fetch handler + suspension check + custom limits
-  env.ts                    # Env interface (DISPATCH, ASSETS, ROUTING, ANALYTICS, BASE_HOSTNAME?)
+  env.ts                    # Env interface (DISPATCH, ISR_CACHE, ROUTING, ANALYTICS, BASE_HOSTNAME?)
   hostname.ts               # extractSlug() — pure function
   static.ts                 # serveStaticAsset() — R2 lookup, SPA fallback, cache headers
+  isr.ts                    # ISR cache read/write/delete — KV with binary pack format
   metering.ts               # recordRequest() — Analytics Engine writeDataPoint wrapper
 ```
 

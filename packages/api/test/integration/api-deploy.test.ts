@@ -1042,7 +1042,7 @@ describe("POST /projects/:id/deploy (static)", () => {
 });
 
 describe("Deploy with prerendering", () => {
-  it("prerenders pages and writes ISR cache entries to R2", async () => {
+  it("prerenders pages and writes ISR cache entries to KV", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "prerender-app");
 
@@ -1078,17 +1078,26 @@ describe("Deploy with prerendering", () => {
     expect(res.status).toBe(200);
     await res.text();
 
-    // Verify ISR cache entries were written to R2
-    const homeEntry = await env.ASSETS.get(`${project.id}/isr/__index__`);
-    expect(homeEntry).not.toBeNull();
-    expect(await homeEntry!.text()).toBe("<html>Prerendered</html>");
-    const homeMeta = homeEntry!.customMetadata;
-    expect(homeMeta?.status).toBe("200");
-    expect(homeMeta?.ttl).toBe("3600");
+    // Verify ISR cache entries were written to KV (packed binary format)
+    const { value: homeValue, metadata: homeMeta } = await env.ISR_CACHE.getWithMetadata<{
+      s: number;
+      c: number;
+      t: number;
+    }>(`${project.id}/isr/__index__`, "arrayBuffer");
+    expect(homeValue).not.toBeNull();
+    // Unpack: [4-byte header len][headers JSON][body]
+    const homeView = new DataView(homeValue!);
+    const homeHeaderLen = homeView.getUint32(0, true);
+    const homeBody = new TextDecoder().decode(new Uint8Array(homeValue!, 4 + homeHeaderLen));
+    expect(homeBody).toBe("<html>Prerendered</html>");
+    expect(homeMeta?.s).toBe(200);
+    expect(homeMeta?.t).toBe(3600);
 
-    const aboutEntry = await env.ASSETS.get(`${project.id}/isr/about`);
-    expect(aboutEntry).not.toBeNull();
-    expect(await aboutEntry!.text()).toBe("<html>Prerendered</html>");
+    const { value: aboutValue } = await env.ISR_CACHE.getWithMetadata(
+      `${project.id}/isr/about`,
+      "arrayBuffer",
+    );
+    expect(aboutValue).not.toBeNull();
 
     // Verify deployment is live
     const [dpl] = await env.db
@@ -1136,12 +1145,18 @@ describe("Deploy with prerendering", () => {
     expect(dispatchFetch).toHaveBeenCalledTimes(1);
 
     // /about should have ISR entry
-    const aboutEntry = await env.ASSETS.get(`${project.id}/isr/about`);
-    expect(aboutEntry).not.toBeNull();
+    const { value: aboutValue } = await env.ISR_CACHE.getWithMetadata(
+      `${project.id}/isr/about`,
+      "arrayBuffer",
+    );
+    expect(aboutValue).not.toBeNull();
 
     // /private should NOT have ISR entry
-    const privateEntry = await env.ASSETS.get(`${project.id}/isr/private`);
-    expect(privateEntry).toBeNull();
+    const { value: privateValue } = await env.ISR_CACHE.getWithMetadata(
+      `${project.id}/isr/private`,
+      "arrayBuffer",
+    );
+    expect(privateValue).toBeNull();
   });
 
   it("does not block deploy when prerender fails", async () => {

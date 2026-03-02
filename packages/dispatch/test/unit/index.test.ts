@@ -43,35 +43,57 @@ function createCtx(): ExecutionContext {
   return { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 }
 
-interface MockAsset {
+interface MockIsrEntry {
   body: string;
-  contentType?: string;
-  etag?: string;
-  customMetadata?: Record<string, string>;
+  status?: number;
+  createdAt: number;
+  ttl: number;
+  headers?: Record<string, string>;
+}
+
+function packMockEntry(entry: MockIsrEntry): {
+  value: ArrayBuffer;
+  metadata: { s: number; c: number; t: number };
+} {
+  const headers = entry.headers ?? {};
+  const headerJson = new TextEncoder().encode(JSON.stringify(headers));
+  const bodyBytes = new TextEncoder().encode(entry.body);
+  const buffer = new ArrayBuffer(4 + headerJson.byteLength + bodyBytes.byteLength);
+  const view = new DataView(buffer);
+  view.setUint32(0, headerJson.byteLength, true);
+  new Uint8Array(buffer, 4, headerJson.byteLength).set(headerJson);
+  new Uint8Array(buffer, 4 + headerJson.byteLength).set(bodyBytes);
+  return {
+    value: buffer,
+    metadata: { s: entry.status ?? 200, c: entry.createdAt, t: entry.ttl },
+  };
 }
 
 function createEnv(options: {
   routing: RoutingEntry;
-  assets?: Record<string, MockAsset>;
+  assets?: Record<string, MockIsrEntry>;
   workerResponse?: Response;
   workerFetchImpl?: () => Promise<Response>;
 }): {
   env: Env;
   workerFetch: ReturnType<typeof vi.fn>;
   dispatchGet: ReturnType<typeof vi.fn>;
-  r2Store: Map<string, MockAsset>;
+  kvStore: Map<string, { value: ArrayBuffer; metadata: { s: number; c: number; t: number } }>;
   analyticsWrites: unknown[];
 } {
   const workerFetch = vi.fn(
     async () => options.workerFetchImpl?.() ?? options.workerResponse ?? new Response("worker"),
   );
-  const r2Store = new Map<string, MockAsset>();
+  const kvStore = new Map<
+    string,
+    { value: ArrayBuffer; metadata: { s: number; c: number; t: number } }
+  >();
   const analyticsWrites: unknown[] = [];
 
-  // Seed initial assets (R2 — used for ISR cache only)
+  // Seed initial ISR cache entries
   if (options.assets) {
-    for (const [key, value] of Object.entries(options.assets)) {
-      r2Store.set(key, value);
+    for (const [key, entry] of Object.entries(options.assets)) {
+      kvStore.set(key, packMockEntry(entry));
     }
   }
 
@@ -84,27 +106,20 @@ function createEnv(options: {
     DISPATCH: {
       get: dispatchGet,
     },
-    ASSETS: {
-      get: async (key: string) => {
-        const object = r2Store.get(key);
-        if (!object) return null;
-        return {
-          body: object.body,
-          httpMetadata: { contentType: object.contentType ?? "text/plain" },
-          httpEtag: object.etag ?? `"${key}"`,
-          customMetadata: object.customMetadata,
-        } as unknown as R2ObjectBody;
+    ISR_CACHE: {
+      getWithMetadata: async (key: string) => {
+        const entry = kvStore.get(key);
+        if (!entry) return { value: null, metadata: null };
+        return { value: entry.value, metadata: entry.metadata };
       },
-      put: async (key: string, body: any, opts?: any) => {
-        const text = typeof body === "string" ? body : await new Response(body).text();
-        r2Store.set(key, {
-          body: text,
-          contentType: opts?.httpMetadata?.contentType,
-          customMetadata: opts?.customMetadata,
+      put: async (key: string, value: ArrayBuffer, opts?: { metadata?: unknown }) => {
+        kvStore.set(key, {
+          value,
+          metadata: opts?.metadata as { s: number; c: number; t: number },
         });
       },
       delete: async (key: string) => {
-        r2Store.delete(key);
+        kvStore.delete(key);
       },
     },
     ANALYTICS: {
@@ -112,7 +127,7 @@ function createEnv(options: {
     },
   } as unknown as Env;
 
-  return { env, workerFetch, dispatchGet, r2Store, analyticsWrites };
+  return { env, workerFetch, dispatchGet, kvStore, analyticsWrites };
 }
 
 describe("dispatch fetch handler", () => {
@@ -182,8 +197,8 @@ describe("custom domain routing", () => {
       DISPATCH: {
         get: () => ({ fetch: workerFetch }),
       },
-      ASSETS: {
-        get: async () => null,
+      ISR_CACHE: {
+        getWithMetadata: async () => ({ value: null, metadata: null }),
       },
       ANALYTICS: { writeDataPoint: () => {} },
     } as unknown as Env;
@@ -206,8 +221,8 @@ describe("custom domain routing", () => {
       DISPATCH: {
         get: () => ({ fetch: vi.fn() }),
       },
-      ASSETS: {
-        get: async () => null,
+      ISR_CACHE: {
+        getWithMetadata: async () => ({ value: null, metadata: null }),
       },
       ANALYTICS: { writeDataPoint: () => {} },
     } as unknown as Env;
@@ -219,8 +234,8 @@ describe("custom domain routing", () => {
 });
 
 describe("ISR (stale-while-revalidate)", () => {
-  it("caches worker response in R2 on first ISR request", async () => {
-    const { env, workerFetch, r2Store } = createEnv({
+  it("caches worker response in KV on first ISR request", async () => {
+    const { env, workerFetch, kvStore } = createEnv({
       routing: {
         workerName: "user-app",
         projectId: "proj_1",
@@ -241,7 +256,7 @@ describe("ISR (stale-while-revalidate)", () => {
 
     // Wait for background write
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
-    expect(r2Store.has("proj_1/isr/dashboard")).toBe(true);
+    expect(kvStore.has("proj_1/isr/dashboard")).toBe(true);
   });
 
   it("serves from ISR cache on second request (no worker call)", async () => {
@@ -255,12 +270,9 @@ describe("ISR (stale-while-revalidate)", () => {
       assets: {
         "proj_1/isr/dashboard": {
           body: "<html>cached</html>",
-          customMetadata: {
-            status: "200",
-            createdAt: String(Date.now()),
-            ttl: "60",
-            headers: JSON.stringify({ "Content-Type": "text/html" }),
-          },
+          createdAt: Date.now(),
+          ttl: 60,
+          headers: { "Content-Type": "text/html" },
         },
       },
     });
@@ -288,12 +300,9 @@ describe("ISR (stale-while-revalidate)", () => {
       assets: {
         "proj_1/isr/dashboard": {
           body: "<html>cached</html>",
-          customMetadata: {
-            status: "200",
-            createdAt: String(Date.now()),
-            ttl: "60",
-            headers: JSON.stringify({ "Content-Type": "text/html" }),
-          },
+          createdAt: Date.now(),
+          ttl: 60,
+          headers: { "Content-Type": "text/html" },
         },
       },
       workerResponse: new Response("<html>personalized</html>"),
@@ -313,7 +322,7 @@ describe("ISR (stale-while-revalidate)", () => {
   });
 
   it("does not cache when x-revalidate: 0 opt-out", async () => {
-    const { env, workerFetch, r2Store } = createEnv({
+    const { env, workerFetch, kvStore } = createEnv({
       routing: {
         workerName: "user-app",
         projectId: "proj_1",
@@ -332,7 +341,7 @@ describe("ISR (stale-while-revalidate)", () => {
     expect(await response.text()).toBe("<html>no-cache</html>");
     // No waitUntil calls — analytics is sync, no userId for queue, no ISR cache write
     expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
-    expect(r2Store.has("proj_1/isr/dashboard")).toBe(false);
+    expect(kvStore.has("proj_1/isr/dashboard")).toBe(false);
   });
 
   it("SSR without revalidate works unchanged", async () => {
@@ -385,8 +394,8 @@ describe("ISR (stale-while-revalidate)", () => {
     );
   });
 
-  it("deletes R2 entry when background revalidation gets x-revalidate: 0", async () => {
-    const { env, workerFetch, r2Store } = createEnv({
+  it("deletes KV entry when background revalidation gets x-revalidate: 0", async () => {
+    const { env, workerFetch, kvStore } = createEnv({
       routing: {
         workerName: "user-app",
         projectId: "proj_1",
@@ -396,12 +405,9 @@ describe("ISR (stale-while-revalidate)", () => {
       assets: {
         "proj_1/isr/dashboard": {
           body: "<html>stale</html>",
-          customMetadata: {
-            status: "200",
-            createdAt: String(Date.now() - 120 * 1000),
-            ttl: "60",
-            headers: JSON.stringify({ "Content-Type": "text/html" }),
-          },
+          createdAt: Date.now() - 120 * 1000,
+          ttl: 60,
+          headers: { "Content-Type": "text/html" },
         },
       },
       workerResponse: new Response("<html>opt-out</html>", {
@@ -417,8 +423,8 @@ describe("ISR (stale-while-revalidate)", () => {
     // Wait for background revalidation
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
     expect(workerFetch).toHaveBeenCalledOnce();
-    // R2 entry should be deleted after x-revalidate: 0
-    expect(r2Store.has("proj_1/isr/dashboard")).toBe(false);
+    // KV entry should be deleted after x-revalidate: 0
+    expect(kvStore.has("proj_1/isr/dashboard")).toBe(false);
   });
 
   it("revalidates stale entry in background and returns stale content", async () => {
@@ -432,12 +438,9 @@ describe("ISR (stale-while-revalidate)", () => {
       assets: {
         "proj_1/isr/dashboard": {
           body: "<html>stale</html>",
-          customMetadata: {
-            status: "200",
-            createdAt: String(Date.now() - 120 * 1000), // 2 minutes ago, TTL is 60s
-            ttl: "60",
-            headers: JSON.stringify({ "Content-Type": "text/html" }),
-          },
+          createdAt: Date.now() - 120 * 1000, // 2 minutes ago, TTL is 60s
+          ttl: 60,
+          headers: { "Content-Type": "text/html" },
         },
       },
       workerResponse: new Response("<html>fresh</html>", {
@@ -460,7 +463,7 @@ describe("ISR (stale-while-revalidate)", () => {
     expect(workerFetch).toHaveBeenCalledOnce();
   });
 
-  it("serves from edge cache on repeat ISR request (no R2 read)", async () => {
+  it("serves from edge cache on repeat ISR request (no KV read)", async () => {
     // Pre-populate edge cache
     edgeCacheStore.set(
       "https://my-app.void.app/dashboard",
@@ -490,7 +493,7 @@ describe("ISR (stale-while-revalidate)", () => {
     expect(await response.text()).toBe("<html>edge</html>");
   });
 
-  it("populates edge cache after R2 hit", async () => {
+  it("populates edge cache after KV hit", async () => {
     const { env, workerFetch } = createEnv({
       routing: {
         workerName: "user-app",
@@ -501,12 +504,9 @@ describe("ISR (stale-while-revalidate)", () => {
       assets: {
         "proj_1/isr/dashboard": {
           body: "<html>r2-cached</html>",
-          customMetadata: {
-            status: "200",
-            createdAt: String(Date.now()),
-            ttl: "60",
-            headers: JSON.stringify({ "Content-Type": "text/html" }),
-          },
+          createdAt: Date.now(),
+          ttl: 60,
+          headers: { "Content-Type": "text/html" },
         },
       },
     });
@@ -622,12 +622,9 @@ describe("ISR JSON edge cache (pages protocol)", () => {
       assets: {
         "proj_1/isr/dashboard": {
           body: "<html>stale</html>",
-          customMetadata: {
-            status: "200",
-            createdAt: String(Date.now() - 120 * 1000),
-            ttl: "60",
-            headers: JSON.stringify({ "Content-Type": "text/html" }),
-          },
+          createdAt: Date.now() - 120 * 1000,
+          ttl: 60,
+          headers: { "Content-Type": "text/html" },
         },
       },
       workerResponse: new Response("<html>fresh</html>", {
@@ -661,12 +658,9 @@ describe("ISR JSON edge cache (pages protocol)", () => {
       assets: {
         "proj_1/isr/dashboard": {
           body: "<html>stale</html>",
-          customMetadata: {
-            status: "200",
-            createdAt: String(Date.now() - 120 * 1000),
-            ttl: "60",
-            headers: JSON.stringify({ "Content-Type": "text/html" }),
-          },
+          createdAt: Date.now() - 120 * 1000,
+          ttl: 60,
+          headers: { "Content-Type": "text/html" },
         },
       },
       workerResponse: new Response("<html>fresh</html>", {
@@ -675,7 +669,7 @@ describe("ISR JSON edge cache (pages protocol)", () => {
     });
 
     const ctx = createCtx();
-    // Initial request has X-VoidPages but ISR serves from R2 (HTML path)
+    // Initial request has X-VoidPages but ISR serves from KV (HTML path)
     await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
 
     // Wait for background revalidation
@@ -700,12 +694,9 @@ describe("ISR JSON edge cache (pages protocol)", () => {
       assets: {
         "proj_1/isr/dashboard": {
           body: "<html>stale</html>",
-          customMetadata: {
-            status: "200",
-            createdAt: String(Date.now() - 120 * 1000),
-            ttl: "60",
-            headers: JSON.stringify({ "Content-Type": "text/html" }),
-          },
+          createdAt: Date.now() - 120 * 1000,
+          ttl: 60,
+          headers: { "Content-Type": "text/html" },
         },
       },
       workerResponse: new Response("<html>opt-out</html>", {
@@ -842,7 +833,7 @@ describe("custom limits", () => {
           }),
       },
       DISPATCH: { get: dispatchGet },
-      ASSETS: { get: async () => null },
+      ISR_CACHE: { getWithMetadata: async () => ({ value: null, metadata: null }) },
       ANALYTICS: { writeDataPoint: () => {} },
     } as unknown as Env;
 
@@ -1192,7 +1183,7 @@ describe("queue relay", () => {
         DISPATCH: {
           get: () => ({ fetch: workerFetch }),
         },
-        ASSETS: { get: async () => null },
+        ISR_CACHE: { getWithMetadata: async () => ({ value: null, metadata: null }) },
         ANALYTICS: { writeDataPoint: () => {} },
       } as unknown as Env,
       workerFetch,

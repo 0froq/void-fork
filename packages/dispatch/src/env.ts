@@ -1,6 +1,6 @@
 export interface Env {
   DISPATCH: DispatchNamespace;
-  ASSETS: R2Bucket;
+  ISR_CACHE: KVNamespace;
   ROUTING: KVNamespace;
   ANALYTICS: AnalyticsEngineDataset;
   USAGE_QUEUE: Queue<unknown>;

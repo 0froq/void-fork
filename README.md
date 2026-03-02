@@ -89,7 +89,7 @@ pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-wo
 | Package                                                | npm name                         | Purpose                                                        |
 | ------------------------------------------------------ | -------------------------------- | -------------------------------------------------------------- |
 | [`packages/api`](./packages/api/README.md)             | `@voidcloud/api` (private)       | Control Plane API + Admin Dashboard                            |
-| [`packages/dispatch`](./packages/dispatch/README.md)   | `@voidcloud/dispatch` (private)  | Routes `*.void.app` to user workers + R2 assets                |
+| [`packages/dispatch`](./packages/dispatch/README.md)   | `@voidcloud/dispatch` (private)  | Routes `*.void.app` to user workers + static/ISR assets        |
 | [`packages/tail`](./packages/tail/README.md)           | `@voidcloud/tail` (private)      | Tail worker — user worker logs + live tailing via DO WebSocket |
 | [`packages/proxy`](./packages/proxy/README.md)         | `@voidcloud/proxy` (private)     | Proxy worker — AI inference, D1/KV/R2 remote bindings          |
 | [`packages/dashboard`](./packages/dashboard/README.md) | `@voidcloud/dashboard` (private) | User-facing dashboard — project management, deployments, usage |
@@ -121,7 +121,7 @@ See [`packages/proxy/README.md`](./packages/proxy/README.md) for request format,
 
 ## `dispatch` Overview
 
-CF Worker routing `*.void.app` traffic. Extracts slug from hostname → KV lookup → serves API routes via Workers for Platforms (with custom CPU/subrequest limits) or static assets from R2 (with edge caching). Records every request to Analytics Engine for usage metering. Also relays Cloudflare Queue batches to user workers via KV-based routing.
+CF Worker routing `*.void.app` traffic. Extracts slug from hostname → KV lookup → serves API routes via Workers for Platforms (with custom CPU/subrequest limits), static assets from R2, or ISR-cached pages from KV (with edge caching). Records every request to Analytics Engine for usage metering. Also relays Cloudflare Queue batches to user workers via KV-based routing.
 
 See [`packages/dispatch/README.md`](./packages/dispatch/README.md) for request flow, metering schema, and edge caching strategy.
 

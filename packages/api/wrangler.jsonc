@@ -28,6 +28,10 @@
       "binding": "ROUTING",
       "id": "9250c33f3db6494ebe8ad6272812c8c0",
     },
+    {
+      "binding": "ISR_CACHE",
+      "id": "7a0284b2390b42218901919579aadf0e",
+    },
   ],
   "dispatch_namespaces": [
     {
@@ -94,6 +98,10 @@
         {
           "binding": "ROUTING",
           "id": "60240eecea804f39bf8b7395cd6c6b08",
+        },
+        {
+          "binding": "ISR_CACHE",
+          "id": "7f13ef3a3745445c883a5bbc72f031b7",
         },
       ],
       "dispatch_namespaces": [

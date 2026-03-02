@@ -15,13 +15,13 @@ How we deploy, what we provision, and how the system is configured.
 
 Five Cloudflare Workers:
 
-| Worker           | Package              | Purpose                                                                                                                   |
-| ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `void-proxy`     | `packages/proxy`     | Unified proxy — AI inference metering + D1/KV/R2 remote bindings for local dev                                            |
-| `void-api`       | `packages/api`       | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering                                |
-| `void-dashboard` | `packages/dashboard` | User-facing dashboard — project management, deployments, usage                                                            |
-| `void-tail`      | `packages/tail`      | Tail worker — captures user worker logs to Analytics Engine + live tailing via Durable Object WebSockets                  |
-| `void-dispatch`  | `packages/dispatch`  | Edge router — routes `*.void.app` + custom domain traffic to user workers (via Workers for Platforms) or R2 static assets |
+| Worker           | Package              | Purpose                                                                                                                             |
+| ---------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `void-proxy`     | `packages/proxy`     | Unified proxy — AI inference metering + D1/KV/R2 remote bindings for local dev                                                      |
+| `void-api`       | `packages/api`       | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering                                          |
+| `void-dashboard` | `packages/dashboard` | User-facing dashboard — project management, deployments, usage                                                                      |
+| `void-tail`      | `packages/tail`      | Tail worker — captures user worker logs to Analytics Engine + live tailing via Durable Object WebSockets                            |
+| `void-dispatch`  | `packages/dispatch`  | Edge router — routes `*.void.app` + custom domain traffic to user workers (via Workers for Platforms), static assets, and ISR cache |
 
 ## Environments
 
@@ -43,6 +43,7 @@ Two fully isolated environments. Each has its own CF resources (KV, R2, dispatch
 | Hyperdrive         | `HYPERDRIVE`    | `7bd6b2a606a347819ad3421867840736` (→ PlanetScale PostgreSQL) |
 | R2 Bucket          | `ASSETS`        | `void-assets`                                                 |
 | KV Namespace       | `ROUTING`       | `9250c33f3db6494ebe8ad6272812c8c0`                            |
+| KV Namespace       | `ISR_CACHE`     | `7a0284b2390b42218901919579aadf0e`                            |
 | Dispatch Namespace | `DISPATCH`      | `void-users`                                                  |
 | Durable Object     | `USAGE_COUNTER` | `UsageCounter` (per-user usage enforcement)                   |
 | Queue (consumer)   | —               | `void-usage-events` (batch 100, timeout 5s)                   |
@@ -53,8 +54,8 @@ Two fully isolated environments. Each has its own CF resources (KV, R2, dispatch
 | Resource           | Binding       | Name / ID                                                   |
 | ------------------ | ------------- | ----------------------------------------------------------- |
 | Dispatch Namespace | `DISPATCH`    | `void-users`                                                |
-| R2 Bucket          | `ASSETS`      | `void-assets`                                               |
 | KV Namespace       | `ROUTING`     | `9250c33f3db6494ebe8ad6272812c8c0`                          |
+| KV Namespace       | `ISR_CACHE`   | `7a0284b2390b42218901919579aadf0e`                          |
 | Analytics Engine   | `ANALYTICS`   | `vite_cloud_requests`                                       |
 | Queue (producer)   | `USAGE_QUEUE` | `void-usage-events`                                         |
 | Routes             | —             | `*.void.app/*`, `*.void.app`, `*/*`, `*` (zone: `void.app`) |
@@ -95,8 +96,9 @@ Same resource types with `-staging` suffixes:
 | Resource    | API                                                           | Dashboard                                                     | Dispatch                                                 | Proxy                                                    |
 | ----------- | ------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------- |
 | Hyperdrive  | `7cde35825e6249d0b60b9de69feb29dd` (→ PlanetScale PostgreSQL) | `7cde35825e6249d0b60b9de69feb29dd` (→ PlanetScale PostgreSQL) | —                                                        | —                                                        |
-| R2          | `void-assets-staging`                                         | —                                                             | `void-assets-staging`                                    | —                                                        |
-| KV          | `60240eecea804f39bf8b7395cd6c6b08`                            | —                                                             | `60240eecea804f39bf8b7395cd6c6b08`                       | —                                                        |
+| R2          | `void-assets-staging`                                         | —                                                             | —                                                        | —                                                        |
+| KV ROUTING  | `60240eecea804f39bf8b7395cd6c6b08`                            | —                                                             | `60240eecea804f39bf8b7395cd6c6b08`                       | —                                                        |
+| KV ISR      | `7f13ef3a3745445c883a5bbc72f031b7`                            | —                                                             | `7f13ef3a3745445c883a5bbc72f031b7`                       | —                                                        |
 | Dispatch NS | `void-users-staging`                                          | —                                                             | `void-users-staging`                                     | —                                                        |
 | Analytics   | —                                                             | —                                                             | `vite_cloud_requests_staging`                            | —                                                        |
 | Queue       | `void-usage-events-staging` (consumer)                        | —                                                             | `void-usage-events-staging` (producer)                   | —                                                        |
@@ -292,8 +294,9 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
 
 2. **Create CF resources** (all with environment suffix):
    - Hyperdrive configuration (pointing to the PlanetScale PgBouncer URL)
-   - KV namespace
-   - R2 bucket
+   - KV namespace for ROUTING
+   - KV namespace for ISR_CACHE (`wrangler kv namespace create void-isr-cache-<env>`)
+   - R2 bucket (for static deploy assets)
    - Dispatch namespace (Workers for Platforms)
    - Analytics Engine dataset
    - AI Gateway named `void`
