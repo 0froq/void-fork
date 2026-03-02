@@ -80,15 +80,20 @@ adminSystem.get("/health", async (c) => {
   const cloudDomain = cloudDomainFromHost(new URL(c.req.url).hostname);
   const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
 
-  const checks = await Promise.all([
-    checkUrl("api", `https://api.${cloudDomain}/health`),
-    checkUrl("proxy", `https://proxy.${cloudDomain}/health`),
-    checkUrl("dashboard", `https://dash.${cloudDomain}/login`),
-    checkUrl("dispatch", `https://test.${siteDomain}/health`, {
-      "X-Health-Check": "void-admin",
-    }),
-    checkDb(c.get("db")),
-  ]);
+  // API check is implicit — we're serving this request, so the API is up.
+  const apiCheck: HealthCheck = { name: "api", ok: true, latencyMs: 0 };
+
+  const checks = [
+    apiCheck,
+    ...(await Promise.all([
+      checkUrl("proxy", `https://proxy.${cloudDomain}/health`),
+      checkUrl("dashboard", `https://dash.${cloudDomain}/login`),
+      checkUrl("dispatch", `https://test.${siteDomain}/health`, {
+        "X-Health-Check": "void-admin",
+      }),
+      checkDb(c.get("db")),
+    ])),
+  ];
 
   return c.json({ checks, allOk: checks.every((ch) => ch.ok) } satisfies HealthResult);
 });
