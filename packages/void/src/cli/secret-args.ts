@@ -2,12 +2,14 @@ import { parseArgs } from "node:util";
 import type { SubcommandDef } from "./subcommand-prompt";
 
 export const secretSubcommands: SubcommandDef[] = [
+  { name: "list", description: "List project secrets" },
   { name: "put", arg: "<name>", description: "Set a project secret" },
   { name: "delete", arg: "<name>", description: "Delete a project secret" },
   { name: "sync", arg: "<file>", description: "Sync secrets from a dotenv file" },
 ];
 
 export type SecretArgs =
+  | { action: "list"; projectName?: string }
   | { action: "put"; name: string; value?: string; projectName?: string }
   | { action: "delete"; name: string; projectName?: string }
   | { action: "sync"; file: string; projectName?: string };
@@ -38,6 +40,13 @@ export function parseSecretArgs(args: string[]): SecretArgs {
   const [action, name, value, extra] = parsed.positionals;
   if (extra) {
     throw new Error(`Error: Unexpected argument for secret: ${extra}`);
+  }
+
+  if (action === "list") {
+    if (name) {
+      throw new Error("Error: Usage: void secret list [--project <name>]");
+    }
+    return { action, projectName };
   }
 
   if (action === "put") {
@@ -80,5 +89,5 @@ export function parseSecretArgs(args: string[]): SecretArgs {
     return { action, file: name, projectName };
   }
 
-  throw new Error("Error: Usage: void secret <put|delete|sync> ...");
+  throw new Error("Error: Usage: void secret <list|put|delete|sync> ...");
 }

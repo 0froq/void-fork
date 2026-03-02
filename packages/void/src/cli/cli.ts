@@ -46,6 +46,7 @@ function printHelp() {
       helpLine("void project rm [name]", "Delete a project and all its resources"),
       "",
       categoryTitle("secrets"),
+      helpLine("void secret list", "List project secrets"),
       helpLine("void secret put <name> [--project]", "Set a project secret"),
       helpLine("void secret delete <name>", "Delete a project secret"),
       helpLine("void secret sync <file>", "Sync secrets from a dotenv file"),
@@ -235,7 +236,7 @@ if (command === "staging") {
       hint: "status | link | list | rm",
       description: "Manage projects and deployments",
     },
-    { name: "secret", hint: "put | delete | sync", description: "Manage project secrets" },
+    { name: "secret", hint: "list | put | delete | sync", description: "Manage project secrets" },
     { name: "domain", hint: "add | rm | list | status", description: "Configure custom domains" },
     {
       name: "db",

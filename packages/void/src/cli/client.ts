@@ -178,6 +178,21 @@ export class PlatformClient {
     return res.json();
   }
 
+  async listSecrets(projectId: string): Promise<{ name: string }[]> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}/secrets`, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Failed to list secrets: ${res.status} ${body}`);
+    }
+
+    return res.json();
+  }
+
   async setSecret(projectId: string, name: string, value: string): Promise<SecretResponse> {
     const res = await fetch(
       `${this.baseUrl}/projects/${projectId}/secrets/${encodeURIComponent(name)}`,

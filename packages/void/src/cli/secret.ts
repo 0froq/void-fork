@@ -4,7 +4,7 @@ import { PlatformClient } from "./client";
 import { readProjectConfig } from "./project";
 import { getRequestedProjectSlug, resolveProjectBySlug } from "./resolve-project";
 import type { SecretArgs } from "./secret-args";
-import { intro, outro, log, cancel, isCancel, password, confirm } from "@clack/prompts";
+import { intro, outro, log, note, cancel, isCancel, password, confirm } from "@clack/prompts";
 import { cliTitle } from "./output";
 
 export async function runSecretCommand(root: string, args: SecretArgs): Promise<void> {
@@ -35,6 +35,17 @@ export async function runSecretCommand(root: string, args: SecretArgs): Promise<
       );
     }
     projectId = config.projectId;
+  }
+
+  if (args.action === "list") {
+    const secrets = await client.listSecrets(projectId);
+    if (secrets.length === 0) {
+      outro("No secrets set.");
+      return;
+    }
+    note(secrets.map((s) => `  ${s.name}`).join("\n"), "Secrets");
+    outro(`${secrets.length} secret(s)`);
+    return;
   }
 
   if (args.action === "put") {
