@@ -313,3 +313,11 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
   vi.stubGlobal("fetch", fn);
   return fn;
 }
+
+export async function readAllEvents(res: Response): Promise<unknown[]> {
+  const text = await res.text();
+  return text
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line));
+}

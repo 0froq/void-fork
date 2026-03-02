@@ -56,3 +56,26 @@ export interface DeployManifest {
   headerRules?: { pattern: string; headers: [string, string][] }[];
   redirectRules?: { source: string; destination: string; status: number }[];
 }
+
+export type DeployEvent =
+  | { event: "start"; deploymentId: string }
+  | { event: "asset_upload"; total: number; new: number; cached: number }
+  | { event: "asset_upload_done" }
+  | { event: "provisioning"; bindings: string[] }
+  | { event: "provisioning_done" }
+  | { event: "migration"; name: string; index: number; total: number }
+  | { event: "worker_upload"; modules: number }
+  | { event: "worker_upload_done" }
+  | { event: "queue_setup"; queues: string[] }
+  | { event: "prerender"; pages: number }
+  | { event: "prerender_done" }
+  | {
+      event: "done";
+      deployment: string;
+      url: string;
+      urls: string[];
+      assets: number;
+      workers: number;
+      migrations?: number;
+    }
+  | { event: "error"; message: string; step: string };

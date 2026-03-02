@@ -11,6 +11,7 @@ import {
   createTestDeployment,
   mockCfApi,
   cfSuccess,
+  readAllEvents,
   CF_ACCOUNT_ID,
   type TestEnv,
 } from "./helpers";
@@ -121,18 +122,16 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      deployment: string;
-      url: string;
-    };
-    expect(body.deployment).toMatch(/^dpl_/);
-    expect(body.url).toBe("https://minimal-app.void.app");
+    const events = await readAllEvents(res);
+    const done = events.find((e: any) => e.event === "done") as any;
+    expect(done.deployment).toMatch(/^dpl_/);
+    expect(done.url).toBe("https://minimal-app.void.app");
 
     // Verify deployment is marked live in DB
     const [dpl] = await env.db
       .select({ status: deployments.status })
       .from(deployments)
-      .where(eq(deployments.id, body.deployment));
+      .where(eq(deployments.id, done.deployment));
     expect(dpl?.status).toBe("live");
   });
 
@@ -150,6 +149,7 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     const routing = await env.ROUTING.get("routed-app", "json");
     expect(routing).toEqual({
@@ -177,6 +177,7 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     const routing = await env.ROUTING.get("ssr-app", "json");
     expect(routing).toEqual({
@@ -203,6 +204,7 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     // Find the worker upload call
     const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
@@ -237,6 +239,7 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
       const url = typeof call[0] === "string" ? call[0] : String(call[0]);
@@ -270,6 +273,7 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     // Verify resource row was created in DB
     const [resource] = await env.db
@@ -306,6 +310,7 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     // Verify no D1 creation call was made
     const createD1Call = fetchMock.mock.calls.find((call: unknown[]) => {
@@ -353,8 +358,9 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { migrations: number };
-    expect(body.migrations).toBe(1);
+    const events = await readAllEvents(res);
+    const done = events.find((e: any) => e.event === "done") as any;
+    expect(done.migrations).toBe(1);
 
     // Verify migrations ran before worker upload
     const workerIdx = callOrder.indexOf("uploadWorker");
@@ -380,9 +386,11 @@ describe("POST /projects/:id/deploy", () => {
       }),
       env,
     );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain("destructive migration rejected");
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const error = events.find((e: any) => e.event === "error") as any;
+    expect(error.message).toContain("destructive migration rejected");
+    expect(error.step).toBe("migration");
 
     // Verify deployment is marked failed with error message
     const [dpl] = await env.db
@@ -425,10 +433,11 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { url: string; urls: string[] };
-    expect(body.url).toBe("https://deploy.example.com");
-    expect(body.urls).toContain("https://deploy.example.com");
-    expect(body.urls).toContain("https://domain-deploy.void.app");
+    const events = await readAllEvents(res);
+    const done = events.find((e: any) => e.event === "done") as any;
+    expect(done.url).toBe("https://deploy.example.com");
+    expect(done.urls).toContain("https://deploy.example.com");
+    expect(done.urls).toContain("https://domain-deploy.void.app");
 
     // Verify domain KV routing was written
     const domainRouting = await env.ROUTING.get("domain:deploy.example.com", "json");
@@ -514,6 +523,7 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     const routing = (await env.ROUTING.get("limits-kv-app", "json")) as {
       limits: { cpuMs: number; subRequests: number };
@@ -535,6 +545,7 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     const routing = (await env.ROUTING.get("custom-plan-app", "json")) as Record<string, unknown>;
     expect(routing.limits).toBeUndefined();
@@ -560,6 +571,7 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
       const url = typeof call[0] === "string" ? call[0] : String(call[0]);
@@ -598,9 +610,11 @@ describe("POST /projects/:id/deploy", () => {
       }),
       env,
     );
-    expect(res.status).toBe(502);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("worker upload failed");
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const error = events.find((e: any) => e.event === "error") as any;
+    expect(error.message).toContain("worker upload failed");
+    expect(error.step).toBe("worker_upload");
 
     // Verify deployment is marked failed with error message
     const [dpl] = await env.db
@@ -631,6 +645,7 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     // Verify queue resource was created in DB
     const [resource] = await env.db
@@ -669,6 +684,7 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
       const url = typeof call[0] === "string" ? call[0] : String(call[0]);
@@ -709,6 +725,7 @@ describe("POST /projects/:id/deploy", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     // Verify queue routing KV entry
     const queueRouting = await env.ROUTING.get("queue:test-queue", "json");
@@ -717,6 +734,32 @@ describe("POST /projects/:id/deploy", () => {
       projectId: project.id,
       queueName: "emails",
     });
+  });
+
+  it("streams events in pipeline order", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "stream-test");
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          assets: { "index.html": "<h1>hi</h1>" },
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const eventNames = events.map((e: any) => e.event);
+
+    expect(eventNames[0]).toBe("start");
+    expect(eventNames[eventNames.length - 1]).toBe("done");
+    expect(eventNames).toContain("worker_upload");
+    expect(eventNames).toContain("worker_upload_done");
   });
 });
 
@@ -771,6 +814,7 @@ describe("Deploy serialization (concurrent deploy guard)", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     // Verify stale deployment was auto-failed
     const [stale] = await env.db
@@ -845,16 +889,12 @@ describe("POST /projects/:id/deploy (static)", () => {
       env,
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      deployment: string;
-      url: string;
-      assets: number;
-      workers: number;
-    };
-    expect(body.deployment).toMatch(/^dpl_/);
-    expect(body.url).toBe("https://spa-site.void.app");
-    expect(body.assets).toBe(2);
-    expect(body.workers).toBe(1);
+    const events = await readAllEvents(res);
+    const done = events.find((e: any) => e.event === "done") as any;
+    expect(done.deployment).toMatch(/^dpl_/);
+    expect(done.url).toBe("https://spa-site.void.app");
+    expect(done.assets).toBe(2);
+    expect(done.workers).toBe(1);
   });
 
   it("writes KV routing with workerName for static SPA", async () => {
@@ -871,6 +911,7 @@ describe("POST /projects/:id/deploy (static)", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     const routing = await env.ROUTING.get("kv-spa", "json");
     expect(routing).toEqual({
@@ -895,6 +936,7 @@ describe("POST /projects/:id/deploy (static)", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     const [row] = await env.db
       .select({ type: projects.type })
@@ -939,6 +981,7 @@ describe("Deploy with prerendering", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     // Verify ISR cache entries were written to R2
     const homeEntry = await env.ASSETS.get(`${project.id}/isr/__index__`);
@@ -992,6 +1035,7 @@ describe("Deploy with prerendering", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     // Only /about should have been fetched (TTL > 0)
     expect(dispatchFetch).toHaveBeenCalledTimes(1);
@@ -1032,6 +1076,7 @@ describe("Deploy with prerendering", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
 
     // Deployment should still be live despite prerender failure
     const [dpl] = await env.db
@@ -1077,6 +1122,7 @@ describe("Deploy with prerendering", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
     expect(statusDuringPrerender).toBe("prerendering");
   });
 });
@@ -1099,7 +1145,8 @@ describe("asset_hashes storage", () => {
     );
 
     expect(res.status).toBe(200);
-    const data = (await res.json()) as { deployment: string };
+    const events = await readAllEvents(res);
+    const data = events.find((e: any) => e.event === "done") as any;
 
     const [row] = await env.db
       .select({ asset_hashes: deployments.asset_hashes })
@@ -1238,6 +1285,7 @@ describe("POST /projects/:id/deploy/preflight", () => {
     );
 
     expect(res.status).toBe(200);
+    await res.text();
 
     // CF session should have received the COMPLETE manifest (merged)
     expect(sessionManifest).toBeDefined();
@@ -1268,6 +1316,7 @@ describe("POST /projects/:id/deploy/preflight", () => {
       env,
     );
     expect(res.status).toBe(200);
+    await res.text();
     expect(capturedMetadata).toBeDefined();
     expect(capturedMetadata!.observability).toEqual({
       enabled: true,
