@@ -285,6 +285,18 @@ app.post("/:id/deploy", async (c) => {
         // Full deploy path
         // Provision bindings (D1, KV, R2) — creates CF resources if needed
         currentStep = "provisioning";
+
+        // Derive binding labels from the manifest upfront so we can show the
+        // spinner BEFORE the (potentially slow) CF API provisioning calls.
+        const bindingLabels: string[] = [];
+        for (const name of manifest.bindings.d1 ?? []) bindingLabels.push(`d1:${name}`);
+        for (const name of manifest.bindings.kv ?? []) bindingLabels.push(`kv:${name}`);
+        for (const name of manifest.bindings.r2 ?? []) bindingLabels.push(`r2:${name}`);
+        for (const q of manifest.queues ?? []) bindingLabels.push(`queue:${q.name}`);
+        if (bindingLabels.length > 0) {
+          emit({ event: "provisioning", bindings: bindingLabels });
+        }
+
         const workerBindings = await provisionBindings(
           c.get("db"),
           c.env.CF_ACCOUNT_ID,
@@ -295,11 +307,7 @@ app.post("/:id/deploy", async (c) => {
           c.env.AI_PROXY_SERVICE ?? "void-proxy",
         );
 
-        const bindingLabels = workerBindings
-          .filter((b) => b.type !== "plain_text" && b.type !== "service")
-          .map((b) => (b.type === "queue" ? `queue:${b.name}` : `${b.type}:${b.name}`));
         if (bindingLabels.length > 0) {
-          emit({ event: "provisioning", bindings: bindingLabels });
           emit({ event: "provisioning_done" });
         }
 
