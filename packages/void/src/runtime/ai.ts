@@ -52,7 +52,7 @@ function unsupported(method: string): () => never {
 
 function makeServiceBindingBackend(proxy: Fetcher, runtimeEnv: RuntimeEnv): AiBackend {
   async function proxyFetch(action: string, body: Record<string, unknown>): Promise<Response> {
-    const res = await proxy.fetch(`https://ai-proxy/${action}`, {
+    const res = await proxy.fetch(`https://ai-proxy/ai/${action}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action, ...body }),
