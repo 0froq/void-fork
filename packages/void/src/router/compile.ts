@@ -387,6 +387,16 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push("");
   }
 
+  if (scan.jobs.length > 0) {
+    lines.push('app.post("/__scheduled", async (c) => {');
+    lines.push("  const { cron, scheduledTime } = await c.req.json();");
+    lines.push("  const controller = { cron, scheduledTime, noRetry() {} };");
+    lines.push("  await scheduled(controller, c.env, c.executionCtx);");
+    lines.push("  return c.json({ ok: true });");
+    lines.push("});");
+    lines.push("");
+  }
+
   if (scan.queues.length > 0) {
     for (let i = 0; i < scan.queues.length; i++) {
       lines.push(`const queue${i}Name = ${JSON.stringify(scan.queues[i].name)};`);

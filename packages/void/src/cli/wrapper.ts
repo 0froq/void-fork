@@ -110,11 +110,39 @@ function generateWrapperSource(root: string, tmpDir: string, features: WrapperFe
   }
 
   lines.push("");
+
+  if (features.crons.length > 0) {
+    lines.push("async function wrappedFetch(request, env, ctx) {");
+    lines.push("  const url = new URL(request.url);");
+    lines.push('  if (request.method === "POST" && url.pathname === "/__scheduled") {');
+    lines.push("    try {");
+    lines.push("      const { cron, scheduledTime } = await request.json();");
+    lines.push("      const controller = { cron, scheduledTime, noRetry() {} };");
+    lines.push("      await handleScheduled(controller, env, ctx);");
+    lines.push("      return new Response(JSON.stringify({ ok: true }), {");
+    lines.push('        headers: { "Content-Type": "application/json" },');
+    lines.push("      });");
+    lines.push("    } catch (err) {");
+    lines.push("      return new Response(JSON.stringify({ error: String(err) }), {");
+    lines.push("        status: 500,");
+    lines.push('        headers: { "Content-Type": "application/json" },');
+    lines.push("      });");
+    lines.push("    }");
+    lines.push("  }");
+    lines.push("  return original.fetch(request, env, ctx);");
+    lines.push("}");
+    lines.push("");
+  }
+
   lines.push("export default {");
 
-  // fetch handler — auth routes are handled by the compiled Hono app,
-  // so we just pass through to the original worker.
-  lines.push("  fetch: original.fetch,");
+  // fetch handler — when crons exist, wrap to intercept /__scheduled;
+  // otherwise pass through to the original worker.
+  if (features.crons.length > 0) {
+    lines.push("  fetch: wrappedFetch,");
+  } else {
+    lines.push("  fetch: original.fetch,");
+  }
 
   // scheduled handler
   if (features.crons.length > 0) {
