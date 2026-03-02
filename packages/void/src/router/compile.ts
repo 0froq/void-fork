@@ -114,6 +114,13 @@ export function compileRouteTable(
   lines.push(`export const requestContext = new AsyncLocalStorage();`);
   lines.push("");
 
+  // X-Powered-By header
+  lines.push("app.use(async (c, next) => {");
+  lines.push("  await next();");
+  lines.push('  c.res.headers.set("X-Powered-By", "Void");');
+  lines.push("});");
+  lines.push("");
+
   // Request context middleware — threads outer request into ALS for isomorphic fetch
   lines.push("app.use(async (c, next) => {");
   if (options.nodeTarget) {
