@@ -93,7 +93,7 @@ export default {
         );
       }
       const res = new Response(response.body, response);
-      res.headers.set("X-Hosted-By", "Void");
+      res.headers.set("X-Hosted-By", "void.cloud");
       return res;
     };
 
