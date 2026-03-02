@@ -21,7 +21,7 @@ function isPagesRequest(c: any): boolean {
 
 function pageJsonResponse(pageObj: PageObject): Response {
   return Response.json(pageObj, {
-    headers: { "X-VoidPages": "true", Vary: "X-VoidPages" },
+    headers: { "X-VoidPages": "true", Vary: "X-VoidPages", "X-Powered-By": "Void" },
   });
 }
 
@@ -96,7 +96,9 @@ function streamDeferredResponse(
       });
   }
 
-  return new Response(readable, { headers: { "content-type": contentType } });
+  return new Response(readable, {
+    headers: { "content-type": contentType, "X-Powered-By": "Void" },
+  });
 }
 
 /** Handle GET page request — run handler, return page object or SSR HTML */
@@ -215,6 +217,7 @@ export async function handlePageGet(
       headers: {
         "content-type": "text/html; charset=utf-8",
         "x-void-page-data": JSON.stringify(pageObj),
+        "X-Powered-By": "Void",
       },
     });
   }
@@ -283,7 +286,7 @@ export async function handlePageMutation(
       if (isPagesRequest(c)) return pageJsonResponse(pageObj);
       const assetTags = await getAssetTags(c.req.raw, c.env);
       return new Response(await renderFn(pageObj, assetTags), {
-        headers: { "content-type": "text/html; charset=utf-8" },
+        headers: { "content-type": "text/html; charset=utf-8", "X-Powered-By": "Void" },
       });
     }
     throw e;
@@ -307,7 +310,7 @@ export async function handlePageMutation(
       if (isPagesRequest(c)) return pageJsonResponse(pageObj);
       const assetTags = await getAssetTags(c.req.raw, c.env);
       return new Response(await renderFn(pageObj, assetTags), {
-        headers: { "content-type": "text/html; charset=utf-8" },
+        headers: { "content-type": "text/html; charset=utf-8", "X-Powered-By": "Void" },
       });
     }
     // 204 (void from withValidator) — fall through to re-run GET
@@ -324,6 +327,6 @@ export async function handlePageMutation(
   if (isPagesRequest(c)) return pageJsonResponse(pageObj);
   const assetTags = await getAssetTags(c.req.raw, c.env);
   return new Response(await renderFn(pageObj, assetTags), {
-    headers: { "content-type": "text/html; charset=utf-8" },
+    headers: { "content-type": "text/html; charset=utf-8", "X-Powered-By": "Void" },
   });
 }
