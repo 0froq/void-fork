@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { ApiEnv } from "./env";
 import { UsageCounter } from "./usage-counter";
+import { CronScheduler } from "./cron-scheduler";
 import { processUsageEventBatch } from "./usage-queue";
 import auth from "./routes/auth";
 import projects from "./routes/projects";
@@ -151,7 +152,7 @@ async function processUserRollover(
   }
 }
 
-export { UsageCounter };
+export { UsageCounter, CronScheduler };
 export type AppType = typeof app;
 export { app, scheduled };
 

@@ -33,6 +33,7 @@ export type TestEnv = {
   DEV_AUTH_BYPASS?: string;
   SITE_DOMAIN?: string;
   USAGE_COUNTER: DurableObjectNamespace;
+  CRON_SCHEDULER: DurableObjectNamespace;
 };
 
 function createMockDoNamespace(): DurableObjectNamespace {
@@ -89,6 +90,7 @@ export async function setupEnv(): Promise<TestEnv> {
     GOOGLE_CLIENT_ID: "test-google-client-id",
     GOOGLE_CLIENT_SECRET: "test-google-client-secret",
     USAGE_COUNTER: createMockDoNamespace(),
+    CRON_SCHEDULER: createMockDoNamespace(),
   };
 }
 

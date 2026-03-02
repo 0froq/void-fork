@@ -41,12 +41,20 @@
         "name": "USAGE_COUNTER",
         "class_name": "UsageCounter",
       },
+      {
+        "name": "CRON_SCHEDULER",
+        "class_name": "CronScheduler",
+      },
     ],
   },
   "migrations": [
     {
       "tag": "v1",
       "new_classes": ["UsageCounter"],
+    },
+    {
+      "tag": "v2",
+      "new_classes": ["CronScheduler"],
     },
   ],
   "queues": {
@@ -98,6 +106,10 @@
           {
             "name": "USAGE_COUNTER",
             "class_name": "UsageCounter",
+          },
+          {
+            "name": "CRON_SCHEDULER",
+            "class_name": "CronScheduler",
           },
         ],
       },

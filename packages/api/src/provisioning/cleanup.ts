@@ -76,6 +76,20 @@ export async function cleanupProjectResources(
     })().catch(warn("Failed to clean up R2 assets")),
   );
 
+  // Clear cron scheduler DO if project had crons
+  cleanup.push(
+    c.env.ROUTING.get(project.slug)
+      .then(async (raw) => {
+        if (raw && JSON.parse(raw).hasCrons) {
+          const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
+          await c.env.CRON_SCHEDULER.get(cronId).fetch(
+            new Request("https://do/clear", { method: "POST" }),
+          );
+        }
+      })
+      .catch(warn("Failed to clear cron scheduler")),
+  );
+
   // KV routing entry
   cleanup.push(c.env.ROUTING.delete(project.slug).catch(warn("Failed to delete routing entry")));
 

@@ -219,10 +219,25 @@ describe("POST /projects/:id/deploy", () => {
     );
   });
 
-  it("passes cron triggers to worker upload metadata", async () => {
+  it("syncs cron schedules to CronScheduler DO on deploy", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "cron-app");
-    const fetchMock = mockCfApi();
+    mockCfApi();
+
+    // Track DO fetch calls
+    const cronDoFetches: { url: string; body: string }[] = [];
+    const cronSchedulerMock = {
+      idFromName: (name: string) => ({ toString: () => name }),
+      get: (_id: unknown) => ({
+        fetch: async (req: Request) => {
+          const body = await req.text();
+          cronDoFetches.push({ url: req.url, body });
+          return Response.json({ ok: true });
+        },
+      }),
+    } as unknown as DurableObjectNamespace;
+
+    const testEnv = { ...env, CRON_SCHEDULER: cronSchedulerMock };
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -236,25 +251,94 @@ describe("POST /projects/:id/deploy", () => {
           },
         }),
       }),
-      env,
+      testEnv,
     );
     expect(res.status).toBe(200);
     await res.text();
 
-    const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
-      const url = typeof call[0] === "string" ? call[0] : String(call[0]);
-      return url.includes("/workers/dispatch/") && (call[1] as RequestInit)?.method === "PUT";
-    });
-    expect(uploadCall).toBeDefined();
+    // Verify DO received /sync with correct payload
+    const syncCall = cronDoFetches.find((f) => f.url.includes("/sync"));
+    expect(syncCall).toBeDefined();
+    const payload = JSON.parse(syncCall!.body);
+    expect(payload.workerName).toBe("user-cron-app");
+    expect(payload.schedules).toEqual([{ name: "sync", cron: "0 * * * *" }]);
+  });
 
-    const workerFormData = (uploadCall![1] as RequestInit).body as FormData;
-    const metadataBlob = workerFormData.get("metadata");
-    expect(metadataBlob).toBeInstanceOf(Blob);
-    const metadata = JSON.parse(await (metadataBlob as Blob).text()) as {
-      triggers?: { crons?: string[] };
-    };
+  it("clears cron schedules when previous deploy had crons", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "no-cron-app");
+    mockCfApi();
 
-    expect(metadata.triggers?.crons).toEqual(["0 * * * *"]);
+    // Simulate previous deploy having crons by setting hasCrons in routing entry
+    await env.ROUTING.put(
+      project.slug,
+      JSON.stringify({ workerName: `user-${project.slug}`, hasCrons: true }),
+    );
+
+    const cronDoFetches: { url: string }[] = [];
+    const cronSchedulerMock = {
+      idFromName: (name: string) => ({ toString: () => name }),
+      get: (_id: unknown) => ({
+        fetch: async (req: Request) => {
+          cronDoFetches.push({ url: req.url });
+          return Response.json({ ok: true });
+        },
+      }),
+    } as unknown as DurableObjectNamespace;
+
+    const testEnv = { ...env, CRON_SCHEDULER: cronSchedulerMock };
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: { version: 2, bindings: {} },
+        }),
+      }),
+      testEnv,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+
+    // Verify DO received /clear
+    const clearCall = cronDoFetches.find((f) => f.url.includes("/clear"));
+    expect(clearCall).toBeDefined();
+  });
+
+  it("skips CronScheduler DO when no crons present or previously configured", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "plain-app");
+    mockCfApi();
+
+    let doCalled = false;
+    const cronSchedulerMock = {
+      idFromName: (name: string) => ({ toString: () => name }),
+      get: (_id: unknown) => ({
+        fetch: async () => {
+          doCalled = true;
+          return Response.json({ ok: true });
+        },
+      }),
+    } as unknown as DurableObjectNamespace;
+
+    const testEnv = { ...env, CRON_SCHEDULER: cronSchedulerMock };
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: { version: 2, bindings: {} },
+        }),
+      }),
+      testEnv,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+
+    // DO should NOT have been called
+    expect(doCalled).toBe(false);
   });
 
   it("provisions D1 when manifest requires it", async () => {

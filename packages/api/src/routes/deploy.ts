@@ -408,10 +408,6 @@ app.post("/:id/deploy", async (c) => {
           compatibility_date: manifest.compatibilityDate ?? "2026-02-12",
           compatibility_flags: manifest.compatibilityFlags ?? ["nodejs_compat"],
           bindings: allBindings,
-          triggers:
-            manifest.schedules && manifest.schedules.length > 0
-              ? { crons: manifest.schedules.map((schedule) => schedule.cron) }
-              : undefined,
           ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
           observability: {
             enabled: true,
@@ -488,6 +484,33 @@ app.post("/:id/deploy", async (c) => {
           }),
         );
 
+        // 2c. Sync cron schedules to CronScheduler DO
+        currentStep = "cron_setup";
+        const hasCrons = manifest.schedules && manifest.schedules.length > 0;
+
+        if (hasCrons) {
+          const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
+          await c.env.CRON_SCHEDULER.get(cronId).fetch(
+            new Request("https://do/sync", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                workerName,
+                schedules: manifest.schedules,
+              }),
+            }),
+          );
+        } else {
+          // Only clear if previous deploy had crons (avoid creating empty DOs)
+          const prevRouting = await c.env.ROUTING.get(project.slug);
+          if (prevRouting && JSON.parse(prevRouting).hasCrons) {
+            const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
+            await c.env.CRON_SCHEDULER.get(cronId).fetch(
+              new Request("https://do/clear", { method: "POST" }),
+            );
+          }
+        }
+
         // 3. Clear previous ISR cache on deploy.
         // Always clear — handles both "new deploy has ISR" and "previous deploy had ISR
         // but new one doesn't" (avoids orphaned R2 entries). No-op for empty prefixes.
@@ -561,6 +584,7 @@ app.post("/:id/deploy", async (c) => {
           version: deployment.id,
           ...dispatchLimits,
           ...(existingEntry?.suspended ? { suspended: existingEntry.suspended } : {}),
+          ...(hasCrons ? { hasCrons: true } : {}),
         });
         await c.env.ROUTING.put(project.slug, routingJson);
 
