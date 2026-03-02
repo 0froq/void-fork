@@ -87,7 +87,7 @@ function printHelp() {
 
   note(
     [
-      helpLine("VOID_TOKEN", "Auth token (or use ~/.void/config.json)"),
+      helpLine("VOID_TOKEN", "Auth token (or use `void login`)"),
       helpLine("VOID_PROJECT", "Deploy target project name override"),
     ].join("\n"),
     sectionTitle("Environment"),

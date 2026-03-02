@@ -47,7 +47,7 @@ export async function runAuthCommand(_root: string, args: AuthArgs): Promise<voi
         execSync(cmd, { input: token });
         log.success("Token copied to clipboard.");
       } catch {
-        log.warn("Could not copy to clipboard. Copy the token manually from ~/.void/config.json");
+        log.warn("Could not copy to clipboard. Re-run `void login` to generate a new token.");
       }
       return;
     }
