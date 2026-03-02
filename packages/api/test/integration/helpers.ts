@@ -209,7 +209,8 @@ const defaultMocks: CfApiMocks = {
   createD1: () => cfSuccess({ uuid: "d1-test-uuid", name: "test-db" }),
   createKV: () => cfSuccess({ id: "kv-test-id", title: "test-kv" }),
   createR2: () => cfSuccess({ name: "test-bucket" }),
-  createQueue: () => cfSuccess({ queue_id: "queue-test-id", queue_name: "test-queue" }),
+  createQueue: () =>
+    cfSuccess({ queue_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", queue_name: "test-queue" }),
   addQueueConsumer: () => cfSuccess({}),
   deleteD1: () => cfSuccess(null),
   deleteKV: () => cfSuccess(null),

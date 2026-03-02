@@ -456,20 +456,25 @@ app.post("/:id/deploy", async (c) => {
             const queueBinding = workerBindings.find(
               (b) => b.type === "queue" && b.name === q.bindingName,
             );
-            if (queueBinding?.queue_name) {
+            if (queueBinding?.queue_id) {
               try {
                 await addQueueConsumer(
                   c.env.CF_ACCOUNT_ID,
                   c.env.CF_API_TOKEN,
-                  queueBinding.queue_name,
+                  queueBinding.queue_id,
                   dispatchWorkerName,
                   {
                     ...(q.maxBatchSize != null && { max_batch_size: q.maxBatchSize }),
                     ...(q.maxBatchTimeout != null && { max_batch_timeout: q.maxBatchTimeout }),
                   },
                 );
-              } catch {
-                // Consumer may already exist — idempotent
+              } catch (err) {
+                // Consumer may already exist — only swallow that specific error
+                if (
+                  !(err instanceof Error && err.message.toLowerCase().includes("already exists"))
+                ) {
+                  throw err;
+                }
               }
               // Store queue→worker mapping for relay routing
               await c.env.ROUTING.put(

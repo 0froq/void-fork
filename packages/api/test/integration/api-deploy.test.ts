@@ -731,21 +731,24 @@ describe("POST /projects/:id/deploy", () => {
     expect(res.status).toBe(200);
     await res.text();
 
-    // Verify queue resource was created in DB
+    // Verify queue resource was created in DB with queue_id (UUID), not queue_name
     const [resource] = await env.db
       .select({ cf_id: resources.cf_id, binding_name: resources.binding_name })
       .from(resources)
       .where(eq(resources.project_id, project.id));
     expect(resource).toBeDefined();
-    expect(resource!.cf_id).toBe("test-queue");
+    expect(resource!.cf_id).toBe("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
     expect(resource!.binding_name).toBe("emails");
 
-    // Verify addQueueConsumer was called
+    // Verify addQueueConsumer was called with queue_id (UUID), not queue_name
     const consumerCall = fetchMock.mock.calls.find((call: unknown[]) => {
       const url = typeof call[0] === "string" ? call[0] : String(call[0]);
       return url.includes("/queues/") && url.includes("/consumers");
     });
     expect(consumerCall).toBeDefined();
+    const consumerUrl =
+      typeof consumerCall![0] === "string" ? consumerCall![0] : String(consumerCall![0]);
+    expect(consumerUrl).toContain("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
   });
 
   it("includes queue producer binding in worker upload metadata", async () => {
@@ -780,12 +783,19 @@ describe("POST /projects/:id/deploy", () => {
     const metadataBlob = workerFormData.get("metadata");
     expect(metadataBlob).toBeInstanceOf(Blob);
     const metadata = JSON.parse(await (metadataBlob as Blob).text()) as {
-      bindings?: { type: string; name: string; queue_name?: string }[];
+      bindings?: { type: string; name: string; queue_name?: string; queue_id?: string }[];
     };
 
+    // queue_name is the deterministic name (for CF producer binding), queue_id is the UUID
+    const expectedQueueName = `${project.id}-emails`.toLowerCase().replaceAll("_", "-");
     const queueBindings = (metadata.bindings ?? []).filter((b) => b.type === "queue");
     expect(queueBindings).toEqual([
-      { type: "queue", name: "QUEUE_EMAILS", queue_name: "test-queue" },
+      {
+        type: "queue",
+        name: "QUEUE_EMAILS",
+        queue_name: expectedQueueName,
+        queue_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      },
     ]);
   });
 
@@ -811,8 +821,9 @@ describe("POST /projects/:id/deploy", () => {
     expect(res.status).toBe(200);
     await res.text();
 
-    // Verify queue routing KV entry
-    const queueRouting = await env.ROUTING.get("queue:test-queue", "json");
+    // Verify queue routing KV entry (key uses deterministic queue name)
+    const expectedQueueName = `${project.id}-emails`.toLowerCase().replaceAll("_", "-");
+    const queueRouting = await env.ROUTING.get(`queue:${expectedQueueName}`, "json");
     expect(queueRouting).toEqual({
       workerName: "user-queue-kv-app",
       projectId: project.id,

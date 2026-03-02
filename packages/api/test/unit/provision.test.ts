@@ -36,8 +36,10 @@ import {
   createD1Database,
   createKVNamespace,
   createR2Bucket,
+  createQueue,
   getD1DatabaseByName,
   getKVNamespaceByTitle,
+  getQueueByName,
 } from "../../src/provisioning/cloudflare-api";
 import { getProjectResources, createResource } from "../../src/db";
 
@@ -111,6 +113,41 @@ describe("provisionBindings", () => {
       "STORAGE",
     );
     expect(bindings).toEqual([{ type: "r2_bucket", name: "STORAGE", bucket_name: "test-STORAGE" }]);
+  });
+
+  it("provisions queue and stores queue_id (UUID) as cf_id", async () => {
+    const manifest: DeployManifest = {
+      version: 2,
+      bindings: {},
+      queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
+    };
+
+    const bindings = await provisionBindings(
+      mockDb,
+      ACCOUNT_ID,
+      API_TOKEN,
+      PROJECT_ID,
+      manifest,
+      JWT_SECRET,
+      "void-proxy",
+    );
+
+    expect(createQueue).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-emails");
+    expect(createResource).toHaveBeenCalledWith(
+      mockDb,
+      PROJECT_ID,
+      "queue",
+      "queue-id-789",
+      "emails",
+    );
+    expect(bindings).toEqual([
+      {
+        type: "queue",
+        name: "QUEUE_EMAILS",
+        queue_name: "proj-abc123-emails",
+        queue_id: "queue-id-789",
+      },
+    ]);
   });
 
   it("skips provisioning when resources already exist", async () => {
@@ -292,6 +329,38 @@ describe("ensureResource — already exists fallback", () => {
     expect(createKVNamespace).toHaveBeenCalledOnce();
     expect(getKVNamespaceByTitle).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-kv");
     expect(bindings).toEqual([{ type: "kv_namespace", name: "KV", namespace_id: "kv-looked-up" }]);
+  });
+
+  it("falls back to lookup when queue create returns 'already exists'", async () => {
+    vi.mocked(createQueue).mockRejectedValueOnce(
+      new Error("Cloudflare API error: A queue with that name already exists"),
+    );
+
+    const manifest: DeployManifest = {
+      version: 2,
+      bindings: {},
+      queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
+    };
+    const bindings = await provisionBindings(
+      mockDb,
+      ACCOUNT_ID,
+      API_TOKEN,
+      PROJECT_ID,
+      manifest,
+      JWT_SECRET,
+      "void-proxy",
+    );
+
+    expect(createQueue).toHaveBeenCalledOnce();
+    expect(getQueueByName).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-emails");
+    expect(bindings).toEqual([
+      {
+        type: "queue",
+        name: "QUEUE_EMAILS",
+        queue_name: "proj-abc123-emails",
+        queue_id: "queue-looked-up",
+      },
+    ]);
   });
 
   it("propagates non-'already exists' errors", async () => {

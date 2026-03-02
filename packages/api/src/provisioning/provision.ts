@@ -20,6 +20,7 @@ export interface WorkerBinding {
   namespace_id?: string;
   bucket_name?: string;
   queue_name?: string;
+  queue_id?: string;
   service?: string;
   text?: string;
 }
@@ -63,9 +64,15 @@ export async function provisionBindings(
   }
 
   for (const q of manifest.queues ?? []) {
+    const queueName = `${projectId}-${q.name}`.toLowerCase().replaceAll("_", "-");
     tasks.push(
       ensureResource(db, accountId, apiToken, projectId, "queue", q.name, existing).then(
-        (r): WorkerBinding => ({ type: "queue", name: q.bindingName, queue_name: r.cf_id }),
+        (r): WorkerBinding => ({
+          type: "queue",
+          name: q.bindingName,
+          queue_name: queueName,
+          queue_id: r.cf_id,
+        }),
       ),
     );
   }
@@ -83,6 +90,8 @@ export async function provisionBindings(
   return bindings;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function ensureResource(
   db: Db,
   accountId: string,
@@ -97,13 +106,14 @@ async function ensureResource(
 
   const found = existing.find((r) => r.type === type && r.binding_name === bindingName);
   if (found) {
-    // Fix legacy queue resources that stored queue_id (UUID) instead of queue_name
-    if (type === "queue" && found.cf_id !== resourceName) {
+    // Fix legacy queue resources that stored queue_name instead of queue_id (UUID)
+    if (type === "queue" && !UUID_RE.test(found.cf_id)) {
+      const queueInfo = await getQueueByName(accountId, apiToken, resourceName);
       await db
         .update(resourcesTable)
-        .set({ cf_id: resourceName })
+        .set({ cf_id: queueInfo.queue_id })
         .where(eq(resourcesTable.id, found.id));
-      found.cf_id = resourceName;
+      found.cf_id = queueInfo.queue_id;
     }
     return found;
   }
@@ -143,7 +153,7 @@ async function createCfResource(
     }
     case "queue": {
       const result = await createQueue(accountId, apiToken, resourceName);
-      return result.queue_name;
+      return result.queue_id;
     }
   }
 }
@@ -168,7 +178,7 @@ async function lookupCfResource(
       return resourceName;
     case "queue": {
       const result = await getQueueByName(accountId, apiToken, resourceName);
-      return result.queue_name;
+      return result.queue_id;
     }
   }
 }
