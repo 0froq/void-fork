@@ -43,7 +43,8 @@ src/
     projects.ts             # Projects CRUD + deployments + migrations list
     deploy.ts               # Asset check + full deploy pipeline
     delete.ts               # Project deletion + CF resource cleanup
-    revalidate.ts           # ISR cache purge (paths or all)
+    revalidate.ts           # ISR cache purge (paths or all) — JWT-authed (dashboard/admin)
+    internal-revalidate.ts  # ISR cache purge — HMAC-authed (proxy → API service binding)
     secrets.ts              # Worker secret management (put/delete)
     domains.ts              # Custom domain CRUD + CF for SaaS
     usage.ts                # Usage queries (per-project + aggregate)
@@ -72,6 +73,7 @@ DELETE /projects/:id                     # Delete project + all CF resources
 POST   /projects/:id/assets/check        # Check which assets need uploading
 POST   /projects/:id/deploy              # Full deploy (migrations → assets → worker)
 POST   /projects/:id/revalidate          # Purge ISR cache (specific paths or all)
+POST   /internal/revalidate/:id         # Internal: ISR cache purge (HMAC auth, no JWT)
 
 PUT    /projects/:id/secrets/:name       # Set/update a worker secret
 DELETE /projects/:id/secrets/:name       # Delete a worker secret

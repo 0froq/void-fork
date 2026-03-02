@@ -68,11 +68,12 @@ Two fully isolated environments. Each has its own CF resources (KV, R2, dispatch
 
 **Proxy worker** (`void-proxy`):
 
-| Resource   | Binding | Name / ID                                                     |
-| ---------- | ------- | ------------------------------------------------------------- |
-| Workers AI | `AI`    | (account-level)                                               |
-| AI Gateway | —       | `void` (shared, account-level)                                |
-| Routes     | —       | `proxy.void.cloud/*`, `proxy.void.cloud` (zone: `void.cloud`) |
+| Resource        | Binding | Name / ID                                                     |
+| --------------- | ------- | ------------------------------------------------------------- |
+| Workers AI      | `AI`    | (account-level)                                               |
+| AI Gateway      | —       | `void` (shared, account-level)                                |
+| Service Binding | `API`   | `void-api` (for internal revalidation)                        |
+| Routes          | —       | `proxy.void.cloud/*`, `proxy.void.cloud` (zone: `void.cloud`) |
 
 **Dashboard worker** (`void-dashboard`):
 
@@ -101,6 +102,7 @@ Same resource types with `-staging` suffixes:
 | Queue       | `void-usage-events-staging` (consumer)                        | —                                                             | `void-usage-events-staging` (producer)                   | —                                                        |
 | DO          | `UsageCounter` (same class, staging-isolated)                 | —                                                             | —                                                        | —                                                        |
 | Workers AI  | —                                                             | —                                                             | —                                                        | `AI` (account-level)                                     |
+| Service     | —                                                             | `void-api-staging`                                            | —                                                        | `void-api-staging` (API binding)                         |
 | Routes      | —                                                             | `dash.staging.void.cloud`                                     | `*.staging.void.app/*`, `*.staging.void.app`, `*/*`, `*` | `proxy.staging.void.cloud/*`, `proxy.staging.void.cloud` |
 
 ## Secrets and Environment Variables
@@ -159,6 +161,7 @@ Set via `vars` in `wrangler.jsonc` (production uses defaults, staging overrides)
 | Worker    | Variable             | Default                                | Staging Override                               | Purpose                                           |
 | --------- | -------------------- | -------------------------------------- | ---------------------------------------------- | ------------------------------------------------- |
 | api       | `DISPATCH_NAMESPACE` | `void-users`                           | `void-users-staging`                           | CF dispatch namespace name                        |
+| api       | `VOID_PROXY_SERVICE` | `void-proxy`                           | `void-proxy-staging`                           | Proxy worker name for service binding injection   |
 | api       | `SITE_DOMAIN`        | `void.app`                             | `staging.void.app`                             | Base domain for deploy URL output                 |
 | api       | `AUTH_REDIRECT_URI`  | `https://api.void.cloud/auth/callback` | `https://api.staging.void.cloud/auth/callback` | OAuth callback URL                                |
 | api       | `DEV_AUTH_BYPASS`    | (unset)                                | —                                              | Skip admin OAuth for local dev (`.dev.vars` only) |

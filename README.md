@@ -115,7 +115,7 @@ See [`packages/api/README.md`](./packages/api/README.md) for API endpoints, auth
 
 ## `proxy` Overview
 
-Unified proxy worker at `proxy.void.cloud`. Proxies all Workers AI inference for metered billing (user workers never get the `AI` binding directly) and provides D1/KV/R2 remote binding access for local development via CF REST APIs. Two auth paths: service binding (production, trusted) and HTTPS with JWT (local dev).
+Unified proxy worker at `proxy.void.cloud`. All deployed user workers get a `__VOID_PROXY` service binding to this worker. Handles AI inference metering (user workers never get the `AI` binding directly), ISR revalidation (forwards to API via service binding), and D1/KV/R2 remote binding access for local development via CF REST APIs. Two auth paths: service binding with HMAC (production) and HTTPS with JWT (local dev).
 
 See [`packages/proxy/README.md`](./packages/proxy/README.md) for request format, authentication, and deployment.
 
