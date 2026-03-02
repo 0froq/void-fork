@@ -138,7 +138,7 @@ export function detectPreset(
     return {
       buildCommand: `${localBin(root, "vite")} build`,
       outputDir: resolve(root, "dist"),
-      appType: options?.spa ? "spa" : "spa",
+      appType: "spa",
     };
   }
 

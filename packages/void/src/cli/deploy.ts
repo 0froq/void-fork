@@ -122,25 +122,29 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   // 3. Resolve deploy app type: void.json > CLI flags > auto-detection
   const vcConfig = readConfig(root);
 
-  // Check for Class B/C framework first
+  // Check for known framework first
   const detected = detectFramework(root);
-  if (detected && (detected.class === "b" || detected.class === "c")) {
-    const fwPreset = FRAMEWORK_PRESETS[detected.name];
-    if (!fwPreset) {
-      log.error(`No deploy preset found for framework "${detected.name}".`);
-      process.exit(1);
-    }
+  if (detected) {
     const gitCommit = options?.skipBuild ? null : getGitCommit(root);
-    await runFrameworkDeploy(
-      root,
-      config,
-      client,
-      detected,
-      fwPreset,
-      vcConfig,
-      options?.skipBuild,
-      gitCommit,
-    );
+    if (detected.class === "b" || detected.class === "c") {
+      const fwPreset = FRAMEWORK_PRESETS[detected.name];
+      if (!fwPreset) {
+        log.error(`No deploy preset found for framework "${detected.name}".`);
+        process.exit(1);
+      }
+      await runFrameworkDeploy(
+        root,
+        config,
+        client,
+        detected,
+        fwPreset,
+        vcConfig,
+        options?.skipBuild,
+        gitCommit,
+      );
+    } else {
+      await runFullDeploy(root, config, client, options?.skipBuild, gitCommit, detected);
+    }
     return;
   }
 
@@ -452,6 +456,7 @@ async function runFullDeploy(
   client: PlatformClient,
   skipBuild?: boolean,
   commit?: string | null,
+  detected?: DetectedFramework,
 ): Promise<void> {
   // 3. Build (child process to avoid Vite API side effects on bundle output)
   if (!skipBuild) {
@@ -486,9 +491,8 @@ async function runFullDeploy(
     }
   }
 
-  // 5. Detect framework mode (Class A only for existing flow)
-  const detected = detectFramework(root);
-  const isFrameworkMode = detected?.class === "a";
+  // 5. Framework mode (Class A — passed from runDeploy)
+  const isFrameworkMode = detected != null;
 
   // 6. Infer bindings (expanded scan dirs in framework mode, or custom from config)
   const deployConfig = readConfig(root);
@@ -534,7 +538,10 @@ async function runFullDeploy(
     ...(q.maxBatchSize != null && { maxBatchSize: q.maxBatchSize }),
     ...(q.maxBatchTimeout != null && { maxBatchTimeout: q.maxBatchTimeout }),
   }));
-  const isSsr = isFrameworkMode ? true : Boolean(validateSsrEntry(root));
+  const hasPages = existsSync(join(root, "pages"));
+  const isSsr = isFrameworkMode
+    ? true
+    : Boolean(validateSsrEntry(root)) || (hasPages && deployConfig.output !== "static");
 
   // Resolve revalidate config from void.json + per-page .server.ts exports
   const vcRevalidate = readConfig(root).cache?.revalidate;
@@ -612,10 +619,11 @@ async function runFullDeploy(
   // 10. Package & Upload
   const s = spinner();
 
-  // Derive asset config: SSR workers handle their own 404s, non-SSR uses SPA fallback
-  const assetConfig: AssetConfig = isSsr
-    ? { not_found_handling: "none" }
-    : { not_found_handling: "single-page-application" };
+  // Derive asset config: SSR and pages-mode workers handle their own 404s, non-SSR uses SPA fallback
+  const assetConfig: AssetConfig =
+    isSsr || hasPages
+      ? { not_found_handling: "none" }
+      : { not_found_handling: "single-page-application" };
 
   // Preflight: hash assets and check which ones changed
   s.start("Checking for changes...");
