@@ -92,7 +92,9 @@ export default {
           }),
         );
       }
-      return response;
+      const res = new Response(response.body, response);
+      res.headers.set("X-Hosted-By", "Void");
+      return res;
     };
 
     // Redirect rules — short-circuit before any worker invocation
