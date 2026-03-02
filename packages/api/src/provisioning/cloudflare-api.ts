@@ -163,7 +163,12 @@ export async function addQueueConsumer(
   apiToken: string,
   queueId: string,
   scriptName: string,
-  settings?: { max_batch_size?: number; max_batch_timeout?: number },
+  settings?: {
+    max_batch_size?: number;
+    max_batch_timeout?: number;
+    max_retries?: number;
+    retry_delay?: number;
+  },
 ): Promise<void> {
   await cfFetch(`${CF_API_BASE}/${accountId}/queues/${queueId}/consumers`, apiToken, {
     method: "POST",

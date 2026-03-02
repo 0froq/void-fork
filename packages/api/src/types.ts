@@ -22,6 +22,8 @@ export interface QueueMeta {
   bindingName: string;
   maxBatchSize?: number;
   maxBatchTimeout?: number;
+  maxRetries?: number;
+  retryDelay?: number;
 }
 
 export const SUPPORTED_MANIFEST_VERSIONS = [2];

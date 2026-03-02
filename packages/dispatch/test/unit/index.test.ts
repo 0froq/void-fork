@@ -1142,6 +1142,209 @@ describe("header rules", () => {
   });
 });
 
+describe("queue relay", () => {
+  interface MockMessage {
+    id: string;
+    timestamp: Date;
+    body: unknown;
+    attempts: number;
+    ack: ReturnType<typeof vi.fn>;
+    retry: ReturnType<typeof vi.fn>;
+  }
+
+  function createMockBatch(
+    queue: string,
+    messages: { id: string; body: unknown; attempts?: number }[],
+  ) {
+    const msgs: MockMessage[] = messages.map((m) => ({
+      id: m.id,
+      timestamp: new Date("2026-01-15T12:00:00Z"),
+      body: m.body,
+      attempts: m.attempts ?? 1,
+      ack: vi.fn(),
+      retry: vi.fn(),
+    }));
+    return {
+      queue,
+      messages: msgs,
+      ackAll: vi.fn(),
+      retryAll: vi.fn(),
+    } as unknown as MessageBatch & {
+      ackAll: ReturnType<typeof vi.fn>;
+      retryAll: ReturnType<typeof vi.fn>;
+      messages: MockMessage[];
+    };
+  }
+
+  function createQueueEnv(options: {
+    routingRaw?: string | null;
+    workerResponse?: Response;
+    workerFetchImpl?: () => Promise<Response>;
+  }) {
+    const workerFetch = vi.fn(
+      async () => options.workerFetchImpl?.() ?? options.workerResponse ?? new Response("ok"),
+    );
+    return {
+      env: {
+        ROUTING: {
+          get: async () => options.routingRaw ?? null,
+        },
+        DISPATCH: {
+          get: () => ({ fetch: workerFetch }),
+        },
+        ASSETS: { get: async () => null },
+        ANALYTICS: { writeDataPoint: () => {} },
+      } as unknown as Env,
+      workerFetch,
+    };
+  }
+
+  it("retries all when routing entry is missing", async () => {
+    const batch = createMockBatch("test-queue", [{ id: "m1", body: "hello" }]);
+    const { env } = createQueueEnv({ routingRaw: null });
+
+    await app.queue(batch, env);
+
+    expect(batch.retryAll).toHaveBeenCalledOnce();
+    expect(batch.ackAll).not.toHaveBeenCalled();
+  });
+
+  it("acks all on legacy protocol (ok: true, no decisions)", async () => {
+    const routing = JSON.stringify({ workerName: "user-app", queueName: "emails" });
+    const batch = createMockBatch("test-queue", [{ id: "m1", body: "hello" }]);
+    const { env } = createQueueEnv({
+      routingRaw: routing,
+      workerResponse: Response.json({ ok: true }),
+    });
+
+    await app.queue(batch, env);
+
+    expect(batch.ackAll).toHaveBeenCalledOnce();
+    expect(batch.retryAll).not.toHaveBeenCalled();
+  });
+
+  it("retries all on legacy protocol (ok: false)", async () => {
+    const routing = JSON.stringify({ workerName: "user-app", queueName: "emails" });
+    const batch = createMockBatch("test-queue", [{ id: "m1", body: "hello" }]);
+    const { env } = createQueueEnv({
+      routingRaw: routing,
+      workerResponse: Response.json({ ok: false }),
+    });
+
+    await app.queue(batch, env);
+
+    expect(batch.retryAll).toHaveBeenCalledOnce();
+    expect(batch.ackAll).not.toHaveBeenCalled();
+  });
+
+  it("applies per-message decisions correctly", async () => {
+    const routing = JSON.stringify({ workerName: "user-app", queueName: "emails" });
+    const batch = createMockBatch("test-queue", [
+      { id: "m1", body: "ack-me" },
+      { id: "m2", body: "retry-me" },
+      { id: "m3", body: "no-decision" },
+    ]);
+    const { env } = createQueueEnv({
+      routingRaw: routing,
+      workerResponse: Response.json({
+        ok: true,
+        decisions: {
+          m1: { action: "ack" },
+          m2: { action: "retry" },
+        },
+      }),
+    });
+
+    await app.queue(batch, env);
+
+    expect(batch.messages[0].ack).toHaveBeenCalledOnce();
+    expect(batch.messages[1].retry).toHaveBeenCalledWith(undefined);
+    expect(batch.messages[2].ack).not.toHaveBeenCalled();
+    expect(batch.messages[2].retry).not.toHaveBeenCalled();
+  });
+
+  it("passes delaySeconds through on retry decisions", async () => {
+    const routing = JSON.stringify({ workerName: "user-app", queueName: "emails" });
+    const batch = createMockBatch("test-queue", [{ id: "m1", body: "retry-me" }]);
+    const { env } = createQueueEnv({
+      routingRaw: routing,
+      workerResponse: Response.json({
+        ok: true,
+        decisions: {
+          m1: { action: "retry", delaySeconds: 30 },
+        },
+      }),
+    });
+
+    await app.queue(batch, env);
+
+    expect(batch.messages[0].retry).toHaveBeenCalledWith({ delaySeconds: 30 });
+  });
+
+  it("retries all undecided messages when handler fails (ok: false)", async () => {
+    const routing = JSON.stringify({ workerName: "user-app", queueName: "emails" });
+    const batch = createMockBatch("test-queue", [
+      { id: "m1", body: "acked" },
+      { id: "m2", body: "undecided" },
+    ]);
+    const { env } = createQueueEnv({
+      routingRaw: routing,
+      workerResponse: Response.json({
+        ok: false,
+        decisions: {
+          m1: { action: "ack" },
+        },
+      }),
+    });
+
+    await app.queue(batch, env);
+
+    // Individual ack decision applied
+    expect(batch.messages[0].ack).toHaveBeenCalledOnce();
+    // retryAll called for undecided messages (CF preserves individual decisions)
+    expect(batch.retryAll).toHaveBeenCalledOnce();
+  });
+
+  it("retries all on network error", async () => {
+    const routing = JSON.stringify({ workerName: "user-app", queueName: "emails" });
+    const batch = createMockBatch("test-queue", [{ id: "m1", body: "hello" }]);
+    const { env } = createQueueEnv({
+      routingRaw: routing,
+      workerFetchImpl: () => Promise.reject(new Error("network error")),
+    });
+
+    await app.queue(batch, env);
+
+    expect(batch.retryAll).toHaveBeenCalledOnce();
+  });
+
+  it("retries all on non-ok HTTP response", async () => {
+    const routing = JSON.stringify({ workerName: "user-app", queueName: "emails" });
+    const batch = createMockBatch("test-queue", [{ id: "m1", body: "hello" }]);
+    const { env } = createQueueEnv({
+      routingRaw: routing,
+      workerResponse: new Response("Internal Server Error", { status: 500 }),
+    });
+
+    await app.queue(batch, env);
+
+    expect(batch.retryAll).toHaveBeenCalledOnce();
+  });
+
+  it("acks all on non-JSON 2xx response (legacy framework)", async () => {
+    const routing = JSON.stringify({ workerName: "user-app", queueName: "emails" });
+    const batch = createMockBatch("test-queue", [{ id: "m1", body: "hello" }]);
+    const { env } = createQueueEnv({
+      routingRaw: routing,
+      workerResponse: new Response("OK", { status: 200 }),
+    });
+
+    await app.queue(batch, env);
+
+    expect(batch.ackAll).toHaveBeenCalledOnce();
+  });
+});
+
 describe("redirect rules", () => {
   it("applies redirect rules before invoking worker", async () => {
     const { env, workerFetch } = createEnv({

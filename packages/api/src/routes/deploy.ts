@@ -466,6 +466,8 @@ app.post("/:id/deploy", async (c) => {
                   {
                     ...(q.maxBatchSize != null && { max_batch_size: q.maxBatchSize }),
                     ...(q.maxBatchTimeout != null && { max_batch_timeout: q.maxBatchTimeout }),
+                    ...(q.maxRetries != null && { max_retries: q.maxRetries }),
+                    ...(q.retryDelay != null && { retry_delay: q.retryDelay }),
                   },
                 );
               } catch (err) {

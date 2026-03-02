@@ -285,7 +285,7 @@ export default {
     // Look up which user worker handles this queue
     const routingRaw = await env.ROUTING.get(`queue:${batch.queue}`, { cacheTtl: 60 });
     if (!routingRaw) {
-      batch.ackAll();
+      batch.retryAll();
       return;
     }
     const { workerName, queueName } = JSON.parse(routingRaw) as QueueRoutingEntry;
@@ -308,11 +308,45 @@ export default {
         }),
       );
 
-      if (res.ok) {
-        batch.ackAll();
-      } else {
+      if (!res.ok) {
         batch.retryAll();
+        return;
       }
+
+      let result: {
+        ok?: boolean;
+        decisions?: Record<string, { action: string; delaySeconds?: number }>;
+      };
+      try {
+        result = await res.json();
+      } catch {
+        // Non-JSON 2xx = legacy framework, treat as success
+        batch.ackAll();
+        return;
+      }
+
+      if (!result.decisions) {
+        // No decisions = legacy protocol, batch fallback
+        if (result.ok !== false) batch.ackAll();
+        else batch.retryAll();
+        return;
+      }
+
+      // Apply per-message decisions
+      const msgMap = new Map(batch.messages.map((m) => [m.id, m]));
+      for (const [id, decision] of Object.entries(result.decisions)) {
+        const cfMsg = msgMap.get(id);
+        if (!cfMsg) continue;
+        if (decision.action === "ack") cfMsg.ack();
+        else if (decision.action === "retry")
+          cfMsg.retry(
+            decision.delaySeconds != null ? { delaySeconds: decision.delaySeconds } : undefined,
+          );
+      }
+
+      // Undecided messages: if handler failed, retry all (individual decisions survive per CF)
+      if (result.ok === false) batch.retryAll();
+      // If ok=true, undecided messages get implicit ack (CF default on successful consumer return)
     } catch {
       batch.retryAll();
     }
