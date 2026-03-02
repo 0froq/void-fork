@@ -265,12 +265,13 @@ async function runStaticDeploy(
   s.start("Checking for changes...");
   const { assetManifest } = collectAndHashAssets(preset.outputDir);
   const { needed, skipped } = await client.preflight(config.projectId, assetManifest);
+  s.stop("Checked for changes");
 
   if (skipped > 0) {
     log.info(`Skipping ${skipped} unchanged asset(s)`);
   }
 
-  s.message("Packaging...");
+  s.start("Packaging...");
   const neededSet = skipped > 0 ? new Set(needed) : null;
   const formData = packageStaticBuild(
     preset.outputDir,
@@ -419,12 +420,13 @@ async function runFrameworkDeploy(
   s.start("Checking for changes...");
   const { assetManifest } = collectAndHashAssets(assetsDir);
   const { needed, skipped } = await client.preflight(config.projectId, assetManifest);
+  s.stop("Checked for changes");
 
   if (skipped > 0) {
     log.info(`Skipping ${skipped} unchanged asset(s)`);
   }
 
-  s.message("Packaging...");
+  s.start("Packaging...");
   const neededSet = skipped > 0 ? new Set(needed) : null;
   const formData = packageFrameworkBuild({
     frameworkName: detected.name,
@@ -668,12 +670,13 @@ async function runFullDeploy(
   s.start("Checking for changes...");
   const { assetManifest } = collectAndHashAssets(clientDir);
   const { needed, skipped } = await client.preflight(config.projectId, assetManifest);
+  s.stop("Checked for changes");
 
   if (skipped > 0) {
     log.info(`Skipping ${skipped} unchanged asset(s)`);
   }
 
-  s.message("Packaging...");
+  s.start("Packaging...");
   const neededSet = skipped > 0 ? new Set(needed) : null;
   const formData = packageBuild(
     distDir,
