@@ -99,6 +99,7 @@ export default defineConfig({
     "@void-x/svelte",
     "@void-x/solid",
     "@napi-rs/keyring",
+    "undici", // ofetch imports this in types
   ],
   inlineOnly: [
     "fdir",
@@ -110,5 +111,6 @@ export default defineConfig({
     "@clack/core",
     "sisteransi",
     "picocolors",
+    "ofetch",
   ],
 });
