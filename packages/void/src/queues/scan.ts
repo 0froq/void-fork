@@ -15,6 +15,10 @@ export interface QueueDefinition {
   maxBatchSize?: number;
   /** Optional max batch timeout (seconds) for consumer */
   maxBatchTimeout?: number;
+  /** Optional max retries before dead-lettering */
+  maxRetries?: number;
+  /** Optional delay (seconds) between retries */
+  retryDelay?: number;
 }
 
 function extractName(filePath: string): string {
@@ -45,6 +49,8 @@ function parseQueueFiles(root: string, queuesDir: string, files: string[]): Queu
         bindingName: deriveBindingName(name),
         maxBatchSize: extractConsumerOption(source, "maxBatchSize"),
         maxBatchTimeout: extractConsumerOption(source, "maxBatchTimeout"),
+        maxRetries: extractConsumerOption(source, "maxRetries"),
+        retryDelay: extractConsumerOption(source, "retryDelay"),
       };
     });
 }

@@ -58,18 +58,24 @@ type ScheduledFn = (
   ctx: JobExecutionContext,
 ) => unknown | Promise<unknown>;
 
-/** A single message in a queue batch (serialized form, not the raw CF MessageBatch). */
+export type QueueRetryOptions = { delaySeconds?: number };
+
+/** A single message in a queue batch. */
 export type QueueMessage<T = unknown> = {
-  id: string;
-  timestamp: string;
-  body: T;
-  attempts: number;
+  readonly id: string;
+  readonly timestamp: Date;
+  readonly body: T;
+  readonly attempts: number;
+  ack(): void;
+  retry(options?: QueueRetryOptions): void;
 };
 
 /** A batch of queue messages delivered to a consumer handler. */
 export type QueueBatch<T = unknown> = {
-  queue: string;
-  messages: QueueMessage<T>[];
+  readonly queue: string;
+  readonly messages: QueueMessage<T>[];
+  ackAll(): void;
+  retryAll(options?: QueueRetryOptions): void;
 };
 
 type QueueFn<T = unknown> = (

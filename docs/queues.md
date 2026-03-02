@@ -24,6 +24,7 @@ interface Message {
 export default defineQueue<Message>(async (batch, env) => {
   for (const msg of batch.messages) {
     console.log(`Send to ${msg.body.to}: ${msg.body.subject}`);
+    msg.ack(); // Acknowledge successful processing
   }
 });
 ```
@@ -53,9 +54,35 @@ export const POST = defineHandler(async (c) => {
 
 The binding name is derived automatically: `QUEUE_` + queue name uppercased with non-alphanumeric characters replaced by `_`. For example, `queues/emails.ts` creates binding `QUEUE_EMAILS`.
 
+## Per-message acknowledgment
+
+Each message in the batch has `ack()` and `retry()` methods matching the [Cloudflare Queues API](https://developers.cloudflare.com/queues/configuration/consumer-concurrency/):
+
+```ts
+export default defineQueue<Message>(async (batch, env) => {
+  for (const msg of batch.messages) {
+    try {
+      await processMessage(msg.body);
+      msg.ack(); // Remove from queue
+    } catch {
+      msg.retry({ delaySeconds: 30 }); // Re-deliver after 30s
+    }
+  }
+});
+```
+
+- `msg.ack()` — Acknowledge the message (remove from queue)
+- `msg.retry(options?)` — Retry the message, optionally with `{ delaySeconds }` delay
+- `batch.ackAll()` — Acknowledge all messages in the batch
+- `batch.retryAll(options?)` — Retry all messages in the batch
+
+The first call wins per message — calling `ack()` after `retry()` (or vice versa) on the same message is a no-op. Messages with no explicit decision are implicitly acknowledged if the handler succeeds, or retried if it throws.
+
+The `timestamp` field on each message is a `Date` object.
+
 ## Consumer options
 
-You can export `maxBatchSize` and `maxBatchTimeout` to configure how Cloudflare delivers batches to your consumer:
+Export named constants to configure how Cloudflare delivers batches to your consumer:
 
 ```ts
 // queues/emails.ts
@@ -68,6 +95,8 @@ interface Message {
 
 export const maxBatchSize = 50;
 export const maxBatchTimeout = 10; // seconds
+export const maxRetries = 5;
+export const retryDelay = 30; // seconds
 
 export default defineQueue<Message>(async (batch, env) => {
   for (const msg of batch.messages) {
@@ -78,6 +107,8 @@ export default defineQueue<Message>(async (batch, env) => {
 
 - `maxBatchSize` — Maximum number of messages per batch (default: 10)
 - `maxBatchTimeout` — Maximum seconds to wait before delivering an incomplete batch (default: 5)
+- `maxRetries` — Maximum number of retries before a message is dead-lettered (default: 3)
+- `retryDelay` — Seconds to wait between retries (default: 0)
 
 ## Deployment behavior
 

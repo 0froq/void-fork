@@ -405,17 +405,46 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push('app.post("/__queue", async (c) => {');
     lines.push("  const payload = await c.req.json();");
     lines.push("  const queueSuffix = payload.queue;");
+    lines.push("  const __decisions = new Map();");
+    lines.push("  function __wrapMsg(m) {");
+    lines.push("    let decided = false;");
+    lines.push("    return {");
+    lines.push(
+      "      id: m.id, timestamp: new Date(m.timestamp), body: m.body, attempts: m.attempts,",
+    );
+    lines.push(
+      '      ack() { if (!decided) { decided = true; __decisions.set(m.id, { action: "ack" }); } },',
+    );
+    lines.push(
+      '      retry(opts) { if (!decided) { decided = true; __decisions.set(m.id, { action: "retry", ...(opts?.delaySeconds != null ? { delaySeconds: opts.delaySeconds } : {}) }); } },',
+    );
+    lines.push("    };");
+    lines.push("  }");
+    lines.push("  const __msgs = payload.messages.map(__wrapMsg);");
+    lines.push("  const batch = {");
+    lines.push("    queue: queueSuffix,");
+    lines.push("    messages: __msgs,");
+    lines.push("    ackAll() { for (const m of __msgs) m.ack(); },");
+    lines.push("    retryAll(opts) { for (const m of __msgs) m.retry(opts); },");
+    lines.push("  };");
+    lines.push("  let __ok = true;");
+    lines.push("  try {");
     for (let i = 0; i < scan.queues.length; i++) {
       const q = scan.queues[i];
       const cond = i === 0 ? "if" : "} else if";
       lines.push(
-        `  ${cond} (queueSuffix === queue${i}Name || queueSuffix.endsWith("-" + queue${i}Name)) {`,
+        `    ${cond} (queueSuffix === queue${i}Name || queueSuffix.endsWith("-" + queue${i}Name)) {`,
       );
-      lines.push(`    const mod = await import(${JSON.stringify(`${queuesDir}/${q.filePath}`)});`);
-      lines.push("    if (typeof mod.default === 'function') await mod.default(payload, c.env);");
+      lines.push(
+        `      const mod = await import(${JSON.stringify(`${queuesDir}/${q.filePath}`)});`,
+      );
+      lines.push("      if (typeof mod.default === 'function') await mod.default(batch, c.env);");
     }
-    lines.push("  }");
-    lines.push("  return c.json({ ok: true });");
+    lines.push("    }");
+    lines.push("  } catch { __ok = false; }");
+    lines.push(
+      "  return c.json({ ok: __ok, ...(__decisions.size > 0 ? { decisions: Object.fromEntries(__decisions) } : {}) });",
+    );
     lines.push("});");
     lines.push("");
   }
@@ -977,13 +1006,27 @@ async function serveWithAssets(request, env, response) {
     : `async (request, env, ctx) => serveWithAssets(request, env, await app.fetch(request, env, ctx))`;
 
   const queueFetchCall = remotePath
-    ? `if (env.__VOID_REMOTE === "1") {
+    ? `let __queueRes;
+  if (env.__VOID_REMOTE === "1") {
     env = createRemoteEnv(env);
-    await withRuntimeEnv(env, () => app.fetch(req, env, ctx));
+    __queueRes = await withRuntimeEnv(env, () => app.fetch(req, env, ctx));
   } else {
-    await app.fetch(req, env, ctx);
+    __queueRes = await app.fetch(req, env, ctx);
   }`
-    : "await app.fetch(req, env, ctx);";
+    : "const __queueRes = await app.fetch(req, env, ctx);";
+
+  const queueDecisionCode = `const __qr = await __queueRes.json();
+  if (__qr.decisions) {
+    const __msgMap = new Map();
+    for (const m of batch.messages) __msgMap.set(m.id, m);
+    for (const [id, d] of Object.entries(__qr.decisions)) {
+      const m = __msgMap.get(id);
+      if (!m) continue;
+      if (d.action === "ack") m.ack();
+      else if (d.action === "retry") m.retry(d.delaySeconds != null ? { delaySeconds: d.delaySeconds } : undefined);
+    }
+  }
+  if (!__qr.ok) throw new Error("Queue handler failed");`;
 
   if (hasQueues) {
     return `import app, { scheduled } from 'virtual:void-routes';
@@ -999,6 +1042,7 @@ async function queue(batch, env, ctx) {
     body: JSON.stringify({ queue: batch.queue, messages }),
   });
   ${queueFetchCall}
+  ${queueDecisionCode}
 }
 
 export default { fetch: ${fetchHandler}, scheduled, queue };`;

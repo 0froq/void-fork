@@ -225,7 +225,7 @@ describe("compileRouteTable", () => {
     expect(code).toContain('app.post("/__queue"');
     expect(code).toContain('const queue0Name = "emails"');
     expect(code).toContain('import("/queues/emails.ts")');
-    expect(code).toContain("mod.default(payload, c.env)");
+    expect(code).toContain("mod.default(batch, c.env)");
   });
 
   it("matches queue name with endsWith for prefixed names", () => {
