@@ -1,4 +1,5 @@
 import { getApiUrl } from "./auth";
+import type { DeployEvent } from "./types";
 
 export interface ProjectResponse {
   id: string;
@@ -12,14 +13,6 @@ export interface ProjectResponse {
 export interface CreateProjectResponse {
   id: string;
   slug: string;
-}
-
-export interface DeployResponse {
-  deployment: string;
-  url: string;
-  assets: number;
-  workers: number;
-  migrations?: number;
 }
 
 export interface DeleteProjectResponse {
@@ -161,7 +154,7 @@ export class PlatformClient {
     }
   }
 
-  async deploy(projectId: string, formData: FormData): Promise<DeployResponse> {
+  async *deploy(projectId: string, formData: FormData): AsyncGenerator<DeployEvent> {
     const res = await fetch(`${this.baseUrl}/projects/${projectId}/deploy`, {
       method: "POST",
       headers: {
@@ -175,7 +168,24 @@ export class PlatformClient {
       throw new Error(`Deploy failed: ${res.status} ${body}`);
     }
 
-    return res.json();
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let newlineIdx;
+      while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newlineIdx);
+        buffer = buffer.slice(newlineIdx + 1);
+        if (line.trim()) {
+          yield JSON.parse(line) as DeployEvent;
+        }
+      }
+    }
   }
 
   async listSecrets(projectId: string): Promise<{ name: string }[]> {

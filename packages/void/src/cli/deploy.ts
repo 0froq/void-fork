@@ -39,7 +39,7 @@ import { getRequestedProjectSlug, resolveProjectBySlug, inferDefaultSlug } from 
 import { cliTitle } from "./output";
 import { parseHeadersFile, parseRedirectsFile } from "./headers";
 import { convertHeadersConfig, convertRedirectsConfig } from "../config";
-import type { AssetConfig, HeaderRule, RedirectRule } from "./types";
+import type { AssetConfig, DeployEvent, HeaderRule, RedirectRule } from "./types";
 
 export interface RunDeployOptions {
   projectSlug?: string;
@@ -191,6 +191,49 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   }
 }
 
+async function streamDeploy(
+  client: PlatformClient,
+  projectId: string,
+  formData: FormData,
+  s: ReturnType<typeof spinner>,
+): Promise<Extract<DeployEvent, { event: "done" }>> {
+  for await (const event of client.deploy(projectId, formData)) {
+    switch (event.event) {
+      case "start":
+        s.message("Deploying...");
+        break;
+      case "asset_upload":
+        if (event.new > 0) {
+          s.message(`Uploading assets (${event.new} new, ${event.cached} cached)`);
+        } else {
+          s.message(`Uploading assets (${event.total} cached)`);
+        }
+        break;
+      case "provisioning":
+        s.message(`Provisioning ${event.bindings.join(", ")}`);
+        break;
+      case "migration":
+        s.message(`Running migration ${event.index}/${event.total}: ${event.name}`);
+        break;
+      case "worker_upload":
+        s.message("Uploading worker...");
+        break;
+      case "prerender":
+        s.message(`Prerendering ${event.pages} pages...`);
+        break;
+      case "done":
+        s.stop("Deployed!");
+        return event;
+      case "error":
+        s.stop("Deploy failed");
+        throw new Error(event.message);
+    }
+  }
+  // Stream ended without done/error — connection dropped
+  s.stop("Deploy failed");
+  throw new Error("Connection lost during deploy");
+}
+
 async function runStaticDeploy(
   root: string,
   config: ProjectConfig,
@@ -240,9 +283,7 @@ async function runStaticDeploy(
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
 
-  s.message("Deploying...");
-  const result = await client.deploy(config.projectId, formData);
-  s.stop("Deployed!");
+  const result = await streamDeploy(client, config.projectId, formData, s);
 
   const uploaded = result.assets - skipped;
   const assetSummary =
@@ -412,9 +453,7 @@ async function runFrameworkDeploy(
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
 
-  s.message("Deploying...");
-  const result = await client.deploy(config.projectId, formData);
-  s.stop("Deployed!");
+  const result = await streamDeploy(client, config.projectId, formData, s);
 
   const uploaded = result.assets - skipped;
   const assetSummary =
@@ -661,9 +700,7 @@ async function runFullDeploy(
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
 
-  s.message("Deploying...");
-  const result = await client.deploy(config.projectId, formData);
-  s.stop("Deployed!");
+  const result = await streamDeploy(client, config.projectId, formData, s);
 
   const uploaded = result.assets - skipped;
   const assetSummary =
