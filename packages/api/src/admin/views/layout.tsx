@@ -33,7 +33,7 @@ export function Layout({
         `}</style>
       </head>
       <body>
-        <div style="max-width: 1100px; margin: 0 auto; padding: 20px">
+        <div style="max-width: 1100px; margin: 0 auto; padding: 20px; padding-bottom: 60px">
           <nav style="display: flex; justify-content: space-between; padding-bottom: 10px; margin-bottom: 20px; border-bottom: 1px solid #ccc">
             <span>
               <strong>Void Admin</strong> &mdash; <a href="/admin/">Dashboard</a> |{" "}

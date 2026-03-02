@@ -95,20 +95,31 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
     }
     header += '<span style="color:' + (entry.outcome === 'ok' ? '#16a34a' : '#dc2626') + '">' + entry.outcome + '</span>';
 
-    var body = '';
+    var messages = [];
     if (entry.logs && entry.logs.length > 0) {
       entry.logs.forEach(function(log) {
-        body += '<div style="margin:2px 0 2px 16px">'
-          + levelBadge(log.level || 'log')
-          + '<span>' + formatMessage(log.message) + '</span></div>';
+        messages.push({ level: log.level || 'log', text: formatMessage(log.message) });
       });
     }
     if (entry.exceptions && entry.exceptions.length > 0) {
       entry.exceptions.forEach(function(ex) {
-        body += '<div style="margin:2px 0 2px 16px;color:#dc2626">'
-          + levelBadge('error')
-          + '<span>' + ex.name + ': ' + ex.message + '</span></div>';
+        messages.push({ level: 'error', text: escapeHtml(ex.name + ': ' + ex.message) });
       });
+    }
+
+    var body = '';
+    if (messages.length > 0) {
+      var lines = messages.map(function(m) { return m.text; }).join('\\n');
+      var badges = messages.map(function(m) {
+        return '<div>' + levelBadge(m.level) + '<span>' + m.text + '</span></div>';
+      }).join('');
+      body = '<div style="position:relative;margin-top:4px;margin-left:24px">'
+        + '<button onclick="navigator.clipboard.writeText(this.dataset.text).then(function(){this.textContent=\\'Copied!\\';var b=this;setTimeout(function(){b.textContent=\\'Copy\\'},1500)}.bind(this))" '
+        + 'data-text="' + lines.replace(/"/g, '&quot;') + '" '
+        + 'style="position:absolute;top:4px;right:4px;font-size:0.7rem;padding:2px 6px;cursor:pointer;background:#f3f4f6;border:1px solid #d1d5db;border-radius:3px">Copy</button>'
+        + '<pre style="margin:0;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:0.78rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all">'
+        + badges
+        + '</pre></div>';
     }
 
     row.innerHTML = header + body;
@@ -139,7 +150,7 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
     var filtered = q ? data.filter(function(e) { return entryText(e).indexOf(q) !== -1; }) : data;
     container.innerHTML = '';
     if (filtered.length === 0) {
-      container.innerHTML = '<p style="color:#999;font-size:0.8rem">No logs found' + (q ? ' matching filter' : ' for this time range') + '.</p>';
+      container.innerHTML = '<p style="color:#999;font-size:0.8rem">No logs found' + (q ? ' matching filter' : ' for this time range') + '. New logs may take up to 2 minutes to appear.</p>';
       return;
     }
     filtered.forEach(function(entry) {
@@ -205,7 +216,7 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
     btn.textContent = 'Stop Tail';
     btn.style.borderColor = 'red';
     btn.style.color = 'red';
-    container.innerHTML = '<p style="color:#999;font-size:0.8rem">Polling for new events...</p>';
+    container.innerHTML = '<p style="color:#999;font-size:0.8rem">Polling for new events... New logs may take up to 2 minutes to appear.</p>';
     pollTail();
     pollTimer = setInterval(pollTail, 3000);
   });

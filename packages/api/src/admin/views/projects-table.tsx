@@ -4,6 +4,7 @@ export type ProjectRow = Project & {
   owner_login: string | null;
   last_deploy: string | null;
   last_deploy_id: string | null;
+  last_deploy_status: string | null;
 };
 
 export function ProjectsTable({
@@ -48,13 +49,18 @@ export function ProjectsTable({
               <td>{new Date(p.created_at).toLocaleDateString()}</td>
               <td>
                 {p.last_deploy ? (
-                  p.last_deploy_id ? (
-                    <a href={`/admin/deployments/${p.last_deploy_id}`}>
-                      {new Date(p.last_deploy).toLocaleString()}
-                    </a>
-                  ) : (
-                    new Date(p.last_deploy).toLocaleString()
-                  )
+                  <>
+                    <span
+                      style={`display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:10px;vertical-align:middle;background:${p.last_deploy_status === "failed" ? "#dc2626" : "#16a34a"}`}
+                    />
+                    {p.last_deploy_id ? (
+                      <a href={`/admin/deployments/${p.last_deploy_id}`}>
+                        {new Date(p.last_deploy).toLocaleString()}
+                      </a>
+                    ) : (
+                      new Date(p.last_deploy).toLocaleString()
+                    )}
+                  </>
                 ) : (
                   "-"
                 )}

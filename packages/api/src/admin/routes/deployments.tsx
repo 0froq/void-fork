@@ -223,6 +223,10 @@ app.get("/:id/logs", async (c) => {
     return c.json({ error: "project not found" }, 404);
   }
 
+  if (c.env.DEV_AUTH_BYPASS) {
+    return c.json({ data: mockLogData() });
+  }
+
   const workerName = `user-${project.slug}`;
   const since = c.req.query("since") ?? "1h";
   const sinceMs = parseSince(since);
@@ -294,6 +298,98 @@ function tryParse(json: string): unknown[] {
   } catch {
     return [];
   }
+}
+
+function mockLogData() {
+  const now = Date.now();
+  return [
+    {
+      timestamp: now - 1000,
+      outcome: "ok",
+      logs: [
+        { level: "info", message: "Incoming request: GET /api/users" },
+        { level: "debug", message: "Cache HIT for key: users:list:page=1" },
+      ],
+      exceptions: [],
+      url: "/api/users",
+      method: "GET",
+      status: "200",
+    },
+    {
+      timestamp: now - 5000,
+      outcome: "ok",
+      logs: [{ level: "log", message: "POST /api/auth/login — user authenticated successfully" }],
+      exceptions: [],
+      url: "/api/auth/login",
+      method: "POST",
+      status: "200",
+    },
+    {
+      timestamp: now - 12000,
+      outcome: "exception",
+      logs: [
+        {
+          level: "error",
+          message:
+            'TypeError: Cannot read properties of undefined (reading "id")\n    at getUser (src/handlers/users.ts:42:18)\n    at handleRequest (src/index.ts:15:3)',
+        },
+      ],
+      exceptions: [
+        { name: "TypeError", message: 'Cannot read properties of undefined (reading "id")' },
+      ],
+      url: "/api/users/999",
+      method: "GET",
+      status: "500",
+    },
+    {
+      timestamp: now - 30000,
+      outcome: "ok",
+      logs: [
+        {
+          level: "warn",
+          message: "Rate limit approaching: 85/100 requests in current window for IP 192.168.1.42",
+        },
+      ],
+      exceptions: [],
+      url: "/api/data/export",
+      method: "GET",
+      status: "200",
+    },
+    {
+      timestamp: now - 45000,
+      outcome: "ok",
+      logs: [],
+      exceptions: [],
+      url: "/health",
+      method: "GET",
+      status: "204",
+    },
+    {
+      timestamp: now - 60000,
+      outcome: "ok",
+      logs: [
+        {
+          level: "info",
+          message:
+            "D1 query executed in 12ms: SELECT * FROM posts WHERE published = 1 ORDER BY created_at DESC LIMIT 20",
+        },
+        { level: "info", message: "Returning 20 posts" },
+      ],
+      exceptions: [],
+      url: "/api/posts",
+      method: "GET",
+      status: "200",
+    },
+    {
+      timestamp: now - 90000,
+      outcome: "canceled",
+      logs: [{ level: "warn", message: "Request canceled by client before completion" }],
+      exceptions: [],
+      url: "/api/reports/generate",
+      method: "POST",
+      status: "499",
+    },
+  ];
 }
 
 function parseSince(since: string): number {

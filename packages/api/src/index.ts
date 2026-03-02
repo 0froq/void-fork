@@ -13,7 +13,7 @@ import { projectUsage, accountUsage } from "./routes/usage";
 import { authMiddleware } from "./middleware/auth";
 import adminLogin from "./admin/routes/login";
 import { adminAuthMiddleware } from "./admin/middleware/auth";
-import { dashboardHandler } from "./admin/routes/system";
+import { dashboardHandler, adminSystem } from "./admin/routes/system";
 import adminUsers from "./admin/routes/users";
 import adminProjects from "./admin/routes/projects";
 import adminDeployments from "./admin/routes/deployments";
@@ -64,6 +64,7 @@ app.route("/admin/users", adminUsers);
 app.route("/admin/projects", adminProjects);
 app.route("/admin/deployments", adminDeployments);
 app.route("/admin/signup-control", adminSignupControl);
+app.route("/admin", adminSystem);
 
 const BATCH_SIZE = 50;
 

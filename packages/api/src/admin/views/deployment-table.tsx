@@ -45,16 +45,11 @@ export function DeploymentTable({
                 )}
               </td>
             )}
-            <td
-              style={
-                d.status === "live"
-                  ? "color: green"
-                  : d.status === "failed"
-                    ? "color: red"
-                    : undefined
-              }
-            >
-              {d.status}
+            <td>
+              <span
+                style={`display:inline-block;width:8px;height:8px;border-radius:50%;background:${d.status === "failed" ? "#dc2626" : "#16a34a"}`}
+                title={d.status}
+              />
             </td>
             <td>{d.source ?? "-"}</td>
             <td>{d.commit ? d.commit.slice(0, 7) : "-"}</td>

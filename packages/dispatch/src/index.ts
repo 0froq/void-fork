@@ -39,6 +39,12 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const startTime = Date.now();
     const url = new URL(request.url);
+
+    // Health check short-circuit — bypass KV lookup entirely
+    if (url.pathname === "/health" && request.headers.get("X-Health-Check") === "void-admin") {
+      return Response.json({ ok: true });
+    }
+
     const slug = extractSlug(url.hostname, env.BASE_HOSTNAME);
     const routingKey = slug ?? `domain:${url.hostname}`;
 

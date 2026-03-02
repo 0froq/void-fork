@@ -408,6 +408,7 @@ export async function getAllProjectsWithOwner(
     owner_login: string | null;
     last_deploy: string | null;
     last_deploy_id: string | null;
+    last_deploy_status: string | null;
   })[]
 > {
   const lastDeploy = db
@@ -417,6 +418,10 @@ export async function getAllProjectsWithOwner(
       last_deploy_id:
         sql<string>`(SELECT id FROM deployments d2 WHERE d2.project_id = ${deployments.project_id} ORDER BY d2.created_at DESC LIMIT 1)`.as(
           "last_deploy_id",
+        ),
+      last_deploy_status:
+        sql<string>`(SELECT status FROM deployments d3 WHERE d3.project_id = ${deployments.project_id} ORDER BY d3.created_at DESC LIMIT 1)`.as(
+          "last_deploy_status",
         ),
     })
     .from(deployments)
@@ -429,6 +434,7 @@ export async function getAllProjectsWithOwner(
       owner_login: users.login,
       last_deploy: lastDeploy.last_deploy,
       last_deploy_id: lastDeploy.last_deploy_id,
+      last_deploy_status: lastDeploy.last_deploy_status,
     })
     .from(projects)
     .leftJoin(users, eq(projects.user_id, users.id))
