@@ -52,15 +52,35 @@ describe("parseSecretArgs", () => {
     );
   });
 
+  it("parses list without project", () => {
+    expect(parseSecretArgs(["list"])).toEqual({
+      action: "list",
+      projectName: undefined,
+    });
+  });
+
+  it("parses list with project", () => {
+    expect(parseSecretArgs(["list", "--project", "my-app"])).toEqual({
+      action: "list",
+      projectName: "my-app",
+    });
+  });
+
+  it("errors on list with extra positional", () => {
+    expect(() => parseSecretArgs(["list", "extra"])).toThrow(
+      "Error: Usage: void secret list [--project <name>]",
+    );
+  });
+
   it("errors on unknown action", () => {
-    expect(() => parseSecretArgs(["list"])).toThrow(
-      "Error: Usage: void secret <put|delete|sync> ...",
+    expect(() => parseSecretArgs(["unknown"])).toThrow(
+      "Error: Usage: void secret <list|put|delete|sync> ...",
     );
   });
 
   it("errors on unsupported set action", () => {
     expect(() => parseSecretArgs(["set", "API_KEY"])).toThrow(
-      "Error: Usage: void secret <put|delete|sync> ...",
+      "Error: Usage: void secret <list|put|delete|sync> ...",
     );
   });
 
