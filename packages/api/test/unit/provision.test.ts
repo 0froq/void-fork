@@ -63,6 +63,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      "void-proxy",
     );
 
     expect(createD1Database).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-db");
@@ -80,6 +81,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      "void-proxy",
     );
 
     expect(createKVNamespace).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-kv");
@@ -97,6 +99,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      "void-proxy",
     );
 
     expect(createR2Bucket).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-storage");
@@ -131,6 +134,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      "void-proxy",
     );
 
     expect(createD1Database).not.toHaveBeenCalled();
@@ -151,6 +155,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      "void-proxy",
     );
 
     expect(createD1Database).toHaveBeenCalledOnce();
@@ -176,6 +181,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      "void-proxy",
     );
 
     expect(createD1Database).not.toHaveBeenCalled();
@@ -195,6 +201,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      "void-proxy",
     );
 
     expect(bindings).toHaveLength(3);
@@ -232,6 +239,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      "void-proxy",
     );
 
     expect(createD1Database).not.toHaveBeenCalled();
@@ -256,6 +264,7 @@ describe("ensureResource — already exists fallback", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      "void-proxy",
     );
 
     expect(createD1Database).toHaveBeenCalledOnce();
@@ -277,6 +286,7 @@ describe("ensureResource — already exists fallback", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
+      "void-proxy",
     );
 
     expect(createKVNamespace).toHaveBeenCalledOnce();
@@ -291,7 +301,15 @@ describe("ensureResource — already exists fallback", () => {
 
     const manifest: DeployManifest = { version: 1, bindings: { d1: ["DB"] } };
     await expect(
-      provisionBindings(mockDb, ACCOUNT_ID, API_TOKEN, PROJECT_ID, manifest, JWT_SECRET),
+      provisionBindings(
+        mockDb,
+        ACCOUNT_ID,
+        API_TOKEN,
+        PROJECT_ID,
+        manifest,
+        JWT_SECRET,
+        "void-proxy",
+      ),
     ).rejects.toThrow("rate limit exceeded");
 
     expect(getD1DatabaseByName).not.toHaveBeenCalled();

@@ -258,6 +258,7 @@ app.post("/:id/deploy", async (c) => {
       projectId,
       manifest,
       c.env.JWT_SECRET,
+      c.env.AI_PROXY_SERVICE ?? "void-proxy",
     );
 
     // 1. Run migrations (before worker deploy — key invariant)
