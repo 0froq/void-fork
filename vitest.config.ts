@@ -1,7 +1,17 @@
 import { defineConfig } from "vitest/config";
 
+const metaframeworks = [
+  "packages/void/test/integration/astro.test.ts",
+  "packages/void/test/integration/nuxt.test.ts",
+  "packages/void/test/integration/sveltekit.test.ts",
+  "packages/void/test/integration/tanstack-start.test.ts",
+  "packages/void/test/integration/vinext-pages.test.ts",
+  "packages/void/test/integration/vinext-app.test.ts",
+];
+
 export default defineConfig({
   test: {
+    silent: "passed-only",
     projects: [
       {
         test: {
@@ -19,12 +29,7 @@ export default defineConfig({
             "packages/void/test/integration/**/*.test.ts",
             "packages/md/test/integration/**/*.test.ts",
           ],
-          exclude: [
-            "packages/void/test/integration/astro.test.ts",
-            "packages/void/test/integration/nuxt.test.ts",
-            "packages/void/test/integration/sveltekit.test.ts",
-            "packages/void/test/integration/tanstack-start.test.ts",
-          ],
+          exclude: metaframeworks,
         },
       },
       {
@@ -32,12 +37,7 @@ export default defineConfig({
           name: "metaframeworks",
           maxWorkers: 3,
           sequence: { groupOrder: 2 },
-          include: [
-            "packages/void/test/integration/astro.test.ts",
-            "packages/void/test/integration/nuxt.test.ts",
-            "packages/void/test/integration/sveltekit.test.ts",
-            "packages/void/test/integration/tanstack-start.test.ts",
-          ],
+          include: metaframeworks,
         },
       },
       {

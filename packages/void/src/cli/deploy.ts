@@ -800,11 +800,15 @@ function loadDeployEnv(root: string): Record<string, string> {
 
 /**
  * Detect the worker output directory name.
- * With viteEnvironment: { name: "ssr" }, output is always dist/ssr/.
+ * RSC output (vinext App Router) → dist/rsc/
+ * SSR output (all others) → dist/ssr/
  */
 export function detectWorkerDir(distDir: string): string {
+  const rscPath = join(distDir, "rsc");
+  if (existsSync(rscPath)) return "rsc";
+
   const ssrPath = join(distDir, "ssr");
   if (existsSync(ssrPath)) return "ssr";
 
-  throw new Error(`Worker output not found: expected ${ssrPath}`);
+  throw new Error(`Worker output not found: expected dist/ssr/ or dist/rsc/`);
 }

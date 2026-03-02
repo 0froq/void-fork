@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { inferProjectBindings } from "../../src/plugin-inference";
+import { inferProjectBindings, detectFramework } from "../../src/plugin-inference";
 
 const tempDirs: string[] = [];
 
@@ -158,5 +158,34 @@ const row = await Astro.locals.runtime.env.DB.prepare("SELECT 1").first();
     const result = inferProjectBindings(root);
     expect(result.needsD1).toBe(false);
     expect(result.needsKV).toBe(false);
+  });
+});
+
+describe("detectFramework", () => {
+  afterEach(() => {
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop()!;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects vinext from package.json", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({ dependencies: { vinext: "^0.0.5", react: "^19.0.0" } }),
+    );
+    const result = detectFramework(root);
+    expect(result).toEqual({ name: "vinext", class: "a" });
+  });
+
+  it("detects vinext from devDependencies", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({ devDependencies: { vinext: "^0.0.5" } }),
+    );
+    const result = detectFramework(root);
+    expect(result).toEqual({ name: "vinext", class: "a" });
   });
 });

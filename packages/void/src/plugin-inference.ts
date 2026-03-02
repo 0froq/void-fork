@@ -15,10 +15,10 @@ export interface DetectedFramework {
 }
 
 /** Class A framework names (used for entry point lookup). */
-export type Framework = "tanstack-start" | "react-router";
+export type Framework = "tanstack-start" | "react-router" | "vinext";
 
 /** Directories to scan for binding inference in framework mode. */
-export const FRAMEWORK_SCAN_DIRS = ["src", "app", "routes", "server"] as const;
+export const FRAMEWORK_SCAN_DIRS = ["src", "app", "pages", "routes", "server"] as const;
 
 /**
  * Map from npm package name to framework identifier.
@@ -29,6 +29,7 @@ export const FRAMEWORK_SCAN_DIRS = ["src", "app", "routes", "server"] as const;
 const FRAMEWORK_PACKAGES: Record<string, DetectedFramework> = {
   "@tanstack/react-start": { name: "tanstack-start", class: "a" },
   "@react-router/dev": { name: "react-router", class: "a" },
+  vinext: { name: "vinext", class: "a" },
   "@sveltejs/kit": { name: "sveltekit", class: "b" },
   nuxt: { name: "nuxt", class: "c" },
   astro: { name: "astro", class: "c" },
