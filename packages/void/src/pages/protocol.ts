@@ -4,6 +4,8 @@ import { resolveHead, type HeadDescriptor, type HeadConfig } from "./head";
 
 export { ValidationError };
 
+const POWERED_BY = { "X-Powered-By": "Void" } as const;
+
 export interface PageObject {
   component: string;
   props: Record<string, unknown>;
@@ -21,7 +23,7 @@ function isPagesRequest(c: any): boolean {
 
 function pageJsonResponse(pageObj: PageObject): Response {
   return Response.json(pageObj, {
-    headers: { "X-VoidPages": "true", Vary: "X-VoidPages", "X-Powered-By": "Void" },
+    headers: { "X-VoidPages": "true", Vary: "X-VoidPages", ...POWERED_BY },
   });
 }
 
@@ -97,7 +99,7 @@ function streamDeferredResponse(
   }
 
   return new Response(readable, {
-    headers: { "content-type": contentType, "X-Powered-By": "Void" },
+    headers: { "content-type": contentType, ...POWERED_BY },
   });
 }
 
@@ -217,7 +219,7 @@ export async function handlePageGet(
       headers: {
         "content-type": "text/html; charset=utf-8",
         "x-void-page-data": JSON.stringify(pageObj),
-        "X-Powered-By": "Void",
+        ...POWERED_BY,
       },
     });
   }
@@ -286,7 +288,7 @@ export async function handlePageMutation(
       if (isPagesRequest(c)) return pageJsonResponse(pageObj);
       const assetTags = await getAssetTags(c.req.raw, c.env);
       return new Response(await renderFn(pageObj, assetTags), {
-        headers: { "content-type": "text/html; charset=utf-8", "X-Powered-By": "Void" },
+        headers: { "content-type": "text/html; charset=utf-8", ...POWERED_BY },
       });
     }
     throw e;
@@ -310,7 +312,7 @@ export async function handlePageMutation(
       if (isPagesRequest(c)) return pageJsonResponse(pageObj);
       const assetTags = await getAssetTags(c.req.raw, c.env);
       return new Response(await renderFn(pageObj, assetTags), {
-        headers: { "content-type": "text/html; charset=utf-8", "X-Powered-By": "Void" },
+        headers: { "content-type": "text/html; charset=utf-8", ...POWERED_BY },
       });
     }
     // 204 (void from withValidator) — fall through to re-run GET
@@ -327,6 +329,6 @@ export async function handlePageMutation(
   if (isPagesRequest(c)) return pageJsonResponse(pageObj);
   const assetTags = await getAssetTags(c.req.raw, c.env);
   return new Response(await renderFn(pageObj, assetTags), {
-    headers: { "content-type": "text/html; charset=utf-8", "X-Powered-By": "Void" },
+    headers: { "content-type": "text/html; charset=utf-8", ...POWERED_BY },
   });
 }
