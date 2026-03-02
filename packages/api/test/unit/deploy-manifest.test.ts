@@ -28,7 +28,7 @@ describe("DeployManifest contract", () => {
       schedules: [{ name: "cleanup", cron: "0 * * * *" }],
       queues: [{ name: "emails", bindingName: "EMAIL_QUEUE" }],
       ssr: true,
-      framework: true,
+      framework: "sveltekit",
       revalidate: 60,
       prerender: ["/", "/about"],
       assetConfig: {
