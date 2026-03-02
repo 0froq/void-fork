@@ -84,7 +84,7 @@
 
 ### Remaining
 
-- [ ] Move platform DB to PlanetScale Postgres via Hyperdrive
+- [x] Move platform DB to PlanetScale Postgres via Hyperdrive
 - [ ] System monitoring / health pings
 - [ ] User dashboard
 - [ ] Improve sign-up page

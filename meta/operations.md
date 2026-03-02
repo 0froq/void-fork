@@ -4,11 +4,12 @@ How we deploy, what we provision, and how the system is configured.
 
 ## Access Levels
 
-| System                         | Who                      | What                                                                                             |
-| ------------------------------ | ------------------------ | ------------------------------------------------------------------------------------------------ |
-| Cloudflare account super admin | Evan (evan@voidzero.dev) | Full account access — Workers, D1, KV, R2, DNS, Analytics Engine, **token generation / refresh** |
-| 1Password tokens vault         | Evan (evan@voidzero.dev) | API tokens, OAuth secrets, JWT secrets for all environments                                      |
-| API admin panel                | Evan (evan@voidzero.dev) | `api.void.cloud/admin` — project management, user management, deploys                            |
+| System                         | Who                      | What                                                                                                     |
+| ------------------------------ | ------------------------ | -------------------------------------------------------------------------------------------------------- |
+| Cloudflare account super admin | Evan (evan@voidzero.dev) | Full account access — Workers, KV, R2, DNS, Analytics Engine, Hyperdrive, **token generation / refresh** |
+| PlanetScale                    | Evan (evan@voidzero.dev) | PostgreSQL database — platform DB (branches, connection strings, dashboard)                              |
+| 1Password tokens vault         | Evan (evan@voidzero.dev) | API tokens, OAuth secrets, JWT secrets for all environments                                              |
+| API admin panel                | Evan (evan@voidzero.dev) | `api.void.cloud/admin` — project management, user management, deploys                                    |
 
 ## What We Deploy
 
@@ -24,7 +25,7 @@ Five Cloudflare Workers:
 
 ## Environments
 
-Two fully isolated environments. Each has its own CF resources (D1, KV, R2, dispatch namespace, analytics engine).
+Two fully isolated environments. Each has its own CF resources (KV, R2, dispatch namespace, analytics engine) and a separate Hyperdrive configuration pointing to its own PlanetScale PostgreSQL database.
 
 | Environment    | API URL                  | Dashboard                 | User Sites           | Trigger                      |
 | -------------- | ------------------------ | ------------------------- | -------------------- | ---------------------------- |
@@ -37,15 +38,15 @@ Two fully isolated environments. Each has its own CF resources (D1, KV, R2, disp
 
 **API worker** (`void-api`):
 
-| Resource           | Binding         | Name / ID                                           |
-| ------------------ | --------------- | --------------------------------------------------- |
-| D1 Database        | `DB`            | `void-api` (`f85c1d7d-7b41-4f85-88e5-ad37966825e7`) |
-| R2 Bucket          | `ASSETS`        | `void-assets`                                       |
-| KV Namespace       | `ROUTING`       | `9250c33f3db6494ebe8ad6272812c8c0`                  |
-| Dispatch Namespace | `DISPATCH`      | `void-users`                                        |
-| Durable Object     | `USAGE_COUNTER` | `UsageCounter` (per-user usage enforcement)         |
-| Queue (consumer)   | —               | `void-usage-events` (batch 100, timeout 5s)         |
-| Cron Trigger       | —               | `0 * * * *` (hourly — billing rollovers + backfill) |
+| Resource           | Binding         | Name / ID                                                     |
+| ------------------ | --------------- | ------------------------------------------------------------- |
+| Hyperdrive         | `HYPERDRIVE`    | `7bd6b2a606a347819ad3421867840736` (→ PlanetScale PostgreSQL) |
+| R2 Bucket          | `ASSETS`        | `void-assets`                                                 |
+| KV Namespace       | `ROUTING`       | `9250c33f3db6494ebe8ad6272812c8c0`                            |
+| Dispatch Namespace | `DISPATCH`      | `void-users`                                                  |
+| Durable Object     | `USAGE_COUNTER` | `UsageCounter` (per-user usage enforcement)                   |
+| Queue (consumer)   | —               | `void-usage-events` (batch 100, timeout 5s)                   |
+| Cron Trigger       | —               | `0 * * * *` (hourly — billing rollovers + backfill)           |
 
 **Dispatch worker** (`void-dispatch`):
 
@@ -75,12 +76,14 @@ Two fully isolated environments. Each has its own CF resources (D1, KV, R2, disp
 
 **Dashboard worker** (`void-dashboard`):
 
-| Resource | Binding | Name / ID                    |
-| -------- | ------- | ---------------------------- |
-| Assets   | —       | `dist/client` (static files) |
-| Routes   | —       | `dash.void.cloud`            |
+| Resource   | Binding      | Name / ID                                                     |
+| ---------- | ------------ | ------------------------------------------------------------- |
+| Hyperdrive | `HYPERDRIVE` | `7bd6b2a606a347819ad3421867840736` (→ PlanetScale PostgreSQL) |
+| Service    | `API`        | `void-api`                                                    |
+| Assets     | —            | `dist/client` (static files)                                  |
+| Routes     | —            | `dash.void.cloud`                                             |
 
-No bindings — the dashboard talks to the API via HTTP (BFF pattern with server-side loaders).
+The dashboard has a Hyperdrive binding for read-only loaders (direct Drizzle queries) and a service binding to the API worker for mutations.
 
 All workers: `compatibility_date: 2026-02-12`, `compatibility_flags: ["nodejs_compat"]`, `observability: enabled`.
 
@@ -88,17 +91,17 @@ All workers: `compatibility_date: 2026-02-12`, `compatibility_flags: ["nodejs_co
 
 Same resource types with `-staging` suffixes:
 
-| Resource    | API                                                         | Dashboard                 | Dispatch                                                 | Proxy                                                    |
-| ----------- | ----------------------------------------------------------- | ------------------------- | -------------------------------------------------------- | -------------------------------------------------------- |
-| D1          | `void-api-staging` (`e78b32c1-497a-40ad-8f83-7049e139983e`) | —                         | —                                                        | —                                                        |
-| R2          | `void-assets-staging`                                       | —                         | `void-assets-staging`                                    | —                                                        |
-| KV          | `60240eecea804f39bf8b7395cd6c6b08`                          | —                         | `60240eecea804f39bf8b7395cd6c6b08`                       | —                                                        |
-| Dispatch NS | `void-users-staging`                                        | —                         | `void-users-staging`                                     | —                                                        |
-| Analytics   | —                                                           | —                         | `vite_cloud_requests_staging`                            | —                                                        |
-| Queue       | `void-usage-events-staging` (consumer)                      | —                         | `void-usage-events-staging` (producer)                   | —                                                        |
-| DO          | `UsageCounter` (same class, staging-isolated)               | —                         | —                                                        | —                                                        |
-| Workers AI  | —                                                           | —                         | —                                                        | `AI` (account-level)                                     |
-| Routes      | —                                                           | `dash.staging.void.cloud` | `*.staging.void.app/*`, `*.staging.void.app`, `*/*`, `*` | `proxy.staging.void.cloud/*`, `proxy.staging.void.cloud` |
+| Resource    | API                                                           | Dashboard                                                     | Dispatch                                                 | Proxy                                                    |
+| ----------- | ------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------- |
+| Hyperdrive  | `7cde35825e6249d0b60b9de69feb29dd` (→ PlanetScale PostgreSQL) | `7cde35825e6249d0b60b9de69feb29dd` (→ PlanetScale PostgreSQL) | —                                                        | —                                                        |
+| R2          | `void-assets-staging`                                         | —                                                             | `void-assets-staging`                                    | —                                                        |
+| KV          | `60240eecea804f39bf8b7395cd6c6b08`                            | —                                                             | `60240eecea804f39bf8b7395cd6c6b08`                       | —                                                        |
+| Dispatch NS | `void-users-staging`                                          | —                                                             | `void-users-staging`                                     | —                                                        |
+| Analytics   | —                                                             | —                                                             | `vite_cloud_requests_staging`                            | —                                                        |
+| Queue       | `void-usage-events-staging` (consumer)                        | —                                                             | `void-usage-events-staging` (producer)                   | —                                                        |
+| DO          | `UsageCounter` (same class, staging-isolated)                 | —                                                             | —                                                        | —                                                        |
+| Workers AI  | —                                                             | —                                                             | —                                                        | `AI` (account-level)                                     |
+| Routes      | —                                                             | `dash.staging.void.cloud`                                     | `*.staging.void.app/*`, `*.staging.void.app`, `*/*`, `*` | `proxy.staging.void.cloud/*`, `proxy.staging.void.cloud` |
 
 ## Secrets and Environment Variables
 
@@ -123,15 +126,15 @@ Set via `wrangler secret put <NAME>` (separate values per environment):
 
 Account-level:
 
-| Permission         | Access | Operations                                             |
-| ------------------ | ------ | ------------------------------------------------------ |
-| Workers Scripts    | Edit   | Upload/delete user workers in dispatch namespace       |
-| Workers Tail       | Read   | Create/delete tail sessions for live log streaming     |
-| D1                 | Edit   | Create databases, execute migrations, delete databases |
-| Workers KV Storage | Edit   | Create/delete KV namespaces                            |
-| Workers R2 Storage | Edit   | Create/delete R2 buckets                               |
-| Queues             | Edit   | Create/delete queues, manage queue consumers           |
-| Account Analytics  | Read   | Query Analytics Engine SQL API for usage metering      |
+| Permission         | Access | Operations                                                       |
+| ------------------ | ------ | ---------------------------------------------------------------- |
+| Workers Scripts    | Edit   | Upload/delete user workers in dispatch namespace                 |
+| Workers Tail       | Read   | Create/delete tail sessions for live log streaming               |
+| D1                 | Edit   | Create/delete user project D1 databases, execute user migrations |
+| Workers KV Storage | Edit   | Create/delete KV namespaces                                      |
+| Workers R2 Storage | Edit   | Create/delete R2 buckets                                         |
+| Queues             | Edit   | Create/delete queues, manage queue consumers                     |
+| Account Analytics  | Read   | Query Analytics Engine SQL API for usage metering                |
 
 Zone-level (on `void.app`):
 
@@ -179,12 +182,12 @@ Two GitHub environments (`Prod` and `Staging`) share the same repo-level secrets
 
 Account-level:
 
-| Permission         | Access | Operations                                     |
-| ------------------ | ------ | ---------------------------------------------- |
-| Workers Scripts    | Edit   | Deploy API and dispatch workers                |
-| D1                 | Edit   | Provision user project D1 databases via CF API |
-| Workers KV Storage | Edit   | Bind KV namespaces during deploy               |
-| Workers R2 Storage | Edit   | Bind R2 buckets during deploy                  |
+| Permission         | Access | Operations                                   |
+| ------------------ | ------ | -------------------------------------------- |
+| Workers Scripts    | Edit   | Deploy API and dispatch workers              |
+| D1                 | Edit   | Bind user project D1 databases during deploy |
+| Workers KV Storage | Edit   | Bind KV namespaces during deploy             |
+| Workers R2 Storage | Edit   | Bind R2 buckets during deploy                |
 
 Zone-level (on `void.app`):
 
@@ -209,7 +212,7 @@ Internal-only toggle for pointing the CLI at staging. Not documented in public d
 Root `package.json` orchestrates deployment:
 
 ```
-pnpm run deploy           # Production: deploy proxy, dispatch, then migrate + deploy api
+pnpm run deploy           # Production: deploy proxy, then migrate (drizzle-kit) + deploy api, then dispatch
 pnpm run deploy:staging   # Staging: same with --env staging
 ```
 
@@ -218,20 +221,18 @@ Broken down:
 ```
 deploy
 ├── deploy:proxy        → pnpm -F proxy run deploy        (wrangler deploy)
-├── deploy:dispatch     → pnpm -F dispatch run deploy     (wrangler deploy)
-├── deploy:api          → pnpm -F api migrate             (wrangler d1 migrations apply --remote)
+├── deploy:api          → pnpm -F api migrate             (drizzle-kit migrate — requires DATABASE_URL)
 │                       → pnpm -F api run deploy          (wrangler deploy)
-└── deploy:dashboard    → pnpm -F dashboard run deploy    (wrangler deploy)
+└── deploy:dispatch     → pnpm -F dispatch run deploy     (wrangler deploy)
 
 deploy:staging
 ├── deploy:staging:proxy     → pnpm -F proxy run deploy --env staging
-├── deploy:staging:dispatch  → pnpm -F dispatch run deploy --env staging
-├── deploy:staging:api       → pnpm -F api migrate:staging  (wrangler d1 migrations apply --env staging --remote)
+├── deploy:staging:api       → pnpm -F api migrate:staging  (DATABASE_URL=$STAGING_DATABASE_URL drizzle-kit migrate)
 │                            → pnpm -F api run deploy --env staging
-└── deploy:staging:dashboard → pnpm -F dashboard run deploy:staging
+└── deploy:staging:dispatch  → pnpm -F dispatch run deploy --env staging
 ```
 
-Deploy order matters: proxy deploys first (user workers depend on it via service binding), dispatch deploys next (stateless router), then api runs D1 migrations before deploying (ensures schema is ready for new code), and dashboard deploys last.
+Deploy order matters: proxy deploys first (user workers depend on it via service binding), then api runs PostgreSQL migrations via drizzle-kit before deploying (ensures schema is ready for new code), and dispatch deploys last. Dashboard is deployed separately (not included in `deploy` / `deploy:staging` scripts).
 
 ### GitHub Actions
 
@@ -249,12 +250,12 @@ Three workflows in `.github/workflows/`:
 **`deploy.yml`** — runs on push to `prod` (production, environment: `Prod`):
 
 1. Runs CI workflow first
-2. `pnpm run deploy` (proxy, dispatch, api, dashboard workers)
+2. `pnpm run deploy` (proxy, api with drizzle-kit migrations, dispatch)
 
 **`deploy-staging.yml`** — runs on push to `main` (staging, environment: `Staging`):
 
 1. Runs CI workflow first
-2. `pnpm run deploy:staging` (all workers to staging)
+2. `pnpm run deploy:staging` (proxy, api with drizzle-kit migrations, dispatch — all to staging)
 
 ### Health Checks
 
@@ -281,8 +282,13 @@ pnpm health:staging    # Check staging API health
 
 Steps to provision a new environment from scratch (e.g. reproducing staging):
 
-1. **Create CF resources** (all with environment suffix):
-   - D1 database
+1. **Provision PlanetScale database**:
+   - Create a new database (or branch) in PlanetScale
+   - Note the direct connection string (for drizzle-kit migrations) and the PgBouncer connection string (for Hyperdrive)
+   - Run `DATABASE_URL=<direct-url> drizzle-kit migrate` from `packages/api/` to apply the schema
+
+2. **Create CF resources** (all with environment suffix):
+   - Hyperdrive configuration (pointing to the PlanetScale PgBouncer URL)
    - KV namespace
    - R2 bucket
    - Dispatch namespace (Workers for Platforms)
@@ -290,9 +296,9 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    - AI Gateway named `void`
    - Queue: `wrangler queues create void-usage-events-<env>` (usage enforcement events)
 
-2. **Update wrangler configs** — add an `env.<name>` section in `packages/api/wrangler.jsonc`, `packages/dashboard/wrangler.jsonc`, `packages/dispatch/wrangler.jsonc`, and `packages/proxy/wrangler.jsonc` with the new resource IDs.
+3. **Update wrangler configs** — add an `env.<name>` section in `packages/api/wrangler.jsonc`, `packages/dashboard/wrangler.jsonc`, `packages/dispatch/wrangler.jsonc`, and `packages/proxy/wrangler.jsonc` with the new resource IDs (including the Hyperdrive configuration ID).
 
-3. **Set worker secrets** — for the API worker:
+4. **Set worker secrets** — for the API worker:
 
    ```
    wrangler secret put CF_API_TOKEN --env <name>
@@ -305,7 +311,7 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    wrangler secret put GOOGLE_CLIENT_SECRET --env <name>
    ```
 
-4. **DNS records** — all records must be proxied (orange cloud).
+5. **DNS records** — all records must be proxied (orange cloud).
 
    **`void.app` zone:**
 
@@ -331,13 +337,13 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    | `api.<env>`  | CNAME | _(managed by CF)_ | API worker       |
    | `dash.<env>` | CNAME | _(managed by CF)_ | Dashboard worker |
 
-5. **OAuth callback URLs** — add the new API URL as an authorized redirect in both the GitHub OAuth App and Google OAuth Client:
+6. **OAuth callback URLs** — add the new API URL as an authorized redirect in both the GitHub OAuth App and Google OAuth Client:
    - `https://<api-host>/auth/callback`
    - `https://<api-host>/admin/callback`
 
-6. **GitHub Actions** — if CI/CD should deploy to this environment, add a workflow file and configure GitHub environment secrets (`CF_API_TOKEN`, `CF_ACCOUNT_ID`).
+7. **GitHub Actions** — if CI/CD should deploy to this environment, add a workflow file and configure GitHub environment secrets (`CF_API_TOKEN`, `CF_ACCOUNT_ID`, `DATABASE_URL` or `STAGING_DATABASE_URL` for drizzle-kit migrations).
 
-7. **Deploy** — run `pnpm run deploy --env <name>` or equivalent.
+8. **Deploy** — run `pnpm run deploy --env <name>` or equivalent.
 
 ## Signup Allowlist (Private Beta)
 
@@ -364,6 +370,29 @@ Temporary mechanism to restrict signups during private beta. Managed via the adm
 
 **Cleanup (post-beta):** Delete KV keys `signup:enabled` and `signup:allowlist`, then remove the admin route (`src/admin/routes/signup-control.tsx`), view (`src/admin/views/signup-control.tsx`), matching logic (`src/signup-allowlist.ts`), the auth check in `src/routes/auth.ts`, the `/signup-restricted` route in `src/index.ts`, and the nav link in `src/admin/views/layout.tsx`.
 
-## Domain Migration History
+## Migration History
+
+### Platform DB: D1 → PlanetScale PostgreSQL (February 2026)
+
+The platform's own database was migrated from Cloudflare D1 (SQLite) to PlanetScale PostgreSQL accessed via Cloudflare Hyperdrive. See `meta/design-docs/0015-platform-d1-to-planetscale.md` for the full design doc.
+
+**What changed:**
+
+| Component         | Before                                  | After                                                       |
+| ----------------- | --------------------------------------- | ----------------------------------------------------------- |
+| Database          | Cloudflare D1 (SQLite)                  | PlanetScale PostgreSQL via Hyperdrive                       |
+| Driver            | `drizzle-orm/d1`                        | `drizzle-orm/node-postgres` (`pg` package)                  |
+| Schema definition | `sqliteTable`                           | `pgTable`                                                   |
+| Date columns      | `text` + `sql\`datetime('now')\``       | `timestamp` + `defaultNow()`                                |
+| Wrangler binding  | `d1_databases` → `env.DB: D1Database`   | `hyperdrive` → `env.HYPERDRIVE: Hyperdrive`                 |
+| Drizzle config    | `dialect: "sqlite"`                     | `dialect: "postgresql"`, `DATABASE_URL` env var             |
+| Migrations        | `wrangler d1 migrations apply --remote` | `drizzle-kit migrate` (direct PlanetScale connection)       |
+| Tests             | Miniflare D1                            | PGlite (in-process WASM PostgreSQL, `@electric-sql/pglite`) |
+
+**What did NOT change:** User project D1 databases are still provisioned via the CF API — only the platform's own database uses PostgreSQL. The API worker's `CF_API_TOKEN` still needs D1 Edit permission for user project databases.
+
+**Both API and Dashboard workers** share the same Hyperdrive configuration per environment, connecting to the same PlanetScale database. The dashboard uses direct Drizzle queries for read-only loaders; mutations go through the API worker.
+
+### Domain: voidcloud.dev → void.app (February 2026)
 
 The userspace domain was migrated from `voidcloud.dev` to `void.app` in February 2026. All DNS records, CF for SaaS configuration, API token permissions, code references, tests, and documentation have been updated. The `void.app` zone is now the primary zone for user site routing and custom domain CNAME targets (`cname.void.app`).
