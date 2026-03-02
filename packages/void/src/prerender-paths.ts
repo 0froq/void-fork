@@ -41,6 +41,7 @@ export async function collectPrerenderPaths(options: {
     if (dynamicPrerenderPages.length > 0) {
       const viteServer = await createServer({
         root,
+        configFile: false,
         server: { middlewareMode: true },
         logLevel: "silent",
       });
@@ -80,6 +81,7 @@ export async function collectPrerenderPaths(options: {
   if (ssrPrerender?.hasGetPrerenderPaths) {
     const viteServer = await createServer({
       root,
+      configFile: false,
       server: { middlewareMode: true },
       logLevel: "silent",
     });
