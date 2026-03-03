@@ -118,6 +118,7 @@ export default extendConfig(
     title: "Void",
     description: "Fullstack Vite plugin for Cloudflare Workers",
     cleanUrls: true,
+    head: [["link", { rel: "icon", type: "image/svg+xml", href: "/icon.svg" }]],
 
     // ./index.server imports in code blocks are false positives
     ignoreDeadLinks: [/\/index$/],
