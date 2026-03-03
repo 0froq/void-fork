@@ -33,13 +33,29 @@ Void also includes presets for where supported meta frameworks (Astro, Nuxt, Sve
 
 ## Non-hashed assets
 
-Everything else (`index.html`, `favicon.ico`, etc.) uses short edge caching with browser revalidation:
+Everything else (`index.html`, `favicon.ico`, `/about`, etc.) is edge-cached using deploy-versioned cache keys. On each deploy, the version changes and all previous cache entries are automatically invalidated — no purge needed.
 
 ```
-Cache-Control: public, s-maxage=60, max-age=0, must-revalidate
+Cache-Control: public, s-maxage=31536000, max-age=0, must-revalidate
 ```
 
-Cached at the edge for 60 seconds. Browsers always revalidate on the next request. Combined with versioned cache keys, this means new deploys are visible within seconds.
+Cached at the edge until the next deploy. Browsers always revalidate on the next request.
+
+**What gets cached:**
+
+- All GET requests for non-SSR projects (SPA/static sites) — every path is static
+- GET requests with file extensions (`.ico`, `.png`, `.css`, etc.) in SSR projects
+
+**What does NOT get cached:**
+
+- `/api/*` routes — always hit the worker
+- SSR-rendered pages (paths without file extensions in SSR projects)
+- Non-GET requests
+- Non-2xx responses
+
+### Opting out
+
+If your worker serves dynamic content at a URL that looks static (e.g., a dynamically generated image at `/avatar.jpg`), you can prevent caching by setting `Cache-Control: private` or `Cache-Control: no-store` in your response headers. Any response with `Cache-Control` containing `private`, `no-store`, or `no-cache` will bypass the edge cache.
 
 ## ETags and 304 Not Modified
 
@@ -51,6 +67,6 @@ This happens automatically for all static assets. No configuration is needed.
 
 You can override caching headers or add your own for any static asset path using [Custom Headers](../headers.md).
 
-## API routes
+## API routes and SSR pages
 
-API responses (`/api/*`) and SSR-rendered pages that fall through to the worker are **not** edge-cached by the dispatch layer.
+API responses (`/api/*`) and SSR-rendered pages (paths without file extensions) always hit the worker — they are **not** edge-cached by the dispatch layer.
