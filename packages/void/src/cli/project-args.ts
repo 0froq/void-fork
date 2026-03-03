@@ -6,7 +6,7 @@ export const projectSubcommands: SubcommandDef[] = [
   { name: "list", description: "List your projects" },
   { name: "logs", description: "Show runtime logs from the deployed project" },
   {
-    name: "rm",
+    name: "delete",
     arg: "[name]",
     description: "Delete a project (omit name to delete linked project)",
   },
@@ -17,7 +17,7 @@ export type ProjectArgs =
   | { subcommand: "link"; name: string }
   | { subcommand: "list" }
   | { subcommand: "logs"; filter: string; range: string }
-  | { subcommand: "rm"; name: string };
+  | { subcommand: "delete"; name: string };
 
 export function parseProjectArgs(args: string[]): ProjectArgs {
   const [subcommand, ...rest] = args;
@@ -60,7 +60,7 @@ export function parseProjectArgs(args: string[]): ProjectArgs {
     return { subcommand, filter, range };
   }
 
-  if (subcommand === "rm") {
+  if (subcommand === "delete") {
     const [name, extra] = rest;
     if (extra) {
       throw new Error(`Error: Unexpected argument: ${extra}`);
@@ -68,5 +68,5 @@ export function parseProjectArgs(args: string[]): ProjectArgs {
     return { subcommand, name: name ?? "" };
   }
 
-  throw new Error("Error: Usage: void project <status|link|list|logs|rm>");
+  throw new Error("Error: Usage: void project <status|link|list|logs|delete>");
 }

@@ -7,21 +7,21 @@ import { pc } from "./output";
 
 export const domainSubcommands: SubcommandDef[] = [
   { name: "add", arg: "<hostname>", description: "Add a custom domain" },
-  { name: "rm", arg: "<hostname>", description: "Remove a custom domain" },
+  { name: "delete", arg: "<hostname>", description: "Remove a custom domain" },
   { name: "list", description: "List custom domains + status" },
   { name: "status", arg: "<hostname>", description: "Check domain verification status" },
 ];
 
 export interface DomainArgs {
-  subcommand: "add" | "rm" | "list" | "status";
+  subcommand: "add" | "delete" | "list" | "status";
   hostname?: string;
   projectSlug?: string;
 }
 
 export function parseDomainArgs(args: string[]): DomainArgs {
   const subcommand = args[0] as DomainArgs["subcommand"];
-  if (!subcommand || !["add", "rm", "list", "status"].includes(subcommand)) {
-    throw new Error("Usage: void domain <add|rm|list|status> [hostname] [--project <name>]");
+  if (!subcommand || !["add", "delete", "list", "status"].includes(subcommand)) {
+    throw new Error("Usage: void domain <add|delete|list|status> [hostname] [--project <name>]");
   }
 
   let hostname: string | undefined;
@@ -36,7 +36,7 @@ export function parseDomainArgs(args: string[]): DomainArgs {
     }
   }
 
-  if ((subcommand === "add" || subcommand === "rm" || subcommand === "status") && !hostname) {
+  if ((subcommand === "add" || subcommand === "delete" || subcommand === "status") && !hostname) {
     throw new Error(`Usage: void domain ${subcommand} <hostname> [--project <name>]`);
   }
 
@@ -76,7 +76,7 @@ export async function runDomainCommand(root: string, args: DomainArgs): Promise<
   switch (args.subcommand) {
     case "add":
       return domainAdd(client, projectId!, args.hostname!);
-    case "rm":
+    case "delete":
       return domainRemove(client, projectId!, args.hostname!);
     case "list":
       return domainList(client, projectId!);

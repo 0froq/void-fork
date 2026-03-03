@@ -112,7 +112,7 @@ Show runtime logs from the deployed project. Uses the linked project from `.void
 
 Output shows one line per request (`HH:MM:SS METHOD URL STATUS`) with indented console log and exception lines beneath. Errors and exceptions are colored red, warnings yellow.
 
-### `void project rm [name]`
+### `void project delete [name]`
 
 Permanently delete a project and all its resources (databases, KV namespaces, R2 buckets, deployments). Requires typing the project slug to confirm.
 
@@ -349,10 +349,10 @@ void domain add <hostname> [--project <name>]
 
 Add a custom domain to a project. Prints the CNAME target you need to add in your DNS provider.
 
-### `void domain rm`
+### `void domain delete`
 
 ```
-void domain rm <hostname> [--project <name>]
+void domain delete <hostname> [--project <name>]
 ```
 
 Remove a custom domain from a project.

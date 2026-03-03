@@ -33,7 +33,7 @@ export async function runDeleteCommand(root: string, slug?: string): Promise<voi
   } else {
     const config = readProjectConfig(root);
     if (!config) {
-      log.error("No linked project found. Pass a project name: void project rm <name>");
+      log.error("No linked project found. Pass a project name: void project delete <name>");
       process.exit(1);
     }
     projectId = config.projectId;
