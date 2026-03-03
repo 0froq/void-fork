@@ -8,13 +8,23 @@ const form = useForm("/queues", {
   key: "",
   value: "",
 });
+
+const deleteForm = useForm("/queues", {
+  intent: "delete",
+  id: 0,
+});
+
+function deleteResult(id: number) {
+  deleteForm.data.id = id;
+  deleteForm.post();
+}
 </script>
 <template>
   <div>
     <h1>Queues</h1>
     <p>
       Message queues via <code>void/queues</code>. Messages are sent to <code>demo-queue</code>,
-      consumed and written to KV.
+      consumed and written to DB.
     </p>
 
     <h2>Send Message</h2>
@@ -34,16 +44,32 @@ const form = useForm("/queues", {
 
     <h2>Processed Results ({{ results.length }})</h2>
     <p>
-      <em
-        >Messages consumed from the queue are written to KV with prefix
-        <code>queue-result:</code></em
-      >
+      <em>Messages consumed from the queue are written to D1 via the consumer.</em>
     </p>
-    <ul v-if="results.length">
-      <li v-for="r in results" :key="r.key">
-        <code>{{ r.key }}</code> = <code>{{ r.value }}</code>
-      </li>
-    </ul>
+    <table v-if="results.length">
+      <thead>
+        <tr>
+          <th style="text-align: left">Key</th>
+          <th style="text-align: left">Value</th>
+          <th style="text-align: left">Created</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="r in results" :key="r.id">
+          <td>
+            <code>{{ r.key }}</code>
+          </td>
+          <td>
+            <code>{{ r.value }}</code>
+          </td>
+          <td>{{ r.created_at }}</td>
+          <td>
+            <button @click="deleteResult(r.id)" :disabled="deleteForm.processing">Delete</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
     <p v-else><em>No results yet. Send a message and wait for the consumer to process it.</em></p>
   </div>
 </template>

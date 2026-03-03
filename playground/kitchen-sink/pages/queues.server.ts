@@ -1,21 +1,20 @@
 import { defineHandler, type InferProps } from "void";
-import { kv } from "void/kv";
+import { db } from "void/db";
 import { queues } from "void/queues";
 
 export type Props = InferProps<typeof loader>;
 
 export const loader = defineHandler(async () => {
-  const list = await kv.list({ prefix: "queue-result:" });
-  const results = await Promise.all(
-    list.keys.map(async (k) => ({
-      key: k.name.slice("queue-result:".length),
-      value: await kv.get(k.name),
-    })),
-  );
+  const results = await db.list("queue_results", { orderBy: "id DESC", limit: 50 });
   return { results };
 });
 
 export const action = defineHandler(async (c) => {
-  const body = await c.req.json<{ key: string; value: string }>();
-  await queues["demo-queue"].send({ key: body.key, value: body.value });
+  const body = await c.req.json<{ intent?: string; key: string; value?: string; id?: number }>();
+
+  if (body.intent === "delete") {
+    await db.delete("queue_results", { where: { id: body.id! } });
+  } else {
+    await queues["demo-queue"].send({ key: body.key, value: body.value! });
+  }
 });
