@@ -1,74 +1,91 @@
 import { extendConfig } from "@voidzero-dev/vitepress-theme/config";
+import type { IconOption } from "@voidzero-dev/vitepress-theme";
 import { defineConfig } from "vitepress";
 import { groupIconMdPlugin, groupIconVitePlugin } from "vitepress-plugin-group-icons";
+
+const referenceItems = [
+  { text: "Project Structure", link: "/reference/structure" },
+  { text: "Resource Inference", link: "/reference/resource-inference" },
+  {
+    text: "Config",
+    link: "/reference/config",
+    collapsed: false,
+    items: [
+      { text: "target", link: "/reference/config#target" },
+      { text: "routing", link: "/reference/config#routing" },
+      { text: "inference", link: "/reference/config#inference" },
+      { text: "output", link: "/reference/config#output" },
+      { text: "remote", link: "/reference/config#remote" },
+      { text: "worker", link: "/reference/config#worker" },
+    ],
+  },
+  {
+    text: "CLI",
+    link: "/reference/cli",
+    collapsed: false,
+    items: [
+      { text: "void init", link: "/reference/cli#setup" },
+      { text: "void auth", link: "/reference/cli#auth" },
+      { text: "void project", link: "/reference/cli#project-commands" },
+      { text: "void deploy", link: "/reference/cli#deploy" },
+      { text: "void db", link: "/reference/cli#database" },
+      { text: "void gen", link: "/reference/cli#code-generation" },
+      { text: "void secret", link: "/reference/cli#secrets" },
+      { text: "void domain", link: "/reference/cli#custom-domains" },
+      { text: "void init --agents", link: "/reference/cli#agent" },
+    ],
+  },
+  {
+    text: "API",
+    link: "/reference/api",
+    collapsed: false,
+    items: [
+      { text: "Plugin", link: "/reference/api#plugin" },
+      { text: "Handlers", link: "/reference/api#handlers" },
+      { text: "Auth", link: "/reference/api#auth" },
+      { text: "Fetch Client", link: "/reference/api#fetch-client" },
+      { text: "Database", link: "/reference/api#database" },
+      { text: "Types", link: "/reference/api#types" },
+      { text: "Environment Types", link: "/reference/api#environment-types" },
+      { text: "Framework Adaptors", link: "/reference/api#framework-adaptors" },
+      { text: "Subpath Exports", link: "/reference/api#subpath-exports" },
+    ],
+  },
+];
 
 const referenceLinks = {
   text: "Reference",
   activeMatch: "/reference/",
-  items: [
-    { text: "Project Structure", link: "/reference/structure" },
-    { text: "Configuration", link: "/reference/config" },
-    { text: "Resource Inference", link: "/reference/resource-inference" },
-    {
-      text: "API",
-      link: "/reference/api",
-      collapsed: false,
-      items: [
-        { text: "Plugin", link: "/reference/api#plugin" },
-        { text: "Handlers", link: "/reference/api#handlers" },
-        { text: "Auth", link: "/reference/api#auth" },
-        { text: "Fetch Client", link: "/reference/api#fetch-client" },
-        { text: "Database", link: "/reference/api#database" },
-        { text: "Types", link: "/reference/api#types" },
-        { text: "Environment Types", link: "/reference/api#environment-types" },
-        { text: "Framework Adaptors", link: "/reference/api#framework-adaptors" },
-        { text: "Subpath Exports", link: "/reference/api#subpath-exports" },
-      ],
-    },
-    {
-      text: "CLI",
-      link: "/reference/cli",
-      collapsed: false,
-      items: [
-        { text: "void init", link: "/reference/cli#setup" },
-        { text: "void auth", link: "/reference/cli#auth" },
-        { text: "void project", link: "/reference/cli#project-commands" },
-        { text: "void deploy", link: "/reference/cli#deploy" },
-        { text: "void db", link: "/reference/cli#database" },
-        { text: "void gen", link: "/reference/cli#code-generation" },
-        { text: "void secret", link: "/reference/cli#secrets" },
-        { text: "void domain", link: "/reference/cli#custom-domains" },
-        { text: "void init --agents", link: "/reference/cli#agent" },
-      ],
-    },
-  ],
+  items: referenceItems,
 };
+
+const integrationItems = [
+  {
+    text: "Meta Frameworks",
+    collapsed: false,
+    items: [
+      { text: "Overview", link: "/integrations/frameworks/overview" },
+      { text: "TanStack Start", link: "/integrations/frameworks/tanstack-start" },
+      { text: "React Router", link: "/integrations/frameworks/react-router" },
+      { text: "Astro", link: "/integrations/frameworks/astro" },
+      { text: "SvelteKit", link: "/integrations/frameworks/sveltekit" },
+      { text: "Nuxt", link: "/integrations/frameworks/nuxt" },
+      { text: "Vinext", link: "/integrations/frameworks/vinext" },
+    ],
+  },
+  { text: "Coding Agents", link: "/integrations/agents" },
+  { text: "Hono", link: "/integrations/hono" },
+  { text: "Cloudflare", link: "/integrations/cloudflare" },
+  { text: "Node.js / Bun / Deno", link: "/integrations/nodejs-bun-deno" },
+  { text: "ORMs and External DBs", link: "/integrations/orms-and-external-dbs" },
+  { text: "Auth Providers", link: "/integrations/auth-providers" },
+  { text: "Payment Processors", link: "/integrations/payment-processors" },
+];
 
 const integrationLinks = {
   text: "Integrations",
   activeMatch: "/integrations/",
-  items: [
-    {
-      text: "Meta Frameworks",
-      collapsed: false,
-      items: [
-        { text: "Overview", link: "/integrations/frameworks/overview" },
-        { text: "TanStack Start", link: "/integrations/frameworks/tanstack-start" },
-        { text: "React Router", link: "/integrations/frameworks/react-router" },
-        { text: "Astro", link: "/integrations/frameworks/astro" },
-        { text: "SvelteKit", link: "/integrations/frameworks/sveltekit" },
-        { text: "Nuxt", link: "/integrations/frameworks/nuxt" },
-        { text: "Vinext", link: "/integrations/frameworks/vinext" },
-      ],
-    },
-    { text: "Coding Agents", link: "/integrations/agents" },
-    { text: "Hono", link: "/integrations/hono" },
-    { text: "Cloudflare", link: "/integrations/cloudflare" },
-    { text: "Node.js / Bun / Deno", link: "/integrations/nodejs-bun-deno" },
-    { text: "ORMs and External Databases", link: "/integrations/orms-and-external-dbs" },
-    { text: "Auth Providers", link: "/integrations/auth-providers" },
-    { text: "Payment Processors", link: "/integrations/payment-processors" },
-  ],
+  items: integrationItems,
 };
 
 const resourcesLinks = {
@@ -122,6 +139,7 @@ export default extendConfig(
         "/guide/": [
           {
             text: "Getting Started",
+            icon: "lucide:rocket",
             collapsed: false,
             items: [
               { text: "Introduction", link: "/guide/" },
@@ -130,6 +148,8 @@ export default extendConfig(
           },
           {
             text: "Routing & Rendering",
+            // @ts-expect-error
+            icon: "lucide:route",
             collapsed: false,
             items: [
               { text: "Server Routing", link: "/guide/server-routing" },
@@ -154,6 +174,7 @@ export default extendConfig(
           },
           {
             text: "Data",
+            icon: "lucide:database",
             collapsed: false,
             items: [
               { text: "Type Safety", link: "/guide/type-safety" },
@@ -165,6 +186,7 @@ export default extendConfig(
           },
           {
             text: "Platform",
+            icon: "lucide:cloud",
             collapsed: false,
             items: [
               { text: "Supported App Types", link: "/guide/app-types" },
@@ -188,8 +210,50 @@ export default extendConfig(
             ],
           },
         ],
-        "/integrations/": [integrationLinks],
-        "/reference/": [referenceLinks],
+        "/integrations/": (() => {
+          const frameworkIcons: Record<string, IconOption> = {
+            "TanStack Start": "simple-icons:tanstack",
+            "React Router": {
+              light: "logos:react-router",
+              dark: "vscode-icons:file-type-reactrouter",
+            },
+            Astro: { light: "logos:astro-icon", dark: "simple-icons:astro" },
+            SvelteKit: "logos:svelte-icon",
+            Nuxt: "logos:nuxt-icon",
+            Vinext: "devicon-plain:nextjs",
+          };
+          const itemIcons: Record<string, IconOption> = {
+            "Coding Agents": "lucide:bot",
+            Hono: "logos:hono",
+            Cloudflare: "devicon:cloudflare",
+            "Node.js / Bun / Deno": "material-icon-theme:nodejs-alt",
+            "ORMs and External DBs": "lucide:database",
+            "Auth Providers": "lucide:shield",
+            "Payment Processors": "lucide:credit-card",
+          };
+          return integrationItems.map((item) =>
+            item.text === "Meta Frameworks"
+              ? {
+                  ...item,
+                  icon: "lucide:blocks",
+                  items: item.items?.map((child) => ({
+                    ...child,
+                    icon: frameworkIcons[child.text],
+                  })),
+                }
+              : { ...item, icon: itemIcons[item.text] },
+          );
+        })(),
+        "/reference/": (() => {
+          const icons: Record<string, string> = {
+            "Project Structure": "lucide:folder-tree",
+            "Resource Inference": "lucide:scan-search",
+            Config: "lucide:settings",
+            API: "lucide:code",
+            CLI: "lucide:terminal",
+          };
+          return referenceItems.map((item) => ({ ...item, icon: icons[item.text] }));
+        })(),
       },
     },
   }),

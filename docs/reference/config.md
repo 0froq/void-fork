@@ -2,7 +2,7 @@
 outline: deep
 ---
 
-# Configuration
+# Config
 
 ## Config File Format
 
