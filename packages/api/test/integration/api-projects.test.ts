@@ -6,6 +6,7 @@ import {
   clearTables,
   createTestUser,
   createTestProject,
+  mockCfApi,
   type TestEnv,
 } from "./helpers";
 import { createDeployment, updateDeploymentStatus } from "../../src/db";
@@ -264,5 +265,93 @@ describe("GET /projects/:id/deployments", () => {
     expect(byId[d1.id].status).toBe("live");
     expect(byId[d2.id].source).toBe("ci");
     expect(byId[d2.id].status).toBe("pending");
+  });
+});
+
+describe("GET /projects/:id/logs", () => {
+  it("returns 401 without auth", async () => {
+    const res = await app.fetch(new Request("http://localhost/projects/fake-id/logs"), env);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 404 for nonexistent project", async () => {
+    const user = await createTestUser(env.db);
+    const res = await app.fetch(
+      new Request("http://localhost/projects/nonexistent/logs", {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 403 for another user's project", async () => {
+    const alice = await createTestUser(env.db, "alice");
+    const bob = await createTestUser(env.db, "bob");
+    const project = await createTestProject(env.db, alice.id, "alice-logs");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/logs`, {
+        headers: { Authorization: `Bearer ${bob.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("returns log data from analytics engine", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "my-app");
+
+    const mockData = {
+      data: [
+        {
+          outcome: "ok",
+          logData: JSON.stringify([{ level: "log", message: ["hello"], timestamp: 1000 }]),
+          exceptionData: "[]",
+          url: "https://my-app.void.app/api/test",
+          method: "GET",
+          statusCode: "200",
+          ts: Date.now() - 5000,
+        },
+      ],
+    };
+
+    mockCfApi({
+      analyticsQuery: (_url, init) => {
+        const body = typeof init?.body === "string" ? init.body : "";
+        expect(body).toContain("user-my-app");
+        return Response.json(mockData);
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/logs`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { data: { outcome: string; url: string }[] };
+    expect(json.data).toHaveLength(1);
+    expect(json.data[0]).toMatchObject({
+      outcome: "ok",
+      url: "https://my-app.void.app/api/test",
+      method: "GET",
+      status: "200",
+    });
+  });
+
+  it("rejects invalid since parameter", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "bad-since");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/logs?since=abc`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
   });
 });

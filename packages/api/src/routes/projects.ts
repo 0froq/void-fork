@@ -138,6 +138,104 @@ const app = new Hono<ApiEnv>()
     }
     const resources = await getProjectResources(c.get("db"), project.id);
     return c.json(resources);
+  })
+
+  // Fetch logs for a project
+  .get("/:id/logs", async (c) => {
+    const project = await getProject(c.get("db"), c.req.param("id"));
+    if (!project) {
+      return c.json({ error: "project not found" }, 404);
+    }
+    if (project.user_id !== c.get("userId")) {
+      return c.json({ error: "forbidden" }, 403);
+    }
+
+    const since = c.req.query("since") ?? "1h";
+    const sinceMs = parseDuration(since);
+    if (sinceMs === null) {
+      return c.json({ error: "invalid since parameter, use format like 15m, 2h, 3d" }, 400);
+    }
+
+    const limit = Math.min(parseInt(c.req.query("limit") ?? "200", 10) || 200, 500);
+    const workerName = `user-${project.slug}`;
+    const sinceStr = new Date(Date.now() - sinceMs).toISOString().replace("T", " ").slice(0, 19);
+    const dataset = c.env.LOGS_DATASET ?? "void_logs";
+
+    const query = `
+      SELECT
+        blob1 as outcome,
+        blob2 as logData,
+        blob3 as exceptionData,
+        blob4 as url,
+        blob5 as method,
+        blob6 as statusCode,
+        double1 as ts,
+        timestamp
+      FROM ${dataset}
+      WHERE index1 = '${workerName}'
+        AND timestamp >= toDateTime('${sinceStr}')
+      ORDER BY double1 ASC
+      LIMIT ${limit}
+    `;
+
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/analytics_engine/sql`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${c.env.CF_API_TOKEN}`,
+          "Content-Type": "text/plain",
+        },
+        body: query,
+      },
+    );
+
+    if (!response.ok) {
+      return c.json({ error: "log query failed" }, 502);
+    }
+
+    const result = (await response.json()) as {
+      data: {
+        outcome: string;
+        logData: string;
+        exceptionData: string;
+        url: string;
+        method: string;
+        statusCode: string;
+        ts: number;
+      }[];
+    };
+
+    const data = (result.data ?? []).map((row) => ({
+      timestamp: row.ts,
+      outcome: row.outcome,
+      logs: tryParse(row.logData),
+      exceptions: tryParse(row.exceptionData),
+      url: row.url,
+      method: row.method,
+      status: row.statusCode,
+    }));
+
+    return c.json({ data });
   });
+
+function parseDuration(input: string): number | null {
+  const match = input.match(/^(\d+)(m|h|d)$/);
+  if (!match) return null;
+  const value = parseInt(match[1], 10);
+  const unit = match[2];
+  const multipliers: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
+  const ms = value * multipliers[unit];
+  if (ms > 7 * 86_400_000) return null; // cap at 7d
+  return ms;
+}
+
+function tryParse(json: string): unknown[] {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return [];
+  }
+}
 
 export default app;
