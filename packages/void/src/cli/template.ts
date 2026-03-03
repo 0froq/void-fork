@@ -2,6 +2,7 @@ export const SCAFFOLD_GITIGNORE_LINES = [
   "node_modules",
   "dist",
   ".void",
+  ".wrangler",
   "*.tsbuildinfo",
   ".DS_Store",
 ] as const;
