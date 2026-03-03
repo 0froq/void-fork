@@ -15,7 +15,7 @@ Auth is enabled automatically when Void detects:
 
 No configuration in `void.json` is needed. Just use the auth APIs and set up your OAuth credentials — everything else is handled for you.
 
-You can also [configure auth explicitly](#explicit-configuration) in `void.json` to override auto-detection.
+You can also [configure auth explicitly](#explicit-configuration) in `void.json` under `inference.auth` to override auto-detection.
 
 ## Auth Routes
 
@@ -193,20 +193,22 @@ You can configure auth explicitly in `void.json` to override auto-detection:
 
 ```json
 {
-  "auth": ["github", "google", "email"]
+  "inference": {
+    "auth": ["github", "google", "email"]
+  }
 }
 ```
 
 This enables all three providers. You can also pick a subset:
 
 ```json
-{ "auth": ["github"] }
+{ "inference": { "auth": ["github"] } }
 ```
 
 Or set `true` for email-only:
 
 ```json
-{ "auth": true }
+{ "inference": { "auth": true } }
 ```
 
 ## How It Works

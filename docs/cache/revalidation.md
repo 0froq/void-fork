@@ -4,17 +4,17 @@ outline: deep
 
 # Revalidation (ISR)
 
-For SSR and [Pages mode](../pages-routing.md) projects, Void supports stale-while-revalidate caching for dynamically rendered pages. Cached pages are served instantly from R2 while the worker re-renders in the background when the cache is stale. This is the equivalent of [Incremental Static Regeneration (ISR)](https://vercel.com/docs/incremental-static-regeneration) in other frameworks.
+For SSR and [Pages mode](../pages-routing.md) projects, Void supports stale-while-revalidate caching for dynamically rendered pages. Cached pages are served instantly from the edge while the worker re-renders in the background when the cache is stale. This is the equivalent of [Incremental Static Regeneration (ISR)](https://vercel.com/docs/incremental-static-regeneration) in other frameworks.
 
 This requires [SSR](../ssr.md) or [Pages mode](../pages-routing.md) to be configured.
 
 ## Enabling revalidation
 
-Add a `cache.revalidate` field to `void.json` with a TTL in seconds:
+Add a `routing.revalidate` field to `void.json` with a TTL in seconds:
 
 ```json
 {
-  "cache": {
+  "routing": {
     "revalidate": 60
   }
 }
@@ -28,7 +28,7 @@ You can set different TTLs for different URL patterns using an object:
 
 ```json
 {
-  "cache": {
+  "routing": {
     "revalidate": {
       "/": 60,
       "/docs/*": 31536000,
@@ -67,14 +67,14 @@ When multiple sources set a revalidate TTL, the most specific wins:
 
 1. `x-revalidate` response header (per-response)
 2. `.server.ts` export (per-page, Pages mode only)
-3. `void.json` `cache.revalidate` path pattern match
-4. `void.json` `cache.revalidate` global number or `"*"` fallback
+3. `void.json` `routing.revalidate` path pattern match
+4. `void.json` `routing.revalidate` global number or `"*"` fallback
 
 ## How revalidation works
 
-1. **First request** — no cache entry. The worker renders the page (blocking), the response is returned, and the result is written to R2 in the background.
+1. **First request** — no cache entry. The worker renders the page (blocking), the response is returned, and the result is written to KV in the background.
 
-2. **Subsequent requests (fresh)** — the cached response is served directly from R2. No worker call.
+2. **Subsequent requests (fresh)** — the cached response is served from the edge cache or KV. No worker call.
 
 3. **Subsequent requests (stale)** — the stale cached response is served immediately, and the worker re-renders in the background. The next request gets the fresh version.
 
@@ -121,8 +121,3 @@ export const POST = defineHandler(async (c) => {
   return c.json({ ok: true });
 });
 ```
-
-This requires two env bindings:
-
-- `VOID_PROJECT_ID` — automatically injected by the platform on deploy
-- `VOID_REVALIDATE_TOKEN` — set manually via `void secret set VOID_REVALIDATE_TOKEN <token>`

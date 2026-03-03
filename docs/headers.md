@@ -4,14 +4,16 @@ outline: deep
 
 # Custom Headers
 
-Define custom response headers in [`void.json`](./config.md) using the `headers` field. Keys are URL patterns, values are arrays of `"Name: value"` strings.
+Define custom response headers in [`void.json`](./config.md) using the `routing.headers` field. Keys are URL patterns, values are arrays of `"Name: value"` strings.
 
 ```json
 {
-  "headers": {
-    "/assets/*": ["Cache-Control: public, max-age=31536000, immutable"],
-    "/*": ["X-Frame-Options: DENY", "X-Content-Type-Options: nosniff"],
-    "/*.html": ["Cache-Control: no-cache"]
+  "routing": {
+    "headers": {
+      "/assets/*": ["Cache-Control: public, max-age=31536000, immutable"],
+      "/*": ["X-Frame-Options: DENY", "X-Content-Type-Options: nosniff"],
+      "/*.html": ["Cache-Control: no-cache"]
+    }
   }
 }
 ```
@@ -27,12 +29,14 @@ Define custom response headers in [`void.json`](./config.md) using the `headers`
 
 ```json
 {
-  "headers": {
-    "/*": [
-      "X-Frame-Options: DENY",
-      "X-Content-Type-Options: nosniff",
-      "Referrer-Policy: strict-origin-when-cross-origin"
-    ]
+  "routing": {
+    "headers": {
+      "/*": [
+        "X-Frame-Options: DENY",
+        "X-Content-Type-Options: nosniff",
+        "Referrer-Policy: strict-origin-when-cross-origin"
+      ]
+    }
   }
 }
 ```
@@ -41,9 +45,11 @@ Define custom response headers in [`void.json`](./config.md) using the `headers`
 
 ```json
 {
-  "headers": {
-    "/*.html": ["Cache-Control: public, max-age=300"],
-    "/config.json": ["Cache-Control: no-store"]
+  "routing": {
+    "headers": {
+      "/*.html": ["Cache-Control: public, max-age=300"],
+      "/config.json": ["Cache-Control: no-store"]
+    }
   }
 }
 ```
@@ -59,14 +65,14 @@ Header rules apply to **all responses** served through the dispatch worker — s
 
 Meta-frameworks like SvelteKit, Nuxt, and Astro generate a `_headers` file with cache rules for their hashed asset directories. Void automatically parses this file during deploy and merges the rules into the deploy manifest.
 
-- Framework-generated rules are applied **before** `void.json` rules. Since the last match wins, `void.json` headers take precedence and can override framework defaults.
+- Framework-generated rules are applied **before** `void.json` rules. Since the last match wins, `routing.headers` in `void.json` takes precedence and can override framework defaults.
 - The `_headers` file is not uploaded as a static asset — its contents are parsed and included in the manifest only.
 
 No configuration is needed. If the framework generates a `_headers` file, it is picked up automatically.
 
 ## How headers work
 
-1. `void deploy` reads header rules from the framework `_headers` file (if present) and `void.json`, then includes them in the deploy manifest.
+1. `void deploy` reads header rules from the framework `_headers` file (if present) and `routing.headers` in `void.json`, then includes them in the deploy manifest.
 2. The platform stores the rules in the KV routing entry for your project.
 3. The dispatch worker applies matching rules to static responses before edge caching.
 

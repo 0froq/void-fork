@@ -12,7 +12,7 @@ import type { VoidConfig } from "./config";
  * 1. Static pages from scanPages() where prerender=true + no params
  * 2. Dynamic pages via createServer() + ssrLoadModule() + getPrerenderPaths()
  * 3. Custom SSR via detectSsrPrerender() + getPrerenderPaths()
- * 4. Explicit paths from config.cache.prerender
+ * 4. Explicit paths from config.routing.prerender
  * 5. Deduplicate
  */
 export async function collectPrerenderPaths(options: {
@@ -105,9 +105,9 @@ export async function collectPrerenderPaths(options: {
     }
   }
 
-  // Add explicit prerender paths from void.json cache.prerender
-  if (config.cache?.prerender) {
-    prerenderPaths.push(...config.cache.prerender);
+  // Add explicit prerender paths from void.json routing.prerender
+  if (config.routing?.prerender) {
+    prerenderPaths.push(...config.routing.prerender);
   }
 
   // Dedupe

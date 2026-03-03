@@ -13,46 +13,10 @@
       "enum": ["cloudflare", "node", "bun", "deno"],
       "description": "Deploy target runtime. Defaults to \"cloudflare\". Non-CF targets disable bindings (D1, KV, R2, AI) and produce a plain Hono app."
     },
-    "auth": {
-      "description": "Enable built-in auth routes and session management. `true` enables email-only auth. An array enables specific providers.",
-      "oneOf": [
-        { "type": "boolean" },
-        {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["github", "google", "email"]
-          },
-          "uniqueItems": true
-        }
-      ]
-    },
-    "bindings": {
-      "type": "object",
-      "description": "Explicitly control inferred Cloudflare bindings. If omitted, bindings are inferred by scanning source files.",
-      "properties": {
-        "db": {
-          "oneOf": [{ "type": "boolean" }, { "type": "string" }],
-          "description": "Enable D1 database binding. `true` uses default name \"DB\", a string sets a custom binding name."
-        },
-        "kv": {
-          "oneOf": [{ "type": "boolean" }, { "type": "string" }],
-          "description": "Enable KV namespace binding. `true` uses default name \"KV\", a string sets a custom binding name."
-        },
-        "storage": {
-          "oneOf": [{ "type": "boolean" }, { "type": "string" }],
-          "description": "Enable R2 bucket binding. `true` uses default name \"STORAGE\", a string sets a custom binding name."
-        },
-        "ai": {
-          "type": "boolean",
-          "description": "Enable Workers AI binding"
-        }
-      },
-      "additionalProperties": false
-    },
-    "build": {
+    "output": {
       "type": "string",
-      "description": "Custom build command. Overrides the framework preset's default build command."
+      "enum": ["server", "static"],
+      "description": "Output mode. \"server\" (default) serves all pages dynamically. \"static\" prerenders all pages at build time, writing HTML files to dist/client/."
     },
     "head": {
       "type": "object",
@@ -118,40 +82,9 @@
       },
       "additionalProperties": false
     },
-    "headers": {
+    "routing": {
       "type": "object",
-      "description": "Custom response headers for static assets. Keys are URL patterns (e.g. \"/assets/*\"), values are arrays of \"Name: value\" strings.",
-      "patternProperties": {
-        "^/": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Header strings in \"Name: value\" format"
-        }
-      },
-      "additionalProperties": false
-    },
-    "appType": {
-      "type": "string",
-      "enum": ["spa", "static", "void", "framework"],
-      "description": "App type. If omitted, auto-detected on first deploy."
-    },
-    "output": {
-      "type": "string",
-      "enum": ["server", "static"],
-      "description": "Output mode. \"server\" (default) serves all pages dynamically. \"static\" prerenders all pages at build time, writing HTML files to dist/client/."
-    },
-    "outputDir": {
-      "type": "string",
-      "description": "Output directory for static deploys. Relative to project root."
-    },
-    "scanDirs": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Directories to scan for binding inference, relative to the project root. Overrides the default scan directories."
-    },
-    "cache": {
-      "type": "object",
-      "description": "Caching configuration.",
+      "description": "Routing configuration — headers, redirects, revalidation, prerendering.",
       "properties": {
         "revalidate": {
           "description": "Edge caching TTL in seconds. A number sets a global TTL for all SSR pages. An object maps URL patterns to TTLs (first match wins). Set to 0 to disable caching for a path.",
@@ -176,6 +109,101 @@
           "type": "array",
           "items": { "type": "string", "pattern": "^/" },
           "description": "Explicit paths to prerender at deploy time. Each path must start with \"/\"."
+        },
+        "headers": {
+          "type": "object",
+          "description": "Custom response headers for static assets. Keys are URL patterns (e.g. \"/assets/*\"), values are arrays of \"Name: value\" strings.",
+          "patternProperties": {
+            "^/": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Header strings in \"Name: value\" format"
+            }
+          },
+          "additionalProperties": false
+        },
+        "redirects": {
+          "type": "object",
+          "description": "URL redirects. Keys are source URL patterns; values are destination strings (302) or objects with \"to\" and optional \"status\".",
+          "patternProperties": {
+            "^/": {
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "properties": {
+                    "to": { "type": "string" },
+                    "status": { "type": "integer", "enum": [301, 302, 307, 308] }
+                  },
+                  "required": ["to"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "inference": {
+      "type": "object",
+      "description": "Inference configuration — bindings, auth, scanDirs, build, outputDir, appType.",
+      "properties": {
+        "auth": {
+          "description": "Enable built-in auth routes and session management. `true` enables email-only auth. An array enables specific providers.",
+          "oneOf": [
+            { "type": "boolean" },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["github", "google", "email"]
+              },
+              "uniqueItems": true
+            }
+          ]
+        },
+        "bindings": {
+          "type": "object",
+          "description": "Explicitly control inferred Cloudflare bindings. If omitted, bindings are inferred by scanning source files.",
+          "properties": {
+            "db": {
+              "oneOf": [{ "type": "boolean" }, { "type": "string" }],
+              "description": "Enable D1 database binding. `true` uses default name \"DB\", a string sets a custom binding name."
+            },
+            "kv": {
+              "oneOf": [{ "type": "boolean" }, { "type": "string" }],
+              "description": "Enable KV namespace binding. `true` uses default name \"KV\", a string sets a custom binding name."
+            },
+            "storage": {
+              "oneOf": [{ "type": "boolean" }, { "type": "string" }],
+              "description": "Enable R2 bucket binding. `true` uses default name \"STORAGE\", a string sets a custom binding name."
+            },
+            "ai": {
+              "type": "boolean",
+              "description": "Enable Workers AI binding"
+            }
+          },
+          "additionalProperties": false
+        },
+        "scanDirs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Directories to scan for binding inference, relative to the project root. Overrides the default scan directories."
+        },
+        "build": {
+          "type": "string",
+          "description": "Custom build command. Overrides the framework preset's default build command."
+        },
+        "outputDir": {
+          "type": "string",
+          "description": "Output directory for static deploys. Relative to project root."
+        },
+        "appType": {
+          "type": "string",
+          "enum": ["spa", "static", "void", "framework"],
+          "description": "App type. If omitted, auto-detected on first deploy."
         }
       },
       "additionalProperties": false
@@ -184,7 +212,7 @@
       "type": "boolean",
       "description": "Connect to remote D1/KV/R2 bindings during local development. Can also be set via VOID_REMOTE=1 environment variable."
     },
-    "wrangler": {
+    "worker": {
       "type": "object",
       "description": "Curated wrangler config passthrough. Binding arrays (d1_databases, kv_namespaces, r2_buckets) are not allowed here — bindings are fully managed by void.",
       "properties": {

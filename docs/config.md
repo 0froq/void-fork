@@ -12,18 +12,20 @@ All project-level configuration lives in a `void.json` file at the project root.
 {
   "$schema": "./node_modules/void/schema.json",
   "target": "cloudflare",
-  "auth": ["github", "google", "email"],
-  "bindings": { "db": true, "kv": false },
-  "cache": {
-    "revalidate": { "/": 60, "*": 30 }
+  "routing": {
+    "revalidate": { "/": 60, "*": 30 },
+    "headers": {
+      "/assets/*": ["Cache-Control: public, max-age=31536000, immutable"],
+      "/*": ["X-Frame-Options: DENY", "X-Content-Type-Options: nosniff"]
+    }
   },
-  "headers": {
-    "/assets/*": ["Cache-Control: public, max-age=31536000, immutable"],
-    "/*": ["X-Frame-Options: DENY", "X-Content-Type-Options: nosniff"]
+  "inference": {
+    "auth": ["github", "google", "email"],
+    "bindings": { "db": true, "kv": false },
+    "appType": "spa",
+    "outputDir": "dist"
   },
-  "appType": "spa",
-  "outputDir": "dist",
-  "wrangler": {
+  "worker": {
     "compatibility_date": "2025-12-01",
     "compatibility_flags": ["nodejs_compat"]
   }
@@ -51,7 +53,73 @@ Non-CF targets disable CF bindings (`void/db`, `void/kv`, `void/auth`, `void/sto
 { "target": "node" }
 ```
 
-### `auth`
+### `routing`
+
+Routing and edge configuration — headers, redirects, and caching.
+
+#### `routing.headers`
+
+Custom response headers for static assets. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Custom Headers](./headers.md) for details.
+
+```json
+{
+  "routing": {
+    "headers": {
+      "/assets/*": ["Cache-Control: public, max-age=31536000, immutable"],
+      "/*": ["X-Frame-Options: DENY", "X-Content-Type-Options: nosniff"]
+    }
+  }
+}
+```
+
+#### `routing.redirects`
+
+URL redirects. Keys are source URL patterns, values are destination strings (302 default) or objects with `to` and optional `status`. See [Redirects](./redirects.md) for details.
+
+```json
+{
+  "routing": {
+    "redirects": {
+      "/old": "/new",
+      "/blog/*": { "to": "/posts/:splat", "status": 301 }
+    }
+  }
+}
+```
+
+#### `routing.revalidate`
+
+ISR revalidation TTL in seconds — global or per-path. See [Revalidation](./cache/revalidation.md) for details.
+
+```json
+{
+  "routing": {
+    "revalidate": {
+      "/": 60,
+      "/docs/*": 31536000,
+      "*": 30
+    }
+  }
+}
+```
+
+#### `routing.prerender`
+
+Paths to prerender as static HTML at deploy time. Each path must start with `/`. See [Edge Prerendering](./cache/prerendering.md) for details.
+
+```json
+{
+  "routing": {
+    "prerender": ["/", "/about", "/pricing"]
+  }
+}
+```
+
+### `inference`
+
+Configuration for build-time inference — how Void detects your app type, bindings, and build process.
+
+#### `inference.auth`
 
 Enable built-in auth routes and session management.
 
@@ -60,17 +128,17 @@ Enable built-in auth routes and session management.
 - `false` or omitted — disables auth entirely.
 
 ```json
-{ "auth": ["github", "email"] }
+{ "inference": { "auth": ["github", "email"] } }
 ```
 
-### `bindings`
+#### `inference.bindings`
 
 Explicitly control inferred Cloudflare bindings. If omitted, bindings are [automatically inferred](./resource-inference.md) by scanning your source files for binding usage. If provided, explicit values take precedence and inference is skipped entirely.
 
 Each binding accepts `true` (use default name), `false` (disable), or a string (custom binding name):
 
 ```json
-{ "bindings": { "db": true, "kv": false, "storage": "MY_BUCKET" } }
+{ "inference": { "bindings": { "db": true, "kv": false, "storage": "MY_BUCKET" } } }
 ```
 
 | Key       | Default Binding | Type          | Custom Name              |
@@ -82,73 +150,23 @@ Each binding accepts `true` (use default name), `false` (disable), or a string (
 
 Custom names are used in the deploy manifest and in wrangler binding sync for local dev.
 
-### `build`
+#### `inference.build`
 
 Override the build command. Useful for frameworks with their own CLIs (Nuxt, Astro) or custom build scripts. If omitted, the CLI uses the framework's default build command.
 
 ```json
-{ "build": "nuxt build --preset cloudflare-module" }
+{ "inference": { "build": "nuxt build --preset cloudflare-module" } }
 ```
 
-### `scanDirs`
+#### `inference.scanDirs`
 
 Override which directories are scanned for [binding inference](./resource-inference.md). Paths are relative to the project root. Replaces the default directories for the current mode.
 
 ```json
-{ "scanDirs": ["src", "lib", "workers"] }
+{ "inference": { "scanDirs": ["src", "lib", "workers"] } }
 ```
 
-### `cache`
-
-Caching configuration. See [Revalidation](./cache/revalidation.md) and [Custom Headers](./headers.md) for details.
-
-| Sub-field    | Type                               | Description                                         |
-| ------------ | ---------------------------------- | --------------------------------------------------- |
-| `revalidate` | `number \| Record<string, number>` | ISR revalidation TTL in seconds, global or per-path |
-| `prerender`  | `string[]`                         | Paths to prerender as static HTML at deploy time    |
-
-```json
-{
-  "cache": {
-    "revalidate": {
-      "/": 60,
-      "/docs/*": 31536000,
-      "*": 30
-    },
-    "prerender": ["/", "/about", "/pricing"]
-  }
-}
-```
-
-Each path in `prerender` must start with `/`.
-
-### `headers`
-
-Custom response headers for static assets. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Custom Headers](./headers.md) for details.
-
-```json
-{
-  "headers": {
-    "/assets/*": ["Cache-Control: public, max-age=31536000, immutable"],
-    "/*": ["X-Frame-Options: DENY", "X-Content-Type-Options: nosniff"]
-  }
-}
-```
-
-### `redirects`
-
-URL redirects. Keys are source URL patterns, values are destination strings (302 default) or objects with `to` and optional `status`. See [Redirects](./redirects.md) for details.
-
-```json
-{
-  "redirects": {
-    "/old": "/new",
-    "/blog/*": { "to": "/posts/:splat", "status": 301 }
-  }
-}
-```
-
-### `appType`
+#### `inference.appType`
 
 App type. If omitted, auto-detected on first deploy. See [Supported App Types](./app-types.md).
 
@@ -156,6 +174,10 @@ App type. If omitted, auto-detected on first deploy. See [Supported App Types](.
 - `"framework"` — meta framework (TanStack Start, React Router, SvelteKit, Nuxt, Astro)
 - `"static"` — fully rendered HTML files (VitePress, plain HTML, external tools). Non-matching paths return `404.html` or a 404 response.
 - `"spa"` — static with SPA fallback. All non-file paths fall back to `index.html` with a 200 status, so client-side routing works out of the box.
+
+#### `inference.outputDir`
+
+Output directory for static deploys, relative to the project root. Only relevant when `inference.appType` is `"spa"` or `"static"`. Defaults to `"dist"`.
 
 ### `output`
 
@@ -173,10 +195,6 @@ When omitted or set to `"server"`, pages are server-rendered on request. Individ
 ```json
 { "output": "static" }
 ```
-
-### `outputDir`
-
-Output directory for static deploys, relative to the project root. Only relevant when `appType` is `"spa"` or `"static"`. Defaults to `"dist"`.
 
 ### `remote`
 
@@ -198,9 +216,9 @@ You can also enable remote mode via the `VOID_REMOTE=1` environment variable wit
 VOID_REMOTE=1 pnpm dev
 ```
 
-### `wrangler`
+### `worker`
 
-Curated Cloudflare Workers configuration. Binding arrays (`d1_databases`, `kv_namespaces`, `r2_buckets`) are not allowed here — bindings are fully managed by void via inference and the `bindings` field. Users wanting custom bindings should use a `wrangler.json` with real binding IDs and `wrangler deploy`.
+Curated Cloudflare Workers configuration. Binding arrays (`d1_databases`, `kv_namespaces`, `r2_buckets`) are not allowed here — bindings are fully managed by void via inference and the `inference.bindings` field. Users wanting custom bindings should use a `wrangler.json` with real binding IDs and `wrangler deploy`.
 
 | Field                 | Type       | Description                            |
 | --------------------- | ---------- | -------------------------------------- |
@@ -209,7 +227,7 @@ Curated Cloudflare Workers configuration. Binding arrays (`d1_databases`, `kv_na
 
 ```json
 {
-  "wrangler": {
+  "worker": {
     "compatibility_date": "2025-12-01",
     "compatibility_flags": ["nodejs_compat"]
   }

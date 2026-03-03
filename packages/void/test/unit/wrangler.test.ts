@@ -98,7 +98,7 @@ describe("readWranglerCompat", () => {
 
   it("void.json overrides wrangler.jsonc date", () => {
     setup("wrangler.jsonc", '{ "compatibility_date": "2025-01-01" }');
-    const config: VoidConfig = { wrangler: { compatibility_date: "2026-06-01" } };
+    const config: VoidConfig = { worker: { compatibility_date: "2026-06-01" } };
     expect(readWranglerCompat(tmpDir, config)).toEqual({
       compatibilityDate: "2026-06-01",
     });
@@ -110,7 +110,7 @@ describe("readWranglerCompat", () => {
       '{ "compatibility_date": "2026-01-01", "compatibility_flags": ["nodejs_compat"] }',
     );
     const config: VoidConfig = {
-      wrangler: { compatibility_flags: ["nodejs_compat", "nodejs_als"] },
+      worker: { compatibility_flags: ["nodejs_compat", "nodejs_als"] },
     };
     const result = readWranglerCompat(tmpDir, config);
     expect(result.compatibilityFlags).toEqual(["nodejs_compat", "nodejs_als"]);
@@ -119,7 +119,7 @@ describe("readWranglerCompat", () => {
   it("void.json date used when no wrangler config exists", () => {
     rmSync(tmpDir, { recursive: true, force: true });
     mkdirSync(tmpDir, { recursive: true });
-    const config: VoidConfig = { wrangler: { compatibility_date: "2026-03-15" } };
+    const config: VoidConfig = { worker: { compatibility_date: "2026-03-15" } };
     expect(readWranglerCompat(tmpDir, config)).toEqual({
       compatibilityDate: "2026-03-15",
     });

@@ -94,7 +94,7 @@ At the edge, the resolution order is:
 
 ## Auto-Detection
 
-When running `void deploy` and no `appType` is set in `void.json`, the detection logic runs in this order:
+When running `void deploy` and no `inference.appType` is set in `void.json`, the detection logic runs in this order:
 
 | Priority | Condition                                                                                 | Type                          |
 | -------- | ----------------------------------------------------------------------------------------- | ----------------------------- |
@@ -107,14 +107,16 @@ When running `void deploy` and no `appType` is set in `void.json`, the detection
 
 ## Explicit Configuration
 
-To lock the app type and skip auto-detection, set `appType` in [`void.json`](./config.md):
+To lock the app type and skip auto-detection, set `inference.appType` in [`void.json`](./config.md):
 
 ```json
 {
-  "appType": "static",
-  "outputDir": ".vitepress/dist"
+  "inference": {
+    "appType": "static",
+    "outputDir": ".vitepress/dist"
+  }
 }
 ```
 
-- `appType`: `"void"`, `"framework"`, `"spa"`, or `"static"`
-- `outputDir`: output directory for static app types (relative to project root, defaults to `"dist"`)
+- `inference.appType`: `"void"`, `"framework"`, `"spa"`, or `"static"`
+- `inference.outputDir`: output directory for static app types (relative to project root, defaults to `"dist"`)

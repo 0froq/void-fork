@@ -103,7 +103,7 @@ You can set non-binding wrangler fields like `compatibility_date`, `compatibilit
 
 ```json
 {
-  "wrangler": {
+  "worker": {
     "compatibility_date": "2025-12-01",
     "compatibility_flags": ["nodejs_compat"],
     "vars": { "API_URL": "https://api.example.com" }
@@ -111,7 +111,7 @@ You can set non-binding wrangler fields like `compatibility_date`, `compatibilit
 }
 ```
 
-Binding arrays (`d1_databases`, `kv_namespaces`, `r2_buckets`) are not allowed in the `wrangler` field — bindings are fully managed by Void. To use custom bindings with real resource IDs, add a `wrangler.jsonc` to your project root instead. See [Wrangler config merging](#wrangler-config-merging) for how Void handles this.
+Binding arrays (`d1_databases`, `kv_namespaces`, `r2_buckets`) are not allowed in the `worker` field — bindings are fully managed by Void. To use custom bindings with real resource IDs, add a `wrangler.jsonc` to your project root instead. See [Wrangler config merging](#wrangler-config-merging) for how Void handles this.
 
 ## Wrangler config merging
 
@@ -148,12 +148,12 @@ This means your `wrangler.jsonc` is the single source of truth for bindings in t
 
 ### Merge precedence
 
-| Source                       | Priority             | What it controls                                                    |
-| ---------------------------- | -------------------- | ------------------------------------------------------------------- |
-| Your `wrangler.jsonc`        | Highest for bindings | Real resource IDs, service bindings, routes, vars, environments     |
-| `void.json` `wrangler` field | Highest for compat   | `compatibility_date`, `compatibility_flags`, `vars`                 |
-| Void inference               | Fills gaps only      | Adds placeholder bindings for inferred resources not in your config |
-| Built-in defaults            | Lowest               | `compatibility_date: "2026-02-12"` when nothing else is set         |
+| Source                     | Priority             | What it controls                                                    |
+| -------------------------- | -------------------- | ------------------------------------------------------------------- |
+| Your `wrangler.jsonc`      | Highest for bindings | Real resource IDs, service bindings, routes, vars, environments     |
+| `void.json` `worker` field | Highest for compat   | `compatibility_date`, `compatibility_flags`, `vars`                 |
+| Void inference             | Fills gaps only      | Adds placeholder bindings for inferred resources not in your config |
+| Built-in defaults          | Lowest               | `compatibility_date: "2026-02-12"` when nothing else is set         |
 
 ### Example
 

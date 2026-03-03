@@ -120,7 +120,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   }
 
   // 3. Resolve deploy app type: void.json > CLI flags > auto-detection
-  const vcConfig = readConfig(root);
+  const voidConfig = readConfig(root);
 
   // Check for known framework first
   const detected = detectFramework(root);
@@ -138,7 +138,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
         client,
         detected,
         fwPreset,
-        vcConfig,
+        voidConfig,
         options?.skipBuild,
         gitCommit,
       );
@@ -150,26 +150,28 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
 
   let preset: StaticPreset | null = null;
 
-  if (vcConfig.appType && vcConfig.appType !== "void" && vcConfig.appType !== "framework") {
+  const appType = voidConfig.inference?.appType;
+  if (appType && appType !== "void" && appType !== "framework") {
     // void.json has an explicit static app type
+    const outputDir = voidConfig.inference?.outputDir;
     preset = {
       buildCommand: null,
-      outputDir: vcConfig.outputDir ? resolve(root, vcConfig.outputDir) : join(root, "dist"),
-      appType: vcConfig.appType,
+      outputDir: outputDir ? resolve(root, outputDir) : join(root, "dist"),
+      appType,
     };
     // Re-detect build command (config stores app type, not command)
     const detectedPreset = detectPreset(root, { dir: options?.dir, spa: options?.spa });
     if (detectedPreset) {
       preset.buildCommand = detectedPreset.buildCommand;
-      if (!vcConfig.outputDir) {
+      if (!outputDir) {
         preset.outputDir = detectedPreset.outputDir;
       }
     }
-  } else if (!vcConfig.appType) {
+  } else if (!appType) {
     // No configured app type — detect from CLI flags + project structure
     preset = detectPreset(root, { dir: options?.dir, spa: options?.spa });
   }
-  // vcConfig.appType === "void" or "framework" → preset stays null → full deploy
+  // appType === "void" or "framework" → preset stays null → full deploy
 
   // Detect git commit before build (only when not skipping build)
   const gitCommit = options?.skipBuild ? null : getGitCommit(root);
@@ -183,8 +185,8 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
       options?.skipBuild,
       gitCommit,
       undefined,
-      convertHeadersConfig(vcConfig.headers) ?? [],
-      convertRedirectsConfig(vcConfig.redirects) ?? [],
+      convertHeadersConfig(voidConfig.routing?.headers) ?? [],
+      convertRedirectsConfig(voidConfig.routing?.redirects) ?? [],
     );
   } else {
     await runFullDeploy(root, config, client, options?.skipBuild, gitCommit);
@@ -306,7 +308,7 @@ async function runFrameworkDeploy(
   client: PlatformClient,
   detected: DetectedFramework,
   fwPreset: FrameworkPreset,
-  vcConfig: VoidConfig,
+  voidConfig: VoidConfig,
   skipBuild?: boolean,
   commit?: string | null,
 ): Promise<void> {
@@ -314,7 +316,7 @@ async function runFrameworkDeploy(
 
   // 1. Build
   if (!skipBuild) {
-    const buildCmd = vcConfig.build ?? fwPreset.buildCommand;
+    const buildCmd = voidConfig.inference?.build ?? fwPreset.buildCommand;
     log.step(`Building (${buildCmd})...`);
     execSync(buildCmd, { cwd: root, stdio: "inherit" });
   }
@@ -325,12 +327,12 @@ async function runFrameworkDeploy(
 
   // Collect header rules: parse framework-generated _headers file + void.json config
   const fwHeaderRules = existsSync(assetsDir) ? parseHeadersFile(assetsDir) : undefined;
-  const cfgHeaderRules = convertHeadersConfig(vcConfig.headers);
+  const cfgHeaderRules = convertHeadersConfig(voidConfig.routing?.headers);
   const headerRules: HeaderRule[] = [...(fwHeaderRules ?? []), ...(cfgHeaderRules ?? [])];
 
   // Collect redirect rules: parse framework-generated _redirects file + void.json config
   const fwRedirectRules = existsSync(assetsDir) ? parseRedirectsFile(assetsDir) : undefined;
-  const cfgRedirectRules = convertRedirectsConfig(vcConfig.redirects);
+  const cfgRedirectRules = convertRedirectsConfig(voidConfig.routing?.redirects);
   const redirectRules: RedirectRule[] = [...(fwRedirectRules ?? []), ...(cfgRedirectRules ?? [])];
 
   if (!existsSync(workerDir)) {
@@ -339,8 +341,10 @@ async function runFrameworkDeploy(
   }
 
   // 3. Infer or read bindings
-  const inferenceOptions = vcConfig.bindings ? { bindings: vcConfig.bindings } : undefined;
-  const scanDirs = vcConfig.scanDirs ?? FRAMEWORK_SCAN_DIRS;
+  const inferenceOptions = voidConfig.inference?.bindings
+    ? { bindings: voidConfig.inference.bindings }
+    : undefined;
+  const scanDirs = voidConfig.inference?.scanDirs ?? FRAMEWORK_SCAN_DIRS;
   const bindings = inferProjectBindings(root, inferenceOptions, scanDirs);
 
   // 4. Collect migrations
@@ -358,10 +362,10 @@ async function runFrameworkDeploy(
   }
 
   // 5. Resolve auth config (explicit config takes precedence, otherwise infer from source)
-  const authProviders: AuthProvider[] | null = vcConfig.auth
-    ? vcConfig.auth === true
+  const authProviders: AuthProvider[] | null = voidConfig.inference?.auth
+    ? voidConfig.inference.auth === true
       ? (["email", "github", "google"] as AuthProvider[])
-      : vcConfig.auth
+      : voidConfig.inference.auth
     : bindings.needsAuth
       ? ["email", "github", "google"]
       : null;
@@ -390,11 +394,11 @@ async function runFrameworkDeploy(
   }
 
   // 8. Read wrangler compat settings (void.json > wrangler.jsonc > default)
-  const wranglerCompat = readWranglerCompat(root, vcConfig);
+  const wranglerCompat = readWranglerCompat(root, voidConfig);
 
   // 9. Resolve revalidate + prerender from void.json
-  const revalidate = vcConfig.cache?.revalidate;
-  const prerender = vcConfig.cache?.prerender;
+  const revalidate = voidConfig.routing?.revalidate;
+  const prerender = voidConfig.routing?.prerender;
 
   // Build manifest-format schedules and queues from raw scans
   const schedules = rawJobs.flatMap((job) =>
@@ -442,7 +446,7 @@ async function runFrameworkDeploy(
     assetConfig: { not_found_handling: "none" },
     vars: envVars,
     packageOptions: {
-      bindingNames: resolveBindingNames(vcConfig.bindings),
+      bindingNames: resolveBindingNames(voidConfig.inference?.bindings),
       workerMain: actualWorkerMain,
       compatibilityDate: wranglerCompat.compatibilityDate,
       compatibilityFlags: wranglerCompat.compatibilityFlags,
@@ -538,18 +542,18 @@ async function runFullDeploy(
   // 6. Infer bindings (expanded scan dirs in framework mode, or custom from config)
   const deployConfig = readConfig(root);
   const deployScanDirs =
-    deployConfig.scanDirs ?? (isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined);
+    deployConfig.inference?.scanDirs ?? (isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined);
   const bindings = inferProjectBindings(root, undefined, deployScanDirs);
 
   // Collect header rules: parse user/framework _headers file + void.json config
   const clientDir = join(distDir, "client");
   const userHeaderRules = existsSync(clientDir) ? parseHeadersFile(clientDir) : undefined;
-  const cfgHeaderRules = convertHeadersConfig(deployConfig.headers);
+  const cfgHeaderRules = convertHeadersConfig(deployConfig.routing?.headers);
   const headerRules: HeaderRule[] = [...(userHeaderRules ?? []), ...(cfgHeaderRules ?? [])];
 
   // Collect redirect rules: parse user/framework _redirects file + void.json config
   const userRedirectRules = existsSync(clientDir) ? parseRedirectsFile(clientDir) : undefined;
-  const cfgRedirectRules = convertRedirectsConfig(deployConfig.redirects);
+  const cfgRedirectRules = convertRedirectsConfig(deployConfig.routing?.redirects);
   const redirectRules: RedirectRule[] = [...(userRedirectRules ?? []), ...(cfgRedirectRules ?? [])];
 
   // 7. Collect and validate migrations
@@ -585,7 +589,7 @@ async function runFullDeploy(
     : Boolean(validateSsrEntry(root)) || (hasPages && deployConfig.output !== "static");
 
   // Resolve revalidate config from void.json + per-page .server.ts exports
-  const vcRevalidate = readConfig(root).cache?.revalidate;
+  const vcRevalidate = readConfig(root).routing?.revalidate;
   let revalidate: number | Record<string, number> | undefined;
   if (vcRevalidate != null) {
     revalidate = vcRevalidate;

@@ -16,15 +16,16 @@ export interface WranglerConfig {
   compatibility_flags?: string[];
 }
 
-/** Caching configuration. */
-export interface CacheConfig {
+/** Routing configuration — headers, redirects, revalidation, prerendering. */
+export interface RoutingConfig {
   revalidate?: number | Record<string, number>;
   prerender?: string[];
+  headers?: Record<string, string[]>;
+  redirects?: Record<string, RedirectDestination>;
 }
 
-/** Shape of the `void.json` config file. All fields optional. */
-export interface VoidConfig {
-  $schema?: string;
+/** Inference configuration — bindings, auth, scanDirs, build, outputDir, appType. */
+export interface InferenceConfig {
   auth?: boolean | AuthProvider[];
   bindings?: {
     db?: boolean | string;
@@ -32,18 +33,22 @@ export interface VoidConfig {
     storage?: boolean | string;
     ai?: boolean;
   };
-  build?: string;
-  cache?: CacheConfig;
   scanDirs?: string[];
-  headers?: Record<string, string[]>;
-  redirects?: Record<string, RedirectDestination>;
-  head?: HeadConfig;
-  target?: "cloudflare" | "node" | "bun" | "deno";
-  appType?: "spa" | "static" | "void" | "framework";
-  output?: "server" | "static";
+  build?: string;
   outputDir?: string;
+  appType?: "spa" | "static" | "void" | "framework";
+}
+
+/** Shape of the `void.json` config file. All fields optional. */
+export interface VoidConfig {
+  $schema?: string;
+  target?: "cloudflare" | "node" | "bun" | "deno";
+  output?: "server" | "static";
+  head?: HeadConfig;
+  routing?: RoutingConfig;
+  inference?: InferenceConfig;
   remote?: boolean;
-  wrangler?: WranglerConfig;
+  worker?: WranglerConfig;
 }
 
 const CONFIG_FILE = "void.json";
@@ -53,6 +58,23 @@ const VALID_AUTH_PROVIDERS = new Set(["github", "google", "email"]);
 const VALID_APP_TYPES = new Set(["spa", "static", "void", "framework"]);
 const VALID_OUTPUTS = new Set(["server", "static"]);
 const VALID_REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
+
+/** Old flat keys that have moved into namespaces. */
+const MIGRATION_ERRORS: Record<string, string> = {
+  auth: '"auth" has moved to "inference.auth"',
+  bindings: '"bindings" has moved to "inference.bindings"',
+  build: '"build" has moved to "inference.build"',
+  scanDirs: '"scanDirs" has moved to "inference.scanDirs"',
+  appType: '"appType" has moved to "inference.appType"',
+  outputDir: '"outputDir" has moved to "inference.outputDir"',
+  headers: '"headers" has moved to "routing.headers"',
+  redirects: '"redirects" has moved to "routing.redirects"',
+  cache:
+    '"cache" has been replaced by "routing" — use "routing.revalidate" and "routing.prerender"',
+  wrangler: '"wrangler" has been renamed to "worker"',
+  mode: '"mode" has been renamed to "inference.appType"',
+  revalidate: '"revalidate" has moved to "routing.revalidate"',
+};
 
 /**
  * Read and validate the `void.json` config file from the project root.
@@ -80,109 +102,24 @@ export function readConfig(root: string): VoidConfig {
 
   const obj = config as Record<string, unknown>;
 
-  // Validate auth
-  if (obj.auth !== undefined) {
-    if (typeof obj.auth === "boolean") {
-      // ok
-    } else if (Array.isArray(obj.auth)) {
-      for (const p of obj.auth) {
-        if (typeof p !== "string" || !VALID_AUTH_PROVIDERS.has(p)) {
-          throw new Error(`Invalid auth provider in ${CONFIG_FILE}: ${JSON.stringify(p)}`);
-        }
-      }
-    } else {
-      throw new Error(`"auth" in ${CONFIG_FILE} must be a boolean or an array of providers`);
+  // Check for old flat keys that have moved
+  for (const [key, message] of Object.entries(MIGRATION_ERRORS)) {
+    if (obj[key] !== undefined) {
+      throw new Error(`${message} in ${CONFIG_FILE}`);
     }
   }
 
-  // Validate bindings
-  if (obj.bindings !== undefined) {
-    if (typeof obj.bindings !== "object" || obj.bindings === null || Array.isArray(obj.bindings)) {
-      throw new Error(`"bindings" in ${CONFIG_FILE} must be an object`);
-    }
-    const b = obj.bindings as Record<string, unknown>;
-    for (const key of Object.keys(b)) {
-      if (!["db", "kv", "storage", "ai"].includes(key)) {
-        throw new Error(`Unknown binding "${key}" in ${CONFIG_FILE}. Valid: db, kv, storage, ai`);
-      }
-      if (key === "ai") {
-        if (typeof b[key] !== "boolean") {
-          throw new Error(`"bindings.${key}" in ${CONFIG_FILE} must be a boolean`);
-        }
-      } else {
-        if (typeof b[key] !== "boolean" && typeof b[key] !== "string") {
-          throw new Error(
-            `"bindings.${key}" in ${CONFIG_FILE} must be a boolean or a string (custom binding name)`,
-          );
-        }
-      }
+  // Validate target
+  if (obj.target !== undefined) {
+    if (typeof obj.target !== "string" || !VALID_TARGETS.has(obj.target)) {
+      throw new Error(`"target" in ${CONFIG_FILE} must be one of: cloudflare, node, bun, deno`);
     }
   }
 
-  // Validate build
-  if (obj.build !== undefined && typeof obj.build !== "string") {
-    throw new Error(`"build" in ${CONFIG_FILE} must be a string`);
-  }
-
-  // Validate scanDirs
-  if (obj.scanDirs !== undefined) {
-    if (!Array.isArray(obj.scanDirs) || !obj.scanDirs.every((d) => typeof d === "string")) {
-      throw new Error(`"scanDirs" in ${CONFIG_FILE} must be an array of strings`);
-    }
-    for (const d of obj.scanDirs as string[]) {
-      if (d.startsWith("/") || d.startsWith("..")) {
-        throw new Error(`"scanDirs" path "${d}" in ${CONFIG_FILE} must be a relative directory`);
-      }
-    }
-  }
-
-  // Validate headers
-  if (obj.headers !== undefined) {
-    if (typeof obj.headers !== "object" || obj.headers === null || Array.isArray(obj.headers)) {
-      throw new Error(`"headers" in ${CONFIG_FILE} must be an object`);
-    }
-    const h = obj.headers as Record<string, unknown>;
-    for (const [pattern, values] of Object.entries(h)) {
-      if (!pattern.startsWith("/")) {
-        throw new Error(`Header pattern "${pattern}" in ${CONFIG_FILE} must start with "/"`);
-      }
-      if (!Array.isArray(values) || !values.every((v) => typeof v === "string")) {
-        throw new Error(`Headers for "${pattern}" in ${CONFIG_FILE} must be an array of strings`);
-      }
-    }
-  }
-
-  // Validate redirects
-  if (obj.redirects !== undefined) {
-    if (
-      typeof obj.redirects !== "object" ||
-      obj.redirects === null ||
-      Array.isArray(obj.redirects)
-    ) {
-      throw new Error(`"redirects" in ${CONFIG_FILE} must be an object`);
-    }
-    const r = obj.redirects as Record<string, unknown>;
-    for (const [source, dest] of Object.entries(r)) {
-      if (!source.startsWith("/")) {
-        throw new Error(`Redirect source "${source}" in ${CONFIG_FILE} must start with "/"`);
-      }
-      if (typeof dest === "string") {
-        // ok
-      } else if (typeof dest === "object" && dest !== null && !Array.isArray(dest)) {
-        const d = dest as Record<string, unknown>;
-        if (typeof d.to !== "string") {
-          throw new Error(`Redirect for "${source}" in ${CONFIG_FILE} must have a "to" string`);
-        }
-        if (d.status !== undefined && !VALID_REDIRECT_STATUSES.has(d.status as number)) {
-          throw new Error(
-            `Redirect status for "${source}" in ${CONFIG_FILE} must be 301, 302, 307, or 308`,
-          );
-        }
-      } else {
-        throw new Error(
-          `Redirect for "${source}" in ${CONFIG_FILE} must be a string or an object with "to" and optional "status"`,
-        );
-      }
+  // Validate output
+  if (obj.output !== undefined) {
+    if (typeof obj.output !== "string" || !VALID_OUTPUTS.has(obj.output)) {
+      throw new Error(`"output" in ${CONFIG_FILE} must be one of: server, static`);
     }
   }
 
@@ -230,88 +167,203 @@ export function readConfig(root: string): VoidConfig {
     }
   }
 
-  // Validate target
-  if (obj.target !== undefined) {
-    if (typeof obj.target !== "string" || !VALID_TARGETS.has(obj.target)) {
-      throw new Error(`"target" in ${CONFIG_FILE} must be one of: cloudflare, node, bun, deno`);
+  // Validate routing
+  if (obj.routing !== undefined) {
+    if (typeof obj.routing !== "object" || obj.routing === null || Array.isArray(obj.routing)) {
+      throw new Error(`"routing" in ${CONFIG_FILE} must be an object`);
     }
-  }
+    const routing = obj.routing as Record<string, unknown>;
 
-  // Migration error for old "mode" key
-  if (obj.mode !== undefined) {
-    throw new Error(`"mode" has been renamed to "appType" in ${CONFIG_FILE}`);
-  }
-
-  // Validate appType
-  if (obj.appType !== undefined) {
-    if (typeof obj.appType !== "string" || !VALID_APP_TYPES.has(obj.appType)) {
-      throw new Error(`"appType" in ${CONFIG_FILE} must be one of: spa, static, void, framework`);
-    }
-  }
-
-  // Validate output
-  if (obj.output !== undefined) {
-    if (typeof obj.output !== "string" || !VALID_OUTPUTS.has(obj.output)) {
-      throw new Error(`"output" in ${CONFIG_FILE} must be one of: server, static`);
-    }
-  }
-
-  // Validate outputDir
-  if (obj.outputDir !== undefined && typeof obj.outputDir !== "string") {
-    throw new Error(`"outputDir" in ${CONFIG_FILE} must be a string`);
-  }
-
-  // Migration error for old top-level revalidate
-  if (obj.revalidate !== undefined) {
-    throw new Error(`"revalidate" has moved to "cache.revalidate" in ${CONFIG_FILE}`);
-  }
-
-  // Validate cache
-  if (obj.cache !== undefined) {
-    if (typeof obj.cache !== "object" || obj.cache === null || Array.isArray(obj.cache)) {
-      throw new Error(`"cache" in ${CONFIG_FILE} must be an object`);
-    }
-    const cache = obj.cache as Record<string, unknown>;
-    if (cache.revalidate !== undefined) {
-      if (typeof cache.revalidate === "number") {
-        if (!Number.isFinite(cache.revalidate) || cache.revalidate < 0) {
+    // Validate routing.revalidate
+    if (routing.revalidate !== undefined) {
+      if (typeof routing.revalidate === "number") {
+        if (!Number.isFinite(routing.revalidate) || routing.revalidate < 0) {
           throw new Error(
-            `"cache.revalidate" in ${CONFIG_FILE} must be a non-negative finite number`,
+            `"routing.revalidate" in ${CONFIG_FILE} must be a non-negative finite number`,
           );
         }
       } else if (
-        typeof cache.revalidate === "object" &&
-        cache.revalidate !== null &&
-        !Array.isArray(cache.revalidate)
+        typeof routing.revalidate === "object" &&
+        routing.revalidate !== null &&
+        !Array.isArray(routing.revalidate)
       ) {
-        const r = cache.revalidate as Record<string, unknown>;
+        const r = routing.revalidate as Record<string, unknown>;
         for (const [pattern, value] of Object.entries(r)) {
           if (pattern !== "*" && !pattern.startsWith("/")) {
             throw new Error(
-              `"cache.revalidate" key "${pattern}" in ${CONFIG_FILE} must start with "/" or be "*"`,
+              `"routing.revalidate" key "${pattern}" in ${CONFIG_FILE} must start with "/" or be "*"`,
             );
           }
           if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
             throw new Error(
-              `"cache.revalidate" value for "${pattern}" in ${CONFIG_FILE} must be a non-negative finite number`,
+              `"routing.revalidate" value for "${pattern}" in ${CONFIG_FILE} must be a non-negative finite number`,
             );
           }
         }
       } else {
         throw new Error(
-          `"cache.revalidate" in ${CONFIG_FILE} must be a number or an object of path patterns to numbers`,
+          `"routing.revalidate" in ${CONFIG_FILE} must be a number or an object of path patterns to numbers`,
         );
       }
     }
-    if (cache.prerender !== undefined) {
-      if (!Array.isArray(cache.prerender) || !cache.prerender.every((p) => typeof p === "string")) {
-        throw new Error(`"cache.prerender" in ${CONFIG_FILE} must be an array of strings`);
+
+    // Validate routing.prerender
+    if (routing.prerender !== undefined) {
+      if (
+        !Array.isArray(routing.prerender) ||
+        !routing.prerender.every((p) => typeof p === "string")
+      ) {
+        throw new Error(`"routing.prerender" in ${CONFIG_FILE} must be an array of strings`);
       }
-      for (const p of cache.prerender as string[]) {
+      for (const p of routing.prerender as string[]) {
         if (!p.startsWith("/")) {
-          throw new Error(`"cache.prerender" path "${p}" in ${CONFIG_FILE} must start with "/"`);
+          throw new Error(`"routing.prerender" path "${p}" in ${CONFIG_FILE} must start with "/"`);
         }
       }
+    }
+
+    // Validate routing.headers
+    if (routing.headers !== undefined) {
+      if (
+        typeof routing.headers !== "object" ||
+        routing.headers === null ||
+        Array.isArray(routing.headers)
+      ) {
+        throw new Error(`"routing.headers" in ${CONFIG_FILE} must be an object`);
+      }
+      const h = routing.headers as Record<string, unknown>;
+      for (const [pattern, values] of Object.entries(h)) {
+        if (!pattern.startsWith("/")) {
+          throw new Error(`Header pattern "${pattern}" in ${CONFIG_FILE} must start with "/"`);
+        }
+        if (!Array.isArray(values) || !values.every((v) => typeof v === "string")) {
+          throw new Error(`Headers for "${pattern}" in ${CONFIG_FILE} must be an array of strings`);
+        }
+      }
+    }
+
+    // Validate routing.redirects
+    if (routing.redirects !== undefined) {
+      if (
+        typeof routing.redirects !== "object" ||
+        routing.redirects === null ||
+        Array.isArray(routing.redirects)
+      ) {
+        throw new Error(`"routing.redirects" in ${CONFIG_FILE} must be an object`);
+      }
+      const r = routing.redirects as Record<string, unknown>;
+      for (const [source, dest] of Object.entries(r)) {
+        if (!source.startsWith("/")) {
+          throw new Error(`Redirect source "${source}" in ${CONFIG_FILE} must start with "/"`);
+        }
+        if (typeof dest === "string") {
+          // ok
+        } else if (typeof dest === "object" && dest !== null && !Array.isArray(dest)) {
+          const d = dest as Record<string, unknown>;
+          if (typeof d.to !== "string") {
+            throw new Error(`Redirect for "${source}" in ${CONFIG_FILE} must have a "to" string`);
+          }
+          if (d.status !== undefined && !VALID_REDIRECT_STATUSES.has(d.status as number)) {
+            throw new Error(
+              `Redirect status for "${source}" in ${CONFIG_FILE} must be 301, 302, 307, or 308`,
+            );
+          }
+        } else {
+          throw new Error(
+            `Redirect for "${source}" in ${CONFIG_FILE} must be a string or an object with "to" and optional "status"`,
+          );
+        }
+      }
+    }
+  }
+
+  // Validate inference
+  if (obj.inference !== undefined) {
+    if (
+      typeof obj.inference !== "object" ||
+      obj.inference === null ||
+      Array.isArray(obj.inference)
+    ) {
+      throw new Error(`"inference" in ${CONFIG_FILE} must be an object`);
+    }
+    const inf = obj.inference as Record<string, unknown>;
+
+    // Validate inference.auth
+    if (inf.auth !== undefined) {
+      if (typeof inf.auth === "boolean") {
+        // ok
+      } else if (Array.isArray(inf.auth)) {
+        for (const p of inf.auth) {
+          if (typeof p !== "string" || !VALID_AUTH_PROVIDERS.has(p)) {
+            throw new Error(`Invalid auth provider in ${CONFIG_FILE}: ${JSON.stringify(p)}`);
+          }
+        }
+      } else {
+        throw new Error(
+          `"inference.auth" in ${CONFIG_FILE} must be a boolean or an array of providers`,
+        );
+      }
+    }
+
+    // Validate inference.bindings
+    if (inf.bindings !== undefined) {
+      if (
+        typeof inf.bindings !== "object" ||
+        inf.bindings === null ||
+        Array.isArray(inf.bindings)
+      ) {
+        throw new Error(`"inference.bindings" in ${CONFIG_FILE} must be an object`);
+      }
+      const b = inf.bindings as Record<string, unknown>;
+      for (const key of Object.keys(b)) {
+        if (!["db", "kv", "storage", "ai"].includes(key)) {
+          throw new Error(`Unknown binding "${key}" in ${CONFIG_FILE}. Valid: db, kv, storage, ai`);
+        }
+        if (key === "ai") {
+          if (typeof b[key] !== "boolean") {
+            throw new Error(`"inference.bindings.${key}" in ${CONFIG_FILE} must be a boolean`);
+          }
+        } else {
+          if (typeof b[key] !== "boolean" && typeof b[key] !== "string") {
+            throw new Error(
+              `"inference.bindings.${key}" in ${CONFIG_FILE} must be a boolean or a string (custom binding name)`,
+            );
+          }
+        }
+      }
+    }
+
+    // Validate inference.build
+    if (inf.build !== undefined && typeof inf.build !== "string") {
+      throw new Error(`"inference.build" in ${CONFIG_FILE} must be a string`);
+    }
+
+    // Validate inference.scanDirs
+    if (inf.scanDirs !== undefined) {
+      if (!Array.isArray(inf.scanDirs) || !inf.scanDirs.every((d) => typeof d === "string")) {
+        throw new Error(`"inference.scanDirs" in ${CONFIG_FILE} must be an array of strings`);
+      }
+      for (const d of inf.scanDirs as string[]) {
+        if (d.startsWith("/") || d.startsWith("..")) {
+          throw new Error(
+            `"inference.scanDirs" path "${d}" in ${CONFIG_FILE} must be a relative directory`,
+          );
+        }
+      }
+    }
+
+    // Validate inference.appType
+    if (inf.appType !== undefined) {
+      if (typeof inf.appType !== "string" || !VALID_APP_TYPES.has(inf.appType)) {
+        throw new Error(
+          `"inference.appType" in ${CONFIG_FILE} must be one of: spa, static, void, framework`,
+        );
+      }
+    }
+
+    // Validate inference.outputDir
+    if (inf.outputDir !== undefined && typeof inf.outputDir !== "string") {
+      throw new Error(`"inference.outputDir" in ${CONFIG_FILE} must be a string`);
     }
   }
 
@@ -320,20 +372,18 @@ export function readConfig(root: string): VoidConfig {
     throw new Error(`"remote" in ${CONFIG_FILE} must be a boolean`);
   }
 
-  // Validate wrangler
-  if (obj.wrangler !== undefined) {
-    if (typeof obj.wrangler !== "object" || obj.wrangler === null || Array.isArray(obj.wrangler)) {
-      throw new Error(`"wrangler" in ${CONFIG_FILE} must be an object`);
+  // Validate worker
+  if (obj.worker !== undefined) {
+    if (typeof obj.worker !== "object" || obj.worker === null || Array.isArray(obj.worker)) {
+      throw new Error(`"worker" in ${CONFIG_FILE} must be an object`);
     }
-    const w = obj.wrangler as Record<string, unknown>;
+    const w = obj.worker as Record<string, unknown>;
     if (w.compatibility_date !== undefined) {
       if (typeof w.compatibility_date !== "string") {
-        throw new Error(`"wrangler.compatibility_date" in ${CONFIG_FILE} must be a string`);
+        throw new Error(`"worker.compatibility_date" in ${CONFIG_FILE} must be a string`);
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(w.compatibility_date)) {
-        throw new Error(
-          `"wrangler.compatibility_date" in ${CONFIG_FILE} must be YYYY-MM-DD format`,
-        );
+        throw new Error(`"worker.compatibility_date" in ${CONFIG_FILE} must be YYYY-MM-DD format`);
       }
     }
     if (w.compatibility_flags !== undefined) {
@@ -342,7 +392,7 @@ export function readConfig(root: string): VoidConfig {
         !w.compatibility_flags.every((f) => typeof f === "string")
       ) {
         throw new Error(
-          `"wrangler.compatibility_flags" in ${CONFIG_FILE} must be an array of strings`,
+          `"worker.compatibility_flags" in ${CONFIG_FILE} must be an array of strings`,
         );
       }
     }
@@ -361,7 +411,7 @@ export function isNodeTarget(target: VoidConfig["target"]): boolean {
  * a string name was explicitly provided (not `true`).
  */
 export function resolveBindingNames(
-  bindings: VoidConfig["bindings"],
+  bindings: InferenceConfig["bindings"],
 ): { d1?: string; kv?: string; r2?: string } | undefined {
   if (!bindings) return undefined;
   const names: { d1?: string; kv?: string; r2?: string } = {};

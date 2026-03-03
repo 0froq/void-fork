@@ -53,9 +53,9 @@ export function readWranglerCompat(root: string, config?: VoidConfig): WranglerC
     }
   }
 
-  // 2. Override with void.json wrangler fields (higher priority)
-  const voidDate = config?.wrangler?.compatibility_date;
-  const voidFlags = config?.wrangler?.compatibility_flags;
+  // 2. Override with void.json worker fields (higher priority)
+  const voidDate = config?.worker?.compatibility_date;
+  const voidFlags = config?.worker?.compatibility_flags;
 
   // 3. Merge: void.json > wrangler.jsonc > default
   const result: WranglerCompat = {

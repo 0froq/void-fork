@@ -43,7 +43,7 @@ With `voidPlugin()` added to the framework's Vite config, all frameworks get the
 - **Auth** — built-in [authentication](../../auth.md) with `getUser()`, auto-detected from `void/auth` imports
 - **Cron jobs** — scheduled handlers via `crons/` directory
 - **Queue consumers** — typed producers and consumers via `queues/` directory
-- **Revalidation & prerendering** — configured via [`cache.revalidate`](../../cache/revalidation.md) and [`cache.prerender`](../../cache/prerendering.md) in `void.json` (Void apps can also configure these per-page in component files)
+- **Revalidation & prerendering** — configured via [`routing.revalidate`](../../cache/revalidation.md) and [`routing.prerender`](../../cache/prerendering.md) in `void.json` (Void apps can also configure these per-page in component files)
 
 Frameworks can also access bindings directly via the framework's own mechanisms (e.g. `platform.env` in SvelteKit, `event.context.cloudflare.env` in Nuxt, `Astro.locals.runtime.env` in Astro).
 
@@ -56,23 +56,25 @@ Most configuration is inferred automatically. Use `void.json` to override defaul
 ```json
 {
   "$schema": "https://unpkg.com/void/schema.json",
-  "build": "nuxt build",
-  "scanDirs": ["src", "server", "lib"],
-  "cache": {
+  "inference": {
+    "build": "nuxt build",
+    "scanDirs": ["src", "server", "lib"],
+    "bindings": { "db": "MY_DB" }
+  },
+  "routing": {
     "prerender": ["/", "/about", "/pricing"],
     "revalidate": 60
-  },
-  "bindings": { "db": "MY_DB" }
+  }
 }
 ```
 
-| Field              | Purpose                                                                                                                                              |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `build`            | Override the default build command                                                                                                                   |
-| `scanDirs`         | Directories to scan for binding inference (defaults vary by framework)                                                                               |
-| `cache.prerender`  | Paths to prerender as static HTML at deploy time                                                                                                     |
-| `cache.revalidate` | Default revalidation TTL in seconds for cached responses                                                                                             |
-| `bindings`         | Override inferred bindings — only needed if auto-detection isn't working as intended. Accepts `true` or a custom binding name (e.g. `"db": "MY_DB"`) |
+| Field                | Purpose                                                                                                                                              |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inference.build`    | Override the default build command                                                                                                                   |
+| `inference.scanDirs` | Directories to scan for binding inference (defaults vary by framework)                                                                               |
+| `routing.prerender`  | Paths to prerender as static HTML at deploy time                                                                                                     |
+| `routing.revalidate` | Default revalidation TTL in seconds for cached responses                                                                                             |
+| `inference.bindings` | Override inferred bindings — only needed if auto-detection isn't working as intended. Accepts `true` or a custom binding name (e.g. `"db": "MY_DB"`) |
 
 See [Configuration](../../config.md) for the full reference.
 

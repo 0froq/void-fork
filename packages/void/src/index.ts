@@ -219,8 +219,10 @@ export function voidPlugin(options?: {
   const framework = detected?.class === "a" ? (detected.name as Framework) : undefined;
 
   // Infer bindings synchronously from source files
-  const scanDirs = config.scanDirs ?? (detected ? FRAMEWORK_SCAN_DIRS : undefined);
-  const inferenceOptions = config.bindings ? { bindings: config.bindings } : undefined;
+  const scanDirs = config.inference?.scanDirs ?? (detected ? FRAMEWORK_SCAN_DIRS : undefined);
+  const inferenceOptions = config.inference?.bindings
+    ? { bindings: config.inference.bindings }
+    : undefined;
   const bindings = inferProjectBindings(root, inferenceOptions, scanDirs);
 
   // Server-only void/* imports (db, kv, ai, etc.) must not pull in
@@ -265,8 +267,8 @@ export function voidPlugin(options?: {
   // voidPlugin() only provides DB type codegen, migration management, and
   // wrangler.jsonc binding sync for local dev.
   if (detected && (detected.class === "b" || detected.class === "c")) {
-    const hasAuth = normalizeAuth(config.auth) !== null;
-    const bindingNames = resolveBindingNames(config.bindings);
+    const hasAuth = normalizeAuth(config.inference?.auth) !== null;
+    const bindingNames = resolveBindingNames(config.inference?.bindings);
     const frameworkPersistRoot = join(root, ".wrangler", "state");
 
     // Ensure required compat flags are written before framework adapters
@@ -337,8 +339,8 @@ export function voidPlugin(options?: {
   // Phase 1: Determine auth providers from imports (sync, at plugin creation)
   // Explicit config takes precedence over auto-detection.
   let authProviders: AuthProvider[] | null;
-  if (config.auth !== undefined) {
-    authProviders = normalizeAuth(config.auth);
+  if (config.inference?.auth !== undefined) {
+    authProviders = normalizeAuth(config.inference.auth);
   } else {
     authProviders = bindings.needsAuth ? ["email", "github", "google"] : null;
   }
@@ -351,11 +353,11 @@ export function voidPlugin(options?: {
   const workerConfig: Record<string, unknown> = {};
 
   // Merge curated wrangler fields from void.json
-  if (config.wrangler?.compatibility_date) {
-    workerConfig.compatibility_date = config.wrangler.compatibility_date;
+  if (config.worker?.compatibility_date) {
+    workerConfig.compatibility_date = config.worker.compatibility_date;
   }
-  if (config.wrangler?.compatibility_flags) {
-    workerConfig.compatibility_flags = config.wrangler.compatibility_flags;
+  if (config.worker?.compatibility_flags) {
+    workerConfig.compatibility_flags = config.worker.compatibility_flags;
   }
   const inspectorPortEnv = process.env.VOID_INSPECTOR_PORT;
   const inspectorPort =
@@ -492,7 +494,7 @@ export function voidPlugin(options?: {
       }
 
       // Auto-detect OAuth providers from env vars (only if not explicitly configured)
-      if (config.auth === undefined) {
+      if (config.inference?.auth === undefined) {
         if (env.GITHUB_OAUTH_ID) {
           authProviders ??= [];
           if (!authProviders.includes("github")) authProviders.push("github");
@@ -539,7 +541,7 @@ export function voidPlugin(options?: {
         }
       }
 
-      if (config.auth !== undefined) return;
+      if (config.inference?.auth !== undefined) return;
       let envHintShown = false;
       const check = (path: string) => {
         if (envHintShown) return;
@@ -565,7 +567,7 @@ export function voidPlugin(options?: {
   // Binding watch plugin — detects new binding imports mid-session and
   // notifies the developer via terminal log + browser toast.
   const autoDetectBindings = !inferenceOptions;
-  const autoDetectAuth = config.auth === undefined;
+  const autoDetectAuth = config.inference?.auth === undefined;
   const bindingWatchPlugin: Plugin = {
     name: "void:binding-watch",
     apply: "serve",
@@ -679,17 +681,17 @@ export function voidPlugin(options?: {
 
   // Non-CF targets: skip binding inference, D1, migrations, wrangler
   if (isNodeTarget(config.target)) {
-    if (config.bindings)
-      voidWarn('"bindings" in void.json is ignored with target: "' + config.target + '"');
-    if (config.auth)
-      voidWarn('"auth" in void.json is ignored with target: "' + config.target + '"');
-    if (config.wrangler)
-      voidWarn('"wrangler" in void.json is ignored with target: "' + config.target + '"');
+    if (config.inference?.bindings)
+      voidWarn('"inference.bindings" in void.json is ignored with target: "' + config.target + '"');
+    if (config.inference?.auth)
+      voidWarn('"inference.auth" in void.json is ignored with target: "' + config.target + '"');
+    if (config.worker)
+      voidWarn('"worker" in void.json is ignored with target: "' + config.target + '"');
     if (config.remote)
       voidWarn('"remote" in void.json is ignored with target: "' + config.target + '"');
-    if (config.cache?.revalidate)
+    if (config.routing?.revalidate)
       voidWarn(
-        '"cache.revalidate" in void.json is ignored with target: "' +
+        '"routing.revalidate" in void.json is ignored with target: "' +
           config.target +
           '" (edge caching is CF-only)',
       );

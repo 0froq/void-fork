@@ -71,11 +71,13 @@ If your project organizes code in non-standard directories, you can override whi
 
 ```json
 {
-  "scanDirs": ["src", "lib", "workers"]
+  "inference": {
+    "scanDirs": ["src", "lib", "workers"]
+  }
 }
 ```
 
-Paths are relative to the project root. When `scanDirs` is set, it replaces the default directories entirely — the defaults for the current mode are not merged in. The SSR entry and `src/` auth scan still apply regardless.
+Paths are relative to the project root. When `inference.scanDirs` is set, it replaces the default directories entirely — the defaults for the current mode are not merged in. The SSR entry and `src/` auth scan still apply regardless.
 
 ## Explicit Binding Overrides
 
@@ -83,16 +85,18 @@ If inference doesn't match your setup, you can skip it entirely and declare bind
 
 ```json
 {
-  "bindings": {
-    "db": true,
-    "kv": true,
-    "storage": false,
-    "ai": false
+  "inference": {
+    "bindings": {
+      "db": true,
+      "kv": true,
+      "storage": false,
+      "ai": false
+    }
   }
 }
 ```
 
-When `bindings` is set, explicit values take full precedence — inference is skipped entirely.
+When `inference.bindings` is set, explicit values take full precedence — inference is skipped entirely.
 
 ## File Types
 

@@ -2,7 +2,7 @@
 outline: deep
 ---
 
-# Static Asset Caching
+# Static Assets Caching
 
 Void serves static assets through Cloudflare's global edge network with sensible cache defaults. This page covers how static assets are cached at the edge.
 
@@ -29,6 +29,8 @@ export default defineConfig({
 
 If `build.assetsDir` is set to `""` (empty string — hashed files at the root), the optimization is skipped since there's no directory-based way to distinguish hashed from non-hashed files.
 
+Void also includes presets for where supported meta frameworks (Astro, Nuxt, SvelteKit, etc.) place their hashed assets, so framework-generated assets enjoy optimal caching out of the box.
+
 ## Non-hashed assets
 
 Everything else (`index.html`, `favicon.ico`, etc.) uses short edge caching with browser revalidation:
@@ -45,16 +47,10 @@ All static asset responses include an `ETag` header derived from the file's cont
 
 This happens automatically for all static assets. No configuration is needed.
 
+## Custom headers
+
+You can override caching headers or add your own for any static asset path using [Custom Headers](../headers.md).
+
 ## API routes
 
 API responses (`/api/*`) and SSR-rendered pages that fall through to the worker are **not** edge-cached by the dispatch layer.
-
-## Request flow
-
-1. `/api/*` requests go to worker API routes (not cached at the edge)
-2. Static asset requests are served from R2 (hashed assets immutable, others versioned)
-3. SSR `GET` requests without `Cookie`/`Authorization` (when `cache.revalidate` is configured):
-   - Cache hit (fresh) — served from R2
-   - Cache hit (stale) — served from R2, worker re-renders in background
-   - Cache miss — worker renders (blocking), cached in R2
-4. All other requests dispatch to the worker directly

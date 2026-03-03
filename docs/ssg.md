@@ -61,14 +61,14 @@ When you run `void deploy` with `output: "static"`, Void inspects the build outp
 
 You don't need to configure this — it's detected automatically based on your pages and project structure.
 
-## Relationship to `appType: "static"`
+## Relationship to `inference.appType: "static"`
 
-The `appType` field describes app type (SPA, static, void), while `output` controls rendering strategy:
+The `inference.appType` field describes app type (SPA, static, void), while `output` controls rendering strategy:
 
-|              | `appType: "static"`                             | `output: "static"`                            |
+|              | `inference.appType: "static"`                   | `output: "static"`                            |
 | ------------ | ----------------------------------------------- | --------------------------------------------- |
 | **What**     | Deploy a pre-built static site (no Void plugin) | Prerender a Void app at build time            |
 | **Worker**   | None (static assets only)                       | Only if some pages can't be prerendered       |
 | **Use case** | VitePress, plain HTML, external SSG tools       | Void apps with mostly or fully static content |
 
-When all pages are prerendered and there are no backend features, `output: "static"` produces the same deploy result as `appType: "static"` — pure static assets, no worker. The difference is that `output: "static"` does this automatically by analyzing your build output, while `appType: "static"` is a manual declaration for non-Void projects.
+When all pages are prerendered and there are no backend features, `output: "static"` produces the same deploy result as `inference.appType: "static"` — pure static assets, no worker. The difference is that `output: "static"` does this automatically by analyzing your build output, while `inference.appType: "static"` is a manual declaration for non-Void projects.

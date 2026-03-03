@@ -131,11 +131,11 @@ The `void deploy` CLI deploys to the Void platform (Cloudflare). For non-CF targ
 
 These `void.json` fields are silently ignored (with a warning) when using a non-CF target:
 
-- `bindings` — CF binding configuration
-- `auth` — built-in auth (requires D1 + KV)
+- `inference.bindings` — CF binding configuration
+- `inference.auth` — built-in auth (requires D1 + KV)
 - `remote` — remote binding proxy
-- `wrangler` — Cloudflare-specific config
-- `cache.revalidate` — edge caching (CF-only)
+- `worker` — Cloudflare-specific config
+- `routing.revalidate` — edge caching (CF-only)
 
 ## Example: API + Pages
 

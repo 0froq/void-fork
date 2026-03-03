@@ -4,13 +4,15 @@ outline: deep
 
 # Redirects
 
-Define URL redirects in [`void.json`](./config.md) using the `redirects` field. Keys are source URL patterns, values are destination strings or objects with an explicit status.
+Define URL redirects in [`void.json`](./config.md) using the `routing.redirects` field. Keys are source URL patterns, values are destination strings or objects with an explicit status.
 
 ```json
 {
-  "redirects": {
-    "/old": "/new",
-    "/blog/*": { "to": "/posts/:splat", "status": 301 }
+  "routing": {
+    "redirects": {
+      "/old": "/new",
+      "/blog/*": { "to": "/posts/:splat", "status": 301 }
+    }
   }
 }
 ```
@@ -27,8 +29,10 @@ Define URL redirects in [`void.json`](./config.md) using the `redirects` field. 
 
 ```json
 {
-  "redirects": {
-    "/old-page": { "to": "/new-page", "status": 301 }
+  "routing": {
+    "redirects": {
+      "/old-page": { "to": "/new-page", "status": 301 }
+    }
   }
 }
 ```
@@ -37,8 +41,10 @@ Define URL redirects in [`void.json`](./config.md) using the `redirects` field. 
 
 ```json
 {
-  "redirects": {
-    "/blog/*": { "to": "/posts/:splat", "status": 301 }
+  "routing": {
+    "redirects": {
+      "/blog/*": { "to": "/posts/:splat", "status": 301 }
+    }
   }
 }
 ```
@@ -49,13 +55,13 @@ A request to `/blog/hello-world` redirects to `/posts/hello-world` with a `301` 
 
 Meta-frameworks may generate a `_redirects` file during build. Void parses this file at deploy time and merges the rules into the deploy manifest.
 
-- Framework-generated rules are applied **before** `void.json` rules. Since the last match wins, `void.json` redirects take precedence.
+- Framework-generated rules are applied **before** `void.json` rules. Since the last match wins, `routing.redirects` in `void.json` takes precedence.
 - Only 3xx redirect rules are included. Rewrite rules (status `200`) in `_redirects` files are ignored.
 - The `_redirects` file is not uploaded as a static asset — its contents are parsed and included in the manifest only.
 
 ## How redirects work
 
-1. `void deploy` reads redirect rules from the framework `_redirects` file (if present) and `void.json`, then includes them in the deploy manifest.
+1. `void deploy` reads redirect rules from the framework `_redirects` file (if present) and `routing.redirects` in `void.json`, then includes them in the deploy manifest.
 2. The platform stores the rules in the KV routing entry for your project.
 3. The dispatch worker checks redirect rules before any worker invocation — matching requests receive a redirect response immediately.
 
