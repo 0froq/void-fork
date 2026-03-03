@@ -10,7 +10,7 @@ Void supports three types of apps:
 2. **Meta frameworks** — [TanStack Start](https://tanstack.com/start/latest), [React Router](https://reactrouter.com/), [SvelteKit](https://svelte.dev/docs/kit), [Nuxt](https://nuxt.com/), [Astro](https://astro.build/)
 3. **Static sites** — SPAs, static sites like [VitePress](https://vitepress.dev/), or any directory of static files
 
-The type is auto-detected from your project structure, or you can set it explicitly in [`void.json`](./config.md).
+The type is auto-detected from your project structure, or you can set it explicitly in [`void.json`](./reference/config.md).
 
 ## Void Apps
 
@@ -42,7 +42,7 @@ my-app/
   vite.config.ts            ← plugins: [voidPlugin()]
 ```
 
-Your worker handles API routes, page rendering, and (optionally) [custom SSR](./ssr.md). Static assets are served from the edge via per-worker assets. Cloudflare bindings (D1, KV, R2) are [inferred from your source code](./resource-inference.md) and provisioned automatically.
+Your worker handles API routes, page rendering, and (optionally) [custom SSR](./ssr.md). Static assets are served from the edge via per-worker assets. Cloudflare bindings (D1, KV, R2) are [inferred from your source code](./reference/resource-inference.md) and provisioned automatically.
 
 Void apps can also be configured with [`output: 'static'`](./ssg.md) to pre-render all pages at build time, producing a fully static site that can be deployed anywhere — no Cloudflare Workers required.
 
@@ -59,7 +59,7 @@ Void apps can also be configured with [`output: 'static'`](./ssg.md) to pre-rend
 
 ## Meta Frameworks
 
-Void supports deploying Vite-based meta-framework apps via `void deploy`. The framework owns routing and SSR — Void handles [binding inference](./resource-inference.md), [typed DB queries](./database.md), migrations, and deployment.
+Void supports deploying Vite-based meta-framework apps via `void deploy`. The framework owns routing and SSR — Void handles [binding inference](./reference/resource-inference.md), [typed DB queries](./database.md), migrations, and deployment.
 
 | Framework                                           | Detected from package   | Setup guide                                          |
 | --------------------------------------------------- | ----------------------- | ---------------------------------------------------- |
@@ -107,7 +107,7 @@ When running `void deploy` and no `inference.appType` is set in `void.json`, the
 
 ## Explicit Configuration
 
-To lock the app type and skip auto-detection, set `inference.appType` in [`void.json`](./config.md):
+To lock the app type and skip auto-detection, set `inference.appType` in [`void.json`](./reference/config.md):
 
 ```json
 {

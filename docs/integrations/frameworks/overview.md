@@ -76,7 +76,7 @@ Most configuration is inferred automatically. Use `void.json` to override defaul
 | `routing.revalidate` | Default revalidation TTL in seconds for cached responses                                                                                             |
 | `inference.bindings` | Override inferred bindings — only needed if auto-detection isn't working as intended. Accepts `true` or a custom binding name (e.g. `"db": "MY_DB"`) |
 
-See [Configuration](../../config.md) for the full reference.
+See [Configuration](../../reference/config.md) for the full reference.
 
 ### `wrangler.jsonc`
 

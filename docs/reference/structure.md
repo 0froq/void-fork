@@ -144,14 +144,14 @@ Auto-generated directory (gitignored). Contains:
 
 ## Config Files
 
-| File                    | Purpose                                                                                                              |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `vite.config.ts`        | Vite configuration — must include `voidPlugin()`                                                                     |
-| `void.json`             | Optional Void config — [routing](/config#routing), [inference](/config#inference), [worker settings](/config#worker) |
-| `tsconfig.json`         | TypeScript config — extends `.void/tsconfig.json` for auto-generated types                                           |
-| `.env`                  | Public environment variables (committed)                                                                             |
-| `.env.local`            | Secret variables for local dev (gitignored)                                                                          |
-| `.env.production`       | Public production variables (committed)                                                                              |
-| `.env.production.local` | Production secrets for local testing (gitignored)                                                                    |
+| File                    | Purpose                                                                                                                                            |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vite.config.ts`        | Vite configuration — must include `voidPlugin()`                                                                                                   |
+| `void.json`             | Optional Void config — [routing](/reference/config#routing), [inference](/reference/config#inference), [worker settings](/reference/config#worker) |
+| `tsconfig.json`         | TypeScript config — extends `.void/tsconfig.json` for auto-generated types                                                                         |
+| `.env`                  | Public environment variables (committed)                                                                                                           |
+| `.env.local`            | Secret variables for local dev (gitignored)                                                                                                        |
+| `.env.production`       | Public production variables (committed)                                                                                                            |
+| `.env.production.local` | Production secrets for local testing (gitignored)                                                                                                  |
 
 See [Environment Variables](/env-vars) for the full env file loading order.

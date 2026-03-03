@@ -38,7 +38,7 @@ The CLI provides commands to inspect, reset, and seed your local database. Place
 - `void db migrate` — apply pending migrations without resetting
 - `void db export` — dump local DB as SQL (supports `--output`, `--no-data`, `--no-schema`, `--table`)
 
-See the [CLI reference](./cli.md#database) for details.
+See the [CLI reference](./reference/cli.md#database) for details.
 
 ## Scaffolding
 
@@ -74,7 +74,7 @@ Column format is `name:type`, with an optional `?` suffix for nullable:
 
 `void gen migration <name>` creates an empty `migrations/NNN_<name>.sql` with a comment placeholder. The number is auto-detected from the highest existing migration prefix.
 
-See the [CLI reference](./cli.md#code-generation) for the full list of generators.
+See the [CLI reference](./reference/cli.md#code-generation) for the full list of generators.
 
 ## Querying
 

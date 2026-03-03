@@ -59,7 +59,7 @@ Routing and edge configuration — headers, redirects, and caching.
 
 #### `routing.headers`
 
-Custom response headers for static assets. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Custom Headers](./edge/headers) for details.
+Custom response headers for static assets. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Custom Headers](../edge/headers) for details.
 
 ```json
 {
@@ -74,7 +74,7 @@ Custom response headers for static assets. Keys are URL patterns, values are arr
 
 #### `routing.redirects`
 
-URL redirects. Keys are source URL patterns, values are destination strings (302 default) or objects with `to` and optional `status`. See [Redirects](./edge/redirects) for details.
+URL redirects. Keys are source URL patterns, values are destination strings (302 default) or objects with `to` and optional `status`. See [Redirects](../edge/redirects) for details.
 
 ```json
 {
@@ -89,7 +89,7 @@ URL redirects. Keys are source URL patterns, values are destination strings (302
 
 #### `routing.revalidate`
 
-ISR revalidation TTL in seconds — global or per-path. See [Revalidation](./edge/revalidation.md) for details.
+ISR revalidation TTL in seconds — global or per-path. See [Revalidation](../edge/revalidation.md) for details.
 
 ```json
 {
@@ -105,7 +105,7 @@ ISR revalidation TTL in seconds — global or per-path. See [Revalidation](./edg
 
 #### `routing.prerender`
 
-Paths to prerender as static HTML at deploy time. Each path must start with `/`. See [Edge Prerendering](./edge/prerendering.md) for details.
+Paths to prerender as static HTML at deploy time. Each path must start with `/`. See [Edge Prerendering](../edge/prerendering.md) for details.
 
 ```json
 {
@@ -168,7 +168,7 @@ Override which directories are scanned for [binding inference](./resource-infere
 
 #### `inference.appType`
 
-App type. If omitted, auto-detected on first deploy. See [Supported App Types](./app-types.md).
+App type. If omitted, auto-detected on first deploy. See [Supported App Types](../app-types.md).
 
 - `"void"` — worker + assets (API routes, SSR, jobs)
 - `"framework"` — meta framework (TanStack Start, React Router, SvelteKit, Nuxt, Astro)

@@ -4,7 +4,7 @@ outline: deep
 
 # Redirects
 
-Define URL redirects in [`void.json`](../config) using the `routing.redirects` field. Keys are source URL patterns, values are destination strings or objects with an explicit status.
+Define URL redirects in [`void.json`](../reference/config) using the `routing.redirects` field. Keys are source URL patterns, values are destination strings or objects with an explicit status.
 
 ```json
 {

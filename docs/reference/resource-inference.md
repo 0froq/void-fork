@@ -56,7 +56,7 @@ When a meta-framework is detected (TanStack Start, React Router, SvelteKit, Nuxt
 
 Framework detection checks `package.json` for `@tanstack/react-start`, `@react-router/dev`, `@sveltejs/kit`, `nuxt`, or `astro` in dependencies.
 
-For SvelteKit, Nuxt, and Astro, add `voidPlugin()` to the framework's Vite config to enable inference during dev. See [Frameworks Integration](./integrations/frameworks/overview.md) for setup details.
+For SvelteKit, Nuxt, and Astro, add `voidPlugin()` to the framework's Vite config to enable inference during dev. See [Frameworks Integration](../integrations/frameworks/overview.md) for setup details.
 
 ### Always scanned
 

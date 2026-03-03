@@ -4,23 +4,53 @@ import { groupIconMdPlugin, groupIconVitePlugin } from "vitepress-plugin-group-i
 
 const referenceLinks = {
   text: "Reference",
-  collapsed: false,
+  activeMatch: "/reference/",
   items: [
-    { text: "Project Structure", link: "/structure" },
-    { text: "Configuration", link: "/config" },
-    { text: "Resource Inference", link: "/resource-inference" },
-    { text: "API", link: "/api" },
-    { text: "CLI", link: "/cli" },
+    { text: "Project Structure", link: "/reference/structure" },
+    { text: "Configuration", link: "/reference/config" },
+    { text: "Resource Inference", link: "/reference/resource-inference" },
+    {
+      text: "API",
+      link: "/reference/api",
+      collapsed: false,
+      items: [
+        { text: "Plugin", link: "/reference/api#plugin" },
+        { text: "Handlers", link: "/reference/api#handlers" },
+        { text: "Auth", link: "/reference/api#auth" },
+        { text: "Fetch Client", link: "/reference/api#fetch-client" },
+        { text: "Database", link: "/reference/api#database" },
+        { text: "Types", link: "/reference/api#types" },
+        { text: "Environment Types", link: "/reference/api#environment-types" },
+        { text: "Framework Adaptors", link: "/reference/api#framework-adaptors" },
+        { text: "Subpath Exports", link: "/reference/api#subpath-exports" },
+      ],
+    },
+    {
+      text: "CLI",
+      link: "/reference/cli",
+      collapsed: false,
+      items: [
+        { text: "void init", link: "/reference/cli#setup" },
+        { text: "void auth", link: "/reference/cli#auth" },
+        { text: "void project", link: "/reference/cli#project-commands" },
+        { text: "void deploy", link: "/reference/cli#deploy" },
+        { text: "void db", link: "/reference/cli#database" },
+        { text: "void gen", link: "/reference/cli#code-generation" },
+        { text: "void secret", link: "/reference/cli#secrets" },
+        { text: "void domain", link: "/reference/cli#custom-domains" },
+        { text: "void init --agents", link: "/reference/cli#agent" },
+      ],
+    },
   ],
 };
 
 const integrationLinks = {
   text: "Integrations",
-  collapsed: false,
+  activeMatch: "/integrations/",
   items: [
     {
       text: "Meta Frameworks",
-      collapsed: true,
+      collapsed: false,
       items: [
         { text: "Overview", link: "/integrations/frameworks/overview" },
         { text: "TanStack Start", link: "/integrations/frameworks/tanstack-start" },
@@ -31,13 +61,13 @@ const integrationLinks = {
         { text: "Vinext", link: "/integrations/frameworks/vinext" },
       ],
     },
-    { text: "Coding Agents", link: "integrations/agents" },
-    { text: "Hono", link: "integrations/hono" },
-    { text: "Cloudflare", link: "integrations/cloudflare" },
-    { text: "Node.js / Bun / Deno", link: "integrations/nodejs-bun-deno" },
-    { text: "ORMs and External Databases", link: "integrations/orms-and-external-dbs" },
-    { text: "Auth Providers", link: "integrations/auth-providers" },
-    { text: "Payment Processors", link: "integrations/payment-processors" },
+    { text: "Coding Agents", link: "/integrations/agents" },
+    { text: "Hono", link: "/integrations/hono" },
+    { text: "Cloudflare", link: "/integrations/cloudflare" },
+    { text: "Node.js / Bun / Deno", link: "/integrations/nodejs-bun-deno" },
+    { text: "ORMs and External Databases", link: "/integrations/orms-and-external-dbs" },
+    { text: "Auth Providers", link: "/integrations/auth-providers" },
+    { text: "Payment Processors", link: "/integrations/payment-processors" },
   ],
 };
 
@@ -76,7 +106,8 @@ export default extendConfig(
 
       nav: [
         { text: "Platform", link: "https://void.cloud" },
-        { text: "Guide", link: "/", activeMatch: "/" },
+        { text: "Guide", link: "/" },
+        integrationLinks,
         referenceLinks,
         resourcesLinks,
       ],
@@ -104,7 +135,7 @@ export default extendConfig(
               { text: "Server Routing", link: "/server-routing" },
               {
                 text: "Pages Routing",
-                collapsed: true,
+                collapsed: false,
                 items: [
                   { text: "Overview", link: "/pages-routing/overview" },
                   { text: "Loaders & Actions", link: "/pages-routing/loaders-actions" },
@@ -140,7 +171,7 @@ export default extendConfig(
               { text: "Deployment", link: "/deployment" },
               {
                 text: "Edge Routing",
-                collapsed: true,
+                collapsed: false,
                 items: [
                   { text: "Static Assets Caching", link: "/edge/static-assets" },
                   { text: "Revalidation (ISR)", link: "/edge/revalidation" },
@@ -156,9 +187,9 @@ export default extendConfig(
               { text: "Environment Variables", link: "/env-vars" },
             ],
           },
-          referenceLinks,
-          integrationLinks,
         ],
+        "/integrations/": [integrationLinks],
+        "/reference/": [referenceLinks],
       },
     },
   }),

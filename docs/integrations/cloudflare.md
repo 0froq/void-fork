@@ -87,7 +87,7 @@ This augments the `Cloudflare.Env` interface with `DB`, `KV`, and `STORAGE` and 
 | `KV`      | `KVNamespace` | `env.KV` or `c.env.KV` usage detected           |
 | `STORAGE` | `R2Bucket`    | `env.STORAGE` or `c.env.STORAGE` usage detected |
 
-Bindings are [inferred automatically](../resource-inference.md) by scanning your source files for these access patterns. You can also set them explicitly in `void.json`:
+Bindings are [inferred automatically](../reference/resource-inference.md) by scanning your source files for these access patterns. You can also set them explicitly in `void.json`:
 
 ```json
 {
@@ -95,7 +95,7 @@ Bindings are [inferred automatically](../resource-inference.md) by scanning your
 }
 ```
 
-See [Configuration](../config.md) for details.
+See [Configuration](../reference/config.md) for details.
 
 ### Wrangler passthrough
 

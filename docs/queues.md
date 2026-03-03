@@ -10,7 +10,7 @@ Void supports Cloudflare Queues for asynchronous message processing from a top-l
 
 Create files in `queues/**/*.ts` (`.mts`, `.js`, `.mjs` also supported). The queue name is inferred from the filename — `queues/emails.ts` creates a queue named `"emails"`, and `queues/order/notifications.ts` creates `"order/notifications"`.
 
-Each queue file should export a default handler wrapped with [`defineQueue`](./api.md#definequeuet-handler). The generic `<T>` parameter defines the message body type — this is the type of each `msg.body` in the batch and is used by the typed `queues` proxy for `send()` calls.
+Each queue file should export a default handler wrapped with [`defineQueue`](./reference/api.md#definequeuet-handler). The generic `<T>` parameter defines the message body type — this is the type of each `msg.body` in the batch and is used by the typed `queues` proxy for `send()` calls.
 
 ```ts
 // queues/emails.ts
