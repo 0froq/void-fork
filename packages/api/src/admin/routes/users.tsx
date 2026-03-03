@@ -15,7 +15,7 @@ import {
 } from "../../db";
 import { cleanupProjectResources } from "../../provisioning/cleanup";
 import { PLAN_LIMITS, getCurrentBillingPeriodStart, type PlanId } from "../../tiers";
-import { queryProjectUsage } from "../../routes/usage";
+import { queryBatchProjectUsage, ZERO_USAGE } from "../../routes/usage";
 import { UsersListPage } from "../views/users-list";
 import { UserDetailPage } from "../views/user-detail";
 
@@ -60,12 +60,17 @@ app.get("/:id", async (c) => {
   const since = user.billing_cycle_start
     ? getCurrentBillingPeriodStart(user.billing_cycle_start)
     : new Date();
-  const projectUsages = await Promise.all(
-    projects.map(async (p) => {
-      const usage = await queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since);
-      return { projectId: p.id, slug: p.slug, ...usage };
-    }),
+  const usageMap = await queryBatchProjectUsage(
+    c.env.CF_ACCOUNT_ID,
+    c.env.CF_API_TOKEN,
+    projects.map((p) => p.id),
+    since,
   );
+  const projectUsages = projects.map((p) => ({
+    projectId: p.id,
+    slug: p.slug,
+    ...(usageMap.get(p.id) ?? ZERO_USAGE),
+  }));
   const totalRequests = projectUsages.reduce((sum, u) => sum + u.requests, 0);
   const totalBandwidth = projectUsages.reduce((sum, u) => sum + u.bandwidthBytes, 0);
 

@@ -71,15 +71,23 @@ const accountUsage = new Hono<ApiEnv>()
     const user = await getUser(c.get("db"), c.get("userId"));
     const since = getCurrentBillingPeriodStart(user!.billing_cycle_start);
 
-    const projectUsages = await Promise.all(
-      projects.map(async (p) => {
-        const [usage, aiUsage] = await Promise.all([
-          queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since),
-          queryProjectAiUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since),
-        ]);
-        return { projectId: p.id, slug: p.slug, ...usage, aiNeurons: aiUsage.neurons };
-      }),
-    );
+    const [usageMap, ...aiUsages] = await Promise.all([
+      queryBatchProjectUsage(
+        c.env.CF_ACCOUNT_ID,
+        c.env.CF_API_TOKEN,
+        projects.map((p) => p.id),
+        since,
+      ),
+      ...projects.map((p) =>
+        queryProjectAiUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since),
+      ),
+    ]);
+    const projectUsages = projects.map((p, i) => ({
+      projectId: p.id,
+      slug: p.slug,
+      ...(usageMap.get(p.id) ?? ZERO_USAGE),
+      aiNeurons: aiUsages[i].neurons,
+    }));
 
     const totals = projectUsages.reduce(
       (acc, u) => ({
@@ -96,6 +104,10 @@ const accountUsage = new Hono<ApiEnv>()
 interface AnalyticsRow {
   requests: number;
   bandwidth_bytes: number;
+}
+
+interface BatchAnalyticsRow extends AnalyticsRow {
+  blob1: string;
 }
 
 async function queryProjectUsage(
@@ -136,6 +148,55 @@ async function queryProjectUsage(
     requests: Math.round(row?.requests ?? 0),
     bandwidthBytes: Math.round(row?.bandwidth_bytes ?? 0),
   };
+}
+
+type UsageEntry = { requests: number; bandwidthBytes: number };
+const ZERO_USAGE: UsageEntry = { requests: 0, bandwidthBytes: 0 };
+
+async function queryBatchProjectUsage(
+  accountId: string,
+  apiToken: string,
+  projectIds: string[],
+  since: Date,
+): Promise<Map<string, UsageEntry>> {
+  if (projectIds.length === 0) return new Map();
+
+  const sinceStr = since.toISOString().replace("T", " ").slice(0, 19);
+  const inList = projectIds.map((id) => `'${id}'`).join(", ");
+  const query = `
+    SELECT
+      blob1,
+      SUM(_sample_interval * double1) as requests,
+      SUM(_sample_interval * double2) as bandwidth_bytes
+    FROM vite_cloud_requests
+    WHERE blob1 IN (${inList})
+      AND timestamp >= toDateTime('${sinceStr}')
+    GROUP BY blob1
+  `;
+
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        "Content-Type": "text/plain",
+      },
+      body: query,
+    },
+  );
+
+  if (!response.ok) return new Map();
+
+  const json = (await response.json()) as { data: BatchAnalyticsRow[] };
+  const result = new Map<string, UsageEntry>();
+  for (const row of json.data ?? []) {
+    result.set(row.blob1, {
+      requests: Math.round(row.requests ?? 0),
+      bandwidthBytes: Math.round(row.bandwidth_bytes ?? 0),
+    });
+  }
+  return result;
 }
 
 interface AiGatewayResponse {
@@ -191,4 +252,11 @@ async function queryProjectAiUsage(
   return { neurons: Math.round(cost / COST_PER_NEURON) };
 }
 
-export { queryProjectUsage, queryProjectAiUsage, projectUsage, accountUsage };
+export {
+  queryProjectUsage,
+  queryBatchProjectUsage,
+  queryProjectAiUsage,
+  projectUsage,
+  accountUsage,
+  ZERO_USAGE,
+};
