@@ -38,15 +38,6 @@ jobs:
       # run install again to link
       - run: pnpm --dir framework install
 
-      # Delete existing project and redeploy from scratch
-      - name: Delete existing project
-        working-directory: framework/playground/kitchen-sink
-        continue-on-error: true
-        run: npx void project delete kitchen-sink --force
-        env:
-          VOID_TOKEN: ${{ secrets.VOID_TOKEN_STAGING }}
-          STAGING: "1"
-
       - name: Deploy kitchen-sink
         working-directory: framework/playground/kitchen-sink
         run: npx void deploy --project kitchen-sink
@@ -56,6 +47,9 @@ jobs:
 
       # Install Chromium for Playwright
       - run: npx playwright install chromium
+
+      - name: Reset app state
+        run: curl -sf -X POST https://kitchen-sink.staging.void.app/api/reset
 
       - name: Run smoke tests
         run: node --test-timeout=120000 --test scripts/kitchen-sink-smoke-test.ts

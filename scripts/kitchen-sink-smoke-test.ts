@@ -76,6 +76,12 @@ async function deleteRowContaining(p: Page, needle: string) {
 describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   before(async () => {
     browser = await chromium.launch();
+
+    // Reset all app state for a clean slate
+    const res = await fetch(`${BASE}/api/reset`, { method: "POST" });
+    if (!res.ok) {
+      console.warn(`  ⚠ Reset endpoint returned ${res.status} — tests may see stale data`);
+    }
   });
 
   after(async () => {
