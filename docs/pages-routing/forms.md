@@ -2,42 +2,6 @@
 outline: deep
 ---
 
-<script setup>
-import { onMounted, nextTick } from 'vue'
-onMounted(() => {
-  const key = 'vitepress:code-group-tab'
-  const saved = localStorage.getItem(key)
-  if (saved) nextTick(() => syncAll(saved))
-  window.addEventListener('click', (e) => {
-    const label = e.target.closest?.('.vp-code-group .tabs label')
-    if (!label) return
-    const title = label.getAttribute('data-title')
-    if (title) {
-      localStorage.setItem(key, title)
-      const rect = label.getBoundingClientRect()
-      syncAll(title)
-      const shift = label.getBoundingClientRect().top - rect.top
-      if (shift) window.scrollBy(0, shift)
-    }
-  })
-  function syncAll(title) {
-    document.querySelectorAll('.vp-code-group').forEach((group) => {
-      const label = group.querySelector(`.tabs label[data-title="${title}"]`)
-      if (!label) return
-      const input = group.querySelector(`#${CSS.escape(label.getAttribute('for'))}`)
-      if (!input || input.checked) return
-      const i = Array.from(group.querySelectorAll('.tabs input')).indexOf(input)
-      const blocks = group.querySelector('.blocks')
-      if (!blocks || i < 0) return
-      input.checked = true
-      const current = blocks.querySelector('.active')
-      if (current) current.classList.remove('active')
-      blocks.children[i]?.classList.add('active')
-    })
-  }
-})
-</script>
-
 # Forms
 
 `useForm` handles form submissions, loading state, and validation errors. It is **fully typed end-to-end** — the URL autocompletes to pages that have an `action`, `form.data` is typed to match the action's validator schema, and `form.errors` keys are constrained to the body's field names. No manual type annotations needed.

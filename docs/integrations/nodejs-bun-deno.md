@@ -121,7 +121,7 @@ You can still define [cron jobs](../jobs.md) in `crons/` and they will compile i
 
 ### No prerendering
 
-[Prerendering](../cache/prerendering.md) is a platform feature that relies on Cloudflare's edge cache and the Void deploy pipeline. It is not available for non-CF targets.
+[Prerendering](../edge/prerendering.md) is a platform feature that relies on Cloudflare's edge cache and the Void deploy pipeline. It is not available for non-CF targets.
 
 ### No `void deploy`
 

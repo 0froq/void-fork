@@ -41,7 +41,7 @@ This is what it unlocks:
 
 Void deploys to [Cloudflare Workers](https://developers.cloudflare.com/workers/). Your server code runs on the edge — globally, close to your users — and scales automatically from zero to whatever you need.
 
-- [Static assets](./cache/static-assets) are served from the edge with proper cache headers. [Incremental revalidation](./cache/revalidation) (ISR) and [prerendering](./cache/prerendering) let you cache dynamic pages while keeping data fresh.
+- [Static assets](./edge/static-assets) are served from the edge with proper cache headers. [Incremental revalidation](./edge/revalidation) (ISR) and [prerendering](./edge/prerendering) let you cache dynamic pages while keeping data fresh.
 - Database reads are fast everywhere via D1's read replication.
 - Custom domains with automatic TLS.
 - Secrets and environment variables managed via CLI or dashboard, scoped per project.

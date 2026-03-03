@@ -1,8 +1,12 @@
 import type { Theme } from "vitepress";
 import BaseTheme, { themeContextKey } from "@voidzero-dev/vitepress-theme";
+import FileTree from "./FileTree.vue";
+import PagesFileTree from "./PagesFileTree.vue";
+import RoutesFileTree from "./RoutesFileTree.vue";
 import { h } from "vue";
 import "virtual:group-icons.css";
 import "./styles.css";
+import CodeGroupSync from "./CodeGroupSync.vue";
 
 import logoDark from "./void-dark.svg";
 import logoLight from "./void-light.svg";
@@ -54,9 +58,13 @@ export default {
   Layout() {
     return h(BaseTheme.Layout, null, {
       "aside-ads-before": () => h(AsideCredit),
+      "layout-bottom": () => h(CodeGroupSync),
     });
   },
   enhanceApp({ app }) {
+    app.component("FileTree", FileTree);
+    app.component("PagesFileTree", PagesFileTree);
+    app.component("RoutesFileTree", RoutesFileTree);
     app.provide(themeContextKey, {
       logoDark,
       logoLight,

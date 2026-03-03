@@ -92,7 +92,7 @@ The `assetTags` values are computed by Void:
 
 ## Caching
 
-See [Revalidation](./cache/revalidation.md) for stale-while-revalidate caching of SSR pages.
+See [Revalidation](./edge/revalidation.md) for stale-while-revalidate caching of SSR pages.
 
 ## Request flow
 

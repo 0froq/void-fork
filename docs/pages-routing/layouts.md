@@ -3,39 +3,78 @@ outline: deep
 ---
 
 <script setup>
-import { onMounted, nextTick } from 'vue'
-onMounted(() => {
-  const key = 'vitepress:code-group-tab'
-  const saved = localStorage.getItem(key)
-  if (saved) nextTick(() => syncAll(saved))
-  window.addEventListener('click', (e) => {
-    const label = e.target.closest?.('.vp-code-group .tabs label')
-    if (!label) return
-    const title = label.getAttribute('data-title')
-    if (title) {
-      localStorage.setItem(key, title)
-      const rect = label.getBoundingClientRect()
-      syncAll(title)
-      const shift = label.getBoundingClientRect().top - rect.top
-      if (shift) window.scrollBy(0, shift)
-    }
-  })
-  function syncAll(title) {
-    document.querySelectorAll('.vp-code-group').forEach((group) => {
-      const label = group.querySelector(`.tabs label[data-title="${title}"]`)
-      if (!label) return
-      const input = group.querySelector(`#${CSS.escape(label.getAttribute('for'))}`)
-      if (!input || input.checked) return
-      const i = Array.from(group.querySelectorAll('.tabs input')).indexOf(input)
-      const blocks = group.querySelector('.blocks')
-      if (!blocks || i < 0) return
-      input.checked = true
-      const current = blocks.querySelector('.active')
-      if (current) current.classList.remove('active')
-      blocks.children[i]?.classList.add('active')
-    })
-  }
-})
+function layoutBasicItems(ext) {
+  return [
+    {
+      name: "pages/",
+      children: [
+        { name: `layout${ext}`, description: "Root layout (nav, footer)" },
+        { name: `index${ext}` },
+        {
+          name: "users/",
+          children: [
+            { name: `layout${ext}`, description: "Nested layout for /users/*" },
+            { name: `index${ext}` },
+            { name: `[id]${ext}` },
+          ],
+        },
+      ],
+    },
+  ]
+}
+
+function namedLayoutItems(ext) {
+  return [
+    {
+      name: "pages/",
+      children: [
+        {
+          name: "_layouts/",
+          children: [
+            { name: `landing${ext}`, description: 'named "landing"' },
+            { name: `post${ext}`, description: 'named "post"' },
+          ],
+        },
+        { name: `layout${ext}`, description: "default root layout" },
+        { name: `index${ext}` },
+        {
+          name: "blog/",
+          children: [
+            { name: "hello.md", description: "layout: post" },
+            { name: "archive.md", description: "layout: landing" },
+          ],
+        },
+        { name: `pricing${ext}`, description: "layout: !landing (exclusive)" },
+      ],
+    },
+  ]
+}
+
+function blogLayoutItems(ext) {
+  return [
+    {
+      name: "pages/",
+      children: [
+        {
+          name: "_layouts/",
+          children: [
+            { name: `post${ext}`, description: "sidebar, date, author" },
+          ],
+        },
+        { name: `layout${ext}`, description: "nav + footer" },
+        {
+          name: "blog/",
+          children: [
+            { name: `layout${ext}`, description: "blog sidebar" },
+            { name: "hello.md", description: "layout: post → chain: [root, _layouts/post]" },
+            { name: `archive${ext}`, description: "(no layout) → chain: [root, blog/layout]" },
+          ],
+        },
+      ],
+    },
+  ]
+}
+
 </script>
 
 # Layouts & Shared Data
@@ -44,15 +83,7 @@ onMounted(() => {
 
 Place a layout file in any `pages/` directory to wrap all pages in that subtree:
 
-```
-pages/
-  layout.(tsx|vue|svelte)     # Root layout (nav, footer)
-  index.(tsx|vue|svelte)
-  users/
-    layout.(tsx|vue|svelte)   # Nested layout for /users/*
-    index.(tsx|vue|svelte)
-    [id].(tsx|vue|svelte)
-```
+<FileTree :items="layoutBasicItems" adapter-tabs default-expanded />
 
 ::: code-group
 
@@ -140,18 +171,7 @@ Layouts nest automatically (e.g. root layout wraps `users/layout` wraps page com
 
 Named layouts let individual pages opt into a different layout without changing the URL structure. Define them in `_layouts/` directories within `pages/`:
 
-```
-pages/
-  _layouts/
-    landing.vue           # named "landing"
-    post.vue              # named "post"
-  layout.vue              # default root layout
-  index.vue
-  blog/
-    hello.md              # layout: post
-    archive.md            # layout: landing
-  pricing.vue             # layout: !landing (exclusive)
-```
+<FileTree :items="namedLayoutItems" adapter-tabs default-expanded />
 
 ### Selecting a named layout
 
@@ -232,16 +252,7 @@ Closest ancestor wins, same as default layout chain. If no matching named layout
 
 **Blog with shared nav but post-specific layout:**
 
-```
-pages/
-  _layouts/
-    post.vue              # sidebar, date, author
-  layout.vue              # nav + footer
-  blog/
-    layout.vue            # blog sidebar
-    hello.md              # layout: post → chain: [root, _layouts/post]
-    archive.vue           # (no layout) → chain: [root, blog/layout]
-```
+<FileTree :items="blogLayoutItems" adapter-tabs default-expanded />
 
 `layout: post` on `blog/hello.md` replaces the innermost default layout (`blog/layout`) with `_layouts/post`. The root layout still wraps.
 

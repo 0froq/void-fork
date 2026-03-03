@@ -50,7 +50,7 @@ Dynamic pages **without** `getPrerenderPaths()` are not prerendered — the path
 | `"server"` (default) | `false`           | `export const prerender = true`  | Deploy-time (platform ISR) |
 | `"static"`           | `true`            | `export const prerender = false` | Build-time (`vite build`)  |
 
-When `output` is omitted or `"server"`, behavior is unchanged — `export const prerender = true` opts individual pages into deploy-time [edge prerendering](./cache/prerendering.md).
+When `output` is omitted or `"server"`, behavior is unchanged — `export const prerender = true` opts individual pages into deploy-time [edge prerendering](./edge/prerendering.md).
 
 ## Deployment behavior
 

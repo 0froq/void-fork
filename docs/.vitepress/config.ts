@@ -6,6 +6,7 @@ const referenceLinks = {
   text: "Reference",
   collapsed: false,
   items: [
+    { text: "Project Structure", link: "/structure" },
     { text: "Configuration", link: "/config" },
     { text: "Resource Inference", link: "/resource-inference" },
     { text: "API", link: "/api" },
@@ -75,7 +76,8 @@ export default extendConfig(
 
       nav: [
         { text: "Platform", link: "https://void.cloud" },
-        { text: "SDK", link: "/", activeMatch: "/" },
+        { text: "Guide", link: "/", activeMatch: "/" },
+        referenceLinks,
         resourcesLinks,
       ],
 
@@ -140,11 +142,11 @@ export default extendConfig(
                 text: "Edge Routing",
                 collapsed: true,
                 items: [
-                  { text: "Static Assets Caching", link: "/cache/static-assets" },
-                  { text: "Revalidation (ISR)", link: "/cache/revalidation" },
-                  { text: "Edge Prerendering", link: "/cache/prerendering" },
-                  { text: "Custom Headers", link: "/cache/headers" },
-                  { text: "Redirects", link: "/cache/redirects" },
+                  { text: "Static Assets Caching", link: "/edge/static-assets" },
+                  { text: "Revalidation (ISR)", link: "/edge/revalidation" },
+                  { text: "Edge Prerendering", link: "/edge/prerendering" },
+                  { text: "Custom Headers", link: "/edge/headers" },
+                  { text: "Redirects", link: "/edge/redirects" },
                 ],
               },
               { text: "AI", link: "/ai" },

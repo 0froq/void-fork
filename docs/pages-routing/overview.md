@@ -2,42 +2,6 @@
 outline: deep
 ---
 
-<script setup>
-import { onMounted, nextTick } from 'vue'
-onMounted(() => {
-  const key = 'vitepress:code-group-tab'
-  const saved = localStorage.getItem(key)
-  if (saved) nextTick(() => syncAll(saved))
-  window.addEventListener('click', (e) => {
-    const label = e.target.closest?.('.vp-code-group .tabs label')
-    if (!label) return
-    const title = label.getAttribute('data-title')
-    if (title) {
-      localStorage.setItem(key, title)
-      const rect = label.getBoundingClientRect()
-      syncAll(title)
-      const shift = label.getBoundingClientRect().top - rect.top
-      if (shift) window.scrollBy(0, shift)
-    }
-  })
-  function syncAll(title) {
-    document.querySelectorAll('.vp-code-group').forEach((group) => {
-      const label = group.querySelector(`.tabs label[data-title="${title}"]`)
-      if (!label) return
-      const input = group.querySelector(`#${CSS.escape(label.getAttribute('for'))}`)
-      if (!input || input.checked) return
-      const i = Array.from(group.querySelectorAll('.tabs input')).indexOf(input)
-      const blocks = group.querySelector('.blocks')
-      if (!blocks || i < 0) return
-      input.checked = true
-      const current = blocks.querySelector('.active')
-      if (current) current.classList.remove('active')
-      blocks.children[i]?.classList.add('active')
-    })
-  }
-})
-</script>
-
 # Pages Routing
 
 Pages routing provides the server-rendered, components-as-pages, collocated-data-loading routing system that is seen in many existing JavaScript meta frameworks. However, pages routing in Void is different from most in that it is **rendering framework agnostic.** It is built on patterns inspired by [Inertia.js](https://inertiajs.com/): The server returns the data, and the component receives it as props. The client-side routing logic is minimal, allowing Void to support any rendering framework Vite can support. Today, React, Vue, Svelte, and Solid have first-party adapters.
@@ -191,25 +155,6 @@ router.post("/logout"); // non-GET navigation
 
 Each page is a component file paired with a `.server.ts` file that provides server-side data loading. Pages can be flat files (`about.vue`) or use directory-based routing (`about/index.vue`) — both map to the same route:
 
-```
-project/
-  pages/                      # UI pages (SSR + SPA navigation)
-    layout.(tsx|vue|svelte)   # Root layout
-    index.(tsx|vue|svelte)    # GET /
-    index.server.ts           # Server handler for /
-    about.(tsx|vue|svelte)    # GET /about (flat file)
-    about.server.ts           # Server handler for /about
-    users/
-      layout.(tsx|vue|svelte) # Nested layout for /users/*
-      index.(tsx|vue|svelte)  # GET /users (directory-based)
-      index.server.ts         # Server handler for /users
-      [id].(tsx|vue|svelte)   # GET /users/:id
-      [id].server.ts          # Server handler for /users/:id
-  routes/                     # Pure JSON API endpoints
-    api/
-      health.ts               # GET /api/health -> JSON
-  middleware/                 # Shared across pages and routes
-    01.auth.ts
-```
+<PagesFileTree />
 
 File-based routing rules are the same as [server routing](../server-routing.md): `[param]` for dynamic segments, `[...param]` for catch-all, `(group)/` for route groups.

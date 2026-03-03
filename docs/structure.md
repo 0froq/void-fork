@@ -1,0 +1,157 @@
+---
+outline: deep
+---
+
+<script setup>
+const items = [
+  { name: "routes/", description: "API endpoints (file-based routing)", link: "#routes" },
+  { name: "pages/", description: "Full-stack server-rendered pages", link: "#pages" },
+  { name: "middleware/", description: "Global request middleware", link: "#middleware" },
+  { name: "migrations/", description: "SQL database migrations", link: "#migrations" },
+  { name: "crons/", description: "Scheduled cron jobs", link: "#crons" },
+  { name: "queues/", description: "Async queue consumers", link: "#queues" },
+  { name: "src/", description: "Shared app code", link: "#src" },
+  { name: "public/", description: "Static assets (served as-is)", link: "#public" },
+  { name: ".void/", description: "Auto-generated (gitignored)", link: "#void" },
+  { name: "vite.config.ts", description: "Vite config with voidPlugin()", link: "#config-files" },
+  { name: "void.json", description: "Void project config (optional)", link: "#config-files" },
+  { name: ".env", description: "Environment variables", link: "#config-files" },
+  { name: "package.json" },
+  { name: "tsconfig.json" },
+];
+
+const middlewareItems = [
+  {
+    name: "middleware/",
+    children: [
+      { name: "01.logger.ts", description: "Runs first" },
+      { name: "02.auth.ts", description: "Runs second" },
+    ],
+  },
+];
+
+const migrationsItems = [
+  {
+    name: "migrations/",
+    children: [
+      { name: "001_create_users.sql" },
+      { name: "002_add_posts.sql" },
+    ],
+  },
+];
+
+const voidItems = [
+  {
+    name: ".void/",
+    children: [
+      { name: "db.d.ts", description: "Types from SQL migrations" },
+      { name: "routes.d.ts", description: "Typed fetch client types" },
+      { name: "queues.d.ts", description: "Queue consumer types" },
+      { name: "tsconfig.json", description: "TypeScript config fragment" },
+      { name: "v3/", description: "Local dev state (D1, KV, R2)" },
+    ],
+  },
+];
+</script>
+
+# Project Structure
+
+## Overview
+
+A Void app uses file-based conventions to define routes, pages, middleware, and more. All directories are optional — use only what you need.
+
+<FileTree :items="items" />
+
+## `routes/`
+
+File-based HTTP API endpoints built on [Hono](https://hono.dev). Each file exports named HTTP method handlers.
+
+<RoutesFileTree />
+
+- **Named exports**: `export const GET = defineHandler(...)`, `export const POST = ...`
+- **Dynamic segments**: `[id]` becomes `:id` route parameter
+- **Catch-all**: `[...slug]` matches the remaining path
+- **Method-specific files**: `hello.get.ts` handles only GET requests
+- **Files starting with `_`** are ignored
+
+See [Server Routing](/server-routing) for the full guide.
+
+## `pages/`
+
+Full-stack server-rendered pages with co-located data loading. Available with Vue, React, Svelte, and Solid adapters.
+
+<PagesFileTree />
+
+- **`.server.ts` files** export `loader` (GET data) and `action` (mutations) — paired with the page component of the same name
+- **Layouts** nest automatically and persist across navigations
+- **Markdown** pages are supported with frontmatter
+
+See [Pages Routing](/pages-routing/overview) for the full guide.
+
+## `middleware/`
+
+Global middleware that runs on every request. Numeric prefixes control execution order.
+
+<FileTree :items="middlewareItems" default-expanded />
+
+Each file exports a `defineMiddleware()` handler. Use middleware to set shared context (auth, logging, rate limiting) available to all routes.
+
+## `migrations/`
+
+SQL migration files for the [D1 database](/database). Applied in order on deploy.
+
+<FileTree :items="migrationsItems" default-expanded />
+
+Generate migrations with `void gen model` or write them by hand. Types are auto-generated in `.void/db.d.ts`.
+
+## `crons/`
+
+[Scheduled jobs](/jobs) that run on a cron schedule.
+
+```ts
+// crons/heartbeat.ts
+export default defineCron("*/5 * * * *", async (ctx) => {
+  // runs every 5 minutes
+});
+```
+
+## `queues/`
+
+[Async queue consumers](/queues) for background job processing.
+
+```ts
+// queues/email.ts
+export default defineQueue("email-queue", async (batch, ctx) => {
+  for (const msg of batch.messages) {
+    // process message
+  }
+});
+```
+
+## `src/`
+
+Shared application code — components, utilities, types. This directory has no special convention; organize it however you like.
+
+## `public/`
+
+Static assets served as-is at the root path. Files here are not processed by Vite.
+
+## `.void/`
+
+Auto-generated directory (gitignored). Contains:
+
+<FileTree :items="voidItems" default-expanded />
+
+## Config Files
+
+| File                    | Purpose                                                                                                              |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `vite.config.ts`        | Vite configuration — must include `voidPlugin()`                                                                     |
+| `void.json`             | Optional Void config — [routing](/config#routing), [inference](/config#inference), [worker settings](/config#worker) |
+| `tsconfig.json`         | TypeScript config — extends `.void/tsconfig.json` for auto-generated types                                           |
+| `.env`                  | Public environment variables (committed)                                                                             |
+| `.env.local`            | Secret variables for local dev (gitignored)                                                                          |
+| `.env.production`       | Public production variables (committed)                                                                              |
+| `.env.production.local` | Production secrets for local testing (gitignored)                                                                    |
+
+See [Environment Variables](/env-vars) for the full env file loading order.

@@ -10,13 +10,7 @@ Full-stack Void apps uses file-based routing powered by [Hono](https://hono.dev)
 
 Create route handlers in `routes/**/*.ts`. Each file maps to a URL path based on its location in the filesystem:
 
-| File                        | URL              |
-| --------------------------- | ---------------- |
-| `routes/index.ts`           | `/`              |
-| `routes/api/hello.ts`       | `/api/hello`     |
-| `routes/api/users/index.ts` | `/api/users`     |
-| `routes/api/users/[id].ts`  | `/api/users/:id` |
-| `routes/docs/[...slug].ts`  | `/docs/*`        |
+<RoutesFileTree />
 
 Dynamic segments use brackets: `[id]` becomes a route parameter, `[...slug]` becomes a catch-all. Files or directories starting with `_` are ignored. Directories wrapped in parentheses like `(admin)` are route groups — they organize files without affecting the URL.
 

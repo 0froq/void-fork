@@ -3,39 +3,44 @@ outline: deep
 ---
 
 <script setup>
-import { onMounted, nextTick } from 'vue'
-onMounted(() => {
-  const key = 'vitepress:code-group-tab'
-  const saved = localStorage.getItem(key)
-  if (saved) nextTick(() => syncAll(saved))
-  window.addEventListener('click', (e) => {
-    const label = e.target.closest?.('.vp-code-group .tabs label')
-    if (!label) return
-    const title = label.getAttribute('data-title')
-    if (title) {
-      localStorage.setItem(key, title)
-      const rect = label.getBoundingClientRect()
-      syncAll(title)
-      const shift = label.getBoundingClientRect().top - rect.top
-      if (shift) window.scrollBy(0, shift)
-    }
-  })
-  function syncAll(title) {
-    document.querySelectorAll('.vp-code-group').forEach((group) => {
-      const label = group.querySelector(`.tabs label[data-title="${title}"]`)
-      if (!label) return
-      const input = group.querySelector(`#${CSS.escape(label.getAttribute('for'))}`)
-      if (!input || input.checked) return
-      const i = Array.from(group.querySelectorAll('.tabs input')).indexOf(input)
-      const blocks = group.querySelector('.blocks')
-      if (!blocks || i < 0) return
-      input.checked = true
-      const current = blocks.querySelector('.active')
-      if (current) current.classList.remove('active')
-      blocks.children[i]?.classList.add('active')
-    })
-  }
-})
+function islandItems(ext) {
+  return [
+    {
+      name: "pages/",
+      children: [
+        {
+          name: "blog/",
+          children: [
+            { name: `index.island${ext}`, description: "← island page" },
+            { name: "index.server.ts" },
+            { name: `_Counter${ext}`, description: "regular component, used as island" },
+            { name: `_PostForm${ext}` },
+          ],
+        },
+      ],
+    },
+  ]
+}
+
+function mixedItems(ext) {
+  return [
+    {
+      name: "pages/",
+      children: [
+        { name: `index${ext}`, description: "regular page (full hydration, client-side router)" },
+        { name: `about${ext}`, description: "regular page" },
+        {
+          name: "blog/",
+          children: [
+            { name: `index.island${ext}`, description: "island page (partial hydration, static HTML)" },
+            { name: `[slug].island${ext}`, description: "island page" },
+          ],
+        },
+      ],
+    },
+  ]
+}
+
 </script>
 
 # Islands
@@ -62,52 +67,14 @@ If your entire page is interactive (dashboards, apps with lots of client state),
 
 Name your page file with the `.island` suffix:
 
-::: code-group
-
-```txt [React]
-pages/
-  blog/
-    index.island.tsx     # ← island page
-    index.server.ts
-    _Counter.tsx          # regular component, used as island
-    _PostForm.tsx
-```
-
-```txt [Vue]
-pages/
-  blog/
-    index.island.vue     # ← island page
-    index.server.ts
-    _Counter.vue
-    _PostForm.vue
-```
-
-```txt [Svelte]
-pages/
-  blog/
-    index.island.svelte  # ← island page
-    index.server.ts
-    _Counter.svelte
-    _PostForm.svelte
-```
-
-```txt [Solid]
-pages/
-  blog/
-    index.island.tsx     # ← island page
-    index.server.ts
-    _Counter.tsx
-    _PostForm.tsx
-```
-
-:::
+<FileTree :items="islandItems" adapter-tabs default-expanded />
 
 The `.island` suffix tells Void to:
 
 1. **Server-render the full page** as static HTML (no `data-page` attribute, no client-side router)
 2. **Only hydrate** the components you explicitly mark as islands
 3. **Skip the Inertia protocol** — navigation between island pages uses full-page loads
-4. **Auto-prerender** — island pages with no `loader` and no dynamic params are automatically [prerendered](/cache/prerendering) at deploy time. Opt out with `export const prerender = false` in the companion `.server.ts` file.
+4. **Auto-prerender** — island pages with no `loader` and no dynamic params are automatically [prerendered](/edge/prerendering) at deploy time. Opt out with `export const prerender = false` in the companion `.server.ts` file.
 
 ## Marking Components as Islands
 
@@ -428,13 +395,6 @@ Island pages support [layouts](./layouts) the same way as regular pages. The lay
 
 Island pages and regular pages can coexist in the same app:
 
-```txt
-pages/
-  index.tsx              # regular page (full hydration, client-side router)
-  about.tsx              # regular page
-  blog/
-    index.island.tsx     # island page (partial hydration, static HTML)
-    [slug].island.tsx    # island page
-```
+<FileTree :items="mixedItems" adapter-tabs default-expanded />
 
 The client-side router handles navigation between regular pages. Navigating to or from an island page triggers a full-page load.

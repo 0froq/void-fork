@@ -3,39 +3,32 @@ outline: deep
 ---
 
 <script setup>
-import { onMounted, nextTick } from 'vue'
-onMounted(() => {
-  const key = 'vitepress:code-group-tab'
-  const saved = localStorage.getItem(key)
-  if (saved) nextTick(() => syncAll(saved))
-  window.addEventListener('click', (e) => {
-    const label = e.target.closest?.('.vp-code-group .tabs label')
-    if (!label) return
-    const title = label.getAttribute('data-title')
-    if (title) {
-      localStorage.setItem(key, title)
-      const rect = label.getBoundingClientRect()
-      syncAll(title)
-      const shift = label.getBoundingClientRect().top - rect.top
-      if (shift) window.scrollBy(0, shift)
-    }
-  })
-  function syncAll(title) {
-    document.querySelectorAll('.vp-code-group').forEach((group) => {
-      const label = group.querySelector(`.tabs label[data-title="${title}"]`)
-      if (!label) return
-      const input = group.querySelector(`#${CSS.escape(label.getAttribute('for'))}`)
-      if (!input || input.checked) return
-      const i = Array.from(group.querySelectorAll('.tabs input')).indexOf(input)
-      const blocks = group.querySelector('.blocks')
-      if (!blocks || i < 0) return
-      input.checked = true
-      const current = blocks.querySelector('.active')
-      if (current) current.classList.remove('active')
-      blocks.children[i]?.classList.add('active')
-    })
-  }
-})
+function mdFileItems(ext) {
+  return [
+    {
+      name: "pages/",
+      children: [
+        { name: `layout.island${ext}` },
+        { name: `index.island${ext}` },
+        {
+          name: "docs/",
+          children: [
+            { name: `layout.island${ext}`, description: "docs layout (sidebar, TOC)" },
+            { name: "getting-started.md" },
+            { name: "configuration.md" },
+            {
+              name: "guides/",
+              children: [
+                { name: "deployment.md" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ]
+}
+
 </script>
 
 # Markdown
@@ -183,19 +176,9 @@ Client scripts work in both dev (served on-demand, HMR support) and production b
 
 Markdown pages live in `pages/` alongside regular pages and route the same way:
 
-```
-pages/
-  layout.island.vue
-  index.island.vue
-  docs/
-    layout.island.vue        # docs layout (sidebar, TOC)
-    getting-started.md
-    configuration.md
-    guides/
-      deployment.md
-```
+<FileTree :items="mdFileItems" adapter-tabs default-expanded />
 
-A `.md` file inherits layouts, supports companion `.server.ts` files for dynamic data, and [auto-prerenders](/cache/prerendering) when static — the same rules as any other page.
+A `.md` file inherits layouts, supports companion `.server.ts` files for dynamic data, and [auto-prerenders](/edge/prerendering) when static — the same rules as any other page.
 
 ## Frontmatter Access
 

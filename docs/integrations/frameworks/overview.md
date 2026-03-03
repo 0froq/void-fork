@@ -43,7 +43,7 @@ With `voidPlugin()` added to the framework's Vite config, all frameworks get the
 - **Auth** — built-in [authentication](../../auth.md) with `getUser()`, auto-detected from `void/auth` imports
 - **Cron jobs** — scheduled handlers via `crons/` directory
 - **Queue consumers** — typed producers and consumers via `queues/` directory
-- **Revalidation & prerendering** — configured via [`routing.revalidate`](../../cache/revalidation.md) and [`routing.prerender`](../../cache/prerendering.md) in `void.json` (Void apps can also configure these per-page in component files)
+- **Revalidation & prerendering** — configured via [`routing.revalidate`](../../edge/revalidation.md) and [`routing.prerender`](../../edge/prerendering.md) in `void.json` (Void apps can also configure these per-page in component files)
 
 Frameworks can also access bindings directly via the framework's own mechanisms (e.g. `platform.env` in SvelteKit, `event.context.cloudflare.env` in Nuxt, `Astro.locals.runtime.env` in Astro).
 
