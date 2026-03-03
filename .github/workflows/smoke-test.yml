@@ -1,6 +1,8 @@
 name: Smoke Test
 
 on:
+  schedule:
+    - cron: "0 0 * * *" # daily at 8am SGT (midnight UTC)
   workflow_dispatch:
   workflow_call:
     secrets:
@@ -33,8 +35,8 @@ jobs:
           key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
       - run: pnpm --dir framework install --frozen-lockfile
       - run: pnpm --dir framework build
-
-      - run: pnpm install --frozen-lockfile
+      # run install again to link
+      - run: pnpm --dir framework install
 
       # Delete existing project and redeploy from scratch
       - name: Delete existing project
