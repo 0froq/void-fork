@@ -48,7 +48,7 @@ void deploy
 
 ## Using Void Platform Features
 
-All [Void platform features](../../app-types.md#void-apps) work with Vinext. Use them in server-side code — Server Components, Route Handlers, `getServerSideProps`, or API Routes depending on your router.
+All [Void platform features](../../guide/app-types.md#void-apps) work with Vinext. Use them in server-side code — Server Components, Route Handlers, `getServerSideProps`, or API Routes depending on your router.
 
 ### Database
 
@@ -112,7 +112,7 @@ export default function handler(req, res) {
 
 :::
 
-See [Authentication](../../auth.md) for setup, providers, and the full API.
+See [Authentication](../../guide/auth.md) for setup, providers, and the full API.
 
 ### KV Storage
 

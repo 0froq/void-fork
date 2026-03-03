@@ -59,8 +59,8 @@ function resolveDocsDir(): string {
 function loadDocs(): DocPage[] {
   const docsDir = resolveDocsDir();
 
-  const files = readdirSync(docsDir)
-    .filter((f) => f.endsWith(".md"))
+  const files = readdirSync(docsDir, { recursive: true })
+    .filter((f): f is string => typeof f === "string" && f.endsWith(".md") && !f.startsWith("."))
     .sort();
 
   return files.map((file) => {

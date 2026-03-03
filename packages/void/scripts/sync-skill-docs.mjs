@@ -14,8 +14,10 @@ if (!existsSync(sourceDir)) {
 rmSync(targetDir, { recursive: true, force: true });
 mkdirSync(targetDir, { recursive: true });
 
-for (const file of readdirSync(sourceDir)) {
-  if (file.endsWith(".md")) {
-    cpSync(resolve(sourceDir, file), resolve(targetDir, file));
+for (const file of readdirSync(sourceDir, { recursive: true })) {
+  if (typeof file === "string" && file.endsWith(".md") && !file.startsWith(".")) {
+    const dest = resolve(targetDir, file);
+    mkdirSync(dirname(dest), { recursive: true });
+    cpSync(resolve(sourceDir, file), dest);
   }
 }

@@ -74,9 +74,9 @@ const integrationLinks = {
 const resourcesLinks = {
   text: "Resources",
   items: [
-    { text: "Guides", link: "/guides/", activeMatch: "/guides/" },
-    { text: "Templates", link: "/templates/", activeMatch: "/templates/" },
-    { text: "Blog", link: "/blog/", activeMatch: "/blog/" },
+    { text: "Recipes", link: "/recipes/", activeMatch: "/recipes/" },
+    { text: "Examples", link: "/examples/", activeMatch: "/examples/" },
+    { text: "Blog", link: "https://voidzero.dev/blog" },
   ],
 };
 
@@ -106,7 +106,7 @@ export default extendConfig(
 
       nav: [
         { text: "Platform", link: "https://void.cloud" },
-        { text: "Guide", link: "/" },
+        { text: "Guide", link: "/guide/", activeMatch: "/guide/" },
         integrationLinks,
         referenceLinks,
         resourcesLinks,
@@ -119,72 +119,72 @@ export default extendConfig(
       ],
 
       sidebar: {
-        "/": [
+        "/guide/": [
           {
             text: "Getting Started",
             collapsed: false,
             items: [
-              { text: "Introduction", link: "/" },
-              { text: "Quickstart", link: "/quickstart" },
+              { text: "Introduction", link: "/guide/" },
+              { text: "Quickstart", link: "/guide/quickstart" },
             ],
           },
           {
             text: "Routing & Rendering",
             collapsed: false,
             items: [
-              { text: "Server Routing", link: "/server-routing" },
+              { text: "Server Routing", link: "/guide/server-routing" },
               {
                 text: "Pages Routing",
                 collapsed: false,
                 items: [
-                  { text: "Overview", link: "/pages-routing/overview" },
-                  { text: "Loaders & Actions", link: "/pages-routing/loaders-actions" },
-                  { text: "Layouts & Shared Data", link: "/pages-routing/layouts" },
-                  { text: "Forms", link: "/pages-routing/forms" },
-                  { text: "Deferred Props", link: "/pages-routing/deferred-props" },
-                  { text: "View Transitions", link: "/pages-routing/view-transitions" },
-                  { text: "Head Management", link: "/pages-routing/head" },
-                  { text: "Islands", link: "/pages-routing/islands" },
-                  { text: "Markdown", link: "/pages-routing/markdown" },
+                  { text: "Overview", link: "/guide/pages-routing/overview" },
+                  { text: "Loaders & Actions", link: "/guide/pages-routing/loaders-actions" },
+                  { text: "Layouts & Shared Data", link: "/guide/pages-routing/layouts" },
+                  { text: "Forms", link: "/guide/pages-routing/forms" },
+                  { text: "Deferred Props", link: "/guide/pages-routing/deferred-props" },
+                  { text: "View Transitions", link: "/guide/pages-routing/view-transitions" },
+                  { text: "Head Management", link: "/guide/pages-routing/head" },
+                  { text: "Islands", link: "/guide/pages-routing/islands" },
+                  { text: "Markdown", link: "/guide/pages-routing/markdown" },
                 ],
               },
-              { text: "Custom SSR", link: "/ssr" },
-              { text: "SSG", link: "/ssg" },
+              { text: "Custom SSR", link: "/guide/ssr" },
+              { text: "SSG", link: "/guide/ssg" },
             ],
           },
           {
             text: "Data",
             collapsed: false,
             items: [
-              { text: "Type Safety", link: "/type-safety" },
-              { text: "Database", link: "/database" },
-              { text: "Typed Fetch", link: "/typed-fetch" },
-              { text: "Key-Value Storage", link: "/kv" },
-              { text: "Object Storage", link: "/storage" },
+              { text: "Type Safety", link: "/guide/type-safety" },
+              { text: "Database", link: "/guide/database" },
+              { text: "Typed Fetch", link: "/guide/typed-fetch" },
+              { text: "Key-Value Storage", link: "/guide/kv" },
+              { text: "Object Storage", link: "/guide/storage" },
             ],
           },
           {
             text: "Platform",
             collapsed: false,
             items: [
-              { text: "Supported App Types", link: "/app-types" },
-              { text: "Deployment", link: "/deployment" },
+              { text: "Supported App Types", link: "/guide/app-types" },
+              { text: "Deployment", link: "/guide/deployment" },
               {
                 text: "Edge Routing",
                 collapsed: false,
                 items: [
-                  { text: "Static Assets Caching", link: "/edge/static-assets" },
-                  { text: "Revalidation (ISR)", link: "/edge/revalidation" },
-                  { text: "Edge Prerendering", link: "/edge/prerendering" },
-                  { text: "Custom Headers", link: "/edge/headers" },
-                  { text: "Redirects", link: "/edge/redirects" },
+                  { text: "Static Assets Caching", link: "/guide/edge/static-assets" },
+                  { text: "Revalidation (ISR)", link: "/guide/edge/revalidation" },
+                  { text: "Edge Prerendering", link: "/guide/edge/prerendering" },
+                  { text: "Custom Headers", link: "/guide/edge/headers" },
+                  { text: "Redirects", link: "/guide/edge/redirects" },
                 ],
               },
-              { text: "AI", link: "/ai" },
-              { text: "Authentication", link: "/auth" },
-              { text: "Cron Jobs", link: "/jobs" },
-              { text: "Queues", link: "/queues" },
-              { text: "Environment Variables", link: "/env-vars" },
+              { text: "AI", link: "/guide/ai" },
+              { text: "Authentication", link: "/guide/auth" },
+              { text: "Cron Jobs", link: "/guide/jobs" },
+              { text: "Queues", link: "/guide/queues" },
+              { text: "Environment Variables", link: "/guide/env-vars" },
             ],
           },
         ],

@@ -33,7 +33,7 @@ GITHUB_SECRET=your-github-client-secret
 STRIPE_KEY=sk_test_...
 ```
 
-To push local secrets to production, use [`void secret sync`](./reference/cli#void-secret-sync).
+To push local secrets to production, use [`void secret sync`](../reference/cli#void-secret-sync).
 
 ## How it works
 
@@ -41,4 +41,4 @@ To push local secrets to production, use [`void secret sync`](./reference/cli#vo
 
 **Deploy** (`void deploy`): Only `.env` and `.env.production` are included in the deploy manifest as `plain_text` bindings. `.local` files (`.env.local`, `.env.production.local`) are excluded — they are for local secrets only.
 
-**Production secrets**: Use [`void secret put`](./reference/cli#void-secret-put) or [`void secret sync`](./reference/cli#void-secret-sync) to set secret bindings on your deployed worker. These are stored as encrypted `secret_text` bindings, not plain text.
+**Production secrets**: Use [`void secret put`](../reference/cli#void-secret-put) or [`void secret sync`](../reference/cli#void-secret-sync) to set secret bindings on your deployed worker. These are stored as encrypted `secret_text` bindings, not plain text.

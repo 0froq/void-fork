@@ -53,11 +53,11 @@ We do not recommend installing `void` globally, because the CLI needs to be in s
 
 If auto-detection fails, `void init` asks you to choose from a short list (Claude, Cursor, Codex, Gemini CLI, Generic).
 
-In supported agents such as Claude Code, you can invoke the `/void` skill to turn your agent into a Void export. Then, simply ask the agent to build an app with Void. See the [Coding Agents](./integrations/agents) guide for more details.
+In supported agents such as Claude Code, you can invoke the `/void` skill to turn your agent into a Void export. Then, simply ask the agent to build an app with Void. See the [Coding Agents](../integrations/agents) guide for more details.
 
 ## Meta Frameworks
 
-Void as a platform supports Vite-based meta frameworks, but the Void SDK itself is also a powerful and flexible meta framework via its [Pages routing](./pages-routing/overview) feature. If you only want to use an existing meta framework and deploy to Void, check out the [Framework Integration Guides](./integrations/frameworks/overview).
+Void as a platform supports Vite-based meta frameworks, but the Void SDK itself is also a powerful and flexible meta framework via its [Pages routing](./pages-routing/overview) feature. If you only want to use an existing meta framework and deploy to Void, check out the [Framework Integration Guides](../integrations/frameworks/overview).
 
 ## Adding to an Existing Vite App
 

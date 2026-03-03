@@ -145,7 +145,7 @@ function defineScheduled(
 
 ### `defineQueue<T>(handler)`
 
-Wraps a [queue](../queues.md) consumer handler with typed message bodies. The generic `<T>` defines the message body type, which flows through to the typed `queues` proxy for `send()` calls.
+Wraps a [queue](../guide/queues.md) consumer handler with typed message bodies. The generic `<T>` defines the message body type, which flows through to the typed `queues` proxy for `send()` calls.
 
 ```ts
 import { defineQueue } from "void";
@@ -270,7 +270,7 @@ interface AuthUser {
 
 ### `AuthClient`
 
-Client-side helpers for Void's built-in [authentication](../auth.md). Imported from `"void/client"`. Handles JSON serialization and cookie sessions automatically.
+Client-side helpers for Void's built-in [authentication](../guide/auth.md). Imported from `"void/client"`. Handles JSON serialization and cookie sessions automatically.
 
 ```ts
 import { auth } from "void/client";
@@ -451,7 +451,7 @@ The typed client is built on [ofetch](https://github.com/unjs/ofetch) with a typ
 
 ## Database
 
-Imported from `"void/db"`. See [Database](../database.md) for usage guide.
+Imported from `"void/db"`. See [Database](../guide/database.md) for usage guide.
 
 ### `db`
 
@@ -664,7 +664,7 @@ declare module "void" {
 // c.get("requestId") → string
 ```
 
-See [Type Safety](../type-safety.md#context-variables) for details.
+See [Type Safety](../guide/type-safety.md#context-variables) for details.
 
 ### `TypedHandler<V, R>`
 
@@ -715,7 +715,7 @@ For handler context variables (`c.set()` / `c.get()`), augment [`CloudContextVar
 
 ## Framework Adaptors
 
-Framework adaptors for [Pages Routing](../pages-routing/overview). Each adaptor provides a Vite plugin and client-side runtime.
+Framework adaptors for [Pages Routing](../guide/pages-routing/overview). Each adaptor provides a Vite plugin and client-side runtime.
 
 ### `@void-x/vue`
 

@@ -9,8 +9,8 @@ function loadDocs() {
   const docsDir = existsSync(bundledDocsDir)
     ? bundledDocsDir
     : join(import.meta.dirname, "../../../../docs");
-  const files = readdirSync(docsDir)
-    .filter((f) => f.endsWith(".md"))
+  const files = readdirSync(docsDir, { recursive: true })
+    .filter((f): f is string => typeof f === "string" && f.endsWith(".md") && !f.startsWith("."))
     .sort();
   return files.map((file) => {
     let content = readFileSync(join(docsDir, file), "utf-8");

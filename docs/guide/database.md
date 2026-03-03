@@ -6,7 +6,7 @@ outline: deep
 
 Void provides automated migration application and a typed query helper for [Cloudflare D1](https://developers.cloudflare.com/d1/) (SQLite) that covers common CRUD operations without writing SQL. Import `db` from `void/db` and start querying.
 
-D1 is suitable for most small to medium apps that are read heavy. It's also great for prototyping as Void will seamlessly create a local instance for you without any setup. That said, you are welcome to use any [ORM or external database](./integrations/orms-and-external-dbs.md) you prefer. Void provides `void/db` for convenience, with no lock-in.
+D1 is suitable for most small to medium apps that are read heavy. It's also great for prototyping as Void will seamlessly create a local instance for you without any setup. That said, you are welcome to use any [ORM or external database](../integrations/orms-and-external-dbs.md) you prefer. Void provides `void/db` for convenience, with no lock-in.
 
 ## Migrations
 
@@ -38,7 +38,7 @@ The CLI provides commands to inspect, reset, and seed your local database. Place
 - `void db migrate` — apply pending migrations without resetting
 - `void db export` — dump local DB as SQL (supports `--output`, `--no-data`, `--no-schema`, `--table`)
 
-See the [CLI reference](./reference/cli.md#database) for details.
+See the [CLI reference](../reference/cli.md#database) for details.
 
 ## Scaffolding
 
@@ -74,7 +74,7 @@ Column format is `name:type`, with an optional `?` suffix for nullable:
 
 `void gen migration <name>` creates an empty `migrations/NNN_<name>.sql` with a comment placeholder. The number is auto-detected from the highest existing migration prefix.
 
-See the [CLI reference](./reference/cli.md#code-generation) for the full list of generators.
+See the [CLI reference](../reference/cli.md#code-generation) for the full list of generators.
 
 ## Querying
 

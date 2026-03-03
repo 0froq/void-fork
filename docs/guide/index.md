@@ -47,7 +47,7 @@ Void deploys to [Cloudflare Workers](https://developers.cloudflare.com/workers/)
 - Secrets and environment variables managed via CLI or dashboard, scoped per project.
 - A dashboard for deployments, usage metrics, and project settings.
 
-You don't need a Cloudflare account or any Cloudflare knowledge to get started. But if you want full control, every build produces a standard Cloudflare Worker — you can always [self-host](./integrations/cloudflare#deploy-to-your-own-cloudflare-account) with your own `wrangler.json`.
+You don't need a Cloudflare account or any Cloudflare knowledge to get started. But if you want full control, every build produces a standard Cloudflare Worker — you can always [self-host](../integrations/cloudflare#deploy-to-your-own-cloudflare-account) with your own `wrangler.json`.
 
 ## How it works
 

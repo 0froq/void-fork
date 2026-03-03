@@ -91,11 +91,11 @@ dist/
 
 These Void features work identically across all targets:
 
-- [File-based routing](../server-routing.md) (`routes/`, `middleware/`)
-- [Pages mode](../pages-routing/overview.md) with SSR (React, Vue, Svelte, Solid)
-- [Typed fetch client](../typed-fetch.md) (`void/client`)
-- [Environment variables](../env-vars.md) (`.env` files)
-- [Static site generation](../ssg.md)
+- [File-based routing](../guide/server-routing.md) (`routes/`, `middleware/`)
+- [Pages mode](../guide/pages-routing/overview.md) with SSR (React, Vue, Svelte, Solid)
+- [Typed fetch client](../guide/typed-fetch.md) (`void/client`)
+- [Environment variables](../guide/env-vars.md) (`.env` files)
+- [Static site generation](../guide/ssg.md)
 - [Vite preview](https://vite.dev/guide/cli#vite-preview) for testing production builds locally
 
 ## What's Different
@@ -117,11 +117,11 @@ If you need a database or storage, use an external provider and connect via stan
 
 ### No cron job runtime
 
-You can still define [cron jobs](../jobs.md) in `crons/` and they will compile into the bundle, but there is no built-in scheduler to invoke them. On Cloudflare, Workers Cron Triggers call the `scheduled` handler automatically. On Node.js, you'll need an external scheduler (e.g. `node-cron`, systemd timers, or your hosting platform's cron) to trigger the exported handler.
+You can still define [cron jobs](../guide/jobs.md) in `crons/` and they will compile into the bundle, but there is no built-in scheduler to invoke them. On Cloudflare, Workers Cron Triggers call the `scheduled` handler automatically. On Node.js, you'll need an external scheduler (e.g. `node-cron`, systemd timers, or your hosting platform's cron) to trigger the exported handler.
 
 ### No prerendering
 
-[Prerendering](../edge/prerendering.md) is a platform feature that relies on Cloudflare's edge cache and the Void deploy pipeline. It is not available for non-CF targets.
+[Prerendering](../guide/edge/prerendering.md) is a platform feature that relies on Cloudflare's edge cache and the Void deploy pipeline. It is not available for non-CF targets.
 
 ### No `void deploy`
 

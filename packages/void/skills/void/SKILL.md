@@ -7,9 +7,9 @@ description: Void skill for app development and CLI operations. Use this skill t
 
 This skill is a router. Open the minimum relevant docs files under `docs/` and execute.
 
-Docs in this skill are bundled from `docs` during `void` package build and live at:
+Docs in this skill are bundled from `docs/` during `void` package build and live at:
 
-- `skills/void/docs/*.md`
+- `skills/void/docs/**/*.md`
 
 ## Command Naming
 
@@ -32,25 +32,33 @@ Then ask what to do next.
 
 ## Task Routing
 
-| User intent                               | Docs file(s)                                                      |
-| ----------------------------------------- | ----------------------------------------------------------------- |
-| CLI command syntax, flags, env vars       | `docs/cli.md`                                                     |
-| Initial setup, onboarding, first app      | `docs/quickstart.md`, `docs/cli.md`                               |
-| App type detection and mode behavior      | `docs/app-types.md`, `docs/config.md`                             |
-| Server/API routing and middleware         | `docs/server-routing.md`, `docs/hono.md`                          |
-| Pages mode, loader/action, forms, layouts | `docs/pages-routing.md`, `docs/type-safety.md`                    |
-| Database and migrations                   | `docs/database.md`, `docs/type-safety.md`                         |
-| Typed fetch and end-to-end typing         | `docs/typed-fetch.md`, `docs/type-safety.md`                      |
-| Authentication                            | `docs/auth.md`, `docs/env-vars.md`                                |
-| Cloudflare runtime bindings and config    | `docs/cloudflare.md`, `docs/config.md`, `docs/env-vars.md`        |
-| KV / storage / queues / cron jobs         | `docs/kv.md`, `docs/storage.md`, `docs/queues.md`, `docs/jobs.md` |
-| SSR and caching                           | `docs/ssr.md`, `docs/cache.md`                                    |
-| Deployment and CI                         | `docs/deployment.md`, `docs/cli.md`                               |
-| MCP server usage                          | `docs/mcp.md`                                                     |
-| API surface details                       | `docs/api.md`                                                     |
+| User intent                               | Docs file(s)                                                                              |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| CLI command syntax, flags, env vars       | `docs/reference/cli.md`                                                                   |
+| Initial setup, onboarding, first app      | `docs/guide/quickstart.md`, `docs/reference/cli.md`                                       |
+| App type detection and mode behavior      | `docs/guide/app-types.md`, `docs/reference/config.md`                                     |
+| Server/API routing and middleware         | `docs/guide/server-routing.md`, `docs/integrations/hono.md`                               |
+| Pages mode, loader/action, forms, layouts | `docs/guide/pages-routing/*.md`, `docs/guide/type-safety.md`                              |
+| Database and migrations                   | `docs/guide/database.md`, `docs/guide/type-safety.md`                                     |
+| Typed fetch and end-to-end typing         | `docs/guide/typed-fetch.md`, `docs/guide/type-safety.md`                                  |
+| Authentication                            | `docs/guide/auth.md`, `docs/guide/env-vars.md`                                            |
+| Cloudflare runtime bindings and config    | `docs/integrations/cloudflare.md`, `docs/reference/config.md`, `docs/guide/env-vars.md`   |
+| AI inference (Workers AI, providers)      | `docs/guide/ai.md`                                                                        |
+| KV / storage / queues / cron jobs         | `docs/guide/kv.md`, `docs/guide/storage.md`, `docs/guide/queues.md`, `docs/guide/jobs.md` |
+| SSR and caching                           | `docs/guide/ssr.md`, `docs/guide/edge/*.md`                                               |
+| Static site generation                    | `docs/guide/ssg.md`                                                                       |
+| Deployment and CI                         | `docs/guide/deployment.md`, `docs/reference/cli.md`                                       |
+| Overview / introduction                   | `docs/guide/index.md`                                                                     |
+| API surface details                       | `docs/reference/api.md`                                                                   |
+| Meta framework integration                | `docs/integrations/frameworks/*.md`                                                       |
+| Coding agent setup                        | `docs/integrations/agents.md`                                                             |
+| Node.js / Bun / Deno targets              | `docs/integrations/nodejs-bun-deno.md`                                                    |
+| ORMs and external databases               | `docs/integrations/orms-and-external-dbs.md`                                              |
+| Project structure and conventions         | `docs/reference/structure.md`                                                             |
+| Resource/binding inference                | `docs/reference/resource-inference.md`                                                    |
 
 ## Working Rules
 
-- For CLI-heavy tasks, open `docs/cli.md` first.
+- For CLI-heavy tasks, open `docs/reference/cli.md` first.
 - For multi-topic tasks, combine only the needed doc files.
 - If docs and memory differ, follow docs.

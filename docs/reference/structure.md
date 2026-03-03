@@ -74,7 +74,7 @@ File-based HTTP API endpoints built on [Hono](https://hono.dev). Each file expor
 - **Method-specific files**: `hello.get.ts` handles only GET requests
 - **Files starting with `_`** are ignored
 
-See [Server Routing](/server-routing) for the full guide.
+See [Server Routing](/guide/server-routing) for the full guide.
 
 ## `pages/`
 
@@ -86,7 +86,7 @@ Full-stack server-rendered pages with co-located data loading. Available with Vu
 - **Layouts** nest automatically and persist across navigations
 - **Markdown** pages are supported with frontmatter
 
-See [Pages Routing](/pages-routing/overview) for the full guide.
+See [Pages Routing](/guide/pages-routing/overview) for the full guide.
 
 ## `middleware/`
 
@@ -98,7 +98,7 @@ Each file exports a `defineMiddleware()` handler. Use middleware to set shared c
 
 ## `migrations/`
 
-SQL migration files for the [D1 database](/database). Applied in order on deploy.
+SQL migration files for the [D1 database](/guide/database). Applied in order on deploy.
 
 <FileTree :items="migrationsItems" default-expanded />
 
@@ -106,7 +106,7 @@ Generate migrations with `void gen model` or write them by hand. Types are auto-
 
 ## `crons/`
 
-[Scheduled jobs](/jobs) that run on a cron schedule.
+[Scheduled jobs](/guide/jobs) that run on a cron schedule.
 
 ```ts
 // crons/heartbeat.ts
@@ -117,7 +117,7 @@ export default defineCron("*/5 * * * *", async (ctx) => {
 
 ## `queues/`
 
-[Async queue consumers](/queues) for background job processing.
+[Async queue consumers](/guide/queues) for background job processing.
 
 ```ts
 // queues/email.ts
@@ -154,4 +154,4 @@ Auto-generated directory (gitignored). Contains:
 | `.env.production`       | Public production variables (committed)                                                                                                            |
 | `.env.production.local` | Production secrets for local testing (gitignored)                                                                                                  |
 
-See [Environment Variables](/env-vars) for the full env file loading order.
+See [Environment Variables](/guide/env-vars) for the full env file loading order.

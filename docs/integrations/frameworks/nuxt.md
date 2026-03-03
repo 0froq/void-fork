@@ -61,7 +61,7 @@ void deploy
 
 ## Using Void Platform Features
 
-All [Void platform features](../../app-types.md#void-apps) work with Nuxt. Use them in server routes, API handlers, and middleware:
+All [Void platform features](../../guide/app-types.md#void-apps) work with Nuxt. Use them in server routes, API handlers, and middleware:
 
 ### Database
 
@@ -89,7 +89,7 @@ export default defineEventHandler(() => {
 });
 ```
 
-See [Authentication](../../auth.md) for setup, providers, and the full API.
+See [Authentication](../../guide/auth.md) for setup, providers, and the full API.
 
 ### KV Storage
 

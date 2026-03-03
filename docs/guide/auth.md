@@ -96,7 +96,7 @@ import { getUser } from "void/auth";
 const user = getUser(); // AuthUser | null
 ```
 
-This works in both Void apps and [meta-framework apps](./integrations/frameworks/overview.md) (TanStack Start, SvelteKit, Nuxt, etc.). Returns `null` if not authenticated or if called outside a request context.
+This works in both Void apps and [meta-framework apps](../integrations/frameworks/overview.md) (TanStack Start, SvelteKit, Nuxt, etc.). Returns `null` if not authenticated or if called outside a request context.
 
 ## Protecting Routes
 

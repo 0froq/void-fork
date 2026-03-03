@@ -65,7 +65,7 @@ void deploy
 
 ## Using Void Platform Features
 
-All [Void platform features](../../app-types.md#void-apps) work with Astro in both local dev and production when using Astro 6+ with `nodejs_als`.
+All [Void platform features](../../guide/app-types.md#void-apps) work with Astro in both local dev and production when using Astro 6+ with `nodejs_als`.
 
 Pages that access runtime bindings must opt out of prerendering:
 
@@ -105,7 +105,7 @@ export const GET: APIRoute = async () => {
 };
 ```
 
-See [Authentication](../../auth.md) for setup, providers, and the full API.
+See [Authentication](../../guide/auth.md) for setup, providers, and the full API.
 
 ### KV Storage
 

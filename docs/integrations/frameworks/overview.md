@@ -34,16 +34,16 @@ See the individual framework guides for setup instructions:
 
 ## Feature Support
 
-With `voidPlugin()` added to the framework's Vite config, all frameworks get the same features as [Void apps](../../app-types.md#void-apps):
+With `voidPlugin()` added to the framework's Vite config, all frameworks get the same features as [Void apps](../../guide/app-types.md#void-apps):
 
 - **Binding inference** — D1, KV, R2, AI, queues, and auth detected from source code
 - **Typed database** — query helpers generated from `migrations/*.sql`
 - **Migrations** — applied to local D1 on dev startup, validated and deployed with `void deploy`
 - **Runtime helpers** — `void/db`, `void/kv`, `void/storage`, `void/ai` for typed access to Cloudflare bindings in dev and production
-- **Auth** — built-in [authentication](../../auth.md) with `getUser()`, auto-detected from `void/auth` imports
+- **Auth** — built-in [authentication](../../guide/auth.md) with `getUser()`, auto-detected from `void/auth` imports
 - **Cron jobs** — scheduled handlers via `crons/` directory
 - **Queue consumers** — typed producers and consumers via `queues/` directory
-- **Revalidation & prerendering** — configured via [`routing.revalidate`](../../edge/revalidation.md) and [`routing.prerender`](../../edge/prerendering.md) in `void.json` (Void apps can also configure these per-page in component files)
+- **Revalidation & prerendering** — configured via [`routing.revalidate`](../../guide/edge/revalidation.md) and [`routing.prerender`](../../guide/edge/prerendering.md) in `void.json` (Void apps can also configure these per-page in component files)
 
 Frameworks can also access bindings directly via the framework's own mechanisms (e.g. `platform.env` in SvelteKit, `event.context.cloudflare.env` in Nuxt, `Astro.locals.runtime.env` in Astro).
 

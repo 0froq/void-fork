@@ -4,7 +4,7 @@ outline: deep
 
 # ORMs and External Databases
 
-Void's built-in [database helper](../database.md) covers common CRUD without writing SQL, but you're not locked into it. Any ORM or query builder that works with D1 works with Void — just pass the D1 binding. Void still handles binding inference, migrations, and deployment regardless of which query layer you use.
+Void's built-in [database helper](../guide/database.md) covers common CRUD without writing SQL, but you're not locked into it. Any ORM or query builder that works with D1 works with Void — just pass the D1 binding. Void still handles binding inference, migrations, and deployment regardless of which query layer you use.
 
 You're also free to skip D1 entirely and connect to an external database like PostgreSQL or MySQL — see [External Databases](#external-databases) below.
 

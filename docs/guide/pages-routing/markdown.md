@@ -178,7 +178,7 @@ Markdown pages live in `pages/` alongside regular pages and route the same way:
 
 <FileTree :items="mdFileItems" adapter-tabs default-expanded />
 
-A `.md` file inherits layouts, supports companion `.server.ts` files for dynamic data, and [auto-prerenders](/edge/prerendering) when static — the same rules as any other page.
+A `.md` file inherits layouts, supports companion `.server.ts` files for dynamic data, and [auto-prerenders](/guide/edge/prerendering) when static — the same rules as any other page.
 
 ## Frontmatter Access
 
