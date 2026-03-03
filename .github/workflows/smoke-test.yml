@@ -1,0 +1,61 @@
+name: Smoke Test
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      FRAMEWORK_REPO_TOKEN:
+        required: true
+      VOID_TOKEN_STAGING:
+        required: true
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      # Build framework packages (void CLI + vue adapter needed for deploy)
+      - uses: actions/cache@v4
+        with:
+          path: framework/node_modules
+          key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
+      - run: pnpm --dir framework install --frozen-lockfile
+      - run: pnpm --dir framework build
+
+      - run: pnpm install --frozen-lockfile
+
+      # Delete existing project and redeploy from scratch
+      - name: Delete existing project
+        working-directory: framework/playground/kitchen-sink
+        continue-on-error: true
+        run: npx void project delete kitchen-sink --force
+        env:
+          VOID_TOKEN: ${{ secrets.VOID_TOKEN_STAGING }}
+          STAGING: "1"
+
+      - name: Deploy kitchen-sink
+        working-directory: framework/playground/kitchen-sink
+        run: npx void deploy --project kitchen-sink
+        env:
+          VOID_TOKEN: ${{ secrets.VOID_TOKEN_STAGING }}
+          STAGING: "1"
+
+      # Install Chromium for Playwright
+      - run: npx playwright install chromium
+
+      - name: Run smoke tests
+        run: node --test-timeout=120000 --test scripts/kitchen-sink-smoke-test.ts
+        env:
+          SMOKE_URL: https://kitchen-sink.staging.void.app
