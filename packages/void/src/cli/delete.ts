@@ -5,7 +5,11 @@ import { readProjectConfig, removeProjectConfig } from "./project";
 import { resolveProjectBySlug } from "./resolve-project";
 import { cliTitle } from "./output";
 
-export async function runDeleteCommand(root: string, slug?: string): Promise<void> {
+export async function runDeleteCommand(
+  root: string,
+  slug?: string,
+  options?: { force?: boolean },
+): Promise<void> {
   console.log();
   intro(cliTitle("delete"));
 
@@ -40,28 +44,30 @@ export async function runDeleteCommand(root: string, slug?: string): Promise<voi
     projectSlug = config.slug;
   }
 
-  note(
-    [
-      "Worker deployments",
-      "D1 databases, KV namespaces, R2 buckets",
-      "Static assets",
-      "Deployment history",
-    ].join("\n"),
-    `Deleting ${projectSlug} will permanently remove`,
-  );
+  if (!options?.force) {
+    note(
+      [
+        "Worker deployments",
+        "D1 databases, KV namespaces, R2 buckets",
+        "Static assets",
+        "Deployment history",
+      ].join("\n"),
+      `Deleting ${projectSlug} will permanently remove`,
+    );
 
-  const confirmation = await text({
-    message: `Type "${projectSlug}" to confirm deletion:`,
-    validate(value) {
-      if (value !== projectSlug) {
-        return `Please type "${projectSlug}" exactly to confirm.`;
-      }
-    },
-  });
+    const confirmation = await text({
+      message: `Type "${projectSlug}" to confirm deletion:`,
+      validate(value) {
+        if (value !== projectSlug) {
+          return `Please type "${projectSlug}" exactly to confirm.`;
+        }
+      },
+    });
 
-  if (isCancel(confirmation)) {
-    cancel("Delete cancelled.");
-    process.exit(0);
+    if (isCancel(confirmation)) {
+      cancel("Delete cancelled.");
+      process.exit(0);
+    }
   }
 
   const s = spinner();

@@ -19,6 +19,6 @@ export async function runProjectCommand(root: string, args: ProjectArgs): Promis
   }
   if (args.subcommand === "delete") {
     const { runDeleteCommand } = await import("./delete");
-    return runDeleteCommand(root, args.name || undefined);
+    return runDeleteCommand(root, args.name || undefined, { force: args.force });
   }
 }

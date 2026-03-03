@@ -17,7 +17,7 @@ export type ProjectArgs =
   | { subcommand: "link"; name: string }
   | { subcommand: "list" }
   | { subcommand: "logs"; filter: string; range: string }
-  | { subcommand: "delete"; name: string };
+  | { subcommand: "delete"; name: string; force: boolean };
 
 export function parseProjectArgs(args: string[]): ProjectArgs {
   const [subcommand, ...rest] = args;
@@ -61,11 +61,20 @@ export function parseProjectArgs(args: string[]): ProjectArgs {
   }
 
   if (subcommand === "delete") {
-    const [name, extra] = rest;
-    if (extra) {
-      throw new Error(`Error: Unexpected argument: ${extra}`);
+    let name = "";
+    let force = false;
+    for (const arg of rest) {
+      if (arg === "--force" || arg === "-f") {
+        force = true;
+      } else if (arg.startsWith("-")) {
+        throw new Error(`Error: Unknown flag: ${arg}`);
+      } else if (name) {
+        throw new Error(`Error: Unexpected argument: ${arg}`);
+      } else {
+        name = arg;
+      }
     }
-    return { subcommand, name: name ?? "" };
+    return { subcommand, name, force };
   }
 
   throw new Error("Error: Usage: void project <status|link|list|logs|delete>");
