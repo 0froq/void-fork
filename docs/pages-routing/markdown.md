@@ -40,7 +40,7 @@ onMounted(() => {
 
 # Markdown
 
-Markdown pages let you use `.md` files as first-class pages in Void's file-based routing. They compile to static HTML at build time with zero client JavaScript, integrate with the layout chain, and can embed interactive framework components as [islands](../islands).
+Markdown pages let you use `.md` files as first-class pages in Void's file-based routing. They compile to static HTML at build time with zero client JavaScript, integrate with the layout chain, and can embed interactive framework components as [islands](./islands).
 
 The `@void-x/md` package is opt-in as it contains markdown processing and syntax highlighting dependencies that are not necessarily needed in every app.
 
@@ -147,7 +147,7 @@ Welcome to Void. Here's an interactive demo:
 <Counter />
 ```
 
-- **`<script>` block** — extracted before markdown compilation. Island imports use `with { island: "..." }` syntax (see [islands](../islands)). Any other code in the block becomes a [client script](#client-scripts) that runs in the browser.
+- **`<script>` block** — extracted before markdown compilation. Island imports use `with { island: "..." }` syntax (see [islands](./islands)). Any other code in the block becomes a [client script](#client-scripts) that runs in the browser.
 - **Frontmatter** — YAML metadata between `---` fences. Accessible in layouts via [`useFrontmatter()`](#frontmatter-access).
 - **Body** — standard markdown + GFM. Uppercase tags (`<Counter />`) reference imported components and render as islands.
 

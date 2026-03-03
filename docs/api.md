@@ -715,7 +715,7 @@ For handler context variables (`c.set()` / `c.get()`), augment [`CloudContextVar
 
 ## Framework Adaptors
 
-Framework adaptors for [Pages Routing](./pages-routing.md). Each adaptor provides a Vite plugin and client-side runtime.
+Framework adaptors for [Pages Routing](./pages-routing/overview). Each adaptor provides a Vite plugin and client-side runtime.
 
 ### `@void-x/vue`
 

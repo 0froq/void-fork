@@ -7,7 +7,7 @@ outline: deep
 You can instruct Void to prerender a page so that the page is served immediately from the cache after a new deploy. Prerendering happens on the platform at deploy time — the platform invokes the uploaded worker and writes results to the edge cache.
 
 - [Markdown pages](../pages-routing/markdown.md) are auto-prerendered.
-- [Island pages](../islands.md) with no companion loader and no dynamic params are also auto-prerendered.
+- [Island pages](../pages-routing/islands) with no companion loader and no dynamic params are also auto-prerendered.
 
 ## Static pages (no params)
 

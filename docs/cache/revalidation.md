@@ -4,9 +4,9 @@ outline: deep
 
 # Revalidation (ISR)
 
-For SSR and [Pages mode](../pages-routing.md) projects, Void supports stale-while-revalidate caching for dynamically rendered pages. Cached pages are served instantly from the edge while the worker re-renders in the background when the cache is stale. This is the equivalent of [Incremental Static Regeneration (ISR)](https://vercel.com/docs/incremental-static-regeneration) in other frameworks.
+For SSR and [Pages mode](../pages-routing/overview) projects, Void supports stale-while-revalidate caching for dynamically rendered pages. Cached pages are served instantly from the edge while the worker re-renders in the background when the cache is stale. This is the equivalent of [Incremental Static Regeneration (ISR)](https://vercel.com/docs/incremental-static-regeneration) in other frameworks.
 
-This requires [SSR](../ssr.md) or [Pages mode](../pages-routing.md) to be configured.
+This requires [SSR](../ssr.md) or [Pages mode](../pages-routing/overview) to be configured.
 
 ## Enabling revalidation
 
@@ -48,7 +48,7 @@ Special values:
 
 ## Per-page revalidation (Pages mode)
 
-In [Pages mode](../pages-routing.md), you can export a `revalidate` value from a `.server.ts` file to override the global config for that page:
+In [Pages mode](../pages-routing/overview), you can export a `revalidate` value from a `.server.ts` file to override the global config for that page:
 
 ```ts
 // pages/products/index.server.ts

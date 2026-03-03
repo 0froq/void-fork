@@ -4,7 +4,7 @@ outline: deep
 
 # Custom Headers
 
-Define custom response headers in [`void.json`](./config.md) using the `routing.headers` field. Keys are URL patterns, values are arrays of `"Name: value"` strings.
+Define custom response headers in [`void.json`](../config) using the `routing.headers` field. Keys are URL patterns, values are arrays of `"Name: value"` strings.
 
 ```json
 {

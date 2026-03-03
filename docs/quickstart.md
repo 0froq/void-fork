@@ -57,7 +57,7 @@ In supported agents such as Claude Code, you can invoke the `/void` skill to tur
 
 ## Meta Frameworks
 
-Void as a platform supports Vite-based meta frameworks, but the Void SDK itself is also a powerful and flexible meta framework via its [Pages routing](./pages-routing) feature. If you only want to use an existing meta framework and deploy to Void, check out the [Framework Integration Guides](./integrations/frameworks/overview).
+Void as a platform supports Vite-based meta frameworks, but the Void SDK itself is also a powerful and flexible meta framework via its [Pages routing](./pages-routing/overview) feature. If you only want to use an existing meta framework and deploy to Void, check out the [Framework Integration Guides](./integrations/frameworks/overview).
 
 ## Adding to an Existing Vite App
 

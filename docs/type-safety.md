@@ -100,7 +100,7 @@ The validator schema is the single source of truth — it defines runtime valida
 
 ## Action → useForm
 
-The same pipeline extends to [pages mode](./pages-routing.md). When a page action uses `withValidator()` in a `.server.ts` file, the body schema flows through to `useForm` — typed `data`, typed `errors` keys, and URL autocomplete:
+The same pipeline extends to [pages mode](./pages-routing/overview). When a page action uses `withValidator()` in a `.server.ts` file, the body schema flows through to `useForm` — typed `data`, typed `errors` keys, and URL autocomplete:
 
 ```ts
 // pages/users/create.server.ts
@@ -129,7 +129,7 @@ const form = useForm("/users/:id", { name: "" }, { params: { id: "42" } });
 form.put(); // submits to /users/42
 ```
 
-Actions without validators still get URL autocomplete — the body falls back to `Record<string, unknown>`. See [Pages Routing — Forms and Actions](./pages-routing.md#forms-and-actions) for the full API.
+Actions without validators still get URL autocomplete — the body falls back to `Record<string, unknown>`. See [Pages Routing — Forms](./pages-routing/forms) for the full API.
 
 ## What Gets Checked
 

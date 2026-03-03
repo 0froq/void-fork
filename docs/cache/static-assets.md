@@ -65,7 +65,7 @@ This happens automatically for all static assets. No configuration is needed.
 
 ## Custom headers
 
-You can override caching headers or add your own for any static asset path using [Custom Headers](../headers.md).
+You can override caching headers or add your own for any static asset path using [Custom Headers](./headers).
 
 ## API routes and SSR pages
 

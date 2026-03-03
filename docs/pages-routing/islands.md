@@ -45,7 +45,7 @@ Islands mode is a partial hydration architecture inspired by [Astro](https://doc
 This gives you the best of both worlds: fast initial page loads with minimal client-side JavaScript, plus rich interactivity exactly where you need it.
 
 ::: tip Prerequisites
-Islands mode builds on top of [Pages Routing](./pages-routing.md). You need a working Pages setup (framework adapter installed, `pages/` directory, Vite config) before using islands.
+Islands mode builds on top of [Pages Routing](./overview). You need a working Pages setup (framework adapter installed, `pages/` directory, Vite config) before using islands.
 :::
 
 ## When to Use Islands
@@ -56,7 +56,7 @@ Islands mode is a good fit when:
 - **Only a few components need interactivity** — a counter, a form, a live widget
 - **Performance is critical** — you want near-zero JavaScript for static content
 
-If your entire page is interactive (dashboards, apps with lots of client state), stick with regular [Pages Routing](./pages-routing.md).
+If your entire page is interactive (dashboards, apps with lots of client state), stick with regular [Pages Routing](./overview).
 
 ## Creating an Island Page
 
@@ -422,7 +422,7 @@ When navigating _from_ a regular page to an island page (e.g., via `<Link>`), th
 
 ## Layouts
 
-Island pages support [layouts](./pages-routing.md#layouts) the same way as regular pages. The layout wraps the page during server rendering. However, layout components in island pages are **static only** — they are not hydrated on the client.
+Island pages support [layouts](./layouts) the same way as regular pages. The layout wraps the page during server rendering. However, layout components in island pages are **static only** — they are not hydrated on the client.
 
 ## Mixing Island and Regular Pages
 

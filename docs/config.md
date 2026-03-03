@@ -59,7 +59,7 @@ Routing and edge configuration — headers, redirects, and caching.
 
 #### `routing.headers`
 
-Custom response headers for static assets. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Custom Headers](./headers.md) for details.
+Custom response headers for static assets. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Custom Headers](./cache/headers) for details.
 
 ```json
 {
@@ -74,7 +74,7 @@ Custom response headers for static assets. Keys are URL patterns, values are arr
 
 #### `routing.redirects`
 
-URL redirects. Keys are source URL patterns, values are destination strings (302 default) or objects with `to` and optional `status`. See [Redirects](./redirects.md) for details.
+URL redirects. Keys are source URL patterns, values are destination strings (302 default) or objects with `to` and optional `status`. See [Redirects](./cache/redirects) for details.
 
 ```json
 {
