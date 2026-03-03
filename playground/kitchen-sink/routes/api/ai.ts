@@ -2,9 +2,18 @@ import { defineHandler } from "void";
 import { ai } from "void/ai";
 
 export const POST = defineHandler(async (c) => {
-  const { prompt } = await c.req.json<{ prompt: string }>();
-  return ai.stream("@cf/meta/llama-3.3-70b-instruct-fp8-fast", {
-    messages: [{ role: "user", content: prompt }],
-    max_tokens: 512,
-  });
+  const { prompt, model } = await c.req.json<{
+    prompt: string;
+    model: string;
+  }>();
+
+  try {
+    return ai.stream(model as any, {
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 512,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ error: message }, 400);
+  }
 });

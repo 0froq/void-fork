@@ -1,4 +1,10 @@
 import { getRuntimeEnv, type RuntimeEnv } from "./env";
+import {
+  PROVIDER_KEY_MAP,
+  type ThirdPartyModel,
+  type ChatCompletionInputs,
+  type ChatCompletionResponse,
+} from "./ai-types";
 
 const PROXY_URL = "https://proxy.void.cloud/ai";
 const STAGING_PROXY_URL = "https://proxy.staging.void.cloud/ai";
@@ -7,6 +13,27 @@ interface AiBackend {
   run(model: string, inputs: unknown, options?: unknown): Promise<unknown>;
   models(params?: unknown): Promise<unknown>;
   toMarkdown(items: unknown, options?: unknown): Promise<unknown>;
+}
+
+function isThirdPartyModel(model: string): boolean {
+  const provider = model.split("/")[0];
+  return provider in PROVIDER_KEY_MAP;
+}
+
+function resolveProviderKey(model: string, runtimeEnv: RuntimeEnv): string {
+  const provider = model.split("/")[0];
+  const envVar = PROVIDER_KEY_MAP[provider];
+  if (!envVar)
+    throw new Error(
+      `Unknown AI provider: "${provider}". Supported: ${Object.keys(PROVIDER_KEY_MAP).join(", ")}`,
+    );
+  const key = runtimeEnv[envVar];
+  if (typeof key !== "string" || key.length === 0) {
+    throw new Error(
+      `Missing ${envVar} secret. Add it as a project secret for provider "${provider}".`,
+    );
+  }
+  return key;
 }
 
 function getProxyUrl(runtimeEnv: RuntimeEnv): string {
@@ -68,6 +95,14 @@ function makeServiceBindingBackend(proxy: Fetcher, runtimeEnv: RuntimeEnv): AiBa
     async run(model, inputs, options) {
       const projectId = runtimeEnv.__PROJECT_ID;
       const aiToken = runtimeEnv.__VOID_PROXY_TOKEN;
+
+      if (isThirdPartyModel(model as string)) {
+        const providerKey = resolveProviderKey(model as string, runtimeEnv);
+        const res = await proxyFetch("gateway", { model, inputs, providerKey, projectId, aiToken });
+        if ((inputs as any)?.stream) return res.body;
+        return res.json();
+      }
+
       const res = await proxyFetch("run", { model, inputs, options, projectId, aiToken });
       if ((inputs as any)?.stream) return res.body;
       return res.json();
@@ -106,6 +141,13 @@ function makeHttpBackend(token: string, projectId: string, runtimeEnv: RuntimeEn
 
   return {
     async run(model, inputs, options) {
+      if (isThirdPartyModel(model as string)) {
+        const providerKey = resolveProviderKey(model as string, runtimeEnv);
+        const res = await proxyFetch("gateway", { model, inputs, providerKey });
+        if ((inputs as any)?.stream) return res.body;
+        return res.json();
+      }
+
       const res = await proxyFetch("run", { model, inputs, options });
       if ((inputs as any)?.stream) return res.body;
       return res.json();
@@ -133,10 +175,32 @@ function backend(): AiBackend {
  * `stream()` calls `ai.run()` with `stream: true` and wraps the result
  * in a `Response` with SSE headers — ready to return from a route handler.
  */
-export interface VoidAi extends Ai {
+export interface VoidAi extends Omit<Ai, "run"> {
+  /** Workers AI inference (existing) */
+  run<Name extends keyof AiModels>(
+    model: Name,
+    inputs: AiModels[Name]["inputs"],
+    options?: AiOptions,
+  ): Promise<AiModels[Name]["postProcessedOutputs"]>;
+
+  /** Third-party chat completions (OpenAI, Anthropic, etc.) */
+  run(
+    model: ThirdPartyModel,
+    inputs: ChatCompletionInputs,
+    options?: AiOptions,
+  ): Promise<ChatCompletionResponse>;
+
+  /** Stream Workers AI response as SSE */
   stream<Name extends keyof AiModels>(
     model: Name,
     inputs: Omit<AiModels[Name]["inputs"], "stream">,
+    options?: AiOptions,
+  ): Promise<Response>;
+
+  /** Stream third-party chat completions as SSE */
+  stream(
+    model: ThirdPartyModel,
+    inputs: Omit<ChatCompletionInputs, "stream">,
     options?: AiOptions,
   ): Promise<Response>;
 }
@@ -157,3 +221,14 @@ export const ai: VoidAi = new Proxy({} as VoidAi, {
     return undefined;
   },
 });
+
+export type {
+  ThirdPartyModel,
+  ThirdPartyProvider,
+  ChatCompletionInputs,
+  ChatCompletionResponse,
+  ChatCompletionChoice,
+  ChatCompletionUsage,
+  ChatCompletionChunk,
+  ChatMessage,
+} from "./ai-types";
