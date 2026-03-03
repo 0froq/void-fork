@@ -80,19 +80,19 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
 
     if (!config) {
       if (!process.stdin.isTTY) {
-        log.error(`No project found with slug "${requestedProjectSlug}".`);
-        process.exit(1);
-      }
+        // CI: auto-create when --project is explicitly specified
+        config = await createNewProject(root, client, requestedProjectSlug);
+      } else {
+        const shouldCreate = await confirm({
+          message: `Project "${requestedProjectSlug}" does not exist. Create it?`,
+        });
+        if (isCancel(shouldCreate) || !shouldCreate) {
+          log.info("Deploy cancelled.");
+          process.exit(0);
+        }
 
-      const shouldCreate = await confirm({
-        message: `Project "${requestedProjectSlug}" does not exist. Create it?`,
-      });
-      if (isCancel(shouldCreate) || !shouldCreate) {
-        log.info("Deploy cancelled.");
-        process.exit(0);
+        config = await createNewProject(root, client, requestedProjectSlug);
       }
-
-      config = await createNewProject(root, client, requestedProjectSlug);
     }
   } else {
     config = readProjectConfig(root);
