@@ -19,12 +19,11 @@ export const POST = defineHandler(async () => {
   }
 
   // Clear all R2 objects (paginated)
-  let r2Truncated = true;
   let r2Cursor: string | undefined;
-  while (r2Truncated) {
+  for (;;) {
     const result = await storage.list({ limit: 1000, cursor: r2Cursor });
     await Promise.all(result.objects.map((obj) => storage.delete(obj.key)));
-    r2Truncated = result.truncated;
+    if (!result.truncated) break;
     r2Cursor = result.cursor;
   }
 
