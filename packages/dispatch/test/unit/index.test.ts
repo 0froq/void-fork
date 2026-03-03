@@ -920,7 +920,7 @@ describe("hashed asset caching", () => {
     expect(res.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
   });
 
-  it("does not cache non-hashed asset paths", async () => {
+  it("does not cache non-hashed asset paths without version", async () => {
     const routing: RoutingEntry = {
       workerName: "test-worker",
       projectId: "proj-1",
@@ -1387,5 +1387,231 @@ describe("redirect rules", () => {
     expect(response.status).toBe(301);
     expect(response.headers.get("Location")).toBe("/posts/hello-world");
     expect(workerFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("static asset caching", () => {
+  it("caches static asset on first request, serves from cache on second", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      version: "deploy-1",
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("favicon") });
+    const ctx = createCtx();
+
+    // First request — cache miss, hits worker
+    const res1 = await app.fetch(new Request("https://test.void.app/favicon.ico"), env, ctx);
+    expect(res1.status).toBe(200);
+    expect(await res1.text()).toBe("favicon");
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+
+    // Wait for background cache.put
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Second request — cache hit, worker NOT invoked
+    const ctx2 = createCtx();
+    const res2 = await app.fetch(new Request("https://test.void.app/favicon.ico"), env, ctx2);
+    expect(res2.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates cache on version change", async () => {
+    const routing1: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      version: "deploy-1",
+    };
+    const { env: env1, workerFetch: wf1 } = createEnv({
+      routing: routing1,
+      workerResponse: new Response("v1"),
+    });
+    const ctx1 = createCtx();
+
+    await app.fetch(new Request("https://test.void.app/favicon.ico"), env1, ctx1);
+    expect(wf1).toHaveBeenCalledTimes(1);
+    await Promise.all((ctx1.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // New deploy with different version
+    const routing2: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      version: "deploy-2",
+    };
+    const { env: env2, workerFetch: wf2 } = createEnv({
+      routing: routing2,
+      workerResponse: new Response("v2"),
+    });
+    const ctx2 = createCtx();
+
+    const res = await app.fetch(new Request("https://test.void.app/favicon.ico"), env2, ctx2);
+    expect(res.status).toBe(200);
+    expect(wf2).toHaveBeenCalledTimes(1); // cache miss — different version
+  });
+
+  it("does not cache /api/ routes", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      version: "deploy-1",
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("api") });
+
+    await app.fetch(new Request("https://test.void.app/api/data"), env, createCtx());
+    await app.fetch(new Request("https://test.void.app/api/data"), env, createCtx());
+    expect(workerFetch).toHaveBeenCalledTimes(2); // no caching
+  });
+
+  it("does not cache SSR paths without extension", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      version: "deploy-1",
+      ssr: true,
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("ssr page") });
+
+    await app.fetch(new Request("https://test.void.app/about"), env, createCtx());
+    await app.fetch(new Request("https://test.void.app/about"), env, createCtx());
+    expect(workerFetch).toHaveBeenCalledTimes(2); // no caching for SSR routes
+  });
+
+  it("caches file-extension paths in SSR projects", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      version: "deploy-1",
+      ssr: true,
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("icon") });
+    const ctx = createCtx();
+
+    await app.fetch(new Request("https://test.void.app/favicon.ico"), env, ctx);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    const ctx2 = createCtx();
+    await app.fetch(new Request("https://test.void.app/favicon.ico"), env, ctx2);
+    expect(workerFetch).toHaveBeenCalledTimes(1); // cache hit
+  });
+
+  it("does not cache when version is absent", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      // no version
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("ok") });
+
+    await app.fetch(new Request("https://test.void.app/favicon.ico"), env, createCtx());
+    await app.fetch(new Request("https://test.void.app/favicon.ico"), env, createCtx());
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not cache non-OK responses", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      version: "deploy-1",
+    };
+    const { env } = createEnv({
+      routing,
+      workerResponse: new Response("not found", { status: 404 }),
+    });
+
+    await app.fetch(new Request("https://test.void.app/missing.png"), env, createCtx());
+    expect(edgeCacheStore.size).toBe(0);
+  });
+
+  it("does not cache when worker sets Cache-Control: private", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      version: "deploy-1",
+    };
+    const { env, workerFetch } = createEnv({
+      routing,
+      workerResponse: new Response("dynamic", {
+        headers: { "Cache-Control": "private, max-age=0" },
+      }),
+    });
+
+    await app.fetch(new Request("https://test.void.app/avatar.jpg"), env, createCtx());
+    await app.fetch(new Request("https://test.void.app/avatar.jpg"), env, createCtx());
+    expect(workerFetch).toHaveBeenCalledTimes(2); // not cached
+  });
+
+  it("does not cache when worker sets Cache-Control: no-store", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      version: "deploy-1",
+    };
+    const { env, workerFetch } = createEnv({
+      routing,
+      workerResponse: new Response("dynamic", {
+        headers: { "Cache-Control": "no-store" },
+      }),
+    });
+
+    await app.fetch(new Request("https://test.void.app/data.json"), env, createCtx());
+    await app.fetch(new Request("https://test.void.app/data.json"), env, createCtx());
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("normalizes query strings (same path, different query → same cache key)", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      version: "deploy-1",
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("img") });
+    const ctx = createCtx();
+
+    await app.fetch(new Request("https://test.void.app/logo.png?width=100"), env, ctx);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Different query string — should still be cache hit (query normalized to ?_v=deploy-1)
+    const ctx2 = createCtx();
+    await app.fetch(new Request("https://test.void.app/logo.png?width=200"), env, ctx2);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips cache for non-GET requests", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      version: "deploy-1",
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response("ok") });
+
+    await app.fetch(
+      new Request("https://test.void.app/form.html", { method: "POST" }),
+      env,
+      createCtx(),
+    );
+    await app.fetch(
+      new Request("https://test.void.app/form.html", { method: "POST" }),
+      env,
+      createCtx(),
+    );
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("applies header rules to cached static assets", async () => {
+    const routing: RoutingEntry = {
+      workerName: "test-worker",
+      projectId: "proj-1",
+      version: "deploy-1",
+      headerRules: [{ pattern: "/*", headers: [["X-Custom", "from-rules"]] }],
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response("ok") });
+    const ctx = createCtx();
+
+    const res = await app.fetch(new Request("https://test.void.app/favicon.ico"), env, ctx);
+    expect(res.headers.get("X-Custom")).toBe("from-rules");
   });
 });

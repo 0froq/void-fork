@@ -229,10 +229,42 @@ export default {
       }
     }
 
+    // Edge-cache non-hashed static assets using deploy-versioned cache keys
+    const isStaticCandidate =
+      request.method === "GET" &&
+      routing.version &&
+      !(pathname.startsWith("/api/") || pathname === "/api") &&
+      (hasExtension(pathname) || !routing.ssr);
+
+    let staticCacheKey: Request | undefined;
+    if (isStaticCandidate) {
+      const cacheUrl = new URL(request.url);
+      cacheUrl.search = `?_v=${routing.version}`;
+      staticCacheKey = new Request(cacheUrl.toString());
+      const cached = await caches.default.match(staticCacheKey);
+      if (cached) {
+        requestType = "static";
+        return meter(cached);
+      }
+    }
+
     // Dispatch to user worker — CF handles static assets transparently
     const worker = getWorker(env, routing);
     try {
       const response = await worker.fetch(request);
+
+      // Cache static asset at edge if eligible
+      if (staticCacheKey && response.ok && !hasCacheOptOut(response)) {
+        const res = new Response(response.body, response);
+        res.headers.delete("x-void-page-data");
+        const finalRes = applyHeaderRules(res, pathname, routing.headerRules);
+        finalRes.headers.set(
+          "Cache-Control",
+          "public, s-maxage=31536000, max-age=0, must-revalidate",
+        );
+        ctx.waitUntil(caches.default.put(staticCacheKey, finalRes.clone()));
+        return meter(finalRes);
+      }
 
       // Classify for metering
       if (pathname.startsWith("/api/") || pathname === "/api") {
@@ -430,4 +462,10 @@ async function revalidateInBackground(
 
 function hasExtension(pathname: string): boolean {
   return pathname.slice(pathname.lastIndexOf("/") + 1).includes(".");
+}
+
+function hasCacheOptOut(response: Response): boolean {
+  const cc = response.headers.get("Cache-Control");
+  if (!cc) return false;
+  return /\b(private|no-store|no-cache)\b/.test(cc);
 }

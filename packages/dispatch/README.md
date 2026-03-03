@@ -50,12 +50,34 @@ Request types: `"api"`, `"static"`, `"ssr"`, `"isr"`. Usage queries multiply by 
 
 ## Edge Caching
 
-Static asset responses are cached at the CF edge via `caches.default`. Cache keys include a `version` from the KV routing entry (set to the deployment ID on each deploy), so new deploys instantly invalidate stale entries without purge APIs. Hashed assets (`/assets/*`) use version-independent cache keys — their content is guaranteed by the filename hash, so they survive across deploys and avoid unnecessary R2 reads after redeployment.
+Two layers of edge caching ensure user workers are only invoked when necessary.
 
-- Hashed assets (`assets/*-<hash>.js`) get `Cache-Control: public, max-age=31536000, immutable` — cached at edge ~1 year, cache key is unversioned
-- Non-hashed assets (`index.html` etc.) get `Cache-Control: public, s-maxage=60, max-age=0, must-revalidate` — cached at edge 60s, cache key includes deploy version
-- API routes and SSR-rendered responses are **not** edge-cached
-- Non-file paths fall back to `index.html` (SPA routing)
+### Hashed Assets
+
+Hashed assets use version-independent cache keys — their content is guaranteed by the filename hash, so they survive across deploys and avoid unnecessary worker invocations after redeployment. The default prefix is `/assets/*` (Vite convention), with built-in presets for supported meta-frameworks (e.g., `/_nuxt/*`).
+
+- `Cache-Control: public, max-age=31536000, immutable` — cached at edge ~1 year
+
+### Static Assets
+
+Non-hashed static assets are edge-cached using deploy-versioned cache keys (`?_v={version}`). On each deploy, the version changes and all previous cache entries are automatically invalidated — no purge API needed.
+
+- `Cache-Control: public, s-maxage=31536000, max-age=0, must-revalidate` — cached at edge until next deploy
+
+**What gets cached:**
+
+- All GET requests for non-SSR projects (SPA/static sites) — every path is static
+- GET requests with file extensions (`.ico`, `.png`, `.css`, etc.) in SSR projects
+
+**What does NOT get cached:**
+
+- `/api/*` routes
+- SSR-rendered pages (paths without file extensions in SSR projects)
+- Non-GET requests
+- Non-2xx responses
+- Responses where the worker sets `Cache-Control: private`, `no-store`, or `no-cache`
+
+**Opting out:** To prevent a response from being cached (e.g., dynamically generated images at a static-looking URL), set `Cache-Control: private` or `Cache-Control: no-store` in your worker response.
 
 ## Tests
 
