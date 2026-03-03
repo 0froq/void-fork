@@ -54,6 +54,11 @@ async function showDeployments(
     return;
   }
 
+  const latest = deployments[0];
+  if (latest.status === "failed" && latest.error_message) {
+    log.error(`Latest deploy failed: ${latest.error_message}`);
+  }
+
   const rows = deployments.map((d) => formatDeploymentRow(d));
 
   const idWidth = Math.max("id".length, ...rows.map((r) => r.id.length));

@@ -28,6 +28,7 @@ export interface DeploymentResponse {
   source: string | null;
   commit: string | null;
   manifest: string | null;
+  error_message: string | null;
   created_at: string;
   deployed_at: string | null;
 }
