@@ -62,6 +62,7 @@ interface MockAi {
   run: ReturnType<typeof vi.fn>;
   models: ReturnType<typeof vi.fn>;
   toMarkdown: ReturnType<typeof vi.fn>;
+  gateway: ReturnType<typeof vi.fn>;
 }
 
 function createMockKv(data: Record<string, string> = {}) {
@@ -95,6 +96,7 @@ function createEnv(
       run: vi.fn(async () => ({ response: "hello" })),
       models: vi.fn(async () => [{ name: "model-a" }]),
       toMarkdown: vi.fn(async () => ({ markdown: "# Hi" })),
+      gateway: vi.fn(() => ({ run: vi.fn(async () => new Response("{}")) })),
       ...aiOverrides,
     },
     JWT_SECRET,
@@ -476,6 +478,214 @@ describe("proxy worker", () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual(result);
       expect(env.AI.toMarkdown).toHaveBeenCalledWith({ content: "hello" }, { format: "md" });
+    });
+  });
+
+  describe("AI: /ai/gateway", () => {
+    function mockGatewayResponse(response: unknown, status = 200) {
+      const runMock = vi.fn(
+        async () =>
+          new Response(JSON.stringify(response), {
+            status,
+            headers: { "content-type": "application/json" },
+          }),
+      );
+      return { runMock, gateway: vi.fn(() => ({ run: runMock })) };
+    }
+
+    function mockGatewayStream(chunks: string[]) {
+      const body = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          for (const chunk of chunks) {
+            controller.enqueue(encoder.encode(chunk));
+          }
+          controller.close();
+        },
+      });
+      const runMock = vi.fn(
+        async () =>
+          new Response(body, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+      );
+      return { runMock, gateway: vi.fn(() => ({ run: runMock })) };
+    }
+
+    it("forwards chat request to AI Gateway via binding", async () => {
+      const gatewayResponse = {
+        id: "chatcmpl-123",
+        choices: [
+          { index: 0, message: { role: "assistant", content: "Hi!" }, finish_reason: "stop" },
+        ],
+        usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+      };
+      const { runMock, gateway } = mockGatewayResponse(gatewayResponse);
+
+      const env = createEnv({ gateway });
+      const res = await worker.fetch(
+        post("/ai/gateway", {
+          model: "openai/gpt-4o",
+          inputs: { messages: [{ role: "user", content: "Hello" }] },
+          providerKey: "sk-test-key",
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_1"],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual(gatewayResponse);
+
+      // Verify gateway was initialized with correct ID
+      expect(gateway).toHaveBeenCalledWith("void");
+
+      // Verify the run call
+      expect(runMock).toHaveBeenCalledOnce();
+      const arg = runMock.mock.calls[0][0];
+      expect(arg.provider).toBe("openai");
+      expect(arg.endpoint).toBe("chat/completions");
+      expect(arg.headers.authorization).toBe("Bearer sk-test-key");
+      expect(arg.headers["cf-aig-metadata-projectId"]).toBe("proj_1");
+      expect(arg.query.model).toBe("gpt-4o");
+      expect(arg.query.messages).toEqual([{ role: "user", content: "Hello" }]);
+    });
+
+    it("requires providerKey", async () => {
+      const env = createEnv();
+      const res = await worker.fetch(
+        post("/ai/gateway", {
+          model: "openai/gpt-4o",
+          inputs: { messages: [{ role: "user", content: "Hello" }] },
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_1"],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "providerKey required" });
+    });
+
+    it("requires model", async () => {
+      const env = createEnv();
+      const res = await worker.fetch(
+        post("/ai/gateway", {
+          inputs: { messages: [{ role: "user", content: "Hello" }] },
+          providerKey: "sk-test",
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_1"],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "model required" });
+    });
+
+    it("returns streaming response when inputs.stream is true", async () => {
+      const { runMock, gateway } = mockGatewayStream([
+        'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"!"}}]}\n\n',
+        "data: [DONE]\n\n",
+      ]);
+
+      const env = createEnv({ gateway });
+      const res = await worker.fetch(
+        post("/ai/gateway", {
+          model: "openai/gpt-4o",
+          inputs: {
+            messages: [{ role: "user", content: "Hello" }],
+            stream: true,
+          },
+          providerKey: "sk-test-key",
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_1"],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("text/event-stream");
+      expect(res.headers.get("cache-control")).toBe("no-cache");
+
+      const text = await res.text();
+      expect(text).toContain("Hi");
+      expect(text).toContain("[DONE]");
+
+      // Verify stream: true was forwarded in the query
+      expect(runMock.mock.calls[0][0].query.stream).toBe(true);
+    });
+
+    it("forwards provider error status and message", async () => {
+      const { gateway } = mockGatewayResponse(
+        { error: { message: "Invalid API key", type: "invalid_request_error" } },
+        401,
+      );
+
+      const env = createEnv({ gateway });
+      const res = await worker.fetch(
+        post("/ai/gateway", {
+          model: "openai/gpt-4o",
+          inputs: { messages: [{ role: "user", content: "Hello" }] },
+          providerKey: "sk-bad-key",
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_1"],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(401);
+      const json = await res.json();
+      expect(json.error).toContain("Invalid API key");
+    });
+
+    it("forwards extra parameters (temperature, max_tokens)", async () => {
+      const { runMock, gateway } = mockGatewayResponse({
+        id: "chatcmpl-1",
+        choices: [],
+        usage: {},
+      });
+
+      const env = createEnv({ gateway });
+      await worker.fetch(
+        post("/ai/gateway", {
+          model: "anthropic/claude-sonnet-4-20250514",
+          inputs: {
+            messages: [{ role: "user", content: "Hello" }],
+            temperature: 0.5,
+            max_tokens: 100,
+          },
+          providerKey: "sk-ant-key",
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_1"],
+        }),
+        env,
+      );
+
+      const arg = runMock.mock.calls[0][0];
+      expect(arg.provider).toBe("anthropic");
+      expect(arg.query.model).toBe("claude-sonnet-4-20250514");
+      expect(arg.query.temperature).toBe(0.5);
+      expect(arg.query.max_tokens).toBe(100);
+    });
+
+    it("respects usage limit (429) for chat endpoint", async () => {
+      const env = createEnv({}, { "ai-block:proj_1": "1" });
+      const res = await worker.fetch(
+        post("/ai/gateway", {
+          model: "openai/gpt-4o",
+          inputs: { messages: [{ role: "user", content: "Hello" }] },
+          providerKey: "sk-test",
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_1"],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({ error: "AI usage limit exceeded" });
     });
   });
 
