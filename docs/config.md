@@ -157,6 +157,23 @@ App type. If omitted, auto-detected on first deploy. See [Supported App Types](.
 - `"static"` — fully rendered HTML files (VitePress, plain HTML, external tools). Non-matching paths return `404.html` or a 404 response.
 - `"spa"` — static with SPA fallback. All non-file paths fall back to `index.html` with a 200 status, so client-side routing works out of the box.
 
+### `output`
+
+Output mode. Controls the default rendering strategy for pages.
+
+| Value                | Default prerender | Per-page override                | Prerender timing           |
+| -------------------- | ----------------- | -------------------------------- | -------------------------- |
+| `"server"` (default) | `false`           | `export const prerender = true`  | Deploy-time (platform ISR) |
+| `"static"`           | `true`            | `export const prerender = false` | Build-time (`vite build`)  |
+
+When set to `"static"`, all pages are prerendered at build time as static HTML files written to `dist/client/`. Individual pages can opt out with `export const prerender = false`. Dynamic pages (with route params) without a `getPrerenderPaths()` export are implicitly not prerendered.
+
+When omitted or set to `"server"`, pages are server-rendered on request. Individual pages can opt into deploy-time prerendering with `export const prerender = true`.
+
+```json
+{ "output": "static" }
+```
+
 ### `outputDir`
 
 Output directory for static deploys, relative to the project root. Only relevant when `appType` is `"spa"` or `"static"`. Defaults to `"dist"`.
