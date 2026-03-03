@@ -8,19 +8,20 @@ outline: deep
 
 ## Cheat Sheet
 
-| Command                           | Purpose                              |
-| --------------------------------- | ------------------------------------ |
-| `void deploy`                     | Build and deploy to Void             |
-| `void gen model <name> [cols...]` | Scaffold migration + CRUD routes     |
-| `void gen route <path>`           | Create an API route                  |
-| `void db status`                  | Show local/remote migration status   |
-| `void db reset`                   | Drop and re-apply all migrations     |
-| `void db seed`                    | Reset + seed local database          |
-| `void secret put <name=value>`    | Set a production secret              |
-| `void secret sync .env.local`     | Bulk upload secrets from dotenv file |
-| `void auth login`                 | Authenticate with Void               |
-| `void project link`               | Link directory to a project          |
-| `void init`                       | Setup wizard (tsconfig, agents, CI)  |
+| Command                           | Purpose                                 |
+| --------------------------------- | --------------------------------------- |
+| `void deploy`                     | Build and deploy to Void                |
+| `void gen model <name> [cols...]` | Scaffold migration + CRUD routes        |
+| `void gen route <path>`           | Create an API route                     |
+| `void db status`                  | Show local/remote migration status      |
+| `void db reset`                   | Drop and re-apply all migrations        |
+| `void db seed`                    | Reset + seed local database             |
+| `void secret put <name=value>`    | Set a production secret                 |
+| `void secret sync .env.local`     | Bulk upload secrets from dotenv file    |
+| `void auth login`                 | Authenticate with Void                  |
+| `void project link`               | Link directory to a project             |
+| `void project logs`               | Show runtime logs from deployed project |
+| `void init`                       | Setup wizard (tsconfig, agents, CI)     |
 
 ## Binary Invocation
 
@@ -95,6 +96,21 @@ Link current directory to an existing project by slug, or select interactively i
 ### `void project list`
 
 List all your projects (slug, mode, URL).
+
+### `void project logs`
+
+```
+void project logs [--filter <text>] [--range <duration>]
+```
+
+Show runtime logs from the deployed project. Uses the linked project from `.void/project.json`.
+
+| Flag                 | Purpose                                                                                                         | Default |
+| -------------------- | --------------------------------------------------------------------------------------------------------------- | ------- |
+| `--range <duration>` | How far back to look. Format: `<number><unit>` (m/h/d). Max 7d.                                                 | `1h`    |
+| `--filter <text>`    | Case-insensitive text match against log/exception messages. Shows full request entry when any log line matches. | —       |
+
+Output shows one line per request (`HH:MM:SS METHOD URL STATUS`) with indented console log and exception lines beneath. Errors and exceptions are colored red, warnings yellow.
 
 ### `void project rm [name]`
 

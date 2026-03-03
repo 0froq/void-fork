@@ -38,6 +38,16 @@ export interface SecretResponse {
   name: string;
 }
 
+export interface LogEntry {
+  timestamp: number;
+  outcome: string;
+  logs: { level: string; message: unknown[]; timestamp: number }[];
+  exceptions: { name: string; message: string; timestamp: number }[];
+  url: string;
+  method: string;
+  status: string;
+}
+
 export interface DomainResponse {
   id: string;
   project_id: string;
@@ -339,5 +349,24 @@ export class PlatformClient {
     }
 
     return res.json();
+  }
+
+  async getLogs(projectId: string, since: string, limit = 200): Promise<LogEntry[]> {
+    const res = await fetch(
+      `${this.baseUrl}/projects/${projectId}/logs?since=${encodeURIComponent(since)}&limit=${limit}`,
+      {
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+        },
+      },
+    );
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Failed to fetch logs: ${res.status} ${body}`);
+    }
+
+    const json = (await res.json()) as { data: LogEntry[] };
+    return json.data;
   }
 }
