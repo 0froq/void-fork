@@ -93,7 +93,23 @@ const resourcesLinks = {
   items: [
     { text: "Recipes", link: "/recipes/", activeMatch: "/recipes/" },
     { text: "Examples", link: "/examples/", activeMatch: "/examples/" },
+    { text: "Roadmap", link: "/roadmap/", activeMatch: "/roadmap/" },
     { text: "Blog", link: "https://voidzero.dev/blog" },
+  ],
+};
+
+const socialLinks = [
+  { icon: "x", link: "https://x.com/voidcloudhq" },
+  { icon: "discord", link: "https://discord.gg/cC6TEVFKSx" },
+  { icon: "github", link: "https://github.com/voidzero-dev/void" },
+];
+
+const platformLinks = {
+  text: "Platform",
+  items: [
+    { text: "Features", link: "/platform/features" },
+    { text: "Pricing", link: "/platform/pricing" },
+    { text: "Enterprise", link: "/platform/enterprise" },
   ],
 };
 
@@ -122,18 +138,15 @@ export default extendConfig(
       },
 
       nav: [
-        { text: "Platform", link: "https://void.cloud" },
         { text: "Guide", link: "/guide/", activeMatch: "/guide/" },
         integrationLinks,
         referenceLinks,
         resourcesLinks,
+        platformLinks,
+        { text: "Dashboard", link: "https://dash.void.cloud" },
       ],
 
-      socialLinks: [
-        { icon: "x", link: "https://x.com/voidcloudhq" },
-        { icon: "discord", link: "https://discord.gg/cC6TEVFKSx" },
-        { icon: "github", link: "https://github.com/voidzero-dev/void" },
-      ],
+      socialLinks,
 
       sidebar: {
         "/guide/": [
@@ -254,6 +267,35 @@ export default extendConfig(
           };
           return referenceItems.map((item) => ({ ...item, icon: icons[item.text] }));
         })(),
+      },
+
+      footer: {
+        // @ts-expect-error theme did not augment vitepress theme config
+        nav: [
+          {
+            title: "Docs",
+            items: [
+              { text: "Guide", link: "/guide/" },
+              { text: "Integrations", link: "/integrations/frameworks/overview" },
+              { text: "Reference", link: "/reference/structure" },
+            ],
+          },
+          {
+            title: "Resources",
+            items: resourcesLinks.items,
+          },
+          {
+            title: "Platform",
+            items: [
+              ...platformLinks.items,
+              {
+                text: "Dashboard",
+                link: "https://dash.void.cloud",
+              },
+            ],
+          },
+        ],
+        social: socialLinks,
       },
     },
   }),

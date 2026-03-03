@@ -1,13 +1,16 @@
 @import "@voidzero-dev/vitepress-theme/src/styles/index.css";
 
-.dark {
-  --vp-code-bg: rgba(255, 255, 255, 0.025);
-  --vp-code-color: var(--vp-code-link-color);
+@source "./**/*.vue";
+
+:root {
+  --color-brand: #4f30e8;
 }
 
-.dark .aside-credit-logo-dark {
-  display: none !important;
+:root.dark:not([data-theme]),
+:root[data-theme="dark"] {
+  --color-brand: #7d88ff;
 }
-.dark .aside-credit-logo-light {
-  display: inline !important;
+
+:root[data-theme="light"] {
+  --color-brand: #4f30e8;
 }

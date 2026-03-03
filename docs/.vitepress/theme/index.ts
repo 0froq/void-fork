@@ -12,7 +12,7 @@ import logoDark from "./void-dark.svg";
 import logoLight from "./void-light.svg";
 import voidzeroLogoDark from "./voidzero-logo-dark.svg";
 import voidzeroLogoLight from "./voidzero-logo-light.svg";
-import footerBg from "@assets/vite/footer-background.jpg";
+import footerBg from "@assets/viteplus/footer-background.jpg";
 import monoIcon from "@assets/icons/vite-mono.svg";
 
 function AsideCredit() {
