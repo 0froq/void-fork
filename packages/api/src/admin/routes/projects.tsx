@@ -3,6 +3,7 @@ import type { ApiEnv } from "../../env";
 import {
   getAllProjectsWithOwner,
   countProjects,
+  searchProjects,
   getProject,
   getProjectDeployments,
   getProjectResources,
@@ -21,6 +22,19 @@ const app = new Hono<ApiEnv>();
 
 // GET /projects
 app.get("/", async (c) => {
+  const search = c.req.query("search");
+  const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+  if (search) {
+    const projects = await searchProjects(c.get("db"), search);
+    return c.html(
+      <ProjectsListPage
+        projects={projects}
+        search={search}
+        siteDomain={siteDomain}
+        username={c.get("userLogin")}
+      />,
+    );
+  }
   const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
   const [projects, total] = await Promise.all([
@@ -28,7 +42,6 @@ app.get("/", async (c) => {
     countProjects(c.get("db")),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
   return c.html(
     <ProjectsListPage
       projects={projects}

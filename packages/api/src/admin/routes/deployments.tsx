@@ -3,6 +3,7 @@ import type { ApiEnv } from "../../env";
 import {
   getAllDeploymentsWithProject,
   countDeployments,
+  searchDeployments,
   getDeployment,
   getProject,
 } from "../../db";
@@ -17,9 +18,21 @@ const app = new Hono<ApiEnv>();
 
 // GET /deployments
 app.get("/", async (c) => {
+  const search = c.req.query("search");
+  const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
+  if (search) {
+    const deployments = await searchDeployments(c.get("db"), search);
+    return c.html(
+      <DeploymentsListPage
+        deployments={deployments}
+        search={search}
+        username={c.get("userLogin")}
+        tz={tz}
+      />,
+    );
+  }
   const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
-  const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
   const [deployments, total] = await Promise.all([
     getAllDeploymentsWithProject(c.get("db"), PAGE_SIZE, offset),
     countDeployments(c.get("db")),

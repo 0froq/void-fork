@@ -429,6 +429,75 @@ export async function getAllProjects(db: Db, limit: number, offset: number): Pro
   return db.select().from(projects).orderBy(desc(projects.created_at)).limit(limit).offset(offset);
 }
 
+export async function searchProjects(
+  db: Db,
+  query: string,
+): Promise<
+  (Project & {
+    owner_login: string | null;
+    last_deploy: string | null;
+    last_deploy_id: string | null;
+    last_deploy_status: string | null;
+  })[]
+> {
+  const pattern = `%${query}%`;
+  const lastDeploy = db
+    .select({
+      project_id: deployments.project_id,
+      last_deploy: sql<string>`max(${deployments.created_at})`.as("last_deploy"),
+      last_deploy_id:
+        sql<string>`(SELECT id FROM deployments d2 WHERE d2.project_id = ${deployments.project_id} ORDER BY d2.created_at DESC LIMIT 1)`.as(
+          "last_deploy_id",
+        ),
+      last_deploy_status:
+        sql<string>`(SELECT status FROM deployments d3 WHERE d3.project_id = ${deployments.project_id} ORDER BY d3.created_at DESC LIMIT 1)`.as(
+          "last_deploy_status",
+        ),
+    })
+    .from(deployments)
+    .groupBy(deployments.project_id)
+    .as("last_deploy_sq");
+
+  return db
+    .select({
+      ...getTableColumns(projects),
+      owner_login: users.login,
+      last_deploy: lastDeploy.last_deploy,
+      last_deploy_id: lastDeploy.last_deploy_id,
+      last_deploy_status: lastDeploy.last_deploy_status,
+    })
+    .from(projects)
+    .leftJoin(users, eq(projects.user_id, users.id))
+    .leftJoin(lastDeploy, eq(projects.id, lastDeploy.project_id))
+    .where(
+      or(ilike(projects.slug, pattern), ilike(users.login, pattern), ilike(projects.id, pattern)),
+    )
+    .orderBy(desc(projects.created_at))
+    .limit(50);
+}
+
+export async function searchDeployments(
+  db: Db,
+  query: string,
+): Promise<(Deployment & { project_slug: string | null })[]> {
+  const pattern = `%${query}%`;
+  return db
+    .select({ ...getTableColumns(deployments), project_slug: projects.slug })
+    .from(deployments)
+    .leftJoin(projects, eq(deployments.project_id, projects.id))
+    .where(
+      or(
+        ilike(deployments.id, pattern),
+        ilike(projects.slug, pattern),
+        ilike(deployments.status, pattern),
+        ilike(deployments.commit, pattern),
+        ilike(deployments.source, pattern),
+      ),
+    )
+    .orderBy(desc(deployments.created_at))
+    .limit(50);
+}
+
 export async function getAllProjectsWithOwner(
   db: Db,
   limit: number,
