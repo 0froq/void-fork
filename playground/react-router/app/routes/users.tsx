@@ -1,9 +1,9 @@
-import { env } from "cloudflare:workers";
+import { db } from "void/db";
 import type { Route } from "./+types/users";
 
 export async function loader() {
-  const result = await env.DB.prepare("SELECT * FROM users ORDER BY id").all();
-  return { users: result.results as { id: number; name: string; email: string }[] };
+  const users = await db.list("users");
+  return { users };
 }
 
 export default function UsersPage({ loaderData }: Route.ComponentProps) {

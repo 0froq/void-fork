@@ -1,4 +1,4 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import { Link, Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 
 export default function Root() {
   return (
@@ -11,8 +11,8 @@ export default function Root() {
       </head>
       <body>
         <nav style={{ padding: "8px", display: "flex", gap: "16px" }}>
-          <a href="/">Home</a>
-          <a href="/users">Users</a>
+          <Link to="/">Home</Link>
+          <Link to="/users">Users</Link>
         </nav>
         <hr />
         <Outlet />
