@@ -55,11 +55,13 @@ const tree = (ext) => [
 <style scoped>
 .hero-file-tree {
   margin-top: 2rem;
+  max-width: calc(100vw - 80px);
 }
 
 @media (min-width: 768px) {
   .hero-file-tree {
     margin-top: 0;
+    max-width: none;
   }
 }
 

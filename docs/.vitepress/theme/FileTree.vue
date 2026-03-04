@@ -329,9 +329,11 @@ const TreeNode = defineComponent({
 }
 
 /* Adapter tabs */
+/* Adapter tabs */
 .adapter-tabs {
   display: flex;
   gap: 0;
+  overflow-x: auto;
   border: 1px solid var(--vp-c-divider);
   border-bottom: none;
   border-radius: 8px 8px 0 0;
