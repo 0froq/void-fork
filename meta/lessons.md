@@ -50,6 +50,17 @@ environments: {
 }
 ```
 
+## Schema Backward Compatibility During Deploy
+
+**Problem:** `drizzle-kit migrate` runs BEFORE the new worker deploys. Old code briefly runs against the new schema. Breaking migrations (renames, drops, type changes) crash production in this window.
+
+**Solution:** `schema-compat` CI job in `.github/workflows/ci.yml` applies PR migrations to real PostgreSQL, then runs `prod` branch tests against it.
+
+**Safe patterns:** add nullable column, add table, add index.
+**Unsafe (two-phase required):** rename column, drop column, change type.
+
+**Test infra:** `DATABASE_URL` env var switches integration tests from PGlite to real PostgreSQL. `fileParallelism: false` prevents data races in this mode.
+
 ## Cloudflare Analytics Engine SQL Quirks
 
 AE SQL is ClickHouse-based with several non-obvious limitations:

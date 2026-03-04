@@ -2,6 +2,8 @@ import { Miniflare } from "miniflare";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
+import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
+import pg from "pg";
 import { fileURLToPath } from "node:url";
 import { vi } from "vitest";
 import type { Db } from "../../src/db";
@@ -53,6 +55,7 @@ function createMockDoNamespace(): DurableObjectNamespace {
 
 let mf: Miniflare;
 let pglite: PGlite | undefined;
+let pgPool: pg.Pool | undefined;
 
 export async function setupEnv(): Promise<TestEnv> {
   mf = new Miniflare({
@@ -64,12 +67,18 @@ export async function setupEnv(): Promise<TestEnv> {
   const kv = await mf.getKVNamespace("ROUTING");
   const isrCache = await mf.getKVNamespace("ISR_CACHE");
 
-  pglite = new PGlite();
-  const db = drizzle(pglite, { schema }) as unknown as Db;
-
-  await migrate(drizzle(pglite, { schema }), {
-    migrationsFolder: fileURLToPath(new URL("../../drizzle", import.meta.url)),
-  });
+  const databaseUrl = process.env.DATABASE_URL;
+  let db: Db;
+  if (databaseUrl) {
+    pgPool = new pg.Pool({ connectionString: databaseUrl });
+    db = drizzlePg(pgPool, { schema }) as unknown as Db;
+  } else {
+    pglite = new PGlite();
+    db = drizzle(pglite, { schema }) as unknown as Db;
+    await migrate(drizzle(pglite, { schema }), {
+      migrationsFolder: fileURLToPath(new URL("../../drizzle", import.meta.url)),
+    });
+  }
 
   // Register the test db so the vi.mock in setup.ts routes createDb() here
   setTestDb(db);
@@ -96,6 +105,10 @@ export async function setupEnv(): Promise<TestEnv> {
 export async function teardownEnv(): Promise<void> {
   clearTestDb();
   await mf.dispose();
+  if (pgPool) {
+    await pgPool.end();
+    pgPool = undefined;
+  }
   if (pglite) {
     await pglite.close();
     pglite = undefined;

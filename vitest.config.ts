@@ -28,6 +28,7 @@ export default defineConfig({
           name: "api-integration",
           include: ["packages/api/test/integration/**/*.test.ts"],
           setupFiles: ["packages/api/test/integration/setup.ts"],
+          ...(process.env.DATABASE_URL ? { fileParallelism: false } : {}),
         },
       },
     ],
