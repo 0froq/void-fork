@@ -809,6 +809,7 @@ function serializePrerenderHeaders(response: Response): Record<string, string> {
 
 function moduleContentType(filename: string): string {
   if (filename.endsWith(".wasm")) return "application/wasm";
+  if (filename.endsWith(".map")) return "application/source-map";
   if (filename.endsWith(".json")) return "application/json";
   if (filename.endsWith(".txt")) return "text/plain";
   return "application/javascript+module";
