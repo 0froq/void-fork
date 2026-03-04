@@ -61,6 +61,12 @@ environments: {
 
 **Test infra:** `VOID_TEST_DATABASE_URL` env var switches integration tests from PGlite to real PostgreSQL. `fileParallelism: false` prevents data races in this mode. Uses a non-standard name to prevent accidental data loss if `DATABASE_URL` is set globally (e.g. for Drizzle migrations).
 
+## Git Commit Messages: Avoid Apostrophes in HEREDOC
+
+**Problem:** Using `git commit -m "$(cat <<'EOF' ... EOF)"` fails when the message body contains apostrophes (e.g. "worker's"). Bash `eval` interprets the `'` as a shell quote delimiter instead of a literal character, causing `unexpected EOF while looking for matching` errors.
+
+**Solution:** Use plain double-quoted `-m` and avoid apostrophes in the message, or escape them. Simpler: just rephrase to remove the apostrophe (e.g. "worker" instead of "worker's").
+
 ## Cloudflare Analytics Engine SQL Quirks
 
 AE SQL is ClickHouse-based with several non-obvious limitations:
