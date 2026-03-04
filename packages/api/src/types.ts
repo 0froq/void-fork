@@ -1,7 +1,8 @@
 import type { InferSelectModel } from "drizzle-orm";
-import type { users, projects, deployments, resources, domains } from "./schema";
+import type { users, oauthAccounts, projects, deployments, resources, domains } from "./schema";
 
 export type User = InferSelectModel<typeof users>;
+export type OAuthAccount = InferSelectModel<typeof oauthAccounts>;
 export type Project = InferSelectModel<typeof projects>;
 export type Deployment = InferSelectModel<typeof deployments>;
 export type Resource = InferSelectModel<typeof resources>;

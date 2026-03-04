@@ -8,7 +8,13 @@ import {
 } from "../auth/google";
 import { signJwt } from "../auth/jwt";
 import { hmacSignState, hmacVerifyState } from "../auth/hmac";
-import { getUserByProvider, getUserByEmail, createUser, updateUser } from "../db";
+import {
+  getUserByOAuthAccount,
+  getUserByEmail,
+  createUser,
+  updateUser,
+  createOAuthAccount,
+} from "../db";
 import { isSignupAllowed, type AllowlistEntry } from "../signup-allowlist";
 
 const DEFAULT_REDIRECT_URI = "https://api.void.cloud/auth/callback";
@@ -136,21 +142,25 @@ app.get("/callback", async (c) => {
     email = ghUser.email;
   }
 
-  // Upsert user
-  let user = await getUserByProvider(c.get("db"), resolvedProvider, providerId);
+  // Upsert user — check oauth_accounts first, then email, then create
+  const db = c.get("db");
+  let user = await getUserByOAuthAccount(db, resolvedProvider, providerId);
   if (user) {
-    await updateUser(c.get("db"), user.id, login, email);
-  } else {
-    // Check for duplicate email across providers
-    if (email) {
-      const existing = await getUserByEmail(c.get("db"), email);
-      if (existing) {
-        const redirectUrl = new URL(redirect);
-        redirectUrl.searchParams.set("error", "email_conflict");
-        redirectUrl.searchParams.set("existing_provider", existing.provider);
-        return c.redirect(redirectUrl.toString());
-      }
+    // Only update login/email when the provider matches the user's primary provider
+    // (avoids overwriting GitHub username with Google email)
+    if (user.provider === resolvedProvider) {
+      await updateUser(db, user.id, login, email);
     }
+  } else if (email) {
+    // Link new provider to existing account with the same email
+    const existing = await getUserByEmail(db, email);
+    if (existing) {
+      await createOAuthAccount(db, existing.id, resolvedProvider, providerId);
+      user = existing;
+    }
+  }
+
+  if (!user) {
     // Check signup allowlist (new users only)
     const enabled = await c.env.ROUTING.get("signup:enabled");
     if (enabled === "true") {
@@ -160,7 +170,8 @@ app.get("/callback", async (c) => {
         return c.redirect("/signup-restricted");
       }
     }
-    user = await createUser(c.get("db"), resolvedProvider, providerId, login, email);
+    user = await createUser(db, resolvedProvider, providerId, login, email);
+    await createOAuthAccount(db, user.id, resolvedProvider, providerId);
   }
 
   // Sign JWT

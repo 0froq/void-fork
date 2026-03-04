@@ -13,10 +13,10 @@ import {
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "./schema";
-import { users, projects, deployments, resources, domains } from "./schema";
+import { users, oauthAccounts, projects, deployments, resources, domains } from "./schema";
 import { generateId } from "./id";
 import type { PlanId } from "./tiers";
-import type { Deployment, Domain, Project, Resource, User } from "./types";
+import type { Deployment, Domain, OAuthAccount, Project, Resource, User } from "./types";
 
 export function createDb(connectionString: string) {
   return drizzle(connectionString, { schema });
@@ -70,6 +70,36 @@ export async function updateUser(
   email: string | null,
 ): Promise<void> {
   await db.update(users).set({ login, email }).where(eq(users.id, id));
+}
+
+// --- OAuth Accounts ---
+
+export async function getUserByOAuthAccount(
+  db: Db,
+  provider: string,
+  providerId: string,
+): Promise<User | null> {
+  const [row] = await db
+    .select({ user: users })
+    .from(oauthAccounts)
+    .innerJoin(users, eq(oauthAccounts.user_id, users.id))
+    .where(and(eq(oauthAccounts.provider, provider), eq(oauthAccounts.provider_id, providerId)))
+    .limit(1);
+  return row?.user ?? null;
+}
+
+export async function createOAuthAccount(
+  db: Db,
+  userId: string,
+  provider: string,
+  providerId: string,
+): Promise<OAuthAccount> {
+  const id = generateId("oa");
+  const [row] = await db
+    .insert(oauthAccounts)
+    .values({ id, user_id: userId, provider, provider_id: providerId })
+    .returning();
+  return row;
 }
 
 export async function updateUserPlan(db: Db, id: string, plan: PlanId): Promise<void> {

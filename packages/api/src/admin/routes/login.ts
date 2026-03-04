@@ -4,7 +4,12 @@ import type { ApiEnv } from "../../env";
 import { getGoogleAuthorizeUrl, exchangeCodeForToken, getGoogleUser } from "../../auth/google";
 import { signJwt } from "../../auth/jwt";
 import { hmacSignState, hmacVerifyState } from "../../auth/hmac";
-import { getUserByProvider, getUserByEmail, updateUserProviderId } from "../../db";
+import {
+  getUserByOAuthAccount,
+  getUserByEmail,
+  updateUserProviderId,
+  createOAuthAccount,
+} from "../../db";
 
 const app = new Hono<ApiEnv>();
 
@@ -68,14 +73,16 @@ app.get("/callback", async (c) => {
   const providerId = googleUser.id;
   const login = googleUser.email;
 
-  let user = await getUserByProvider(c.get("db"), "google", providerId);
+  const db = c.get("db");
+  let user = await getUserByOAuthAccount(db, "google", providerId);
 
   // Fall back to email lookup — handles first login after seeding by email
   if (!user) {
-    const byEmail = await getUserByEmail(c.get("db"), login);
+    const byEmail = await getUserByEmail(db, login);
     if (byEmail && byEmail.provider === "google") {
       // Backfill the real provider_id so future logins match directly
-      await updateUserProviderId(c.get("db"), byEmail.id, providerId);
+      await updateUserProviderId(db, byEmail.id, providerId);
+      await createOAuthAccount(db, byEmail.id, "google", providerId);
       user = byEmail;
     }
   }

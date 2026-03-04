@@ -27,6 +27,26 @@ export const users = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// oauth_accounts
+// ---------------------------------------------------------------------------
+export const oauthAccounts = pgTable(
+  "oauth_accounts",
+  {
+    id: text("id").primaryKey(),
+    user_id: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    provider_id: text("provider_id").notNull(),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("idx_oauth_accounts_provider_id").on(t.provider, t.provider_id),
+    index("idx_oauth_accounts_user_id").on(t.user_id),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // projects
 // ---------------------------------------------------------------------------
 export const projects = pgTable(

@@ -8,8 +8,9 @@ import { fileURLToPath } from "node:url";
 import { vi } from "vitest";
 import type { Db } from "../../src/db";
 import * as schema from "../../src/schema";
-import { users, projects, deployments, resources, domains } from "../../src/schema";
+import { users, oauthAccounts, projects, deployments, resources, domains } from "../../src/schema";
 import { signJwt } from "../../src/auth/jwt";
+import { generateId } from "../../src/id";
 import type { PlanId } from "../../src/tiers";
 import { setTestDb, clearTestDb } from "./setup";
 
@@ -120,6 +121,7 @@ export async function clearTables(db: Db): Promise<void> {
   await db.delete(resources);
   await db.delete(deployments);
   await db.delete(projects);
+  await db.delete(oauthAccounts);
   await db.delete(users);
 }
 
@@ -143,6 +145,12 @@ export async function createTestUser(
     email: null,
     plan,
     role,
+  });
+  await db.insert(oauthAccounts).values({
+    id: generateId("oa"),
+    user_id: id,
+    provider,
+    provider_id: pid,
   });
   const jwt = await signJwt({ sub: id, login }, JWT_SECRET);
   return { id, login, jwt };
