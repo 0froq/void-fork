@@ -539,8 +539,10 @@ export function voidPlugin(options?: {
         }
       }
 
-      // Minify worker bundles for smaller deploys
-      if (!isNodeTarget(config.target)) {
+      // Minify worker bundles for smaller deploys (skip when output: "static"
+      // because prerendering runs the SSR bundle in Miniflare, which cannot
+      // resolve template-literal dynamic imports produced by the minifier)
+      if (!isNodeTarget(config.target) && config.output !== "static") {
         const envNames = framework === "vinext-app" ? ["rsc", "ssr"] : ["ssr"];
         return {
           environments: Object.fromEntries(envNames.map((n) => [n, { build: { minify: true } }])),
