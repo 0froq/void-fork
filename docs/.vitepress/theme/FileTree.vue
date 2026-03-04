@@ -9,6 +9,7 @@ export interface FileTreeItem {
   description?: string;
   link?: string;
   children?: FileTreeItem[];
+  collapsed?: boolean;
 }
 
 const props = defineProps<{
@@ -25,7 +26,9 @@ function getAllFolderNames(items: FileTreeItem[]): string[] {
   const names: string[] = [];
   for (const item of items) {
     if (isFolder(item)) {
-      names.push(item.name);
+      if (!item.collapsed) {
+        names.push(item.name);
+      }
       if (item.children) {
         names.push(...getAllFolderNames(item.children));
       }
