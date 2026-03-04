@@ -337,7 +337,9 @@ async function runFrameworkDeploy(
   const redirectRules: RedirectRule[] = [...(fwRedirectRules ?? []), ...(cfgRedirectRules ?? [])];
 
   if (!existsSync(workerDir)) {
-    log.error(`Worker output not found: ${fwPreset.workerDir}`);
+    log.error(
+      `Worker output not found at "${fwPreset.workerDir}". Run "${fwPreset.buildCommand}" first.`,
+    );
     process.exit(1);
   }
 

@@ -110,9 +110,9 @@ export const FRAMEWORK_PRESETS: Record<string, FrameworkPreset> = {
   },
   astro: {
     buildCommand: "astro build",
-    workerDir: "dist/_worker.js",
-    workerMain: "index.js",
-    assetsDir: "dist",
+    workerDir: "dist/server",
+    workerMain: "entry.mjs",
+    assetsDir: "dist/client",
     hashedAssetsPrefix: "_astro",
   },
 };
