@@ -29,13 +29,8 @@ import { collectPrerenderPaths } from "../prerender-paths";
 import { detectPreset, FRAMEWORK_PRESETS, type StaticPreset, type FrameworkPreset } from "./preset";
 import { readConfig, resolveBindingNames, type AuthProvider, type VoidConfig } from "../config";
 import { readWranglerCompat } from "./wrangler";
-import {
-  needsWrapper,
-  generateWrapper,
-  bundleEntry,
-  cleanupWrapper,
-  type WrapperFeatures,
-} from "./wrapper";
+import { needsWrapper, generateWrapper, bundleEntry, cleanupWrapper } from "./wrapper";
+import type { WrapperFeatures } from "./wrapper";
 import { getRequestedProjectSlug, resolveProjectBySlug, inferDefaultSlug } from "./resolve-project";
 import { cliTitle } from "./output";
 import { parseHeadersFile, parseRedirectsFile } from "./headers";
@@ -380,7 +375,6 @@ async function runFrameworkDeploy(
   const originalEntry = join(workerDir, fwPreset.workerMain);
 
   const wrapperFeatures: WrapperFeatures = {
-    originalEntry,
     auth: authProviders,
     crons: rawJobs,
     queues: rawQueues,
@@ -389,25 +383,20 @@ async function runFrameworkDeploy(
   let actualWorkerDir = workerDir;
   let actualWorkerMain = fwPreset.workerMain;
 
-  // Step 1: Generate wrapper source if crons/queues are present
-  let entryToBuild = originalEntry;
-  let resolveConfig: import("vite").UserConfig["resolve"] | undefined;
-
-  if (needsWrapper(wrapperFeatures)) {
-    log.step("Generating wrapper...");
-    const wrapper = generateWrapper(root, wrapperFeatures);
-    entryToBuild = wrapper.entryPath;
-    resolveConfig = { alias: wrapper.resolveAlias };
-    log.info("Wrapper generated");
-  }
-
-  // Step 2: Bundle when needed (wrapper has uncompiled source, or framework has bare imports)
-  if (resolveConfig || fwPreset.bundle) {
+  // Step 1: Bundle if framework has unbundled bare imports (e.g. SvelteKit)
+  if (fwPreset.bundle) {
     log.step("Bundling worker...");
-    const bundleResult = await bundleEntry(root, entryToBuild, resolveConfig);
+    const bundleResult = await bundleEntry(root, originalEntry);
     actualWorkerDir = bundleResult.outputDir;
     actualWorkerMain = bundleResult.entryFilename;
     log.info("Worker bundled");
+  }
+
+  // Step 2: Wrap if crons/queues are present (in-place, no re-bundling)
+  if (needsWrapper(wrapperFeatures)) {
+    log.step("Generating wrapper...");
+    await generateWrapper(actualWorkerDir, actualWorkerMain, root, wrapperFeatures);
+    log.info("Wrapper generated");
   }
 
   // 8. Read wrangler compat settings (void.json > wrangler.jsonc > default)
