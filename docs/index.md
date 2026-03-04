@@ -4,7 +4,7 @@ theme: dark
 
 hero:
   name: Void.
-  text: Ship full-stack Vite apps like never before
+  text: Ship full-stack Vite apps at warp speed
   tagline: Void is a deployment platform designed for Vite - with a powerful backend SDK that makes your Vite apps truly full-stack.
   actions:
     - theme: brand

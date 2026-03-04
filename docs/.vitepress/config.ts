@@ -117,7 +117,7 @@ const platformLinks = {
 export default extendConfig(
   defineConfig({
     title: "Void",
-    description: "Fullstack Vite plugin for Cloudflare Workers",
+    description: "Build and deploy full-stack Vite apps at warp speed",
     cleanUrls: true,
     head: [["link", { rel: "icon", type: "image/svg+xml", href: "/icon.svg" }]],
     appearance: "dark",
