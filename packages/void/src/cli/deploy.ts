@@ -313,7 +313,7 @@ async function runFrameworkDeploy(
   skipBuild?: boolean,
   commit?: string | null,
 ): Promise<void> {
-  log.info(`${detected.name} (Class ${detected.class.toUpperCase()}) deploy`);
+  log.info(`${detected.name} framework deploy`);
 
   // 1. Build
   if (!skipBuild) {
