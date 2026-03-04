@@ -538,6 +538,14 @@ export function voidPlugin(options?: {
           if (!authProviders.includes("google")) authProviders.push("google");
         }
       }
+
+      // Minify worker bundles for smaller deploys
+      if (!isNodeTarget(config.target)) {
+        const envNames = framework === "vinext-app" ? ["rsc", "ssr"] : ["ssr"];
+        return {
+          environments: Object.fromEntries(envNames.map((n) => [n, { build: { minify: true } }])),
+        };
+      }
     },
     configureServer(server) {
       // Remote mode status — log which bindings are using the proxy

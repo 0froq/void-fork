@@ -31,7 +31,8 @@ import { readConfig, resolveBindingNames, type AuthProvider, type VoidConfig } f
 import { readWranglerCompat } from "./wrangler";
 import {
   needsWrapper,
-  generateAndBundleWrapper,
+  generateWrapper,
+  bundleEntry,
   cleanupWrapper,
   type WrapperFeatures,
 } from "./wrapper";
@@ -388,12 +389,25 @@ async function runFrameworkDeploy(
   let actualWorkerDir = workerDir;
   let actualWorkerMain = fwPreset.workerMain;
 
+  // Step 1: Generate wrapper source if crons/queues are present
+  let entryToBuild = originalEntry;
+  let resolveConfig: import("vite").UserConfig["resolve"] | undefined;
+
   if (needsWrapper(wrapperFeatures)) {
     log.step("Generating wrapper...");
-    const wrapperResult = await generateAndBundleWrapper(root, wrapperFeatures);
-    actualWorkerDir = wrapperResult.outputDir;
-    actualWorkerMain = wrapperResult.entryFilename;
-    log.info("Wrapper bundled");
+    const wrapper = generateWrapper(root, wrapperFeatures);
+    entryToBuild = wrapper.entryPath;
+    resolveConfig = { alias: wrapper.resolveAlias };
+    log.info("Wrapper generated");
+  }
+
+  // Step 2: Bundle when needed (wrapper has uncompiled source, or framework has bare imports)
+  if (resolveConfig || fwPreset.bundle) {
+    log.step("Bundling worker...");
+    const bundleResult = await bundleEntry(root, entryToBuild, resolveConfig);
+    actualWorkerDir = bundleResult.outputDir;
+    actualWorkerMain = bundleResult.entryFilename;
+    log.info("Worker bundled");
   }
 
   // 8. Read wrangler compat settings (void.json > wrangler.jsonc > default)

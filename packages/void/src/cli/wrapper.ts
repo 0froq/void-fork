@@ -1,6 +1,6 @@
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { build } from "vite";
+import { build, type UserConfig } from "vite";
 
 export interface WrapperFeatures {
   /** Absolute path to the framework's original worker entry. */
@@ -21,42 +21,18 @@ export interface WrapperResult {
 }
 
 /**
- * Determine whether a wrapper is needed based on the features.
- */
-export function needsWrapper(features: WrapperFeatures): boolean {
-  return features.crons.length > 0 || features.queues.length > 0;
-}
-
-/**
- * Generate a wrapper module, bundle it with Vite, and return the output info.
+ * Bundle an entry module targeting workerd.
  *
- * The wrapper wraps the framework's original worker with:
- * - Scheduled handler for cron jobs (if any)
- * - Queue handler for queue consumers (if any)
+ * Uses a temp directory as build root so Vite won't load the project's
+ * vite.config.ts. Externalizes all `cloudflare:` and `node:` imports
+ * (provided by the runtime).
  */
-export async function generateAndBundleWrapper(
-  root: string,
-  features: WrapperFeatures,
+async function bundleForWorkerd(
+  tmpDir: string,
+  entry: string,
+  fileName: string,
+  resolve?: UserConfig["resolve"],
 ): Promise<WrapperResult> {
-  const tmpDir = join(root, ".void", "wrapper");
-  mkdirSync(tmpDir, { recursive: true });
-
-  // Generate wrapper source
-  const entrySource = generateWrapperSource(root, tmpDir, features);
-  const entryPath = join(tmpDir, "entry.ts");
-  writeFileSync(entryPath, entrySource);
-
-  // Generate scheduled handler if needed
-  if (features.crons.length > 0) {
-    writeFileSync(join(tmpDir, "scheduled.ts"), generateScheduledSource(root, features.crons));
-  }
-
-  // Generate queue handler if needed
-  if (features.queues.length > 0) {
-    writeFileSync(join(tmpDir, "queue.ts"), generateQueueSource(root, features.queues));
-  }
-
-  // Bundle with Vite
   const outDir = join(tmpDir, "out");
   await build({
     root: tmpDir,
@@ -65,34 +41,103 @@ export async function generateAndBundleWrapper(
       outDir,
       emptyOutDir: true,
       lib: {
-        entry: entryPath,
+        entry,
         formats: ["es"],
-        fileName: "wrapper",
+        fileName,
       },
       rollupOptions: {
-        external: ["node:async_hooks", "cloudflare:workers"],
+        external: [/^cloudflare:/, /^node:/],
+        output: {
+          // Workers for Platforms restricts caches.default access.
+          // Stub it so framework code (e.g. SvelteKit) that uses it doesn't throw.
+          banner: [
+            "const __noopCache = {",
+            "  match() { return Promise.resolve(undefined); },",
+            "  put() { return Promise.resolve(); },",
+            "  delete() { return Promise.resolve(false); },",
+            "};",
+            "globalThis.caches = { default: __noopCache, open() { return Promise.resolve(__noopCache); } };",
+          ].join("\n"),
+        },
       },
       minify: false,
       target: "esnext",
     },
-    resolve: {
-      alias: {
-        __ORIGINAL_WORKER__: features.originalEntry,
-      },
-    },
+    resolve,
   });
 
+  // Read actual output filename from the output directory
+  const outFiles = readdirSync(outDir).filter((f) => f.startsWith(fileName));
+  const entryFilename = outFiles[0] ?? `${fileName}.mjs`;
+
+  return { entryFilename, outputDir: outDir };
+}
+
+/**
+ * Determine whether a wrapper is needed based on the features.
+ */
+export function needsWrapper(features: WrapperFeatures): boolean {
+  return features.crons.length > 0 || features.queues.length > 0;
+}
+
+export interface GeneratedWrapper {
+  /** Absolute path to the generated wrapper entry. */
+  entryPath: string;
+  /** Resolve alias mapping `__ORIGINAL_WORKER__` to the real entry. */
+  resolveAlias: Record<string, string>;
+}
+
+/**
+ * Generate wrapper source files (no bundling).
+ *
+ * Writes the wrapper entry + scheduled/queue handler modules to
+ * `.void/wrapper/`. The caller is responsible for bundling the
+ * returned entry path via `bundleEntry()`.
+ */
+export function generateWrapper(root: string, features: WrapperFeatures): GeneratedWrapper {
+  const tmpDir = join(root, ".void", "wrapper");
+  mkdirSync(tmpDir, { recursive: true });
+
+  const entrySource = generateWrapperSource(root, tmpDir, features);
+  const entryPath = join(tmpDir, "entry.ts");
+  writeFileSync(entryPath, entrySource);
+
+  if (features.crons.length > 0) {
+    writeFileSync(join(tmpDir, "scheduled.ts"), generateScheduledSource(root, features.crons));
+  }
+
+  if (features.queues.length > 0) {
+    writeFileSync(join(tmpDir, "queue.ts"), generateQueueSource(root, features.queues));
+  }
+
   return {
-    entryFilename: "wrapper.mjs",
-    outputDir: outDir,
+    entryPath,
+    resolveAlias: { __ORIGINAL_WORKER__: features.originalEntry },
   };
 }
 
 /**
- * Clean up generated wrapper files.
+ * Bundle a worker entry into a self-contained module.
+ *
+ * Used for:
+ * - Frameworks with unbundled bare imports (e.g. SvelteKit)
+ * - Generated wrapper entries that reference cron/queue source files
+ */
+export async function bundleEntry(
+  root: string,
+  entry: string,
+  resolve?: UserConfig["resolve"],
+): Promise<WrapperResult> {
+  const tmpDir = join(root, ".void", "bundle");
+  mkdirSync(tmpDir, { recursive: true });
+  return bundleForWorkerd(tmpDir, entry, "index", resolve);
+}
+
+/**
+ * Clean up generated wrapper/bundle files.
  */
 export function cleanupWrapper(root: string): void {
-  rmSync(join(root, ".void", "wrapper"), { recursive: true, force: true });
+  rmSync(join(root, ".void"), { recursive: true, force: true });
 }
 
 // ─── Source Generators ─────────────────────────────────────────────

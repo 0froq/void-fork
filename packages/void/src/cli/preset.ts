@@ -55,6 +55,8 @@ export interface FrameworkPreset {
   assetsDir: string;
   /** URL-level prefix for hashed/immutable assets (used by dispatch for cache headers + edge cache keys). */
   hashedAssetsPrefix?: string;
+  /** Whether the worker entry needs bundling (bare imports not resolved by framework build). */
+  bundle?: boolean;
 }
 
 /**
@@ -100,6 +102,7 @@ export const FRAMEWORK_PRESETS: Record<string, FrameworkPreset> = {
     workerMain: "_worker.js",
     assetsDir: ".svelte-kit/cloudflare",
     hashedAssetsPrefix: "_app/immutable",
+    bundle: true,
   },
   nuxt: {
     buildCommand: "nuxt build",
