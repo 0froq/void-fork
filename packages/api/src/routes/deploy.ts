@@ -392,7 +392,7 @@ app.post("/:id/deploy", async (c) => {
         const allBindings = [
           ...plainTextBindings,
           ...workerBindings,
-          { name: "ASSETS", type: "assets" },
+          ...(completionJwt ? [{ name: "ASSETS", type: "assets" }] : []),
         ];
 
         // Add metadata part (include provisioned bindings + assets)
