@@ -8,6 +8,7 @@ import {
   getProjectDeployments,
   getProjectResources,
   getDomainsByProjectIds,
+  getUser,
 } from "../db";
 import { queryD1 } from "../migrations/remote-runner";
 
@@ -44,6 +45,14 @@ const app = new Hono<ApiEnv>()
     // Validate slug format: lowercase alphanumeric + dashes
     if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(body.slug) && body.slug.length > 1) {
       return c.json({ error: "slug must be lowercase alphanumeric with dashes" }, 400);
+    }
+
+    // Short slugs (5 chars or fewer) are reserved for paid plans
+    if (body.slug.length <= 5) {
+      const user = await getUser(c.get("db"), c.get("userId"));
+      if (!user || user.plan === "free") {
+        return c.json({ error: "short slugs (5 characters or fewer) require a paid plan" }, 403);
+      }
     }
 
     // Check for slug uniqueness

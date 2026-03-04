@@ -169,6 +169,45 @@ describe("POST /projects", () => {
     });
   });
 
+  it("rejects short slug for free tier users", async () => {
+    const user = await createTestUser(env.db);
+
+    const res = await app.fetch(
+      new Request("http://localhost/projects", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ slug: "abc" }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: "short slugs (5 characters or fewer) require a paid plan",
+    });
+  });
+
+  it("allows short slug for paid tier users", async () => {
+    const user = await createTestUser(env.db, "paiduser", "github", undefined, "solo");
+
+    const res = await app.fetch(
+      new Request("http://localhost/projects", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ slug: "abc" }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { slug: string };
+    expect(body.slug).toBe("abc");
+  });
+
   it("rejects duplicate slug", async () => {
     const user = await createTestUser(env.db);
     await createTestProject(env.db, user.id, "taken-slug");
