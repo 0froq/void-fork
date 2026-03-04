@@ -67,7 +67,7 @@ export async function setupEnv(): Promise<TestEnv> {
   const kv = await mf.getKVNamespace("ROUTING");
   const isrCache = await mf.getKVNamespace("ISR_CACHE");
 
-  const databaseUrl = process.env.DATABASE_URL;
+  const databaseUrl = process.env.VOID_TEST_DATABASE_URL;
   let db: Db;
   if (databaseUrl) {
     pgPool = new pg.Pool({ connectionString: databaseUrl });

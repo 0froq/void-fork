@@ -59,7 +59,7 @@ environments: {
 **Safe patterns:** add nullable column, add table, add index.
 **Unsafe (two-phase required):** rename column, drop column, change type.
 
-**Test infra:** `DATABASE_URL` env var switches integration tests from PGlite to real PostgreSQL. `fileParallelism: false` prevents data races in this mode.
+**Test infra:** `VOID_TEST_DATABASE_URL` env var switches integration tests from PGlite to real PostgreSQL. `fileParallelism: false` prevents data races in this mode. Uses a non-standard name to prevent accidental data loss if `DATABASE_URL` is set globally (e.g. for Drizzle migrations).
 
 ## Cloudflare Analytics Engine SQL Quirks
 
