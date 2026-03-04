@@ -12,6 +12,7 @@ const alias = {
 export default defineConfig({
   resolve: { alias },
   test: {
+    silent: "passed-only",
     projects: [
       // Unit tests + other packages (no special setup needed)
       {
