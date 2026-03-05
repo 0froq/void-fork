@@ -14,7 +14,8 @@ Define your tables in `db/schema.ts` using [Drizzle's SQLite column helpers](htt
 
 ```ts
 // db/schema.ts
-import { sqliteTable, text, integer, sql } from "void/schema-helpers";
+import { sqliteTable, text, integer } from "void/schema-helpers";
+import { sql } from "void/db";
 
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -262,7 +263,8 @@ Instead of writing validator schemas by hand, you can derive them directly from 
 
 ```ts [Valibot]
 // db/schema.ts
-import { sqliteTable, text, integer, sql } from "void/schema-helpers";
+import { sqliteTable, text, integer } from "void/schema-helpers";
+import { sql } from "void/db";
 import { createInsertSchema } from "drizzle-valibot";
 import { pipe, minLength, email } from "valibot";
 
@@ -283,7 +285,8 @@ export const insertUserSchema = createInsertSchema(users, {
 
 ```ts [Zod]
 // db/schema.ts
-import { sqliteTable, text, integer, sql } from "void/schema-helpers";
+import { sqliteTable, text, integer } from "void/schema-helpers";
+import { sql } from "void/db";
 import { createInsertSchema } from "drizzle-zod";
 
 export const users = sqliteTable("users", {

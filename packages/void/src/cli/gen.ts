@@ -412,7 +412,8 @@ async function runModel(root: string, name: string, columns: ColumnSpec[]): Prom
   ];
 
   const content = [
-    `import { sqliteTable, ${columnImports.join(", ")}, sql } from "void/schema-helpers";`,
+    `import { sqliteTable, ${columnImports.join(", ")} } from "void/schema-helpers";`,
+    `import { sql } from "void/db";`,
     "",
     `export const ${name} = sqliteTable("${name}", {`,
     ...allCols,

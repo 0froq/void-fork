@@ -1,4 +1,5 @@
-import { sqliteTable, integer, text, sql } from "void/schema-helpers";
+import { sqliteTable, integer, text } from "void/schema-helpers";
+import { sql } from "void/db";
 
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
