@@ -223,6 +223,7 @@ void db migrate
 | `void db reset`    | Drop the local DB and re-apply all migrations                 |
 | `void db seed`     | Reset + run seed file (`--file <path>`)                       |
 | `void db execute`  | Run ad-hoc SQL against local DB (`--file <path>`)             |
+| `void db studio`   | Open Drizzle Studio for the local database                    |
 | `void db export`   | Dump local DB as SQL (`--output`, `--no-data`, `--no-schema`) |
 
 See the [CLI reference](../reference/cli.md#database) for details.

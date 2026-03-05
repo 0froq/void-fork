@@ -16,6 +16,7 @@ outline: deep
 | `void db status`                  | Show local/remote migration status      |
 | `void db reset`                   | Drop and re-apply all migrations        |
 | `void db seed`                    | Reset + seed local database             |
+| `void db studio`                  | Open Drizzle Studio for local database  |
 | `void secret put <name=value>`    | Set a production secret                 |
 | `void secret sync .env.local`     | Bulk upload secrets from dotenv file    |
 | `void auth login`                 | Authenticate with Void                  |
@@ -177,6 +178,10 @@ void db migrate
 ```
 
 Apply pending migrations to the local database without resetting. Unlike `void db reset`, this preserves existing data and only runs migrations that haven't been applied yet.
+
+### `void db studio`
+
+Open [Drizzle Studio](https://orm.drizzle.team/docs/drizzle-kit-studio) for the local D1 database. Launches a web-based GUI for browsing and editing your data.
 
 ### `void db export`
 

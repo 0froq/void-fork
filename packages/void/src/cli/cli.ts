@@ -65,6 +65,7 @@ function printHelp() {
       helpLine("void db execute <sql>", "Run SQL against the local database"),
       helpLine("  --file <path>", "Run SQL from a file instead"),
       helpLine("void db migrate", "Apply pending migrations locally"),
+      helpLine("void db studio", "Open Drizzle Studio for the local database"),
       helpLine("void db export [--output <path>]", "Export local database as SQL"),
       helpLine("  --no-data", "Schema only (no INSERT statements)"),
       helpLine("  --no-schema", "Data only (no CREATE TABLE)"),
@@ -248,7 +249,7 @@ if (command === "staging") {
     },
     {
       name: "db",
-      hint: "status | reset | seed | execute | migrate | export",
+      hint: "status | reset | seed | execute | migrate | studio | export",
       description: "Database migrations and management",
     },
     {
