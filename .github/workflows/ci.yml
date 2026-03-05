@@ -10,7 +10,7 @@ on:
 
 jobs:
   lint-and-check:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,7 +35,7 @@ jobs:
       - run: pnpm check
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     strategy:
       fail-fast: false
       matrix:
@@ -65,7 +65,7 @@ jobs:
       - run: pnpm vitest --run ${{ matrix.pattern }}
 
   schema-compat:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     env:
       POSTGRES_USER: void_ci
       POSTGRES_PASSWORD: void_ci_pass
