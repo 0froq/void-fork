@@ -271,7 +271,6 @@ export default extendConfig(
       },
 
       footer: {
-        // @ts-expect-error theme did not augment vitepress theme config
         nav: [
           {
             title: "Docs",
