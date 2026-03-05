@@ -2,6 +2,8 @@ import { execFileSync, execSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
+
+const drizzleKitBin = join(fileURLToPath(import.meta.resolve("drizzle-kit")), "..", "bin.cjs");
 import { intro, outro, log, note, spinner, confirm, isCancel } from "@clack/prompts";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
@@ -355,7 +357,7 @@ async function runFrameworkDeploy(
 
     try {
       const driftConfigPath = writeDrizzleConfig(root, ":memory:");
-      execSyncDrift(`npx drizzle-kit generate --config ${driftConfigPath}`, {
+      execSyncDrift(`node ${drizzleKitBin} generate --config ${driftConfigPath}`, {
         cwd: root,
         stdio: "pipe",
       });
@@ -615,7 +617,7 @@ async function runFullDeploy(
 
     try {
       const driftConfigPath = writeDrizzleConfig(root, ":memory:");
-      execSyncDrift(`npx drizzle-kit generate --config ${driftConfigPath}`, {
+      execSyncDrift(`node ${drizzleKitBin} generate --config ${driftConfigPath}`, {
         cwd: root,
         stdio: "pipe",
       });

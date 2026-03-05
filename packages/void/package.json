@@ -60,7 +60,8 @@
     },
     "./schema-helpers": {
       "types": "./dist/runtime/schema.d.mts",
-      "import": "./dist/runtime/schema.mjs"
+      "import": "./dist/runtime/schema.mjs",
+      "require": "./schema-helpers.cjs"
     },
     "./kv": {
       "types": "./dist/runtime/kv.d.mts",

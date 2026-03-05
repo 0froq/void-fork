@@ -1,11 +1,14 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { intro, outro, log } from "@clack/prompts";
 import { getToken } from "./auth";
 import { PlatformClient } from "./client";
 import { readProjectConfig } from "./project";
 import type { DbArgs } from "./db-args";
 import { cliTitle, dim, pc } from "./output";
+
+const drizzleKitBin = join(fileURLToPath(import.meta.resolve("drizzle-kit")), "..", "bin.cjs");
 
 export async function runDbCommand(root: string, args: DbArgs): Promise<void> {
   console.log();
@@ -25,6 +28,8 @@ export async function runDbCommand(root: string, args: DbArgs): Promise<void> {
     await runExecute(root, args.command, args.file);
   } else if (args.action === "migrate") {
     await runMigrate(root);
+  } else if (args.action === "studio") {
+    await runStudio(root);
   } else {
     await runExport(root, args);
   }
@@ -45,7 +50,7 @@ async function runPush(root: string): Promise<void> {
   const configPath = writeDrizzleConfig(root, dbPath);
 
   try {
-    execSync(`npx drizzle-kit push --config ${configPath}`, {
+    execSync(`node ${drizzleKitBin} push --config ${configPath}`, {
       cwd: root,
       stdio: "inherit",
     });
@@ -64,7 +69,7 @@ async function runGenerate(root: string): Promise<void> {
   const configPath = writeDrizzleConfig(root, ":memory:");
 
   try {
-    execSync(`npx drizzle-kit generate --config ${configPath}`, {
+    execSync(`node ${drizzleKitBin} generate --config ${configPath}`, {
       cwd: root,
       stdio: "inherit",
     });
@@ -260,6 +265,33 @@ async function runMigrate(root: string): Promise<void> {
     log.info(dim("Restart your dev server if it's running."));
   }
   outro("");
+}
+
+async function runStudio(root: string): Promise<void> {
+  const { existsSync } = await import("node:fs");
+  const { execSync } = await import("node:child_process");
+  const { writeDrizzleConfig } = await import("../drizzle/config");
+  const { getMiniflareDatabasePath } = await import("../migrations/runner");
+
+  const persistRoot = join(root, ".void");
+  const dbPath = getMiniflareDatabasePath(persistRoot, "local");
+
+  if (!existsSync(dbPath)) {
+    log.error("No local database found. Run `void dev` first.");
+    process.exit(1);
+  }
+
+  const configPath = writeDrizzleConfig(root, dbPath);
+
+  log.info("Opening Drizzle Studio...");
+  try {
+    execSync(`node ${drizzleKitBin} studio --config ${configPath}`, {
+      cwd: root,
+      stdio: "inherit",
+    });
+  } catch {
+    process.exit(1);
+  }
 }
 
 async function runExport(
