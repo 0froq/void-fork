@@ -102,6 +102,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     nodeTarget: !!options.target,
     headerRules: options.headerRules,
     redirectRules: options.redirectRules,
+    bindingHandlerPath: options.target ? undefined : resolveFile("void/remote/binding-handler"),
   };
 
   // Auth compile options are set up lazily in buildStart (after env plugin
