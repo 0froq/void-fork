@@ -8,6 +8,10 @@ Void's built-in database layer uses [Drizzle ORM](../guide/database.md) with D1 
 
 You're also free to skip D1 entirely and connect to an external database like PostgreSQL or MySQL — see [External Databases](#external-databases) below.
 
+::: warning ⚠️ Cloudflare env access in meta frameworks
+Some frameworks, like Nuxt and SvelteKit, do not run in workerd during dev and therefore do not support directly importing from `cloudflare:workers`.
+:::
+
 ## Kysely
 
 ```ts

@@ -141,8 +141,8 @@ export default extendConfig(
 
       nav: [
         { text: "Guide", link: "/guide/", activeMatch: "/guide/" },
-        integrationLinks,
         referenceLinks,
+        integrationLinks,
         resourcesLinks,
         platformLinks,
         { text: "Dashboard", link: "https://dash.void.cloud" },

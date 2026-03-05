@@ -8,6 +8,7 @@ import { h } from "vue";
 import "virtual:group-icons.css";
 import "./styles.css";
 import CodeGroupSync from "./CodeGroupSync.vue";
+import DocFooter from "./DocFooter.vue";
 
 import logoDark from "./void-dark.svg";
 import logoLight from "./void-light.svg";
@@ -59,7 +60,7 @@ export default {
   Layout() {
     return h(BaseTheme.Layout, null, {
       "aside-ads-before": () => h(AsideCredit),
-      "layout-bottom": () => h(CodeGroupSync),
+      "layout-bottom": () => [h(DocFooter), h(CodeGroupSync)],
     });
   },
   enhanceApp({ app }) {
