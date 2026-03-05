@@ -206,6 +206,7 @@ export default extendConfig(
             items: [
               { text: "Supported App Types", link: "/guide/app-types" },
               { text: "Deployment", link: "/guide/deployment" },
+              { text: "Remote Development", link: "/guide/remote-dev" },
               {
                 text: "Edge Routing",
                 collapsed: false,
