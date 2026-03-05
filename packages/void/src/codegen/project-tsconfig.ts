@@ -22,7 +22,7 @@ export function ensureProjectTsconfig(
   const includeQueues = existsSync(join(root, "queues"));
   const files = [
     ...(includeRoutes ? ["routes.d.ts"] : []),
-    "db.d.ts",
+    ...(hasDrizzle ? ["db.d.ts"] : []),
     ...(includeQueues ? ["queues.d.ts"] : []),
   ];
 

@@ -218,7 +218,7 @@ export function createBindingHandler(env: Record<string, unknown>): Hono {
     return c.json({
       keys: result.keys,
       list_complete: result.list_complete,
-      cursor: result.cursor ?? null,
+      cursor: result.list_complete ? null : result.cursor,
     });
   });
 

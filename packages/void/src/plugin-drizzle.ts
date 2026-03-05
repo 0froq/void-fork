@@ -150,6 +150,8 @@ function generateDbDts(outDir: string, _schema: SchemaLocation): void {
     "  type Schema = typeof schema;",
     "  export const db: DrizzleD1Database<Schema>;",
     "  export function createDb(d1: D1Database): DrizzleD1Database<Schema>;",
+    '  export { sql, eq, ne, gt, gte, lt, lte, and, or, not, desc, asc, like, ilike, notLike, inArray, notInArray, isNull, isNotNull, between, notBetween, exists, notExists, count, sum, avg, min, max } from "drizzle-orm";',
+    '  export type { DrizzleD1Database } from "drizzle-orm/d1";',
     "}",
     "",
   ];
