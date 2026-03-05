@@ -26,7 +26,7 @@ features:
     details: Void scans your source code, detects what you use, and provisions every resource automatically — no config files, no dashboard clicks. Locally and in the cloud.
   - iconify: lucide:shield-check
     title: End-to-End Type Safety
-    details: Types flow from SQL migrations through route handlers to page component props and the frontend fetch client. One schema validates at runtime and infers types at build time.
+    details: Types flow from Drizzle schema through route handlers to page component props and the frontend fetch client. One schema validates at runtime and infers types at build time.
   - iconify: lucide:blocks
     title: Any Framework, Any Rendering
     details: React, Vue, Svelte, Solid, plus Vite-based meta-frameworks. SSR, SSG, ISR, islands with partial hydration, and markdown — mix and match per page.

@@ -3,6 +3,7 @@ import BaseTheme, { themeContextKey } from "@voidzero-dev/vitepress-theme";
 import FileTree from "./FileTree.vue";
 import PagesFileTree from "./PagesFileTree.vue";
 import RoutesFileTree from "./RoutesFileTree.vue";
+import VoidAppFileTree from "./VoidAppFileTree.vue";
 import { h } from "vue";
 import "virtual:group-icons.css";
 import "./styles.css";
@@ -65,6 +66,7 @@ export default {
     app.component("FileTree", FileTree);
     app.component("PagesFileTree", PagesFileTree);
     app.component("RoutesFileTree", RoutesFileTree);
+    app.component("VoidAppFileTree", VoidAppFileTree);
     app.provide(themeContextKey, {
       logoDark,
       logoLight,

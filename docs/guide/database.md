@@ -254,6 +254,89 @@ Column format is `name:type`, with an optional `?` suffix for nullable:
 
 See the [CLI reference](../reference/cli.md#code-generation) for the full list of generators.
 
+## Schema-Derived Validators
+
+Instead of writing validator schemas by hand, you can derive them directly from your Drizzle tables using [`drizzle-valibot`](https://orm.drizzle.team/docs/typebox) or [`drizzle-zod`](https://orm.drizzle.team/docs/zod). This keeps your validation in sync with your database schema automatically.
+
+::: code-group
+
+```ts [Valibot]
+// db/schema.ts
+import { sqliteTable, text, integer, sql } from "void/schema-helpers";
+import { createInsertSchema } from "drizzle-valibot";
+import { pipe, minLength, email } from "valibot";
+
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+export const insertUserSchema = createInsertSchema(users, {
+  name: (schema) => pipe(schema, minLength(1)),
+  email: (schema) => pipe(schema, email()),
+});
+```
+
+```ts [Zod]
+// db/schema.ts
+import { sqliteTable, text, integer, sql } from "void/schema-helpers";
+import { createInsertSchema } from "drizzle-zod";
+
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+export const insertUserSchema = createInsertSchema(users, {
+  name: (schema) => schema.min(1),
+  email: (schema) => schema.email(),
+});
+```
+
+:::
+
+`createInsertSchema` generates a validator that matches `$inferInsert` — columns with defaults or auto-increments become optional, `NOT NULL` columns are required. The optional second argument refines individual columns via a callback that receives the auto-generated schema.
+
+Use the derived schema in your route handlers with [`withValidator()`](./server-routing.md#validation):
+
+```ts
+// routes/api/users/index.ts
+import { defineHandler } from "void";
+import { db } from "void/db";
+import { users, insertUserSchema } from "@schema";
+
+export const POST = defineHandler.withValidator({
+  body: insertUserSchema,
+})(async (c, { body }) => {
+  const [created] = await db.insert(users).values(body).returning();
+  return created;
+});
+```
+
+Three functions are available:
+
+| Function             | Purpose                                                                   |
+| -------------------- | ------------------------------------------------------------------------- |
+| `createInsertSchema` | Validates insert data — excludes auto-generated columns, applies defaults |
+| `createSelectSchema` | Matches the shape of selected rows                                        |
+| `createUpdateSchema` | Like insert but all fields are optional (partial update)                  |
+
+Install whichever package matches your validator:
+
+```bash
+npm install drizzle-valibot valibot
+# or
+npm install drizzle-zod zod
+```
+
 ## Deploy Workflow
 
 When you run `void deploy`:
