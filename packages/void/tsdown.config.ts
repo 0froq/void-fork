@@ -63,6 +63,7 @@ export default defineConfig({
     "src/auth/schema.ts",
     "src/runtime/env.ts",
     "src/runtime/db.ts",
+    "src/runtime/schema.ts",
     "src/runtime/kv.ts",
     "src/runtime/queues.ts",
     "src/runtime/storage.ts",

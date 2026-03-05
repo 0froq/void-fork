@@ -2,6 +2,8 @@ import { parseArgs } from "node:util";
 import type { SubcommandDef } from "./subcommand-prompt";
 
 export const dbSubcommands: SubcommandDef[] = [
+  { name: "push", description: "Push schema to local D1 (no migration files)" },
+  { name: "generate", description: "Generate SQL migrations from schema changes" },
   { name: "status", description: "Show migration status (local + remote)" },
   { name: "reset", description: "Reset local DB and re-run migrations" },
   {
@@ -24,6 +26,8 @@ export const dbSubcommands: SubcommandDef[] = [
 ];
 
 export type DbArgs =
+  | { action: "push" }
+  | { action: "generate" }
   | { action: "status" }
   | { action: "reset" }
   | { action: "seed"; file?: string }
@@ -46,6 +50,20 @@ export function parseDbArgs(args: string[]): DbArgs {
   });
 
   const [action, ...rest] = parsed.positionals;
+
+  if (action === "push") {
+    if (rest.length > 0) {
+      throw new Error(`Error: Unexpected argument: ${rest[0]}`);
+    }
+    return { action };
+  }
+
+  if (action === "generate") {
+    if (rest.length > 0) {
+      throw new Error(`Error: Unexpected argument: ${rest[0]}`);
+    }
+    return { action };
+  }
 
   if (action === "status") {
     if (rest.length > 0) {
@@ -102,5 +120,5 @@ export function parseDbArgs(args: string[]): DbArgs {
     return { action, output, noData, noSchema, table };
   }
 
-  throw new Error("Error: Usage: void db <status|reset|seed|execute|migrate|export>");
+  throw new Error("Error: Usage: void db <push|generate|status|reset|seed|execute|migrate|export>");
 }

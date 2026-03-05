@@ -58,6 +58,10 @@
       "types": "./dist/runtime/db.d.mts",
       "import": "./dist/runtime/db.mjs"
     },
+    "./schema-helpers": {
+      "types": "./dist/runtime/schema.d.mts",
+      "import": "./dist/runtime/schema.mjs"
+    },
     "./kv": {
       "types": "./dist/runtime/kv.d.mts",
       "import": "./dist/runtime/kv.mjs"
@@ -151,6 +155,8 @@
     "@hono/oauth-providers": "^0.8.5",
     "@napi-rs/keyring": "1.2.0",
     "better-sqlite3": "^12.6.2",
+    "drizzle-kit": "^0.31.9",
+    "drizzle-orm": "^0.45.1",
     "wrangler": "catalog:"
   },
   "devDependencies": {

@@ -346,8 +346,51 @@ async function runFrameworkDeploy(
   const scanDirs = voidConfig.inference?.scanDirs ?? FRAMEWORK_SCAN_DIRS;
   const bindings = inferProjectBindings(root, inferenceOptions, scanDirs);
 
+  // Check for Drizzle schema drift
+  const { discoverSchema: discoverDrizzleSchema } = await import("../drizzle/discover");
+  const drizzleSchema = discoverDrizzleSchema(root);
+  if (drizzleSchema) {
+    const { execSync: execSyncDrift } = await import("node:child_process");
+    const { writeDrizzleConfig } = await import("../drizzle/config");
+
+    try {
+      const driftConfigPath = writeDrizzleConfig(root, ":memory:");
+      execSyncDrift(`npx drizzle-kit generate --config ${driftConfigPath}`, {
+        cwd: root,
+        stdio: "pipe",
+      });
+
+      // Check if new migration files were generated
+      const gitStatus = execSyncDrift("git status --porcelain db/migrations/", {
+        cwd: root,
+        encoding: "utf-8",
+      }).trim();
+
+      if (gitStatus) {
+        const shouldCommit = await confirm({
+          message: "Schema changes detected. Generate and commit the migrations?",
+        });
+
+        if (!shouldCommit || isCancel(shouldCommit)) {
+          execSyncDrift("git checkout -- db/migrations/", { cwd: root, stdio: "pipe" });
+          log.error("Deploy aborted — migrations not committed.");
+          process.exit(1);
+        }
+
+        execSyncDrift("git add db/migrations/", { cwd: root, stdio: "pipe" });
+        execSyncDrift('git commit -m "db: generate migrations"', {
+          cwd: root,
+          stdio: "pipe",
+        });
+        log.success("Migrations generated and committed.");
+      }
+    } catch {
+      // drizzle-kit generate failed or git not available — continue without drift check
+    }
+  }
+
   // 4. Collect migrations
-  const migrationsDir = join(root, "migrations");
+  const migrationsDir = join(root, "db", "migrations");
   const rawMigrations = collectMigrations(migrationsDir);
   let validatedMigrations;
   if (rawMigrations.length > 0) {
@@ -563,8 +606,51 @@ async function runFullDeploy(
   const cfgRedirectRules = convertRedirectsConfig(deployConfig.routing?.redirects);
   const redirectRules: RedirectRule[] = [...(userRedirectRules ?? []), ...(cfgRedirectRules ?? [])];
 
+  // Check for Drizzle schema drift
+  const { discoverSchema: discoverDrizzleSchema } = await import("../drizzle/discover");
+  const drizzleSchema = discoverDrizzleSchema(root);
+  if (drizzleSchema) {
+    const { execSync: execSyncDrift } = await import("node:child_process");
+    const { writeDrizzleConfig } = await import("../drizzle/config");
+
+    try {
+      const driftConfigPath = writeDrizzleConfig(root, ":memory:");
+      execSyncDrift(`npx drizzle-kit generate --config ${driftConfigPath}`, {
+        cwd: root,
+        stdio: "pipe",
+      });
+
+      // Check if new migration files were generated
+      const gitStatus = execSyncDrift("git status --porcelain db/migrations/", {
+        cwd: root,
+        encoding: "utf-8",
+      }).trim();
+
+      if (gitStatus) {
+        const shouldCommit = await confirm({
+          message: "Schema changes detected. Generate and commit the migrations?",
+        });
+
+        if (!shouldCommit || isCancel(shouldCommit)) {
+          execSyncDrift("git checkout -- db/migrations/", { cwd: root, stdio: "pipe" });
+          log.error("Deploy aborted — migrations not committed.");
+          process.exit(1);
+        }
+
+        execSyncDrift("git add db/migrations/", { cwd: root, stdio: "pipe" });
+        execSyncDrift('git commit -m "db: generate migrations"', {
+          cwd: root,
+          stdio: "pipe",
+        });
+        log.success("Migrations generated and committed.");
+      }
+    } catch {
+      // drizzle-kit generate failed or git not available — continue without drift check
+    }
+  }
+
   // 7. Collect and validate migrations
-  const migrationsDir = join(root, "migrations");
+  const migrationsDir = join(root, "db", "migrations");
   const rawMigrations = collectMigrations(migrationsDir);
   let validatedMigrations;
   if (rawMigrations.length > 0) {
