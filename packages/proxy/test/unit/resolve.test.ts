@@ -1,39 +1,59 @@
 import { describe, it, expect, vi } from "vitest";
 import { resolveResource } from "../../src/resolve";
 
-function createMockDb(rows: Record<string, { cf_id: string }>) {
+const JWT_SECRET = "test-secret-key";
+
+function createMockApi(resources: Record<string, string>) {
   return {
-    prepare: vi.fn((_sql: string) => ({
-      bind: vi.fn((...args: unknown[]) => ({
-        first: vi.fn(async () => {
-          const key = args.join(":");
-          return rows[key] ?? null;
-        }),
-      })),
-    })),
-  } as unknown as D1Database;
+    fetch: vi.fn(async (url: string, init?: RequestInit) => {
+      const projectId = new URL(url).pathname.split("/").pop()!;
+      const body = JSON.parse(init?.body as string);
+      const key = `${projectId}:${body.type}:${body.binding}`;
+      const cfId = resources[key];
+      if (cfId) {
+        return Response.json({ cf_id: cfId });
+      }
+      return Response.json({ error: `unknown binding "${body.binding}"` }, { status: 404 });
+    }),
+  } as unknown as Fetcher;
 }
 
 describe("resolveResource", () => {
   it("returns cf_id for a known resource", async () => {
-    const db = createMockDb({ "proj_1:d1:DB": { cf_id: "d1-uuid-123" } });
-    const result = await resolveResource(db, "proj_1", "d1", "DB");
+    const api = createMockApi({ "proj_1:d1:DB": "d1-uuid-123" });
+    const result = await resolveResource(api, JWT_SECRET, "proj_1", "d1", "DB");
     expect(result).toBe("d1-uuid-123");
   });
 
   it("throws for an unknown resource", async () => {
-    const db = createMockDb({});
-    await expect(resolveResource(db, "proj_1", "kv", "MISSING")).rejects.toThrow(
-      'No kv resource "MISSING" found for project proj_1',
+    const api = createMockApi({});
+    await expect(resolveResource(api, JWT_SECRET, "proj_1", "kv", "MISSING")).rejects.toThrow(
+      "Resource resolution failed (404)",
     );
   });
 
-  it("queries with correct parameters", async () => {
-    const db = createMockDb({ "proj_42:r2:STORAGE": { cf_id: "r2-uuid-456" } });
-    await resolveResource(db, "proj_42", "r2", "STORAGE");
+  it("calls API with correct URL and body", async () => {
+    const api = createMockApi({ "proj_42:r2:STORAGE": "r2-uuid-456" });
+    await resolveResource(api, JWT_SECRET, "proj_42", "r2", "STORAGE");
 
-    expect(db.prepare).toHaveBeenCalledWith(
-      "SELECT cf_id FROM resources WHERE project_id = ? AND type = ? AND binding_name = ?",
+    expect(api.fetch).toHaveBeenCalledWith(
+      "https://api/internal/resolve-resource/proj_42",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ type: "r2", binding: "STORAGE" }),
+      }),
     );
+  });
+
+  it("includes HMAC token in x-void-internal header", async () => {
+    const api = createMockApi({ "proj_1:d1:DB": "d1-uuid-123" });
+    await resolveResource(api, JWT_SECRET, "proj_1", "d1", "DB");
+
+    const call = (api.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const init = call[1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers["x-void-internal"]).toBeDefined();
+    expect(typeof headers["x-void-internal"]).toBe("string");
+    expect(headers["x-void-internal"].length).toBeGreaterThan(0);
   });
 });

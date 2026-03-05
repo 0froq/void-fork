@@ -16,7 +16,7 @@ d1.post("/query", async (c) => {
 
   let dbId: string;
   try {
-    dbId = await resolveResource(c.env.DB, projectId, "d1", body.binding);
+    dbId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "d1", body.binding);
   } catch {
     return c.json({ error: `unknown binding "${body.binding}"` }, 404);
   }
@@ -69,7 +69,7 @@ d1.post("/batch", async (c) => {
 
   let dbId: string;
   try {
-    dbId = await resolveResource(c.env.DB, projectId, "d1", body.binding);
+    dbId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "d1", body.binding);
   } catch {
     return c.json({ error: `unknown binding "${body.binding}"` }, 404);
   }

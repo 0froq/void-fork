@@ -274,6 +274,25 @@ export async function getProjectResources(db: Db, projectId: string): Promise<Re
   return db.select().from(resources).where(eq(resources.project_id, projectId));
 }
 
+export async function getResourceByBinding(
+  db: Db,
+  projectId: string,
+  type: "d1" | "kv" | "r2" | "queue",
+  bindingName: string,
+): Promise<{ cf_id: string } | undefined> {
+  return db
+    .select({ cf_id: resources.cf_id })
+    .from(resources)
+    .where(
+      and(
+        eq(resources.project_id, projectId),
+        eq(resources.type, type),
+        eq(resources.binding_name, bindingName),
+      ),
+    )
+    .then((rows) => rows[0]);
+}
+
 // --- Domains ---
 
 export async function createDomain(

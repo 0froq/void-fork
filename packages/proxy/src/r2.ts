@@ -20,7 +20,7 @@ r2.post("/get", async (c) => {
 
   let bucket: string;
   try {
-    bucket = await resolveResource(c.env.DB, projectId, "r2", body.binding);
+    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "r2", body.binding);
   } catch {
     return c.json({ error: `unknown binding "${body.binding}"` }, 404);
   }
@@ -64,7 +64,7 @@ r2.post("/put", async (c) => {
 
   let bucket: string;
   try {
-    bucket = await resolveResource(c.env.DB, projectId, "r2", body.binding);
+    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "r2", body.binding);
   } catch {
     return c.json({ error: `unknown binding "${body.binding}"` }, 404);
   }
@@ -109,7 +109,7 @@ r2.post("/delete", async (c) => {
 
   let bucket: string;
   try {
-    bucket = await resolveResource(c.env.DB, projectId, "r2", body.binding);
+    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "r2", body.binding);
   } catch {
     return c.json({ error: `unknown binding "${body.binding}"` }, 404);
   }
@@ -140,7 +140,7 @@ r2.post("/list", async (c) => {
 
   let bucket: string;
   try {
-    bucket = await resolveResource(c.env.DB, projectId, "r2", body.binding);
+    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "r2", body.binding);
   } catch {
     return c.json({ error: `unknown binding "${body.binding}"` }, 404);
   }
@@ -187,7 +187,7 @@ r2.post("/head", async (c) => {
 
   let bucket: string;
   try {
-    bucket = await resolveResource(c.env.DB, projectId, "r2", body.binding);
+    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "r2", body.binding);
   } catch {
     return c.json({ error: `unknown binding "${body.binding}"` }, 404);
   }

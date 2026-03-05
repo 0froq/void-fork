@@ -27,7 +27,7 @@ app.get("/health", (c) =>
       ai: !!c.env.AI,
       kv: !!c.env.ROUTING,
       jwt: !!c.env.JWT_SECRET,
-      db: !!c.env.DB,
+      api: !!c.env.API,
     },
   }),
 );

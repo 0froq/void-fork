@@ -28,26 +28,27 @@ async function signAiToken(projectId: string, secret: string): Promise<string> {
 
 // --- Mock factories ---
 
-function createMockDb(resources: Record<string, string>) {
+function createMockApi(resources: Record<string, string> = {}) {
   return {
-    prepare: vi.fn(() => ({
-      bind: vi.fn((...args: unknown[]) => ({
-        first: vi.fn(async () => {
-          const key = args.join(":");
-          const cfId = resources[key];
-          return cfId ? { cf_id: cfId } : null;
-        }),
-      })),
-    })),
+    fetch: vi.fn(async (url: string, init?: RequestInit) => {
+      const projectId = new URL(url).pathname.split("/").pop()!;
+      const body = JSON.parse(init?.body as string);
+      const key = `${projectId}:${body.type}:${body.binding}`;
+      const cfId = resources[key];
+      if (cfId) {
+        return Response.json({ cf_id: cfId });
+      }
+      return Response.json({ error: `unknown binding "${body.binding}"` }, { status: 404 });
+    }),
   };
 }
 
-function createEnv(dbResources: Record<string, string> = {}) {
+function createEnv(apiResources: Record<string, string> = {}) {
   return {
     AI: { run: vi.fn(), models: vi.fn(), toMarkdown: vi.fn() },
     JWT_SECRET,
     ROUTING: { get: vi.fn(async () => null), put: vi.fn(), delete: vi.fn() },
-    DB: createMockDb(dbResources) as any,
+    API: createMockApi(apiResources),
     CF_ACCOUNT_ID: "test-account",
     CF_API_TOKEN: "test-token",
   };

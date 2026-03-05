@@ -16,7 +16,7 @@ kv.post("/get", async (c) => {
 
   let nsId: string;
   try {
-    nsId = await resolveResource(c.env.DB, projectId, "kv", body.binding);
+    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "kv", body.binding);
   } catch {
     return c.json({ error: `unknown binding "${body.binding}"` }, 404);
   }
@@ -62,7 +62,7 @@ kv.post("/put", async (c) => {
 
   let nsId: string;
   try {
-    nsId = await resolveResource(c.env.DB, projectId, "kv", body.binding);
+    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "kv", body.binding);
   } catch {
     return c.json({ error: `unknown binding "${body.binding}"` }, 404);
   }
@@ -114,7 +114,7 @@ kv.post("/delete", async (c) => {
 
   let nsId: string;
   try {
-    nsId = await resolveResource(c.env.DB, projectId, "kv", body.binding);
+    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "kv", body.binding);
   } catch {
     return c.json({ error: `unknown binding "${body.binding}"` }, 404);
   }
@@ -145,7 +145,7 @@ kv.post("/list", async (c) => {
 
   let nsId: string;
   try {
-    nsId = await resolveResource(c.env.DB, projectId, "kv", body.binding);
+    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "kv", body.binding);
   } catch {
     return c.json({ error: `unknown binding "${body.binding}"` }, 404);
   }

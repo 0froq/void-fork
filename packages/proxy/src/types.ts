@@ -2,7 +2,7 @@ export interface Env {
   AI: Ai;
   JWT_SECRET: string;
   ROUTING: KVNamespace;
-  DB: D1Database;
+
   CF_ACCOUNT_ID: string;
   CF_API_TOKEN: string;
   API: Fetcher;
