@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { ProxyEnv } from "./types";
 import { resolveResource } from "./resolve";
+import { dispatchToWorker } from "./dispatch";
 
 const CF_API = "https://api.cloudflare.com/client/v4";
 
@@ -14,6 +15,11 @@ d1.post("/query", async (c) => {
     return c.json({ error: "binding and sql required" }, 400);
   }
 
+  // Try WfP dispatch first (native bindings, ~1-5ms)
+  const dispatchRes = await dispatchToWorker(c.env, projectId, "/d1/query", body);
+  if (dispatchRes) return dispatchRes;
+
+  // Fallback: CF REST API (for old deploys without /__void handler)
   let dbId: string;
   try {
     dbId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "d1", body.binding);
@@ -67,6 +73,11 @@ d1.post("/batch", async (c) => {
     return c.json({ error: "binding and statements required" }, 400);
   }
 
+  // Try WfP dispatch first (native db.batch() with transactional guarantees)
+  const dispatchRes = await dispatchToWorker(c.env, projectId, "/d1/batch", body);
+  if (dispatchRes) return dispatchRes;
+
+  // Fallback: CF REST API (sequential, no transaction)
   let dbId: string;
   try {
     dbId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "d1", body.binding);
@@ -74,9 +85,6 @@ d1.post("/batch", async (c) => {
     return c.json({ error: `unknown binding "${body.binding}"` }, 404);
   }
 
-  // Execute each statement sequentially via the CF D1 REST API.
-  // Note: the D1 binding's batch() provides transactional guarantees;
-  // REST API calls are independent. Acceptable for local dev.
   const results = [];
   for (const stmt of body.statements as { sql: string; params?: unknown[] }[]) {
     const cfRes = await fetch(

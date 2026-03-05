@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { ProxyEnv } from "./types";
 import { resolveResource } from "./resolve";
+import { dispatchToWorker } from "./dispatch";
 
 const CF_API = "https://api.cloudflare.com/client/v4";
 
@@ -14,6 +15,11 @@ kv.post("/get", async (c) => {
     return c.json({ error: "binding and key required" }, 400);
   }
 
+  // Try WfP dispatch first
+  const dispatchRes = await dispatchToWorker(c.env, projectId, "/kv/get", body);
+  if (dispatchRes) return dispatchRes;
+
+  // Fallback: CF REST API
   let nsId: string;
   try {
     nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "kv", body.binding);
@@ -60,6 +66,11 @@ kv.post("/put", async (c) => {
     return c.json({ error: "binding and key required" }, 400);
   }
 
+  // Try WfP dispatch first
+  const dispatchRes = await dispatchToWorker(c.env, projectId, "/kv/put", body);
+  if (dispatchRes) return dispatchRes;
+
+  // Fallback: CF REST API
   let nsId: string;
   try {
     nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "kv", body.binding);
@@ -112,6 +123,11 @@ kv.post("/delete", async (c) => {
     return c.json({ error: "binding and key required" }, 400);
   }
 
+  // Try WfP dispatch first
+  const dispatchRes = await dispatchToWorker(c.env, projectId, "/kv/delete", body);
+  if (dispatchRes) return dispatchRes;
+
+  // Fallback: CF REST API
   let nsId: string;
   try {
     nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "kv", body.binding);
@@ -143,6 +159,11 @@ kv.post("/list", async (c) => {
     return c.json({ error: "binding required" }, 400);
   }
 
+  // Try WfP dispatch first
+  const dispatchRes = await dispatchToWorker(c.env, projectId, "/kv/list", body);
+  if (dispatchRes) return dispatchRes;
+
+  // Fallback: CF REST API
   let nsId: string;
   try {
     nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "kv", body.binding);

@@ -6,6 +6,7 @@ export interface Env {
   CF_ACCOUNT_ID: string;
   CF_API_TOKEN: string;
   API: Fetcher;
+  DISPATCH: DispatchNamespace;
 }
 
 export interface JwtPayload {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
 import worker from "../../src/index";
+import { clearWorkerNameCache } from "../../src/dispatch";
 
 const JWT_SECRET = "test-secret-key";
 
@@ -31,7 +32,12 @@ async function signAiToken(projectId: string, secret: string): Promise<string> {
 function createMockApi(resources: Record<string, string> = {}) {
   return {
     fetch: vi.fn(async (url: string, init?: RequestInit) => {
-      const projectId = new URL(url).pathname.split("/").pop()!;
+      const path = new URL(url).pathname;
+      // resolve-worker endpoint (no body)
+      if (path.includes("/internal/resolve-worker/")) {
+        return Response.json({ error: "not found" }, { status: 404 });
+      }
+      const projectId = path.split("/").pop()!;
       const body = JSON.parse(init?.body as string);
       const key = `${projectId}:${body.type}:${body.binding}`;
       const cfId = resources[key];
@@ -39,6 +45,15 @@ function createMockApi(resources: Record<string, string> = {}) {
         return Response.json({ cf_id: cfId });
       }
       return Response.json({ error: `unknown binding "${body.binding}"` }, { status: 404 });
+    }),
+  };
+}
+
+// DISPATCH mock that always throws (simulates no deployed worker — forces REST API fallback)
+function createMockDispatch() {
+  return {
+    get: vi.fn(() => {
+      throw new Error("worker not found");
     }),
   };
 }
@@ -51,6 +66,7 @@ function createEnv(apiResources: Record<string, string> = {}) {
     API: createMockApi(apiResources),
     CF_ACCOUNT_ID: "test-account",
     CF_API_TOKEN: "test-token",
+    DISPATCH: createMockDispatch(),
   };
 }
 
@@ -83,6 +99,7 @@ describe("D1 proxy endpoints", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    clearWorkerNameCache();
     vi.restoreAllMocks();
   });
 

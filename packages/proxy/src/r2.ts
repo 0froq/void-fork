@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { ProxyEnv } from "./types";
 import { resolveResource } from "./resolve";
+import { dispatchToWorker } from "./dispatch";
 
 const CF_API = "https://api.cloudflare.com/client/v4";
 
@@ -18,6 +19,11 @@ r2.post("/get", async (c) => {
     return c.json({ error: "binding and key required" }, 400);
   }
 
+  // Try WfP dispatch first
+  const dispatchRes = await dispatchToWorker(c.env, projectId, "/r2/get", body);
+  if (dispatchRes) return dispatchRes;
+
+  // Fallback: CF REST API
   let bucket: string;
   try {
     bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "r2", body.binding);
@@ -62,6 +68,11 @@ r2.post("/put", async (c) => {
     return c.json({ error: "binding and key required" }, 400);
   }
 
+  // Try WfP dispatch first
+  const dispatchRes = await dispatchToWorker(c.env, projectId, "/r2/put", body);
+  if (dispatchRes) return dispatchRes;
+
+  // Fallback: CF REST API
   let bucket: string;
   try {
     bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "r2", body.binding);
@@ -107,6 +118,11 @@ r2.post("/delete", async (c) => {
     return c.json({ error: "key or keys required" }, 400);
   }
 
+  // Try WfP dispatch first
+  const dispatchRes = await dispatchToWorker(c.env, projectId, "/r2/delete", body);
+  if (dispatchRes) return dispatchRes;
+
+  // Fallback: CF REST API
   let bucket: string;
   try {
     bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "r2", body.binding);
@@ -138,6 +154,11 @@ r2.post("/list", async (c) => {
     return c.json({ error: "binding required" }, 400);
   }
 
+  // Try WfP dispatch first
+  const dispatchRes = await dispatchToWorker(c.env, projectId, "/r2/list", body);
+  if (dispatchRes) return dispatchRes;
+
+  // Fallback: CF REST API
   let bucket: string;
   try {
     bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "r2", body.binding);
@@ -185,6 +206,11 @@ r2.post("/head", async (c) => {
     return c.json({ error: "binding and key required" }, 400);
   }
 
+  // Try WfP dispatch first
+  const dispatchRes = await dispatchToWorker(c.env, projectId, "/r2/head", body);
+  if (dispatchRes) return dispatchRes;
+
+  // Fallback: CF REST API
   let bucket: string;
   try {
     bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "r2", body.binding);

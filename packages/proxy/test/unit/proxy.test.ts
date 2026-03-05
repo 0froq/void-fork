@@ -104,6 +104,11 @@ function createEnv(
     CF_ACCOUNT_ID: "test-account-id",
     CF_API_TOKEN: "test-api-token",
     API: apiOverride ?? createMockApi(),
+    DISPATCH: {
+      get: vi.fn(() => {
+        throw new Error("worker not found");
+      }),
+    },
   };
 }
 
