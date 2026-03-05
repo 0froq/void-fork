@@ -1,5 +1,11 @@
 # Lessons
 
+## Worktrees: When asked to create a worktree, CREATE A WORKTREE
+
+**Problem:** When the user asks to "create a worktree and execute the plan", you MUST create an actual git worktree. Do NOT just create a branch in the submodule directly — this modifies the user's active working tree, disrupting any other work they have in progress. This is unacceptable.
+
+**Rule:** If the user says "create a worktree", use `git worktree add` to create an isolated workspace. No exceptions. No shortcuts. Follow the `using-git-worktrees` skill exactly.
+
 ## Worktrees + Submodules: How to merge back to root tree
 
 **Problem:** A submodule pointer is a specific commit SHA. Committing the framework change in the worktree (on a detached HEAD) produces a SHA that only exists there. When you try to merge the platform branch back to main, `git submodule update` fails because the referenced commit doesn't exist in main's framework object store or the remote.
