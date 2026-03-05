@@ -52,6 +52,8 @@ export function createDb(d1: D1Database): DrizzleD1Database {
   return _drizzle(d1);
 }
 
+let _instance: DrizzleD1Database | undefined;
+
 /**
  * Default Drizzle D1 instance — resolves the `DB` binding from the runtime
  * environment. When the Void plugin is active, this is replaced with a
@@ -59,7 +61,7 @@ export function createDb(d1: D1Database): DrizzleD1Database {
  */
 export const db: DrizzleD1Database = new Proxy({} as any, {
   get(_, prop) {
-    const instance = _drizzle(requireRuntimeBinding<D1Database>("DB"));
-    return Reflect.get(instance, prop);
+    _instance ??= _drizzle(requireRuntimeBinding<D1Database>("DB"));
+    return Reflect.get(_instance, prop);
   },
 });

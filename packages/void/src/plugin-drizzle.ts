@@ -51,46 +51,50 @@ export function drizzlePlugin(root: string, hasRouteTypes: boolean): Plugin {
       };
     },
 
-    resolveId(id) {
-      // Only intercept void/db in server/worker environments (not client)
-      if (id === "void/db" && this.environment?.name !== "client") {
-        if (!schema) return; // Fall through to the real module (stub)
-        return VIRTUAL_DB_ID;
-      }
+    resolveId: {
+      filter: { id: /^(void\/db|@schema)/ },
+      handler(id, importer) {
+        // Only intercept void/db in server/worker environments (not client)
+        if (id === "void/db" && this.environment?.name !== "client") {
+          if (!schema) return; // Fall through to the real module (stub)
+          // Don't redirect schema files to avoid circular dependency
+          // (virtual:void-db imports the schema, which imports void/db)
+          if (importer) {
+            if (schema.type === "file" && importer === schema.path) return;
+            if (schema.type === "directory" && importer.startsWith(schema.path)) return;
+          }
+          return VIRTUAL_DB_ID;
+        }
 
-      // Resolve @schema alias explicitly via resolveId so it works in
-      // meta-framework SSR environments (Astro's workerd runner, etc.)
-      // where Vite's config-level resolve.alias may not be applied.
-      if (schema && (id === "@schema" || id.startsWith("@schema/"))) {
-        if (id === "@schema") return schema.path;
-        return join(schema.path, id.slice("@schema/".length));
-      }
+        // Resolve @schema alias explicitly via resolveId so it works in
+        // meta-framework SSR environments (Astro's workerd runner, etc.)
+        // where Vite's config-level resolve.alias may not be applied.
+        if (schema && (id === "@schema" || id.startsWith("@schema/"))) {
+          if (id === "@schema") return schema.path;
+          return join(schema.path, id.slice("@schema/".length));
+        }
+      },
     },
 
-    load(id) {
-      if (id !== VIRTUAL_DB_ID) return;
+    load: {
+      filter: { id: /^\0virtual:void-db$/ },
+      handler() {
+        const schemaImport = JSON.stringify(schema!.path);
 
-      const schemaImport = JSON.stringify(schema!.path);
-
-      // Use absolute paths for drizzle-orm imports so they resolve in any
-      // project context (metaframeworks where drizzle-orm isn't a direct dep).
-      return `
+        // Use absolute paths for drizzle-orm imports so they resolve in any
+        // project context (metaframeworks where drizzle-orm isn't a direct dep).
+        return `
 import { drizzle } from ${JSON.stringify(drizzleD1Resolved)};
 import { requireRuntimeBinding } from ${JSON.stringify(envModuleResolved)};
 import * as schema from ${schemaImport};
 export { sql, eq, ne, gt, gte, lt, lte, and, or, not, desc, asc, like, ilike, notLike, inArray, notInArray, isNull, isNotNull, between, notBetween, exists, notExists, count, sum, avg, min, max } from ${JSON.stringify(drizzleOrmResolved)};
 
-const _cache = new WeakMap();
+let _instance;
 
 export const db = new Proxy({}, {
   get(_, prop) {
-    const d1 = requireRuntimeBinding("DB");
-    let instance = _cache.get(d1);
-    if (!instance) {
-      instance = drizzle(d1, { schema });
-      _cache.set(d1, instance);
-    }
-    return Reflect.get(instance, prop);
+    _instance ??= drizzle(requireRuntimeBinding("DB"), { schema });
+    return Reflect.get(_instance, prop);
   },
 });
 
@@ -98,6 +102,7 @@ export function createDb(d1) {
   return drizzle(d1, { schema });
 }
 `;
+      },
     },
 
     configureServer(server) {
