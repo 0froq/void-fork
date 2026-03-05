@@ -1,5 +1,16 @@
+// In-memory cache: resource mappings are stable (only change on deploy).
+// Persists across requests within the same CF worker isolate.
+const cache = new Map<string, string>();
+
+/** @internal Exposed for testing only. */
+export function clearResolveCache() {
+  cache.clear();
+}
+
 /**
  * Resolves a project's binding to its Cloudflare resource ID via the API service binding.
+ * Results are cached in-memory per isolate — the first call per binding hits the API,
+ * subsequent calls return instantly.
  */
 export async function resolveResource(
   api: Fetcher,
@@ -8,6 +19,10 @@ export async function resolveResource(
   type: "d1" | "kv" | "r2",
   bindingName: string,
 ): Promise<string> {
+  const cacheKey = `${projectId}:${type}:${bindingName}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
   const token = await hmacSign(projectId, jwtSecret);
   const res = await api.fetch(`https://api/internal/resolve-resource/${projectId}`, {
     method: "POST",
@@ -24,6 +39,7 @@ export async function resolveResource(
   }
 
   const data = await res.json<{ cf_id: string }>();
+  cache.set(cacheKey, data.cf_id);
   return data.cf_id;
 }
 

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { resolveResource } from "../../src/resolve";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { resolveResource, clearResolveCache } from "../../src/resolve";
 
 const JWT_SECRET = "test-secret-key";
 
@@ -19,6 +19,10 @@ function createMockApi(resources: Record<string, string>) {
 }
 
 describe("resolveResource", () => {
+  beforeEach(() => {
+    clearResolveCache();
+  });
+
   it("returns cf_id for a known resource", async () => {
     const api = createMockApi({ "proj_1:d1:DB": "d1-uuid-123" });
     const result = await resolveResource(api, JWT_SECRET, "proj_1", "d1", "DB");
@@ -43,6 +47,15 @@ describe("resolveResource", () => {
         body: JSON.stringify({ type: "r2", binding: "STORAGE" }),
       }),
     );
+  });
+
+  it("caches resolved resource IDs", async () => {
+    const api = createMockApi({ "proj_1:d1:DB": "d1-uuid-123" });
+    await resolveResource(api, JWT_SECRET, "proj_1", "d1", "DB");
+    await resolveResource(api, JWT_SECRET, "proj_1", "d1", "DB");
+    await resolveResource(api, JWT_SECRET, "proj_1", "d1", "DB");
+
+    expect((api.fetch as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
   });
 
   it("includes HMAC token in x-void-internal header", async () => {
