@@ -5,9 +5,9 @@ This is the private platform repo for Void. The open-source framework code lives
 When making changes that span both repos, commit framework first, then update the submodule pointer in the platform repo:
 
 ```bash
-# 1. commit and push framework changes
+# 1. commit framework changes
 cd framework
-git add . && git commit -m "feat: whatever" && git push
+git add . && git commit -m "feat: whatever"
 
 # 2. update submodule pointer + commit platform changes
 cd ..
@@ -16,7 +16,28 @@ git add ...        # any platform changes
 git commit -m "feat: whatever (bump framework)"
 ```
 
-For PRs that span both repos: merge the framework PR first, then update the submodule pointer in the platform PR so CI picks up the merged framework changes.
+**When working in worktrees:** Commits made in a worktree's `framework/` submodule can be cherry-picked back to the main worktree. Submodules in separate worktrees have separate object stores, so you must fetch before cherry-picking. Cherry-pick also produces new SHAs (same content, different hash), so the platform commit's submodule pointer must be amended afterward.
+
+```bash
+# 1. fetch objects from the worktree's submodule (separate object stores — SHA won't be found without this)
+cd /path/to/main/framework
+git fetch /path/to/worktree/framework HEAD
+
+# 2. cherry-pick framework commit(s)
+git cherry-pick <framework-sha>
+
+# 3. cherry-pick parent repo commit
+cd /path/to/main
+git cherry-pick <platform-sha>
+
+# 4. fix submodule pointer — cherry-pick gave the framework commit a new SHA,
+#    but the platform commit still references the worktree's original SHA
+git add framework
+git commit --amend --no-edit
+
+# 5. verify — no '+' prefix means the pointer matches
+git submodule status
+```
 
 ## Context Overview
 
