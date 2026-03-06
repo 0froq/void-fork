@@ -41,7 +41,7 @@ function buildDeployForm(opts?: {
   migrations?: Record<string, string>;
 }): FormData {
   const form = new FormData();
-  form.append("manifest", JSON.stringify(opts?.manifest ?? { version: 2, bindings: {} }));
+  form.append("manifest", JSON.stringify(opts?.manifest ?? { version: 3, bindings: {} }));
   // Default: include at least one worker file
   const workers = opts?.workers ?? {
     "index.js": "export default { fetch() { return new Response('ok'); } }",
@@ -153,7 +153,7 @@ describe("POST /projects/:id/deploy", () => {
 
     const routing = await env.ROUTING.get("routed-app", "json");
     expect(routing).toEqual({
-      workerName: "user-routed-app",
+      workerName: expect.stringMatching(/^user-routed-app-dpl_/),
       projectId: project.id,
       userId: user.id,
       version: expect.stringMatching(/^dpl_/),
@@ -171,7 +171,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { version: 2, bindings: {}, ssr: true },
+          manifest: { version: 3, bindings: {}, ssr: true },
         }),
       }),
       env,
@@ -181,7 +181,7 @@ describe("POST /projects/:id/deploy", () => {
 
     const routing = await env.ROUTING.get("ssr-app", "json");
     expect(routing).toEqual({
-      workerName: "user-ssr-app",
+      workerName: expect.stringMatching(/^user-ssr-app-dpl_/),
       projectId: project.id,
       userId: user.id,
       ssr: true,
@@ -215,7 +215,7 @@ describe("POST /projects/:id/deploy", () => {
     const uploadUrl =
       typeof uploadCall![0] === "string" ? uploadCall![0] : uploadCall![0].toString();
     expect(uploadUrl).toContain(
-      `/accounts/${CF_ACCOUNT_ID}/workers/dispatch/namespaces/void-users/scripts/user-worker-app`,
+      `/accounts/${CF_ACCOUNT_ID}/workers/dispatch/namespaces/void-users/scripts/user-worker-app-dpl_`,
     );
   });
 
@@ -245,7 +245,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 2,
+            version: 3,
             bindings: {},
             schedules: [{ name: "sync", cron: "0 * * * *" }],
           },
@@ -260,7 +260,7 @@ describe("POST /projects/:id/deploy", () => {
     const syncCall = cronDoFetches.find((f) => f.url.includes("/sync"));
     expect(syncCall).toBeDefined();
     const payload = JSON.parse(syncCall!.body);
-    expect(payload.workerName).toBe("user-cron-app");
+    expect(payload.workerName).toMatch(/^user-cron-app-dpl_/);
     expect(payload.schedules).toEqual([{ name: "sync", cron: "0 * * * *" }]);
   });
 
@@ -293,7 +293,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { version: 2, bindings: {} },
+          manifest: { version: 3, bindings: {} },
         }),
       }),
       testEnv,
@@ -329,7 +329,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { version: 2, bindings: {} },
+          manifest: { version: 3, bindings: {} },
         }),
       }),
       testEnv,
@@ -351,7 +351,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { version: 2, bindings: { d1: ["DB"] } },
+          manifest: { version: 3, bindings: { d1: ["DB"] } },
         }),
       }),
       env,
@@ -388,7 +388,7 @@ describe("POST /projects/:id/deploy", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
-          manifest: { version: 2, bindings: { d1: ["DB"] } },
+          manifest: { version: 3, bindings: { d1: ["DB"] } },
         }),
       }),
       env,
@@ -408,81 +408,55 @@ describe("POST /projects/:id/deploy", () => {
     expect(createD1Call).toBeUndefined();
   });
 
-  it("runs migrations before worker deploy", async () => {
+  it("runs migrations via worker after upload (v3 flow)", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "migrate-app");
 
-    const callOrder: string[] = [];
     mockCfApi({
-      createD1: () => {
-        callOrder.push("createD1");
-        return cfSuccess({ uuid: "d1-migrate-uuid", name: "test-db" });
-      },
-      queryD1: () => {
-        callOrder.push("queryD1");
-        return cfSuccess([{ results: [] }]);
-      },
-      uploadWorker: () => {
-        callOrder.push("uploadWorker");
-        return new Response("ok", { status: 200 });
-      },
+      createD1: () => cfSuccess({ uuid: "d1-migrate-uuid", name: "test-db" }),
     });
 
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildDeployForm({
-          manifest: { version: 2, bindings: { d1: ["DB"] } },
-          migrations: {
-            "001_create_table.sql": "CREATE TABLE items (id TEXT PRIMARY KEY)",
-          },
-        }),
+    // Mock the DISPATCH namespace so the deploy route can call the worker's migration endpoint
+    const originalDispatch = env.DISPATCH;
+    env.DISPATCH = {
+      get: () => ({
+        fetch: async () =>
+          Response.json({
+            ok: true,
+            migrations: [{ name: "001_create_table.sql", applied: true, durationMs: 5 }],
+          }),
       }),
-      env,
-    );
-    expect(res.status).toBe(200);
-    const events = await readAllEvents(res);
-    const done = events.find((e: any) => e.event === "done") as any;
-    expect(done.migrations).toBe(1);
+    } as unknown as DispatchNamespace;
 
-    // Verify migrations ran before worker upload
-    const workerIdx = callOrder.indexOf("uploadWorker");
-    const lastQueryIdx = callOrder.lastIndexOf("queryD1");
-    expect(lastQueryIdx).toBeLessThan(workerIdx);
-  });
-
-  it("rejects destructive migration without pragma", async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "destructive-app");
-    mockCfApi();
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildDeployForm({
-          manifest: { version: 2, bindings: { d1: ["DB"] } },
-          migrations: {
-            "002_drop.sql": "DROP TABLE users",
-          },
+    try {
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${user.jwt}` },
+          body: buildDeployForm({
+            manifest: {
+              version: 3,
+              bindings: { d1: ["DB"] },
+              migrations: { dialect: "sqlite", pending: 1 },
+            },
+          }),
         }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-    const events = await readAllEvents(res);
-    const error = events.find((e: any) => e.event === "error") as any;
-    expect(error.message).toContain("destructive migration rejected");
-    expect(error.step).toBe("migration");
+        env,
+      );
+      expect(res.status).toBe(200);
+      const events = await readAllEvents(res);
 
-    // Verify deployment is marked failed with error message
-    const [dpl] = await env.db
-      .select({ status: deployments.status, error_message: deployments.error_message })
-      .from(deployments)
-      .where(eq(deployments.project_id, project.id));
-    expect(dpl?.status).toBe("failed");
-    expect(dpl?.error_message).toContain("destructive migration rejected: 002_drop.sql");
+      const migrationStart = events.find((e: any) => e.event === "migration_start") as any;
+      expect(migrationStart.pending).toBe(1);
+
+      const migration = events.find((e: any) => e.event === "migration") as any;
+      expect(migration.name).toBe("001_create_table.sql");
+
+      const done = events.find((e: any) => e.event === "done") as any;
+      expect(done.migrations).toBe(1);
+    } finally {
+      env.DISPATCH = originalDispatch;
+    }
   });
 
   it("updates KV routing for active custom domains on deploy", async () => {
@@ -526,7 +500,7 @@ describe("POST /projects/:id/deploy", () => {
     // Verify domain KV routing was written
     const domainRouting = await env.ROUTING.get("domain:deploy.example.com", "json");
     expect(domainRouting).toEqual({
-      workerName: "user-domain-deploy",
+      workerName: expect.stringMatching(/^user-domain-deploy-dpl_/),
       projectId: project.id,
       userId: user.id,
       version: expect.stringMatching(/^dpl_/),
@@ -646,7 +620,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 2,
+            version: 3,
             bindings: {},
             vars: { API_URL: "https://api.example.com", NODE_ENV: "production" },
           },
@@ -720,7 +694,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 2,
+            version: 3,
             bindings: {},
             queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
           },
@@ -762,7 +736,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 2,
+            version: 3,
             bindings: {},
             queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
           },
@@ -810,7 +784,7 @@ describe("POST /projects/:id/deploy", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 2,
+            version: 3,
             bindings: {},
             queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
           },
@@ -825,7 +799,7 @@ describe("POST /projects/:id/deploy", () => {
     const expectedQueueName = `${project.id}-emails`.toLowerCase().replaceAll("_", "-");
     const queueRouting = await env.ROUTING.get(`queue:${expectedQueueName}`, "json");
     expect(queueRouting).toEqual({
-      workerName: "user-queue-kv-app",
+      workerName: expect.stringMatching(/^user-queue-kv-app-dpl_/),
       projectId: project.id,
       queueName: "emails",
     });
@@ -954,7 +928,7 @@ function buildStaticDeployForm(opts: {
     opts.type === "spa"
       ? { not_found_handling: "single-page-application" }
       : { not_found_handling: "404-page" };
-  form.append("manifest", JSON.stringify({ version: 2, bindings: {}, assetConfig }));
+  form.append("manifest", JSON.stringify({ version: 3, bindings: {}, assetConfig }));
   if (opts.assets) {
     for (const [path, content] of Object.entries(opts.assets)) {
       form.append(`asset:${path}`, new Blob([content]));
@@ -1010,7 +984,7 @@ describe("POST /projects/:id/deploy (static)", () => {
 
     const routing = await env.ROUTING.get("kv-spa", "json");
     expect(routing).toEqual({
-      workerName: "user-kv-spa",
+      workerName: expect.stringMatching(/^user-kv-spa-dpl_/),
       projectId: project.id,
       userId: user.id,
       version: expect.stringMatching(/^dpl_/),
@@ -1066,7 +1040,7 @@ describe("Deploy with prerendering", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 2,
+            version: 3,
             bindings: {},
             revalidate: 3600,
             prerender: ["/", "/about"],
@@ -1129,7 +1103,7 @@ describe("Deploy with prerendering", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 2,
+            version: 3,
             bindings: {},
             revalidate: { "/about": 3600, "/private": 0, "*": 0 },
             prerender: ["/about", "/private"],
@@ -1176,7 +1150,7 @@ describe("Deploy with prerendering", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 2,
+            version: 3,
             bindings: {},
             revalidate: 3600,
             prerender: ["/"],
@@ -1222,7 +1196,7 @@ describe("Deploy with prerendering", () => {
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           manifest: {
-            version: 2,
+            version: 3,
             bindings: {},
             revalidate: 3600,
             prerender: ["/"],
@@ -1380,7 +1354,7 @@ describe("POST /projects/:id/deploy/preflight", () => {
     });
 
     const form = new FormData();
-    form.append("manifest", JSON.stringify({ version: 2, bindings: {} }));
+    form.append("manifest", JSON.stringify({ version: 3, bindings: {} }));
     form.append("preflight", "true");
     form.append("asset:app.js", new Blob(["new content"]), "app.js");
     form.append("worker:index.js", new Blob(["export default {}"]), "index.js");

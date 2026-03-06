@@ -312,6 +312,7 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    wrangler secret put GITHUB_CLIENT_SECRET --env <name>
    wrangler secret put GOOGLE_CLIENT_ID --env <name>
    wrangler secret put GOOGLE_CLIENT_SECRET --env <name>
+
    ```
 
 5. **DNS records** — all records must be proxied (orange cloud).

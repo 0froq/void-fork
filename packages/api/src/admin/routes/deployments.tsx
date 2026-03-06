@@ -156,17 +156,11 @@ app.get("/:id", async (c) => {
                               </tr>
                             ) : null,
                           )}
-                        {manifest.migrations && manifest.migrations.length > 0 && (
+                        {manifest.migrations && (
                           <tr>
                             <th>Migrations</th>
                             <td>
-                              {manifest.migrations.map((m, i) => (
-                                <span key={m.name}>
-                                  {i > 0 && ", "}
-                                  {m.name}
-                                  {m.destructive && " (destructive)"}
-                                </span>
-                              ))}
+                              {manifest.migrations.dialect} — {manifest.migrations.pending} pending
                             </td>
                           </tr>
                         )}

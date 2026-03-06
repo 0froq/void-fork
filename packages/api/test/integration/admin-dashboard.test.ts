@@ -384,7 +384,7 @@ describe("GET /admin/deployments/:id", () => {
     const id = `dpl_manifest${n}`;
     const manifest = JSON.stringify({
       bindings: { d1: ["DB"], kv: ["CACHE"] },
-      migrations: [{ name: "001_init.sql", destructive: false }],
+      migrations: { dialect: "sqlite", pending: 1 },
       schedules: [{ name: "sync", cron: "0 * * * *" }],
     });
     await env.db.insert(deployments).values({
@@ -402,7 +402,8 @@ describe("GET /admin/deployments/:id", () => {
     expect(html).toContain("DB");
     expect(html).toContain("KV");
     expect(html).toContain("CACHE");
-    expect(html).toContain("001_init.sql");
+    expect(html).toContain("sqlite");
+    expect(html).toContain("1 pending");
     expect(html).toContain("sync");
     expect(html).toContain("0 * * * *");
     expect(html).toContain("Raw JSON");

@@ -66,7 +66,8 @@ GET    /me                               # Current user info
 GET    /projects                         # List user's projects
 POST   /projects                         # Create project (slug)
 GET    /projects/:id                     # Get project
-GET    /projects/:id/deployments         # List deployments
+GET    /projects/:id/deployments         # List deployments (+ activeDeploymentId)
+POST   /projects/:id/rollback            # Rollback to a retained deployment
 GET    /projects/:id/migrations          # Get applied migrations
 DELETE /projects/:id                     # Delete project + all CF resources
 
@@ -120,20 +121,39 @@ Auth middleware on `/projects/*` extracts Bearer token, verifies JWT, sets `c.ge
 1. Ownership check: `project.user_id` must match authenticated user
 2. **Deploy count enforcement**: Look up user plan, check `countUserDeploymentsToday()` against `planLimits.deploysPerDay` → 429 if exceeded
 3. Provision bindings (D1, KV, R2) — creates CF resources if needed
-4. `migration:<name>` fields → validated, then executed on D1 via CF REST API (status: `"migrating"`)
-5. `asset:<path>` fields → uploaded via CF Workers Assets API
-6. `worker:<path>` fields → uploaded to CF dispatch namespace via API
+4. `asset:<path>` fields → uploaded via CF Workers Assets API
+5. `worker:<path>` fields → uploaded to CF dispatch namespace as **versioned worker**: `user-{slug}-{deployId}` (e.g. `user-my-app-dpl_a1b2c3d4e5f6`)
+6. **Migrations run inside the worker** — after upload, the API invokes `POST /__void/migrate` on the deployed worker via Workers for Platforms dispatch. This runs migrations in the worker's own D1 binding context rather than via the CF REST API.
 7. Queue provisioning: creates CF Queues, adds producer bindings, registers dispatch worker as consumer, writes `queue:<queueId>` routing entries to KV
 8. KV routing updated: `slug → { workerName, projectId, version, limits?, suspended? }`
    - `limits` includes `cpuMs` and `subRequests` from user's plan (omitted when all unlimited)
    - `suspended` is carried forward from the existing KV entry to avoid race conditions with cron
-9. Deployment marked as `live`
+9. Deployment marked as `live`, `retained` set to `true`, `active_deployment_id` updated on the project
+10. **Legacy cleanup**: deletes the unversioned `user-{slug}` worker script (safe no-op if already gone)
+11. **Retention cleanup**: evicts old retained worker scripts beyond the plan's `retainedDeployments` limit — deletes the dispatch script and sets `retained = false` on the deployment row. The limit includes the active deployment (e.g., limit of 5 = active + 4 previous).
 
-**Key invariant:** Worker is never deployed unless all migrations succeed. On migration failure, deployment is marked `"failed"` with an `error_message` and the existing worker keeps running. All 5 failure points (destructive validation, missing D1, migration error, worker upload, catch-all) store a descriptive `error_message` in the deployment row.
+**Key invariant:** Worker is never routed to unless all migrations succeed. On migration failure, deployment is marked `"failed"` with an `error_message` and the existing worker keeps running. All failure points (destructive validation, missing D1, migration error, worker upload, catch-all) store a descriptive `error_message` in the deployment row.
+
+### Rollback
+
+`POST /projects/:id/rollback` accepts `{ deploymentId }` and switches traffic to a previously retained deployment:
+
+1. Validates the target deployment exists, belongs to the project, and is `retained` (worker script still exists)
+2. Computes `migrationDiff` — migrations present in the current active deployment but missing from the target (rollback may leave forward-only migrations in place)
+3. Updates KV routing for the project slug, all active custom domains, and queue routing entries to point to `user-{slug}-{deployId}`
+4. Clears the ISR cache (stale prerendered pages from the current deployment)
+5. Sets `active_deployment_id` on the project to the target deployment
+6. Returns `{ ok, deploymentId, migrationDiff }`
+
+### Schema: Versioned Deployment Fields
+
+- **`projects.active_deployment_id`** — nullable text column pointing to the currently routed deployment ID. Updated on deploy and rollback.
+- **`deployments.retained`** — boolean (default `false`). Set to `true` when a deployment goes live. Set to `false` when the worker script is evicted by retention cleanup. Only retained deployments can be rollback targets.
+- **`deployments.applied_migrations`** — JSON array of migration names applied during this deployment. Used to compute `migrationDiff` during rollback.
 
 ## Usage Metering & Tiers
 
-Five plan tiers: `free`, `solo`, `pro`, `sponsored`, `custom`. Defined in `src/tiers.ts` with `PLAN_LIMITS` constant. `0` = unlimited for any field. The `isWithinLimit(limit, current)` helper centralizes the unlimited-check logic.
+Five plan tiers: `free`, `solo`, `pro`, `sponsored`, `custom`. Defined in `src/tiers.ts` with `PLAN_LIMITS` constant. `0` = unlimited for any field. The `isWithinLimit(limit, current)` helper centralizes the unlimited-check logic. Retention limits per plan: free=1, solo=5, pro=25, sponsored/custom=unlimited.
 
 - **Immediate enforcement**: Deploy count per day (checked at deploy time via D1 query)
 - **Per-request enforcement**: CPU time and sub-requests via CF Custom Limits (passed in KV routing `limits` field, applied by dispatch worker)

@@ -125,7 +125,7 @@ describe("provisionBindings", () => {
 
   it("provisions queue and stores queue_id (UUID) as cf_id", async () => {
     const manifest: DeployManifest = {
-      version: 2,
+      version: 3,
       bindings: {},
       queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
     };
@@ -370,7 +370,7 @@ describe("ensureResource — already exists fallback", () => {
     );
 
     const manifest: DeployManifest = {
-      version: 2,
+      version: 3,
       bindings: {},
       queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
     };

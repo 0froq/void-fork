@@ -7,10 +7,16 @@ import {
   getProjectsByUserId,
   getProjectDeployments,
   getProjectResources,
+  getDomainsByProjectId,
   getDomainsByProjectIds,
+  getDeployment,
   getUser,
+  setActiveDeployment,
 } from "../db";
 import { queryD1 } from "../migrations/remote-runner";
+import { buildRoutingJson } from "../routing";
+import { getPlanLimits } from "../tiers";
+import type { DeployManifest } from "../types";
 
 const app = new Hono<ApiEnv>()
 
@@ -100,8 +106,120 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "forbidden" }, 403);
     }
 
-    const deployments = await getProjectDeployments(c.get("db"), project.id);
-    return c.json(deployments);
+    const deployments = await getProjectDeployments(c.get("db"), project.id, 20);
+    return c.json({
+      deployments,
+      activeDeploymentId: project.active_deployment_id,
+    });
+  })
+
+  // Rollback to a previous deployment
+  .post("/:id/rollback", async (c) => {
+    const projectId = c.req.param("id");
+    const project = await getProject(c.get("db"), projectId);
+    if (!project) {
+      return c.json({ error: "project not found" }, 404);
+    }
+    if (project.user_id !== c.get("userId")) {
+      return c.json({ error: "forbidden" }, 403);
+    }
+
+    const { deploymentId } = await c.req.json<{ deploymentId: string }>();
+    if (!deploymentId) {
+      return c.json({ error: "deploymentId is required" }, 400);
+    }
+
+    const target = await getDeployment(c.get("db"), deploymentId);
+    if (!target || target.project_id !== projectId) {
+      return c.json({ error: "deployment not found" }, 404);
+    }
+    if (!target.retained) {
+      return c.json({ error: "deployment not retained (worker script evicted)" }, 400);
+    }
+
+    // Compute migration diff
+    const currentActive = project.active_deployment_id
+      ? await getDeployment(c.get("db"), project.active_deployment_id)
+      : null;
+    const currentMigrations: string[] = currentActive?.applied_migrations
+      ? JSON.parse(currentActive.applied_migrations)
+      : [];
+    const targetMigrations: string[] = target.applied_migrations
+      ? JSON.parse(target.applied_migrations)
+      : [];
+    const migrationDiff = currentMigrations.filter((m) => !targetMigrations.includes(m));
+
+    // Build routing JSON from target deployment's manifest
+    const workerName = `user-${project.slug}-${target.id}`;
+    const user = await getUser(c.get("db"), project.user_id);
+    const planLimits = getPlanLimits(user?.plan ?? "free");
+    const manifest: DeployManifest | null = target.manifest ? JSON.parse(target.manifest) : null;
+    const dispatchLimits =
+      planLimits.cpuMsPerRequest > 0 || planLimits.subRequestsPerInvocation > 0
+        ? {
+            ...(planLimits.cpuMsPerRequest > 0 ? { cpuMs: planLimits.cpuMsPerRequest } : {}),
+            ...(planLimits.subRequestsPerInvocation > 0
+              ? { subRequests: planLimits.subRequestsPerInvocation }
+              : {}),
+          }
+        : null;
+
+    // Carry forward suspended flag
+    const existingRouting = await c.env.ROUTING.get(project.slug);
+    const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
+
+    const routingJson = buildRoutingJson({
+      workerName,
+      projectId,
+      userId: project.user_id,
+      manifest,
+      deploymentId: target.id,
+      dispatchLimits,
+      suspended: existingEntry?.suspended,
+      hasCrons: !!manifest?.schedules?.length,
+    });
+
+    await c.env.ROUTING.put(project.slug, routingJson);
+
+    // Update custom domain routing
+    const projectDomains = await getDomainsByProjectId(c.get("db"), projectId);
+    for (const domain of projectDomains) {
+      if (domain.status === "active") {
+        await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
+      }
+    }
+
+    // Update queue routing
+    if (manifest?.queues) {
+      const projectResources = await getProjectResources(c.get("db"), projectId);
+      for (const q of manifest.queues) {
+        const queueResource = projectResources.find(
+          (r) => r.type === "queue" && r.binding_name === q.bindingName,
+        );
+        if (queueResource) {
+          await c.env.ROUTING.put(
+            `queue:${queueResource.cf_id}`,
+            JSON.stringify({ workerName, projectId, queueName: q.name }),
+          );
+        }
+      }
+    }
+
+    // Clear ISR cache (stale prerendered pages from the current deployment)
+    const isrPrefix = `${projectId}/isr/`;
+    let cursor: string | undefined;
+    do {
+      const listed = await c.env.ISR_CACHE.list({ prefix: isrPrefix, cursor });
+      for (const key of listed.keys) {
+        await c.env.ISR_CACHE.delete(key.name);
+      }
+      cursor = listed.list_complete ? undefined : listed.cursor;
+    } while (cursor);
+
+    // Update active deployment
+    await setActiveDeployment(c.get("db"), projectId, target.id);
+
+    return c.json({ ok: true, deploymentId: target.id, migrationDiff });
   })
 
   // Get migration status for a project
@@ -166,10 +284,12 @@ const app = new Hono<ApiEnv>()
     }
 
     const limit = Math.min(parseInt(c.req.query("limit") ?? "200", 10) || 200, 500);
+    const deploymentId = c.req.query("deploymentId");
     const workerName = `user-${project.slug}`;
     const sinceStr = new Date(Date.now() - sinceMs).toISOString().replace("T", " ").slice(0, 19);
     const dataset = c.env.LOGS_DATASET ?? "void_logs";
 
+    const deployFilter = deploymentId ? `\n        AND blob7 = '${deploymentId}'` : "";
     const query = `
       SELECT
         blob1 as outcome,
@@ -178,11 +298,12 @@ const app = new Hono<ApiEnv>()
         blob4 as url,
         blob5 as method,
         blob6 as statusCode,
+        blob7 as deployId,
         double1 as ts,
         timestamp
       FROM ${dataset}
       WHERE index1 = '${workerName}'
-        AND timestamp >= toDateTime('${sinceStr}')
+        AND timestamp >= toDateTime('${sinceStr}')${deployFilter}
       ORDER BY double1 ASC
       LIMIT ${limit}
     `;

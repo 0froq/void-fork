@@ -17,6 +17,8 @@ export interface PlanLimits {
   kvStorageBytes: number;
   /** Max AI neurons per month (0 = unlimited) */
   aiNeuronsPerMonth: number;
+  /** Max retained deployment scripts (0 = unlimited) */
+  retainedDeployments: number;
 }
 
 const GB = 1024 * 1024 * 1024;
@@ -31,6 +33,7 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     r2StorageBytes: 5 * GB,
     kvStorageBytes: 1 * GB,
     aiNeuronsPerMonth: 100_000,
+    retainedDeployments: 1,
   },
   solo: {
     requestsPerMonth: 10_000_000,
@@ -41,6 +44,7 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     r2StorageBytes: 25 * GB,
     kvStorageBytes: 5 * GB,
     aiNeuronsPerMonth: 300_000,
+    retainedDeployments: 5,
   },
   pro: {
     requestsPerMonth: 100_000_000,
@@ -51,6 +55,7 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     r2StorageBytes: 100 * GB,
     kvStorageBytes: 25 * GB,
     aiNeuronsPerMonth: 500_000,
+    retainedDeployments: 25,
   },
   sponsored: {
     requestsPerMonth: 0,
@@ -61,6 +66,7 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     r2StorageBytes: 0,
     kvStorageBytes: 0,
     aiNeuronsPerMonth: 0,
+    retainedDeployments: 0,
   },
   custom: {
     requestsPerMonth: 0,
@@ -71,6 +77,7 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     r2StorageBytes: 0,
     kvStorageBytes: 0,
     aiNeuronsPerMonth: 0,
+    retainedDeployments: 0,
   },
 };
 

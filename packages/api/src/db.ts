@@ -4,6 +4,7 @@ import {
   desc,
   asc,
   eq,
+  ne,
   inArray,
   notInArray,
   ilike,
@@ -267,6 +268,62 @@ export async function getLastLiveAssetManifest(
 
   if (!row?.asset_hashes) return null;
   return JSON.parse(row.asset_hashes);
+}
+
+export async function setActiveDeployment(
+  db: Db,
+  projectId: string,
+  deploymentId: string,
+): Promise<void> {
+  await db
+    .update(projects)
+    .set({ active_deployment_id: deploymentId })
+    .where(eq(projects.id, projectId));
+}
+
+export async function markDeploymentRetained(
+  db: Db,
+  deploymentId: string,
+  retained: boolean,
+): Promise<void> {
+  await db.update(deployments).set({ retained }).where(eq(deployments.id, deploymentId));
+}
+
+export async function setAppliedMigrations(
+  db: Db,
+  deploymentId: string,
+  migrations: string[],
+): Promise<void> {
+  await db
+    .update(deployments)
+    .set({ applied_migrations: JSON.stringify(migrations) })
+    .where(eq(deployments.id, deploymentId));
+}
+
+export async function getRetainedDeployments(db: Db, projectId: string): Promise<Deployment[]> {
+  return db
+    .select()
+    .from(deployments)
+    .where(and(eq(deployments.project_id, projectId), eq(deployments.retained, true)))
+    .orderBy(desc(deployments.created_at));
+}
+
+export async function getRetainedDeploymentsExcluding(
+  db: Db,
+  projectId: string,
+  excludeId: string,
+): Promise<Deployment[]> {
+  return db
+    .select()
+    .from(deployments)
+    .where(
+      and(
+        eq(deployments.project_id, projectId),
+        eq(deployments.retained, true),
+        ne(deployments.id, excludeId),
+      ),
+    )
+    .orderBy(desc(deployments.created_at));
 }
 
 // --- Resources ---

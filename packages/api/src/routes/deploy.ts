@@ -11,15 +11,19 @@ import {
   countUserDeploymentsToday,
   getActiveDeployment,
   getLastLiveAssetManifest,
+  setActiveDeployment,
+  markDeploymentRetained,
+  setAppliedMigrations,
+  getRetainedDeploymentsExcluding,
 } from "../db";
 import { eq } from "drizzle-orm";
 import { deployments } from "../schema";
 import { provisionBindings } from "../provisioning/provision";
 import { addQueueConsumer } from "../provisioning/cloudflare-api";
-import { runRemoteMigrations, type RemoteMigration } from "../migrations/remote-runner";
-import { validateMigrationSQL } from "../migrations/validate";
+import { deleteDispatchScript } from "../cf-api";
 import { getPlanLimits, isWithinLimit } from "../tiers";
 import { SITE_DOMAIN } from "../constants";
+import { buildRoutingJson } from "../routing";
 import {
   collectAssets,
   createAssetUploadSession,
@@ -79,7 +83,7 @@ app.post("/:id/deploy", async (c) => {
   const manifestRaw = formData.get("manifest") as string | null;
   const manifest: DeployManifest = manifestRaw
     ? (JSON.parse(manifestRaw) as DeployManifest)
-    : { version: 2, bindings: {} };
+    : { version: 3, bindings: {} };
 
   // Validate deploy manifest version
   if (manifest.version == null || !SUPPORTED_MANIFEST_VERSIONS.includes(manifest.version)) {
@@ -99,7 +103,7 @@ app.post("/:id/deploy", async (c) => {
   // Create deployment record
   const deployment = await createDeployment(c.get("db"), projectId, manifestRaw, source, commit);
   const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
-  const workerName = `user-${project.slug}`;
+  const workerName = `user-${project.slug}-${deployment.id}`;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -229,17 +233,14 @@ app.post("/:id/deploy", async (c) => {
           // Update KV routing
           const existingRouting = await c.env.ROUTING.get(project.slug);
           const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
-          const routingJson = JSON.stringify({
+          const routingJson = buildRoutingJson({
             workerName,
             projectId,
             userId: project.user_id,
-            version: deployment.id,
-            ...(manifest.hashedAssetsPrefix
-              ? { hashedAssetsPrefix: manifest.hashedAssetsPrefix }
-              : {}),
-            ...(manifest.headerRules?.length ? { headerRules: manifest.headerRules } : {}),
-            ...(manifest.redirectRules?.length ? { redirectRules: manifest.redirectRules } : {}),
-            ...(existingEntry?.suspended ? { suspended: existingEntry.suspended } : {}),
+            manifest,
+            deploymentId: deployment.id,
+            dispatchLimits: null,
+            suspended: existingEntry?.suspended,
           });
           await c.env.ROUTING.put(project.slug, routingJson);
 
@@ -251,6 +252,35 @@ app.post("/:id/deploy", async (c) => {
 
           await updateDeploymentStatus(c.get("db"), deployment.id, "live");
           await updateProjectType(c.get("db"), projectId, type);
+          await setActiveDeployment(c.get("db"), projectId, deployment.id);
+          await markDeploymentRetained(c.get("db"), deployment.id, true);
+
+          // Legacy cleanup + retention
+          const legacyName = `user-${project.slug}`;
+          await deleteDispatchScript(
+            c.env.CF_ACCOUNT_ID,
+            c.env.CF_API_TOKEN,
+            dispatchNamespace,
+            legacyName,
+          );
+          const retentionLimit = planLimits.retainedDeployments;
+          if (retentionLimit > 0) {
+            const retained = await getRetainedDeploymentsExcluding(
+              c.get("db"),
+              projectId,
+              deployment.id,
+            );
+            const toEvict = retained.slice(retentionLimit - 1);
+            for (const old of toEvict) {
+              await deleteDispatchScript(
+                c.env.CF_ACCOUNT_ID,
+                c.env.CF_API_TOKEN,
+                dispatchNamespace,
+                `user-${project.slug}-${old.id}`,
+              );
+              await markDeploymentRetained(c.get("db"), old.id, false);
+            }
+          }
 
           // Store asset manifest for future preflight dedup
           if (assetCount > 0) {
@@ -311,50 +341,7 @@ app.post("/:id/deploy", async (c) => {
           emit({ event: "provisioning_done" });
         }
 
-        // 1. Run migrations (before worker deploy — key invariant)
-        currentStep = "migration";
-        let migrationsApplied = 0;
-        const migrationEntries: RemoteMigration[] = [];
-        for (const [key, value] of formData.entries()) {
-          if (key.startsWith("migration:")) {
-            const name = key.slice("migration:".length);
-            const sql = await (value as Blob).text();
-
-            // Server-side validation (defense in depth)
-            const validation = validateMigrationSQL(sql);
-            if (!validation.allowed) {
-              throw new Error(`destructive migration rejected: ${name}`);
-            }
-
-            migrationEntries.push({ name, sql });
-          }
-        }
-
-        if (migrationEntries.length > 0) {
-          const d1Resource = workerBindings.find((b) => b.type === "d1");
-          if (!d1Resource || !d1Resource.id) {
-            throw new Error("migrations require a D1 database but none is provisioned");
-          }
-
-          await updateDeploymentStatus(c.get("db"), deployment.id, "migrating");
-
-          // Run migrations one at a time for per-migration events
-          for (let i = 0; i < migrationEntries.length; i++) {
-            const entry = migrationEntries[i];
-            emit({
-              event: "migration",
-              name: entry.name,
-              index: i + 1,
-              total: migrationEntries.length,
-            });
-            await runRemoteMigrations(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, d1Resource.id, [
-              entry,
-            ]);
-            migrationsApplied++;
-          }
-        }
-
-        // 2. Upload worker to dispatch namespace via CF API
+        // 1. Upload worker to dispatch namespace via CF API
         currentStep = "worker_upload";
         const workerFormData = new FormData();
 
@@ -442,6 +429,59 @@ app.post("/:id/deploy", async (c) => {
         }
 
         emit({ event: "worker_upload_done" });
+
+        // 1b. Run migrations via the newly-uploaded worker (v3 flow)
+        let migrationsApplied = 0;
+        if (manifest.migrations && manifest.migrations.pending > 0) {
+          currentStep = "migration";
+          await updateDeploymentStatus(c.get("db"), deployment.id, "migrating");
+          emit({ event: "migration_start", pending: manifest.migrations.pending });
+
+          try {
+            const userWorker = c.env.DISPATCH.get(workerName);
+            const proxyTokenBinding = workerBindings.find((b) => b.name === "__VOID_PROXY_TOKEN");
+            const migrateResponse = await userWorker.fetch(
+              new Request("https://internal/__void/migrate", {
+                method: "POST",
+                headers: { "x-void-internal": proxyTokenBinding?.text ?? "" },
+              }),
+            );
+
+            const result = (await migrateResponse.json()) as {
+              ok: boolean;
+              migrations: {
+                name: string;
+                applied: boolean;
+                durationMs: number;
+                error?: string;
+              }[];
+              error?: string;
+            };
+
+            if (!result.ok) {
+              throw new Error(`migration failed: ${result.error ?? "unknown error"}`);
+            }
+
+            for (const m of result.migrations) {
+              if (m.applied) {
+                emit({ event: "migration", name: m.name, durationMs: m.durationMs });
+                migrationsApplied++;
+              }
+            }
+
+            const allApplied = result.migrations.map((m) => m.name);
+            await setAppliedMigrations(c.get("db"), deployment.id, allApplied);
+          } catch (err) {
+            // Migration failed — delete the new worker, abort
+            await deleteDispatchScript(
+              c.env.CF_ACCOUNT_ID,
+              c.env.CF_API_TOKEN,
+              dispatchNamespace,
+              workerName,
+            );
+            throw err;
+          }
+        }
 
         // 2b. Configure queue consumers (dispatch worker relays to user workers)
         currentStep = "queue_setup";
@@ -572,29 +612,21 @@ app.post("/:id/deploy", async (c) => {
         const dispatchLimits =
           planLimits.cpuMsPerRequest > 0 || planLimits.subRequestsPerInvocation > 0
             ? {
-                limits: {
-                  ...(planLimits.cpuMsPerRequest > 0 ? { cpuMs: planLimits.cpuMsPerRequest } : {}),
-                  ...(planLimits.subRequestsPerInvocation > 0
-                    ? { subRequests: planLimits.subRequestsPerInvocation }
-                    : {}),
-                },
+                ...(planLimits.cpuMsPerRequest > 0 ? { cpuMs: planLimits.cpuMsPerRequest } : {}),
+                ...(planLimits.subRequestsPerInvocation > 0
+                  ? { subRequests: planLimits.subRequestsPerInvocation }
+                  : {}),
               }
-            : {};
-        const routingJson = JSON.stringify({
+            : null;
+        const routingJson = buildRoutingJson({
           workerName,
           projectId,
           userId: project.user_id,
-          ...(manifest.ssr ? { ssr: true } : {}),
-          ...(manifest.revalidate ? { revalidate: manifest.revalidate } : {}),
-          ...(manifest.hashedAssetsPrefix
-            ? { hashedAssetsPrefix: manifest.hashedAssetsPrefix }
-            : {}),
-          ...(manifest.headerRules?.length ? { headerRules: manifest.headerRules } : {}),
-          ...(manifest.redirectRules?.length ? { redirectRules: manifest.redirectRules } : {}),
-          version: deployment.id,
-          ...dispatchLimits,
-          ...(existingEntry?.suspended ? { suspended: existingEntry.suspended } : {}),
-          ...(hasCrons ? { hasCrons: true } : {}),
+          manifest,
+          deploymentId: deployment.id,
+          dispatchLimits,
+          suspended: existingEntry?.suspended,
+          hasCrons,
         });
         await c.env.ROUTING.put(project.slug, routingJson);
 
@@ -612,6 +644,41 @@ app.post("/:id/deploy", async (c) => {
           projectId,
           manifest.type ?? (manifest.framework ? "framework" : "void"),
         );
+
+        // 5b. Set active deployment + mark retained
+        await setActiveDeployment(c.get("db"), projectId, deployment.id);
+        await markDeploymentRetained(c.get("db"), deployment.id, true);
+
+        // Legacy cleanup — delete unversioned worker script (safe no-op if already gone)
+        const legacyWorkerName = `user-${project.slug}`;
+        await deleteDispatchScript(
+          c.env.CF_ACCOUNT_ID,
+          c.env.CF_API_TOKEN,
+          dispatchNamespace,
+          legacyWorkerName,
+        );
+
+        // Retention cleanup — delete old worker scripts beyond plan limit
+        const retentionLimit = planLimits.retainedDeployments;
+        if (retentionLimit > 0) {
+          const retained = await getRetainedDeploymentsExcluding(
+            c.get("db"),
+            projectId,
+            deployment.id,
+          );
+          // retentionLimit includes the active deployment, so keep (limit - 1) others
+          const toEvict = retained.slice(retentionLimit - 1);
+          for (const old of toEvict) {
+            const oldWorkerName = `user-${project.slug}-${old.id}`;
+            await deleteDispatchScript(
+              c.env.CF_ACCOUNT_ID,
+              c.env.CF_API_TOKEN,
+              dispatchNamespace,
+              oldWorkerName,
+            );
+            await markDeploymentRetained(c.get("db"), old.id, false);
+          }
+        }
 
         // Store asset manifest for future preflight dedup
         if (assetCount > 0) {

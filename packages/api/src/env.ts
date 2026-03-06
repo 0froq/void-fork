@@ -20,6 +20,7 @@ export interface ApiEnv extends Env {
     DISPATCH_NAMESPACE?: string;
     DISPATCH_WORKER_NAME?: string;
     VOID_PROXY_SERVICE?: string;
+    VOID_PROXY_TOKEN?: string;
     SITE_DOMAIN?: string;
     DASHBOARD_URL?: string;
     USAGE_COUNTER: DurableObjectNamespace;

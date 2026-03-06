@@ -9,7 +9,14 @@ import {
   mockCfApi,
   type TestEnv,
 } from "./helpers";
-import { createDeployment, updateDeploymentStatus } from "../../src/db";
+import {
+  createDeployment,
+  updateDeploymentStatus,
+  markDeploymentRetained,
+  setActiveDeployment,
+  setAppliedMigrations,
+} from "../../src/db";
+import { domains } from "../../src/schema";
 
 let env: TestEnv;
 
@@ -274,7 +281,12 @@ describe("GET /projects/:id/deployments", () => {
       env,
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual([]);
+    const body = (await res.json()) as {
+      deployments: unknown[];
+      activeDeploymentId: string | null;
+    };
+    expect(body.deployments).toEqual([]);
+    expect(body.activeDeploymentId).toBeNull();
   });
 
   it("returns deployments with source field", async () => {
@@ -292,18 +304,207 @@ describe("GET /projects/:id/deployments", () => {
       env,
     );
     expect(res.status).toBe(200);
-    const deployments = (await res.json()) as {
-      id: string;
-      source: string | null;
-      status: string;
-    }[];
-    expect(deployments).toHaveLength(2);
+    const body = (await res.json()) as {
+      deployments: { id: string; source: string | null; status: string }[];
+      activeDeploymentId: string | null;
+    };
+    expect(body.deployments).toHaveLength(2);
 
-    const byId = Object.fromEntries(deployments.map((d) => [d.id, d]));
+    const byId = Object.fromEntries(body.deployments.map((d) => [d.id, d]));
     expect(byId[d1.id].source).toBe("manual");
     expect(byId[d1.id].status).toBe("live");
     expect(byId[d2.id].source).toBe("ci");
     expect(byId[d2.id].status).toBe("pending");
+  });
+});
+
+describe("POST /projects/:id/rollback", () => {
+  it("rolls back to a retained deployment", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "rollback-app");
+
+    // Create two deployments, both retained and live
+    const d1 = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, d1.id, "live");
+    await markDeploymentRetained(env.db, d1.id, true);
+
+    const d2 = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, d2.id, "live");
+    await markDeploymentRetained(env.db, d2.id, true);
+    await setActiveDeployment(env.db, project.id, d2.id);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ deploymentId: d1.id }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      deploymentId: string;
+      migrationDiff: string[];
+    };
+    expect(body.ok).toBe(true);
+    expect(body.deploymentId).toBe(d1.id);
+    expect(body.migrationDiff).toEqual([]);
+
+    // Verify KV routing updated
+    const routing = (await env.ROUTING.get(project.slug, "json")) as { workerName: string };
+    expect(routing.workerName).toBe(`user-rollback-app-${d1.id}`);
+  });
+
+  it("returns 400 for non-retained deployment", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "evicted-app");
+
+    const d1 = await createDeployment(env.db, project.id, null);
+    await updateDeploymentStatus(env.db, d1.id, "live");
+    // retained defaults to false
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ deploymentId: d1.id }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "deployment not retained (worker script evicted)" });
+  });
+
+  it("returns 404 for deployment from another project", async () => {
+    const alice = await createTestUser(env.db, "alice");
+    const bob = await createTestUser(env.db, "bob");
+    const projectA = await createTestProject(env.db, alice.id, "alice-roll");
+    const projectB = await createTestProject(env.db, bob.id, "bob-roll");
+
+    const d1 = await createDeployment(env.db, projectB.id, null);
+    await markDeploymentRetained(env.db, d1.id, true);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${projectA.id}/rollback`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${alice.jwt}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ deploymentId: d1.id }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "deployment not found" });
+  });
+
+  it("returns migrationDiff when rolling back past migrations", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "migrate-roll");
+
+    const d1 = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, d1.id, "live");
+    await markDeploymentRetained(env.db, d1.id, true);
+    await setAppliedMigrations(env.db, d1.id, ["001_init.sql"]);
+
+    const d2 = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, d2.id, "live");
+    await markDeploymentRetained(env.db, d2.id, true);
+    await setAppliedMigrations(env.db, d2.id, [
+      "001_init.sql",
+      "002_add_email.sql",
+      "003_add_roles.sql",
+    ]);
+    await setActiveDeployment(env.db, project.id, d2.id);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ deploymentId: d1.id }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { migrationDiff: string[] };
+    expect(body.migrationDiff).toEqual(["002_add_email.sql", "003_add_roles.sql"]);
+  });
+
+  it("updates custom domain KV entries on rollback", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "domain-roll");
+
+    // Insert an active domain
+    await env.db.insert(domains).values({
+      id: "dom_rollback",
+      project_id: project.id,
+      hostname: "rollback.example.com",
+      cf_hostname_id: "ch-rollback",
+      status: "active",
+    });
+
+    const d1 = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, d1.id, "live");
+    await markDeploymentRetained(env.db, d1.id, true);
+
+    const d2 = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, d2.id, "live");
+    await markDeploymentRetained(env.db, d2.id, true);
+    await setActiveDeployment(env.db, project.id, d2.id);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ deploymentId: d1.id }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    // Verify domain KV routing updated
+    const domainRouting = (await env.ROUTING.get("domain:rollback.example.com", "json")) as {
+      workerName: string;
+    };
+    expect(domainRouting.workerName).toBe(`user-domain-roll-${d1.id}`);
   });
 });
 

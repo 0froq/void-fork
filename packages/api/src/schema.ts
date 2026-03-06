@@ -1,4 +1,4 @@
-import { index, pgTable, text, timestamp, unique, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, pgTable, text, timestamp, unique, uniqueIndex } from "drizzle-orm/pg-core";
 import type { PlanId } from "./tiers";
 import type { PlatformWorkerName, PlatformEnv } from "./admin/platform-workers";
 
@@ -59,6 +59,7 @@ export const projects = pgTable(
       .references(() => users.id),
     slug: text("slug").notNull(),
     type: text("mode").notNull().default("worker").$type<"void" | "spa" | "static" | "framework">(),
+    active_deployment_id: text("active_deployment_id"),
     created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   },
   (t) => [
@@ -89,6 +90,8 @@ export const deployments = pgTable(
     asset_hashes: text("asset_hashes"),
     created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
     deployed_at: timestamp("deployed_at", { mode: "string" }),
+    retained: boolean("retained").notNull().default(false),
+    applied_migrations: text("applied_migrations"),
   },
   (t) => [
     index("idx_deployments_project_id").on(t.project_id, t.created_at),
