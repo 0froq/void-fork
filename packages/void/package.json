@@ -91,6 +91,10 @@
       "types": "./dist/runtime/remote/binding-handler.d.mts",
       "import": "./dist/runtime/remote/binding-handler.mjs"
     },
+    "./runtime/migration-handler": {
+      "types": "./dist/runtime/migration-handler.d.mts",
+      "import": "./dist/runtime/migration-handler.mjs"
+    },
     "./pages": {
       "types": "./dist/pages/index.d.mts",
       "import": "./dist/pages/index.mjs"

@@ -213,8 +213,11 @@ async function streamDeploy(
       case "provisioning":
         s.message(`Provisioning ${event.bindings.join(", ")}`);
         break;
+      case "migration_start":
+        s.message(`Running ${event.pending} migration${event.pending > 1 ? "s" : ""}...`);
+        break;
       case "migration":
-        s.message(`Running migration ${event.index}/${event.total}: ${event.name}`);
+        s.message(`Applied migration: ${event.name} (${event.durationMs}ms)`);
         break;
       case "worker_upload":
         s.message("Uploading worker...");

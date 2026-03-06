@@ -71,6 +71,7 @@ export default defineConfig({
     "src/runtime/ai.ts",
     "src/runtime/remote/index.ts",
     "src/runtime/remote/binding-handler.ts",
+    "src/runtime/migration-handler.ts",
     "src/pages/index.ts",
     "src/pages/protocol.ts",
     "src/pages/head.ts",

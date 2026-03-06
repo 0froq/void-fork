@@ -44,6 +44,7 @@ function printHelp() {
       helpLine("void project link [name]", "Link directory to a project"),
       helpLine("void project list", "List your projects"),
       helpLine("void project logs [--filter] [--range]", "Show runtime logs from deployed project"),
+      helpLine("void project rollback [deployId]", "Roll back to a previous deployment"),
       helpLine("void project delete [name]", "Delete a project and all its resources"),
       "",
       categoryTitle("secrets"),
@@ -238,7 +239,7 @@ if (command === "staging") {
     },
     {
       name: "project",
-      hint: "status | link | list | logs | delete",
+      hint: "status | link | list | logs | rollback | delete",
       description: "Manage projects and deployments",
     },
     { name: "secret", hint: "list | put | delete | sync", description: "Manage project secrets" },
