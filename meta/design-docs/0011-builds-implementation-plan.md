@@ -1,5 +1,6 @@
 # Implementation Plan: Void Builds Service
 
+**Updated:** 2026-03-05
 **Status:** Not started yet
 
 ## Context
@@ -13,115 +14,283 @@ Two deploy paths will coexist:
 
 ## Critical Files (Existing)
 
-| File                                  | Purpose                                                                         |
-| ------------------------------------- | ------------------------------------------------------------------------------- |
-| `packages/api/src/routes/deploy.ts`   | Deploy pipeline (provision → migrate → R2 → WfP → KV) — must refactor for reuse |
-| `packages/api/src/index.ts`           | Hono app entry, route mounting, `scheduled()` handler                           |
-| `packages/api/src/env.ts`             | `ApiEnv` type with all bindings                                                 |
-| `packages/api/src/types.ts`           | `User`, `Project`, `Deployment`, `DeployManifest`, etc.                         |
-| `packages/api/src/db.ts`              | All D1 query helpers (`generateId`, CRUD functions)                             |
-| `packages/api/src/id.ts`              | `generateId(prefix)` — reuse for `bld_` and `ghc_` prefixes                     |
-| `packages/api/src/tiers.ts`           | `PlanLimits`, `PLAN_LIMITS`, `getPlanLimits()`                                  |
-| `packages/api/src/middleware/auth.ts` | JWT Bearer auth middleware                                                      |
-| `packages/api/wrangler.jsonc`         | Worker config (D1, KV, R2, dispatch, crons) — no DOs currently                  |
-| `packages/void/src/cli/package.ts`    | `packageBuild()`, `computeAssetHashes()`, `collectFiles()`                      |
+| File                                  | Purpose                                                                      |
+| ------------------------------------- | ---------------------------------------------------------------------------- |
+| `packages/api/src/routes/deploy.ts`   | Deploy pipeline (provision → migrate → assets → WfP → KV → prerender → cron) |
+| `packages/api/src/assets.ts`          | Asset collection, upload sessions, bucket uploads                            |
+| `packages/api/src/index.ts`           | Hono app entry, route mounting, `scheduled()` handler, DO exports            |
+| `packages/api/src/env.ts`             | `ApiEnv` type with all bindings (Hyperdrive, KV, DO, etc.)                   |
+| `packages/api/src/schema.ts`          | Drizzle PostgreSQL schema (users, projects, deployments, resources, domains) |
+| `packages/api/src/types.ts`           | Types inferred via `InferSelectModel`, plus `DeployManifest`, `DeployEvent`  |
+| `packages/api/src/db.ts`              | All Drizzle query helpers (`generateId`, CRUD functions)                     |
+| `packages/api/src/id.ts`              | `generateId(prefix)` — reuse for `bld_` and `ghc_` prefixes                  |
+| `packages/api/src/tiers.ts`           | `PlanId`, `PlanLimits`, `PLAN_LIMITS`, `getPlanLimits()`                     |
+| `packages/api/src/middleware/auth.ts` | JWT Bearer auth middleware                                                   |
+| `packages/api/wrangler.jsonc`         | Worker config (Hyperdrive, KV, DOs, queues, crons)                           |
 
 ---
 
 ## Step 1: Database Schema + Types + Helpers
 
-### 1a. D1 migrations
+### 1a. Drizzle schema
 
-**Create `packages/api/migrations/0011_builds.sql`:**
-
-```sql
-CREATE TABLE builds (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id),
-  user_id TEXT NOT NULL REFERENCES users(id),
-  status TEXT NOT NULL DEFAULT 'queued',
-  commit_sha TEXT NOT NULL,
-  branch TEXT NOT NULL,
-  deployment_id TEXT REFERENCES deployments(id),
-  error TEXT,
-  exit_code INTEGER,
-  instance_type TEXT,
-  started_at TEXT,
-  completed_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX idx_builds_project ON builds(project_id, created_at DESC);
-CREATE INDEX idx_builds_status ON builds(status);
-CREATE INDEX idx_builds_user_status ON builds(user_id, status);
-```
-
-**Create `packages/api/migrations/0012_github_connections.sql`:**
-
-```sql
-CREATE TABLE github_connections (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL UNIQUE REFERENCES projects(id),
-  installation_id INTEGER NOT NULL,
-  repo_full_name TEXT NOT NULL,
-  branch TEXT NOT NULL DEFAULT 'main',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX idx_github_repo ON github_connections(installation_id, repo_full_name);
-```
-
-### 1b. TypeScript interfaces
-
-**Edit `packages/api/src/types.ts`** — add:
+**Edit `packages/api/src/schema.ts`** — add two new tables following existing patterns:
 
 ```typescript
-export interface Build {
-  id: string;
-  project_id: string;
-  user_id: string;
-  status: "queued" | "starting" | "building" | "deploying" | "complete" | "failed" | "cancelled";
-  commit_sha: string;
-  branch: string;
-  deployment_id: string | null;
-  error: string | null;
-  exit_code: number | null;
-  instance_type: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-  created_at: string;
-}
+import { index, pgTable, text, timestamp, unique, uniqueIndex } from "drizzle-orm/pg-core";
 
-export interface GitHubConnection {
-  id: string;
-  project_id: string;
-  installation_id: number;
-  repo_full_name: string;
-  branch: string;
-  created_at: string;
-}
+// ---------------------------------------------------------------------------
+// builds
+// ---------------------------------------------------------------------------
+export const builds = pgTable(
+  "builds",
+  {
+    id: text("id").primaryKey(),
+    project_id: text("project_id")
+      .notNull()
+      .references(() => projects.id),
+    user_id: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    status: text("status")
+      .notNull()
+      .default("queued")
+      .$type<
+        "queued" | "starting" | "building" | "deploying" | "complete" | "failed" | "cancelled"
+      >(),
+    commit_sha: text("commit_sha").notNull(),
+    branch: text("branch").notNull(),
+    deployment_id: text("deployment_id").references(() => deployments.id),
+    error: text("error"),
+    exit_code: text("exit_code"),
+    instance_type: text("instance_type"),
+    started_at: timestamp("started_at", { mode: "string" }),
+    completed_at: timestamp("completed_at", { mode: "string" }),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_builds_project").on(t.project_id, t.created_at),
+    index("idx_builds_status").on(t.status),
+    index("idx_builds_user_status").on(t.user_id, t.status),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// github_connections
+// ---------------------------------------------------------------------------
+export const githubConnections = pgTable(
+  "github_connections",
+  {
+    id: text("id").primaryKey(),
+    project_id: text("project_id")
+      .notNull()
+      .unique()
+      .references(() => projects.id),
+    installation_id: text("installation_id").notNull(),
+    repo_full_name: text("repo_full_name").notNull(),
+    branch: text("branch").notNull().default("main"),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  },
+  (t) => [index("idx_github_repo").on(t.installation_id, t.repo_full_name)],
+);
+```
+
+Then run `pnpm db:generate` to auto-generate the migration SQL. This is a safe migration (new tables only — no breaking changes). The `schema-compat` CI job will validate.
+
+### 1b. TypeScript types
+
+**Edit `packages/api/src/types.ts`** — add inferred types (following existing pattern):
+
+```typescript
+import type { builds, githubConnections } from "./schema";
+
+export type Build = InferSelectModel<typeof builds>;
+export type GitHubConnection = InferSelectModel<typeof githubConnections>;
 ```
 
 ### 1c. DB query helpers
 
-**Edit `packages/api/src/db.ts`** — add build + github_connection CRUD:
+**Edit `packages/api/src/db.ts`** — add build + github_connection CRUD using Drizzle query builder (following existing patterns like `createDeployment`, `getProjectDeployments`, etc.):
 
-- `createBuild(db, projectId, userId, commitSha, branch): Build` — uses `generateId("bld")`
-- `getBuild(db, id): Build | null`
-- `getProjectBuilds(db, projectId, limit=10): Build[]`
-- `updateBuildStatus(db, id, status, opts?: { error, exitCode, instanceType, startedAt, completedAt, deploymentId })`
-- `countUserActiveBuilds(db, userId): number` — `WHERE status IN ('queued','starting','building','deploying')`
-- `getQueuedBuilds(db, limit=50): (Build & { user_plan: string })[]` — joins users for plan
-- `createGitHubConnection(db, projectId, installationId, repoFullName, branch): GitHubConnection`
-- `getGitHubConnection(db, projectId): GitHubConnection | null`
-- `getGitHubConnectionByRepo(db, installationId, repoFullName): (GitHubConnection & { user_id: string }) | null` — joins projects for user_id
-- `deleteGitHubConnection(db, projectId): void`
+```typescript
+import { builds, githubConnections } from "./schema";
+import type { Build, GitHubConnection } from "./types";
 
-Admin queries (for dashboard):
+// --- Builds ---
 
-- `getAllBuildsWithProject(db, limit, offset): (Build & { project_slug: string | null })[]`
-- `countBuilds(db): number`
-- `getBuildByDeploymentId(db, deploymentId): Build | null` — for linking deployments to builds
+export async function createBuild(
+  db: Db,
+  projectId: string,
+  userId: string,
+  commitSha: string,
+  branch: string,
+): Promise<Build> {
+  const id = generateId("bld");
+  const [row] = await db
+    .insert(builds)
+    .values({ id, project_id: projectId, user_id: userId, commit_sha: commitSha, branch })
+    .returning();
+  return row;
+}
+
+export async function getBuild(db: Db, id: string): Promise<Build | null> {
+  const [row] = await db.select().from(builds).where(eq(builds.id, id)).limit(1);
+  return row ?? null;
+}
+
+export async function getProjectBuilds(db: Db, projectId: string, limit = 10): Promise<Build[]> {
+  return db
+    .select()
+    .from(builds)
+    .where(eq(builds.project_id, projectId))
+    .orderBy(desc(builds.created_at))
+    .limit(limit);
+}
+
+export async function updateBuildStatus(
+  db: Db,
+  id: string,
+  status: Build["status"],
+  opts?: {
+    error?: string;
+    exitCode?: string;
+    instanceType?: string;
+    startedAt?: string;
+    completedAt?: string;
+    deploymentId?: string;
+  },
+): Promise<void> {
+  await db
+    .update(builds)
+    .set({
+      status,
+      ...(opts && {
+        error: opts.error,
+        exit_code: opts.exitCode,
+        instance_type: opts.instanceType,
+        started_at: opts.startedAt,
+        completed_at: opts.completedAt,
+        deployment_id: opts.deploymentId,
+      }),
+    })
+    .where(eq(builds.id, id));
+}
+
+export async function countUserActiveBuilds(db: Db, userId: string): Promise<number> {
+  const [result] = await db
+    .select({ count: count() })
+    .from(builds)
+    .where(
+      and(
+        eq(builds.user_id, userId),
+        inArray(builds.status, ["queued", "starting", "building", "deploying"]),
+      ),
+    );
+  return result?.count ?? 0;
+}
+
+export async function getQueuedBuilds(db: Db, limit = 50): Promise<Build[]> {
+  return db
+    .select()
+    .from(builds)
+    .where(eq(builds.status, "queued"))
+    .orderBy(asc(builds.created_at))
+    .limit(limit);
+}
+
+export async function getBuildByDeploymentId(db: Db, deploymentId: string): Promise<Build | null> {
+  const [row] = await db
+    .select()
+    .from(builds)
+    .where(eq(builds.deployment_id, deploymentId))
+    .limit(1);
+  return row ?? null;
+}
+
+// --- GitHub Connections ---
+
+export async function createGitHubConnection(
+  db: Db,
+  projectId: string,
+  installationId: string,
+  repoFullName: string,
+  branch: string,
+): Promise<GitHubConnection> {
+  const id = generateId("ghc");
+  const [row] = await db
+    .insert(githubConnections)
+    .values({
+      id,
+      project_id: projectId,
+      installation_id: installationId,
+      repo_full_name: repoFullName,
+      branch,
+    })
+    .returning();
+  return row;
+}
+
+export async function getGitHubConnection(
+  db: Db,
+  projectId: string,
+): Promise<GitHubConnection | null> {
+  const [row] = await db
+    .select()
+    .from(githubConnections)
+    .where(eq(githubConnections.project_id, projectId))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function getGitHubConnectionByRepo(
+  db: Db,
+  installationId: string,
+  repoFullName: string,
+): Promise<(GitHubConnection & { user_id: string }) | null> {
+  const [row] = await db
+    .select({
+      ...getTableColumns(githubConnections),
+      user_id: projects.user_id,
+    })
+    .from(githubConnections)
+    .innerJoin(projects, eq(githubConnections.project_id, projects.id))
+    .where(
+      and(
+        eq(githubConnections.installation_id, installationId),
+        eq(githubConnections.repo_full_name, repoFullName),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+export async function deleteGitHubConnection(db: Db, projectId: string): Promise<void> {
+  await db.delete(githubConnections).where(eq(githubConnections.project_id, projectId));
+}
+```
+
+Admin queries:
+
+```typescript
+export async function getAllBuildsWithProject(
+  db: Db,
+  limit: number,
+  offset: number,
+): Promise<(Build & { project_slug: string | null })[]> {
+  return db
+    .select({ ...getTableColumns(builds), project_slug: projects.slug })
+    .from(builds)
+    .leftJoin(projects, eq(builds.project_id, projects.id))
+    .orderBy(desc(builds.created_at))
+    .limit(limit)
+    .offset(offset);
+}
+
+export async function countBuilds(db: Db): Promise<number> {
+  const [result] = await db.select({ count: count() }).from(builds);
+  return result?.count ?? 0;
+}
+```
 
 ### Verify
 
@@ -137,24 +306,27 @@ Admin queries (for dashboard):
 Add to `PlanLimits`:
 
 ```typescript
+/** Max concurrent builds (0 = unlimited) */
 concurrentBuilds: number;
+/** Max build timeout in minutes (0 = unlimited) */
 buildTimeoutMinutes: number;
 ```
 
 Add to each plan:
-| Plan | `concurrentBuilds` | `buildTimeoutMinutes` |
-|------|--------------------|-----------------------|
-| free | 1 | 10 |
-| solo | 2 | 15 |
-| pro | 3 | 15 |
-| sponsored | 6 | 20 |
-| custom | 0 (unlimited) | 0 (unlimited) |
+
+| Plan      | `concurrentBuilds` | `buildTimeoutMinutes` |
+| --------- | ------------------ | --------------------- |
+| free      | 1                  | 10                    |
+| solo      | 2                  | 15                    |
+| pro       | 3                  | 15                    |
+| sponsored | 6                  | 20                    |
+| custom    | 0 (unlimited)      | 0 (unlimited)         |
 
 Add helper:
 
 ```typescript
-export function getBuildInstanceType(plan: string): string {
-  const map: Record<string, string> = {
+export function getBuildInstanceType(plan: PlanId): string {
+  const map: Record<PlanId, string> = {
     free: "standard-1",
     solo: "standard-1",
     pro: "standard-2",
@@ -174,19 +346,21 @@ export function getBuildInstanceType(plan: string): string {
 
 ## Step 3: Refactor Deploy Pipeline
 
-Extract the core deploy logic from the 408-line `POST /:id/deploy` handler into a reusable function so both the existing CLI deploy endpoint and the new internal build artifacts endpoint can call it.
+Extract the core deploy logic from the `POST /:id/deploy` handler (~818 lines) into a reusable function so both the existing CLI deploy endpoint and the new internal build artifacts endpoint can call it.
 
 **Create `packages/api/src/deploy-pipeline.ts`:**
 
 Extract from `deploy.ts`:
 
 - `runDeployPipeline(env, project, user, formData, manifest, source): Promise<DeployResult>` — the full pipeline from "create deployment record" through "mark live"
-- Move helper functions: `collectAssetEntries`, `uploadPool`, `clearIsrCache`, `guessContentType`
+- Move shared helper functions that both endpoints need
 
 **Edit `packages/api/src/routes/deploy.ts`:**
 
 - `POST /:id/deploy` becomes: auth check → rate limit check → parse FormData → call `runDeployPipeline()`
-- All the extracted helpers are imported from `deploy-pipeline.ts`
+- All extracted helpers are imported from `deploy-pipeline.ts`
+
+Note: The deploy pipeline now includes asset preflight dedup, ISR, prerendering, queue consumers, cron sync, and header/redirect rules. All of these must be preserved in the extracted function.
 
 ### Verify
 
@@ -230,7 +404,7 @@ All routes use `authMiddleware` and ownership checks.
 - `GET /:id/builds` — list builds for a project (`getProjectBuilds()`)
 - `GET /:id/builds/:buildId` — get build status
 - `POST /:id/builds/:buildId/cancel` — cancel a build:
-  - If queued: update D1 status to `cancelled`
+  - If queued: update PostgreSQL status to `cancelled`
   - If active: forward cancel to BuildManager DO
 - `GET /:id/builds/:buildId/logs` — WebSocket upgrade, proxy to BuildManager DO
 - `POST /builds/:buildId/artifacts` — **internal endpoint**, authenticated with build token (not user JWT):
@@ -284,9 +458,11 @@ GITHUB_WEBHOOK_SECRET?: string;
 
 ```typescript
 import { DurableObject } from "cloudflare:workers";
+import type { ApiEnv } from "../env";
+import { createDb } from "../db";
 
 export class BuildScheduler extends DurableObject<ApiEnv["Bindings"]> {
-  constructor(ctx, env) {
+  constructor(ctx: DurableObjectState, env: ApiEnv["Bindings"]) {
     super(ctx, env);
   }
 
@@ -297,7 +473,8 @@ export class BuildScheduler extends DurableObject<ApiEnv["Bindings"]> {
   }
 
   async alarm() {
-    // 1. Query D1 for queued builds (ordered by created_at)
+    const db = createDb(this.env.HYPERDRIVE.connectionString);
+    // 1. Query PostgreSQL for queued builds (ordered by created_at)
     // 2. For each build:
     //    a. Look up user plan → get concurrentBuilds limit
     //    b. Count user's active builds
@@ -315,7 +492,7 @@ The scheduler only reschedules its alarm when there are queued builds. When the 
 
 ### Verify
 
-- Unit test: mock D1 queries, verify concurrency enforcement
+- Unit test: mock DB queries, verify concurrency enforcement
 - Unit test: verify alarm rescheduling logic
 
 ---
@@ -328,6 +505,8 @@ This is the most complex component. It extends `Container` from `@cloudflare/con
 
 ```typescript
 import { Container } from "@cloudflare/containers";
+import type { ApiEnv } from "../env";
+import { createDb, updateBuildStatus } from "../db";
 
 export class BuildManager extends Container<ApiEnv["Bindings"]> {
   defaultPort = 4000;
@@ -335,7 +514,7 @@ export class BuildManager extends Container<ApiEnv["Bindings"]> {
 
   // RPC method called by BuildScheduler
   async startBuild(config: BuildConfig) {
-    // 1. Store config in SQLite
+    // 1. Store config in DO SQLite
     // 2. Set timeout alarm based on tier
     // 3. Start container with env vars:
     //    BUILD_ID, PROJECT_ID, SOURCE_URL, SOURCE_TOKEN,
@@ -343,16 +522,19 @@ export class BuildManager extends Container<ApiEnv["Bindings"]> {
   }
 
   override onStart() {
-    // Container ready — update D1 build status to 'building'
+    // Container ready — update PostgreSQL build status to 'building' via Hyperdrive
+    const db = createDb(this.env.HYPERDRIVE.connectionString);
+    // updateBuildStatus(db, this.buildId, "building", { startedAt: new Date().toISOString() });
   }
 
   override onStop({ exitCode, reason }) {
-    // Build finished — update D1 build status based on exit code
-    // Notify scheduler if needed
+    // Build finished — update PostgreSQL build status via Hyperdrive
+    const db = createDb(this.env.HYPERDRIVE.connectionString);
+    // updateBuildStatus based on exit code
   }
 
   override onError(error: string) {
-    // Container crashed — mark build as failed
+    // Container crashed — mark build as failed in PostgreSQL
   }
 
   async alarm() {
@@ -365,7 +547,7 @@ export class BuildManager extends Container<ApiEnv["Bindings"]> {
 
     if (url.pathname === "/logs" && request.method === "POST") {
       // Receive batched log lines from container
-      // Store in SQLite, broadcast to WebSocket clients
+      // Store in DO SQLite, broadcast to WebSocket clients
     }
 
     if (url.pathname === "/status" && request.method === "POST") {
@@ -374,7 +556,7 @@ export class BuildManager extends Container<ApiEnv["Bindings"]> {
 
     if (request.headers.get("Upgrade") === "websocket") {
       // Accept WebSocket for log streaming
-      // Send buffered logs from SQLite, then live-stream
+      // Send buffered logs from DO SQLite, then live-stream
     }
 
     return new Response("not found", { status: 404 });
@@ -408,44 +590,41 @@ export class BuildManager extends Container<ApiEnv["Bindings"]> {
 
 **Edit `packages/api/wrangler.jsonc`:**
 
+Add to existing `durable_objects.bindings` array (alongside `UsageCounter` and `CronScheduler`):
+
 ```jsonc
 {
-  // ... existing config ...
-
-  // Add container definition
-  "containers": [
-    {
-      "class_name": "BuildManager",
-      "image": "./container/Dockerfile",
-      "max_instances": 50,
-    },
-  ],
-
-  // Add Durable Object bindings
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "BUILD_SCHEDULER",
-        "class_name": "BuildScheduler",
-      },
-      {
-        "name": "BUILD_MANAGER",
-        "class_name": "BuildManager",
-      },
-    ],
-  },
-
-  // Add DO migration (required for SQLite-backed DOs)
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["BuildScheduler", "BuildManager"],
-    },
-  ],
-
-  // ... staging env needs equivalent config with separate container/DO resources ...
-}
+  "name": "BUILD_SCHEDULER",
+  "class_name": "BuildScheduler",
+},
+{
+  "name": "BUILD_MANAGER",
+  "class_name": "BuildManager",
+},
 ```
+
+Add container definition:
+
+```jsonc
+"containers": [
+  {
+    "class_name": "BuildManager",
+    "image": "./container/Dockerfile",
+    "max_instances": 50,
+  },
+],
+```
+
+Add DO migration (appended to existing migrations array — currently at v2):
+
+```jsonc
+{
+  "tag": "v3",
+  "new_sqlite_classes": ["BuildScheduler", "BuildManager"],
+},
+```
+
+Mirror all changes in the `env.staging` section with equivalent config.
 
 **Update exports in `packages/api/src/index.ts`:**
 
@@ -521,19 +700,33 @@ The agent script handles the full build lifecycle inside the container:
 
 ---
 
-## Step 9: Admin Dashboard — Builds View
+## Step 9: Dashboard — Builds Views
 
-Add a Builds section to the admin dashboard, following the existing pattern of server-rendered Hono JSX pages with pagination.
+### 9a. User-Facing Dashboard (`packages/dashboard`)
 
-### Existing admin patterns to follow
+Build-related pages for end users, following existing Vue Pages patterns:
 
-- Layout: `src/admin/views/layout.tsx` — shared nav bar + page chrome
-- List view: `src/admin/views/deployments-list.tsx` — table with badge-colored status, pagination
-- Detail view: `src/admin/routes/deployments.tsx` — status, error card, metadata table
-- Route mounting: `src/index.ts` lines 40-44 — `app.route("/admin/builds", adminBuilds)`
-- Nav: `src/admin/views/layout.tsx` line 66 — add `<a href="/admin/builds">Builds</a>` after Deployments
+**Build list page** — shows builds for a project:
 
-### New files
+- Read-only loader queries `builds` table via Hyperdrive (direct Drizzle queries)
+- Table: status badge, branch, commit SHA (truncated, links to GitHub), duration, timestamp
+- Auto-refresh for in-progress builds
+
+**Build detail page** — shows build status + logs:
+
+- Status, commit, branch, duration, error (if failed)
+- Real-time log viewer via WebSocket to `GET /builds/:id/logs` on the API
+- Cancel button (mutation via API HTTP)
+
+**GitHub connection management** — in project settings:
+
+- Connect repo (install GitHub App, store connection via API HTTP)
+- Show current connection (repo name, branch)
+- Disconnect (mutation via API HTTP)
+
+### 9b. Admin Dashboard (`packages/api/src/admin/`)
+
+Admin builds view for operational visibility, following existing Hono JSX patterns.
 
 **Create `packages/api/src/admin/views/builds-list.tsx`:**
 
@@ -552,12 +745,12 @@ Add a Builds section to the admin dashboard, following the existing pattern of s
 `GET /builds/:id` — detail page:
 
 - Query `getBuild()` + `getProject()` + `getGitHubConnection()`
-- Show: build ID, project link, status badge, commit SHA, branch, instance type, timing (created → started → completed)
+- Show: build ID, project link, status badge, commit SHA, branch, instance type, timing
 - If `error` is set: show error card (red background, same as deployment error card)
 - If `deployment_id` is set: link to `/admin/deployments/:deploymentId`
 - Build logs section: fetch logs from BuildManager DO via internal fetch, display in a `<pre>` block
 
-### Modify existing views
+### Modify existing admin views
 
 **Edit `packages/api/src/admin/views/layout.tsx`:**
 
@@ -565,18 +758,11 @@ Add a Builds section to the admin dashboard, following the existing pattern of s
 
 **Edit `packages/api/src/admin/routes/deployments.tsx`:**
 
-- In `GET /deployments/:id` detail view, add a row to the table:
-  - "Build" row: query `getBuildByDeploymentId(db, deployment.id)` — if found, render link to `/admin/builds/:buildId` with build status badge
-  - If no build found, show "-" (deploy was via `void deploy`, not a remote build)
-
-**Edit `packages/api/src/admin/views/deployments-list.tsx`:**
-
-- Add "Build" column to the table — shows build ID link if the deployment has an associated build, "-" otherwise
-- Requires the list query to join builds: `getAllDeploymentsWithProject()` → also LEFT JOIN builds ON `builds.deployment_id = deployments.id`
+- In `GET /deployments/:id` detail view, add "Build" row: query `getBuildByDeploymentId()` — if found, link to build; otherwise show "-"
 
 **Edit `packages/api/src/admin/views/dashboard.tsx`:**
 
-- Add build count stat card to the system dashboard (alongside existing users/projects/deployments counts)
+- Add build count stat card (alongside existing users/projects/deployments counts via `getSystemStats()` — extend to include builds)
 
 **Mount in `src/index.ts`:**
 
@@ -591,6 +777,7 @@ app.route("/admin/builds", adminBuilds);
 - Click a build → detail page with status, error, logs
 - Navigate to `/admin/deployments/:id` — "Build" row shows link to associated build (or "-")
 - Dashboard stat card shows build count
+- User dashboard build list and detail pages render correctly
 
 ---
 
@@ -604,14 +791,14 @@ app.route("/admin/builds", adminBuilds);
 
 2. **Unit tests for each component:**
    - Webhook signature verification
-   - Build DB helpers
+   - Build DB helpers (using PGlite test infrastructure)
    - Scheduler concurrency logic
    - BuildManager state machine
    - Build token generation/verification
    - Deploy pipeline extraction (regression test existing deploys)
 
 3. **Verify existing functionality:**
-   - `pnpm vitest --run` — all 882+ existing tests pass
+   - `pnpm test` — all existing tests pass
    - `cd playground/spa && pnpm dev` — still works
    - `pnpm lint && pnpm fmt && pnpm check`
 
@@ -622,10 +809,11 @@ app.route("/admin/builds", adminBuilds);
 - Update `meta/design-docs/0010-builds.md` status from "Design" to "Implemented"
 - Update `README.md` (CLAUDE.md source of truth):
   - Add builds system to platform overview
-  - Add new secrets to environment docs
-  - Update test counts
+  - Add new secrets to operations reference
+  - Update monorepo structure table if new packages added
 - Update `packages/api/README.md` with new routes, DOs, container config
 - Update `meta/progress.md` with builds milestone
+- Update `meta/operations.md` with new secrets (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`)
 
 ---
 
@@ -633,8 +821,6 @@ app.route("/admin/builds", adminBuilds);
 
 | File                                                  | Purpose                                                            |
 | ----------------------------------------------------- | ------------------------------------------------------------------ |
-| `packages/api/migrations/0011_builds.sql`             | Builds table                                                       |
-| `packages/api/migrations/0012_github_connections.sql` | GitHub repo connections table                                      |
 | `packages/api/src/deploy-pipeline.ts`                 | Extracted deploy pipeline (shared by deploy + artifacts endpoints) |
 | `packages/api/src/routes/webhooks.ts`                 | GitHub webhook handler                                             |
 | `packages/api/src/routes/builds.ts`                   | Build status, cancel, logs, artifacts, GitHub connection routes    |
@@ -646,19 +832,20 @@ app.route("/admin/builds", adminBuilds);
 | `packages/api/container/build-agent.mjs`              | Build agent script                                                 |
 | `packages/api/src/admin/views/builds-list.tsx`        | Admin builds list view                                             |
 | `packages/api/src/admin/routes/builds.tsx`            | Admin builds routes                                                |
+| `packages/dashboard/pages/projects/[id]/builds/`      | User-facing build list + detail pages                              |
 
 ## Modified Files Summary
 
-| File                                                | Changes                                                                 |
-| --------------------------------------------------- | ----------------------------------------------------------------------- |
-| `packages/api/src/types.ts`                         | Add `Build`, `GitHubConnection` interfaces                              |
-| `packages/api/src/db.ts`                            | Add build + github_connection CRUD functions                            |
-| `packages/api/src/tiers.ts`                         | Add `concurrentBuilds`, `buildTimeoutMinutes`, `getBuildInstanceType()` |
-| `packages/api/src/env.ts`                           | Add DO bindings, GitHub App secrets to `ApiEnv`                         |
-| `packages/api/src/index.ts`                         | Mount webhook/build routes, export DO classes                           |
-| `packages/api/src/routes/deploy.ts`                 | Refactor to use `runDeployPipeline()` from deploy-pipeline.ts           |
-| `packages/api/wrangler.jsonc`                       | Add containers, durable_objects, migrations (prod + staging)            |
-| `packages/api/src/admin/views/layout.tsx`           | Add Builds nav link                                                     |
-| `packages/api/src/admin/routes/deployments.tsx`     | Add build link to deployment detail                                     |
-| `packages/api/src/admin/views/deployments-list.tsx` | Add Build column                                                        |
-| `packages/api/src/admin/views/dashboard.tsx`        | Add build count stat card                                               |
+| File                                            | Changes                                                                 |
+| ----------------------------------------------- | ----------------------------------------------------------------------- |
+| `packages/api/src/schema.ts`                    | Add `builds`, `githubConnections` tables                                |
+| `packages/api/src/types.ts`                     | Add `Build`, `GitHubConnection` inferred types                          |
+| `packages/api/src/db.ts`                        | Add build + github_connection Drizzle query helpers                     |
+| `packages/api/src/tiers.ts`                     | Add `concurrentBuilds`, `buildTimeoutMinutes`, `getBuildInstanceType()` |
+| `packages/api/src/env.ts`                       | Add DO bindings, GitHub App secrets to `ApiEnv`                         |
+| `packages/api/src/index.ts`                     | Mount webhook/build routes, export DO classes                           |
+| `packages/api/src/routes/deploy.ts`             | Refactor to use `runDeployPipeline()` from deploy-pipeline.ts           |
+| `packages/api/wrangler.jsonc`                   | Add containers, durable_objects bindings, v3 migration (prod + staging) |
+| `packages/api/src/admin/views/layout.tsx`       | Add Builds nav link                                                     |
+| `packages/api/src/admin/routes/deployments.tsx` | Add build link to deployment detail                                     |
+| `packages/api/src/admin/views/dashboard.tsx`    | Add build count stat card                                               |

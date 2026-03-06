@@ -1,6 +1,7 @@
 # Builds — CI/Build Service
 
 **Date:** 2026-02-19
+**Updated:** 2026-03-05
 **Status:** Design
 
 ---
@@ -25,11 +26,11 @@ GitHub push webhook
   │
   ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  Platform Worker                                              │
+│  API Worker (void-api)                                        │
 │                                                               │
 │  POST /webhooks/github       → verify, lookup project, queue  │
-│  GET  /projects/:id/builds   → list builds from D1           │
-│  GET  /builds/:id            → build status from D1          │
+│  GET  /projects/:id/builds   → list builds from PostgreSQL   │
+│  GET  /builds/:id            → build status from PostgreSQL  │
 │  WS   /builds/:id/logs       → proxy WebSocket to DO         │
 │  POST /builds/:id/cancel     → RPC to BuildManager DO        │
 │  POST /builds/:id/artifacts  → (internal) run deploy pipeline │
@@ -48,12 +49,14 @@ GitHub push webhook
 │  │ WebSocket: log stream│          │ 1. Download tarball    │  │
 │  │ Alarm: build timeout │          │ 2. Detect pkg manager  │  │
 │  │                      │          │ 3. Install deps        │  │
-│  │ onStop(): update D1, │          │ 4. vite build          │  │
+│  │ onStop(): update DB, │          │ 4. vite build          │  │
 │  │   notify scheduler   │          │ 5. Package artifacts   │  │
 │  └─────────────────────┘          │ 6. POST to platform    │  │
 │                                    └────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
 ```
+
+Note: The BuildManager DO's own state (logs, build config) lives in its SQLite storage. The platform's shared database (builds table, project/user lookups) is PostgreSQL via Hyperdrive.
 
 ---
 
@@ -65,7 +68,7 @@ A single global instance (addressed as `"global-scheduler"`). Runs a polling loo
 
 **Responsibilities:**
 
-- Poll D1 every 2s for builds with `status = 'queued'`
+- Poll PostgreSQL every 2s for builds with `status = 'queued'`
 - Enforce per-user concurrency limits based on plan tier
 - Start builds by calling `env.BUILD_MANAGER.get(buildId).startBuild(config)`
 - Reschedule its own alarm after each tick
@@ -82,15 +85,15 @@ A single global instance (addressed as `"global-scheduler"`). Runs a polling loo
 
 ```
 alarm():
-  builds = D1.query("SELECT * FROM builds WHERE status = 'queued' ORDER BY created_at")
+  builds = db.select().from(builds).where(eq(builds.status, 'queued')).orderBy(asc(builds.created_at))
   for each build:
-    user = lookupUser(build.user_id)
-    activeCount = D1.query("SELECT COUNT(*) FROM builds WHERE user_id = ? AND status IN ('starting', 'building', 'deploying')")
-    limit = tierLimit(user.tier)
+    user = getUser(db, build.userId)
+    activeCount = countUserActiveBuilds(db, build.userId)
+    limit = getPlanLimits(user.plan).concurrentBuilds
     if activeCount < limit:
-      D1.update(build.id, status = 'starting')
+      updateBuildStatus(db, build.id, 'starting')
       env.BUILD_MANAGER.get(build.id).startBuild(config)
-  setAlarm(now + 2000)
+  if queue not empty: setAlarm(now + 2000)
 ```
 
 **Why a scheduler instead of starting builds immediately:**
@@ -120,9 +123,9 @@ queued ──→ starting ──→ building ──→ deploying ──→ compl
 - Set a timeout alarm (10/15/20 min based on tier)
 - Accept WebSocket connections for real-time log streaming
 - Receive log lines from the container via HTTP POST (batched every 500ms)
-- Store logs in SQLite for historical retrieval
+- Store logs in DO SQLite for historical retrieval
 - Broadcast log lines to all connected WebSocket clients
-- On container stop: update D1 build status, clean up
+- On container stop: update PostgreSQL build status via Hyperdrive, clean up
 
 **Container communication:**
 
@@ -231,7 +234,7 @@ The container produces the **exact same FormData** that `void deploy` produces t
 | `migration:<name>` | SQL migration files                                           |
 | `source`           | `"github"`                                                    |
 
-The container POSTs this to `POST /builds/:id/artifacts`, a new internal endpoint authenticated with the build token. This endpoint runs the **existing deploy pipeline** (provision bindings → migrations → R2 upload → WfP upload → KV routing).
+The container POSTs this to `POST /builds/:id/artifacts`, a new internal endpoint authenticated with the build token. This endpoint runs the **existing deploy pipeline** (provision bindings → migrations → asset upload → WfP upload → KV routing → prerendering → cron sync).
 
 This means:
 
@@ -246,13 +249,13 @@ This means:
 ```
 Container ──POST /logs (batch)──→ BuildManager DO ──WebSocket──→ Dashboard
                                        │
-                                  SQLite storage
+                                  DO SQLite storage
                                   (historical retrieval)
 ```
 
 **Container → DO:** Every 500ms, the build-agent collects buffered stdout/stderr lines and POSTs them to the DO's HTTP endpoint. Each batch is an array of `{ line, timestamp }` objects.
 
-**DO → Clients:** The DO broadcasts each batch to all connected WebSocket clients immediately on receipt. Lines are also appended to SQLite for clients that connect mid-build or after completion.
+**DO → Clients:** The DO broadcasts each batch to all connected WebSocket clients immediately on receipt. Lines are also appended to DO SQLite for clients that connect mid-build or after completion.
 
 **Client reconnection:** On WebSocket connect, the DO sends all stored log lines (from SQLite) followed by a `{ type: "caught_up" }` marker, then live-streams new lines.
 
@@ -262,7 +265,7 @@ Container ──POST /logs (batch)──→ BuildManager DO ──WebSocket─�
 
 ### `POST /webhooks/github`
 
-Receives GitHub push webhooks. Verifies HMAC-SHA256 signature, looks up project by `installation_id` + `repo_full_name`, checks branch filter, inserts build row into D1, and pokes the BuildScheduler DO alarm.
+Receives GitHub push webhooks. Verifies HMAC-SHA256 signature, looks up project by `installation_id` + `repo_full_name`, checks branch filter, inserts build row into PostgreSQL, and pokes the BuildScheduler DO alarm.
 
 ### `GET /projects/:id/builds`
 
@@ -278,7 +281,7 @@ Stream build logs in real-time. Proxied to the BuildManager DO.
 
 ### `POST /builds/:id/cancel`
 
-Cancel a queued or in-progress build. If queued, marks as cancelled in D1. If in-progress, sends cancel signal to the BuildManager DO, which sends SIGTERM to the container.
+Cancel a queued or in-progress build. If queued, marks as cancelled in PostgreSQL. If in-progress, sends cancel signal to the BuildManager DO, which sends SIGTERM to the container.
 
 ### `POST /builds/:id/artifacts` (internal)
 
@@ -286,30 +289,78 @@ Receives the build FormData from the container. Authenticated with the build-spe
 
 ---
 
-## D1 Schema
+## Database Schema
 
-```sql
-CREATE TABLE builds (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'queued',
-  -- queued | starting | building | deploying | complete | failed | cancelled
-  commit_sha TEXT NOT NULL,
-  branch TEXT NOT NULL,
-  error TEXT,
-  exit_code INTEGER,
-  instance_type TEXT,
-  started_at TEXT,
-  completed_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (project_id) REFERENCES projects(id)
+The platform uses PostgreSQL (PlanetScale) via Cloudflare Hyperdrive, with Drizzle ORM for type-safe queries. Schema is defined in `packages/api/src/schema.ts`. Types are inferred via `InferSelectModel`, not hand-maintained.
+
+**New tables to add to `packages/api/src/schema.ts`:**
+
+```typescript
+// ---------------------------------------------------------------------------
+// builds
+// ---------------------------------------------------------------------------
+export const builds = pgTable(
+  "builds",
+  {
+    id: text("id").primaryKey(),
+    project_id: text("project_id")
+      .notNull()
+      .references(() => projects.id),
+    user_id: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    status: text("status")
+      .notNull()
+      .default("queued")
+      .$type<
+        "queued" | "starting" | "building" | "deploying" | "complete" | "failed" | "cancelled"
+      >(),
+    commit_sha: text("commit_sha").notNull(),
+    branch: text("branch").notNull(),
+    deployment_id: text("deployment_id").references(() => deployments.id),
+    error: text("error"),
+    exit_code: text("exit_code"),
+    instance_type: text("instance_type"),
+    started_at: timestamp("started_at", { mode: "string" }),
+    completed_at: timestamp("completed_at", { mode: "string" }),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_builds_project").on(t.project_id, t.created_at),
+    index("idx_builds_status").on(t.status),
+    index("idx_builds_user_status").on(t.user_id, t.status),
+  ],
 );
 
-CREATE INDEX idx_builds_project ON builds(project_id, created_at DESC);
-CREATE INDEX idx_builds_status ON builds(status);
-CREATE INDEX idx_builds_user_status ON builds(user_id, status);
+// ---------------------------------------------------------------------------
+// github_connections
+// ---------------------------------------------------------------------------
+export const githubConnections = pgTable(
+  "github_connections",
+  {
+    id: text("id").primaryKey(),
+    project_id: text("project_id")
+      .notNull()
+      .unique()
+      .references(() => projects.id),
+    installation_id: text("installation_id").notNull(),
+    repo_full_name: text("repo_full_name").notNull(),
+    branch: text("branch").notNull().default("main"),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  },
+  (t) => [index("idx_github_repo").on(t.installation_id, t.repo_full_name)],
+);
 ```
+
+**Types (in `packages/api/src/types.ts`):**
+
+```typescript
+import type { builds, githubConnections } from "./schema";
+export type Build = InferSelectModel<typeof builds>;
+export type GitHubConnection = InferSelectModel<typeof githubConnections>;
+```
+
+**Migrations:** Run `pnpm db:generate` after adding to schema. Drizzle generates the migration SQL automatically. Apply with `drizzle-kit migrate`. This is a safe migration (new tables only — no breaking changes to existing schema). The `schema-compat` CI job will validate this.
 
 ---
 
@@ -320,7 +371,7 @@ Builds are triggered exclusively by GitHub pushes. The GitHub repo is the source
 ### Setup Flow
 
 1. User installs the Void GitHub App on their repo (via dashboard or `void init --github`)
-2. Platform stores the installation ID and repo mapping in D1
+2. Platform stores the installation ID and repo mapping in PostgreSQL
 3. User configures which branch triggers deploys (default: `main`)
 
 ### Webhook Flow
@@ -329,30 +380,36 @@ Builds are triggered exclusively by GitHub pushes. The GitHub repo is the source
 GitHub push event
   │
   ▼
-Platform Worker: POST /webhooks/github
+API Worker: POST /webhooks/github
   │
   ├─ Verify webhook signature (HMAC-SHA256)
   ├─ Look up project by repo (installation_id + repo full_name)
   ├─ Check branch filter (only build configured branches)
   ├─ Generate installation access token (GitHub App API, 1hr TTL)
-  ├─ Insert build row into D1 (status: queued)
+  ├─ Insert build row into PostgreSQL (status: queued)
   └─ Poke BuildScheduler DO alarm
 ```
 
-### D1 Schema (GitHub connection)
+---
 
-```sql
-CREATE TABLE github_connections (
-  project_id TEXT PRIMARY KEY,
-  installation_id INTEGER NOT NULL,
-  repo_full_name TEXT NOT NULL,  -- "owner/repo"
-  branch TEXT NOT NULL DEFAULT 'main',
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (project_id) REFERENCES projects(id)
-);
+## Dashboard Integration
 
-CREATE INDEX idx_github_repo ON github_connections(installation_id, repo_full_name);
-```
+### User-Facing Dashboard (`packages/dashboard`)
+
+The user dashboard is a Vue Pages mode app (`packages/dashboard`) with direct Hyperdrive reads. Build-related pages:
+
+- **Build list** — read-only loader queries `builds` table via Hyperdrive
+- **Build detail** — status, logs (WebSocket to API), commit info
+- **GitHub connection management** — connect/disconnect repo (mutations go through API HTTP)
+- **Real-time log viewer** — WebSocket to `GET /builds/:id/logs` on the API
+
+### Admin Dashboard (`packages/api/src/admin/`)
+
+The admin dashboard (Hono JSX, server-rendered) gets a builds section for operational visibility:
+
+- Paginated builds list with status badges, project links, commit SHAs
+- Build detail with error cards and log display
+- Build count in system stats dashboard
 
 ---
 
