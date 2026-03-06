@@ -1,4 +1,4 @@
-const CF_API_BASE = "https://api.cloudflare.com/client/v4/accounts";
+export const CF_API_BASE = "https://api.cloudflare.com/client/v4/accounts";
 const CF_ZONE_API_BASE = "https://api.cloudflare.com/client/v4/zones";
 
 interface CfApiResult<T> {
@@ -7,7 +7,7 @@ interface CfApiResult<T> {
   result: T;
 }
 
-async function cfFetch<T>(url: string, apiToken: string, init?: RequestInit): Promise<T> {
+export async function cfFetch<T>(url: string, apiToken: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
     headers: {

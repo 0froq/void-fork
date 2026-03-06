@@ -22,6 +22,7 @@ import adminUsers from "./admin/routes/users";
 import adminProjects from "./admin/routes/projects";
 import adminDeployments from "./admin/routes/deployments";
 import adminSignupControl from "./admin/routes/signup-control";
+import adminPlatform from "./admin/routes/platform";
 import me from "./routes/me";
 import { createDb, getUsersWithProjectsBatch, unsuspendUserIfReason, type Db } from "./db";
 import { getCurrentBillingPeriodStart, getPlanLimits } from "./tiers";
@@ -71,6 +72,7 @@ app.route("/admin/users", adminUsers);
 app.route("/admin/projects", adminProjects);
 app.route("/admin/deployments", adminDeployments);
 app.route("/admin/signup-control", adminSignupControl);
+app.route("/admin/platform", adminPlatform);
 app.route("/admin", adminSystem);
 
 const BATCH_SIZE = 50;

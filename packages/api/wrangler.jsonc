@@ -68,7 +68,9 @@
     "crons": ["0 * * * *"],
   },
   "routes": [{ "pattern": "api.void.cloud", "custom_domain": true }],
-  "vars": {},
+  "vars": {
+    "PLATFORM_ENV": "production",
+  },
   // Secrets (via `wrangler secret put`): CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID, JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
   // Optional env var: AUTH_REDIRECT_URI (defaults to https://api.void.cloud/auth/callback)
   // For local dev, set AUTH_REDIRECT_URI=http://localhost:8787/auth/callback and DEV_AUTH_BYPASS=true in .dev.vars
@@ -128,6 +130,7 @@
         "DASHBOARD_URL": "https://dash.staging.void.cloud",
         "AUTH_REDIRECT_URI": "https://api.staging.void.cloud/auth/callback",
         "LOGS_DATASET": "void_logs_staging",
+        "PLATFORM_ENV": "staging",
       },
     },
   },

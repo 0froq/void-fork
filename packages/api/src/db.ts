@@ -13,10 +13,26 @@ import {
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "./schema";
-import { users, oauthAccounts, projects, deployments, resources, domains } from "./schema";
+import {
+  users,
+  oauthAccounts,
+  projects,
+  deployments,
+  resources,
+  domains,
+  platformEvents,
+} from "./schema";
 import { generateId } from "./id";
 import type { PlanId } from "./tiers";
-import type { Deployment, Domain, OAuthAccount, Project, Resource, User } from "./types";
+import type {
+  Deployment,
+  Domain,
+  OAuthAccount,
+  PlatformEvent,
+  Project,
+  Resource,
+  User,
+} from "./types";
 
 export function createDb(connectionString: string) {
   return drizzle(connectionString, { schema });
@@ -626,4 +642,57 @@ export async function unsuspendUserIfReason(db: Db, id: string, reason: string):
     .update(users)
     .set({ suspended_reason: null })
     .where(and(eq(users.id, id), eq(users.suspended_reason, reason)));
+}
+
+// --- Platform Events ---
+
+export async function createPlatformEvent(
+  db: Db,
+  event: Omit<PlatformEvent, "created_at">,
+): Promise<PlatformEvent> {
+  const [row] = await db.insert(platformEvents).values(event).returning();
+  return row;
+}
+
+export async function updatePlatformEventStatus(
+  db: Db,
+  id: string,
+  status: PlatformEvent["status"],
+  errorMessage?: string,
+): Promise<void> {
+  await db
+    .update(platformEvents)
+    .set({ status, error_message: errorMessage ?? null })
+    .where(eq(platformEvents.id, id));
+}
+
+export async function skipPendingBatchEvents(db: Db, batchId: string): Promise<void> {
+  await db
+    .update(platformEvents)
+    .set({ status: "skipped" })
+    .where(and(eq(platformEvents.batch_id, batchId), eq(platformEvents.status, "pending")));
+}
+
+export async function getPlatformEventsByBatchId(
+  db: Db,
+  batchId: string,
+): Promise<PlatformEvent[]> {
+  return db
+    .select()
+    .from(platformEvents)
+    .where(eq(platformEvents.batch_id, batchId))
+    .orderBy(asc(platformEvents.created_at));
+}
+
+export async function getRecentPlatformEvents(
+  db: Db,
+  environment: PlatformEvent["environment"],
+  limit = 20,
+): Promise<PlatformEvent[]> {
+  return db
+    .select()
+    .from(platformEvents)
+    .where(eq(platformEvents.environment, environment))
+    .orderBy(desc(platformEvents.created_at))
+    .limit(limit);
 }

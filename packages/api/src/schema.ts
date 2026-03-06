@@ -1,5 +1,6 @@
 import { index, pgTable, text, timestamp, unique, uniqueIndex } from "drizzle-orm/pg-core";
 import type { PlanId } from "./tiers";
+import type { PlatformWorkerName, PlatformEnv } from "./admin/platform-workers";
 
 // ---------------------------------------------------------------------------
 // users
@@ -129,4 +130,32 @@ export const domains = pgTable(
     created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   },
   (t) => [index("idx_domains_project_id").on(t.project_id, t.created_at)],
+);
+
+// ---------------------------------------------------------------------------
+// platform_events (audit log for admin platform rollbacks)
+// ---------------------------------------------------------------------------
+export const platformEvents = pgTable(
+  "platform_events",
+  {
+    id: text("id").primaryKey(),
+    batch_id: text("batch_id"),
+    action: text("action").notNull().$type<"rollback" | "rollback_all">(),
+    worker_name: text("worker_name").notNull().$type<PlatformWorkerName>(),
+    environment: text("environment").notNull().$type<PlatformEnv>(),
+    version_id: text("version_id").notNull(),
+    script_name: text("script_name").notNull(),
+    status: text("status")
+      .notNull()
+      .default("pending")
+      .$type<"pending" | "success" | "failed" | "skipped">(),
+    error_message: text("error_message"),
+    admin_user_id: text("admin_user_id").notNull(),
+    admin_login: text("admin_login").notNull(),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_platform_events_batch_id").on(t.batch_id),
+    index("idx_platform_events_env_created").on(t.environment, t.created_at),
+  ],
 );

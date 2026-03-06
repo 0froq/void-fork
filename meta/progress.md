@@ -81,6 +81,8 @@
 - [x] Admin dashboard (Hono JSX, merged into platform worker)
 - [x] Staging environment with isolated CF resources
 - [x] Staging sign-up allowlist (VoidZero Google accounts only)
+- [x] Platform worker rollback admin page (per-worker version history + rollback)
+- [x] Platform rollback audit log (`platform_events` table), unified "Rollback All" with orchestration
 
 ### Remaining
 

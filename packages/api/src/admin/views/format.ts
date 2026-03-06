@@ -35,3 +35,10 @@ export function formatLimit(value: number, unit?: string): string {
   if (unit === "bytes") return formatBytes(value);
   return formatNumber(value);
 }
+
+export const STATUS_COLORS: Record<string, string> = {
+  success: "#16a34a",
+  failed: "#dc2626",
+  pending: "#d97706",
+  skipped: "#6b7280",
+};
