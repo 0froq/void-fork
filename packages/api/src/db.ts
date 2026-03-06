@@ -226,9 +226,13 @@ export async function getAllDeploymentsWithProject(
   db: Db,
   limit: number,
   offset: number,
-): Promise<(Deployment & { project_slug: string | null })[]> {
+): Promise<(Deployment & { project_slug: string | null; active_deployment_id: string | null })[]> {
   return db
-    .select({ ...getTableColumns(deployments), project_slug: projects.slug })
+    .select({
+      ...getTableColumns(deployments),
+      project_slug: projects.slug,
+      active_deployment_id: projects.active_deployment_id,
+    })
     .from(deployments)
     .leftJoin(projects, eq(deployments.project_id, projects.id))
     .orderBy(desc(deployments.created_at))
@@ -571,10 +575,14 @@ export async function searchProjects(
 export async function searchDeployments(
   db: Db,
   query: string,
-): Promise<(Deployment & { project_slug: string | null })[]> {
+): Promise<(Deployment & { project_slug: string | null; active_deployment_id: string | null })[]> {
   const pattern = `%${query}%`;
   return db
-    .select({ ...getTableColumns(deployments), project_slug: projects.slug })
+    .select({
+      ...getTableColumns(deployments),
+      project_slug: projects.slug,
+      active_deployment_id: projects.active_deployment_id,
+    })
     .from(deployments)
     .leftJoin(projects, eq(deployments.project_id, projects.id))
     .where(

@@ -172,7 +172,11 @@ app.get("/:id", async (c) => {
       )}
 
       <h2>Recent Deployments ({deployments.length})</h2>
-      <DeploymentTable deployments={deployments} tz={tz} />
+      <DeploymentTable
+        deployments={deployments}
+        activeDeploymentId={project.active_deployment_id}
+        tz={tz}
+      />
 
       <h2>Danger Zone</h2>
       <form

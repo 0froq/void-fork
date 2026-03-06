@@ -1,5 +1,6 @@
 import { Miniflare } from "miniflare";
 import { PGlite } from "@electric-sql/pglite";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
@@ -188,6 +189,9 @@ export async function createTestDeployment(
     source: source ?? null,
     error_message: errorMessage ?? null,
   });
+  if (status === "live") {
+    await db.update(projects).set({ active_deployment_id: id }).where(eq(projects.id, projectId));
+  }
   return { id };
 }
 

@@ -1,12 +1,43 @@
 import type { Deployment } from "../../types";
 import { formatDateTime } from "./format";
 
+export function displayStatus(
+  d: Deployment,
+  activeDeploymentId: string | null | undefined,
+): string {
+  if (d.status === "failed") return "failed";
+  if (d.status !== "live") return d.status;
+  if (d.id === activeDeploymentId) return "live";
+  if (d.retained) return "retained";
+  return "evicted";
+}
+
+function statusColor(status: string): string | undefined {
+  switch (status) {
+    case "live":
+      return "color: #16a34a; font-weight: 600";
+    case "retained":
+      return "color: #16a34a";
+    case "evicted":
+      return "color: #888";
+    case "failed":
+      return "color: #dc2626";
+    default:
+      return undefined;
+  }
+}
+
 export function DeploymentTable({
   deployments,
+  activeDeploymentId,
   showProject,
   tz,
 }: {
-  deployments: (Deployment & { project_slug?: string | null })[];
+  deployments: (Deployment & {
+    project_slug?: string | null;
+    active_deployment_id?: string | null;
+  })[];
+  activeDeploymentId?: string | null;
   showProject?: boolean;
   tz?: string;
 }) {
@@ -31,51 +62,50 @@ export function DeploymentTable({
         </tr>
       </thead>
       <tbody>
-        {deployments.map((d) => (
-          <tr key={d.id}>
-            <td>
-              <a href={`/admin/deployments/${d.id}`}>{d.id}</a>
-            </td>
-            {showProject && (
+        {deployments.map((d) => {
+          const activeId = activeDeploymentId ?? d.active_deployment_id;
+          const status = displayStatus(d, activeId);
+          return (
+            <tr key={d.id}>
               <td>
-                {d.project_slug ? (
-                  <a href={`/admin/projects/${d.project_id}`}>{d.project_slug}</a>
+                <a href={`/admin/deployments/${d.id}`}>{d.id}</a>
+              </td>
+              {showProject && (
+                <td>
+                  {d.project_slug ? (
+                    <a href={`/admin/projects/${d.project_id}`}>{d.project_slug}</a>
+                  ) : (
+                    "-"
+                  )}
+                </td>
+              )}
+              <td style={statusColor(status)}>{status}</td>
+              <td>{d.source ?? "-"}</td>
+              <td>{d.commit ? d.commit.slice(0, 7) : "-"}</td>
+              <td>
+                {d.error_message ? (
+                  <>
+                    <span style="color: red; max-width: 400px; display: inline-block; word-break: break-word">
+                      {d.error_message}
+                    </span>
+                    <br />
+                    <button
+                      type="button"
+                      class="copy-btn"
+                      data-copy={d.error_message}
+                      style="font-size: 0.65rem; padding: 1px 5px; float: right; margin-top: 5px"
+                    >
+                      copy
+                    </button>
+                  </>
                 ) : (
                   "-"
                 )}
               </td>
-            )}
-            <td>
-              <span
-                style={`display:inline-block;width:8px;height:8px;border-radius:50%;background:${d.status === "failed" ? "#dc2626" : "#16a34a"}`}
-                title={d.status}
-              />
-            </td>
-            <td>{d.source ?? "-"}</td>
-            <td>{d.commit ? d.commit.slice(0, 7) : "-"}</td>
-            <td>
-              {d.error_message ? (
-                <>
-                  <span style="color: red; max-width: 400px; display: inline-block; word-break: break-word">
-                    {d.error_message}
-                  </span>
-                  <br />
-                  <button
-                    type="button"
-                    class="copy-btn"
-                    data-copy={d.error_message}
-                    style="font-size: 0.65rem; padding: 1px 5px; float: right; margin-top: 5px"
-                  >
-                    copy
-                  </button>
-                </>
-              ) : (
-                "-"
-              )}
-            </td>
-            <td>{formatDateTime(d.created_at, tz)}</td>
-          </tr>
-        ))}
+              <td>{formatDateTime(d.created_at, tz)}</td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

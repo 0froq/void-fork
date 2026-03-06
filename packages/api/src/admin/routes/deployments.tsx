@@ -10,6 +10,7 @@ import {
 import type { DeployManifest } from "../../types";
 import { DeploymentsListPage } from "../views/deployments-list";
 import { DeploymentLogs } from "../views/deployment-logs";
+import { displayStatus } from "../views/deployment-table";
 import { Layout } from "../views/layout";
 import { formatDateTime } from "../views/format";
 
@@ -100,15 +101,16 @@ app.get("/:id", async (c) => {
           <tr>
             <th>Status</th>
             <td
-              style={
-                deployment.status === "live"
-                  ? "color: green"
-                  : deployment.status === "failed"
-                    ? "color: red"
-                    : undefined
-              }
+              style={(() => {
+                const s = displayStatus(deployment, project?.active_deployment_id);
+                if (s === "live") return "color: #16a34a; font-weight: 600";
+                if (s === "retained") return "color: #16a34a";
+                if (s === "evicted") return "color: #888";
+                if (s === "failed") return "color: #dc2626";
+                return undefined;
+              })()}
             >
-              {deployment.status}
+              {displayStatus(deployment, project?.active_deployment_id)}
             </td>
             <th>Source</th>
             <td>{deployment.source ?? "-"}</td>
@@ -230,11 +232,13 @@ app.get("/:id/logs", async (c) => {
       blob4 as url,
       blob5 as method,
       blob6 as statusCode,
+      blob7 as deployId,
       double1 as ts,
       timestamp
     FROM ${dataset}
     WHERE index1 = '${workerName}'
       AND timestamp >= toDateTime('${sinceStr}')
+      AND blob7 = '${deployment.id}'
     ORDER BY timestamp DESC
     LIMIT ${limit}
   `;
