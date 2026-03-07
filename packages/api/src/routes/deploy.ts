@@ -809,6 +809,15 @@ app.post("/:id/deploy/preflight", async (c) => {
     return c.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
   }
 
+  // If the active deployment has no KV serving manifest, its assets live in
+  // WfP (ASSETS binding), not KV/R2.  All assets must be uploaded fresh.
+  if (project.active_deployment_id) {
+    const hasServingManifest = await c.env.ROUTING.get(`manifest:${project.active_deployment_id}`);
+    if (!hasServingManifest) {
+      return c.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
+    }
+  }
+
   const needed: string[] = [];
   for (const [path, entry] of Object.entries(assetManifest)) {
     const prev = prevManifest[path];

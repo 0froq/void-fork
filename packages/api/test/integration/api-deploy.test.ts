@@ -1302,6 +1302,13 @@ describe("POST /projects/:id/deploy/preflight", () => {
       .update(deployments)
       .set({ asset_hashes: JSON.stringify(prevManifest) })
       .where(eq(deployments.id, prevDeploy.id));
+    // Simulate a KV/R2 deployment: store a serving manifest so preflight
+    // knows assets are in KV/R2 (not WfP)
+    const servingManifest: Record<string, string> = {};
+    for (const [path, entry] of Object.entries(prevManifest)) {
+      servingManifest[path] = entry.hash;
+    }
+    await env.ROUTING.put(`manifest:${prevDeploy.id}`, JSON.stringify(servingManifest));
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
