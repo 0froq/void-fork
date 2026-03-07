@@ -71,7 +71,7 @@ describe("uploadStaticAssets", () => {
     expect(largeHashes.has("smallhash0000000000000000000000")).toBe(false);
   });
 
-  it("skips assets that already exist in KV", async () => {
+  it("overwrites assets that already exist in KV (idempotent puts)", async () => {
     const kv = createMockKV();
     const r2 = createMockR2();
     kv.store.set("assets/existinghash000000000000000000", new ArrayBuffer(1));
@@ -83,10 +83,10 @@ describe("uploadStaticAssets", () => {
 
     await uploadStaticAssets(kv, r2, assetsByHash);
 
-    expect(kv.put).toHaveBeenCalledTimes(1); // only the new asset
+    expect(kv.put).toHaveBeenCalledTimes(2); // both assets, no existence check
   });
 
-  it("skips assets that already exist in R2", async () => {
+  it("overwrites assets that already exist in R2 (idempotent puts)", async () => {
     const kv = createMockKV();
     const r2 = createMockR2();
     r2.store.set("assets/existinglarge00000000000000000", new ArrayBuffer(KV_THRESHOLD + 1));
@@ -103,7 +103,7 @@ describe("uploadStaticAssets", () => {
 
     const largeHashes = await uploadStaticAssets(kv, r2, assetsByHash);
 
-    expect(r2.put).toHaveBeenCalledTimes(0); // skipped
+    expect(r2.put).toHaveBeenCalledTimes(1); // idempotent put, no existence check
     expect(largeHashes.has("existinglarge00000000000000000")).toBe(true);
   });
 });
