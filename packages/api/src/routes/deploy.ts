@@ -124,12 +124,18 @@ app.post("/:id/deploy", async (c) => {
         // Collect assets from FormData and compute CF-compatible hashes
         const { manifest: assetManifest, assetsByHash } = await collectAssets(formData);
 
-        // When preflight was used, merge previous deploy's manifest for skipped assets
+        // When preflight was used, fill in skipped assets.
+        // Prefer the CLI's full manifest (new CLIs send it) to avoid accumulating
+        // stale entries from previous deploys. Fall back to the previous deploy's
+        // manifest for older CLIs that don't send it.
         const preflightUsed = formData.get("preflight") === "true";
         if (preflightUsed) {
-          const prevManifest = await getLastLiveAssetManifest(c.get("db"), projectId);
-          if (prevManifest) {
-            for (const [path, entry] of Object.entries(prevManifest)) {
+          const fullManifestJson = formData.get("assetManifest") as string | null;
+          const fillManifest = fullManifestJson
+            ? (JSON.parse(fullManifestJson) as Record<string, { hash: string; size: number }>)
+            : await getLastLiveAssetManifest(c.get("db"), projectId);
+          if (fillManifest) {
+            for (const [path, entry] of Object.entries(fillManifest)) {
               if (!(path in assetManifest)) {
                 assetManifest[path] = entry;
               }
