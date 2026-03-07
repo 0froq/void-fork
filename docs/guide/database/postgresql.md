@@ -49,11 +49,11 @@ You can also set the connection string ahead of time with `void db set-url`.
 
 ## Schema Definition
 
-With the `postgresql` dialect, `void/schema-helpers` re-exports from `drizzle-orm/pg-core` instead of `drizzle-orm/sqlite-core`:
+With the `postgresql` dialect, import schema helpers from `void/schema-pg` (re-exports from `drizzle-orm/pg-core`):
 
 ```ts
 // db/schema.ts
-import { pgTable, serial, text, timestamp, boolean, doublePrecision } from "void/schema-helpers";
+import { pgTable, serial, text, timestamp, boolean, doublePrecision } from "void/schema-pg";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),

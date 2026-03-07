@@ -49,13 +49,13 @@ Void supports two database backends. Both use the same Drizzle-based workflow fo
 
 ## Schema Definition
 
-Define your tables in `db/schema.ts` using column helpers from `void/schema-helpers`. This file is the source of truth for your database structure:
+Define your tables in `db/schema.ts` using column helpers from `void/schema-d1` or `void/schema-pg`. This file is the source of truth for your database structure:
 
 ::: code-group
 
 ```ts [SQLite (D1)]
 // db/schema.ts
-import { sqliteTable, text, integer } from "void/schema-helpers";
+import { sqliteTable, text, integer } from "void/schema-d1";
 import { sql } from "void/db";
 
 export const users = sqliteTable("users", {
@@ -71,7 +71,7 @@ export const users = sqliteTable("users", {
 
 ```ts [PostgreSQL]
 // db/schema.ts
-import { pgTable, serial, text, timestamp } from "void/schema-helpers";
+import { pgTable, serial, text, timestamp } from "void/schema-pg";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -230,7 +230,7 @@ Instead of writing validator schemas by hand, you can derive them directly from 
 
 ```ts [Zod]
 // db/schema.ts
-import { sqliteTable, text, integer } from "void/schema-helpers";
+import { sqliteTable, text, integer } from "void/schema-d1";
 import { sql } from "void/db";
 import { createInsertSchema } from "drizzle-zod";
 
@@ -251,7 +251,7 @@ export const insertUserSchema = createInsertSchema(users, {
 
 ```ts [Valibot]
 // db/schema.ts
-import { sqliteTable, text, integer } from "void/schema-helpers";
+import { sqliteTable, text, integer } from "void/schema-d1";
 import { sql } from "void/db";
 import { createInsertSchema } from "drizzle-valibot";
 import { pipe, minLength, email } from "valibot";
@@ -273,7 +273,7 @@ export const insertUserSchema = createInsertSchema(users, {
 
 ```ts [ArkType]
 // db/schema.ts
-import { sqliteTable, text, integer } from "void/schema-helpers";
+import { sqliteTable, text, integer } from "void/schema-d1";
 import { sql } from "void/db";
 import { createInsertSchema } from "drizzle-arktype";
 import { type } from "arktype";

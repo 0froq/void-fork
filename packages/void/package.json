@@ -58,10 +58,13 @@
       "types": "./dist/runtime/db.d.mts",
       "import": "./dist/runtime/db.mjs"
     },
-    "./schema-helpers": {
-      "types": "./dist/runtime/schema.d.mts",
-      "import": "./dist/runtime/schema.mjs",
-      "require": "./schema-helpers.cjs"
+    "./schema-d1": {
+      "types": "./dist/runtime/schema-d1.d.mts",
+      "import": "./dist/runtime/schema-d1.mjs"
+    },
+    "./schema-pg": {
+      "types": "./dist/runtime/schema-pg.d.mts",
+      "import": "./dist/runtime/schema-pg.mjs"
     },
     "./kv": {
       "types": "./dist/runtime/kv.d.mts",

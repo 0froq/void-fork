@@ -48,7 +48,7 @@ describe("gen model", () => {
     });
 
     const schema = read("db/schema/posts.ts");
-    expect(schema).toContain('from "void/schema-helpers"');
+    expect(schema).toContain('from "void/schema-d1"');
     expect(schema).toContain("import { sqliteTable");
     expect(schema).toContain('export const posts = sqliteTable("posts"');
     expect(schema).toContain('id: integer("id").primaryKey({ autoIncrement: true })');

@@ -11,12 +11,9 @@ import { voidWarn } from "./log";
 const drizzleD1Resolved = fileURLToPath(import.meta.resolve("drizzle-orm/d1"));
 const drizzleOrmResolved = fileURLToPath(import.meta.resolve("drizzle-orm"));
 const envModuleResolved = fileURLToPath(import.meta.resolve("void/_env"));
-const drizzlePgCoreResolved = fileURLToPath(import.meta.resolve("drizzle-orm/pg-core"));
-const drizzleSqliteCoreResolved = fileURLToPath(import.meta.resolve("drizzle-orm/sqlite-core"));
 const drizzleNodePgResolved = fileURLToPath(import.meta.resolve("drizzle-orm/node-postgres"));
 
 const VIRTUAL_DB_ID = "\0virtual:void-db";
-const VIRTUAL_SCHEMA_HELPERS_ID = "\0virtual:void-schema-helpers";
 
 /**
  * Vite plugin for Drizzle integration.
@@ -60,12 +57,8 @@ export function drizzlePlugin(
     },
 
     resolveId: {
-      filter: { id: /^(void\/db|void\/schema-helpers|@schema)/ },
+      filter: { id: /^(void\/db|@schema)/ },
       handler(id, importer) {
-        if (id === "void/schema-helpers" && this.environment?.name !== "client") {
-          return VIRTUAL_SCHEMA_HELPERS_ID;
-        }
-
         // Only intercept void/db in server/worker environments (not client)
         if (id === "void/db" && this.environment?.name !== "client") {
           if (!schema) return; // Fall through to the real module (stub)
@@ -89,15 +82,8 @@ export function drizzlePlugin(
     },
 
     load: {
-      filter: { id: /^\0virtual:void-(db|schema-helpers)$/ },
+      filter: { id: /^\0virtual:void-db$/ },
       handler(id) {
-        // void/schema-helpers virtual module
-        if (id === VIRTUAL_SCHEMA_HELPERS_ID) {
-          const source =
-            dialect === "postgresql" ? drizzlePgCoreResolved : drizzleSqliteCoreResolved;
-          return `export * from ${JSON.stringify(source)};`;
-        }
-
         // void/db virtual module
         const schemaImport = JSON.stringify(schema!.path);
 

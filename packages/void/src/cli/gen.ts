@@ -458,7 +458,7 @@ async function runModel(root: string, name: string, columns: ColumnSpec[]): Prom
     ];
 
     content = [
-      `import { pgTable, ${columnImports.join(", ")} } from "void/schema-helpers";`,
+      `import { pgTable, ${columnImports.join(", ")} } from "void/schema-pg";`,
       "",
       `export const ${name} = pgTable("${name}", {`,
       ...allCols,
@@ -476,7 +476,7 @@ async function runModel(root: string, name: string, columns: ColumnSpec[]): Prom
     ];
 
     content = [
-      `import { sqliteTable, ${columnImports.join(", ")} } from "void/schema-helpers";`,
+      `import { sqliteTable, ${columnImports.join(", ")} } from "void/schema-d1";`,
       `import { sql } from "void/db";`,
       "",
       `export const ${name} = sqliteTable("${name}", {`,

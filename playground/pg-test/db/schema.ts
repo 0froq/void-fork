@@ -1,4 +1,4 @@
-import { pgTable, serial, text, boolean, timestamp } from "void/schema-helpers";
+import { pgTable, serial, text, boolean, timestamp } from "void/schema-pg";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),

@@ -252,6 +252,6 @@ Database backend. Omit for D1/SQLite (default). Set to `"pg"` for PostgreSQL via
 When using `"pg"`:
 
 - Add `DATABASE_URL` to `.env.local` for local development
-- `void/schema-helpers` re-exports from `drizzle-orm/pg-core` instead of `drizzle-orm/sqlite-core`
+- Import schema helpers from `void/schema-pg` instead of `void/schema-d1`
 - `void/db` connects via Hyperdrive in production, direct connection locally
 - `void gen model` generates `pgTable` with `serial`, `timestamp`, etc.
