@@ -215,7 +215,7 @@ describe("query tool", () => {
     expect(names).toContain("query");
   });
 
-  it("executes simple code that calls void.projects()", async () => {
+  it("executes simple code that calls void_.listProjects()", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => [
@@ -236,7 +236,7 @@ describe("query tool", () => {
       method: "tools/call",
       params: {
         name: "query",
-        arguments: { code: "async () => await void_.projects()" },
+        arguments: { code: "async () => await void_.listProjects()" },
       },
     });
 
@@ -262,18 +262,23 @@ describe("query tool", () => {
     });
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => [
-        {
-          id: "d1",
-          status: "active",
-          source: "cli",
-          commit: "abc",
-          manifest: null,
-          error_message: null,
-          created_at: "2026-01-01",
-          deployed_at: "2026-01-01",
-        },
-      ],
+      json: async () => ({
+        deployments: [
+          {
+            id: "d1",
+            status: "active",
+            source: "cli",
+            commit: "abc",
+            manifest: null,
+            error_message: null,
+            retained: true,
+            applied_migrations: null,
+            created_at: "2026-01-01",
+            deployed_at: "2026-01-01",
+          },
+        ],
+        activeDeploymentId: "d1",
+      }),
     });
 
     const res = await handleRequest(ctx, {
@@ -284,9 +289,9 @@ describe("query tool", () => {
         name: "query",
         arguments: {
           code: `async () => {
-            const projects = await void_.projects();
+            const projects = await void_.listProjects();
             const p = projects.find(p => p.slug === "my-app");
-            return await void_.deployments(p.id);
+            return await void_.listDeployments(p.id);
           }`,
         },
       },
@@ -294,8 +299,8 @@ describe("query tool", () => {
 
     const result = (res as Record<string, unknown>).result as { content: { text: string }[] };
     const data = JSON.parse(result.content[0].text);
-    expect(data).toHaveLength(1);
-    expect(data[0].status).toBe("active");
+    expect(data.deployments).toHaveLength(1);
+    expect(data.deployments[0].status).toBe("active");
   });
 
   it("returns error when code throws", async () => {
@@ -325,7 +330,7 @@ describe("query tool", () => {
       method: "tools/call",
       params: {
         name: "query",
-        arguments: { code: "async () => await void_.projects()" },
+        arguments: { code: "async () => await void_.listProjects()" },
       },
     });
 
@@ -335,5 +340,125 @@ describe("query tool", () => {
     };
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Not logged in");
+  });
+
+  it("executes rollback via void_.rollback()", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, deploymentId: "d2" }),
+    });
+
+    const res = await handleRequest(ctx, {
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: {
+        name: "query",
+        arguments: { code: 'async () => await void_.rollback("p1", "d1")' },
+      },
+    });
+
+    const result = (res as Record<string, unknown>).result as { content: { text: string }[] };
+    const data = JSON.parse(result.content[0].text);
+    expect(data.ok).toBe(true);
+    expect(data.deploymentId).toBe("d2");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining("/projects/p1/rollback"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("executes addDomain via void_.addDomain()", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: "dom1",
+        project_id: "p1",
+        hostname: "example.com",
+        cf_hostname_id: "cf1",
+        status: "pending",
+        created_at: "2026-01-01",
+        cname_target: "p1.void.app",
+      }),
+    });
+
+    const res = await handleRequest(ctx, {
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: {
+        name: "query",
+        arguments: { code: 'async () => await void_.addDomain("p1", "example.com")' },
+      },
+    });
+
+    const result = (res as Record<string, unknown>).result as { content: { text: string }[] };
+    const data = JSON.parse(result.content[0].text);
+    expect(data.hostname).toBe("example.com");
+    expect(data.cname_target).toBe("p1.void.app");
+  });
+
+  it("executes setSecret via void_.setSecret()", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, name: "API_KEY" }),
+    });
+
+    const res = await handleRequest(ctx, {
+      jsonrpc: "2.0",
+      id: 8,
+      method: "tools/call",
+      params: {
+        name: "query",
+        arguments: { code: 'async () => await void_.setSecret("p1", "API_KEY", "secret123")' },
+      },
+    });
+
+    const result = (res as Record<string, unknown>).result as { content: { text: string }[] };
+    const data = JSON.parse(result.content[0].text);
+    expect(data.ok).toBe(true);
+    expect(data.name).toBe("API_KEY");
+  });
+
+  it("executes getMigrationStatus via void_.getMigrationStatus()", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        applied: [{ name: "001_init", applied_at: "2026-01-01" }],
+      }),
+    });
+
+    const res = await handleRequest(ctx, {
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: {
+        name: "query",
+        arguments: { code: 'async () => await void_.getMigrationStatus("p1")' },
+      },
+    });
+
+    const result = (res as Record<string, unknown>).result as { content: { text: string }[] };
+    const data = JSON.parse(result.content[0].text);
+    expect(data.applied).toHaveLength(1);
+    expect(data.applied[0].name).toBe("001_init");
+  });
+
+  it("does not expose private fields (token, baseUrl)", async () => {
+    const res = await handleRequest(ctx, {
+      jsonrpc: "2.0",
+      id: 10,
+      method: "tools/call",
+      params: {
+        name: "query",
+        arguments: { code: "async () => ({ token: void_.token, baseUrl: void_.baseUrl })" },
+      },
+    });
+
+    const result = (res as Record<string, unknown>).result as { content: { text: string }[] };
+    const data = JSON.parse(result.content[0].text);
+    expect(data.token).toBeUndefined();
+    expect(data.baseUrl).toBeUndefined();
   });
 });

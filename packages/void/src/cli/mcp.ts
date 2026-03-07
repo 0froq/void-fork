@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getToken } from "./auth";
 import { PlatformClient } from "./client";
+import { writeProjectConfig } from "./project";
 
 // --- Types ---
 
@@ -154,17 +155,33 @@ export function searchDocs(pages: DocPage[], query: string): SearchResult[] {
 
 function createQuerySdk(token: string) {
   const client = new PlatformClient(token);
-  return {
-    me: () => client.whoami(),
-    projects: () => client.listProjects(),
-    deployments: (projectId: string) => client.listDeployments(projectId),
-    logs: (projectId: string, opts?: { since?: string; limit?: number }) =>
-      client.getLogs(projectId, opts?.since ?? "1h", opts?.limit ?? 200),
-    secrets: (projectId: string) => client.listSecrets(projectId),
-    domains: (projectId: string) => client.listDomains(projectId),
-    domainStatus: (projectId: string, domainId: string) =>
-      client.getDomainStatus(projectId, domainId),
+
+  // Auto-bind all PlatformClient methods without exposing private fields
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sdk: Record<string, (...args: any[]) => unknown> = {};
+  const proto = Object.getPrototypeOf(client) as Record<string, unknown>;
+  for (const key of Object.getOwnPropertyNames(proto)) {
+    if (key === "constructor") continue;
+    const val = proto[key];
+    if (typeof val === "function") {
+      sdk[key] = val.bind(client);
+    }
+  }
+
+  // link: find-or-create project + write .void/project.json
+  sdk.link = async (slug: string) => {
+    const projects = await client.listProjects();
+    const existing = projects.find((p) => p.slug === slug);
+    if (existing) {
+      writeProjectConfig(process.cwd(), { projectId: existing.id, slug: existing.slug });
+      return { projectId: existing.id, slug: existing.slug, created: false };
+    }
+    const created = await client.createProject(slug);
+    writeProjectConfig(process.cwd(), { projectId: created.id, slug: created.slug });
+    return { projectId: created.id, slug: created.slug, created: true };
   };
+
+  return sdk;
 }
 
 // --- Tool definitions ---
@@ -206,20 +223,45 @@ const TOOLS = [
   },
   {
     name: "query",
-    description: `Execute JavaScript to query the Void platform API.
+    description: `Execute JavaScript to interact with the Void platform API.
 
 Available methods on the "void_" object:
-  void_.me() → { login: string, plan: string }
-  void_.projects() → { id, slug, type, created_at, custom_domain }[]
-  void_.deployments(projectId) → { id, status, source, commit, created_at, deployed_at }[]
-  void_.logs(projectId, opts?) → { timestamp, outcome, logs, exceptions, url, method, status }[]
-    opts: { since?: string (default "1h"), limit?: number (default 200) }
-  void_.secrets(projectId) → { name }[]
-  void_.domains(projectId) → { id, hostname, status, cname_target }[]
-  void_.domainStatus(projectId, domainId) → { hostname, status, ssl_status, verification_errors }
+
+  Account:
+    void_.whoami() → { login, plan }
+
+  Projects:
+    void_.listProjects() → { id, slug, type, created_at, custom_domain }[]
+    void_.createProject(slug) → { id, slug }
+    void_.deleteProject(projectId) → { ok, id, slug, warnings? }
+    void_.link(slug) → { projectId, slug, created } — find-or-create project + write .void/project.json
+
+  Deployments:
+    void_.listDeployments(projectId) → { deployments, activeDeploymentId }
+    void_.rollback(projectId, deploymentId) → { ok, deploymentId?, migrationDiff?, error? }
+
+  Logs:
+    void_.getLogs(projectId, since, limit?, deploymentId?) → { timestamp, outcome, logs, exceptions, url, method, status }[]
+      since: duration string (e.g. "1h"), limit: number (default 200)
+
+  Secrets:
+    void_.listSecrets(projectId) → { name }[]
+    void_.setSecret(projectId, name, value) → { ok, name }
+    void_.deleteSecret(projectId, name) → { ok, name }
+
+  Domains:
+    void_.listDomains(projectId) → { id, hostname, status, cname_target? }[]
+    void_.getDomainStatus(projectId, domainId) → { hostname, status, ssl_status, verification_errors? }
+    void_.addDomain(projectId, hostname) → { id, hostname, status, cname_target? }
+    void_.removeDomain(projectId, domainId) → { ok }
+
+  Database:
+    void_.getMigrationStatus(projectId) → { applied: { name, applied_at }[] }
+    void_.setDatabaseUrl(projectId, connectionString) → { ok }
+    void_.getResources(projectId) → { type, binding_name }[]
 
 Write an async arrow function in JavaScript. The SDK is available as "void_".
-Example: async () => { const ps = await void_.projects(); return ps.map(p => p.slug); }`,
+Example: async () => { const ps = await void_.listProjects(); return ps.map(p => p.slug); }`,
     inputSchema: {
       type: "object" as const,
       properties: {
