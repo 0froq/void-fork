@@ -12,6 +12,7 @@ const drizzleD1Resolved = fileURLToPath(import.meta.resolve("drizzle-orm/d1"));
 const drizzleOrmResolved = fileURLToPath(import.meta.resolve("drizzle-orm"));
 const envModuleResolved = fileURLToPath(import.meta.resolve("void/_env"));
 const drizzleNodePgResolved = fileURLToPath(import.meta.resolve("drizzle-orm/node-postgres"));
+const pgResolved = fileURLToPath(import.meta.resolve("pg"));
 
 const VIRTUAL_DB_ID = "\0virtual:void-db";
 
@@ -40,11 +41,14 @@ export function drizzlePlugin(
     generateDbDts(outDir, schema, dialect);
   }
 
+  let isBuild = false;
+
   return {
     name: "void:drizzle",
     enforce: "pre",
 
-    config() {
+    config(_, env) {
+      isBuild = env.command === "build";
       if (!schema) return;
 
       return {
@@ -57,8 +61,14 @@ export function drizzlePlugin(
     },
 
     resolveId: {
-      filter: { id: /^(void\/db|@schema)/ },
+      filter: { id: /^(void\/db|@schema|pg$)/ },
       handler(id, importer) {
+        // Resolve pg from void's own deps during build so PG projects
+        // don't need pg as a direct dependency.
+        if (id === "pg" && isBuild && dialect === "postgresql" && importer === VIRTUAL_DB_ID) {
+          return pgResolved;
+        }
+
         // Only intercept void/db in server/worker environments (not client)
         if (id === "void/db" && this.environment?.name !== "client") {
           if (!schema) return; // Fall through to the real module (stub)
