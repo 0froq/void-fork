@@ -5,7 +5,7 @@ status: approved
 
 # MCP Code Mode for Platform API
 
-Add a `query` tool to the Void MCP server that lets AI agents write JavaScript to compose read-only platform API calls, inspired by [Cloudflare's Code Mode MCP](https://blog.cloudflare.com/code-mode-mcp/).
+Add a `query` tool to the Void MCP server that lets AI agents write JavaScript to interact with the platform API, inspired by [Cloudflare's Code Mode MCP](https://blog.cloudflare.com/code-mode-mcp/).
 
 ## Motivation
 
@@ -13,7 +13,7 @@ The current MCP server (`void mcp`) only exposes documentation tools. Agents tha
 
 ## Design Decisions
 
-- **Read-only operations only.** Mutations (deploy, create/delete project, set/delete secret, add/delete domain) stay in the CLI. Code mode is for querying and composing data.
+- **Full API access.** The SDK exposes all `PlatformClient` methods (reads and mutations) plus a `link()` helper. Deploy-related methods (`deploy`, `preflight`) are available but not documented in the tool description since they require FormData. The SDK auto-binds all prototype methods without exposing private fields (`token`, `baseUrl`).
 - **Local execution.** Code runs in the `void mcp` process via `new AsyncFunction()`. No remote sandbox — the SDK methods are pre-authenticated HTTP calls to `api.void.cloud`, which already has auth and rate limiting.
 - **Implicit auth.** The MCP server reads `~/.void/token` (or `VOID_TOKEN` env) at startup, same as the CLI. The token never enters the LLM context.
 - **Coexists with docs tools.** The 3 existing tools (`list_pages`, `get_page`, `search_docs`) remain unchanged. `query` is a 4th tool.
@@ -41,19 +41,28 @@ The tool description includes the full SDK type signatures so the LLM knows what
 
 ## SDK Methods
 
-The `void` object is passed as the sole argument to the executed function. It wraps `PlatformClient` read-only methods:
+The `void_` object exposes all `PlatformClient` prototype methods via auto-binding, plus a `link()` helper. Private fields (`token`, `baseUrl`) are not exposed. Key methods:
 
-| Method                                   | Maps to                                   | Returns                |
-| ---------------------------------------- | ----------------------------------------- | ---------------------- |
-| `void.me()`                              | `client.whoami()`                         | `{ login, plan }`      |
-| `void.projects()`                        | `client.listProjects()`                   | `ProjectResponse[]`    |
-| `void.deployments(projectId)`            | `client.listDeployments(projectId)`       | `DeploymentResponse[]` |
-| `void.logs(projectId, opts?)`            | `client.getLogs(projectId, since, limit)` | `LogEntry[]`           |
-| `void.secrets(projectId)`                | `client.listSecrets(projectId)`           | `{ name }[]`           |
-| `void.domains(projectId)`                | `client.listDomains(projectId)`           | `DomainResponse[]`     |
-| `void.domainStatus(projectId, domainId)` | `client.getDomainStatus(...)`             | `DomainStatusResponse` |
-
-`logs()` accepts an optional options object: `{ since?: string, limit?: number }`. Defaults: `since = "1h"`, `limit = 200`.
+| Method                                                   | Returns                                                           |
+| -------------------------------------------------------- | ----------------------------------------------------------------- |
+| `void_.whoami()`                                         | `{ login, plan }`                                                 |
+| `void_.listProjects()`                                   | `ProjectResponse[]`                                               |
+| `void_.createProject(slug)`                              | `{ id, slug }`                                                    |
+| `void_.deleteProject(projectId)`                         | `{ ok, id, slug, warnings? }`                                     |
+| `void_.link(slug)`                                       | `{ projectId, slug, created }` — also writes `.void/project.json` |
+| `void_.listDeployments(projectId)`                       | `{ deployments, activeDeploymentId }`                             |
+| `void_.rollback(projectId, deploymentId)`                | `{ ok, deploymentId?, migrationDiff?, error? }`                   |
+| `void_.getLogs(projectId, since, limit?, deploymentId?)` | `LogEntry[]`                                                      |
+| `void_.listSecrets(projectId)`                           | `{ name }[]`                                                      |
+| `void_.setSecret(projectId, name, value)`                | `{ ok, name }`                                                    |
+| `void_.deleteSecret(projectId, name)`                    | `{ ok, name }`                                                    |
+| `void_.listDomains(projectId)`                           | `DomainResponse[]`                                                |
+| `void_.getDomainStatus(projectId, domainId)`             | `DomainStatusResponse`                                            |
+| `void_.addDomain(projectId, hostname)`                   | `DomainResponse`                                                  |
+| `void_.removeDomain(projectId, domainId)`                | `{ ok }`                                                          |
+| `void_.getMigrationStatus(projectId)`                    | `{ applied: { name, applied_at }[] }`                             |
+| `void_.setDatabaseUrl(projectId, url)`                   | `{ ok }`                                                          |
+| `void_.getResources(projectId)`                          | `{ type, binding_name }[]`                                        |
 
 ## Execution Model
 
@@ -75,31 +84,40 @@ const result = await Promise.race([
 **List projects:**
 
 ```js
-async () => await void.projects()
+async () => await void_.listProjects();
 ```
 
 **Recent errors for a specific project:**
 
 ```js
 async () => {
-  const projects = await void.projects();
-  const p = projects.find(p => p.slug === "my-app");
-  const logs = await void.logs(p.id, { since: "1h" });
-  return logs.filter(l => l.exceptions.length > 0);
-}
+  const projects = await void_.listProjects();
+  const p = projects.find((p) => p.slug === "my-app");
+  const logs = await void_.getLogs(p.id, "1h");
+  return logs.filter((l) => l.exceptions.length > 0);
+};
 ```
 
-**Deployment status across all projects:**
+**Rollback to previous deployment:**
 
 ```js
 async () => {
-  const projects = await void.projects();
-  return Promise.all(projects.map(async p => {
-    const deps = await void.deployments(p.id);
-    const latest = deps[0];
-    return { slug: p.slug, status: latest?.status, deployedAt: latest?.deployed_at };
-  }));
-}
+  const projects = await void_.listProjects();
+  const p = projects.find((p) => p.slug === "my-app");
+  const { deployments } = await void_.listDeployments(p.id);
+  const prev = deployments.find((d) => d.retained && d.status === "active");
+  return await void_.rollback(p.id, prev.id);
+};
+```
+
+**Add a custom domain:**
+
+```js
+async () => {
+  const projects = await void_.listProjects();
+  const p = projects.find((p) => p.slug === "my-app");
+  return await void_.addDomain(p.id, "example.com");
+};
 ```
 
 ## File Changes
