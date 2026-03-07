@@ -162,7 +162,42 @@ const form = useForm("/users/:id", { name: "" }, { params: { id: "42" } });
 form.put(); // submits to /users/42
 ```
 
-Actions without validators still get URL autocomplete — the body falls back to `Record<string, unknown>`. See [Pages Routing — Forms](./pages-routing/forms) for the full API.
+Actions without validators still get URL autocomplete — the body falls back to `Record<string, unknown>`. See [Pages Routing — Forms](./pages-routing/actions-and-forms) for the full API.
+
+### Named Actions
+
+When a page exports [named actions](./pages-routing/actions-and-forms#named-actions), each action gets its own typed validator. The `?actionName` suffix on the URL selects the correct types:
+
+```ts
+// pages/users/edit.server.ts
+export const actions = {
+  update: defineHandler.withValidator({
+    body: updateUserSchema,
+  })(async (c, { body }) => {
+    await db
+      .update(users)
+      .set(body)
+      .where(eq(users.id, c.req.param("id")));
+  }),
+
+  delete: defineHandler.withValidator({
+    body: z.object({ id: z.string() }),
+  })(async (c, { body }) => {
+    await db.delete(users).where(eq(users.id, body.id));
+  }),
+};
+```
+
+```ts
+// Component
+const updateForm = useForm("/users/:id?update", { name: "", email: "" }, { params: { id } });
+updateForm.errors.email; // typed from updateUserSchema
+
+const deleteForm = useForm("/users/:id?delete", { id: "" }, { params: { id } });
+deleteForm.errors.id; // typed from the delete schema
+```
+
+The `action()` helper gets the same type checking — URLs, data payloads, and dynamic params are all validated at compile time.
 
 ## What Gets Checked
 
@@ -172,6 +207,7 @@ Actions without validators still get URL autocomplete — the body falls back to
 | Handlers     | `c.env` bindings, validator input, return type                                                   |
 | Fetch client | Route paths, HTTP methods, `body`/`query`/`params`, response type                                |
 | `useForm`    | Page action URLs, `data` fields, `errors` keys, `reset()`/`clearErrors()` args, dynamic `params` |
+| `action()`   | Page action URLs, `data` payload, dynamic `params`                                               |
 
 ## Serialization
 
