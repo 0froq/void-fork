@@ -82,7 +82,6 @@ const integrationItems = [
   { text: "Hono", link: "/integrations/hono" },
   { text: "Cloudflare", link: "/integrations/cloudflare" },
   { text: "Node.js / Bun / Deno", link: "/integrations/nodejs-bun-deno" },
-  { text: "ORMs and External DBs", link: "/integrations/orms-and-external-dbs" },
   { text: "Auth Providers", link: "/integrations/auth-providers" },
   { text: "Payment Processors", link: "/integrations/payment-processors" },
 ];
@@ -199,7 +198,15 @@ export default extendConfig(
             collapsed: false,
             items: [
               { text: "Type Safety", link: "/guide/type-safety" },
-              { text: "Database", link: "/guide/database" },
+              {
+                text: "Database",
+                collapsed: false,
+                items: [
+                  { text: "Overview", link: "/guide/database" },
+                  { text: "D1 (SQLite)", link: "/guide/database/d1" },
+                  { text: "PostgreSQL", link: "/guide/database/postgresql" },
+                ],
+              },
               { text: "Typed Fetch", link: "/guide/typed-fetch" },
               { text: "Key-Value Storage", link: "/guide/kv" },
               { text: "Object Storage", link: "/guide/storage" },
@@ -248,7 +255,6 @@ export default extendConfig(
             Hono: "logos:hono",
             Cloudflare: "devicon:cloudflare",
             "Node.js / Bun / Deno": "material-icon-theme:nodejs-alt",
-            "ORMs and External DBs": "lucide:database",
             "Auth Providers": "lucide:shield",
             "Payment Processors": "lucide:credit-card",
           };
