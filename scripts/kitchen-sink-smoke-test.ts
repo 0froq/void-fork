@@ -73,7 +73,7 @@ async function deleteRowContaining(p: Page, needle: string) {
 // Test suite
 // ---------------------------------------------------------------------------
 
-describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
+void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   before(async () => {
     browser = await chromium.launch();
 
@@ -98,7 +98,7 @@ describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 1. Home SSR + asset caching
   // -----------------------------------------------------------------------
-  it("1 — home SSR + asset caching", async () => {
+  void it("1 — home SSR + asset caching", async () => {
     const { ctx, page: p } = await freshPage();
     try {
       await goto(p, "/");
@@ -132,7 +132,7 @@ describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 2. SPA navigation (no full reload)
   // -----------------------------------------------------------------------
-  it("2 — SPA navigation", async () => {
+  void it("2 — SPA navigation", async () => {
     const { ctx, page: p } = await freshPage();
     try {
       await goto(p, "/");
@@ -167,7 +167,7 @@ describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 3. Layout persistence across navigation
   // -----------------------------------------------------------------------
-  it("3 — layout persistence", async () => {
+  void it("3 — layout persistence", async () => {
     const { ctx, page: p } = await freshPage();
     try {
       await goto(p, "/");
@@ -194,7 +194,7 @@ describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 4. DB — create and delete a note
   // -----------------------------------------------------------------------
-  it("4 — DB CRUD", async () => {
+  void it("4 — DB CRUD", async () => {
     const { ctx, page: p } = await freshPage();
     try {
       const title = `smoke-${uid}`;
@@ -226,7 +226,7 @@ describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 5. KV — set and delete a key
   // -----------------------------------------------------------------------
-  it("5 — KV set/lookup/delete", async () => {
+  void it("5 — KV set/lookup/delete", async () => {
     const { ctx, page: p } = await freshPage();
     try {
       const key = `smoke-kv-${uid}`;
@@ -263,7 +263,7 @@ describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 6. Storage — upload and delete a file
   // -----------------------------------------------------------------------
-  it("6 — Storage upload/delete", async () => {
+  void it("6 — Storage upload/delete", async () => {
     const { ctx, page: p } = await freshPage();
     try {
       await goto(p, "/storage");
@@ -297,7 +297,7 @@ describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 7. Env — displays bindings
   // -----------------------------------------------------------------------
-  it("7 — Env bindings", async () => {
+  void it("7 — Env bindings", async () => {
     const { ctx, page: p } = await freshPage();
     try {
       await goto(p, "/env");
@@ -313,7 +313,7 @@ describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 8. Queues — send message and see consumer result
   // -----------------------------------------------------------------------
-  it("8 — Queues", async () => {
+  void it("8 — Queues", async () => {
     const { ctx, page: p } = await freshPage();
     try {
       const key = `smoke-q-${uid}`;
@@ -345,7 +345,7 @@ describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 9. Auth — register, login, protected route, logout
   // -----------------------------------------------------------------------
-  it("9 — Auth flow", async () => {
+  void it("9 — Auth flow", async () => {
     const { ctx, page: p } = await freshPage();
     try {
       const email = `smoke-${uid}@example.com`;
@@ -403,7 +403,7 @@ describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 10. Cron — heartbeat is running
   // -----------------------------------------------------------------------
-  it("10 — Cron heartbeat", async () => {
+  void it("10 — Cron heartbeat", async () => {
     const { ctx, page: p } = await freshPage();
     try {
       await goto(p, "/cron");
@@ -438,7 +438,7 @@ describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 11. ISR Revalidation
   // -----------------------------------------------------------------------
-  it("11 — ISR revalidation", async () => {
+  void it("11 — ISR revalidation", async () => {
     const { ctx, page: p } = await freshPage();
     try {
       await goto(p, "/revalidate");

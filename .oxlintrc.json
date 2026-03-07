@@ -4,5 +4,13 @@
   "rules": {
     "typescript/no-redundant-type-constituents": "off",
     "typescript/no-misused-spread": "off"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["**/*.test.ts", "**/*.test.tsx"],
+      "rules": {
+        "typescript/unbound-method": "off"
+      }
+    }
+  ]
 }
