@@ -1,6 +1,6 @@
 ---
 title: PostgreSQL via Hyperdrive
-status: draft
+status: done
 created: 2026-03-06
 depends: 0054-versioned-deployments
 ---

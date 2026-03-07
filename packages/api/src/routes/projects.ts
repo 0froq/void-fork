@@ -347,6 +347,114 @@ const app = new Hono<ApiEnv>()
     }));
 
     return c.json({ data });
+  })
+
+  // Provision Hyperdrive for a PostgreSQL project
+  .post("/:id/database", async (c) => {
+    const projectId = c.req.param("id");
+    const project = await getProject(c.get("db"), projectId);
+    if (!project || project.user_id !== c.get("userId")) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const { connectionString } = await c.req.json<{ connectionString: string }>();
+    if (!connectionString?.startsWith("postgres")) {
+      return c.json({ error: "Invalid connection string" }, 400);
+    }
+
+    const { createHyperdrive, getHyperdriveByName } =
+      await import("../provisioning/cloudflare-api");
+    const { createResource, getProjectResources } = await import("../db");
+
+    // Check if Hyperdrive already exists
+    const existing = await getProjectResources(c.get("db"), projectId);
+    const found = existing.find((r) => r.type === "hyperdrive");
+    if (found) {
+      return c.json(
+        { error: "Hyperdrive already provisioned. Use PUT /database-url to update." },
+        409,
+      );
+    }
+
+    const resourceName = `${projectId}-hyperdrive`.toLowerCase();
+    let hyperdriveId: string;
+    try {
+      const hd = await createHyperdrive(
+        c.env.CF_ACCOUNT_ID,
+        c.env.CF_API_TOKEN,
+        resourceName,
+        connectionString,
+      );
+      hyperdriveId = hd.id;
+    } catch (err: any) {
+      if (err.message?.toLowerCase().includes("already exists")) {
+        const hd = await getHyperdriveByName(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resourceName);
+        hyperdriveId = hd.id;
+      } else {
+        throw err;
+      }
+    }
+
+    await createResource(c.get("db"), projectId, "hyperdrive", hyperdriveId, "HYPERDRIVE");
+    return c.json({ ok: true });
+  })
+
+  // Update PostgreSQL connection string (updates Hyperdrive config)
+  .put("/:id/database-url", async (c) => {
+    const projectId = c.req.param("id");
+    const project = await getProject(c.get("db"), projectId);
+    if (!project || project.user_id !== c.get("userId")) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const { connectionString } = await c.req.json<{ connectionString: string }>();
+    if (!connectionString?.startsWith("postgres")) {
+      return c.json({ error: "Invalid connection string" }, 400);
+    }
+
+    const { createHyperdrive, updateHyperdrive, getHyperdriveByName } =
+      await import("../provisioning/cloudflare-api");
+    const { createResource, getProjectResources } = await import("../db");
+
+    const existing = await getProjectResources(c.get("db"), projectId);
+    const found = existing.find((r) => r.type === "hyperdrive");
+
+    if (found) {
+      // Update existing Hyperdrive config
+      await updateHyperdrive(
+        c.env.CF_ACCOUNT_ID,
+        c.env.CF_API_TOKEN,
+        found.cf_id,
+        connectionString,
+      );
+    } else {
+      // Create new Hyperdrive config
+      const resourceName = `${projectId}-hyperdrive`.toLowerCase();
+      let hyperdriveId: string;
+      try {
+        const hd = await createHyperdrive(
+          c.env.CF_ACCOUNT_ID,
+          c.env.CF_API_TOKEN,
+          resourceName,
+          connectionString,
+        );
+        hyperdriveId = hd.id;
+      } catch (err: any) {
+        if (err.message?.toLowerCase().includes("already exists")) {
+          const hd = await getHyperdriveByName(
+            c.env.CF_ACCOUNT_ID,
+            c.env.CF_API_TOKEN,
+            resourceName,
+          );
+          hyperdriveId = hd.id;
+        } else {
+          throw err;
+        }
+      }
+      await createResource(c.get("db"), projectId, "hyperdrive", hyperdriveId, "HYPERDRIVE");
+    }
+
+    return c.json({ ok: true });
   });
 
 function parseDuration(input: string): number | null {

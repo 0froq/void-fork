@@ -14,7 +14,7 @@ import {
 import { hmacSignState } from "../auth/hmac";
 
 export interface WorkerBinding {
-  type: "d1" | "kv_namespace" | "r2_bucket" | "queue" | "service" | "plain_text";
+  type: "d1" | "kv_namespace" | "r2_bucket" | "queue" | "service" | "plain_text" | "hyperdrive";
   name: string;
   id?: string;
   namespace_id?: string;
@@ -75,6 +75,16 @@ export async function provisionBindings(
         }),
       ),
     );
+  }
+
+  for (const name of manifest.bindings.hyperdrive ?? []) {
+    const found = existing.find((r) => r.type === "hyperdrive" && r.binding_name === name);
+    if (!found) {
+      throw new Error(
+        `Hyperdrive not provisioned for binding "${name}". Run \`void db set-url\` first.`,
+      );
+    }
+    tasks.push(Promise.resolve({ type: "hyperdrive" as const, name, id: found.cf_id }));
   }
 
   const bindings = await Promise.all(tasks);
@@ -154,6 +164,10 @@ async function createCfResource(
       const result = await createQueue(accountId, apiToken, resourceName);
       return result.queue_id;
     }
+    case "hyperdrive":
+      throw new Error(
+        "Hyperdrive resources are provisioned via the database endpoint, not ensureResource",
+      );
   }
 }
 
@@ -179,6 +193,10 @@ async function lookupCfResource(
       const result = await getQueueByName(accountId, apiToken, resourceName);
       return result.queue_id;
     }
+    case "hyperdrive":
+      throw new Error(
+        "Hyperdrive resources are provisioned via the database endpoint, not ensureResource",
+      );
   }
 }
 

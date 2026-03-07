@@ -232,6 +232,65 @@ export async function deleteCustomHostname(
   });
 }
 
+// --- Hyperdrive ---
+
+export interface HyperdriveInfo {
+  id: string;
+  name: string;
+}
+
+export async function createHyperdrive(
+  accountId: string,
+  apiToken: string,
+  name: string,
+  connectionString: string,
+): Promise<HyperdriveInfo> {
+  return cfFetch<HyperdriveInfo>(`${CF_API_BASE}/${accountId}/hyperdrive/configs`, apiToken, {
+    method: "POST",
+    body: JSON.stringify({ name, origin: { connection_string: connectionString } }),
+  });
+}
+
+export async function updateHyperdrive(
+  accountId: string,
+  apiToken: string,
+  hyperdriveId: string,
+  connectionString: string,
+): Promise<HyperdriveInfo> {
+  return cfFetch<HyperdriveInfo>(
+    `${CF_API_BASE}/${accountId}/hyperdrive/configs/${hyperdriveId}`,
+    apiToken,
+    {
+      method: "PUT",
+      body: JSON.stringify({ origin: { connection_string: connectionString } }),
+    },
+  );
+}
+
+export async function deleteHyperdrive(
+  accountId: string,
+  apiToken: string,
+  hyperdriveId: string,
+): Promise<void> {
+  await cfFetch(`${CF_API_BASE}/${accountId}/hyperdrive/configs/${hyperdriveId}`, apiToken, {
+    method: "DELETE",
+  });
+}
+
+export async function getHyperdriveByName(
+  accountId: string,
+  apiToken: string,
+  name: string,
+): Promise<HyperdriveInfo> {
+  const result = await cfFetch<HyperdriveInfo[]>(
+    `${CF_API_BASE}/${accountId}/hyperdrive/configs`,
+    apiToken,
+  );
+  const match = result.find((h) => h.name === name);
+  if (!match) throw new Error(`Hyperdrive config not found: ${name}`);
+  return match;
+}
+
 // --- Cache Purge ---
 
 export async function purgeZoneCache(

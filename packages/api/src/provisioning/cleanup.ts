@@ -7,6 +7,7 @@ import {
   deleteR2Bucket,
   deleteQueue,
   deleteCustomHostname,
+  deleteHyperdrive,
 } from "./cloudflare-api";
 import { DEFAULT_DISPATCH_NAMESPACE } from "../constants";
 import type { Project } from "../types";
@@ -42,7 +43,9 @@ export async function cleanupProjectResources(
           ? deleteKVNamespace(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
           : resource.type === "r2"
             ? deleteR2Bucket(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
-            : deleteQueue(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id);
+            : resource.type === "hyperdrive"
+              ? deleteHyperdrive(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
+              : deleteQueue(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id);
     cleanup.push(del.catch(warn(`Failed to delete ${resource.type} resource ${resource.cf_id}`)));
   }
 
