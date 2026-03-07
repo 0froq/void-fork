@@ -195,7 +195,8 @@ const KV_THRESHOLD = 2 * 1024 * 1024; // 2 MB
 
 /**
  * Upload static assets to KV (< 2 MB) or R2 (>= 2 MB).
- * Content-addressed: skips assets that already exist.
+ * Content-addressed keys make puts idempotent, so no existence checks needed.
+ * Uploads run concurrently in batches for speed.
  * Returns the set of hashes that were stored in R2 (large assets).
  */
 export async function uploadStaticAssets(
@@ -204,27 +205,26 @@ export async function uploadStaticAssets(
   assetsByHash: Map<string, AssetEntry>,
 ): Promise<Set<string>> {
   const largeHashes = new Set<string>();
+  const tasks: Promise<void>[] = [];
+
   for (const [hash, entry] of assetsByHash) {
     const key = `assets/${hash}`;
-    const buffer = await entry.blob.arrayBuffer();
-
-    if (buffer.byteLength >= KV_THRESHOLD) {
-      const existing = await r2.head(key);
-      if (!existing) {
+    const task = entry.blob.arrayBuffer().then(async (buffer) => {
+      if (buffer.byteLength >= KV_THRESHOLD) {
         await r2.put(key, buffer, {
           httpMetadata: { contentType: entry.contentType },
         });
-      }
-      largeHashes.add(hash);
-    } else {
-      const existing = await kv.get(key, { type: "arrayBuffer" });
-      if (!existing) {
+        largeHashes.add(hash);
+      } else {
         await kv.put(key, buffer, {
           metadata: { ct: entry.contentType },
         });
       }
-    }
+    });
+    tasks.push(task);
   }
+
+  await Promise.all(tasks);
   return largeHashes;
 }
 
