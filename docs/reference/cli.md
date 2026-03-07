@@ -175,7 +175,7 @@ Drop the local D1 database and re-apply all migrations. Does not affect the remo
 void db seed [--file <path>]
 ```
 
-Reset the local database, re-apply all migrations, then execute a seed file. Defaults to `migrations/seed.sql`. The seed file is excluded from migration collection — it's never deployed or applied as a migration.
+Reset the local database, re-apply all migrations, then execute a seed file. Defaults to `db/seed.sql`.
 
 ### `void db execute`
 

@@ -215,10 +215,9 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
   outro(parts.join(", "));
 }
 
-async function runReset(root: string, dialect: DatabaseDialect): Promise<void> {
+async function resetDatabase(root: string, dialect: DatabaseDialect): Promise<number> {
   if (dialect === "postgresql") {
     await withPgClient(root, async (client) => {
-      // Drop all user tables (not system tables)
       const tables = await client.query(
         "SELECT tablename FROM pg_tables WHERE schemaname = 'public'",
       );
@@ -226,7 +225,6 @@ async function runReset(root: string, dialect: DatabaseDialect): Promise<void> {
         await client.query(`DROP TABLE IF EXISTS "${row.tablename}" CASCADE`);
       }
     });
-    // Re-run migrations
     const migrationsDir = join(root, "db", "migrations");
     const { collectMigrations } = await import("../migrations/collect");
     const migrations = collectMigrations(migrationsDir);
@@ -251,9 +249,7 @@ async function runReset(root: string, dialect: DatabaseDialect): Promise<void> {
         }
       });
     }
-    log.success(`Database reset. Applied ${migrations.length} migration(s).`);
-    outro("");
-    return;
+    return migrations.length;
   }
 
   const { getMiniflareDatabasePath, runMigrations } = await import("../migrations/runner");
@@ -266,8 +262,15 @@ async function runReset(root: string, dialect: DatabaseDialect): Promise<void> {
 
   const migrationsDir = join(root, "db", "migrations");
   const applied = await runMigrations(migrationsDir, dbPath);
-  log.success(`Database reset. Applied ${applied.length} migration(s).`);
-  log.info(dim("Restart your dev server if it's running."));
+  return applied.length;
+}
+
+async function runReset(root: string, dialect: DatabaseDialect): Promise<void> {
+  const count = await resetDatabase(root, dialect);
+  log.success(`Database reset. Applied ${count} migration(s).`);
+  if (dialect !== "postgresql") {
+    log.info(dim("Restart your dev server if it's running."));
+  }
   outro("");
 }
 
@@ -276,40 +279,10 @@ async function runSeed(
   file: string | undefined,
   dialect: DatabaseDialect,
 ): Promise<void> {
-  if (dialect === "postgresql") {
-    // Reset first
-    await runReset(root, dialect);
+  // Reset first (drop + re-run migrations)
+  const migrationCount = await resetDatabase(root, dialect);
+  log.step(`Reset database. Applied ${migrationCount} migration(s).`);
 
-    const seedPath = file ? join(root, file) : join(root, "db", "seed.sql");
-    if (!existsSync(seedPath)) {
-      log.error(`Seed file not found: ${seedPath}`);
-      process.exit(1);
-    }
-
-    const sql = readFileSync(seedPath, "utf-8");
-    await withPgClient(root, async (client) => {
-      await client.query(sql);
-    });
-
-    log.success(`Seeded from ${file ?? "db/seed.sql"}.`);
-    outro("");
-    return;
-  }
-
-  // Reset first
-  const { getMiniflareDatabasePath, runMigrations } = await import("../migrations/runner");
-  const persistRoot = join(root, ".void");
-  const dbPath = getMiniflareDatabasePath(persistRoot, "local");
-
-  rmSync(dbPath, { force: true });
-  rmSync(dbPath + "-wal", { force: true });
-  rmSync(dbPath + "-shm", { force: true });
-
-  const migrationsDir = join(root, "db", "migrations");
-  const applied = await runMigrations(migrationsDir, dbPath);
-  log.step(`Applied ${applied.length} migration(s).`);
-
-  // Run seed
   const seedPath = file ? join(root, file) : join(root, "db", "seed.sql");
   if (!existsSync(seedPath)) {
     log.error(`Seed file not found: ${seedPath}`);
@@ -317,6 +290,19 @@ async function runSeed(
   }
 
   const sql = readFileSync(seedPath, "utf-8");
+
+  if (dialect === "postgresql") {
+    await withPgClient(root, async (client) => {
+      await client.query(sql);
+    });
+    log.success(`Seeded from ${file ?? "db/seed.sql"}.`);
+    outro("Done.");
+    return;
+  }
+
+  const { getMiniflareDatabasePath } = await import("../migrations/runner");
+  const persistRoot = join(root, ".void");
+  const dbPath = getMiniflareDatabasePath(persistRoot, "local");
   const Database = (await import("better-sqlite3")).default;
   const db = new Database(dbPath);
   try {
@@ -327,7 +313,7 @@ async function runSeed(
 
   log.success(`Seeded from ${file ?? "db/seed.sql"}.`);
   log.info(dim("Restart your dev server if it's running."));
-  outro("");
+  outro("Done.");
 }
 
 async function runExecute(
