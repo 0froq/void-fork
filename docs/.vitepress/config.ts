@@ -148,9 +148,9 @@ export default extendConfig(
         { text: "Guide", link: "/guide/", activeMatch: "/guide/" },
         referenceLinks,
         integrationLinks,
-        resourcesLinks,
-        platformLinks,
-        { text: "Dashboard", link: "https://dash.void.cloud" },
+        // resourcesLinks,
+        // platformLinks,
+        // { text: "Dashboard", link: "https://dash.void.cloud" },
       ],
 
       socialLinks,
@@ -163,6 +163,7 @@ export default extendConfig(
             collapsed: false,
             items: [
               { text: "Introduction", link: "/guide/" },
+              { text: "Supported App Types", link: "/guide/app-types" },
               { text: "Quickstart", link: "/guide/quickstart" },
             ],
           },
@@ -175,7 +176,7 @@ export default extendConfig(
               { text: "Server Routing", link: "/guide/server-routing" },
               {
                 text: "Pages Routing",
-                collapsed: false,
+                collapsed: true,
                 items: [
                   { text: "Overview", link: "/guide/pages-routing/overview" },
                   { text: "Loaders & Actions", link: "/guide/pages-routing/loaders-actions" },
@@ -186,6 +187,17 @@ export default extendConfig(
                   { text: "Head Management", link: "/guide/pages-routing/head" },
                   { text: "Islands", link: "/guide/pages-routing/islands" },
                   { text: "Markdown", link: "/guide/pages-routing/markdown" },
+                ],
+              },
+              {
+                text: "Edge Routing",
+                collapsed: true,
+                items: [
+                  { text: "Static Assets Caching", link: "/guide/edge/static-assets" },
+                  { text: "Revalidation (ISR)", link: "/guide/edge/revalidation" },
+                  { text: "Edge Prerendering", link: "/guide/edge/prerendering" },
+                  { text: "Custom Headers", link: "/guide/edge/headers" },
+                  { text: "Redirects", link: "/guide/edge/redirects" },
                 ],
               },
               { text: "Custom SSR", link: "/guide/ssr" },
@@ -200,7 +212,7 @@ export default extendConfig(
               { text: "Type Safety", link: "/guide/type-safety" },
               {
                 text: "Database",
-                collapsed: false,
+                collapsed: true,
                 items: [
                   { text: "Overview", link: "/guide/database" },
                   { text: "D1 (SQLite)", link: "/guide/database/d1" },
@@ -210,6 +222,7 @@ export default extendConfig(
               { text: "Typed Fetch", link: "/guide/typed-fetch" },
               { text: "Key-Value Storage", link: "/guide/kv" },
               { text: "Object Storage", link: "/guide/storage" },
+              { text: "Environment Variables", link: "/guide/env-vars" },
             ],
           },
           {
@@ -217,25 +230,12 @@ export default extendConfig(
             icon: "lucide:cloud",
             collapsed: false,
             items: [
-              { text: "Supported App Types", link: "/guide/app-types" },
-              { text: "Deployment", link: "/guide/deployment" },
-              { text: "Remote Development", link: "/guide/remote-dev" },
-              {
-                text: "Edge Routing",
-                collapsed: false,
-                items: [
-                  { text: "Static Assets Caching", link: "/guide/edge/static-assets" },
-                  { text: "Revalidation (ISR)", link: "/guide/edge/revalidation" },
-                  { text: "Edge Prerendering", link: "/guide/edge/prerendering" },
-                  { text: "Custom Headers", link: "/guide/edge/headers" },
-                  { text: "Redirects", link: "/guide/edge/redirects" },
-                ],
-              },
               { text: "AI", link: "/guide/ai" },
               { text: "Authentication", link: "/guide/auth" },
               { text: "Cron Jobs", link: "/guide/jobs" },
               { text: "Queues", link: "/guide/queues" },
-              { text: "Environment Variables", link: "/guide/env-vars" },
+              { text: "Remote Development", link: "/guide/remote-dev" },
+              { text: "Deployment", link: "/guide/deployment" },
             ],
           },
         ],
@@ -309,10 +309,10 @@ export default extendConfig(
             title: "Platform",
             items: [
               ...platformLinks.items,
-              {
-                text: "Dashboard",
-                link: "https://dash.void.cloud",
-              },
+              // {
+              //   text: "Dashboard",
+              //   link: "https://dash.void.cloud",
+              // },
             ],
           },
         ],
