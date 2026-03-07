@@ -69,6 +69,20 @@ environments: {
 
 **Solution:** Use plain double-quoted `-m` and avoid apostrophes in the message, or escape them. Simpler: just rephrase to remove the apostrophe (e.g. "worker" instead of "worker's").
 
+## pnpm test: Do NOT use `--` before args
+
+**Problem:** `pnpm test -- some-test-file` makes vitest ignore the args that follow. You think you're running a single test file, but you're actually running the **full test suite**.
+
+**Solution:** Run `pnpm test some-file-name` directly, without `--`. Also, `pnpm test` already includes `--run`, so don't pass that either.
+
+```bash
+# WRONG — runs full suite, ignores the filter
+pnpm test -- packages/void/test/unit/mcp.test.ts
+
+# CORRECT — runs only the matching test
+pnpm test packages/void/test/unit/mcp.test.ts
+```
+
 ## Cloudflare Analytics Engine SQL Quirks
 
 AE SQL is ClickHouse-based with several non-obvious limitations:
