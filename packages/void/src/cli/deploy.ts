@@ -291,6 +291,7 @@ async function runStaticDeploy(
     headerRules,
     redirectRules,
   );
+  if (neededSet) formData.append("assetManifest", JSON.stringify(assetManifest));
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
 
@@ -551,6 +552,7 @@ async function runFrameworkDeploy(
     redirectRules,
     dialect,
   });
+  if (neededSet) formData.append("assetManifest", JSON.stringify(assetManifest));
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
 
@@ -877,6 +879,7 @@ async function runFullDeploy(
     redirectRules,
     dialect,
   );
+  if (neededSet) formData.append("assetManifest", JSON.stringify(assetManifest));
   formData.append("source", getTokenSource());
   if (commit) formData.append("commit", commit);
 
