@@ -81,6 +81,9 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
   },
 };
 
+/** Static deployments use a fixed retention limit across all tiers (KV/R2-backed, not WfP). */
+export const STATIC_RETENTION_LIMIT = 100;
+
 /** Returns plan limits, defaulting to free tier for unknown plans. */
 export function getPlanLimits(plan: string): PlanLimits {
   return PLAN_LIMITS[plan as PlanId] ?? PLAN_LIMITS.free;

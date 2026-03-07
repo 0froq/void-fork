@@ -21,15 +21,16 @@ import { deployments } from "../schema";
 import { provisionBindings } from "../provisioning/provision";
 import { addQueueConsumer } from "../provisioning/cloudflare-api";
 import { deleteDispatchScript } from "../cf-api";
-import { getPlanLimits, isWithinLimit } from "../tiers";
+import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT } from "../tiers";
 import { SITE_DOMAIN } from "../constants";
-import { buildRoutingJson } from "../routing";
+import { buildRoutingJson, buildStaticRoutingJson } from "../routing";
 import {
   collectAssets,
   createAssetUploadSession,
   uploadAssetBuckets,
   buildAssetMetadata,
-  PASSTHROUGH_WORKER,
+  uploadStaticAssets,
+  deleteUnreferencedAssets,
 } from "../assets";
 
 const DEFAULT_DISPATCH_NAMESPACE = "void-users";
@@ -142,9 +143,17 @@ app.post("/:id/deploy", async (c) => {
         const hasWorkerFiles = [...formData.keys()].some((k) => k.startsWith("worker:"));
         const isStaticOnly = !hasWorkerFiles;
 
-        // Upload assets via CF asset upload API (3-step flow)
-        let completionJwt: string | undefined;
-        if (assetCount > 0) {
+        // Fetch domains once — used in both static-only and full deploy paths
+        const projectDomains = await getDomainsByProjectId(c.get("db"), projectId);
+
+        if (isStaticOnly) {
+          // Static-only deploy: upload assets to KV/R2, skip bindings/migrations/WfP
+          currentStep = "asset_upload";
+          const assetConfig = manifest.assetConfig ?? {
+            not_found_handling: "single-page-application",
+          };
+
+          // Upload new assets to KV (< 2 MB) or R2 (>= 2 MB)
           const newAssets = Object.keys(assetsByHash).length;
           emit({
             event: "asset_upload",
@@ -152,94 +161,72 @@ app.post("/:id/deploy", async (c) => {
             new: newAssets,
             cached: assetCount - newAssets,
           });
-
-          const session = await createAssetUploadSession(
-            c.env.CF_ACCOUNT_ID,
-            c.env.CF_API_TOKEN,
-            dispatchNamespace,
-            workerName,
-            assetManifest,
+          const largeHashes = await uploadStaticAssets(
+            c.env.STATIC_ASSETS,
+            c.env.STATIC_ASSETS_R2,
+            assetsByHash,
           );
-
-          if (session.buckets.length > 0) {
-            completionJwt = await uploadAssetBuckets(
-              c.env.CF_ACCOUNT_ID,
-              c.env.CF_API_TOKEN,
-              session.jwt,
-              session.buckets,
-              assetsByHash,
-            );
-          } else {
-            completionJwt = session.jwt;
-          }
           emit({ event: "asset_upload_done" });
-        }
 
-        // Fetch domains once — used in both static-only and full deploy paths
-        const projectDomains = await getDomainsByProjectId(c.get("db"), projectId);
-
-        if (isStaticOnly) {
-          // Static-only deploy: generate passthrough worker, skip bindings/migrations
-          currentStep = "worker_upload";
-          const assetConfig = manifest.assetConfig ?? {
-            not_found_handling: "single-page-application",
-          };
-          const workerFormData = new FormData();
-
-          const metadata: Record<string, unknown> = {
-            main_module: "index.js",
-            compatibility_date: "2026-02-12",
-            compatibility_flags: ["nodejs_compat"],
-            bindings: [{ name: "ASSETS", type: "assets" }],
-            ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
-            observability: {
-              enabled: true,
-              logs: { invocation_logs: true, head_sampling_rate: 1 },
-            },
-          };
-          workerFormData.append(
-            "metadata",
-            new Blob([JSON.stringify(metadata)], { type: "application/json" }),
-          );
-          workerFormData.append(
-            "index.js",
-            new Blob([PASSTHROUGH_WORKER], { type: "application/javascript+module" }),
-            "index.js",
-          );
-
-          emit({ event: "worker_upload", modules: 1 });
-
-          const cfResponse = await fetch(
-            `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`,
-            {
-              method: "PUT",
-              headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
-              body: workerFormData,
-            },
-          );
-
-          if (!cfResponse.ok) {
-            const error = await cfResponse.text();
-            throw new Error(`worker upload failed: ${error}`);
+          // Build serving manifest: path → hash (prefix with "!" for R2-stored assets)
+          // For assets from preflight (not in assetsByHash), carry forward R2 status
+          // from the previous deployment's manifest
+          let prevServingManifest: Record<string, string> | null = null;
+          if (preflightUsed && project.active_deployment_id) {
+            const prev = await c.env.ROUTING.get(`manifest:${project.active_deployment_id}`);
+            if (prev) {
+              prevServingManifest = JSON.parse(prev) as Record<string, string>;
+            }
           }
 
-          emit({ event: "worker_upload_done" });
+          // Build a reverse lookup from hash → "!" prefix status from previous manifest
+          const prevR2Hashes = new Set<string>();
+          if (prevServingManifest) {
+            for (const v of Object.values(prevServingManifest)) {
+              if (v.startsWith("!")) {
+                prevR2Hashes.add(v.slice(1));
+              }
+            }
+          }
+
+          const servingManifest: Record<string, string> = {};
+          for (const [path, entry] of Object.entries(assetManifest)) {
+            if (largeHashes.has(entry.hash)) {
+              // Newly uploaded to R2
+              servingManifest[path] = `!${entry.hash}`;
+            } else if (prevR2Hashes.has(entry.hash)) {
+              // Preflight-skipped asset that was previously in R2
+              servingManifest[path] = `!${entry.hash}`;
+            } else {
+              // KV-stored asset (newly uploaded or preflight-skipped)
+              servingManifest[path] = entry.hash;
+            }
+          }
+
+          // Store serving manifest in ROUTING KV for dispatch to look up
+          await c.env.ROUTING.put(`manifest:${deployment.id}`, JSON.stringify(servingManifest));
+
+          // Store asset manifest in DB for future preflight dedup + retention cleanup
+          await c
+            .get("db")
+            .update(deployments)
+            .set({ asset_hashes: JSON.stringify(assetManifest) })
+            .where(eq(deployments.id, deployment.id));
 
           // Use manifest type when present, fall back to assetConfig-based derivation for older CLIs
           const type =
             manifest.type ??
             (assetConfig.not_found_handling === "single-page-application" ? "spa" : "static");
 
-          // Update KV routing
+          // Set KV routing — uses staticDeploymentId (no WfP worker)
           const existingRouting = await c.env.ROUTING.get(project.slug);
           const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
-          const routingJson = buildRoutingJson({
-            workerName,
+          const routingJson = buildStaticRoutingJson({
             projectId,
             userId: project.user_id,
-            manifest,
             deploymentId: deployment.id,
-            dispatchLimits: null,
+            assetConfig,
+            manifest,
             suspended: existingEntry?.suspended,
           });
           await c.env.ROUTING.put(project.slug, routingJson);
@@ -250,12 +237,13 @@ app.post("/:id/deploy", async (c) => {
             }
           }
 
+          // Mark deployment live + update project type
           await updateDeploymentStatus(c.get("db"), deployment.id, "live");
           await updateProjectType(c.get("db"), projectId, type);
           await setActiveDeployment(c.get("db"), projectId, deployment.id);
           await markDeploymentRetained(c.get("db"), deployment.id, true);
 
-          // Legacy cleanup + retention
+          // Hard cutoff: delete legacy WfP scripts (one-time cleanup on first KV/R2 deploy)
           const legacyName = `user-${project.slug}`;
           await deleteDispatchScript(
             c.env.CF_ACCOUNT_ID,
@@ -263,32 +251,67 @@ app.post("/:id/deploy", async (c) => {
             dispatchNamespace,
             legacyName,
           );
-          const retentionLimit = planLimits.retainedDeployments;
-          if (retentionLimit > 0) {
-            const retained = await getRetainedDeploymentsExcluding(
-              c.get("db"),
-              projectId,
-              deployment.id,
+
+          // Fetch all retained deployments once — used for both WfP cleanup and retention
+          const retained = await getRetainedDeploymentsExcluding(
+            c.get("db"),
+            projectId,
+            deployment.id,
+          );
+
+          // Delete any previously retained versioned WfP scripts
+          for (const old of retained) {
+            await deleteDispatchScript(
+              c.env.CF_ACCOUNT_ID,
+              c.env.CF_API_TOKEN,
+              dispatchNamespace,
+              `user-${project.slug}-${old.id}`,
             );
-            const toEvict = retained.slice(retentionLimit - 1);
-            for (const old of toEvict) {
-              await deleteDispatchScript(
-                c.env.CF_ACCOUNT_ID,
-                c.env.CF_API_TOKEN,
-                dispatchNamespace,
-                `user-${project.slug}-${old.id}`,
-              );
-              await markDeploymentRetained(c.get("db"), old.id, false);
-            }
           }
 
-          // Store asset manifest for future preflight dedup
-          if (assetCount > 0) {
-            await c
-              .get("db")
-              .update(deployments)
-              .set({ asset_hashes: JSON.stringify(assetManifest) })
-              .where(eq(deployments.id, deployment.id));
+          // Static retention cleanup — STATIC_RETENTION_LIMIT (100) instead of per-plan limits
+          if (STATIC_RETENTION_LIMIT > 0) {
+            // STATIC_RETENTION_LIMIT includes the active deployment, so keep (limit - 1) others
+            const toEvict = retained.slice(STATIC_RETENTION_LIMIT - 1);
+            if (toEvict.length > 0) {
+              // Collect all hashes from the current + remaining retained deployments
+              const retainedHashes = new Set<string>();
+              for (const [, entry] of Object.entries(assetManifest)) {
+                retainedHashes.add(entry.hash);
+              }
+              const keptDeployments = retained.slice(0, STATIC_RETENTION_LIMIT - 1);
+              for (const kept of keptDeployments) {
+                if (kept.asset_hashes) {
+                  const keptManifest = JSON.parse(kept.asset_hashes) as Record<
+                    string,
+                    { hash: string }
+                  >;
+                  for (const entry of Object.values(keptManifest)) {
+                    retainedHashes.add(entry.hash);
+                  }
+                }
+              }
+
+              for (const old of toEvict) {
+                // Collect evicted hashes and delete unreferenced assets
+                if (old.asset_hashes) {
+                  const evictedManifest = JSON.parse(old.asset_hashes) as Record<
+                    string,
+                    { hash: string }
+                  >;
+                  const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
+                  await deleteUnreferencedAssets(
+                    c.env.STATIC_ASSETS,
+                    c.env.STATIC_ASSETS_R2,
+                    evictedHashes,
+                    retainedHashes,
+                  );
+                }
+                // Delete serving manifest from ROUTING KV
+                await c.env.ROUTING.delete(`manifest:${old.id}`);
+                await markDeploymentRetained(c.get("db"), old.id, false);
+              }
+            }
           }
 
           const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
@@ -307,7 +330,7 @@ app.post("/:id/deploy", async (c) => {
               `https://${project.slug}.${siteDomain}`,
             ],
             assets: assetCount,
-            workers: 1,
+            workers: 0,
           });
           return;
         }
@@ -339,6 +362,39 @@ app.post("/:id/deploy", async (c) => {
 
         if (bindingLabels.length > 0) {
           emit({ event: "provisioning_done" });
+        }
+
+        // Upload assets via CF asset upload API (3-step flow)
+        let completionJwt: string | undefined;
+        if (assetCount > 0) {
+          const newAssets = Object.keys(assetsByHash).length;
+          emit({
+            event: "asset_upload",
+            total: assetCount,
+            new: newAssets,
+            cached: assetCount - newAssets,
+          });
+
+          const session = await createAssetUploadSession(
+            c.env.CF_ACCOUNT_ID,
+            c.env.CF_API_TOKEN,
+            dispatchNamespace,
+            workerName,
+            assetManifest,
+          );
+
+          if (session.buckets.length > 0) {
+            completionJwt = await uploadAssetBuckets(
+              c.env.CF_ACCOUNT_ID,
+              c.env.CF_API_TOKEN,
+              session.jwt,
+              session.buckets,
+              assetsByHash,
+            );
+          } else {
+            completionJwt = session.jwt;
+          }
+          emit({ event: "asset_upload_done" });
         }
 
         // 1. Upload worker to dispatch namespace via CF API

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   PLAN_LIMITS,
+  STATIC_RETENTION_LIMIT,
   getPlanLimits,
   isWithinLimit,
   getCurrentBillingPeriodStart,
@@ -170,5 +171,11 @@ describe("getCurrentBillingPeriodStart", () => {
     const result = getCurrentBillingPeriodStart("not-a-date");
     expect(result.getTime()).toBeGreaterThanOrEqual(before);
     expect(result.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+});
+
+describe("STATIC_RETENTION_LIMIT", () => {
+  it("is 100 for all tiers", () => {
+    expect(STATIC_RETENTION_LIMIT).toBe(100);
   });
 });

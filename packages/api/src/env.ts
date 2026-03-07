@@ -6,6 +6,8 @@ export interface ApiEnv extends Env {
     HYPERDRIVE: Hyperdrive;
     ISR_CACHE: KVNamespace;
     ROUTING: KVNamespace;
+    STATIC_ASSETS: KVNamespace;
+    STATIC_ASSETS_R2: R2Bucket;
     DISPATCH: DispatchNamespace;
     CF_API_TOKEN: string;
     CF_ACCOUNT_ID: string;

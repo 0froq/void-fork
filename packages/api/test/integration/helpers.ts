@@ -25,6 +25,8 @@ export type TestEnv = {
   HYPERDRIVE: { connectionString: string };
   ISR_CACHE: KVNamespace;
   ROUTING: KVNamespace;
+  STATIC_ASSETS: KVNamespace;
+  STATIC_ASSETS_R2: R2Bucket;
   DISPATCH: DispatchNamespace;
   CF_API_TOKEN: string;
   CF_ACCOUNT_ID: string;
@@ -63,11 +65,14 @@ export async function setupEnv(): Promise<TestEnv> {
   mf = new Miniflare({
     modules: true,
     script: "export default { fetch() { return new Response(''); } }",
-    kvNamespaces: ["ROUTING", "ISR_CACHE"],
+    kvNamespaces: ["ROUTING", "ISR_CACHE", "STATIC_ASSETS"],
+    r2Buckets: ["STATIC_ASSETS_R2"],
   });
 
   const kv = await mf.getKVNamespace("ROUTING");
   const isrCache = await mf.getKVNamespace("ISR_CACHE");
+  const staticAssets = await mf.getKVNamespace("STATIC_ASSETS");
+  const staticAssetsR2 = await mf.getR2Bucket("STATIC_ASSETS_R2");
 
   const databaseUrl = process.env.VOID_TEST_DATABASE_URL;
   let db: Db;
@@ -90,6 +95,8 @@ export async function setupEnv(): Promise<TestEnv> {
     HYPERDRIVE: { connectionString: "test://mock" },
     ISR_CACHE: isrCache as unknown as KVNamespace,
     ROUTING: kv as unknown as KVNamespace,
+    STATIC_ASSETS: staticAssets as unknown as KVNamespace,
+    STATIC_ASSETS_R2: staticAssetsR2 as unknown as R2Bucket,
     DISPATCH: {} as DispatchNamespace,
     CF_API_TOKEN,
     CF_ACCOUNT_ID,

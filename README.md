@@ -145,6 +145,8 @@ See [`packages/proxy/README.md`](./packages/proxy/README.md) for request format,
 
 CF Worker routing `*.void.app` traffic. Extracts slug from hostname → KV lookup → serves API routes via Workers for Platforms (with custom CPU/subrequest limits), static assets from R2, or ISR-cached pages from KV (with edge caching). Records every request to Analytics Engine for usage metering. Also relays Cloudflare Queue batches to user workers via KV-based routing.
 
+Static-only projects (type `"static"` / `"spa"`) are served directly from KV (primary) with R2 overflow for files >= 2 MB — no WfP worker created. Assets use content-addressed keys (`assets/{hash}`) in the `STATIC_ASSETS` KV namespace. Manifests stored in `ROUTING` KV.
+
 See [`packages/dispatch/README.md`](./packages/dispatch/README.md) for request flow, metering schema, and edge caching strategy.
 
 ## Tooling
@@ -184,3 +186,4 @@ See [`meta/operations.md`](./meta/operations.md) for the full operations referen
 - **Deploy protocol versioning** — The `DeployManifest` interface has a `version` field. The API validates it and rejects unknown versions with a clear error. See `meta/design-docs/0018-open-source-split.md` for the versioning policy.
 - **Schema backward compatibility** — During deploy, migrations run before the new worker goes live. The `schema-compat` CI job catches breaking migrations by running `prod` branch tests against the PR's new schema on real PostgreSQL. Safe: adding nullable columns, new tables, new indexes. Unsafe (require two-phase migration): column renames, drops, type changes. First PR adds the new column alongside the old; second PR removes the old after deploy.
 - **Project type field is `mode` in DB, `type` everywhere else** — The `projects` table column is `mode` (DB column name), but the Drizzle schema field and all TypeScript code use `type` (`type: text("mode")`). The `DeployManifest` field is `type`, the API function is `updateProjectType`, and all views/templates reference `project.type`. Values: `"void"` (Void apps), `"spa"`, `"static"`, `"framework"` (3rd-party meta-frameworks like Astro/SvelteKit).
+- **Static deployments use KV/R2, not WfP** — Projects with type `"static"` or `"spa"` store assets in KV (< 2 MB) or R2 (>= 2 MB) with content-addressed keys, served by dispatch directly. No WfP worker scripts created. Retention is fixed at 100 deployments for all tiers (`STATIC_RETENTION_LIMIT`), separate from per-plan `retainedDeployments` which applies only to worker-based deployments. In the serving manifest, R2-stored asset hashes are prefixed with `!` to distinguish them from KV-stored assets.

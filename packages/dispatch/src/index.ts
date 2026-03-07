@@ -2,6 +2,8 @@ import type { Env } from "./env";
 import { applyHeaderRules, type HeaderRule } from "./headers";
 import { applyRedirectRules, type RedirectRule } from "./redirects";
 import { extractSlug } from "./hostname";
+import { resolveStaticPath, getContentType } from "./static";
+import type { AssetConfig } from "./static";
 import {
   readIsrCache,
   writeIsrCache,
@@ -28,6 +30,8 @@ interface RoutingEntry {
   hashedAssetsPrefix?: string;
   headerRules?: HeaderRule[];
   redirectRules?: RedirectRule[];
+  staticDeploymentId?: string;
+  assetConfig?: AssetConfig;
 }
 
 interface QueueRoutingEntry {
@@ -117,7 +121,25 @@ export default {
         if (cached?.headers.get("Cache-Control")?.includes("immutable")) {
           return meter(cached);
         }
-        // Cache miss — invoke worker, cache immutable response
+        // Cache miss — fetch from KV/R2 for static deployments, or invoke worker
+        if (routing.staticDeploymentId) {
+          const manifestRaw = await env.ROUTING.get(`manifest:${routing.staticDeploymentId}`, {
+            cacheTtl: 86400,
+          });
+          const assetManifest: Record<string, string> = manifestRaw ? JSON.parse(manifestRaw) : {};
+          const hash = assetManifest[pathname];
+          const response = hash
+            ? ((await fetchStaticAsset(env, hash, pathname)) ??
+              new Response("Not Found", { status: 404 }))
+            : new Response("Not Found", { status: 404 });
+          if (response.ok) {
+            const res = new Response(response.body, response);
+            res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+            ctx.waitUntil(cache.put(cacheKey, res.clone()));
+            return meter(res);
+          }
+          return meter(response);
+        }
         try {
           const worker = getWorker(env, routing);
           const response = await worker.fetch(request);
@@ -246,6 +268,61 @@ export default {
         requestType = "static";
         return meter(cached);
       }
+    }
+
+    // KV/R2-backed static serving — no WfP worker needed
+    if (routing.staticDeploymentId) {
+      const manifestRaw = await env.ROUTING.get(`manifest:${routing.staticDeploymentId}`, {
+        cacheTtl: 86400,
+      });
+      if (!manifestRaw) {
+        return meter(new Response("Deployment manifest not found", { status: 502 }));
+      }
+      const assetManifest: Record<string, string> = JSON.parse(manifestRaw);
+      const assetConfig: AssetConfig = routing.assetConfig ?? {};
+
+      const resolved = resolveStaticPath(pathname, assetManifest, assetConfig);
+      if (!resolved) {
+        return meter(new Response("Not Found", { status: 404 }));
+      }
+
+      if (resolved.redirect) {
+        return meter(
+          new Response(null, {
+            status: 308,
+            headers: { Location: resolved.redirect },
+          }),
+        );
+      }
+
+      const assetResponse = await fetchStaticAsset(env, resolved.hash, resolved.path);
+      if (!assetResponse) {
+        return meter(new Response("Asset not found", { status: 404 }));
+      }
+
+      const status = resolved.notFound ? 404 : 200;
+      const response = new Response(assetResponse.body, {
+        status,
+        headers: assetResponse.headers,
+      });
+      const finalRes = applyHeaderRules(response, pathname, routing.headerRules);
+
+      // Populate edge cache (same pattern as existing deploy-versioned static cache)
+      const edgeCacheKey =
+        staticCacheKey ??
+        (request.method === "GET"
+          ? new Request(`${url.origin}${pathname}?_v=${routing.staticDeploymentId}`)
+          : undefined);
+      if (edgeCacheKey && status === 200) {
+        const cached = new Response(finalRes.clone().body, finalRes);
+        cached.headers.set(
+          "Cache-Control",
+          "public, s-maxage=31536000, max-age=0, must-revalidate",
+        );
+        ctx.waitUntil(caches.default.put(edgeCacheKey, cached.clone()));
+      }
+
+      return meter(finalRes);
     }
 
     // Dispatch to user worker — CF handles static assets transparently
@@ -384,6 +461,41 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
+
+/**
+ * Fetch a static asset from KV (small files) or R2 (large files, prefixed with `!`).
+ * Returns null if the asset is not found.
+ */
+async function fetchStaticAsset(env: Env, hash: string, path: string): Promise<Response | null> {
+  const isLarge = hash.startsWith("!");
+  const cleanHash = isLarge ? hash.slice(1) : hash;
+  const key = `assets/${cleanHash}`;
+
+  if (isLarge) {
+    const obj = await env.STATIC_ASSETS_R2.get(key);
+    if (!obj) return null;
+    return new Response(obj.body, {
+      headers: {
+        "Content-Type": obj.httpMetadata?.contentType ?? getContentType(path),
+        ETag: obj.httpEtag,
+        ...(obj.size ? { "Content-Length": String(obj.size) } : {}),
+      },
+    });
+  }
+
+  const { value, metadata } = await env.STATIC_ASSETS.getWithMetadata<{ ct: string }>(key, {
+    type: "arrayBuffer",
+    cacheTtl: 86400,
+  });
+  if (!value) return null;
+  const contentType = metadata?.ct ?? getContentType(path);
+  return new Response(value, {
+    headers: {
+      "Content-Type": contentType,
+      "Content-Length": String((value as ArrayBuffer).byteLength),
+    },
+  });
+}
 
 /** Get a dispatch worker, applying custom limits if configured. */
 function getWorker(env: Env, routing: RoutingEntry): Fetcher {

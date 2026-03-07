@@ -22,6 +22,8 @@ function makeBindings(e: TestEnv) {
     HYPERDRIVE: e.HYPERDRIVE as unknown as Hyperdrive,
     ISR_CACHE: e.ISR_CACHE,
     ROUTING: e.ROUTING,
+    STATIC_ASSETS: e.STATIC_ASSETS,
+    STATIC_ASSETS_R2: e.STATIC_ASSETS_R2,
     DISPATCH: e.DISPATCH,
     CF_API_TOKEN: e.CF_API_TOKEN,
     CF_ACCOUNT_ID: e.CF_ACCOUNT_ID,

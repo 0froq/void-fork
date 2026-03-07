@@ -14,7 +14,7 @@ import {
   setActiveDeployment,
 } from "../db";
 import { queryD1 } from "../migrations/remote-runner";
-import { buildRoutingJson } from "../routing";
+import { buildRoutingJson, buildStaticRoutingJson } from "../routing";
 import { getPlanLimits } from "../tiers";
 import type { DeployManifest } from "../types";
 
@@ -168,16 +168,33 @@ const app = new Hono<ApiEnv>()
     const existingRouting = await c.env.ROUTING.get(project.slug);
     const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
 
-    const routingJson = buildRoutingJson({
-      workerName,
-      projectId,
-      userId: project.user_id,
-      manifest,
-      deploymentId: target.id,
-      dispatchLimits,
-      suspended: existingEntry?.suspended,
-      hasCrons: !!manifest?.schedules?.length,
-    });
+    const isStaticDeployment = project.type === "static" || project.type === "spa";
+
+    let routingJson: string;
+    if (isStaticDeployment) {
+      const assetConfig = manifest?.assetConfig ?? {
+        not_found_handling: project.type === "spa" ? "single-page-application" : "404-page",
+      };
+      routingJson = buildStaticRoutingJson({
+        projectId,
+        userId: project.user_id,
+        deploymentId: target.id,
+        assetConfig,
+        manifest,
+        suspended: existingEntry?.suspended,
+      });
+    } else {
+      routingJson = buildRoutingJson({
+        workerName,
+        projectId,
+        userId: project.user_id,
+        manifest,
+        deploymentId: target.id,
+        dispatchLimits,
+        suspended: existingEntry?.suspended,
+        hasCrons: !!manifest?.schedules?.length,
+      });
+    }
 
     await c.env.ROUTING.put(project.slug, routingJson);
 

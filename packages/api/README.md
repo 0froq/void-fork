@@ -120,17 +120,19 @@ Auth middleware on `/projects/*` extracts Bearer token, verifies JWT, sets `c.ge
 
 1. Ownership check: `project.user_id` must match authenticated user
 2. **Deploy count enforcement**: Look up user plan, check `countUserDeploymentsToday()` against `planLimits.deploysPerDay` → 429 if exceeded
-3. Provision bindings (D1, KV, R2) — creates CF resources if needed
-4. `asset:<path>` fields → uploaded via CF Workers Assets API
-5. `worker:<path>` fields → uploaded to CF dispatch namespace as **versioned worker**: `user-{slug}-{deployId}` (e.g. `user-my-app-dpl_a1b2c3d4e5f6`)
-6. **Migrations run inside the worker** — after upload, the API invokes `POST /__void/migrate` on the deployed worker via Workers for Platforms dispatch. This runs migrations in the worker's own D1 binding context rather than via the CF REST API.
-7. Queue provisioning: creates CF Queues, adds producer bindings, registers dispatch worker as consumer, writes `queue:<queueId>` routing entries to KV
-8. KV routing updated: `slug → { workerName, projectId, version, limits?, suspended? }`
+3. **Static deploys** (type `"static"` / `"spa"`): Assets are content-addressed and stored in `STATIC_ASSETS` KV (< 2 MB) or `STATIC_ASSETS_R2` R2 (>= 2 MB). No WfP worker script is created — dispatch serves these directly. A serving manifest mapping paths to content hashes is written to `ROUTING` KV. R2-stored hashes are prefixed with `!` in the manifest. Retention is fixed at 100 deployments (`STATIC_RETENTION_LIMIT`).
+4. **Worker deploys** (type `"void"` / `"framework"`):
+   a. Provision bindings (D1, KV, R2) — creates CF resources if needed
+   b. `asset:<path>` fields → uploaded via CF Workers Assets API
+   c. `worker:<path>` fields → uploaded to CF dispatch namespace as **versioned worker**: `user-{slug}-{deployId}` (e.g. `user-my-app-dpl_a1b2c3d4e5f6`)
+5. **Migrations run inside the worker** — after upload, the API invokes `POST /__void/migrate` on the deployed worker via Workers for Platforms dispatch. This runs migrations in the worker's own D1 binding context rather than via the CF REST API.
+6. Queue provisioning: creates CF Queues, adds producer bindings, registers dispatch worker as consumer, writes `queue:<queueId>` routing entries to KV
+7. KV routing updated: `slug → { workerName, projectId, version, limits?, suspended? }`
    - `limits` includes `cpuMs` and `subRequests` from user's plan (omitted when all unlimited)
    - `suspended` is carried forward from the existing KV entry to avoid race conditions with cron
-9. Deployment marked as `live`, `retained` set to `true`, `active_deployment_id` updated on the project
-10. **Legacy cleanup**: deletes the unversioned `user-{slug}` worker script (safe no-op if already gone)
-11. **Retention cleanup**: evicts old retained worker scripts beyond the plan's `retainedDeployments` limit — deletes the dispatch script and sets `retained = false` on the deployment row. The limit includes the active deployment (e.g., limit of 5 = active + 4 previous).
+8. Deployment marked as `live`, `retained` set to `true`, `active_deployment_id` updated on the project
+9. **Legacy cleanup**: deletes the unversioned `user-{slug}` worker script (safe no-op if already gone)
+10. **Retention cleanup**: evicts old retained worker scripts beyond the plan's `retainedDeployments` limit — deletes the dispatch script and sets `retained = false` on the deployment row. The limit includes the active deployment (e.g., limit of 5 = active + 4 previous).
 
 **Key invariant:** Worker is never routed to unless all migrations succeed. On migration failure, deployment is marked `"failed"` with an `error_message` and the existing worker keeps running. All failure points (destructive validation, missing D1, migration error, worker upload, catch-all) store a descriptive `error_message` in the deployment row.
 

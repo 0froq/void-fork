@@ -5,7 +5,7 @@ interface AssetManifestEntry {
   size: number;
 }
 
-interface AssetEntry {
+export interface AssetEntry {
   blob: Blob;
   contentType: string;
 }
@@ -191,10 +191,64 @@ export function buildAssetMetadata(
   };
 }
 
-/** Passthrough worker script for static-only deploys. */
-export const PASSTHROUGH_WORKER = `export default {
-  async fetch(request, env) {
-    return env.ASSETS.fetch(request);
-  },
-};
-`;
+const KV_THRESHOLD = 2 * 1024 * 1024; // 2 MB
+
+/**
+ * Upload static assets to KV (< 2 MB) or R2 (>= 2 MB).
+ * Content-addressed: skips assets that already exist.
+ * Returns the set of hashes that were stored in R2 (large assets).
+ */
+export async function uploadStaticAssets(
+  kv: KVNamespace,
+  r2: R2Bucket,
+  assetsByHash: Map<string, AssetEntry>,
+): Promise<Set<string>> {
+  const largeHashes = new Set<string>();
+  for (const [hash, entry] of assetsByHash) {
+    const key = `assets/${hash}`;
+    const buffer = await entry.blob.arrayBuffer();
+
+    if (buffer.byteLength >= KV_THRESHOLD) {
+      const existing = await r2.head(key);
+      if (!existing) {
+        await r2.put(key, buffer, {
+          httpMetadata: { contentType: entry.contentType },
+        });
+      }
+      largeHashes.add(hash);
+    } else {
+      const existing = await kv.get(key, { type: "arrayBuffer" });
+      if (!existing) {
+        await kv.put(key, buffer, {
+          metadata: { ct: entry.contentType },
+        });
+      }
+    }
+  }
+  return largeHashes;
+}
+
+/**
+ * Delete assets that are no longer referenced by any retained deployment.
+ * Deletes from both KV and R2 (content-addressed keys live in one or the other,
+ * but we clean both since we don't track which store holds a given hash).
+ */
+export async function deleteUnreferencedAssets(
+  kv: KVNamespace,
+  r2: R2Bucket,
+  evictedHashes: string[],
+  retainedHashes: Set<string>,
+): Promise<void> {
+  const toDelete = evictedHashes.filter((h) => !retainedHashes.has(h));
+  if (toDelete.length === 0) return;
+
+  for (const hash of toDelete) {
+    await kv.delete(`assets/${hash}`);
+  }
+
+  // R2 supports batch delete up to 1000 keys at a time
+  for (let i = 0; i < toDelete.length; i += 1000) {
+    const batch = toDelete.slice(i, i + 1000).map((h) => `assets/${h}`);
+    await r2.delete(batch);
+  }
+}

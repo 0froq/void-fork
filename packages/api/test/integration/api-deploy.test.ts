@@ -963,10 +963,10 @@ describe("POST /projects/:id/deploy (static)", () => {
     expect(done.deployment).toMatch(/^dpl_/);
     expect(done.url).toBe("https://spa-site.void.app");
     expect(done.assets).toBe(2);
-    expect(done.workers).toBe(1);
+    expect(done.workers).toBe(0);
   });
 
-  it("writes KV routing with workerName for static SPA", async () => {
+  it("writes KV routing with staticDeploymentId for static SPA", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "kv-spa");
     mockCfApi();
@@ -984,9 +984,10 @@ describe("POST /projects/:id/deploy (static)", () => {
 
     const routing = await env.ROUTING.get("kv-spa", "json");
     expect(routing).toEqual({
-      workerName: expect.stringMatching(/^user-kv-spa-dpl_/),
+      staticDeploymentId: expect.stringMatching(/^dpl_/),
       projectId: project.id,
       userId: user.id,
+      assetConfig: { not_found_handling: "single-page-application" },
       version: expect.stringMatching(/^dpl_/),
     });
   });

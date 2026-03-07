@@ -5,12 +5,13 @@ Routes `*.void.app` traffic to user workers and static assets. CF Worker using p
 ## Request Flow
 
 1. Extract slug from hostname (`{slug}.void.app`)
-2. KV lookup: `slug → { workerName, projectId, version, limits?, suspended? }`
+2. KV lookup: `slug → { workerName, projectId, version, limits?, suspended? }` or `slug → { staticDeploymentId, projectId, version, suspended? }`
 3. **Suspension check**: If `routing.suspended` is set → return 429 `{ error: "usage limit exceeded", reason }`
 4. Edge cache check via `caches.default` with versioned cache key (`?_v={version}`)
-5. `/api/*` → `getWorker(env, routing).fetch(request)` with custom limits (Workers for Platforms, not cached). CPU limit errors caught → 429
-6. Everything else → serve static assets from R2 (SPA fallback to `index.html`) or ISR cache from KV, cache response at edge
-7. **Metering**: Every request (except 404/suspended) records an Analytics Engine data point via `ctx.waitUntil` (fire-and-forget, zero latency impact)
+5. **Static projects** (`staticDeploymentId` in routing): served directly from `STATIC_ASSETS` KV (primary) with `STATIC_ASSETS_R2` R2 overflow for large files. Path resolution handled by `resolveStaticPath()` in `src/static.ts` (SPA fallback to `index.html`, directory index resolution). Asset hashes prefixed with `!` are fetched from R2 instead of KV.
+6. `/api/*` → `getWorker(env, routing).fetch(request)` with custom limits (Workers for Platforms, not cached). CPU limit errors caught → 429
+7. Everything else → serve static assets from R2 (SPA fallback to `index.html`) or ISR cache from KV, cache response at edge
+8. **Metering**: Every request (except 404/suspended) records an Analytics Engine data point via `ctx.waitUntil` (fire-and-forget, zero latency impact)
 
 ## Queue Relay
 
@@ -27,9 +28,10 @@ The dispatch worker also exports a `queue()` handler for Cloudflare Queue batch 
 ```
 src/
   index.ts                  # Main fetch handler + suspension check + custom limits
-  env.ts                    # Env interface (DISPATCH, ISR_CACHE, ROUTING, ANALYTICS, BASE_HOSTNAME?)
+  env.ts                    # Env interface (DISPATCH, ISR_CACHE, ROUTING, STATIC_ASSETS, STATIC_ASSETS_R2, ANALYTICS, BASE_HOSTNAME?)
   hostname.ts               # extractSlug() — pure function
   static.ts                 # serveStaticAsset() — R2 lookup, SPA fallback, cache headers
+                            # resolveStaticPath() — KV/R2-backed static serving for static/SPA deployments
   isr.ts                    # ISR cache read/write/delete — KV with binary pack format
   metering.ts               # recordRequest() — Analytics Engine writeDataPoint wrapper
 ```
