@@ -29,7 +29,7 @@
     },
     {
       "binding": "STATIC_ASSETS",
-      "id": "TODO_PRODUCTION_KV_ID",
+      "id": "843a002c09eb4a2f910426212826b666",
     },
   ],
   "r2_buckets": [
@@ -84,7 +84,7 @@
         },
         {
           "binding": "STATIC_ASSETS",
-          "id": "TODO_STAGING_KV_ID",
+          "id": "4aaab48c46634a4a8cec69f23fde0504",
         },
       ],
       "r2_buckets": [
