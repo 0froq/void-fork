@@ -112,7 +112,7 @@ async function runPush(root: string, dialect: DatabaseDialect): Promise<void> {
   } catch {
     process.exit(1);
   }
-  outro("");
+  outro("Done.");
 }
 
 async function runGenerate(root: string, dialect: DatabaseDialect): Promise<void> {
@@ -132,7 +132,7 @@ async function runGenerate(root: string, dialect: DatabaseDialect): Promise<void
   } catch {
     process.exit(1);
   }
-  outro("");
+  outro("Done.");
 }
 
 async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> {
@@ -142,7 +142,7 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
 
   if (allMigrations.length === 0) {
     log.info("No migration files found in db/migrations/");
-    outro("");
+    outro("Done.");
     return;
   }
 
@@ -271,7 +271,7 @@ async function runReset(root: string, dialect: DatabaseDialect): Promise<void> {
   if (dialect !== "postgresql") {
     log.info(dim("Restart your dev server if it's running."));
   }
-  outro("");
+  outro("Done.");
 }
 
 async function runSeed(
@@ -332,7 +332,7 @@ async function runExecute(
         log.success("Executed successfully.");
       }
     });
-    outro("");
+    outro("Done.");
     return;
   }
 
@@ -365,7 +365,7 @@ async function runExecute(
   } finally {
     db.close();
   }
-  outro("");
+  outro("Done.");
 }
 
 function printTable(rows: Record<string, unknown>[]): void {
@@ -403,7 +403,7 @@ async function runMigrate(root: string, dialect: DatabaseDialect): Promise<void>
       }
       log.success(`Applied ${applied.length} migration(s).`);
     }
-    outro("");
+    outro("Done.");
     return;
   }
 
@@ -422,7 +422,7 @@ async function runMigrate(root: string, dialect: DatabaseDialect): Promise<void>
     log.success(`Applied ${applied.length} migration(s).`);
     log.info(dim("Restart your dev server if it's running."));
   }
-  outro("");
+  outro("Done.");
 }
 
 async function runStudio(root: string, dialect: DatabaseDialect): Promise<void> {
@@ -533,7 +533,7 @@ async function runExport(
     if (args.output) {
       writeFileSync(join(root, args.output), output);
       log.success(`Exported to ${args.output}`);
-      outro("");
+      outro("Done.");
     } else {
       process.stdout.write(output);
     }
@@ -603,7 +603,7 @@ async function runExport(
     if (args.output) {
       writeFileSync(join(root, args.output), output);
       log.success(`Exported to ${args.output}`);
-      outro("");
+      outro("Done.");
     } else {
       // Print raw SQL to stdout for piping — no clack formatting
       process.stdout.write(output);
@@ -657,5 +657,5 @@ async function runSetUrl(root: string): Promise<void> {
   await client.setDatabaseUrl(projectConfig.projectId, connectionString as string);
 
   log.success("Database URL updated.");
-  outro("");
+  outro("Done.");
 }
