@@ -2,7 +2,9 @@
 
 This is the private platform repo for Void. The open-source framework code lives in `framework/` (git submodule pointing at `voidzero-dev/void`).
 
-When making changes that span both repos, commit framework first, then update the submodule pointer in the platform repo:
+If all changes are inside `framework/`, commit only in `framework/`. Do not create a platform commit just to bump the submodule pointer.
+
+When changes span both repos, commit framework first, then update the submodule pointer in the platform repo:
 
 ```bash
 # 1. commit framework changes
@@ -26,11 +28,12 @@ git fetch /path/to/worktree/framework HEAD
 # 2. cherry-pick framework commit(s)
 git cherry-pick <framework-sha>
 
-# 3. cherry-pick parent repo commit
+# 3. if there was also a platform commit, cherry-pick it
 cd /path/to/main
 git cherry-pick <platform-sha>
 
-# 4. fix submodule pointer — cherry-pick gave the framework commit a new SHA,
+# 4. if you cherry-picked a platform commit that referenced framework,
+#    fix the submodule pointer — cherry-pick gave the framework commit a new SHA,
 #    but the platform commit still references the worktree's original SHA
 git add framework
 git commit --amend --no-edit
