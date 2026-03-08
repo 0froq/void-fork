@@ -645,6 +645,56 @@ describe("vue-pages client (dev)", () => {
   defineClientTests(() => DEV_BASE);
   defineIslandTests(() => DEV_BASE);
 
+  it("page component HMR updates when defineProps<Props>() comes from companion server types", async () => {
+    const pageFile = join(ROOT, "playground/vue-pages/pages/deferred.vue");
+    const original = readFileSync(pageFile, "utf-8");
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    page.setDefaultTimeout(10_000);
+
+    try {
+      await page.goto(`${DEV_BASE}/deferred`);
+      await page.waitForSelector('#app[data-hydrated="true"]');
+      await page.waitForFunction(
+        () => document.querySelector("h1")?.textContent === "Deferred Page",
+      );
+
+      await page.evaluate(() => {
+        (window as any).__hmr_marker = true;
+      });
+
+      const modified = original.replace("<h1>{{ title }}</h1>", "<h1>Updated: {{ title }}</h1>");
+      writeFileSync(pageFile, modified);
+
+      await page.waitForFunction(
+        () =>
+          document.querySelector("h1")?.textContent === "Updated: Deferred Page" ||
+          document.querySelector("vite-error-overlay"),
+        { timeout: 10_000 },
+      );
+
+      const markerSurvived = await page.evaluate(() => (window as any).__hmr_marker === true);
+      expect(markerSurvived).toBe(true);
+      expect(
+        await page.evaluate(() => {
+          const overlay = document.querySelector("vite-error-overlay") as HTMLElement | null;
+          if (!overlay) return "";
+          return (
+            overlay.shadowRoot?.textContent?.replace(/\s+/g, " ").trim() ??
+            overlay.textContent?.replace(/\s+/g, " ").trim() ??
+            ""
+          );
+        }),
+      ).toBe("");
+      expect(await page.textContent("h1")).toBe("Updated: Deferred Page");
+    } finally {
+      await page.context().close();
+      writeFileSync(pageFile, original);
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  });
+
   it("island component HMR updates without full page reload", async () => {
     const counterFile = join(ROOT, "playground/vue-pages/pages/blog/_Counter.vue");
     const original = readFileSync(counterFile, "utf-8");

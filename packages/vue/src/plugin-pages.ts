@@ -18,6 +18,41 @@ interface PagesPluginOptions {
   prefetch?: PrefetchConfig;
 }
 
+function isVuePageFile(id: string, pagesDir: string): boolean {
+  if (!id.startsWith(pagesDir + "/")) return false;
+  const rel = id.slice(pagesDir.length + 1);
+  if (rel.split("/").some((s) => s.startsWith("_"))) return false;
+  const basename = rel.slice(rel.lastIndexOf("/") + 1);
+  return basename !== "layout.vue" && !basename.endsWith(".island.vue");
+}
+
+function stripDefinePropsTypeArgument(code: string): string | null {
+  // Find defineProps<...>( and strip the generic using bracket counting
+  // to handle nested generics like InferProps<typeof loader>
+  const match = /\bdefineProps\s*</.exec(code);
+  if (!match) return null;
+
+  const start = match.index + match[0].length - 1; // position of '<'
+  let depth = 0;
+  let end = -1;
+  let newlineCount = 0;
+  for (let i = start; i < code.length; i++) {
+    const ch = code[i];
+    if (ch === "\n") newlineCount++;
+    else if (ch === "<") depth++;
+    else if (ch === ">") {
+      depth--;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  if (end === -1) return null;
+
+  return code.slice(0, start) + "\n".repeat(newlineCount) + code.slice(end + 1);
+}
+
 /** Check if the pages directory has any non-island Vue page files. */
 function hasNonIslandPages(dir: string): boolean {
   try {
@@ -45,39 +80,24 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       transform: {
         filter: { id: /\.vue$/ },
         handler(code, id) {
-          if (!id.startsWith(pagesDir + "/")) return;
-          const rel = id.slice(pagesDir.length + 1);
-          if (rel.split("/").some((s) => s.startsWith("_"))) return;
-          const basename = rel.slice(rel.lastIndexOf("/") + 1);
-          if (basename === "layout.vue" || basename.endsWith(".island.vue")) return;
-
-          // Find defineProps<...>( and strip the generic using bracket counting
-          // to handle nested generics like InferProps<typeof loader>
-          const match = /\bdefineProps\s*</.exec(code);
-          if (!match) return;
-
-          const start = match.index + match[0].length - 1; // position of '<'
-          let depth = 0;
-          let end = -1;
-          let newlineCount = 0;
-          for (let i = start; i < code.length; i++) {
-            const ch = code[i];
-            if (ch === "\n") newlineCount++;
-            else if (ch === "<") depth++;
-            else if (ch === ">") {
-              depth--;
-              if (depth === 0) {
-                end = i;
-                break;
-              }
-            }
-          }
-          if (end === -1) return;
-
-          // Replace with equivalent newlines to preserve line count for source maps
-          const transformed =
-            code.slice(0, start) + "\n".repeat(newlineCount) + code.slice(end + 1);
+          if (!isVuePageFile(id, pagesDir)) return;
+          const transformed = stripDefinePropsTypeArgument(code);
+          if (!transformed) return;
           return { code: transformed, map: { mappings: "" } };
+        },
+      },
+
+      handleHotUpdate: {
+        order: "pre",
+        handler(ctx) {
+          if (!isVuePageFile(ctx.file, pagesDir)) return;
+
+          const read = ctx.read;
+          // Vue reparses raw SFC source during HMR, so apply the same rewrite here.
+          ctx.read = async () => {
+            const code = await read();
+            return stripDefinePropsTypeArgument(code) ?? code;
+          };
         },
       },
     },
