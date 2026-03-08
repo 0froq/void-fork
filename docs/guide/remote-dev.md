@@ -12,7 +12,7 @@ Remote development mode connects your local dev server to the **real bindings** 
 
 Before enabling remote mode, you need:
 
-1. **Logged in** — run `void login` if you haven't already
+1. **Logged in** — run `void auth login` if you haven't already
 2. **Project linked** — run `void deploy` at least once to create and link a project
 
 ## Enabling Remote Mode

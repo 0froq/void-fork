@@ -118,13 +118,13 @@ bunx void init
 
 ### 1. Add your first API route
 
-Create `routes/api/hello.get.ts`:
+Create `routes/api/hello.ts`:
 
 ```ts
 import { defineHandler } from "void";
 
-export default defineHandler((c) => {
-  return c.json({ message: "Hello from Void" });
+export const GET = defineHandler(() => {
+  return { message: "Hello from Void" };
 });
 ```
 

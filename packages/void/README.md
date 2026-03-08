@@ -1,6 +1,16 @@
 # void
 
-The Vite plugin for deploying full-stack apps to [Void](https://void.cloud). File-based API routing, typed database queries, and one-command deploys.
+Vite plugin and CLI for building and deploying apps on Void.
+
+## What It Covers
+
+- file-based API routes from `routes/`
+- Pages mode from `pages/`
+- typed Drizzle access via `void/db`
+- `crons/` and `queues/`
+- binding inference for D1, KV, R2, AI, auth, and queues
+- remote bindings for local development
+- deploy packaging for Void-hosted apps, static sites, and supported meta-frameworks
 
 ## Quick Start
 
@@ -9,33 +19,63 @@ npm install -D void
 npx void init
 ```
 
-Or add to an existing Vite project:
-
-```bash
-npm install -D void
-npx void init
-```
-
 ```ts
 // vite.config.ts
+import { defineConfig } from "vite";
 import { voidPlugin } from "void";
 
-export default {
+export default defineConfig({
   plugins: [voidPlugin()],
-};
+});
 ```
 
-## Features
+## Core Surfaces
 
-- **File-based API routing** on [Hono](https://hono.dev) with named HTTP method exports
-- **Typed database** with auto-generated types from SQL migrations
-- **Typed fetch client** with full route inference
-- **Input validation** via any [Standard Schema](https://github.com/standard-schema/standard-schema) library (Zod, Valibot, ArkType)
-- **Zero-config deploy** to Cloudflare's edge network
+- `voidPlugin()` — Vite integration, routing, pages mode, codegen, migrations, packaging
+- `void auth login` — platform auth
+- `void deploy` — build and deploy
+- `void db *` — local DB and migration commands
+- `void project *` — link, status, logs, rollback, delete
+
+Runtime helpers include:
+
+- `defineHandler`
+- `defineMiddleware`
+- `defineScheduled`
+- `defineQueue`
+- `void/db`
+- `void/kv`
+- `void/storage`
+- `void/ai`
+- `void/isr`
+- `void/client`
+- `void/auth`
+
+## Supported App Shapes
+
+- native Void apps (`routes/`, `pages/`, `middleware/`, `crons/`, `queues/`)
+- supported meta-framework deploy targets:
+  - TanStack Start
+  - React Router
+  - SvelteKit
+  - Nuxt
+  - Astro
+- static and SPA deploys
+- non-Cloudflare server targets (`node`, `bun`, `deno`)
+
+There is Vinext-specific source in the repo, but it is intentionally on hold and not part of the current public support matrix.
+
+## Database Model
+
+`void/db` is Drizzle-first.
+
+- D1 is the default managed database target
+- framework apps can opt into PostgreSQL mode
+- route types, DB types, and queue types are generated into `.void/*.d.ts`
 
 ## Documentation
 
-Full documentation is available at **[void.cloud/docs](https://void.cloud/docs)**.
+Full docs live at [void.cloud/docs](https://void.cloud/docs).
 
 ## License
 

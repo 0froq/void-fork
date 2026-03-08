@@ -121,7 +121,11 @@ Generate schema with `void gen model` or write it by hand. Generate migrations w
 
 ```ts
 // crons/heartbeat.ts
-export default defineCron("*/5 * * * *", async (ctx) => {
+import { defineScheduled } from "void";
+
+export const cron = "*/5 * * * *";
+
+export default defineScheduled(async (controller, env) => {
   // runs every 5 minutes
 });
 ```
@@ -132,7 +136,9 @@ export default defineCron("*/5 * * * *", async (ctx) => {
 
 ```ts
 // queues/email.ts
-export default defineQueue("email-queue", async (batch, ctx) => {
+import { defineQueue } from "void";
+
+export default defineQueue(async (batch, env) => {
   for (const msg of batch.messages) {
     // process message
   }
