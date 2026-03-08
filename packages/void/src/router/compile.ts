@@ -26,6 +26,8 @@ export interface CompileOptions {
   honoPath: string;
   /** Absolute path to the void/response module */
   responsePath: string;
+  /** Absolute path to the void/_env module */
+  runtimeEnvPath: string;
   /** Whether to inject React Fast Refresh preamble in dev SSR HTML. */
   reactRefresh: boolean;
   /** Auth configuration (null = disabled) */
@@ -44,6 +46,8 @@ export interface CompileOptions {
   headerRules?: HeaderRule[];
   /** Redirect rules from routing.redirects config (node targets only) */
   redirectRules?: RedirectRule[];
+  /** Explicit prerender paths from void.json routing.prerender */
+  explicitPrerenderPaths?: string[];
 }
 
 export interface SsrCompileOptions {
@@ -92,6 +96,7 @@ export function compileRouteTable(
   lines.push(`import { AsyncLocalStorage } from "node:async_hooks";`);
   lines.push(`import { Hono } from ${JSON.stringify(options.honoPath)};`);
   lines.push(`import { convertReturnValue } from ${JSON.stringify(options.responsePath)};`);
+  lines.push(`import { withRuntimeEnv } from ${JSON.stringify(options.runtimeEnvPath)};`);
 
   // Auth imports
   if (auth) {
@@ -229,6 +234,8 @@ export function compileRouteTable(
   if (pages && scan.pages.pages.length > 0) {
     compilePageRoutes(lines, scan, pages);
   }
+
+  compilePrerenderCollector(lines, scan, ssr, options);
 
   if (ssr) {
     const clientEntryUrl = `/${ssr.clientEntryRelativePath}`;
@@ -507,6 +514,85 @@ window.__vite_plugin_react_preamble_installed__ = true;
   lines.push(`export default app;`);
 
   return lines.join("\n");
+}
+
+function compilePrerenderCollector(
+  lines: string[],
+  scan: ScanResult,
+  ssr: SsrCompileOptions | null,
+  options: CompileOptions,
+): void {
+  const staticPaths = scan.pages.pages
+    .filter((page) => page.prerender && page.params.length === 0 && !page.catchAll)
+    .map((page) => page.pattern);
+  const dynamicPages = scan.pages.pages.filter(
+    (page) =>
+      page.prerender && page.hasGetPrerenderPaths && (page.params.length > 0 || page.catchAll),
+  );
+  const explicitPaths = options.explicitPrerenderPaths ?? [];
+
+  lines.push(`function __voidBuildPrerenderPath(pattern, params) {`);
+  lines.push(`  let path = pattern;`);
+  lines.push(`  for (const [key, value] of Object.entries(params)) {`);
+  lines.push(`    path = path.replace(":" + key, value);`);
+  lines.push(`  }`);
+  lines.push(`  return path;`);
+  lines.push(`}`);
+  lines.push("");
+
+  lines.push(`export async function __voidCollectPrerenderPaths(request, env, ctx) {`);
+  lines.push(`  return withRuntimeEnv(env, async () => {`);
+  if (options.nodeTarget) {
+    lines.push(`    return requestContext.run({ request }, async () => {`);
+  } else {
+    lines.push(`    return requestContext.run({ request, executionCtx: ctx }, async () => {`);
+  }
+  lines.push(`      const paths = [];`);
+
+  for (const path of staticPaths) {
+    lines.push(`      paths.push(${JSON.stringify(path)});`);
+  }
+
+  for (const page of dynamicPages) {
+    const loaderName = `_pload_${page.componentId.replace(/[^a-zA-Z0-9]/g, "_")}`;
+    lines.push(`      {`);
+    lines.push(`        const mod = await ${loaderName}();`);
+    lines.push(`        if (typeof mod.getPrerenderPaths === "function") {`);
+    lines.push(`          const paramSets = await mod.getPrerenderPaths();`);
+    lines.push(`          if (Array.isArray(paramSets)) {`);
+    lines.push(`            for (const params of paramSets) {`);
+    lines.push(
+      `              paths.push(__voidBuildPrerenderPath(${JSON.stringify(page.pattern)}, params));`,
+    );
+    lines.push(`            }`);
+    lines.push(`          }`);
+    lines.push(`        }`);
+    lines.push(`      }`);
+  }
+
+  if (ssr) {
+    lines.push(`      {`);
+    lines.push(`        const mod = await import(${JSON.stringify(ssr.serverEntryPath)});`);
+    lines.push(`        if (typeof mod.getPrerenderPaths === "function") {`);
+    lines.push(`          const ssrPaths = await mod.getPrerenderPaths();`);
+    lines.push(`          if (Array.isArray(ssrPaths)) {`);
+    lines.push(`            for (const path of ssrPaths) {`);
+    lines.push(`              if (typeof path === "string") paths.push(path);`);
+    lines.push(`            }`);
+    lines.push(`          }`);
+    lines.push(`        }`);
+    lines.push(`      }`);
+  }
+
+  for (const path of explicitPaths) {
+    lines.push(`      paths.push(${JSON.stringify(path)});`);
+  }
+
+  lines.push(`      return [...new Set(paths)];`);
+  lines.push(`    });`);
+  lines.push(`  });`);
+  lines.push(`}`);
+  lines.push("");
 }
 
 function compileAuthRoutes(lines: string[], auth: AuthCompileOptions): void {
@@ -1069,11 +1155,19 @@ async function serveWithAssets(request, env, response) {
     ? `async (request, env, ctx) => {
   if (env.__VOID_REMOTE === "1") {
     env = createRemoteEnv(env);
+    const internal = await __handleInternal(request, env, ctx);
+    if (internal) return internal;
     return serveWithAssets(request, env, await withRuntimeEnv(env, () => app.fetch(request, env, ctx)));
   }
+  const internal = await __handleInternal(request, env, ctx);
+  if (internal) return internal;
   return serveWithAssets(request, env, await app.fetch(request, env, ctx));
 }`
-    : `async (request, env, ctx) => serveWithAssets(request, env, await app.fetch(request, env, ctx))`;
+    : `async (request, env, ctx) => {
+  const internal = await __handleInternal(request, env, ctx);
+  if (internal) return internal;
+  return serveWithAssets(request, env, await app.fetch(request, env, ctx));
+}`;
 
   const queueFetchCall = remotePath
     ? `let __queueRes;
@@ -1098,9 +1192,17 @@ async function serveWithAssets(request, env, response) {
   }
   if (!__qr.ok) throw new Error("Queue handler failed");`;
 
+  const internalRouteHelper = `async function __handleInternal(request, env, ctx) {
+  const url = new URL(request.url);
+  if (request.method !== "POST" || url.pathname !== "/__void/prerender-paths") return null;
+  const paths = await __voidCollectPrerenderPaths(request, env, ctx);
+  return Response.json({ paths });
+}`;
+
   if (hasQueues) {
-    return `import app, { scheduled } from 'virtual:void-routes';
+    return `import app, { scheduled, __voidCollectPrerenderPaths } from 'virtual:void-routes';
 ${remoteImport}${assetHelper}
+${internalRouteHelper}
 async function queue(batch, env, ctx) {
   const messages = [...batch.messages].map(m => ({
     id: m.id, timestamp: m.timestamp.toISOString(),
@@ -1117,8 +1219,9 @@ async function queue(batch, env, ctx) {
 
 export default { fetch: ${fetchHandler}, scheduled, queue };`;
   }
-  return `import app, { scheduled } from 'virtual:void-routes';
+  return `import app, { scheduled, __voidCollectPrerenderPaths } from 'virtual:void-routes';
 ${remoteImport}${assetHelper}
+${internalRouteHelper}
 export default { fetch: ${fetchHandler}, scheduled };`;
 }
 
@@ -1126,7 +1229,7 @@ export default { fetch: ${fetchHandler}, scheduled };`;
  * Generate the app module — exports the Hono app with static asset serving.
  * This is the entry imported by `vite preview` and can be used programmatically.
  */
-export function compileNodeApp(target: "node" | "bun" | "deno"): string {
+export function compileNodeApp(target: "node" | "bun" | "deno", honoPath: string): string {
   const staticImport =
     target === "bun"
       ? `import { serveStatic } from "hono/bun";`
@@ -1135,9 +1238,16 @@ export function compileNodeApp(target: "node" | "bun" | "deno"): string {
         : `import { serveStatic } from "@hono/node-server/serve-static";`;
 
   return `${staticImport}
-import app from "virtual:void-routes";
+import { Hono } from ${JSON.stringify(honoPath)};
+import innerApp, { __voidCollectPrerenderPaths } from "virtual:void-routes";
 
+const app = new Hono();
+app.post("/__void/prerender-paths", async (c) => {
+  const paths = await __voidCollectPrerenderPaths(c.req.raw);
+  return c.json({ paths });
+});
 app.use("/assets/*", serveStatic({ root: "./client" }));
+app.all("*", (c) => innerApp.fetch(c.req.raw));
 export default app;`;
 }
 

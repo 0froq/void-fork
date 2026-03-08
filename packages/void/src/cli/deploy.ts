@@ -27,7 +27,7 @@ import { scanJobsSync } from "../crons/scan";
 import { scanQueuesSync } from "../queues/scan";
 import { validateSsrEntry } from "../ssr/entry";
 import { scanPages } from "../pages/scan";
-import { collectPrerenderPaths } from "../prerender-paths";
+import { collectPrerenderPaths, collectPrerenderPathsNode } from "../prerender";
 import { detectPreset, FRAMEWORK_PRESETS, type StaticPreset, type FrameworkPreset } from "./preset";
 import {
   readConfig,
@@ -35,6 +35,7 @@ import {
   type AuthProvider,
   type VoidConfig,
   getDatabaseDialect,
+  isNodeTarget,
 } from "../config";
 import { readWranglerCompat } from "./wrangler";
 import { needsWrapper, generateWrapper, bundleEntry, cleanupWrapper } from "./wrapper";
@@ -827,7 +828,18 @@ async function runFullDeploy(
   const uniquePrerenderPaths =
     deployConfig.output === "static"
       ? []
-      : await collectPrerenderPaths({ root, config: deployConfig });
+      : isNodeTarget(deployConfig.target)
+        ? await collectPrerenderPathsNode({
+            root,
+            ssrDir: join(distDir, "ssr"),
+            clientDir,
+          })
+        : await collectPrerenderPaths({
+            root,
+            workerDir: join(distDir, workerDirName),
+            clientDir,
+            persistDir: join(root, ".void"),
+          });
 
   // 8. Read wrangler compat settings (void.json > wrangler.jsonc > default)
   const wranglerCompat = readWranglerCompat(root, deployConfig);

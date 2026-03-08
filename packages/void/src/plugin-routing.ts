@@ -39,6 +39,8 @@ const LOAD_ID_FILTER = /^virtual:void-(routes|client-worker)$/;
 interface RoutingPluginOptions {
   getAuth: () => AuthProvider[] | null;
   headConfig?: import("./pages/head").HeadConfig;
+  output?: "server" | "static";
+  prerenderPaths?: string[];
   remoteMode?: boolean;
   target?: "node" | "bun" | "deno";
   headerRules?: import("./cli/types").HeaderRule[];
@@ -73,7 +75,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   }
 
   async function rescan() {
-    scan = await scanRoutes(root);
+    scan = await scanRoutes(root, { output: options.output });
     const entries = validateSsrEntries(root);
     ssr = entries
       ? {
@@ -98,11 +100,13 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   const compileOptions: CompileOptions = {
     honoPath: resolveFile("hono"),
     responsePath: resolveFile("void/response"),
+    runtimeEnvPath: resolveFile("void/_env"),
     reactRefresh: false,
     auth: null,
     nodeTarget: !!options.target,
     headerRules: options.headerRules,
     redirectRules: options.redirectRules,
+    explicitPrerenderPaths: options.prerenderPaths,
     bindingHandlerPath: options.target ? undefined : resolveFile("void/remote/binding-handler"),
   };
 
@@ -159,7 +163,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   mkdirSync(outDir, { recursive: true });
   // Write initial entry — will be re-written with hasQueues once scan completes
   if (options.target) {
-    writeFileSync(join(outDir, "app.ts"), compileNodeApp(options.target));
+    writeFileSync(join(outDir, "app.ts"), compileNodeApp(options.target, compileOptions.honoPath));
     writeFileSync(join(outDir, "index.ts"), compileNodeServer(options.target));
   } else {
     writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(false, remote));
@@ -212,7 +216,10 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       }
       // Re-write entry with queue handler if needed
       if (options.target) {
-        writeFileSync(join(outDir, "app.ts"), compileNodeApp(options.target));
+        writeFileSync(
+          join(outDir, "app.ts"),
+          compileNodeApp(options.target, compileOptions.honoPath),
+        );
         writeFileSync(join(outDir, "index.ts"), compileNodeServer(options.target));
       } else {
         writeFileSync(
@@ -297,7 +304,10 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         writeRouteTypes();
         writeQueueTypes();
         if (options.target) {
-          writeFileSync(join(outDir, "app.ts"), compileNodeApp(options.target));
+          writeFileSync(
+            join(outDir, "app.ts"),
+            compileNodeApp(options.target, compileOptions.honoPath),
+          );
           writeFileSync(join(outDir, "index.ts"), compileNodeServer(options.target));
         } else {
           writeFileSync(

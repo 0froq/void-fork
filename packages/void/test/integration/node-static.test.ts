@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { collectPrerenderPathsNode } from "../../src/prerender";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
 const PLAYGROUND = "playground/node-static";
@@ -55,6 +56,16 @@ describe("playground/node-static build (target: node, output: static)", () => {
     expect(html).toContain('src="/assets/');
     expect(html).not.toContain("/@vite/client");
     expect(html).not.toContain("/@id/");
+  });
+
+  it("collects prerender paths from the built node app endpoint", async () => {
+    const paths = await collectPrerenderPathsNode({
+      root: join(ROOT, PLAYGROUND),
+      ssrDir: join(DIST, "ssr"),
+      clientDir: join(DIST, "client"),
+    });
+
+    expect(paths).toEqual(expect.arrayContaining(["/", "/about"]));
   });
 
   it("does not emit wrangler.json (Node target)", () => {

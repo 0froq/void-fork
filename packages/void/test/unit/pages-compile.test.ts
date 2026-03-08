@@ -5,6 +5,7 @@ import type { ScanResult } from "../../src/router/scan";
 const testOptions = {
   honoPath: "/resolved/hono/index.mjs",
   responsePath: "/resolved/void/runtime/response.mjs",
+  runtimeEnvPath: "/resolved/void/runtime/env.mjs",
   reactRefresh: false,
   auth: null,
 };

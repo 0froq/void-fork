@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { collectPrerenderPaths } from "../../src/prerender";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
 const PLAYGROUND = "playground/static-pages";
@@ -71,6 +72,38 @@ describe("playground/static-pages build (output: static)", () => {
     const html = readFileSync(helloPath, "utf-8");
     expect(html).toContain('data-testid="post-title"');
     expect(html).toContain("Post hello");
+  });
+
+  it("collects prerender paths from the built worker endpoint", async () => {
+    const paths = await collectPrerenderPaths({
+      root: join(ROOT, PLAYGROUND),
+      workerDir: join(DIST, "ssr"),
+      clientDir: join(DIST, "client"),
+      persistDir: join(ROOT, PLAYGROUND, ".void"),
+    });
+
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "/",
+        "/about",
+        "/posts/hello",
+        "/posts/world",
+        "/tags/vue",
+        "/tags/vite",
+      ]),
+    );
+    expect(paths).not.toContain("/items/:id");
+  });
+
+  it("prerenders dynamic pages with getPrerenderPaths using virtual modules", () => {
+    const vuePath = join(DIST, "client/tags/vue.html");
+    const vitePath = join(DIST, "client/tags/vite.html");
+    expect(existsSync(vuePath)).toBe(true);
+    expect(existsSync(vitePath)).toBe(true);
+
+    const html = readFileSync(vuePath, "utf-8");
+    expect(html).toContain('data-testid="tag-title"');
+    expect(html).toContain("Tag vue");
   });
 
   it("does not prerender dynamic pages without getPrerenderPaths", () => {

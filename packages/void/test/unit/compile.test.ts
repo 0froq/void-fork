@@ -10,6 +10,7 @@ import type { ScanResult } from "../../src/router/scan";
 const testOptions = {
   honoPath: "/resolved/hono/index.mjs",
   responsePath: "/resolved/void/runtime/response.mjs",
+  runtimeEnvPath: "/resolved/void/runtime/env.mjs",
   reactRefresh: true,
   auth: null,
 };
@@ -282,7 +283,9 @@ describe("compileWorkerEntry", () => {
   it("generates valid worker entry code without queues", () => {
     const code = compileWorkerEntry();
 
-    expect(code).toContain("import app, { scheduled } from 'virtual:void-routes'");
+    expect(code).toContain(
+      "import app, { scheduled, __voidCollectPrerenderPaths } from 'virtual:void-routes'",
+    );
     expect(code).toContain("serveWithAssets");
     expect(code).toContain("export default { fetch:");
     expect(code).not.toContain("queue");
@@ -309,6 +312,7 @@ describe("compileWorkerEntry", () => {
     const code = compileWorkerEntry();
 
     expect(code).toContain("async function serveWithAssets(request, env, response)");
+    expect(code).toContain('url.pathname !== "/__void/prerender-paths"');
     expect(code).toContain("env.ASSETS");
     expect(code).toContain('"/assets/"');
     // Both cache-control values (hashed + non-hashed)
@@ -330,21 +334,25 @@ describe("compileWorkerEntry", () => {
 
 describe("compileNodeApp", () => {
   it("generates node app with serveStatic and default export", () => {
-    const code = compileNodeApp("node");
+    const code = compileNodeApp("node", "/resolved/hono/index.mjs");
     expect(code).toContain('import { serveStatic } from "@hono/node-server/serve-static"');
+    expect(code).toContain('import { Hono } from "/resolved/hono/index.mjs"');
     expect(code).toContain("export default app");
-    expect(code).toContain('import app from "virtual:void-routes"');
+    expect(code).toContain(
+      'import innerApp, { __voidCollectPrerenderPaths } from "virtual:void-routes"',
+    );
+    expect(code).toContain('app.post("/__void/prerender-paths"');
   });
 
   it("generates bun app with hono/bun serveStatic", () => {
-    const code = compileNodeApp("bun");
+    const code = compileNodeApp("bun", "/resolved/hono/index.mjs");
     expect(code).toContain('import { serveStatic } from "hono/bun"');
     expect(code).toContain("export default app");
     expect(code).not.toContain("@hono/node-server");
   });
 
   it("generates deno app with hono/deno serveStatic", () => {
-    const code = compileNodeApp("deno");
+    const code = compileNodeApp("deno", "/resolved/hono/index.mjs");
     expect(code).toContain('import { serveStatic } from "hono/deno"');
     expect(code).toContain("export default app");
     expect(code).not.toContain("@hono/node-server");

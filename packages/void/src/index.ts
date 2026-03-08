@@ -772,6 +772,8 @@ export function voidPlugin(options?: {
       routingPlugin(root, {
         getAuth: () => null,
         headConfig: config.head,
+        output: config.output,
+        prerenderPaths: config.routing?.prerender,
         target: config.target as "node" | "bun" | "deno",
         headerRules: convertHeadersConfig(config.routing?.headers),
         redirectRules: convertRedirectsConfig(config.routing?.redirects),
@@ -824,7 +826,13 @@ export function voidPlugin(options?: {
     bindingWatchPlugin,
     envPlugin,
     clientStubsPlugin,
-    routingPlugin(root, { getAuth: () => authProviders, headConfig: config.head, remoteMode }),
+    routingPlugin(root, {
+      getAuth: () => authProviders,
+      headConfig: config.head,
+      output: config.output,
+      prerenderPaths: config.routing?.prerender,
+      remoteMode,
+    }),
     drizzlePlugin(root, true, getDatabaseDialect(config)),
     migrationPlugin(root, getDatabaseDialect(config)),
     prerenderPlugin(root, config),

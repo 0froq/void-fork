@@ -28,7 +28,10 @@ const HANDLER_EXTENSIONS = ["ts", "mts", "js", "mjs"];
  * Scan routes/ and middleware/ directories and return a structured manifest.
  * Files starting with _ are ignored.
  */
-export async function scanRoutes(root: string): Promise<ScanResult> {
+export async function scanRoutes(
+  root: string,
+  options?: { output?: "server" | "static" },
+): Promise<ScanResult> {
   const pattern = `**/*.{${HANDLER_EXTENSIONS.join(",")}}`;
 
   const [routeFiles, middlewareFiles, jobs, queues, pages] = await Promise.all([
@@ -36,7 +39,7 @@ export async function scanRoutes(root: string): Promise<ScanResult> {
     glob(pattern, { cwd: `${root}/middleware`, absolute: false }).catch(() => [] as string[]),
     scanJobs(root),
     scanQueues(root),
-    scanPages(root),
+    scanPages(root, { output: options?.output }),
   ]);
 
   const routesDir = `${root}/routes`;

@@ -5,27 +5,76 @@ import { join, dirname } from "node:path";
 import { loadEnv } from "vite";
 import { voidLog, voidWarn } from "./log";
 
+const PRERENDER_PATHS_ENDPOINT = "/__void/prerender-paths";
+
 export interface PrerenderResult {
   rendered: string[];
   failed: Array<{ path: string; error: string }>;
 }
 
-/**
- * Prerender pages by spinning up Miniflare with the built worker and
- * fetching each path. Writes HTML responses to `clientDir`.
- */
-export async function prerenderPages(options: {
-  root: string;
-  workerDir: string; // absolute path to dist/<workerDir>
-  clientDir: string; // absolute path to dist/client
+export interface PrerenderRunResult extends PrerenderResult {
   paths: string[];
-  persistDir: string; // .void
-}): Promise<PrerenderResult> {
-  const { root, workerDir, clientDir, paths, persistDir } = options;
+}
 
-  if (paths.length === 0) return { rendered: [], failed: [] };
+function outputFileForPath(path: string): string {
+  return path === "/" ? "index.html" : `${path.slice(1)}.html`;
+}
 
-  // Read the wrangler.json emitted by @cloudflare/vite-plugin during build
+async function readPrerenderPathsResponse(response: Response): Promise<string[]> {
+  if (!response.ok) {
+    throw new Error(`Failed to collect prerender paths: HTTP ${response.status}`);
+  }
+
+  const payload = (await response.json()) as { paths?: unknown };
+  if (!Array.isArray(payload.paths) || !payload.paths.every((path) => typeof path === "string")) {
+    throw new Error("Failed to collect prerender paths: invalid response payload");
+  }
+
+  return payload.paths;
+}
+
+async function renderPrerenderPaths(
+  paths: string[],
+  clientDir: string,
+  fetchPath: (path: string) => Promise<Response>,
+): Promise<PrerenderResult> {
+  const result: PrerenderResult = { rendered: [], failed: [] };
+
+  for (const path of paths) {
+    try {
+      const response = await fetchPath(path);
+      const html = await response.text();
+
+      if (!response.ok) {
+        result.failed.push({ path, error: `HTTP ${response.status}` });
+        voidWarn(`prerender ${path} failed: HTTP ${response.status}`);
+        continue;
+      }
+
+      const outputFile = outputFileForPath(path);
+      const outputPath = join(clientDir, outputFile);
+      mkdirSync(dirname(outputPath), { recursive: true });
+      writeFileSync(outputPath, html);
+      result.rendered.push(path);
+      voidLog(`prerender \x1b[36m${outputFile}\x1b[39m`);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      result.failed.push({ path, error });
+      voidWarn(`prerender ${path} failed: ${error}`);
+    }
+  }
+
+  return result;
+}
+
+async function createCloudflarePrerenderRunner(options: {
+  root: string;
+  workerDir: string;
+  persistDir: string;
+  clientDir?: string;
+}) {
+  const { root, workerDir, persistDir, clientDir } = options;
+
   const wranglerPath = join(workerDir, "wrangler.json");
   if (!existsSync(wranglerPath)) {
     throw new Error(`[void] wrangler.json not found in ${workerDir}`);
@@ -33,26 +82,18 @@ export async function prerenderPages(options: {
   const wranglerConfig = JSON.parse(readFileSync(wranglerPath, "utf-8"));
   const workerEntry = join(workerDir, wranglerConfig.main ?? "index.js");
 
-  // Load .env vars (same as dev — production .env without .local files)
   const env = loadEnv("production", root, "");
 
-  // Dynamic import — miniflare is a transitive dependency via wrangler.
-  // Resolve from wrangler's context since pnpm doesn't hoist it.
   const wranglerUrl = import.meta.resolve("wrangler/package.json");
   const require = createRequire(wranglerUrl);
   const miniflarePath = require.resolve("miniflare");
   const { Miniflare } = (await import(miniflarePath)) as {
     Miniflare: new (options: Record<string, unknown>) => {
-      dispatchFetch(url: string): Promise<Response>;
+      dispatchFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
       dispose(): Promise<void>;
     };
   };
 
-  // Build Miniflare options from the wrangler config.
-  // Use scriptPath (not modules array) so Miniflare resolves relative chunk
-  // imports from the worker directory. modulesRoot sets the base path.
-  // modulesRules tells Miniflare to treat .js files as ESModule (matching
-  // the rules in wrangler.json emitted by the CF vite plugin).
   const mfOptions: Record<string, unknown> = {
     scriptPath: workerEntry,
     modules: true,
@@ -60,11 +101,11 @@ export async function prerenderPages(options: {
     modulesRules: [{ type: "ESModule", include: ["**/*.js", "**/*.mjs"] }],
     compatibilityDate: wranglerConfig.compatibility_date ?? "2024-01-01",
     compatibilityFlags: wranglerConfig.compatibility_flags ?? [],
-    // Merge wrangler vars with .env vars
     bindings: { ...wranglerConfig.vars, ...env },
-    // Provide ASSETS binding so the worker can load the client manifest
-    // and generate production asset tags instead of dev-time URLs.
-    serviceBindings: {
+  };
+
+  if (clientDir) {
+    mfOptions.serviceBindings = {
       ASSETS(request: Request) {
         const url = new URL(request.url);
         const filePath = join(clientDir, url.pathname);
@@ -75,10 +116,9 @@ export async function prerenderPages(options: {
           return new Response("Not Found", { status: 404 });
         }
       },
-    },
-  };
+    };
+  }
 
-  // D1
   const d1 = wranglerConfig.d1_databases;
   if (Array.isArray(d1) && d1.length > 0) {
     const databases: Record<string, string> = {};
@@ -89,7 +129,6 @@ export async function prerenderPages(options: {
     mfOptions.d1Persist = persistDir;
   }
 
-  // KV
   const kv = wranglerConfig.kv_namespaces;
   if (Array.isArray(kv) && kv.length > 0) {
     const namespaces: Record<string, string> = {};
@@ -100,7 +139,6 @@ export async function prerenderPages(options: {
     mfOptions.kvPersist = persistDir;
   }
 
-  // R2
   const r2 = wranglerConfig.r2_buckets;
   if (Array.isArray(r2) && r2.length > 0) {
     const buckets: Record<string, string> = {};
@@ -112,61 +150,67 @@ export async function prerenderPages(options: {
   }
 
   const mf = new Miniflare(mfOptions);
-  const result: PrerenderResult = { rendered: [], failed: [] };
 
+  return {
+    async collectPaths(): Promise<string[]> {
+      return readPrerenderPathsResponse(
+        await mf.dispatchFetch(`http://localhost${PRERENDER_PATHS_ENDPOINT}`, { method: "POST" }),
+      );
+    },
+    async fetchPath(path: string): Promise<Response> {
+      return mf.dispatchFetch(`http://localhost${path}`);
+    },
+    async close() {
+      await mf.dispose();
+    },
+  };
+}
+
+export async function collectPrerenderPaths(options: {
+  root: string;
+  workerDir: string;
+  persistDir: string;
+  clientDir?: string;
+}): Promise<string[]> {
+  const runner = await createCloudflarePrerenderRunner(options);
   try {
-    for (const path of paths) {
-      try {
-        const response = await mf.dispatchFetch(`http://localhost${path}`);
-        const html = await response.text();
-
-        if (!response.ok) {
-          result.failed.push({ path, error: `HTTP ${response.status}` });
-          voidWarn(`prerender ${path} failed: HTTP ${response.status}`);
-          continue;
-        }
-
-        // /about → dist/client/about.html, / → dist/client/index.html
-        const outputFile = path === "/" ? "index.html" : `${path.slice(1)}.html`;
-        const outputPath = join(clientDir, outputFile);
-        mkdirSync(dirname(outputPath), { recursive: true });
-        writeFileSync(outputPath, html);
-        result.rendered.push(path);
-        voidLog(`prerender \x1b[36m${outputFile}\x1b[39m`);
-      } catch (err) {
-        const error = err instanceof Error ? err.message : String(err);
-        result.failed.push({ path, error });
-        voidWarn(`prerender ${path} failed: ${error}`);
-      }
-    }
+    return await runner.collectPaths();
   } finally {
-    await mf.dispose();
+    await runner.close();
   }
-
-  return result;
 }
 
 /**
- * Prerender pages for Node.js targets by spawning a child process.
- *
- * Uses a child process to avoid mutating `process.env` in the parent Vite
- * build process. Writes a temp runner script to `.void/`, spawns it with
- * the loaded env vars, and parses the JSON result from stdout.
+ * Prerender pages by spinning up Miniflare with the built worker.
+ * Collects paths through the built worker's internal endpoint and then
+ * fetches each page, writing HTML responses to `clientDir`.
  */
-export async function prerenderPagesNode(options: {
+export async function prerenderPages(options: {
   root: string;
-  ssrDir: string; // absolute path to dist/ssr
-  clientDir: string; // absolute path to dist/client
-  paths: string[];
-}): Promise<PrerenderResult> {
-  const { root, ssrDir, clientDir, paths } = options;
+  workerDir: string;
+  clientDir: string;
+  persistDir: string;
+}): Promise<PrerenderRunResult> {
+  const runner = await createCloudflarePrerenderRunner(options);
+  try {
+    const paths = await runner.collectPaths();
+    if (paths.length === 0) return { paths, rendered: [], failed: [] };
 
-  if (paths.length === 0) return { rendered: [], failed: [] };
+    const result = await renderPrerenderPaths(paths, options.clientDir, (path) =>
+      runner.fetchPath(path),
+    );
+    return { paths, ...result };
+  } finally {
+    await runner.close();
+  }
+}
 
-  // Load .env vars (pure function — does not touch process.env)
+type NodeRunnerConfig =
+  | { mode: "collect"; ssrDir: string; clientDir?: string }
+  | { mode: "collect-and-render"; ssrDir: string; clientDir: string };
+
+async function runNodePrerenderRunner<T>(root: string, config: NodeRunnerConfig): Promise<T> {
   const env = loadEnv("production", root, "");
-
-  // Write a temp runner script that imports the built app and fetches each path
   const runnerPath = join(root, ".void", "prerender-runner.mjs");
   mkdirSync(dirname(runnerPath), { recursive: true });
   writeFileSync(
@@ -177,14 +221,14 @@ import { join, dirname } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const config = JSON.parse(process.argv[2]);
-const { ssrDir, clientDir, paths } = config;
+const { mode, ssrDir, clientDir } = config;
 
-// Inject the Vite manifest so the SSR renderer can generate production
-// asset tags (script/link). loadPagesManifest() checks this global first.
-try {
-  const manifestPath = join(clientDir, ".vite", "manifest.json");
-  globalThis.__VITE_MANIFEST__ = JSON.parse(readFileSync(manifestPath, "utf-8"));
-} catch {}
+if (clientDir) {
+  try {
+    const manifestPath = join(clientDir, ".vite", "manifest.json");
+    globalThis.__VITE_MANIFEST__ = JSON.parse(readFileSync(manifestPath, "utf-8"));
+  } catch {}
+}
 
 const appUrl = pathToFileURL(join(ssrDir, "app.js")).href;
 const app = await import(appUrl);
@@ -194,37 +238,60 @@ if (!fetch) {
   process.exit(1);
 }
 
-const result = { rendered: [], failed: [] };
-
-for (const path of paths) {
-  try {
-    const response = await fetch(new Request("http://localhost" + path));
-    const html = await response.text();
-    if (!response.ok) {
-      result.failed.push({ path, error: "HTTP " + response.status });
-      continue;
-    }
-    const outputFile = path === "/" ? "index.html" : path.slice(1) + ".html";
-    const outputPath = join(clientDir, outputFile);
-    mkdirSync(dirname(outputPath), { recursive: true });
-    writeFileSync(outputPath, html);
-    result.rendered.push(path);
-  } catch (err) {
-    result.failed.push({ path, error: err instanceof Error ? err.message : String(err) });
+async function collectPaths() {
+  const response = await fetch(
+    new Request("http://localhost${PRERENDER_PATHS_ENDPOINT}", { method: "POST" }),
+  );
+  if (!response.ok) {
+    throw new Error("Failed to collect prerender paths: HTTP " + response.status);
   }
+  const payload = await response.json();
+  if (!payload || !Array.isArray(payload.paths) || !payload.paths.every((path) => typeof path === "string")) {
+    throw new Error("Failed to collect prerender paths: invalid response payload");
+  }
+  return payload.paths;
 }
 
-process.stdout.write(JSON.stringify(result));
+async function renderPaths(paths) {
+  if (!clientDir) return { rendered: [], failed: [] };
+  const result = { rendered: [], failed: [] };
+
+  for (const path of paths) {
+    try {
+      const response = await fetch(new Request("http://localhost" + path));
+      const html = await response.text();
+      if (!response.ok) {
+        result.failed.push({ path, error: "HTTP " + response.status });
+        continue;
+      }
+      const outputFile = path === "/" ? "index.html" : path.slice(1) + ".html";
+      const outputPath = join(clientDir, outputFile);
+      mkdirSync(dirname(outputPath), { recursive: true });
+      writeFileSync(outputPath, html);
+      result.rendered.push(path);
+    } catch (err) {
+      result.failed.push({ path, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return result;
+}
+
+if (mode === "collect") {
+  process.stdout.write(JSON.stringify({ paths: await collectPaths() }));
+} else {
+  const paths = await collectPaths();
+  const result = await renderPaths(paths);
+  process.stdout.write(JSON.stringify({ paths, ...result }));
+}
 `,
   );
 
-  const configJson = JSON.stringify({ ssrDir, clientDir, paths });
-
   try {
-    const result = await new Promise<PrerenderResult>((resolve, reject) => {
+    return await new Promise<T>((resolve, reject) => {
       execFile(
         process.execPath,
-        [runnerPath, configJson],
+        [runnerPath, JSON.stringify(config)],
         { env: { ...process.env, ...env }, cwd: root, maxBuffer: 10 * 1024 * 1024 },
         (error, stdout, stderr) => {
           if (stderr) process.stderr.write(stderr);
@@ -240,20 +307,50 @@ process.stdout.write(JSON.stringify(result));
         },
       );
     });
-
-    // Log results in the parent process
-    for (const path of result.rendered) {
-      const outputFile = path === "/" ? "index.html" : `${path.slice(1)}.html`;
-      voidLog(`prerender \x1b[36m${outputFile}\x1b[39m`);
-    }
-    for (const { path, error } of result.failed) {
-      voidWarn(`prerender ${path} failed: ${error}`);
-    }
-
-    return result;
   } finally {
     try {
       unlinkSync(runnerPath);
     } catch {}
   }
+}
+
+export async function collectPrerenderPathsNode(options: {
+  root: string;
+  ssrDir: string;
+  clientDir?: string;
+}): Promise<string[]> {
+  const result = await runNodePrerenderRunner<{ paths: string[] }>(options.root, {
+    mode: "collect",
+    ssrDir: options.ssrDir,
+    clientDir: options.clientDir,
+  });
+  return result.paths;
+}
+
+/**
+ * Prerender pages for Node.js targets by spawning a child process.
+ *
+ * Uses a child process to avoid mutating `process.env` in the parent Vite
+ * build process. The child imports the built app, collects prerender paths
+ * from the internal endpoint, renders each page, and returns the result.
+ */
+export async function prerenderPagesNode(options: {
+  root: string;
+  ssrDir: string;
+  clientDir: string;
+}): Promise<PrerenderRunResult> {
+  const result = await runNodePrerenderRunner<PrerenderRunResult>(options.root, {
+    mode: "collect-and-render",
+    ssrDir: options.ssrDir,
+    clientDir: options.clientDir,
+  });
+
+  for (const path of result.rendered) {
+    voidLog(`prerender \x1b[36m${outputFileForPath(path)}\x1b[39m`);
+  }
+  for (const { path, error } of result.failed) {
+    voidWarn(`prerender ${path} failed: ${error}`);
+  }
+
+  return result;
 }
