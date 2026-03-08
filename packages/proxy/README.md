@@ -1,156 +1,122 @@
 # @voidcloud/proxy
 
-Unified proxy worker for platform services: AI inference metering, ISR revalidation, and remote binding access. Hono-based CF Worker at `proxy.void.cloud`. All deployed user workers get a `__VOID_PROXY` service binding to this worker. Also provides D1/KV/R2 proxy endpoints backed by CF REST APIs for local development with remote bindings.
+Shared proxy worker for platform-owned capabilities: AI metering, ISR revalidation, and remote D1/KV/R2 access.
 
-## Why a proxy?
+## Architecture
 
-**AI metering:** Cloudflare charges our platform account for all AI inference across Workers for Platforms. If user workers had the `AI` binding, they could strip metering code and call `env.AI.run()` directly. The proxy ensures every inference call flows through our AI Gateway for tamper-proof logging.
+- **AI traffic** goes through AI Gateway so usage cannot bypass platform metering.
+- **ISR revalidation** forwards to the API worker over a service binding.
+- **Remote bindings** try the deployed user worker first via `DISPATCH` and its `/__void/*` endpoints, then fall back to Cloudflare REST APIs for older deployments.
+- **Resource resolution** happens through internal API endpoints, not direct DB reads inside the proxy.
 
-**ISR revalidation:** On-demand ISR cache purge (`revalidate()` from `void/isr`) routes through the proxy to the API worker via service binding. The proxy forwards the HMAC-authenticated request to the API's internal revalidation endpoint, which deletes from R2 and purges edge cache.
-
-**Remote bindings:** During local development, users may want to connect to their production/staging D1/KV/R2 resources instead of local miniflare. The proxy acts as an authenticated gateway to the CF REST APIs, resolving resource IDs from the platform database.
-
-```
-User worker (deployed)       Proxy (this worker)           Downstream
-┌──────────────────┐ svc  ┌────────────────────┐        ┌────────────────────┐
-│ ai.run()         │─────▶│ /ai/*  → AI GW     │───────▶│ Workers AI         │
-│ revalidate()     │─────▶│ /revalidate → API  │───────▶│ void-api (svc)     │
-└──────────────────┘      └────────────────────┘        └────────────────────┘
-
-User worker (local dev)       Proxy (HTTPS)                 CF REST API
-┌──────────────────┐ HTTPS ┌────────────────────┐        ┌────────────────────┐
-│ ai.run()         │──────▶│ /ai/*  → AI GW     │───────▶│ Workers AI         │
-│ db.query()       │──────▶│ /d1/*  → CF API    │───────▶│ D1 Database        │
-│ kv.get()         │──────▶│ /kv/*  → CF API    │───────▶│ KV Namespace       │
-│ r2.get()         │──────▶│ /r2/*  → CF API    │───────▶│ R2 Bucket          │
-└──────────────────┘      └────────────────────┘        └────────────────────┘
+```text
+Deployed user worker            Proxy                       Downstream
+┌────────────────────┐         ┌────────────────────┐      ┌────────────────────┐
+│ ai.run()           │────────▶│ /ai/*              │─────▶│ AI Gateway / AI    │
+│ revalidate()       │────────▶│ /revalidate        │─────▶│ void-api           │
+│ remote D1/KV/R2    │────────▶│ /d1/* /kv/* /r2/*  │─────▶│ user worker / CF   │
+└────────────────────┘         └────────────────────┘      └────────────────────┘
 ```
 
 ## Authentication
 
-Two paths, determined by the presence of an `Authorization` header:
+Two auth paths are supported:
 
-| Path                | When                          | Auth                                                                           |
-| ------------------- | ----------------------------- | ------------------------------------------------------------------------------ |
-| **Service binding** | Production (deployed to Void) | HMAC-signed project token (`projectId` + `aiToken` in body)                    |
-| **HTTPS**           | Local dev (`pnpm dev`)        | `Authorization: Bearer <jwt>` — JWT validated with `JWT_SECRET` (HMAC-SHA256). |
+| Path            | When               | Auth                                      |
+| --------------- | ------------------ | ----------------------------------------- |
+| Service binding | Deployed Void apps | HMAC-signed `projectId` token (`aiToken`) |
+| HTTPS           | Local development  | `Authorization: Bearer <jwt>`             |
 
-JWT payload: `{ sub: string, login: string, iat: number, exp: number }`
-
-All endpoints require `projectId` in the JSON body. The proxy uses this to resolve the correct CF resource IDs from the platform database.
+All routes require `projectId` in the JSON body.
 
 ## Endpoints
 
-### AI (`/ai/*`)
+### AI
 
-AI inference with usage-limit enforcement. Checks `ai-block:{projectId}` in KV before processing.
+| Endpoint              | Body                                                   | Notes                                 |
+| --------------------- | ------------------------------------------------------ | ------------------------------------- |
+| `POST /ai/run`        | `{ model, inputs?, options?, projectId, aiToken? }`    | Workers AI inference                  |
+| `POST /ai/gateway`    | `{ model, inputs?, providerKey, projectId, aiToken? }` | BYOK provider call through AI Gateway |
+| `POST /ai/models`     | `{ inputs?, projectId, aiToken? }`                     | List models                           |
+| `POST /ai/toMarkdown` | `{ inputs, options?, projectId, aiToken? }`            | `AI.toMarkdown()` passthrough         |
 
-| Endpoint    | Body                                               | Response                  |
-| ----------- | -------------------------------------------------- | ------------------------- |
-| `POST /ai/` | `{ action, model?, inputs?, options?, projectId }` | JSON result or SSE stream |
+`/ai/*` also checks `ROUTING` for `ai-block:{projectId}` before forwarding.
 
-Actions: `run` (inference), `models` (list models), `toMarkdown` (convert to markdown).
+### Remote bindings
 
-### D1 (`/d1/*`)
+| Endpoint                                            | Purpose             |
+| --------------------------------------------------- | ------------------- |
+| `POST /d1/query`                                    | Query a D1 binding  |
+| `POST /d1/batch`                                    | Batch D1 statements |
+| `POST /kv/get` / `put` / `delete` / `list`          | KV access           |
+| `POST /r2/get` / `put` / `delete` / `list` / `head` | R2 access           |
 
-| Endpoint         | Body                                                     | Response                                                         |
-| ---------------- | -------------------------------------------------------- | ---------------------------------------------------------------- |
-| `POST /d1/query` | `{ binding, sql, params?, method?, projectId }`          | `{ results, meta: { changes, last_row_id, duration }, success }` |
-| `POST /d1/batch` | `{ binding, statements: [{ sql, params? }], projectId }` | Array of D1Result                                                |
+The remote-binding path is:
 
-### KV (`/kv/*`)
+1. resolve the active worker or resource via internal API
+2. try the deployed worker's native binding handler through `DISPATCH`
+3. fall back to the Cloudflare REST API if the worker does not support `/__void/*`
 
-| Endpoint          | Body                                                  | Response                           |
-| ----------------- | ----------------------------------------------------- | ---------------------------------- |
-| `POST /kv/get`    | `{ binding, key, projectId }`                         | Value (JSON) or `null`             |
-| `POST /kv/put`    | `{ binding, key, value, expiration_ttl?, projectId }` | `{ success: true }`                |
-| `POST /kv/delete` | `{ binding, key, projectId }`                         | `{ success: true }`                |
-| `POST /kv/list`   | `{ binding, prefix?, limit?, cursor?, projectId }`    | `{ keys, list_complete, cursor? }` |
+### ISR revalidation
 
-### R2 (`/r2/*`)
+| Endpoint           | Body                                                      |
+| ------------------ | --------------------------------------------------------- |
+| `POST /revalidate` | `{ paths?: string[], all?: boolean, projectId, aiToken }` |
 
-| Endpoint          | Body                                                | Response                                                |
-| ----------------- | --------------------------------------------------- | ------------------------------------------------------- |
-| `POST /r2/get`    | `{ binding, key, projectId }`                       | Binary body with metadata headers, or JSON `null`       |
-| `POST /r2/put`    | `{ binding, key, value, content_type?, projectId }` | `{ key, size, etag, uploaded, version }`                |
-| `POST /r2/delete` | `{ binding, key, projectId }`                       | `{ success: true }`                                     |
-| `POST /r2/list`   | `{ binding, prefix?, limit?, cursor?, projectId }`  | `{ objects, truncated, cursor? }`                       |
-| `POST /r2/head`   | `{ binding, key, projectId }`                       | `{ key, size, etag, uploaded, version }` or JSON `null` |
+The proxy forwards the request to `API.fetch("https://api/internal/revalidate/:projectId")` with `x-void-internal`.
 
-### Revalidate (`/revalidate`)
+### Health
 
-Forwards ISR revalidation requests to the API worker via service binding.
-
-| Endpoint           | Body                                                      | Response        |
-| ------------------ | --------------------------------------------------------- | --------------- |
-| `POST /revalidate` | `{ paths?: string[], all?: boolean, projectId, aiToken }` | `{ purged: N }` |
-
-The HMAC token is forwarded to the API as `X-Void-Internal` header. The API verifies it independently and performs R2 deletion + edge cache purge.
-
-### Health Check
-
-`GET /health` — returns `{ ok: true, bindings: { ai, kv, jwt, db } }`.
-
-## Resource Resolution
-
-The proxy resolves CF resource IDs from the platform database. Given a `projectId` and `binding` name, it looks up the project's resources in D1 to find the real CF resource IDs (database ID, KV namespace ID, R2 bucket name). This ensures user workers never need to know or manage CF resource IDs directly.
-
-## Error Handling
-
-- AI binding errors return `502` with `{ error: "<message>" }`.
-- CF REST API errors return `502` with `{ error: "<context>", status: <upstream_status> }`.
-- Missing or unresolvable bindings return `404`.
-- All error responses include CORS headers.
-- CORS preflight (`OPTIONS`) returns `204`.
+`GET /health` returns binding presence for `ai`, `kv`, `jwt`, and `api`.
 
 ## Source Layout
 
-```
+```text
 src/
-  index.ts          # Hono app — CORS, auth middleware, route mounting
-  ai.ts             # AI inference endpoints
-  d1.ts             # D1 proxy endpoints (query, batch)
-  kv.ts             # KV proxy endpoints (get, put, delete, list)
-  r2.ts             # R2 proxy endpoints (get, put, delete, list, head)
-  revalidate.ts     # ISR revalidation forwarding to API
-  resolve.ts        # Resource ID resolution from platform DB
-  types.ts          # Shared types (ProxyEnv, JwtPayload)
-test/
-  unit/
-    proxy.test.ts   # Auth, CORS, AI actions, streaming, revalidation
-    d1.test.ts      # D1 query/batch endpoints
-    kv.test.ts      # KV get/put/delete/list endpoints
-    r2.test.ts      # R2 get/put/delete/list/head endpoints
-    resolve.test.ts # Resource resolution logic
+  index.ts        # Hono app, CORS, auth middleware, route mounting
+  ai.ts           # Workers AI + AI Gateway endpoints
+  revalidate.ts   # ISR revalidation forwarding to API
+  dispatch.ts     # Dispatch-to-user-worker fast path for remote bindings
+  resolve.ts      # Internal API resource resolution + in-memory cache
+  d1.ts           # D1 remote access
+  kv.ts           # KV remote access
+  r2.ts           # R2 remote access
+  types.ts        # Env and JWT types
+test/unit/
+  proxy.test.ts
+  dispatch.test.ts
+  resolve.test.ts
+  d1.test.ts
+  kv.test.ts
+  r2.test.ts
 ```
 
 ## Bindings
 
-| Binding         | Type            | Purpose                                                           |
-| --------------- | --------------- | ----------------------------------------------------------------- |
-| `AI`            | Workers AI      | The real AI binding — inference calls                             |
-| `API`           | Service Binding | Forwards revalidation requests to `void-api`                      |
-| `JWT_SECRET`    | Secret          | Shared HMAC-SHA256 secret for JWT verification (same as platform) |
-| `CF_ACCOUNT_ID` | Secret          | Cloudflare account ID for REST API calls                          |
-| `CF_API_TOKEN`  | Secret          | Cloudflare API token for D1/KV/R2 REST API calls                  |
-| `ROUTING`       | KV              | AI usage limit checks (`ai-block:{projectId}`)                    |
-| `DB`            | D1              | Platform database for resource ID resolution                      |
+| Binding         | Type               | Purpose                                                |
+| --------------- | ------------------ | ------------------------------------------------------ |
+| `AI`            | Workers AI         | Real inference binding                                 |
+| `API`           | Service binding    | Internal API calls (`revalidate`, resource resolution) |
+| `DISPATCH`      | Dispatch namespace | Fast path to deployed user workers                     |
+| `ROUTING`       | KV                 | AI limit flags                                         |
+| `JWT_SECRET`    | Secret             | HMAC/JWT verification                                  |
+| `CF_ACCOUNT_ID` | Secret             | Cloudflare account ID                                  |
+| `CF_API_TOKEN`  | Secret             | Fallback REST API access                               |
 
-## Deployment
+## Deploy
 
+```bash
+pnpm -C packages/proxy deploy
+pnpm -C packages/proxy deploy --env staging
 ```
-pnpm -C packages/proxy deploy              # Production (proxy.void.cloud)
-pnpm -C packages/proxy deploy --env staging # Staging (proxy.staging.void.cloud)
-```
 
-Deployed as part of the root `pnpm run deploy` / `pnpm run deploy:staging` scripts.
+Deployed as part of the root `pnpm run deploy` and `pnpm run deploy:staging` scripts.
 
 ## Tests
 
-| Test file                   | Covers                                                         |
-| --------------------------- | -------------------------------------------------------------- |
-| `test/unit/proxy.test.ts`   | CORS, method validation, JWT auth, service binding, AI actions |
-| `test/unit/d1.test.ts`      | D1 query, batch, error handling                                |
-| `test/unit/kv.test.ts`      | KV get, put, delete, list, error handling                      |
-| `test/unit/r2.test.ts`      | R2 get, put, delete, list, head, error handling                |
-| `test/unit/resolve.test.ts` | Resource ID resolution from platform DB                        |
+- `test/unit/proxy.test.ts` — auth, CORS, AI routes, revalidation
+- `test/unit/dispatch.test.ts` — dispatch fast path and fallback behavior
+- `test/unit/resolve.test.ts` — internal resource resolution cache
+- `test/unit/d1.test.ts` — D1 query and batch behavior
+- `test/unit/kv.test.ts` — KV operations
+- `test/unit/r2.test.ts` — R2 operations

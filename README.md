@@ -44,7 +44,7 @@ git submodule status
 - **Important**: The source of truth of this file on disk is `README.md`. Both `AGENTS.md` and `CLAUDE.md` are symlinks to this file. When asked to update any of these, always update `README.md` (the actual file).
 - Refer to the [Design Doc](./meta/design-docs/0001-design.md) for the high-level vision and architecture.
 - Refer to the [Progress Doc](./meta/progress.md) for tracking progress.
-- Framework repo: `framework/` (git submodule — run `git submodule update --init` after cloning). If work involves the framework, read `frameworks/CLAUDE.md` first.
+- Framework repo: `framework/` (git submodule — run `git submodule update --init` after cloning). If work involves the framework, read `framework/CLAUDE.md` first.
 - Public-facing docs: `framework/docs` (Vitepress site).
 
 ## Best Practices That Must Be Followed
@@ -92,62 +92,158 @@ git submodule status
 
 ## Quick Reference
 
-```
-pnpm -r build                       # Build all packages
-pnpm test                           # Run vitest (unit + integration tests)
-pnpm lint                           # oxlint
-pnpm fmt                            # oxfmt
-pnpm check                          # Typecheck all packages (tsc --noEmit)
-pnpm run deploy                     # Build all + deploy proxy, dispatch, api & dashboard (production)
-pnpm run deploy:staging             # Deploy all workers to staging environment
-```
+| Command                             | Purpose                                                                                             |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `pnpm dev`                          | Start the dashboard dev server only                                                                 |
+| `pnpm build`                        | Build the dashboard only                                                                            |
+| `pnpm test`                         | Run vitest (unit + integration tests)                                                               |
+| `pnpm lint`                         | Run oxlint                                                                                          |
+| `pnpm fmt`                          | Run oxfmt                                                                                           |
+| `pnpm check`                        | Run package `typecheck` scripts (`tsgo --noEmit` in most packages, `vue-tsc --noEmit` in dashboard) |
+| `pnpm run deploy`                   | Deploy `proxy` → `tail` → `api` → `dispatch`                                                        |
+| `pnpm run deploy:dashboard`         | Deploy the dashboard separately                                                                     |
+| `pnpm run deploy:staging`           | Deploy staging `proxy` → `tail` → `api` → `dispatch`                                                |
+| `pnpm run deploy:staging:dashboard` | Deploy the staging dashboard separately                                                             |
+
+Root `dev` and `build` are intentionally dashboard-only. Dashboard work is currently deferred, which is why it stays outside the main platform deploy pipeline.
 
 **Manual deploys only. Do not ask to push or deploy.**
 
 ## Monorepo Structure
 
-pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-workspace.yaml` (@cloudflare/workers-types, wrangler). Make sure to run `pnpm install` after making package structure changes.
+Void is split across two codebases in this repo:
 
-| Package                                                | npm name                         | Purpose                                                        |
-| ------------------------------------------------------ | -------------------------------- | -------------------------------------------------------------- |
-| [`packages/api`](./packages/api/README.md)             | `@voidcloud/api` (private)       | Control Plane API + Admin Dashboard                            |
-| [`packages/dispatch`](./packages/dispatch/README.md)   | `@voidcloud/dispatch` (private)  | Routes `*.void.app` to user workers + static/ISR assets        |
-| [`packages/tail`](./packages/tail/README.md)           | `@voidcloud/tail` (private)      | Tail worker — user worker logs + live tailing via DO WebSocket |
-| [`packages/proxy`](./packages/proxy/README.md)         | `@voidcloud/proxy` (private)     | Proxy worker — AI inference, D1/KV/R2 remote bindings          |
-| [`packages/dashboard`](./packages/dashboard/README.md) | `@voidcloud/dashboard` (private) | User-facing dashboard — project management, deployments, usage |
-| [`packages/ui`](./packages/ui)                         | `@voidcloud/ui` (private)        | Shared CSS/design tokens (used by dashboard)                   |
+- `packages/` — the private platform: control plane, traffic router, proxy services, log pipeline, dashboard, and shared internal UI styles
+- `framework/` — the open-source framework submodule: Vite plugin, CLI, runtime helpers, adapters, docs, and tests
+
+### Top-Level Map
+
+| Path                                                   | Purpose                                                                   |
+| ------------------------------------------------------ | ------------------------------------------------------------------------- |
+| [`packages/api`](./packages/api/README.md)             | Control plane API, deploy pipeline, provisioning, internal admin UI       |
+| [`packages/dashboard`](./packages/dashboard/README.md) | User-facing dashboard app                                                 |
+| [`packages/dispatch`](./packages/dispatch/README.md)   | Edge router for `*.void.app` and custom domains                           |
+| [`packages/proxy`](./packages/proxy/README.md)         | AI proxy, remote D1/KV/R2 proxy, ISR revalidation bridge                  |
+| [`packages/tail`](./packages/tail/README.md)           | Runtime log ingestion and live tail streaming                             |
+| [`packages/ui`](./packages/ui)                         | Shared internal CSS tokens                                                |
+| `framework/packages/void`                              | Main `void` package: Vite plugin, CLI, runtime, codegen, deploy packaging |
+| `framework/packages/{vue,react,svelte,solid}`          | Pages-mode adapters and runtime helpers                                   |
+| `framework/packages/create-void`                       | Scaffolding package                                                       |
+| `framework/packages/md`                                | Markdown package                                                          |
+| `framework/docs`                                       | Public-facing framework docs                                              |
+| `meta/design-docs`                                     | Internal design history                                                   |
+| `meta/progress.md`                                     | Progress tracker                                                          |
+| `meta/operations.md`                                   | Operations/runbook                                                        |
+
+### Where Code for X Lives
+
+| Feature                                                                   | Primary code paths                                                                                                                                |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vite plugin and local runtime                                             | `framework/packages/void/src/index.ts`, `plugin-*`, `runtime/*`                                                                                   |
+| CLI commands                                                              | `framework/packages/void/src/cli/*`                                                                                                               |
+| File-based API routing                                                    | `framework/packages/void/src/router/*`, `runtime/handler.ts`                                                                                      |
+| Pages routing, loaders, actions, named actions, deferred props            | `framework/packages/void/src/pages/*`, adapter runtimes in `framework/packages/{vue,react,svelte,solid}/src/runtime/*`                            |
+| Typed route/page/action codegen                                           | `framework/packages/void/src/codegen/*`, `routes-stub.ts`                                                                                         |
+| Binding inference                                                         | `framework/packages/void/src/plugin-inference.ts`, `framework/packages/void/src/inference/*`                                                      |
+| Drizzle integration and migrations                                        | `framework/packages/void/src/drizzle/*`, `framework/packages/void/src/migrations/*`                                                               |
+| Framework detection and deploy presets                                    | `framework/packages/void/src/plugin-inference.ts`, `framework/packages/void/src/cli/preset.ts`                                                    |
+| Platform auth and project APIs                                            | `packages/api/src/routes/*`, `packages/api/src/auth/*`, `packages/api/src/middleware/*`                                                           |
+| Internal admin UI                                                         | `packages/api/src/admin/*`                                                                                                                        |
+| Deploy pipeline                                                           | `framework/packages/void/src/cli/deploy.ts`, `packages/api/src/routes/deploy.ts`, `packages/api/src/assets.ts`, `packages/api/src/provisioning/*` |
+| Hostname routing, static serving, ISR, redirects, headers, metering       | `packages/dispatch/src/*`                                                                                                                         |
+| AI metering, BYOK AI gateway, remote D1/KV/R2 access, revalidation bridge | `packages/proxy/src/*`                                                                                                                            |
+| Runtime logs and live tailing                                             | `packages/tail/src/index.ts`, `packages/api/src/admin/routes/deployments.tsx`                                                                     |
+| User-facing dashboard                                                     | `packages/dashboard/pages/*`, `packages/dashboard/middleware/01.auth.ts`, `packages/dashboard/lib/api.ts`                                         |
+| Shared internal styling                                                   | `packages/ui/src/base.css`, `packages/ui/src/theme.css`                                                                                           |
 
 The dashboard depends on `void` and `@void-x/vue`, resolved via `pnpm.overrides` to `link:framework/...` (the git submodule). CI checks out the submodule and builds it before `pnpm install`.
 
-## `dashboard` Overview
+## Framework Repo Overview
 
-Vue Pages mode app serving the user-facing Void dashboard at `dash.void.cloud`. Built with `@void-x/vue` (SSR + `<script server>` blocks), Hono, and Tailwind CSS v4 with shared design tokens from `@voidcloud/ui`. Has a Hyperdrive binding to the API database (PlanetScale PostgreSQL) — read-only loaders use direct Drizzle queries, while mutations and non-DB reads (usage metrics, secrets) go through the API via HTTP.
+The framework submodule is the public product surface.
 
-- **Auth**: OAuth (GitHub/Google) via API, JWT in httpOnly `void_token` cookie
-- **Pages**: login, project list with aggregate usage, project detail (deployments, domains, secrets, usage metrics), settings
-- **Deployment**: CF Worker — production at `dash.void.cloud`, staging at `dash.staging.void.cloud`
+### `framework/packages/void`
 
-See [`packages/dashboard/README.md`](./packages/dashboard/README.md) for details.
+This is the main `void` package.
 
-## `api` Overview
+- `src/index.ts` wires together routing, pages-mode infrastructure, codegen, migrations, prerendering, Cloudflare integration, and non-CF targets.
+- `src/cli/*` contains the CLI.
+- `src/router/*` handles `routes/` scanning and route compilation.
+- `src/pages/*` handles pages-mode scanning, protocol, head management, defer, and manifest generation.
+- `src/runtime/*` contains helpers exposed as `void/db`, `void/kv`, `void/storage`, `void/ai`, `void/isr`, `void/client`, and auth utilities.
+- `src/codegen/*` generates `.void/routes.d.ts`, `.void/db.d.ts`, `.void/queues.d.ts`, and tsconfig glue.
+- `src/drizzle/*` and `src/migrations/*` handle schema discovery and migration execution.
+- `src/plugin-node-target.ts` supports `target: "node" | "bun" | "deno"`.
 
-CF Worker serving the Control Plane API + Admin Dashboard. Handles OAuth (GitHub/Google), project CRUD, deploy pipeline (migrations → assets → worker upload), usage metering via Analytics Engine, and plan tier enforcement. Admin dashboard uses Hono JSX with cookie-based auth. Uses Drizzle ORM with PlanetScale PostgreSQL (via Cloudflare Hyperdrive) for type-safe database queries — schema defined in `src/schema.ts`, types inferred via `InferSelectModel`.
+### Adapter packages
 
-See [`packages/api/README.md`](./packages/api/README.md) for API endpoints, auth flow, deploy flow, tiers, secrets, and CF API token permissions.
+- `framework/packages/vue`
+- `framework/packages/react`
+- `framework/packages/svelte`
+- `framework/packages/solid`
 
-## `proxy` Overview
+These packages provide pages-mode adapters, links, forms, router helpers, prefetching, and framework-specific client behavior.
 
-Unified proxy worker at `proxy.void.cloud`. All deployed user workers get a `__VOID_PROXY` service binding to this worker. Handles AI inference metering (user workers never get the `AI` binding directly), ISR revalidation (forwards to API via service binding), and D1/KV/R2 remote binding access for local development via CF REST APIs. Two auth paths: service binding with HMAC (production) and HTTPS with JWT (local dev).
+### Framework support
 
-See [`packages/proxy/README.md`](./packages/proxy/README.md) for request format, authentication, and deployment.
+Current public support is:
 
-## `dispatch` Overview
+- TanStack Start
+- React Router
+- SvelteKit
+- Nuxt
+- Astro
 
-CF Worker routing `*.void.app` traffic. Extracts slug from hostname → KV lookup → serves API routes via Workers for Platforms (with custom CPU/subrequest limits), static assets from R2, or ISR-cached pages from KV (with edge caching). Records every request to Analytics Engine for usage metering. Also relays Cloudflare Queue batches to user workers via KV-based routing.
+There is Vinext-specific source in the framework repo, but it is intentionally on hold and not part of the current public support matrix.
 
-Static-only projects (type `"static"` / `"spa"`) are served directly from KV (primary) with R2 overflow for files >= 2 MB — no WfP worker created. Assets use content-addressed keys (`assets/{hash}`) in the `STATIC_ASSETS` KV namespace. Manifests stored in `ROUTING` KV.
+## Platform Package Overview
 
-See [`packages/dispatch/README.md`](./packages/dispatch/README.md) for request flow, metering schema, and edge caching strategy.
+### `packages/api`
+
+The control plane.
+
+- Owns users, OAuth accounts, projects, deployments, resources, domains, and platform events.
+- Stores platform metadata in PostgreSQL via Hyperdrive.
+- Exposes the API used by the CLI and dashboard.
+- Runs deploys, rollbacks, provisioning, routing updates, queue setup, and retention cleanup.
+- Also contains the internal admin UI in `src/admin/`.
+
+### `packages/dashboard`
+
+The user-facing dashboard.
+
+- Built as a Void Vue pages app.
+- Uses direct Postgres reads through Hyperdrive for read-heavy loaders.
+- Uses the API for mutations, usage metrics, secrets, and domain operations.
+- Is deployed separately from the main platform pipeline.
+- Is currently de-emphasized relative to the rest of the platform work.
+
+### `packages/dispatch`
+
+The edge router.
+
+- Reads slug/domain routing from KV.
+- Sends worker projects to Workers for Platforms.
+- Serves static/SPA deployments directly from `STATIC_ASSETS` KV with R2 overflow for large files.
+- Handles ISR, edge caching, redirect rules, header rules, and request metering.
+- Relays Cloudflare Queue batches to user workers.
+
+### `packages/proxy`
+
+The shared proxy layer.
+
+- Routes all AI traffic through AI Gateway for metering.
+- Supports BYOK provider models in addition to Workers AI.
+- Provides authenticated remote D1/KV/R2 access for local development.
+- Forwards ISR revalidation requests from user workers to the API.
+
+### `packages/tail`
+
+The runtime log pipeline.
+
+- Receives tail events from dispatch/user workers.
+- Writes logs to Analytics Engine.
+- Broadcasts live log events through a Durable Object.
 
 ## Tooling
 
@@ -168,22 +264,31 @@ Tests run from root with `pnpm test` (vitest). See each package README for detai
 
 ## Operations
 
-Four workers: `void-api`, `void-dashboard`, `void-dispatch`, `void-proxy`. Two environments: **production** (`api.void.cloud`, `dash.void.cloud`, `*.void.app`) and **staging** (`api.staging.void.cloud`, `dash.staging.void.cloud`, `*.staging.void.app`). Each has fully isolated CF resources (KV, R2, dispatch namespace, analytics engine) plus a shared Hyperdrive binding to PlanetScale PostgreSQL.
+There are five deployable platform packages/surfaces:
+
+| Package              | Worker / Surface                                | Role                                           |
+| -------------------- | ----------------------------------------------- | ---------------------------------------------- |
+| `packages/proxy`     | `proxy.void.cloud` / `proxy.staging.void.cloud` | AI proxy, remote bindings, revalidation bridge |
+| `packages/tail`      | internal worker                                 | Worker log ingestion and live tail             |
+| `packages/api`       | `api.void.cloud` / `api.staging.void.cloud`     | Control plane API and internal admin UI        |
+| `packages/dashboard` | `dash.void.cloud` / `dash.staging.void.cloud`   | User-facing dashboard                          |
+| `packages/dispatch`  | `*.void.app` / `*.staging.void.app`             | User traffic router                            |
+
+Dashboard deployment is intentionally separate from the main platform pipeline.
 
 ```
-pnpm run deploy           # Production
-pnpm run deploy:staging   # Staging
+pnpm run deploy                     # proxy -> tail -> api -> dispatch
+pnpm run deploy:dashboard           # dashboard only
+pnpm run deploy:staging             # staging proxy -> tail -> api -> dispatch
+pnpm run deploy:staging:dashboard   # staging dashboard only
 ```
 
 See [`meta/operations.md`](./meta/operations.md) for the full operations reference — CF resources, secrets, environment variables, DNS setup, GitHub Actions, and fresh environment provisioning.
 
 ## Pitfalls / Things That Broke
 
-- **API DB uses Drizzle ORM with PostgreSQL** — PlanetScale PostgreSQL accessed via Cloudflare Hyperdrive. Schema is the source of truth in `src/schema.ts`. To add columns or tables: update schema → `pnpm db:generate` → apply migration with `drizzle-kit migrate` (requires `DATABASE_URL` env var). Types are inferred via `InferSelectModel`, not hand-maintained. Use `.$type<T>()` on text columns to narrow to union types (e.g., `PlanId`, deployment status). Note: user project D1 databases are still provisioned via the CF API — only the platform's own database uses PostgreSQL.
-- **Hyperdrive binding** — Both `api` and `dashboard` workers use a `HYPERDRIVE` binding (same Hyperdrive configuration ID) to connect to PlanetScale. The `drizzle-orm/node-postgres` adapter accepts the `connectionString` from `env.HYPERDRIVE.connectionString`. Tests use PGlite (in-process WASM PostgreSQL) instead.
+- **Platform DB is PostgreSQL; user apps still default to D1** — Platform metadata lives in PostgreSQL via Hyperdrive (`packages/api/src/schema.ts` is the source of truth). User projects still default to D1 unless the app opts into `"database": "pg"`.
 - **tsconfig `lib` must be explicit** for CF Workers packages. Without `"lib": ["ES2022"]`, TS defaults to including `lib.dom.d.ts` which shadows `@cloudflare/workers-types` globals (e.g. `CacheStorage.default`). Applied to `dispatch`. Not applied to `api` (its tests use Miniflare/Node which needs DOM-compatible `URL` types).
-- **OAuth env vars use `_CLIENT_` prefix** (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`). These are passed explicitly to `@hono/oauth-providers` middleware, overriding its default `GITHUB_ID`/`GOOGLE_ID` convention, to avoid naming collisions and make the purpose clear.
-- **Deploy protocol versioning** — The `DeployManifest` interface has a `version` field. The API validates it and rejects unknown versions with a clear error. See `meta/design-docs/0018-open-source-split.md` for the versioning policy.
-- **Schema backward compatibility** — During deploy, migrations run before the new worker goes live. The `schema-compat` CI job catches breaking migrations by running `prod` branch tests against the PR's new schema on real PostgreSQL. Safe: adding nullable columns, new tables, new indexes. Unsafe (require two-phase migration): column renames, drops, type changes. First PR adds the new column alongside the old; second PR removes the old after deploy.
+- **Deploy protocol and schema changes must stay backward compatible** — deploy manifests are versioned, and schema changes must tolerate old code briefly running against the new schema during deploy. Safe: additive changes. Unsafe without a two-phase rollout: renames, drops, and type changes.
 - **Project type field is `mode` in DB, `type` everywhere else** — The `projects` table column is `mode` (DB column name), but the Drizzle schema field and all TypeScript code use `type` (`type: text("mode")`). The `DeployManifest` field is `type`, the API function is `updateProjectType`, and all views/templates reference `project.type`. Values: `"void"` (Void apps), `"spa"`, `"static"`, `"framework"` (3rd-party meta-frameworks like Astro/SvelteKit).
-- **Static deployments use KV/R2, not WfP** — Projects with type `"static"` or `"spa"` store assets in KV (< 2 MB) or R2 (>= 2 MB) with content-addressed keys, served by dispatch directly. No WfP worker scripts created. Retention is fixed at 100 deployments for all tiers (`STATIC_RETENTION_LIMIT`), separate from per-plan `retainedDeployments` which applies only to worker-based deployments. In the serving manifest, R2-stored asset hashes are prefixed with `!` to distinguish them from KV-stored assets.
+- **Static deployments use KV/R2, not WfP** — Projects with type `"static"` or `"spa"` are served directly by dispatch from content-addressed KV/R2 assets. No WfP worker script is created for those deploys.

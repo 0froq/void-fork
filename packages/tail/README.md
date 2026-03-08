@@ -1,48 +1,50 @@
 # @voidcloud/tail
 
-Tail worker for capturing user worker logs. Attached as a `tail_consumer` to the dispatch worker, it receives trace events from all user workers in the dispatch namespace.
+Tail consumer for deployed user workers.
 
-## Architecture
+## Behavior
 
-- **`tail()` handler** — parses the script name via `parseScriptName()`, writes each trace event to Analytics Engine (`void_logs` dataset), and forwards to a `LogStream` Durable Object for live broadcasting.
-- **`LogStream` DO** — per-worker-name Durable Object that accepts WebSocket connections and broadcasts trace events to connected clients. Uses WebSocket hibernation.
-- **`fetch()` handler** — handles `GET /tail/:scriptName` WebSocket upgrade requests via service binding from the API worker.
+- Receives Cloudflare tail events from the dispatch namespace.
+- Parses worker script names into:
+  - `projectKey`: `user-{slug}`
+  - `deployId`: `dpl_*` when present
+- Writes one Analytics Engine row per trace event.
 
-### Versioned Script Name Parsing
+Versioned deploys use script names like `user-my-app-dpl_abc123`. Legacy unversioned names like `user-my-app` are still accepted for older deployments.
 
-`parseScriptName()` handles both versioned and legacy worker script names:
+## Analytics Engine Schema
 
-- **Versioned**: `user-{slug}-dpl_{id}` → `projectKey: "user-{slug}"`, `deployId: "dpl_{id}"`
-- **Legacy**: `user-{slug}` → `projectKey: "user-{slug}"`, `deployId: ""`
+| Slot         | Content                   |
+| ------------ | ------------------------- |
+| `indexes[0]` | `projectKey`              |
+| `blobs[0]`   | outcome                   |
+| `blobs[1]`   | serialized logs           |
+| `blobs[2]`   | serialized exceptions     |
+| `blobs[3]`   | request URL               |
+| `blobs[4]`   | request method            |
+| `blobs[5]`   | response status as string |
+| `blobs[6]`   | deploy ID or `""`         |
+| `doubles[0]` | event timestamp           |
+| `doubles[1]` | response status as number |
 
-The `projectKey` is used as the Analytics Engine index (same across all deployments of a project), enabling per-project log queries. The `deployId` is stored in `blobs[6]`, enabling per-deployment log filtering.
+## Source Layout
 
-## Analytics Engine Schema (`void_logs`)
-
-| Slot         | Content                                            |
-| ------------ | -------------------------------------------------- |
-| `indexes[0]` | projectKey (`user-{slug}`, parsed from scriptName) |
-| `blobs[0]`   | outcome                                            |
-| `blobs[1]`   | JSON logs array                                    |
-| `blobs[2]`   | JSON exceptions array                              |
-| `blobs[3]`   | Request URL                                        |
-| `blobs[4]`   | Request method                                     |
-| `blobs[5]`   | Response status (string)                           |
-| `blobs[6]`   | deployId (e.g. `dpl_abc123`, or `""` for legacy)   |
-| `doubles[0]` | eventTimestamp (ms)                                |
-| `doubles[1]` | Response status (number)                           |
+```text
+src/index.ts              # tail() handler + parseScriptName()
+test/parse-script-name.test.ts
+```
 
 ## Configuration
 
-- Connected via `tail_consumers` in `packages/dispatch/wrangler.jsonc`
-- API worker accesses via `TAIL` service binding
-- No public routes — only reachable via tail events and service bindings
+- Wired into `packages/dispatch/wrangler.jsonc` via `tail_consumers`
+- Writes to the `void_logs` / `void_logs_staging` Analytics Engine datasets
+- No public HTTP surface
 
 ## Deploy
 
 ```bash
-pnpm -F tail run deploy              # production
-pnpm -F tail run deploy --env staging  # staging
+pnpm -F tail run deploy
+pnpm -F tail run deploy --env staging
 ```
 
-Must be deployed **before** the dispatch worker (which references it as a tail consumer).
+Deploy this before `dispatch`, since dispatch references it as a tail consumer.

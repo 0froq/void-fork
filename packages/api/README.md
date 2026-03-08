@@ -1,264 +1,186 @@
 # @voidcloud/api
 
-Control Plane API + Admin Dashboard. CF Worker using Hono, Drizzle ORM + PostgreSQL (via Hyperdrive), KV, and Workers for Platforms (dispatch namespaces). No tsdown — wrangler handles TS bundling.
+Control-plane API and internal admin UI for Void.
+
+It owns platform auth, projects, deployments, domains, secrets, provisioning, rollback, and usage/account enforcement. The worker uses Hono plus Drizzle over PostgreSQL via Hyperdrive.
+
+## Architecture
+
+- **Platform DB**: PostgreSQL via `HYPERDRIVE.connectionString`
+- **Public API**: CLI and dashboard-facing JSON routes
+- **Internal API**: resource resolution and revalidation used by other platform workers
+- **Admin UI**: server-rendered HTML under `/admin/*`
+- **Background work**:
+  - `scheduled()` for periodic usage enforcement and rollover checks
+  - `queue()` for usage-event ingestion
 
 ## Source Layout
 
-```
+```text
 src/
-  index.ts                  # Hono app + scheduled handler (cron), mounts route groups + auth middleware
-  env.ts                    # ApiEnv type (Hyperdrive, KV, DISPATCH, secrets, Variables)
-  schema.ts                 # Drizzle schema — source of truth for all DB tables + types
-  types.ts                  # DB types (inferred from schema) + DeployManifest, QueueMeta, etc.
-  id.ts                     # generateId(prefix) → "proj_a1b2c3d4e5f6"
-  db.ts                     # Drizzle query functions (createDb, CRUD for all tables)
-  tiers.ts                  # PlanId, PlanLimits, PLAN_LIMITS constants, getPlanLimits(), isWithinLimit()
-  auth/
-    jwt.ts                  # HS256 JWT sign/verify via Web Crypto API
-    github.ts               # GitHub OAuth helpers (authorize URL, code→token, user profile)
-    google.ts               # Google OAuth helpers (authorize URL, code→token, user profile)
-    hmac.ts                 # HMAC state signing/verification for OAuth flows
-  middleware/
-    auth.ts                 # Bearer token verification, sets userId/userLogin on context
-  admin/
-    middleware/auth.ts      # Cookie-based JWT auth + role === "admin" check
-    routes/login.ts         # GET /admin/login, /admin/login/google, /admin/callback, /admin/logout
-    routes/system.tsx       # GET /admin/ (dashboard home with stats)
-    routes/users.tsx        # GET /admin/users, GET /admin/users/:id, POST plan/suspend/unsuspend
-    routes/projects.tsx     # GET /admin/projects, GET /admin/projects/:id
-    routes/deployments.tsx  # GET /admin/deployments, GET /admin/deployments/:id
-    views/layout.tsx        # HTML shell (head, nav, body)
-    views/dashboard.tsx     # System stats overview
-    views/users-list.tsx    # Users table with search/filter form
-    views/user-detail.tsx   # User profile, projects, plan limits, deploy count, suspend button
-    views/projects-list.tsx # All projects table
-    views/deployments-list.tsx # Deployments table with error preview column
-    views/pagination.tsx    # Reusable pagination component
-    views/format.ts         # Shared formatting helpers (formatBytes, formatNumber, formatLimit)
-  migrations/
-    remote-runner.ts        # Executes migrations on remote D1 via CF REST API (user project D1s)
-    validate.ts             # Server-side destructive-op validation (defense in depth)
+  index.ts                    # Hono app, Drizzle setup, scheduled(), queue()
+  env.ts                      # Worker env types
+  schema.ts                   # Drizzle schema
+  db.ts                       # Query layer
+  types.ts                    # Shared types including DeployManifest
+  assets.ts                   # Static asset upload/session helpers
+  routing.ts                  # Routing KV updates
+  cf-api.ts                   # Cloudflare API helpers
+  cron-scheduler.ts           # Durable Object for project crons
+  usage-counter.ts            # Durable Object for per-user usage counters
+  usage-queue.ts              # Queue consumer logic
+  tiers.ts                    # Plan limits + helpers
+  provisioning/               # Worker/resource provisioning + cleanup
+  migrations/                 # Validation + legacy remote D1 runner
   routes/
-    auth.ts                 # OAuth login + callback (GitHub/Google)
-    projects.ts             # Projects CRUD + deployments + migrations list
-    deploy.ts               # Asset check + full deploy pipeline
-    delete.ts               # Project deletion + CF resource cleanup
-    revalidate.ts           # ISR cache purge (paths or all) — JWT-authed (dashboard/admin)
-    internal-revalidate.ts  # ISR cache purge — HMAC-authed (proxy → API service binding)
-    secrets.ts              # Worker secret management (put/delete)
-    domains.ts              # Custom domain CRUD + CF for SaaS
-    usage.ts                # Usage queries (per-project + aggregate)
+    auth.ts                   # OAuth login/callback
+    me.ts                     # Current user
+    projects.ts               # Project CRUD, migrations, logs, PG DB ops
+    deploy.ts                 # Deploy pipeline
+    delete.ts                 # Project deletion
+    revalidate.ts             # Dashboard/admin ISR revalidation
+    internal-revalidate.ts    # Proxy -> API ISR revalidation
+    internal-resolve-resource.ts
+    internal-resolve-worker.ts
+    secrets.ts
+    domains.ts
+    usage.ts
+  admin/
+    routes/                   # Admin pages, users/projects/deployments/platform/signup-control
+    views/                    # Hono JSX view layer
+    middleware/auth.ts
 drizzle/
-  0000_numerous_tarot.sql   # Baseline PG migration (all 5 tables + indexes + FKs)
-  meta/_journal.json        # Drizzle migration journal
+  0000_*.sql
+  0001_*.sql
+  0002_*.sql
+  0003_*.sql
 ```
 
-## API Endpoints
+## Main Route Groups
 
-All endpoints except `/health`, `/auth/*`, and `/admin/*` require Bearer token authentication. Project endpoints verify ownership (`project.user_id === userId`). Admin dashboard uses cookie-based auth with `role === "admin"` check.
+### Public API
 
-```
-GET    /health                           # Health check
-GET    /auth/login                       # OAuth initiation (GitHub/Google)
-GET    /auth/callback                    # OAuth callback → JWT
-GET    /me                               # Current user info
+- `GET /health`
+- `GET /auth/login`
+- `GET /auth/callback`
+- `GET /me`
+- `/projects/*`
+  - CRUD
+  - deploys and rollbacks
+  - migrations and logs
+  - secrets
+  - domains
+  - usage
+  - PostgreSQL project database provisioning/update
+- `GET /usage`
 
-GET    /projects                         # List user's projects
-POST   /projects                         # Create project (slug)
-GET    /projects/:id                     # Get project
-GET    /projects/:id/deployments         # List deployments (+ activeDeploymentId)
-POST   /projects/:id/rollback            # Rollback to a retained deployment
-GET    /projects/:id/migrations          # Get applied migrations
-DELETE /projects/:id                     # Delete project + all CF resources
+### Internal API
 
-POST   /projects/:id/assets/check        # Check which assets need uploading
-POST   /projects/:id/deploy              # Full deploy (migrations → assets → worker)
-POST   /projects/:id/revalidate          # Purge ISR cache (specific paths or all)
-POST   /internal/revalidate/:id         # Internal: ISR cache purge (HMAC auth, no JWT)
+- `POST /internal/revalidate/:projectId`
+- `POST /internal/resolve-resource/:projectId`
+- `POST /internal/resolve-worker/:projectId`
 
-PUT    /projects/:id/secrets/:name       # Set/update a worker secret
-DELETE /projects/:id/secrets/:name       # Delete a worker secret
+### Admin UI
 
-POST   /projects/:id/domains             # Add custom domain
-GET    /projects/:id/domains             # List custom domains
-GET    /projects/:id/domains/:domainId   # Get domain status (polls CF API)
-DELETE /projects/:id/domains/:domainId   # Remove custom domain
-
-GET    /projects/:id/usage               # Project usage (current billing period)
-GET    /usage                            # Aggregate usage across all projects
-
-# Admin dashboard (HTML, cookie-based auth)
-GET    /admin/login                      # Login page
-GET    /admin/login/google               # Google OAuth initiation
-GET    /admin/callback                   # OAuth callback → set cookie
-GET    /admin/logout                     # Clear cookie
-GET    /admin/                           # Dashboard (stats + recent projects)
-GET    /admin/users                      # Users list (paginated, searchable)
-GET    /admin/users/:id                  # User detail (plan, usage, suspension)
-POST   /admin/users/:id/plan             # Change plan
-POST   /admin/users/:id/suspend          # Suspend user
-POST   /admin/users/:id/unsuspend        # Unsuspend user
-GET    /admin/projects                   # All projects list
-GET    /admin/projects/:id               # Project detail (resources, deployments, domains)
-GET    /admin/deployments                # All deployments list
-GET    /admin/deployments/:id            # Deployment detail (manifest, errors)
-```
+- `/admin/users`
+- `/admin/projects`
+- `/admin/deployments`
+- `/admin/signup-control`
+- `/admin/platform`
 
 ## Auth Flow
 
-`GET /auth/login?redirect=http://localhost:{port}/callback&provider=github|google` → HMAC-signed state (includes `provider`) → GitHub or Google OAuth → `GET /auth/callback` → extract `provider` from state → exchange code → upsert user (with duplicate email check across providers) → sign JWT → redirect to CLI with `?token=`.
+`GET /auth/login?redirect=...&provider=github|google` starts OAuth. After callback:
 
-The CLI's `void login` prompts user to choose GitHub or Google, then passes `provider` in the query string. On email conflict (same email registered under different provider), the callback redirects with `?error=email_conflict&existing_provider=...`.
+1. the API validates the signed state
+2. exchanges the code with GitHub or Google
+3. looks up an existing OAuth account
+4. if needed, links the provider to an existing user with the same email
+5. otherwise creates a new user
+6. signs a JWT and redirects back with `?token=...`
 
-The `User` type uses provider-agnostic columns: `provider` (`"github"` | `"google"`), `provider_id` (TEXT — GitHub numeric ID cast to string, Google opaque sub), `login` (GitHub username or Google email), `plan` (defaults to `"free"`).
+The CLI entrypoint is `void auth login`, not `void login`.
 
-Auth middleware on `/projects/*` extracts Bearer token, verifies JWT, sets `c.get("userId")` and `c.get("userLogin")`. Deploy endpoint checks `project.user_id === c.get("userId")` for ownership.
+Dashboard auth uses the same JWT model, stored in the `void_token` cookie.
 
-## Deploy Endpoint Flow
+## Deploy Flow
 
-`POST /projects/:id/deploy` receives multipart form data:
+`POST /projects/:id/deploy` handles both worker and static deploys.
 
-1. Ownership check: `project.user_id` must match authenticated user
-2. **Deploy count enforcement**: Look up user plan, check `countUserDeploymentsToday()` against `planLimits.deploysPerDay` → 429 if exceeded
-3. **Static deploys** (type `"static"` / `"spa"`): Assets are content-addressed and stored in `STATIC_ASSETS` KV (< 2 MB) or `STATIC_ASSETS_R2` R2 (>= 2 MB). No WfP worker script is created — dispatch serves these directly. A serving manifest mapping paths to content hashes is written to `ROUTING` KV. R2-stored hashes are prefixed with `!` in the manifest. Retention is fixed at 100 deployments (`STATIC_RETENTION_LIMIT`).
-4. **Worker deploys** (type `"void"` / `"framework"`):
-   a. Provision bindings (D1, KV, R2) — creates CF resources if needed
-   b. `asset:<path>` fields → uploaded via CF Workers Assets API
-   c. `worker:<path>` fields → uploaded to CF dispatch namespace as **versioned worker**: `user-{slug}-{deployId}` (e.g. `user-my-app-dpl_a1b2c3d4e5f6`)
-5. **Migrations run inside the worker** — after upload, the API invokes `POST /__void/migrate` on the deployed worker via Workers for Platforms dispatch. This runs migrations in the worker's own D1 binding context rather than via the CF REST API.
-6. Queue provisioning: creates CF Queues, adds producer bindings, registers dispatch worker as consumer, writes `queue:<queueId>` routing entries to KV
-7. KV routing updated: `slug → { workerName, projectId, version, limits?, suspended? }`
-   - `limits` includes `cpuMs` and `subRequests` from user's plan (omitted when all unlimited)
-   - `suspended` is carried forward from the existing KV entry to avoid race conditions with cron
-8. Deployment marked as `live`, `retained` set to `true`, `active_deployment_id` updated on the project
-9. **Legacy cleanup**: deletes the unversioned `user-{slug}` worker script (safe no-op if already gone)
-10. **Retention cleanup**: evicts old retained worker scripts beyond the plan's `retainedDeployments` limit — deletes the dispatch script and sets `retained = false` on the deployment row. The limit includes the active deployment (e.g., limit of 5 = active + 4 previous).
+### Worker deploys
 
-**Key invariant:** Worker is never routed to unless all migrations succeed. On migration failure, deployment is marked `"failed"` with an `error_message` and the existing worker keeps running. All failure points (destructive validation, missing D1, migration error, worker upload, catch-all) store a descriptive `error_message` in the deployment row.
+1. validate ownership and deploy limits
+2. provision bindings and queues from the manifest
+3. upload worker modules and assets
+4. upload a versioned worker: `user-{slug}-{deploymentId}`
+5. call `POST /__void/migrate` on that new worker
+6. update routing KV and active domains only after migrations succeed
+7. mark the deployment live and run retention cleanup
 
-### Rollback
+### Static/SPA deploys
 
-`POST /projects/:id/rollback` accepts `{ deploymentId }` and switches traffic to a previously retained deployment:
+1. content-address assets by hash
+2. store small assets in `STATIC_ASSETS` KV and large assets in `STATIC_ASSETS_R2`
+3. write a manifest to `ROUTING`
+4. point routing at `staticDeploymentId` instead of a worker
 
-1. Validates the target deployment exists, belongs to the project, and is `retained` (worker script still exists)
-2. Computes `migrationDiff` — migrations present in the current active deployment but missing from the target (rollback may leave forward-only migrations in place)
-3. Updates KV routing for the project slug, all active custom domains, and queue routing entries to point to `user-{slug}-{deployId}`
-4. Clears the ISR cache (stale prerendered pages from the current deployment)
-5. Sets `active_deployment_id` on the project to the target deployment
-6. Returns `{ ok, deploymentId, migrationDiff }`
+## Usage and Plan Enforcement
 
-### Schema: Versioned Deployment Fields
+- **Deploy/day limits** are checked from the platform Postgres database.
+- **Request usage** is counted asynchronously through `USAGE_QUEUE` and the `UsageCounter` DO.
+- **Scheduled enforcement** runs hourly from the worker cron and reconciles request/AI usage against plan limits.
+- **Per-request runtime limits** are carried in routing data and enforced by `dispatch`.
 
-- **`projects.active_deployment_id`** — nullable text column pointing to the currently routed deployment ID. Updated on deploy and rollback.
-- **`deployments.retained`** — boolean (default `false`). Set to `true` when a deployment goes live. Set to `false` when the worker script is evicted by retention cleanup. Only retained deployments can be rollback targets.
-- **`deployments.applied_migrations`** — JSON array of migration names applied during this deployment. Used to compute `migrationDiff` during rollback.
+## Admin UI
 
-## Usage Metering & Tiers
+The admin surface is built into this worker under `/admin/*`.
 
-Five plan tiers: `free`, `solo`, `pro`, `sponsored`, `custom`. Defined in `src/tiers.ts` with `PLAN_LIMITS` constant. `0` = unlimited for any field. The `isWithinLimit(limit, current)` helper centralizes the unlimited-check logic. Retention limits per plan: free=1, solo=5, pro=25, sponsored/custom=unlimited.
+Notable sections:
 
-- **Immediate enforcement**: Deploy count per day (checked at deploy time via D1 query)
-- **Per-request enforcement**: CPU time and sub-requests via CF Custom Limits (passed in KV routing `limits` field, applied by dispatch worker)
-- **Async enforcement**: Request count per month via Cron Trigger (`*/5 * * * *`) — batched user processing (50 users/batch) with concurrent analytics queries (10 concurrency), sets/clears `suspended: "requests_exceeded"` in KV routing entries. Only clears suspension if the reason is `"requests_exceeded"` (preserves admin suspensions). Errors are isolated per-user via `Promise.allSettled`.
-- **Usage queries**: `GET /projects/:id/usage` (per-project) and `GET /usage` (aggregate) query Analytics Engine SQL API with `_sample_interval` multiplier
+- user search, plan changes, suspension controls
+- project and deployment inspection
+- deployment log viewing
+- signup allowlist/private-beta controls
+- platform worker version history and orchestrated rollback
 
-The platform default export is `{ fetch: app.fetch, scheduled }` — `app` (the Hono instance) is also exported as a named export for integration tests.
+## Local Setup and Secrets
 
-## Admin Dashboard
+Useful scripts:
 
-Integrated into the platform worker at `/admin/*`. Uses Hono JSX (server-rendered HTML) with cookie-based JWT auth, separate from the Bearer token auth used by API endpoints.
+```bash
+pnpm -C packages/api dev
+pnpm -C packages/api setup
+pnpm -C packages/api db:generate
+pnpm -C packages/api migrate
+```
 
-**Auth**: Cookie-based — Google OAuth flow at `/admin/login/google` → set `admin_token` cookie → verify `role === "admin"`. The OAuth callback URL is derived from the request origin (`new URL(c.req.url).origin + "/admin/callback"`), so no separate env var is needed. `DEV_AUTH_BYPASS=true` in `.dev.vars` skips OAuth for local development.
+Secrets used at runtime:
 
-## Secrets (via `wrangler secret put`)
+- `CF_API_TOKEN`
+- `CF_ACCOUNT_ID`
+- `CF_ZONE_ID`
+- `JWT_SECRET`
+- `GITHUB_CLIENT_ID`
+- `GITHUB_CLIENT_SECRET`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
 
-| Secret                 | Staging notes                                        |
-| ---------------------- | ---------------------------------------------------- |
-| `CF_API_TOKEN`         | Can share with production                            |
-| `CF_ACCOUNT_ID`        | Can share with production                            |
-| `CF_ZONE_ID`           | Can share with production                            |
-| `JWT_SECRET`           | Must differ from production                          |
-| `GITHUB_CLIENT_ID`     | Can share with production (add staging callback URL) |
-| `GITHUB_CLIENT_SECRET` | Can share with production                            |
-| `GOOGLE_CLIENT_ID`     | Can share with production (add staging callback URL) |
-| `GOOGLE_CLIENT_SECRET` | Can share with production                            |
+Optional vars:
 
-`AUTH_REDIRECT_URI` is set as a `vars` entry in wrangler config for staging (`https://api.staging.void.cloud/auth/callback`). For local dev, set `AUTH_REDIRECT_URI=http://localhost:8787/auth/callback` and `DEV_AUTH_BYPASS=true` in `.dev.vars`.
-
-## Cloudflare API Token Permissions
-
-Two tokens are needed: a **deploy token** (used by wrangler / CI) and a **runtime token** (used by the platform worker to provision user resources). A single token can serve both roles if it has the union of all permissions.
-
-**Account-wide features** (enabled on the account, not configurable per-token): Workers for Platforms, Cloudflare for SaaS.
-
-### Deploy Token (`CLOUDFLARE_API_TOKEN`)
-
-Used by `pnpm run deploy` and GitHub Actions to deploy platform and dispatch workers.
-
-**Account permissions:**
-
-| Permission         | Access | Reason                               |
-| ------------------ | ------ | ------------------------------------ |
-| Workers Scripts    | Edit   | Deploy platform and dispatch workers |
-| Workers KV Storage | Edit   | KV namespace bindings (ROUTING)      |
-| D1                 | Edit   | D1 database bindings (DB)            |
-
-**Zone permissions** (on `void.app`):
-
-| Permission     | Access | Reason                                          |
-| -------------- | ------ | ----------------------------------------------- |
-| Workers Routes | Edit   | Dispatch worker route patterns (`*.void.app/*`) |
-| DNS            | Read   | Zone lookup for route binding                   |
-
-### Runtime Token (`CF_API_TOKEN` secret)
-
-Used by the platform worker at runtime to provision and manage user resources via the CF REST API.
-
-**Account permissions:**
-
-| Permission         | Access | Reason                                                 |
-| ------------------ | ------ | ------------------------------------------------------ |
-| Workers Scripts    | Edit   | Upload/delete user workers in dispatch namespace       |
-| Workers Tail       | Read   | Create/delete tail sessions for live log streaming     |
-| D1                 | Edit   | Create databases, execute migrations, delete databases |
-| Workers KV Storage | Edit   | Create/delete KV namespaces                            |
-| Workers R2 Storage | Edit   | Create/delete R2 buckets                               |
-| Queues             | Edit   | Create/delete queues, manage consumers                 |
-| Account Analytics  | Read   | Query Analytics Engine SQL API for usage metering      |
-
-**Zone permissions** (on `void.app`):
-
-| Permission           | Access | Reason                                      |
-| -------------------- | ------ | ------------------------------------------- |
-| SSL and Certificates | Edit   | Custom hostname DV certificate provisioning |
+- `AUTH_REDIRECT_URI`
+- `DASHBOARD_URL`
+- `VOID_PROXY_SERVICE`
+- `SITE_DOMAIN`
 
 ## Tests
 
-### Unit Tests
+Unit coverage includes provisioning, JWT/auth helpers, deploy manifest validation, usage counters, cron scheduling, and legacy D1 migration helpers.
 
-| Test file                         | Covers                                             |
-| --------------------------------- | -------------------------------------------------- |
-| `test/unit/provision.test.ts`     | Binding provisioning engine (7 tests)              |
-| `test/unit/jwt.test.ts`           | JWT sign/verify round-trip (5 tests)               |
-| `test/unit/remote-runner.test.ts` | Remote D1 migration execution (7 tests)            |
-| `test/unit/tiers.test.ts`         | Plan limits, getPlanLimits(), isWithinLimit() (11) |
+Integration coverage includes:
 
-### Integration Tests
-
-Integration tests call the Hono app via `app.fetch(request, env)` with **PGlite** (in-process WASM PostgreSQL) for the database, **Miniflare** KV bindings, and **mocked** external fetch calls (GitHub API, CF API). This tests the full request→middleware→route→DB→response chain.
-
-| Test file                                  | Covers                                                                                                                                                          |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/integration/api-health.test.ts`      | Health endpoint smoke test (1 test)                                                                                                                             |
-| `test/integration/api-me.test.ts`          | Auth middleware: missing/invalid/expired JWT, valid (4)                                                                                                         |
-| `test/integration/api-projects.test.ts`    | Projects CRUD: auth, list, create, validation, dupes (12)                                                                                                       |
-| `test/integration/api-deploy.test.ts`      | Deploy pipeline: auth, provisioning, migrations, assets, KV, limits, queues, failure modes (36)                                                                 |
-| `test/integration/admin-dashboard.test.ts` | Admin dashboard: auth, pages, forms, search, pagination, deployments, error display, plan limits, login/logout (28)                                             |
-| `test/integration/scheduled.test.ts`       | Cron handler: empty DB, unlimited skip, no-projects skip, within limits, exceeds limits, unsuspend, admin-suspended preserved, error isolation, multi-batch (9) |
-
-Shared helpers in `test/integration/helpers.ts`:
-
-- `setupEnv()` / `teardownEnv()` — PGlite + Miniflare lifecycle (KV bindings) + Drizzle migration
-- `clearTables()` — Drizzle delete in FK order
-- `createTestUser()` / `createTestProject()` / `createTestDeployment()` — Drizzle insert factories with JWT signing
-- `mockCfApi()` — URL-based fetch mock for CF API with configurable overrides
+- auth and `/me`
+- project CRUD
+- deploy/rollback/revalidation
+- custom domains and secrets
+- admin dashboard
+- scheduled usage enforcement

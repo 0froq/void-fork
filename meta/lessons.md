@@ -92,3 +92,14 @@ AE SQL is ClickHouse-based with several non-obvious limitations:
 3. **No auto-cast string→DateTime** — `timestamp >= '2026-01-01 00:00:00'` fails with "cannot combine DateTime and String types". Use `timestamp >= toDateTime('...')`.
 4. **Don't alias over `timestamp`** — `double1 as timestamp` shadows the built-in column, causing type errors in WHERE clauses. Use a different alias like `ts`.
 5. **DateTime format** — Use `YYYY-MM-DD HH:MM:SS` (no milliseconds, no `T`, no `Z`). Trim with `.toISOString().replace("T", " ").slice(0, 19)`.
+
+## Docs Sweeps: Source Truth vs Intentional Omissions
+
+**Problem:** During doc alignment work, it is easy to treat every source/docs mismatch as a bug. That causes false positives when public docs intentionally omit paused or unsupported integrations, and it also causes root-script descriptions to drift away from what the repo actually uses.
+
+**Rule:** For documentation sweeps:
+
+- source code is the source of truth for implemented behavior
+- public docs can intentionally omit on-hold integrations; confirm before "fixing" those omissions
+- root scripts must be described exactly as implemented, not as idealized monorepo commands
+- in this repo specifically, root `dev` and `build` are dashboard-only unless the source changes

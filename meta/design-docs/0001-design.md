@@ -1,275 +1,448 @@
 # Void — Design Document
 
-**Date:** 2026-02-15
+**Date:** 2026-03-08
 **Status:** Implemented (living document)
 
----
+Void has two halves:
 
-## 1. Vision
+- the public framework in `framework/`, which gives developers a Vite-native fullstack DX
+- the private platform in `packages/`, which provisions resources, deploys apps, routes traffic, meters usage, and operates the hosted product
 
-Void is a deployment platform and Vite plugin that makes Cloudflare the easiest place to ship a web app. The user writes a Vite app, adds API routes, uses a database / KV / object storage — and the framework provisions everything automatically. They deploy with one command. No Cloudflare account needed.
-
-**Mental model:** Vite is your framework. Cloudflare is the runtime. Void is the invisible bridge.
-
-Progressive experience:
-
-1. `npm install -D void` + `npx void init` → scaffold a Vite app in the current directory
-2. Add `routes/api/hello.ts` → serverless API endpoint
-3. Use `c.env.DB` in that handler → D1 database auto-provisioned
-4. `void deploy` → live on `*.void.app`
+This document should describe the current architecture first. Future-facing ideas belong here only when they are clearly marked as roadmap.
 
 ---
 
-## 2. Architecture Overview
+## 1. Platform Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                      User's Machine                      │
-│                                                          │
-│   src/                                                   │
-│   ├── index.html          (SPA entry)                    │
-│   └── App.tsx             (any framework)                │
-│                                                          │
-│   routes/                                                │
-│   ├── api/                                               │
-│   │   ├── hello.ts        (GET/POST /api/hello)          │
-│   │   └── users/                                         │
-│   │       ├── index.ts    (GET/POST /api/users)          │
-│   │       └── [id].ts     (GET /api/users/:id)           │
-│                                                          │
-│   middleware/                                             │
-│   └── auth.ts             (runs on every request)        │
-│                                                          │
-│   vite.config.ts                                         │
-│   └── plugins: [voidPlugin()]                             │
-│                                                          │
-└────────────┬────────────────────────────────┬────────────┘
-             │ vite dev                       │ void deploy
-             ▼                                ▼
-┌────────────────────────┐     ┌──────────────────────────────┐
-│     Local Dev Server    │     │     Void Platform       │
-│                         │     │                               │
-│  Vite Dev Server        │     │  ┌─────────────────────────┐  │
-│    ├── Static assets    │     │  │    Control Plane API     │  │
-│    └── Proxy /api/* ──────┐  │  │  (auth, projects)        │  │
-│                         │  │  │  └──────────┬──────────────┘  │
-│  workerd (local)        │◄─┘  │             │                 │
-│    ├── API handlers     │     │  ┌──────────▼──────────────┐  │
-│    ├── Local D1 (SQLite)│     │  │   Provisioning Engine    │  │
-│    ├── Local KV (fs)    │     │  │  (infer bindings, create │  │
-│    └── Local R2 (fs)    │     │  │   resources via CF API)  │  │
-│                         │     │  └──────────┬──────────────┘  │
-└────────────────────────┘     │             │                 │
-                                │  ┌──────────▼──────────────┐  │
-                                │  │  Workers for Platforms    │  │
-                                │  │  (dispatch namespace)     │  │
-                                │  └──────────┬──────────────┐  │
-                                │             │              │  │
-                                │       ┌─────┼─────┐       │  │
-                                │       ▼     ▼     ▼       │  │
-                                │      D1    KV    R2       │  │
-                                │                           │  │
-                                └───────────────────────────┘  │
-                                └──────────────────────────────┘
+### Mental Model
+
+Void is a Vite-first framework and deployment platform for Cloudflare.
+
+The framework turns app structure and source imports into a deployable worker + assets bundle. The platform owns the hosted control plane: auth, projects, deploys, resource provisioning, routing, usage metering, logs, and dashboard surfaces.
+
+### High-Level System
+
+```text
+Developer machine
+  ├─ Vite dev / framework dev
+  ├─ voidPlugin() + adapters + codegen
+  └─ void CLI (auth, deploy, db, project, secret, domain)
+          │
+          ▼
+Void Platform API (`packages/api`)
+  ├─ users / projects / deployments / domains / secrets / usage
+  ├─ deploy pipeline + rollback
+  ├─ resource provisioning (D1, KV, R2, Queues)
+  ├─ internal admin UI
+  └─ platform metadata in PostgreSQL via Hyperdrive
+          │
+          ├─ Routing KV + static-asset KV/R2
+          ├─ Workers for Platforms dispatch namespace
+          ├─ Analytics Engine
+          └─ Cloudflare account resources
+                 │
+                 ├─ Dispatch (`packages/dispatch`)
+                 ├─ Proxy (`packages/proxy`)
+                 ├─ Tail (`packages/tail`)
+                 └─ Dashboard (`packages/dashboard`)
 ```
 
-### Core Components
+### Major Moving Pieces
 
-**Vite Plugin (`void`):** User-facing package. `voidPlugin()` takes zero arguments — config comes from `void.json`. Returns routing plugin + migration plugin + `@cloudflare/vite-plugin`. In framework mode (TanStack Start, React Router), the routing plugin is omitted and the CF plugin hooks into the framework's SSR environment.
+#### Framework package (`framework/packages/void`)
 
-**Local Runtime:** `@cloudflare/vite-plugin` runs Worker code in `workerd` via the Vite Environment API. D1 backed by local SQLite, KV and R2 by filesystem. All state in `.void/` (gitignored).
+The framework package is responsible for local DX and build-time understanding of the app.
 
-**Control Plane (`packages/api`):** Hono app on CF Workers. Manages users, projects, deploys, usage metering. Uses D1, R2, KV, Workers for Platforms.
+It handles:
 
-**Dispatch Worker (`packages/dispatch`):** Routes `*.void.app` traffic to user workers and R2 static assets. Handles edge caching, ISR, usage metering via Analytics Engine. Suspension enforcement for usage limit violations.
+- Vite plugin composition
+- framework detection and deploy preset resolution
+- file-based routing
+- pages-mode scanning and protocol generation
+- codegen for typed routes, actions, queues, and DB types
+- migration discovery and local execution
+- build packaging and deploy upload
+- runtime helpers like `void/db`, `void/kv`, `void/storage`, `void/ai`, `void/isr`, and `void/client`
 
-**Admin Dashboard (`packages/admin`):** Hono JSX server-rendered dashboard for user management, plan changes, suspension controls.
+#### Platform API (`packages/api`)
 
----
+This is the control plane.
 
-## 3. File-Based Routing
+It owns:
 
-Routes live in `routes/` at the project root. HTTP methods are determined by **named exports** (`export const GET`, `export const POST`, etc.) — not filename suffixes.
+- OAuth login for platform users
+- projects, deployments, domains, secrets, and usage APIs
+- deployment records and rollout state
+- binding/resource provisioning
+- rollback and retention logic
+- queue and cron registration
+- internal admin routes and views
 
-```
-routes/
-  api/
-    hello.ts              →  GET /api/hello
-    users/
-      index.ts            →  GET + POST /api/users
-      [id].ts             →  GET /api/users/:id
-    [org]/[repo]/
-      issues.ts           →  /api/:org/:repo/issues
-  [...]ts                 →  catch-all fallback
-```
+Platform metadata lives in PostgreSQL, accessed through a Hyperdrive binding.
 
-Special conventions:
+#### Dispatch (`packages/dispatch`)
 
-- `[param]` → `:param`, `[...param]` → catch-all, `[...]` → unnamed catch-all
-- `(groupname)/` directories → organizational grouping, no URL effect
-- `.dev` / `.prod` suffix → environment-specific routes
-- Files/dirs starting with `_` are ignored
+Dispatch is the data-plane entrypoint for deployed apps.
 
-### Middleware
+It:
 
-Defined with `defineMiddleware` in `middleware/` directory. Execute in filename sort order before route handlers.
+- resolves slug/domain routing from KV
+- sends worker projects to Workers for Platforms
+- serves static/SPA deployments directly from KV/R2
+- applies edge caching, redirect rules, header rules, and ISR behavior
+- meters every request into Analytics Engine
+- relays Cloudflare Queue batches to user workers
 
-```ts
-// middleware/02.auth.ts
-import { defineMiddleware } from "void";
+#### Proxy (`packages/proxy`)
 
-export default defineMiddleware(async (c, next) => {
-  const token = c.req.header("Authorization")?.replace("Bearer ", "");
-  if (!token) return new Response("Unauthorized", { status: 401 });
-  await next();
-});
-```
+Proxy is the shared service layer between user apps and platform-owned capabilities.
 
-### Cron Jobs
+It handles:
 
-Files in `jobs/` directory with an exported `cron` string are registered as Cron Triggers:
+- Workers AI and BYOK provider traffic through AI Gateway
+- authenticated remote D1/KV/R2 access during local development
+- ISR revalidation forwarding from user workers back to the API
 
-```ts
-// jobs/cleanup.ts
-import { defineHandler } from "void";
-export const cron = "0 * * * *";
-export default defineHandler(async (c) => {
-  await c.env.DB.prepare("DELETE FROM sessions WHERE expires < ?").bind(Date.now()).run();
-});
-```
+The point of the proxy is that platform-owned resources never need to be exposed directly to user code.
 
----
+#### Tail (`packages/tail`)
 
-## 4. The `defineHandler` API
+Tail is the runtime log pipeline.
 
-Thin identity function at runtime. Provides typed Hono `Context` (pre-typed with `CloudEnv`):
+It:
 
-```ts
-// c.env.DB       — D1Database
-// c.env.KV       — KVNamespace
-// c.env.STORAGE  — R2Bucket
-```
+- receives worker tail events
+- stores logs in Analytics Engine
+- broadcasts live log events through a Durable Object
 
-**`defineHandler.withValidator()`** adds Standard Schema validation for `body`, `query`, `params`:
+#### Dashboard (`packages/dashboard`)
 
-```ts
-import * as v from "valibot";
-import { defineHandler } from "void";
-import { db } from "void/db";
+The dashboard is the user-facing product surface.
 
-export const POST = defineHandler.withValidator({
-  body: v.object({
-    name: v.pipe(v.string(), v.minLength(1)),
-    email: v.pipe(v.string(), v.email()),
-  }),
-})(async (c, { body }) => {
-  await db.insert("users", { name: body.name, email: body.email });
-  return { created: true };
-});
-```
+It is a Void app itself, built with Vue pages mode, and it currently mixes:
 
-Return values auto-convert: objects → JSON, strings → text/html, `null` → 204, `Response` → passthrough.
+- direct reads from the platform Postgres database for loader-heavy views
+- API calls for mutations, usage metrics, secrets, and domain operations
 
-**One DB, one KV, one STORAGE per project by default.** Users wanting raw CF deployment with custom bindings add a `wrangler.json` with real binding IDs — the plugin's `mergeBindings` function respects user-provided config and only adds placeholders for missing inferred bindings.
+It is deployed separately from the main platform pipeline and is currently lower priority than the core platform work.
 
----
+### Core Data Stores
 
-## 5. Typed Route System
+Void currently uses several different storage systems, each for a different job:
 
-Five-part system providing end-to-end type safety:
+- PostgreSQL via Hyperdrive: platform control-plane data
+- `ROUTING` KV: active slug/domain routing, static manifests, queue routing
+- `STATIC_ASSETS` KV + `STATIC_ASSETS_R2`: static/SPA deployment assets
+- Analytics Engine: request metering and runtime logs
+- Per-project Cloudflare resources: D1, KV, R2, Queues, and optionally Hyperdrive-backed Postgres for user apps
 
-1. **Route type codegen** — generates `.void/routes.d.ts` using `typeof import(...)`. Inlines `Serialize<T>` and `ExtractInput<V>` helper types.
-2. **`RouteMap` declaration merging** — `declare module "void/routes"` augments the stub interface.
-3. **Typed `fetch` client** — `void/client` exports `fetch()` constrained by `RouteMap`.
-4. **Seamless tsconfig** — `.void/tsconfig.json` with `files` entry (inherited by child).
-5. **Schema-derived DB types** — DDL parser replays migrations → `.void/db.d.ts` augments `void/db` with `DbTables`/`DbInsertTables`.
+### Deployment Flow
 
-Standard Schema V1 types are inlined — no `@standard-schema/spec` dependency needed.
+There are two deploy shapes: worker deploys and static-only deploys.
 
----
+#### Worker deploys (`type: "void"` or `"framework"`)
 
-## 6. Binding Inference
+1. The CLI builds the app, detects app type/framework, scans bindings, collects migrations, and packages worker modules plus assets.
+2. The CLI uploads the deploy manifest and blobs to `packages/api`.
+3. The API creates a deployment row and provisions missing resources.
+4. The API uploads a versioned worker named `user-{slug}-{deploymentId}`.
+5. The API invokes `POST /__void/migrate` on that new worker.
+6. If migrations succeed, the API updates routing KV and active domains to point at the new worker.
+7. Dispatch starts sending traffic to the new deployment.
+8. Retention cleanup removes old retained deployments beyond the plan limit.
 
-**Static analysis only** (runtime JIT inference was considered but not implemented). Uses Vite's `parseSync` (oxc-powered) + `estree-walker` to scan `routes/`, `middleware/`, and `jobs/` for `*.env.DB`, `*.env.KV`, `*.env.STORAGE` member expressions.
+The key invariant is that traffic does not move until migrations succeed.
 
-Explicit override via `void.json`:
+The current supported deploy manifest version is `3`.
 
-```json
-{ "bindings": { "db": true, "kv": true } }
-```
+#### Static/SPA deploys (`type: "static"` or `"spa"`)
 
----
+1. The CLI builds or uploads a static directory.
+2. The API content-addresses all assets by hash.
+3. Assets smaller than `2 MB` go to `STATIC_ASSETS` KV; larger assets go to `STATIC_ASSETS_R2`.
+4. The API writes a per-deployment manifest into routing KV.
+5. Routing KV points the slug/domain at `staticDeploymentId` instead of a worker.
+6. Dispatch serves the assets directly without creating a Workers for Platforms script.
 
-## 7. Relationship to `@cloudflare/vite-plugin`
+This makes retained static deployments much cheaper than versioned worker deploys.
 
-We build on top of `@cloudflare/vite-plugin`, not replace it. It provides workerd integration, HMR, build output, and Environment API. We add file-based routing, binding inference, auto-provisioning, typed codegen, and managed deployment.
+### Local Development
 
-In **default mode**: `voidPlugin()` → `[routingPlugin, dbTypesPlugin, migrationPlugin, ...cloudflare({ config: mergeBindings })]`
+Local development is designed to stay close to production, but there are multiple modes.
 
-In **framework mode** (auto-detected via `detectFramework()`): routing plugin is omitted, CF plugin uses `viteEnvironment: { name: "ssr" }` to hook into the framework's environment.
+#### Default Cloudflare mode
 
-**Raw CF deployment** is supported: if a `wrangler.json` exists, the plugin respects its real binding IDs. Users run `vite build && wrangler deploy`.
+- `vite dev` runs through `@cloudflare/vite-plugin`
+- D1, KV, and R2 are local emulations
+- state persists under `.void/`
+- worker code runs in a Cloudflare-like runtime during development
 
----
+#### Remote bindings mode
 
-## 8. Deployment
+When `remote: true` or `VOID_REMOTE=1` is enabled, D1/KV/R2 calls are replaced with proxy-backed remote bindings.
 
-### CLI Deploy Flow (`void deploy`)
+This lets a local dev session talk to real deployed resources while still using the same application code.
 
-1. Build (`vite build`) — client + worker bundles
-2. Authenticate — GitHub or Google OAuth, JWT cached locally
-3. Upload to Control Plane — manifest, worker script, static assets, migrations
-4. Platform provisions D1/KV/R2 resources as needed
-5. Platform runs migrations on remote D1 via CF REST API
-6. Static assets uploaded to R2, worker deployed to dispatch namespace
-7. KV routing entry updated → `{slug}.void.app` is live
+#### Non-Cloudflare targets
 
-**Key invariant:** Worker never deploys unless all migrations succeed.
+`target: "node" | "bun" | "deno"` produces a standalone server build.
 
-### Static Asset Serving
-
-Dispatch worker routes:
-
-- `/api/*` → user Worker (not cached)
-- `/*` → R2 static assets with edge caching (`caches.default`)
-- Hashed assets: `Cache-Control: public, max-age=31536000, immutable`
-- Non-hashed: `Cache-Control: public, s-maxage=60, max-age=0, must-revalidate`
-- Non-file paths fall back to `index.html` (SPA routing)
-
-Cache keys include deploy version (`?_v={deploymentId}`) for instant invalidation.
-
-### SSR + ISR
-
-SSR is supported via `src/main.ssr.ts` render entry. ISR (Incremental Static Regeneration) is implemented in the dispatch worker with a two-layer cache (edge + R2).
+This is an escape hatch for self-hosting, not the primary product path. Platform-specific features like managed Cloudflare bindings do not apply there.
 
 ---
 
-## 9. Platform Architecture
+## 2. Framework Design
 
-### Authentication
+### DX Principles
 
-Users sign in via GitHub or Google OAuth. Provider-agnostic user model (`provider`, `provider_id`, `login`, `plan`). JWT tokens, cached at `~/.void/config.json`.
+The framework side of Void is trying to give developers a specific kind of experience:
 
-### Usage Metering & Tiers
+- Vite is the center of gravity.
+- Infrastructure should be inferred from source when possible.
+- Local development should run against a runtime that behaves like production.
+- Type information should flow from schema to server to client.
+- The default path should be simple, but escape hatches must exist.
 
-Five tiers: `free`, `solo`, `pro`, `sponsored`, `custom`. Enforcement:
+### Supported App Shapes
 
-- **Immediate:** deploy count per day (checked at deploy time)
-- **Per-request:** CPU time + sub-requests via CF Custom Limits
-- **Async:** request count per month via Cron Trigger (queries Analytics Engine, sets `suspended` flag in KV)
+Void currently supports four broad ways to build an app.
 
-### Resource Isolation
+#### Void apps
 
-All resources live under our CF account. Isolation enforced at the binding level — a user's worker can only access its own D1/KV/R2.
+These use Void’s own framework conventions:
+
+- `routes/` for API routes
+- `pages/` for server-rendered UI
+- `middleware/` for global request middleware
+- `crons/` for scheduled handlers
+- `queues/` for queue consumers
+- `db/` for schema and migrations
+
+This is the most opinionated and most integrated mode.
+
+#### Meta-framework apps
+
+Void can also act as the platform layer for supported frameworks.
+
+Current public support is:
+
+- TanStack Start
+- React Router
+- SvelteKit
+- Nuxt
+- Astro
+
+In this mode the framework owns routing and rendering, while Void provides deploy packaging, binding inference, Drizzle wiring, auth/queue/cron wrappers where needed, and platform deployment.
+
+There is Vinext-specific source in the framework repo, but it is intentionally on hold and not part of the current public support matrix.
+
+#### Static and SPA projects
+
+If a project has no backend surface, Void can deploy it as:
+
+- `static`
+- `spa`
+
+These projects skip the worker path entirely and are served directly from KV/R2.
+
+#### Non-Cloudflare targets
+
+For self-hosting or non-platform usage, Void can also build for Node, Bun, or Deno.
+
+### Core Developer Primitives
+
+The framework API is intentionally small.
+
+#### `voidPlugin()`
+
+`voidPlugin()` is the main entrypoint.
+
+It composes:
+
+- routing
+- pages-mode infrastructure
+- Drizzle support
+- migrations
+- prerendering
+- Cloudflare runtime integration
+- target-specific behavior for non-CF builds
+
+#### Runtime helpers
+
+The main runtime surfaces are:
+
+- `defineHandler`
+- `defineMiddleware`
+- `defineScheduled`
+- `defineQueue`
+- `void/db`
+- `void/kv`
+- `void/storage`
+- `void/ai`
+- `void/isr`
+- `void/client`
+- `void/auth`
+
+These are meant to feel like a thin, typed layer over the runtime rather than a second hidden framework.
+
+#### Pages mode
+
+Pages mode is Void’s own server-rendered UI story.
+
+Key traits:
+
+- rendering-framework-agnostic
+- server loaders and actions
+- named page actions
+- nested layouts
+- typed forms and action helpers
+- SSR on first load, lightweight client navigation after that
+
+The adapters in `@void-x/{vue,react,svelte,solid}` provide the framework-specific client/runtime layer.
+
+### Conventions Over Config
+
+Void expects a small number of strong directory conventions:
+
+- `routes/`
+- `pages/`
+- `middleware/`
+- `crons/`
+- `queues/`
+- `db/schema.ts`
+- `db/migrations/`
+- `public/`
+
+`void.json` exists for targeted overrides, not to recreate infrastructure-by-config.
+
+Important override areas are:
+
+- `target`
+- `output`
+- `database`
+- `inference.bindings`
+- `inference.scanDirs`
+- `inference.build`
+- `inference.appType`
+- `routing.revalidate`
+- `routing.prerender`
+- `worker.compatibility_*`
+
+### Type Pipeline
+
+A large part of the framework value is that types are generated from the app instead of handwritten in parallel.
+
+Today that pipeline includes:
+
+- Drizzle schema as the DB source of truth
+- route scanning and route type generation
+- page action typing
+- queue payload typing
+- generated `.void/*.d.ts` files
+- typed fetch/action/form helpers
+
+The intended result is that database schema, validators, route inputs, route outputs, and page actions stay mechanically aligned.
+
+### Resource Inference
+
+Void reads application source to infer required Cloudflare resources.
+
+That inference currently covers:
+
+- database usage
+- KV usage
+- R2 usage
+- AI usage
+- auth
+- queues
+- code inside `routes/`, `pages/`, `middleware/`, `crons/`, `queues/`, and optional SSR entries
+
+Inference is deliberately shallow enough to stay understandable. When it is not enough, `void.json` and `wrangler.json(c)` are the escape hatches.
+
+### Escape Hatches
+
+Void should never trap a user.
+
+Current escape hatches include:
+
+- explicit binding overrides
+- custom build commands
+- custom scan directories
+- raw `wrangler.json(c)` for direct Cloudflare deploys
+- non-Cloudflare targets
+- framework-owned routing/SSR in meta-framework mode
+
+The design goal is progressive disclosure, not forced lock-in.
 
 ---
 
-## 10. Key Decisions & Resolved Questions
+## 3. Platform Features
 
-- **No unstorage.** KV and R2 are accessed via native CF APIs (`c.env.KV`, `c.env.STORAGE`). Typed wrappers available at `void/kv` and `void/storage`.
-- **No h3/Nitro.** Hono is the runtime. We take patterns (file-based routing, defineHandler) but not packages.
-- **No auto-imports.** Explicit imports for type inference.
-- **SSR implemented.** `src/main.ssr.ts` convention + ISR via dispatch worker.
-- **Secrets** managed via `void secret set NAME=value`.
-- **Framework mode** auto-detected — supports TanStack Start and React Router.
-- **Auth** supports both platform-level (GitHub/Google OAuth for deployment) and app-level (built-in auth with `void/auth` + `c.get("user")` convention).
+This section is about features offered to apps after they are deployed on Void.
+
+### Shipped Today
+
+#### Deployment and release management
+
+- one-command deploys from the CLI
+- project linking and auth
+- app-type auto-detection
+- versioned worker deployments
+- static/SPA deployments without WfP workers
+- rollback to retained deployments
+- retained-deployment cleanup by plan
+- staging environment support
+
+#### Managed infrastructure
+
+- inferred D1/KV/R2 provisioning
+- queue provisioning and relay
+- cron trigger registration from `crons/`
+- optional PostgreSQL mode for framework apps via Hyperdrive
+- secret management
+- custom domains
+- remote bindings for local development
+
+#### Runtime behavior
+
+- edge asset serving
+- ISR and on-demand revalidation
+- prerender path support
+- redirect and header rules
+- request metering
+- AI metering and usage limiting
+- BYOK provider AI through AI Gateway
+
+#### Product surfaces
+
+- user-facing dashboard
+- internal admin dashboard
+- deployment logs and runtime logs
+- project usage views
+- plan enforcement and suspension
+
+### Planned / Roadmap
+
+These fit the current architecture but are not fully implemented platform behavior yet.
+
+- GitHub App push-to-deploy
+- preview deployments
+- preview database copies or forks
+- richer deploy-status streaming UX
+- per-route observability
+- Core Web Vitals collection
+- privacy-first product analytics
+- error tracking
+- better user-facing log exploration and live tailing
+- team collaboration, RBAC, and audit logs
+- environment promotion flows
+- enterprise SSO
+- first-class email integrations
+- first-class WebSocket support
+- integration marketplace / provider packages
+
+### What This Platform Is Not Trying to Be
+
+Void is not trying to re-implement every meta-framework feature itself.
+
+The framework side should own the developer-facing fullstack ergonomics where Void is clearly differentiated. The platform side should own managed deployment, routing, metering, and hosted operations. Existing frameworks should remain first-class citizens when users prefer them.

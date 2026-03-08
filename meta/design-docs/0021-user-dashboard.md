@@ -1,131 +1,73 @@
 # User Dashboard
 
-**Date:** 2026-02-22
-**Status:** Draft
+**Date:** 2026-03-08
+**Status:** Implemented (living document)
 
 ---
 
 ## Summary
 
-A user-facing dashboard for Void, built as a Vue Pages mode app that dogfoods the platform. Provides project management, deployment history, usage monitoring, domain/secrets management, and account settings.
+A user-facing dashboard for Void, built as a Vue Pages mode app that dogfoods the platform. It provides project management, deployment history, usage monitoring, domain/secrets management, and account settings.
 
 ## Architecture
 
 ### Package: `packages/dashboard`
 
 - Vue Pages mode app using `voidPlugin()` + `voidVue()`
-- Deploys as its own Void project at `dashboard.void.app`
-- Tailwind CSS with custom theme from shared preset
+- Deploys separately at `dash.void.cloud` / `dash.staging.void.cloud`
+- Tailwind CSS v4 with shared tokens from `@voidcloud/ui`
 
-### Data Access: BFF via Platform API
+### Data Access
 
-Server-side loaders (`<script server>` / `.server.ts`) call the platform API over HTTP using the user's JWT. No direct D1 or Analytics Engine access — the platform remains the single source of truth for all business logic and authorization.
+- **Direct DB reads via Hyperdrive** — middleware creates a Drizzle client from `env.HYPERDRIVE.connectionString`, and read-heavy loaders query the platform Postgres database directly.
+- **API for mutations and non-DB reads** — domain changes, secret changes, usage metrics, and similar operations still go through the platform API.
 
 ### Auth
 
-OAuth (GitHub/Google) → platform issues JWT → stored in httpOnly cookie → forwarded as Bearer token to platform API in server-side loaders.
+OAuth (GitHub/Google) → platform issues JWT → stored in `void_token` httpOnly cookie → middleware validates token and sets request-scoped user state.
 
 ### Shared Design System: `packages/ui`
 
-Starts as a Tailwind preset package exporting design tokens. Dashboard components live in `packages/dashboard/components/` initially. When patterns stabilize, mature components are extracted to `packages/ui` as a Vue component library. The admin dashboard (Hono JSX) can adopt the same Tailwind preset to converge on a shared look.
+`packages/ui` currently exports shared CSS tokens (`base.css`, `theme.css`) consumed by the dashboard. It is not yet a component library.
 
 ## Pages
 
-| Route                     | Purpose                                                                   | API Calls                                                                                                    |
-| ------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `pages/login.vue`         | OAuth buttons, callback handler                                           | —                                                                                                            |
-| `pages/layout.vue`        | Top bar (logo, nav links, user info)                                      | —                                                                                                            |
-| `pages/index.vue`         | Project list + aggregate usage summary cards                              | `GET /projects`, `GET /usage`                                                                                |
-| `pages/projects/[id].vue` | Project detail: overview, deployments, usage, domains, secrets, resources | `GET /projects/:id`, `GET /projects/:id/deployments`, `GET /projects/:id/usage`, `GET /projects/:id/domains` |
-| `pages/settings.vue`      | Profile, plan tier + limits, API token                                    | `GET /user` (new endpoint)                                                                                   |
+| Route            | Purpose                                         |
+| ---------------- | ----------------------------------------------- |
+| `/login`         | OAuth buttons                                   |
+| `/auth/callback` | Receives platform token and sets cookie         |
+| `/`              | Project list + aggregate usage summary          |
+| `/projects/:id`  | Deployments, usage, domains, secrets, resources |
+| `/settings`      | Profile, provider, plan, limits                 |
+| `/logout`        | Clears cookie and redirects                     |
 
-### Home (`pages/index.vue`)
+## Source Layout
 
-- Project cards grid: name/slug, live URL, mode badge, last deploy timestamp + status, request count
-- Aggregate usage bar: total requests / limit, bandwidth, AI neurons with progress toward plan limits
-- "New project" CTA linking to CLI docs (`void projects create`)
-
-### Project Detail (`pages/projects/[id].vue`)
-
-Organized in sections or tabs:
-
-- **Overview** — live URL, mode, created date, current deployment status
-- **Deployments** — chronological table with status badge (live/failed/pending), commit, source, timestamp. Expandable error messages for failed deploys.
-- **Usage** — summary cards for current billing period: requests, bandwidth, AI neurons. Progress bars showing usage vs. plan limits.
-- **Domains** — list with status badges (pending/active). Add/remove forms.
-- **Secrets** — list variable names (values hidden). Add/edit/delete forms. Values shown only on creation.
-- **Resources** — read-only list of bindings (D1, KV, R2, queues) with binding names
-
-### Settings (`pages/settings.vue`)
-
-- Profile info (email, login, OAuth provider)
-- Current plan tier + limits breakdown
-- API token display/regeneration
-
-## Visual Design
-
-### Palette
-
-| Token            | Value                      |
-| ---------------- | -------------------------- |
-| Background       | `#16171d`                  |
-| Dividers/borders | `#3b3440`                  |
-| Text primary     | `#ffffff`                  |
-| Text secondary   | `rgba(255, 255, 255, 0.7)` |
-| Accent/highlight | `#b39aff`                  |
-| Status: live     | green                      |
-| Status: pending  | amber                      |
-| Status: failed   | red                        |
-
-### Aesthetic
-
-Dark TUI (terminal UI) inspired — dense, information-rich, polished. Not a gimmick; a genuine developer-tool feel.
-
-- Monospace font for data (slugs, IDs, timestamps, usage numbers)
-- Sans-serif (system font or Inter) for navigation and headings
-- Tight spacing, dense information display
-- `1px solid #3b3440` borders. No shadows. Minimal or zero border-radius.
-- Tables over cards where data is tabular
-- Active/hover states: `#b39aff` with low-opacity backgrounds (`rgba(179, 154, 255, 0.1)`)
-- Progress bars: thin, `#b39aff` fill on `#3b3440` track
-- Navigation: horizontal top bar, no sidebar
-
-## Directory Structure
-
-```
-packages/ui/
-  src/
-    tailwind-preset.ts       # Shared design tokens
-    base.css                 # Base styles (resets, scrollbars)
-  package.json
-
+```text
 packages/dashboard/
+  middleware/
+    01.auth.ts               # Hyperdrive DB init, cookie auth, shared user state
+  lib/
+    api.ts                   # Typed platform API client
   pages/
-    login.vue
     layout.vue
+    login.vue
+    login.server.ts
+    logout.vue
+    logout.server.ts
     index.vue
+    index.server.ts
+    settings.vue
+    settings.server.ts
+    auth/
+      callback.vue
+      callback.server.ts
     projects/
       [id].vue
       [id].server.ts
-    settings.vue
-    settings.server.ts
-  middleware/
-    01.auth.ts               # JWT cookie check, redirect to login
-  components/                # Dashboard UI components
-  vite.config.ts
-  tailwind.config.ts         # Imports preset from @voidcloud/ui
-  package.json
 ```
 
-## Out of Scope (v1)
+## Notes
 
-- Time-series charts / full observability (p50/p95/p99, per-route breakdowns)
-- Team/org features
-- Project creation from dashboard (CLI only)
-- Deployment rollback
-- Log streaming / real-time request tailing
-- Dark/light mode toggle (dark only)
-
-## New Platform API Endpoint Needed
-
-- `GET /user` — returns current user profile, plan, billing cycle start, limits
+- This doc replaces the original API-only BFF design. The implemented dashboard now uses a mixed model: direct DB reads via Hyperdrive for loaders, API calls for writes and non-DB reads.
+- The dashboard is intentionally deployed outside the main `pnpm run deploy` pipeline.

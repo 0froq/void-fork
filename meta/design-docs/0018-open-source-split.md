@@ -7,7 +7,7 @@
 
 ## Summary
 
-Split the Void monorepo into two repos: an open-source **framework repo** (void plugin, CLI, framework adapters, docs) and a private **platform repo** (control plane, edge dispatch). The goal is to open-source the entire client-side DX layer while keeping the server infrastructure closed.
+Split the Void monorepo into two repos: an open-source **framework repo** (void plugin, CLI, framework adapters, docs) and a private **platform repo** (control plane, dispatch, proxy, dashboard). The goal is to open-source the entire client-side DX layer while keeping the server infrastructure closed.
 
 ## Motivation
 
@@ -25,7 +25,7 @@ Split the Void monorepo into two repos: an open-source **framework repo** (void 
 - `packages/react` — React framework adapter
 - `packages/svelte` — Svelte framework adapter
 - `packages/solid` — SolidJS framework adapter
-- `packages/website` — documentation site (VitePress)
+- `docs/` — documentation site (VitePress)
 - `playground/*` — all 10 test apps (spa, ssr, vue-pages, react-pages, svelte-pages, solid-pages, queues, auth, ai, tanstack-start)
 - `docs` symlink
 
@@ -33,7 +33,7 @@ Split the Void monorepo into two repos: an open-source **framework repo** (void 
 
 - `packages/api` — control plane API
 - `packages/dispatch` — edge router worker
-- `packages/ai-proxy` — AI inference proxy worker
+- `packages/proxy` — AI inference, revalidation, and remote bindings proxy worker
 - `packages/dashboard` — user-facing dashboard (Vue Pages app)
 - `packages/ui` — shared CSS/design tokens (used by dashboard)
 - `meta/` — design docs, operations, progress tracking
@@ -42,7 +42,7 @@ Split the Void monorepo into two repos: an open-source **framework repo** (void 
 
 The split is architecturally clean — confirmed by code analysis:
 
-- **Platform, dispatch, and ai-proxy have zero imports from `void`**. No `from "void"` or `from "@voidcloud/{vue,react,svelte,solid}"` anywhere in platform/dispatch/ai-proxy source code.
+- **Platform, dispatch, and proxy have zero imports from `void`**. No `from "void"` or `from "@voidcloud/{vue,react,svelte,solid}"` anywhere in platform/dispatch/proxy source code.
 - **The only cross-boundary coupling is the HTTP deploy protocol** — the CLI sends a deploy manifest to the platform API. This is a network boundary, not a code dependency.
 - **No shared test utilities** between framework and platform packages.
 - **Runtime subpaths are hermetic** — `handler`, `db`, `fetch`, `queues`, `auth` have zero imports from CLI or plugin code.
@@ -66,10 +66,10 @@ The framework repo lives inside the platform repo directory, gitignored. This en
 ```
 ~/VoidZero/void/              # platform repo (private)
 ├── .gitignore                      # includes framework/
-├── pnpm-workspace.yaml             # platform + dispatch + ai-proxy + dashboard + ui
+├── pnpm-workspace.yaml             # platform + dispatch + proxy + dashboard + ui
 ├── packages/api/
 ├── packages/dispatch/
-├── packages/ai-proxy/
+├── packages/proxy/
 ├── packages/dashboard/
 ├── packages/ui/
 ├── meta/
@@ -82,7 +82,7 @@ The framework repo lives inside the platform repo directory, gitignored. This en
     ├── packages/react/
     ├── packages/svelte/
     ├── packages/solid/
-    ├── packages/website/
+    ├── docs/
     └── playground/
 ```
 
@@ -134,7 +134,7 @@ The `DeployManifest` interface is the only cross-repo coupling — the CLI sends
 **Platform repo CI** (simplified):
 
 - lint + typecheck
-- Unit tests (platform + dispatch + ai-proxy)
+- Unit tests (platform + dispatch + proxy)
 - Integration tests (platform + dashboard)
 - Remove pages adapter suite, remove `--filter '!website'` exclusions
 - Playwright may still be needed for dashboard E2E tests

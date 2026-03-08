@@ -5,10 +5,11 @@ User-facing dashboard for Void. Built as a Vue Pages mode app, dogfooding the pl
 ## Architecture
 
 - **Vue Pages mode** — `voidPlugin()` + `voidVue()`, SSR with client hydration
-- **Direct D1 for reads** — loaders query the shared API database directly via Drizzle (projects, deployments, domains, resources, user profile). Non-D1 reads (usage metrics via Analytics Engine, secrets via CF API) still go through the platform API over HTTP.
+- **Direct Postgres reads via Hyperdrive** — middleware initializes a Drizzle DB client from `env.HYPERDRIVE.connectionString`, and loaders query the platform database directly for read-heavy views.
 - **API for mutations** — all write operations (add/remove domain, set/remove secret) go through the platform API.
-- **Auth** — OAuth (GitHub/Google) via the platform's `/auth/login` flow. JWT stored in an httpOnly cookie (`void_token`). Middleware extracts `userId` from the JWT and initializes a Drizzle DB instance from the D1 binding.
-- **Styling** — Tailwind CSS v4 with shared design tokens from `@voidcloud/ui`. Dark TUI aesthetic.
+- **API for non-DB reads** — usage metrics and secret operations still go through the platform API.
+- **Auth** — OAuth (GitHub/Google) via the platform's `/auth/login` flow. JWT stored in an httpOnly cookie (`void_token`). Middleware validates the token and initializes the shared loader state.
+- **Styling** — Tailwind CSS v4 with shared CSS tokens from `@voidcloud/ui`.
 
 ## Pages
 
@@ -22,7 +23,7 @@ User-facing dashboard for Void. Built as a Vue Pages mode app, dogfooding the pl
 
 ## Local Development
 
-The easiest way is to run the setup script from the API package, which seeds the DB and creates `.dev.vars` for both the API and dashboard:
+The easiest setup path is still the API package helper, which seeds local state and writes `.dev.vars` for both workers:
 
 ```sh
 pnpm -C packages/api setup
@@ -42,7 +43,7 @@ pnpm -C packages/api dev
 pnpm -C packages/dashboard dev
 ```
 
-The dashboard shares the API's local D1 state via the `persistTo` option in `vite.config.ts`, so both workers read from the same SQLite file in dev.
+In `vite.config.ts`, the dashboard points `persistTo` at the API worker state directory and registers the API worker as an auxiliary worker. That keeps local platform state aligned while the dashboard still talks to the platform API for mutations and non-DB reads.
 
 ## Source Layout
 
@@ -50,20 +51,21 @@ The dashboard shares the API's local D1 state via the `persistTo` option in `vit
 lib/
   api.ts                    # Platform API client (typed fetch wrapper, used for mutations + usage/secrets)
 middleware/
-  01.auth.ts                # D1 init, JWT cookie extraction, userId extraction, login redirect
+  01.auth.ts                # Hyperdrive DB init, JWT cookie extraction, user bootstrap, login redirect
 pages/
   layout.vue                # Top bar with nav + user info
   login.vue                 # OAuth login buttons
+  login.server.ts           # Builds provider login URLs
   logout.vue                # Cookie clear + redirect
   logout.server.ts
   index.vue                 # Project list + usage cards
-  index.server.ts           # Direct D1 for projects, API for usage
+  index.server.ts           # Direct DB for projects/domains, API for usage
   settings.vue              # Profile + plan info
-  settings.server.ts        # Direct D1 for user + plan limits
+  settings.server.ts        # Direct DB for user + plan limits
   auth/
     callback.vue            # OAuth callback (receives token)
     callback.server.ts
   projects/
     [id].vue                # Project detail (all sections)
-    [id].server.ts          # Direct D1 for project/deployments/domains/resources, API for usage/secrets. Actions for mutations.
+    [id].server.ts          # Direct DB for project/deployments/domains/resources, API for usage/secrets. Actions for mutations.
 ```

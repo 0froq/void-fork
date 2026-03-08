@@ -1,89 +1,90 @@
 # @voidcloud/dispatch
 
-Routes `*.void.app` traffic to user workers and static assets. CF Worker using plain `fetch` handler (no framework).
+Edge router for deployed Void apps. It routes requests to user workers, serves static deployments, manages ISR caching, applies redirect/header rules, and records request usage.
 
 ## Request Flow
 
-1. Extract slug from hostname (`{slug}.void.app`)
-2. KV lookup: `slug → { workerName, projectId, version, limits?, suspended? }` or `slug → { staticDeploymentId, projectId, version, suspended? }`
-3. **Suspension check**: If `routing.suspended` is set → return 429 `{ error: "usage limit exceeded", reason }`
-4. Edge cache check via `caches.default` with versioned cache key (`?_v={version}`)
-5. **Static projects** (`staticDeploymentId` in routing): served directly from `STATIC_ASSETS` KV (primary) with `STATIC_ASSETS_R2` R2 overflow for large files. Path resolution handled by `resolveStaticPath()` in `src/static.ts` (SPA fallback to `index.html`, directory index resolution). Asset hashes prefixed with `!` are fetched from R2 instead of KV.
-6. `/api/*` → `getWorker(env, routing).fetch(request)` with custom limits (Workers for Platforms, not cached). CPU limit errors caught → 429
-7. Everything else → serve static assets from R2 (SPA fallback to `index.html`) or ISR cache from KV, cache response at edge
-8. **Metering**: Every request (except 404/suspended) records an Analytics Engine data point via `ctx.waitUntil` (fire-and-forget, zero latency impact)
+1. Extract slug from hostname or fall back to `domain:{hostname}` routing.
+2. Read routing data from `ROUTING` KV.
+3. Reject suspended projects with `429`.
+4. Apply redirect rules before any worker invocation.
+5. Serve hashed assets from edge cache when possible.
+6. For static/SPA projects, serve files from `STATIC_ASSETS` KV with `STATIC_ASSETS_R2` overflow for large assets, using `assetConfig` path resolution.
+7. For `/api/*`, forward to the user worker in the dispatch namespace with plan-specific CPU/subrequest limits.
+8. For SSR with ISR enabled, use `caches.default` plus `ISR_CACHE` KV for stale-while-revalidate behavior.
+9. Apply header rules and record usage in Analytics Engine. If `userId` is present on the routing entry, enqueue usage events as well.
+
+## Static and ISR Storage
+
+- **Static/SPA deploys**: manifest in `ROUTING`, assets in `STATIC_ASSETS` KV, overflow in `STATIC_ASSETS_R2`
+- **ISR cache**: packed HTML/headers stored in `ISR_CACHE` KV, with edge-cache copies in `caches.default`
+- **Hashed assets**: immutable edge-cache entries keyed by URL path
 
 ## Queue Relay
 
-The dispatch worker also exports a `queue()` handler for Cloudflare Queue batch relay:
+The dispatch worker also exports `queue()`:
 
-1. CF delivers `MessageBatch` to dispatch worker's `queue()` export
-2. KV lookup: `queue:<queueId>` → `{ workerName, projectId, queueName }`
-3. Serialize batch to JSON (`{ queue, messages: [{id, timestamp, body, attempts}] }`)
-4. Forward to user worker: `env.DISPATCH.get(workerName).fetch("/__queue", serializedBatch)`
-5. Ack all on success, retry all on failure
+1. Cloudflare delivers a `MessageBatch`
+2. `queue:{queueId}` is resolved from `ROUTING` KV
+3. The batch is serialized and forwarded to the active user worker at `/__queue`
+4. Success acks the whole batch; failure retries the batch
 
 ## Source Layout
 
-```
+```text
 src/
-  index.ts                  # Main fetch handler + suspension check + custom limits
-  env.ts                    # Env interface (DISPATCH, ISR_CACHE, ROUTING, STATIC_ASSETS, STATIC_ASSETS_R2, ANALYTICS, BASE_HOSTNAME?)
-  hostname.ts               # extractSlug() — pure function
-  static.ts                 # serveStaticAsset() — R2 lookup, SPA fallback, cache headers
-                            # resolveStaticPath() — KV/R2-backed static serving for static/SPA deployments
-  isr.ts                    # ISR cache read/write/delete — KV with binary pack format
-  metering.ts               # recordRequest() — Analytics Engine writeDataPoint wrapper
+  index.ts        # Main fetch + queue handlers
+  hostname.ts     # Hostname/slug extraction
+  static.ts       # Static manifest path resolution + content types
+  isr.ts          # ISR cache packing, KV read/write, edge cache keys
+  redirects.ts    # Redirect rule matching
+  headers.ts      # Header rule application
+  metering.ts     # Analytics Engine writes + usage queue events
+  constants.ts
+  env.ts
+test/unit/
+  index.test.ts
+  hostname.test.ts
+  static.test.ts
+  isr.test.ts
+  redirects.test.ts
+  headers.test.ts
+  metering.test.ts
 ```
 
-## Metering (Analytics Engine)
+## Metering
 
-Every request is recorded via `recordRequest()` using `ctx.waitUntil` (non-blocking). Data point schema:
+Any request that resolves to a routing entry and is not suspended records:
 
-| Field   | Value                                 |
-| ------- | ------------------------------------- |
-| index   | projectId (sampling key)              |
-| blob1-5 | projectId, type, method, status, slug |
-| double1 | 1 (for SUM counting)                  |
-| double2 | responseBytes                         |
-| double3 | durationMs                            |
+- project ID
+- request type (`api`, `static`, `ssr`, `isr`)
+- method
+- status
+- response bytes
+- duration
+- slug/hostname
 
-Request types: `"api"`, `"static"`, `"ssr"`, `"isr"`. Usage queries multiply by `_sample_interval` for accuracy at high traffic.
+Analytics Engine is the source for usage reporting. Dispatch also publishes lightweight usage events to `USAGE_QUEUE` when the routing entry includes a `userId`.
 
 ## Edge Caching
 
-Two layers of edge caching ensure user workers are only invoked when necessary.
+- **Hashed assets**: `Cache-Control: public, max-age=31536000, immutable`
+- **Versioned static assets**: `s-maxage=31536000, max-age=0, must-revalidate`
+- **ISR HTML/JSON**: edge cache backed by `ISR_CACHE` KV
 
-### Hashed Assets
+Not cached:
 
-Hashed assets use version-independent cache keys — their content is guaranteed by the filename hash, so they survive across deploys and avoid unnecessary worker invocations after redeployment. The default prefix is `/assets/*` (Vite convention), with built-in presets for supported meta-frameworks (e.g., `/_nuxt/*`).
-
-- `Cache-Control: public, max-age=31536000, immutable` — cached at edge ~1 year
-
-### Static Assets
-
-Non-hashed static assets are edge-cached using deploy-versioned cache keys (`?_v={version}`). On each deploy, the version changes and all previous cache entries are automatically invalidated — no purge API needed.
-
-- `Cache-Control: public, s-maxage=31536000, max-age=0, must-revalidate` — cached at edge until next deploy
-
-**What gets cached:**
-
-- All GET requests for non-SSR projects (SPA/static sites) — every path is static
-- GET requests with file extensions (`.ico`, `.png`, `.css`, etc.) in SSR projects
-
-**What does NOT get cached:**
-
-- `/api/*` routes
-- SSR-rendered pages (paths without file extensions in SSR projects)
-- Non-GET requests
-- Non-2xx responses
-- Responses where the worker sets `Cache-Control: private`, `no-store`, or `no-cache`
-
-**Opting out:** To prevent a response from being cached (e.g., dynamically generated images at a static-looking URL), set `Cache-Control: private` or `Cache-Control: no-store` in your worker response.
+- `/api/*`
+- non-GET requests
+- private/no-store/no-cache responses
+- SSR pages without ISR
 
 ## Tests
 
-| Test file                    | Covers                                      |
-| ---------------------------- | ------------------------------------------- |
-| `test/unit/hostname.test.ts` | Slug extraction from hostname (18 tests)    |
-| `test/unit/metering.test.ts` | Analytics Engine data point shape (5 tests) |
+- `test/unit/index.test.ts` — main routing behavior
+- `test/unit/static.test.ts` — static path resolution and serving
+- `test/unit/isr.test.ts` — ISR cache packing and TTL behavior
+- `test/unit/redirects.test.ts` — redirect rule matching
+- `test/unit/headers.test.ts` — header rule application
+- `test/unit/hostname.test.ts` — slug extraction
+- `test/unit/metering.test.ts` — Analytics Engine payload shape
