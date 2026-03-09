@@ -133,6 +133,7 @@ export function packageBuild(
 
   // Build manifest from inferred bindings
   const manifest: DeployManifest = { version: 3, bindings: {} };
+  if (bindings.needsAuth) manifest.auth = true;
   if (bindings.needsD1 || bindings.needsAuth) {
     if (dialect === "postgresql") {
       manifest.bindings.hyperdrive = ["HYPERDRIVE"];

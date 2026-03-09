@@ -64,4 +64,34 @@ describe("resolveVoidAuthOptions", () => {
       ),
     ).rejects.toThrow('Missing auth credentials for provider "google"');
   });
+
+  it("requires BETTER_AUTH_SECRET outside localhost", async () => {
+    await expect(
+      resolveVoidAuthOptions(
+        new Request("https://example.com/api/auth"),
+        {
+          AUTH_SECRET: "legacy-secret",
+        },
+        {
+          dialect: "sqlite",
+          providers: null,
+        },
+        {} as never,
+      ),
+    ).rejects.toThrow("Missing Better Auth secret. Set BETTER_AUTH_SECRET.");
+  });
+
+  it("uses the localhost fallback when BETTER_AUTH_SECRET is missing", async () => {
+    const { options } = await resolveVoidAuthOptions(
+      new Request("http://localhost:3000/api/auth"),
+      {},
+      {
+        dialect: "sqlite",
+        providers: null,
+      },
+      {} as never,
+    );
+
+    expect(options.secret).toBe("void-dev-better-auth-secret-1234567890");
+  });
 });

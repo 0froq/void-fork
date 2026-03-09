@@ -139,15 +139,15 @@ When auth is active, Void configures Better Auth with these conventions:
 - mount path: `/api/auth/*`
 - email/password enabled by default unless `auth.providers` is set without `"email"`
 - `auth.providers` can enable any built-in Better Auth social provider
-- deployed apps need an auth secret via `BETTER_AUTH_SECRET` or `AUTH_SECRET`
+- deployed apps need an auth secret via `BETTER_AUTH_SECRET`
 - D1/SQLite uses the app `DB` binding
 - PostgreSQL apps (`"database": "pg"`) use the app `HYPERDRIVE` binding
 
 Auth sessions live in the same database system as the rest of the app. `AUTH_KV` is no longer used.
 
-On Void Cloud, Void auto-creates `BETTER_AUTH_SECRET` for auth-enabled apps if you have not set `BETTER_AUTH_SECRET` or `AUTH_SECRET` yourself through project secrets.
+On Void Cloud, Void auto-creates `BETTER_AUTH_SECRET` for auth-enabled apps if you have not set `BETTER_AUTH_SECRET` yourself through project secrets.
 
-Localhost dev uses a built-in fallback secret automatically. Outside the managed Void Cloud deploy flow, set `BETTER_AUTH_SECRET` or `AUTH_SECRET` yourself.
+Localhost dev uses a built-in fallback secret automatically. Outside the managed Void Cloud deploy flow, set `BETTER_AUTH_SECRET` yourself.
 
 ## Customization
 

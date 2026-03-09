@@ -23,7 +23,6 @@ export interface VoidAuthEnv extends Record<string, unknown> {
   DATABASE_URL?: string;
   HYPERDRIVE?: { connectionString?: string };
   BETTER_AUTH_SECRET?: string;
-  AUTH_SECRET?: string;
   GITHUB_OAUTH_ID?: string;
   GITHUB_OAUTH_SECRET?: string;
   GOOGLE_OAUTH_ID?: string;
@@ -76,9 +75,7 @@ function resolveSecret(request: Request, env: VoidAuthEnv): string {
   const explicit =
     typeof env.BETTER_AUTH_SECRET === "string" && env.BETTER_AUTH_SECRET.length > 0
       ? env.BETTER_AUTH_SECRET
-      : typeof env.AUTH_SECRET === "string" && env.AUTH_SECRET.length > 0
-        ? env.AUTH_SECRET
-        : undefined;
+      : undefined;
   if (explicit) return explicit;
 
   const url = new URL(request.url);
@@ -86,7 +83,7 @@ function resolveSecret(request: Request, env: VoidAuthEnv): string {
     return "void-dev-better-auth-secret-1234567890";
   }
 
-  throw new Error("Missing Better Auth secret. Set BETTER_AUTH_SECRET or AUTH_SECRET.");
+  throw new Error("Missing Better Auth secret. Set BETTER_AUTH_SECRET.");
 }
 
 function readEnvString(env: VoidAuthEnv, ...keys: string[]): string | undefined {
