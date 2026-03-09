@@ -47,6 +47,7 @@ export interface WebSocketRouteMeta {
   pattern: string;
   filePath: string;
   className: string;
+  bindingName?: string;
   mode: "room" | "socket";
   hasAuthGate: boolean;
 }

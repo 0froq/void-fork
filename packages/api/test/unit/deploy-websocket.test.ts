@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { enrichWebSocketManifest } from "../../src/routes/deploy";
+import {
+  buildWebSocketUploadBindings,
+  buildWebSocketUploadMigrations,
+  enrichWebSocketManifest,
+} from "../../src/routes/deploy";
 import type { DeployManifest } from "../../src/types";
 
 describe("enrichWebSocketManifest", () => {
@@ -97,6 +101,86 @@ describe("enrichWebSocketManifest", () => {
     expect(result.manifest.websocket?.migrations).toEqual([
       { tag: "ws-v1", newClasses: ["ChatRoom", "LegacyRoom"] },
       { tag: "ws-v2", newClasses: ["PresenceRoom"], deletedClasses: ["LegacyRoom"] },
+    ]);
+  });
+});
+
+describe("buildWebSocketUploadMigrations", () => {
+  it("returns Cloudflare upload metadata with new_tag and steps", () => {
+    expect(
+      buildWebSocketUploadMigrations([
+        { tag: "ws-v1", newClasses: ["ChatRoom", "LegacyRoom"] },
+        { tag: "ws-v2", newClasses: ["PresenceRoom"], deletedClasses: ["LegacyRoom"] },
+      ]),
+    ).toEqual({
+      new_tag: "ws-v2",
+      steps: [
+        { new_classes: ["ChatRoom", "LegacyRoom"] },
+        { new_classes: ["PresenceRoom"], deleted_classes: ["LegacyRoom"] },
+      ],
+    });
+  });
+
+  it("returns undefined when there are no websocket migrations", () => {
+    expect(buildWebSocketUploadMigrations([])).toBeUndefined();
+    expect(buildWebSocketUploadMigrations(undefined)).toBeUndefined();
+  });
+});
+
+describe("buildWebSocketUploadBindings", () => {
+  it("serializes durable object namespaces from websocket routes", () => {
+    expect(
+      buildWebSocketUploadBindings({
+        routes: [
+          {
+            pattern: "/ws/chat/:room",
+            filePath: "routes/ws/chat/[room].ws.ts",
+            className: "WsChatRoomWs",
+            bindingName: "CHAT_ROOM",
+            mode: "room",
+            hasAuthGate: false,
+          },
+          {
+            pattern: "/ws/presence",
+            filePath: "routes/ws/presence.ws.ts",
+            className: "WsPresenceWs",
+            mode: "socket",
+            hasAuthGate: false,
+          },
+        ],
+        classes: ["WsChatRoomWs", "WsPresenceWs"],
+      }),
+    ).toEqual([
+      {
+        type: "durable_object_namespace",
+        name: "CHAT_ROOM",
+        class_name: "WsChatRoomWs",
+      },
+      {
+        type: "durable_object_namespace",
+        name: "WsPresenceWs",
+        class_name: "WsPresenceWs",
+      },
+    ]);
+  });
+
+  it("falls back to class names when route metadata is unavailable", () => {
+    expect(
+      buildWebSocketUploadBindings({
+        routes: [],
+        classes: ["WsPresenceWs", "WsChatRoomWs", "WsPresenceWs"],
+      }),
+    ).toEqual([
+      {
+        type: "durable_object_namespace",
+        name: "WsChatRoomWs",
+        class_name: "WsChatRoomWs",
+      },
+      {
+        type: "durable_object_namespace",
+        name: "WsPresenceWs",
+        class_name: "WsPresenceWs",
+      },
     ]);
   });
 });

@@ -17,6 +17,15 @@ interface UploadSessionResponse {
   };
 }
 
+function tryParseJson<T>(text: string): T | null {
+  if (!text.trim()) return null;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Step 1: Create an asset upload session with CF.
  * Sends the asset manifest (path → {hash, size}) and receives a completion JWT
@@ -46,7 +55,11 @@ export async function createAssetUploadSession(
     throw new Error(`asset upload session failed: ${error}`);
   }
 
-  const data = (await response.json()) as UploadSessionResponse;
+  const text = await response.text();
+  const data = tryParseJson<UploadSessionResponse>(text);
+  if (!data?.result?.jwt || !Array.isArray(data.result.buckets)) {
+    throw new Error(`asset upload session returned invalid response: ${text}`);
+  }
   return { jwt: data.result.jwt, buckets: data.result.buckets };
 }
 
@@ -64,7 +77,7 @@ export async function uploadAssetBuckets(
   buckets: string[][],
   assetsByHash: Map<string, AssetEntry>,
 ): Promise<string> {
-  let completionJwt = "";
+  let completionJwt = jwt;
   for (const bucket of buckets) {
     const formData = new FormData();
     for (const hash of bucket) {
@@ -91,8 +104,9 @@ export async function uploadAssetBuckets(
       throw new Error(`asset upload failed: ${error}`);
     }
 
-    const data = (await response.json()) as { result: { jwt?: string } };
-    if (data.result?.jwt) {
+    const text = await response.text();
+    const data = tryParseJson<{ result?: { jwt?: string } }>(text);
+    if (data?.result?.jwt) {
       completionJwt = data.result.jwt;
     }
   }

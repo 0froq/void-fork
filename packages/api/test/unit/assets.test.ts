@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { uploadStaticAssets, deleteUnreferencedAssets } from "../../src/assets";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { deleteUnreferencedAssets, uploadAssetBuckets, uploadStaticAssets } from "../../src/assets";
 
 function createMockKV() {
   const store = new Map<string, ArrayBuffer>();
@@ -49,6 +49,11 @@ function createMockR2() {
 }
 
 const KV_THRESHOLD = 2 * 1024 * 1024; // 2 MB
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("uploadStaticAssets", () => {
   it("uploads small assets to KV and large assets to R2", async () => {
@@ -149,5 +154,61 @@ describe("deleteUnreferencedAssets", () => {
 
     expect(kv.delete).not.toHaveBeenCalled();
     expect(r2.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe("uploadAssetBuckets", () => {
+  it("falls back to the current jwt when Cloudflare returns plain-text success", async () => {
+    const fetchMock = vi.fn(async () => new Response("Assets have already been uploaded."));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const completionJwt = await uploadAssetBuckets(
+      "acct",
+      "api-token",
+      "session-jwt",
+      [["hash1"]],
+      new Map([
+        [
+          "hash1",
+          {
+            blob: new Blob(["hello"]),
+            contentType: "text/plain",
+          },
+        ],
+      ]),
+    );
+
+    expect(completionJwt).toBe("session-jwt");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the returned jwt when Cloudflare responds with JSON", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        result: {
+          jwt: "completion-jwt",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const completionJwt = await uploadAssetBuckets(
+      "acct",
+      "api-token",
+      "session-jwt",
+      [["hash1"]],
+      new Map([
+        [
+          "hash1",
+          {
+            blob: new Blob(["hello"]),
+            contentType: "text/plain",
+          },
+        ],
+      ]),
+    );
+
+    expect(completionJwt).toBe("completion-jwt");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

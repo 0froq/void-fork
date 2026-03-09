@@ -830,6 +830,29 @@ describe("POST /projects/:id/deploy", () => {
     expect(eventNames).toContain("worker_upload");
     expect(eventNames).toContain("worker_upload_done");
   });
+
+  it("tolerates plain-text success responses from Cloudflare asset upload", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "asset-text-test");
+    mockCfApi({
+      assetUpload: () => new Response("Assets have already been uploaded."),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          assets: { "index.html": "<h1>hi</h1>" },
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    expect(events.at(-1)).toMatchObject({ event: "done" });
+  });
 });
 
 describe("Deploy serialization (concurrent deploy guard)", () => {
@@ -1413,6 +1436,77 @@ describe("POST /projects/:id/deploy/preflight", () => {
     expect(capturedMetadata!.observability).toEqual({
       enabled: true,
       logs: { invocation_logs: true, head_sampling_rate: 1 },
+    });
+  });
+
+  it("serializes websocket durable object migrations in Cloudflare upload format", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "ws-migrations-proj");
+
+    let capturedMetadata: Record<string, unknown> | undefined;
+    mockCfApi({
+      uploadWorker: async (_url: string, init?: RequestInit) => {
+        const body = init?.body as FormData;
+        const metadataBlob = body.get("metadata") as Blob;
+        capturedMetadata = JSON.parse(await metadataBlob.text());
+        return new Response("ok", { status: 200 });
+      },
+    });
+
+    const form = buildDeployForm({
+      manifest: {
+        version: 3,
+        bindings: {},
+        websocket: {
+          routes: [
+            {
+              pattern: "/ws/chat/:room",
+              filePath: "routes/ws/chat/[room].ws.ts",
+              className: "WsChatRoomWs",
+              bindingName: "CHAT_ROOM",
+              mode: "room",
+              hasAuthGate: false,
+            },
+          ],
+          classes: ["WsChatRoomWs", "WsPresenceWs"],
+          migrations: [
+            { tag: "ws-v1", newClasses: ["WsChatRoomWs"] },
+            { tag: "ws-v2", newClasses: ["WsPresenceWs"] },
+          ],
+        },
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+
+    expect(capturedMetadata).toBeDefined();
+    expect(capturedMetadata!.bindings).toEqual(
+      expect.arrayContaining([
+        {
+          type: "durable_object_namespace",
+          name: "CHAT_ROOM",
+          class_name: "WsChatRoomWs",
+        },
+        {
+          type: "durable_object_namespace",
+          name: "WsPresenceWs",
+          class_name: "WsPresenceWs",
+        },
+      ]),
+    );
+    expect(capturedMetadata).not.toHaveProperty("durable_objects");
+    expect(capturedMetadata!.migrations).toEqual({
+      new_tag: "ws-v1",
+      steps: [{ new_classes: ["WsChatRoomWs", "WsPresenceWs"] }],
     });
   });
 });

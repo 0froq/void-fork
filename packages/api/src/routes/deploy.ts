@@ -34,6 +34,7 @@ import {
   uploadStaticAssets,
   deleteUnreferencedAssets,
 } from "../assets";
+import type { WebSocketMigrationMeta } from "../types";
 
 const DEFAULT_DISPATCH_NAMESPACE = "void-users";
 const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
@@ -55,6 +56,56 @@ function parseManifest(raw: string | null | undefined): DeployManifest | null {
   } catch {
     return null;
   }
+}
+
+export function buildWebSocketUploadMigrations(migrations: WebSocketMigrationMeta[] | undefined):
+  | {
+      new_tag: string;
+      steps: Array<{
+        new_classes?: string[];
+        deleted_classes?: string[];
+      }>;
+    }
+  | undefined {
+  if (!migrations || migrations.length === 0) return undefined;
+
+  return {
+    new_tag: migrations[migrations.length - 1].tag,
+    steps: migrations.map((migration) => ({
+      ...(migration.newClasses?.length ? { new_classes: migration.newClasses } : {}),
+      ...(migration.deletedClasses?.length ? { deleted_classes: migration.deletedClasses } : {}),
+    })),
+  };
+}
+
+export function buildWebSocketUploadBindings(
+  websocket: DeployManifest["websocket"] | undefined,
+): Array<{
+  type: "durable_object_namespace";
+  name: string;
+  class_name: string;
+}> {
+  if (!websocket) return [];
+
+  const bindings = new Map<string, string>();
+
+  for (const route of websocket.routes) {
+    const bindingName = route.bindingName ?? route.className;
+    bindings.set(bindingName, route.className);
+  }
+
+  const boundClasses = new Set(bindings.values());
+  for (const className of sortUnique(websocket.classes)) {
+    if (!boundClasses.has(className)) {
+      bindings.set(className, className);
+    }
+  }
+
+  return Array.from(bindings, ([name, class_name]) => ({
+    type: "durable_object_namespace",
+    name,
+    class_name,
+  }));
 }
 
 export function enrichWebSocketManifest(
@@ -533,9 +584,11 @@ app.post("/:id/deploy", async (c) => {
           name,
           text,
         }));
+        const websocketBindings = buildWebSocketUploadBindings(manifest.websocket);
         const allBindings = [
           ...plainTextBindings,
           ...workerBindings,
+          ...websocketBindings,
           ...(completionJwt ? [{ name: "ASSETS", type: "assets" }] : []),
         ];
 
@@ -547,30 +600,13 @@ app.post("/:id/deploy", async (c) => {
         }
 
         const assetConfig = manifest.assetConfig ?? { not_found_handling: "none" };
-        const websocketBindings =
-          manifest.websocket?.classes.map((className) => ({
-            name: className,
-            class_name: className,
-          })) ?? [];
+        const websocketMigrations = buildWebSocketUploadMigrations(manifest.websocket?.migrations);
         const metadata: Record<string, unknown> = {
           main_module: manifest.workerMain ?? "index.js",
           compatibility_date: manifest.compatibilityDate ?? "2026-02-12",
           compatibility_flags: manifest.compatibilityFlags ?? ["nodejs_compat"],
           bindings: allBindings,
-          ...(websocketBindings.length > 0
-            ? { durable_objects: { bindings: websocketBindings } }
-            : {}),
-          ...(manifest.websocket?.migrations?.length
-            ? {
-                migrations: manifest.websocket.migrations.map((migration) => ({
-                  tag: migration.tag,
-                  ...(migration.newClasses?.length ? { new_classes: migration.newClasses } : {}),
-                  ...(migration.deletedClasses?.length
-                    ? { deleted_classes: migration.deletedClasses }
-                    : {}),
-                })),
-              }
-            : {}),
+          ...(websocketMigrations ? { migrations: websocketMigrations } : {}),
           ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
           observability: {
             enabled: true,
