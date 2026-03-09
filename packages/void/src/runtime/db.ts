@@ -43,7 +43,6 @@ export {
   max,
 } from "drizzle-orm";
 export type { DrizzleD1Database } from "drizzle-orm/d1";
-export type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
 /**
  * Create a Drizzle D1 instance from a custom D1 binding.

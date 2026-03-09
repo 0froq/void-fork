@@ -212,9 +212,14 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
           const { collectMigrations } = await import("./migrations/collect");
           const migrations = collectMigrations(migrationsDir);
           if (migrations.length > 0) {
-            compileOptions.migrationHandlerPath = resolveFile("void/runtime/migration-handler");
+            const migrationDialect = getDatabaseDialect(readConfig(root));
+            compileOptions.migrationHandlerPath = resolveFile(
+              migrationDialect === "postgresql"
+                ? "void/runtime/migration-handler-pg"
+                : "void/runtime/migration-handler",
+            );
             compileOptions.migrations = migrations;
-            compileOptions.migrationDialect = getDatabaseDialect(readConfig(root));
+            compileOptions.migrationDialect = migrationDialect;
           }
         }
       }

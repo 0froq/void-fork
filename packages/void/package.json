@@ -102,6 +102,10 @@
       "types": "./dist/runtime/migration-handler.d.mts",
       "import": "./dist/runtime/migration-handler.mjs"
     },
+    "./runtime/migration-handler-pg": {
+      "types": "./dist/runtime/migration-handler-pg.d.mts",
+      "import": "./dist/runtime/migration-handler-pg.mjs"
+    },
     "./runtime/ws-server": {
       "types": "./dist/runtime/ws-server.d.mts",
       "import": "./dist/runtime/ws-server.mjs"
@@ -144,6 +148,10 @@
     "./_db": {
       "types": "./dist/runtime/db.d.mts",
       "import": "./dist/runtime/db.mjs"
+    },
+    "./_db-pg": {
+      "types": "./dist/runtime/db-pg.d.mts",
+      "import": "./dist/runtime/db-pg.mjs"
     },
     "./vue": {
       "types": "./dist/runtime/vue.d.mts",
