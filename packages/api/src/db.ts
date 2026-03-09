@@ -230,6 +230,14 @@ export async function getProjectDeployments(
     .limit(limit);
 }
 
+export async function getAllProjectDeployments(db: Db, projectId: string): Promise<Deployment[]> {
+  return db
+    .select()
+    .from(deployments)
+    .where(eq(deployments.project_id, projectId))
+    .orderBy(desc(deployments.created_at));
+}
+
 export async function getAllDeploymentsWithProject(
   db: Db,
   limit: number,

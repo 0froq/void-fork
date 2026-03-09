@@ -12,6 +12,7 @@ import {
   getQueueByName,
 } from "./cloudflare-api";
 import { hmacSignState } from "../auth/hmac";
+import { getProjectQueueName } from "../naming";
 
 export interface WorkerBinding {
   type: "d1" | "kv_namespace" | "r2_bucket" | "queue" | "service" | "plain_text" | "hyperdrive";
@@ -64,7 +65,7 @@ export async function provisionBindings(
   }
 
   for (const q of manifest.queues ?? []) {
-    const queueName = `${projectId}-${q.name}`.toLowerCase().replaceAll("_", "-");
+    const queueName = getProjectQueueName(projectId, q.name);
     tasks.push(
       ensureResource(db, accountId, apiToken, projectId, "queue", q.name, existing).then(
         (r): WorkerBinding => ({

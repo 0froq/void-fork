@@ -17,6 +17,7 @@ import { queryD1 } from "../migrations/remote-runner";
 import { buildRoutingJson, buildStaticRoutingJson } from "../routing";
 import { getPlanLimits } from "../tiers";
 import type { DeployManifest } from "../types";
+import { getProjectDeploymentWorkerName, getProjectQueueName } from "../naming";
 
 const app = new Hono<ApiEnv>()
 
@@ -150,7 +151,7 @@ const app = new Hono<ApiEnv>()
     const migrationDiff = currentMigrations.filter((m) => !targetMigrations.includes(m));
 
     // Build routing JSON from target deployment's manifest
-    const workerName = `user-${project.slug}-${target.id}`;
+    const workerName = getProjectDeploymentWorkerName(project.slug, target.id);
     const user = await getUser(c.get("db"), project.user_id);
     const planLimits = getPlanLimits(user?.plan ?? "free");
     const manifest: DeployManifest | null = target.manifest ? JSON.parse(target.manifest) : null;
@@ -211,11 +212,11 @@ const app = new Hono<ApiEnv>()
       const projectResources = await getProjectResources(c.get("db"), projectId);
       for (const q of manifest.queues) {
         const queueResource = projectResources.find(
-          (r) => r.type === "queue" && r.binding_name === q.bindingName,
+          (r) => r.type === "queue" && r.binding_name === q.name,
         );
         if (queueResource) {
           await c.env.ROUTING.put(
-            `queue:${queueResource.cf_id}`,
+            `queue:${getProjectQueueName(projectId, q.name)}`,
             JSON.stringify({ workerName, projectId, queueName: q.name }),
           );
         }

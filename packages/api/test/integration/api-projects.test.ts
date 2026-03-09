@@ -16,7 +16,7 @@ import {
   setActiveDeployment,
   setAppliedMigrations,
 } from "../../src/db";
-import { domains } from "../../src/schema";
+import { domains, resources } from "../../src/schema";
 
 let env: TestEnv;
 
@@ -505,6 +505,59 @@ describe("POST /projects/:id/rollback", () => {
       workerName: string;
     };
     expect(domainRouting.workerName).toBe(`user-domain-roll-${d1.id}`);
+  });
+
+  it("updates queue KV entries on rollback using deterministic queue names", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "queue-roll");
+    const queueRoutingKey = `queue:${project.id.replaceAll("_", "-")}-emails`;
+
+    await env.db.insert(resources).values({
+      id: "res_queue_roll",
+      project_id: project.id,
+      type: "queue",
+      cf_id: "25832cb0ce3d4f60b1e538911a4629f4",
+      binding_name: "emails",
+    });
+
+    const manifest = JSON.stringify({
+      version: 3,
+      bindings: {},
+      queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
+    });
+
+    const d1 = await createDeployment(env.db, project.id, manifest);
+    await updateDeploymentStatus(env.db, d1.id, "live");
+    await markDeploymentRetained(env.db, d1.id, true);
+
+    const d2 = await createDeployment(env.db, project.id, manifest);
+    await updateDeploymentStatus(env.db, d2.id, "live");
+    await markDeploymentRetained(env.db, d2.id, true);
+    await setActiveDeployment(env.db, project.id, d2.id);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ deploymentId: d1.id }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const queueRouting = (await env.ROUTING.get(queueRoutingKey, "json")) as {
+      workerName: string;
+      projectId: string;
+      queueName: string;
+    };
+    expect(queueRouting).toEqual({
+      workerName: `user-queue-roll-${d1.id}`,
+      projectId: project.id,
+      queueName: "emails",
+    });
   });
 });
 

@@ -219,14 +219,35 @@ describe("DELETE /projects/:id", () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "queue-app");
     const fetchMock = mockCfApi();
+    const queueRoutingKey = `queue:${project.id.replaceAll("_", "-")}-demo-queue`;
 
     // Add a queue resource
-    await addResource(project.id, "queue", "queue-cf-id-123", "MY_QUEUE");
+    await addResource(project.id, "queue", "25832cb0ce3d4f60b1e538911a4629f4", "demo-queue");
+    await env.db.insert(deployments).values([
+      {
+        id: "dpl_active",
+        project_id: project.id,
+        status: "live",
+      },
+      {
+        id: "dpl_failed",
+        project_id: project.id,
+        status: "failed",
+      },
+    ]);
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: "dpl_active" })
+      .where(eq(projects.id, project.id));
 
     // Add queue routing KV entry (as deploy would)
     await env.ROUTING.put(
-      "queue:queue-cf-id-123",
-      JSON.stringify({ workerName: "user-queue-app", projectId: project.id, queueName: "tasks" }),
+      queueRoutingKey,
+      JSON.stringify({
+        workerName: "user-queue-app-dpl_active",
+        projectId: project.id,
+        queueName: "demo-queue",
+      }),
     );
 
     const res = await app.fetch(
@@ -242,13 +263,48 @@ describe("DELETE /projects/:id", () => {
     const deleteQueueCall = fetchMock.mock.calls.find((call: unknown[]) => {
       const url = typeof call[0] === "string" ? call[0] : String(call[0]);
       return (
-        url.includes("/queues/queue-cf-id-123") && (call[1] as RequestInit)?.method === "DELETE"
+        url.includes("/queues/25832cb0ce3d4f60b1e538911a4629f4") &&
+        (call[1] as RequestInit)?.method === "DELETE"
       );
     });
     expect(deleteQueueCall).toBeDefined();
 
+    const workerDeleteCalls = fetchMock.mock.calls.filter((call: unknown[]) => {
+      const url = typeof call[0] === "string" ? call[0] : String(call[0]);
+      return url.includes("/workers/dispatch/") && (call[1] as RequestInit)?.method === "DELETE";
+    });
+    const deletedWorkers = workerDeleteCalls.map((call: unknown[]) => {
+      const url = typeof call[0] === "string" ? call[0] : String(call[0]);
+      return url.split("/scripts/")[1];
+    });
+    expect(deletedWorkers).toEqual(
+      expect.arrayContaining([
+        "user-queue-app",
+        "user-queue-app-dpl_active",
+        "user-queue-app-dpl_failed",
+      ]),
+    );
+
+    const queueDeleteIndex = fetchMock.mock.calls.findIndex((call: unknown[]) => {
+      const url = typeof call[0] === "string" ? call[0] : String(call[0]);
+      return (
+        url.includes("/queues/25832cb0ce3d4f60b1e538911a4629f4") &&
+        (call[1] as RequestInit)?.method === "DELETE"
+      );
+    });
+    for (const workerName of ["user-queue-app-dpl_active", "user-queue-app-dpl_failed"]) {
+      const workerDeleteIndex = fetchMock.mock.calls.findIndex((call: unknown[]) => {
+        const url = typeof call[0] === "string" ? call[0] : String(call[0]);
+        return (
+          url.includes(`/scripts/${workerName}`) && (call[1] as RequestInit)?.method === "DELETE"
+        );
+      });
+      expect(workerDeleteIndex).toBeGreaterThanOrEqual(0);
+      expect(workerDeleteIndex).toBeLessThan(queueDeleteIndex);
+    }
+
     // Verify queue routing KV entry is removed
-    const routing = await env.ROUTING.get("queue:queue-cf-id-123");
+    const routing = await env.ROUTING.get(queueRoutingKey);
     expect(routing).toBeNull();
 
     // Verify DB records are gone
@@ -259,7 +315,7 @@ describe("DELETE /projects/:id", () => {
     expect(dbResources).toHaveLength(0);
   });
 
-  it("calls worker dispatch deletion", async () => {
+  it("deletes the legacy worker name for older projects", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "worker-del");
     const fetchMock = mockCfApi();
@@ -273,7 +329,7 @@ describe("DELETE /projects/:id", () => {
     );
     expect(res.status).toBe(200);
 
-    // Find the worker delete call
+    // Find the legacy worker delete call
     const deleteWorkerCall = fetchMock.mock.calls.find((call: unknown[]) => {
       const url = typeof call[0] === "string" ? call[0] : String(call[0]);
       return (
