@@ -31,18 +31,6 @@
       "types": "./dist/runtime/auth.d.mts",
       "import": "./dist/runtime/auth.mjs"
     },
-    "./auth/session": {
-      "types": "./dist/auth/session.d.mts",
-      "import": "./dist/auth/session.mjs"
-    },
-    "./auth/password": {
-      "types": "./dist/auth/password.d.mts",
-      "import": "./dist/auth/password.mjs"
-    },
-    "./auth/schema": {
-      "types": "./dist/auth/schema.d.mts",
-      "import": "./dist/auth/schema.mjs"
-    },
     "./validator": {
       "types": "./dist/runtime/validator.d.mts",
       "import": "./dist/runtime/validator.mjs"
@@ -53,6 +41,14 @@
     "./client": {
       "types": "./dist/runtime/client.d.mts",
       "import": "./dist/runtime/client.mjs"
+    },
+    "./runtime/fetch": {
+      "types": "./dist/runtime/fetch.d.mts",
+      "import": "./dist/runtime/fetch.mjs"
+    },
+    "./runtime/fetch-stream": {
+      "types": "./dist/runtime/fetch-stream.d.mts",
+      "import": "./dist/runtime/fetch-stream.mjs"
     },
     "./ws": {
       "types": "./dist/runtime/ws.d.mts",
@@ -182,6 +178,7 @@
     "@cloudflare/workers-types": "catalog:",
     "@hono/oauth-providers": "^0.8.5",
     "@napi-rs/keyring": "1.2.0",
+    "better-auth": "^1.5.4",
     "better-sqlite3": "^12.6.2",
     "drizzle-kit": "^0.31.9",
     "drizzle-orm": "^0.45.1",

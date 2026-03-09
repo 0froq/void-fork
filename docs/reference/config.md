@@ -12,6 +12,9 @@ All project-level configuration lives in a `void.json` file at the project root.
 {
   "$schema": "./node_modules/void/schema.json",
   "target": "cloudflare",
+  "auth": {
+    "providers": ["email", "github", "google"]
+  },
   "routing": {
     "revalidate": { "/": 60, "*": 30 },
     "headers": {
@@ -20,7 +23,6 @@ All project-level configuration lives in a `void.json` file at the project root.
     }
   },
   "inference": {
-    "auth": ["github", "google", "email"],
     "bindings": { "db": true, "kv": false },
     "appType": "spa",
     "outputDir": "dist"
@@ -115,21 +117,25 @@ Paths to prerender as static HTML at deploy time. Each path must start with `/`.
 }
 ```
 
+### `auth`
+
+High-level Better Auth configuration.
+
+Use `auth.providers` to select which built-in auth providers Void should enable by default. Include `"email"` for email/password auth. Social providers read credentials from `AUTH_<PROVIDER>_CLIENT_ID` and `AUTH_<PROVIDER>_CLIENT_SECRET`.
+
+```json
+{
+  "auth": {
+    "providers": ["email", "github", "google", "discord"]
+  }
+}
+```
+
+If `auth` is omitted but auth is active via imports, Void enables email/password only. For provider-specific options, scopes, plugins, or custom OAuth flows, use a root `auth.ts` with `defineAuth(...)`.
+
 ### `inference`
 
 Configuration for build-time inference — how Void detects your app type, bindings, and build process.
-
-#### `inference.auth`
-
-Enable built-in auth routes and session management.
-
-- `true` — enables email-only auth.
-- An array of providers (`"github"`, `"google"`, `"email"`) — enables specific providers.
-- `false` or omitted — disables auth entirely.
-
-```json
-{ "inference": { "auth": ["github", "email"] } }
-```
 
 #### `inference.bindings`
 
@@ -208,7 +214,7 @@ Use remote D1/KV/R2 bindings during local development instead of local miniflare
 
 - Must be logged in (`void auth login`)
 - Must have a linked project (`void project link`)
-- Only affects D1 (`DB`), KV (`KV`, `AUTH_KV`), and R2 (`STORAGE`) bindings
+- Only affects D1 (`DB`), KV (`KV`), and R2 (`STORAGE`) bindings
 
 You can also enable remote mode via the `VOID_REMOTE=1` environment variable without modifying `void.json`:
 

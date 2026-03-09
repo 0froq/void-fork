@@ -135,30 +135,27 @@ export function collectPrerenderWorkerModules(
   workerMain: string,
 ): PrerenderWorkerModule[] {
   const normalizedEntry = normalizeWorkerModulePath(workerMain);
-  const modules = collectFiles(workerDir)
-    .map((filePath) => {
-      const relativePath = normalizeWorkerModulePath(relative(workerDir, filePath));
-      const type = resolveWorkerModuleType(relativePath);
-      if (!type) return null;
+  type CollectedPrerenderWorkerModule = PrerenderWorkerModule & {
+    relativePath: string;
+  };
 
-      const file = readFileSync(filePath);
-      const contents =
-        type === "CompiledWasm" || type === "Data" ? new Uint8Array(file) : file.toString("utf-8");
+  const modules: CollectedPrerenderWorkerModule[] = collectFiles(workerDir).flatMap((filePath) => {
+    const relativePath = normalizeWorkerModulePath(relative(workerDir, filePath));
+    const type = resolveWorkerModuleType(relativePath);
+    if (!type) return [];
 
-      return { path: filePath, relativePath, type, contents };
-    })
-    .filter(
-      (
-        module,
-      ): module is PrerenderWorkerModule & {
-        relativePath: string;
-      } => module !== null,
-    )
-    .sort((a, b) => {
-      if (a.relativePath === normalizedEntry) return -1;
-      if (b.relativePath === normalizedEntry) return 1;
-      return a.relativePath.localeCompare(b.relativePath);
-    });
+    const file = readFileSync(filePath);
+    const contents: PrerenderWorkerModule["contents"] =
+      type === "CompiledWasm" || type === "Data" ? new Uint8Array(file) : file.toString("utf-8");
+
+    return [{ path: filePath, relativePath, type, contents }];
+  });
+
+  modules.sort((a, b) => {
+    if (a.relativePath === normalizedEntry) return -1;
+    if (b.relativePath === normalizedEntry) return 1;
+    return a.relativePath.localeCompare(b.relativePath);
+  });
 
   if (!modules.some((module) => module.relativePath === normalizedEntry)) {
     throw new Error(`[void] worker entry "${normalizedEntry}" not found in ${workerDir}`);

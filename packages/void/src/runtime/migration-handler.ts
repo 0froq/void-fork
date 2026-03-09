@@ -18,8 +18,9 @@ export interface MigrationResponse {
 
 export function createMigrationHandler(
   env: Record<string, unknown>,
-  migrations: MigrationEntry[],
+  migrations: MigrationEntry[] | undefined,
   _dialect: "sqlite" | "postgresql",
+  runAuthMigrations?: () => Promise<void>,
 ) {
   return async (request: Request): Promise<Response> => {
     const token = request.headers.get("x-void-internal");
@@ -40,7 +41,10 @@ export function createMigrationHandler(
           { status: 500 },
         );
       }
-      const result = await runD1Migrations(db, migrations);
+      const result = await runD1Migrations(db, migrations ?? []);
+      if (result.ok && runAuthMigrations) {
+        await runAuthMigrations();
+      }
       return Response.json(result);
     } catch (err) {
       return Response.json(

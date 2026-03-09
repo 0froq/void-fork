@@ -1,0 +1,67 @@
+import { describe, expect, it } from "vitest";
+import { resolveVoidAuthOptions } from "../../src/runtime/better-auth";
+
+describe("resolveVoidAuthOptions", () => {
+  it("defaults to email auth when no providers are configured", async () => {
+    const { options } = await resolveVoidAuthOptions(
+      new Request("https://example.com/api/auth"),
+      {
+        BETTER_AUTH_SECRET: "secret",
+      },
+      {
+        dialect: "sqlite",
+        providers: null,
+      },
+      {} as never,
+    );
+
+    expect(options.emailAndPassword).toEqual({ enabled: true });
+    expect(options.socialProviders).toBeUndefined();
+  });
+
+  it("resolves configured social providers from standardized env vars", async () => {
+    const { options } = await resolveVoidAuthOptions(
+      new Request("https://example.com/api/auth"),
+      {
+        BETTER_AUTH_SECRET: "secret",
+        AUTH_DISCORD_CLIENT_ID: "discord-id",
+        AUTH_DISCORD_CLIENT_SECRET: "discord-secret",
+        AUTH_GITHUB_CLIENT_ID: "github-id",
+        AUTH_GITHUB_CLIENT_SECRET: "github-secret",
+      },
+      {
+        dialect: "sqlite",
+        providers: ["email", "discord", "github"],
+      },
+      {} as never,
+    );
+
+    expect(options.emailAndPassword).toEqual({ enabled: true });
+    expect(options.socialProviders).toEqual({
+      discord: {
+        clientId: "discord-id",
+        clientSecret: "discord-secret",
+      },
+      github: {
+        clientId: "github-id",
+        clientSecret: "github-secret",
+      },
+    });
+  });
+
+  it("throws when a configured provider is missing env credentials", async () => {
+    await expect(
+      resolveVoidAuthOptions(
+        new Request("https://example.com/api/auth"),
+        {
+          BETTER_AUTH_SECRET: "secret",
+        },
+        {
+          dialect: "sqlite",
+          providers: ["google"],
+        },
+        {} as never,
+      ),
+    ).rejects.toThrow('Missing auth credentials for provider "google"');
+  });
+});

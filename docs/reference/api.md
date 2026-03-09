@@ -236,6 +236,57 @@ function defineHead<P = Record<string, unknown>>(
 
 Imported from `"void"` or `"void/auth"`. Client-side helpers imported from `"void/client"`.
 
+### `defineAuth(config)`
+
+Advanced escape hatch for customizing Void's Better Auth config.
+
+```ts
+import { defineAuth } from "void/auth";
+
+export default defineAuth(({ defaults }) => ({
+  ...defaults,
+  trustedOrigins: ["https://example.com"],
+}));
+```
+
+**Signature:**
+
+```ts
+function defineAuth(config: VoidAuthConfig): VoidAuthConfig;
+```
+
+### `getUser()`
+
+Returns the current authenticated user from AsyncLocalStorage, or `null` when no user is present.
+
+```ts
+import { getUser } from "void/auth";
+
+const user = getUser();
+```
+
+**Signature:**
+
+```ts
+function getUser(): AuthUser | null;
+```
+
+### `getSession()`
+
+Returns the current Better Auth request state, or `null`.
+
+```ts
+import { getSession } from "void/auth";
+
+const state = getSession();
+```
+
+**Signature:**
+
+```ts
+function getSession(): AuthState | null;
+```
+
 ### `requireAuth(c)`
 
 Extracts the authenticated user from the request context. Throws a 401 `HTTPException` if no session is present.
@@ -256,114 +307,72 @@ export const GET = defineHandler((c) => {
 function requireAuth(c: CloudContext): AuthUser;
 ```
 
-**Type: `AuthUser`**
+### `AuthUser`
+
+Better Auth user shape re-exported by Void.
 
 ```ts
 interface AuthUser {
   id: string;
-  provider: string; // "email", "github", or "google"
-  email: string | null;
-  name: string | null;
-  avatar_url: string | null;
+  email: string;
+  emailVerified: boolean;
+  name: string;
+  image?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 ```
 
-### `AuthClient`
+### `AuthSession`
 
-Client-side helpers for Void's built-in [authentication](../guide/auth.md). Imported from `"void/client"`. Handles JSON serialization and cookie sessions automatically.
+Better Auth session shape re-exported by Void.
+
+```ts
+interface AuthSession {
+  id: string;
+  token: string;
+  userId: string;
+  expiresAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+```
+
+### `AuthState`
+
+Combined authenticated request state:
+
+```ts
+interface AuthState {
+  user: AuthUser;
+  session: AuthSession;
+}
+```
+
+### `auth`
+
+Imported from `"void/client"`. This is a ready-to-use Better Auth client instance preconfigured with `basePath: "/api/auth"`.
 
 ```ts
 import { auth } from "void/client";
+
+await auth.signIn.email({ email, password });
+await auth.signOut();
 ```
 
-#### `auth.register(input)`
+The exact client methods come from Better Auth. In pages apps, Void automatically chooses the framework-specific Better Auth client package when available.
 
-Create a new email/password account. Sets the session cookie on success.
+### `createAuthClient`
+
+Imported from `"void/client"`. Re-export of Better Auth's `createAuthClient` for advanced usage.
 
 ```ts
-const user = await auth.register({
-  email: "alice@example.com",
-  password: "s3cret",
-  name: "Alice",
-});
+import { createAuthClient } from "void/client";
+
+const auth = createAuthClient({ basePath: "/api/auth" });
 ```
-
-**Signature:**
-
-```ts
-register(input: { email: string; password: string; name?: string }): Promise<AuthUser>;
-```
-
-#### `auth.login(input)`
-
-Sign in with email and password. Sets the session cookie on success.
-
-```ts
-const user = await auth.login({
-  email: "alice@example.com",
-  password: "s3cret",
-});
-```
-
-**Signature:**
-
-```ts
-login(input: { email: string; password: string }): Promise<AuthUser>;
-```
-
-#### `auth.me()`
-
-Return the current user, or `null` if not authenticated.
-
-```ts
-const user = await auth.me();
-```
-
-**Signature:**
-
-```ts
-me(): Promise<AuthUser | null>;
-```
-
-#### `auth.logout()`
-
-Sign out and clear the session cookie.
-
-```ts
-await auth.logout();
-```
-
-**Signature:**
-
-```ts
-logout(): Promise<void>;
-```
-
-### `AuthError`
-
-Error class thrown by `auth` client helpers on non-2xx responses.
-
-```ts
-import { auth, AuthError } from "void/client";
-
-try {
-  await auth.login({ email, password });
-} catch (e) {
-  if (e instanceof AuthError) {
-    console.log(e.status); // 401
-    console.log(e.message); // "Invalid credentials"
-    console.log(e.data); // raw response body
-  }
-}
-```
-
-**Properties:**
-
-| Property  | Type      | Description                                                       |
-| --------- | --------- | ----------------------------------------------------------------- |
-| `status`  | `number`  | HTTP status code                                                  |
-| `message` | `string`  | Extracted from `error` field in response body, or generic message |
-| `data`    | `unknown` | Full parsed response body                                         |
 
 ## Fetch Client
 
@@ -513,7 +522,6 @@ interface CloudEnv extends Env {
     DB: D1Database;
     KV: KVNamespace;
     STORAGE: R2Bucket;
-    AUTH_KV: KVNamespace;
     [key: string]: unknown;
   };
   Variables: CloudContextVariables;
@@ -527,6 +535,7 @@ The context variables type used by `c.set()` / `c.get()`. Augment this interface
 ```ts
 interface CloudContextVariables {
   user: AuthUser | null;
+  session: AuthSession | null;
   [key: string]: unknown;
 }
 ```
@@ -719,8 +728,8 @@ Imported from `"void/svelte"`.
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `void`           | `voidPlugin` named export + all handler/type re-exports                                                                                                          |
 | `void/handler`   | `defineHandler`, `defineMiddleware`, `defineScheduled`, `defineQueue`, `defineRender`, `defineHead`, types                                                       |
-| `void/auth`      | `requireAuth`, `AuthUser`                                                                                                                                        |
-| `void/client`    | `fetch`, `FetchError`, `auth`, `AuthError`, `AuthUser`                                                                                                           |
+| `void/auth`      | `defineAuth`, `getUser`, `getSession`, `requireAuth`, `AuthUser`, `AuthSession`, `AuthState`                                                                     |
+| `void/client`    | `fetch`, `fetchStream`, `FetchError`, `auth`, `createAuthClient`, `AuthUser`, `AuthSession`, `AuthState`                                                         |
 | `void/ws`        | `defineRoom`, `defineWebSocket`, `connect`, WebSocket context and connection types                                                                               |
 | `void/response`  | `convertReturnValue`                                                                                                                                             |
 | `void/validator` | `runValidation`, `ValidatorSlots`, `HandlerInput`                                                                                                                |

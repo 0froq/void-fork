@@ -49,9 +49,9 @@ describe("inferProjectBindings", () => {
     writeFileSync(
       join(root, "src", "App.tsx"),
       `
-      import { auth, AuthError } from "void/client";
+      import { auth } from "void/client";
       export default function App() {
-        auth.me();
+        auth.signIn;
       }
       `,
     );
