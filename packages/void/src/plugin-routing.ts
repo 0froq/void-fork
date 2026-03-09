@@ -101,6 +101,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     honoPath: resolveFile("hono"),
     responsePath: resolveFile("void/response"),
     runtimeEnvPath: resolveFile("void/_env"),
+    webSocketRuntimePath: resolveFile("void/runtime/ws-server"),
     reactRefresh: false,
     auth: null,
     nodeTarget: !!options.target,
@@ -198,6 +199,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     async buildStart() {
       resolveAuthCompileOptions();
       await rescan();
+      if (options.target && (scan?.websockets?.length ?? 0) > 0) {
+        throw new Error("WebSocket routes require the default Cloudflare target.");
+      }
       writeRouteTypes();
       writeQueueTypes();
 
@@ -224,7 +228,12 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       } else {
         writeFileSync(
           join(outDir, "entry.ts"),
-          compileWorkerEntry(scan!.queues.length > 0, remote, resolvedConfig?.build.assetsDir),
+          compileWorkerEntry(
+            scan!.queues.length > 0,
+            remote,
+            resolvedConfig?.build.assetsDir,
+            (scan!.websockets ?? []).map((route) => route.className),
+          ),
         );
       }
     },
@@ -312,7 +321,12 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         } else {
           writeFileSync(
             join(outDir, "entry.ts"),
-            compileWorkerEntry(scan!.queues.length > 0, remote, resolvedConfig?.build.assetsDir),
+            compileWorkerEntry(
+              scan!.queues.length > 0,
+              remote,
+              resolvedConfig?.build.assetsDir,
+              (scan!.websockets ?? []).map((route) => route.className),
+            ),
           );
         }
 

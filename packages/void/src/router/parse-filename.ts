@@ -16,18 +16,7 @@ export interface RouteDefinition {
 const EXTENSIONS = [".ts", ".mts", ".js", ".mjs"];
 const ENV_SUFFIXES = ["dev", "prod"];
 
-/**
- * Parse a route filename (relative to routes/) into a RouteDefinition.
- *
- * Rules (applied in order):
- * 1. Strip file extension (.ts, .js, .mts, .mjs)
- * 2. Check for env suffix (.dev, .prod) → strip and record
- * 3. Strip trailing "index" segment
- * 4. Remove route group directories: (groupname)
- * 5. Convert [param] → :param, [...param] → **:param, [...] → **
- * 6. Prefix with /
- */
-export function parseRouteFilename(relativePath: string): RouteDefinition {
+function parsePath(relativePath: string, isWebSocketRoute: boolean): RouteDefinition {
   const filePath = relativePath;
 
   // Normalize path separators
@@ -39,6 +28,11 @@ export function parseRouteFilename(relativePath: string): RouteDefinition {
       path = path.slice(0, -ext.length);
       break;
     }
+  }
+
+  // 1b. Strip .ws segment for WebSocket routes
+  if (isWebSocketRoute && path.endsWith(".ws")) {
+    path = path.slice(0, -3);
   }
 
   // Split into segments for processing
@@ -101,4 +95,24 @@ export function parseRouteFilename(relativePath: string): RouteDefinition {
     env,
     filePath,
   };
+}
+
+/**
+ * Parse a route filename (relative to routes/) into a RouteDefinition.
+ *
+ * Rules (applied in order):
+ * 1. Strip file extension (.ts, .js, .mts, .mjs)
+ * 2. Check for env suffix (.dev, .prod) → strip and record
+ * 3. Strip trailing "index" segment
+ * 4. Remove route group directories: (groupname)
+ * 5. Convert [param] → :param, [...param] → **:param, [...] → **
+ * 6. Prefix with /
+ */
+export function parseRouteFilename(relativePath: string): RouteDefinition {
+  return parsePath(relativePath, false);
+}
+
+/** Parse a `.ws.*` route filename into a regular route definition. */
+export function parseWebSocketFilename(relativePath: string): RouteDefinition {
+  return parsePath(relativePath, true);
 }

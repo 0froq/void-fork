@@ -47,7 +47,7 @@ Deploy target runtime. Defaults to `"cloudflare"`.
 | `"bun"`        | Bun — uses `Bun.serve()`                              |
 | `"deno"`       | Deno — uses `Deno.serve()`                            |
 
-Non-CF targets disable CF bindings (`void/db`, `void/kv`, `void/auth`, `void/storage`, `void/ai`, `void/env`). Importing any of these with a non-CF target produces a compile-time error. File-based routing, middleware, and `void/client` all work normally.
+Non-CF targets disable CF bindings (`void/db`, `void/kv`, `void/auth`, `void/storage`, `void/ai`, `void/env`, `void/ws`). Importing any of these with a non-CF target produces a compile-time error. File-based routing, middleware, and `void/client` all work normally.
 
 ```json
 { "target": "node" }

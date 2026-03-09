@@ -54,6 +54,10 @@
       "types": "./dist/runtime/client.d.mts",
       "import": "./dist/runtime/client.mjs"
     },
+    "./ws": {
+      "types": "./dist/runtime/ws.d.mts",
+      "import": "./dist/runtime/ws.mjs"
+    },
     "./db": {
       "types": "./dist/runtime/db.d.mts",
       "import": "./dist/runtime/db.mjs"
@@ -97,6 +101,10 @@
     "./runtime/migration-handler": {
       "types": "./dist/runtime/migration-handler.d.mts",
       "import": "./dist/runtime/migration-handler.mjs"
+    },
+    "./runtime/ws-server": {
+      "types": "./dist/runtime/ws-server.d.mts",
+      "import": "./dist/runtime/ws-server.mjs"
     },
     "./pages": {
       "types": "./dist/pages/index.d.mts",

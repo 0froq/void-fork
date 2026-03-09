@@ -11,6 +11,7 @@ const testOptions = {
   honoPath: "/resolved/hono/index.mjs",
   responsePath: "/resolved/void/runtime/response.mjs",
   runtimeEnvPath: "/resolved/void/runtime/env.mjs",
+  webSocketRuntimePath: "/resolved/void/runtime/ws-server.mjs",
   reactRefresh: true,
   auth: null,
 };
@@ -277,6 +278,48 @@ describe("compileRouteTable", () => {
 
     expect(code).not.toContain("/__queue");
   });
+
+  it("generates websocket durable object exports and proxy routes", () => {
+    const scan: ScanResult = {
+      routes: [],
+      websockets: [
+        {
+          pattern: "/chat/:room",
+          methods: [],
+          params: ["room"],
+          catchAll: false,
+          env: null,
+          filePath: "chat/[room].ws.ts",
+          className: "ChatRoomWs",
+          bindingName: "ChatRoomWs",
+          mode: "room",
+          hasAuthGate: true,
+        },
+      ],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: { pages: [], layouts: [], namedLayouts: [] },
+    };
+
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/crons",
+      "/queues",
+      null,
+      testOptions,
+    );
+
+    expect(code).toContain('import websocket0 from "/routes/chat/[room].ws.ts"');
+    expect(code).toContain("createWebSocketDurableObject");
+    expect(code).toContain("export const ChatRoomWs = __createWebSocketDurableObject");
+    expect(code).toContain('const __voidWebSocketRoutes = [{"pattern":"/chat/:room"');
+    expect(code).toContain("export async function __voidHandleWebSocket(request, env)");
+    expect(code).toContain('app.all("/chat/:room"');
+    expect(code).toContain("__forwardWebSocketRequest");
+  });
 });
 
 describe("compileWorkerEntry", () => {
@@ -284,11 +327,21 @@ describe("compileWorkerEntry", () => {
     const code = compileWorkerEntry();
 
     expect(code).toContain(
-      "import app, { scheduled, __voidCollectPrerenderPaths } from 'virtual:void-routes'",
+      "import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket } from 'virtual:void-routes'",
     );
     expect(code).toContain("serveWithAssets");
     expect(code).toContain("export default { fetch:");
     expect(code).not.toContain("queue");
+  });
+
+  it("re-exports websocket classes when present", () => {
+    const code = compileWorkerEntry(false, undefined, "assets", ["ChatRoomWs"]);
+
+    expect(code).toContain(
+      "import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket, ChatRoomWs } from 'virtual:void-routes'",
+    );
+    expect(code).toContain("export { ChatRoomWs };");
+    expect(code).toContain("const ws = await __voidHandleWebSocket(request, env);");
   });
 
   it("generates queue() export in worker entry when hasQueues=true", () => {

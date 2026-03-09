@@ -10,7 +10,9 @@ import type {
   QueueMeta,
   RedirectRule,
   ScheduleMeta,
+  WebSocketManifestMeta,
 } from "./types";
+import type { WebSocketRouteDefinition } from "../router/websocket";
 
 /**
  * Compute a CF-compatible asset hash: SHA-256, first 32 hex chars.
@@ -90,6 +92,22 @@ export interface PackageOptions {
   compatibilityFlags?: string[];
 }
 
+function toWebSocketManifest(
+  routes: WebSocketRouteDefinition[] | undefined,
+): WebSocketManifestMeta | undefined {
+  if (!routes || routes.length === 0) return undefined;
+  return {
+    routes: routes.map((route) => ({
+      pattern: route.pattern,
+      filePath: route.filePath,
+      className: route.className,
+      mode: route.mode,
+      hasAuthGate: route.hasAuthGate,
+    })),
+    classes: routes.map((route) => route.className),
+  };
+}
+
 export function packageBuild(
   distDir: string,
   workerDirName: string,
@@ -109,6 +127,7 @@ export function packageBuild(
   headerRules?: HeaderRule[],
   redirectRules?: RedirectRule[],
   dialect?: "sqlite" | "postgresql",
+  webSockets?: WebSocketRouteDefinition[],
 ): FormData {
   const formData = new FormData();
 
@@ -194,6 +213,11 @@ export function packageBuild(
 
   if (redirectRules && redirectRules.length > 0) {
     manifest.redirectRules = redirectRules;
+  }
+
+  const websocketManifest = toWebSocketManifest(webSockets);
+  if (websocketManifest) {
+    manifest.websocket = websocketManifest;
   }
 
   formData.append("manifest", JSON.stringify(manifest));
@@ -303,6 +327,7 @@ export function packageFrameworkBuild(opts: {
   headerRules?: HeaderRule[];
   redirectRules?: RedirectRule[];
   dialect?: "sqlite" | "postgresql";
+  webSockets?: WebSocketRouteDefinition[];
 }): FormData {
   const formData = new FormData();
   const po = opts.packageOptions;
@@ -360,6 +385,11 @@ export function packageFrameworkBuild(opts: {
 
   if (opts.redirectRules && opts.redirectRules.length > 0) {
     manifest.redirectRules = opts.redirectRules;
+  }
+
+  const websocketManifest = toWebSocketManifest(opts.webSockets);
+  if (websocketManifest) {
+    manifest.websocket = websocketManifest;
   }
 
   formData.append("manifest", JSON.stringify(manifest));

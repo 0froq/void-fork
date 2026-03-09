@@ -14,7 +14,7 @@ voidPlugin() → [routingPlugin, migrationPlugin, cloudflare({...inferredBinding
 voidPlugin() → [routingPlugin, prerenderPlugin, nodeTargetPlugin()]
 ```
 
-Non-CF targets disable CF-only bindings (`void/db`, `void/kv`, `void/auth`, `void/storage`, `void/ai`, `void/env`) at compile time. The `nodeTargetPlugin` provides a binding guard (compile-time errors for CF imports), a Vite dev server middleware (SSR-loads the Hono app), and a build entry generator for the target runtime.
+Non-CF targets disable CF-only bindings (`void/db`, `void/kv`, `void/auth`, `void/storage`, `void/ai`, `void/env`, `void/ws`) at compile time. The `nodeTargetPlugin` provides a binding guard (compile-time errors for CF imports), a Vite dev server middleware (SSR-loads the Hono app), and a build entry generator for the target runtime.
 
 ### Runtime Framework
 
@@ -37,14 +37,15 @@ src/
   plugin-inference.ts       # Binding inference orchestration (calls walk.ts)
   plugin-migration.ts       # Local migration runner on dev startup
   standard-schema.ts        # Inlined Standard Schema V1 types (no @standard-schema/spec dep)
-  routes-stub.ts            # Empty RouteMap interface (augmented by generated routes.d.ts)
+  routes-stub.ts            # Empty RouteMap/WebSocketRouteMap interfaces (augmented by generated routes.d.ts)
   router/
     parse-filename.ts       # Route filename → RouteDefinition (pure function)
     detect-exports.ts       # Detects named HTTP method exports (GET, POST, etc.) via parseSync
+    websocket.ts            # .ws.ts scanner + DO class metadata extraction
     scan.ts                 # Filesystem scanner using tinyglobby + export detection
-    compile.ts              # Generates Hono app code + worker entry
+    compile.ts              # Generates Hono app code + worker entry + websocket wiring
   codegen/
-    route-types.ts          # Generates .void/routes.d.ts (RouteMap with Serialize + ExtractInput)
+    route-types.ts          # Generates .void/routes.d.ts (RouteMap + WebSocketRouteMap)
     db-types.ts             # (removed — Drizzle schema is now the type source)
     queue-types.ts          # Generates .void/queues.d.ts (QueueMap with payload types)
   queues/
@@ -56,6 +57,8 @@ src/
     response.ts             # convertReturnValue() — return → Response
     fetch.ts                # Typed fetch client for void/client
     fetch-stream.ts         # SSE stream consumer (fetchStream) for void/client
+    ws.ts                   # defineRoom(), defineWebSocket(), typed connect() client
+    ws-server.ts            # DO runtime helpers for generated websocket routes
     ai.ts                   # AI proxy — auto-detects backend (service binding / HTTPS / direct binding)
     db.ts                   # Drizzle D1 instance (auto-wired with user schema via virtual module)
   inference/
@@ -92,8 +95,9 @@ src/
 | `void/handler`   | `defineHandler()`, `defineHandler.withValidator()`, `defineMiddleware()`, `defineHead()`, types                         |
 | `void/response`  | `convertReturnValue()`                                                                                                  |
 | `void/validator` | `runValidation()`, `ValidatorSlots`, `HandlerInput` types                                                               |
-| `void/routes`    | Empty `RouteMap` stub interface (augmented by generated `routes.d.ts`)                                                  |
+| `void/routes`    | Empty `RouteMap` + `WebSocketRouteMap` stubs (augmented by generated `routes.d.ts`)                                     |
 | `void/client`    | Typed `fetch()` client + `fetchStream()` SSE consumer + `FetchError`                                                    |
+| `void/ws`        | `defineRoom()`, `defineWebSocket()`, typed `connect()`, and WebSocket context types                                     |
 | `void/db`        | `db` Drizzle D1 instance (auto-wired with user schema) + `createDb()` for custom D1 bindings                            |
 | `void/queues`    | `queues` typed proxy + `QueueMap` stub interface (augmented by generated `queues.d.ts`)                                 |
 | `void/ai`        | `ai` proxy — `ai.run()`, `ai.stream()`, `ai.models()` with auto-detected backend (service binding / HTTPS / direct)     |
@@ -179,6 +183,7 @@ Agent instructions use versioned markers (`<!--injected-by-void-v0.0.1-->` / `<!
 | `test/unit/validator-real-schemas.test.ts`  | Real schema validation (zod/valibot/arktype) (16 tests)        |
 | `test/unit/define-handler.test.ts`          | defineHandler + middleware composition (18 tests)              |
 | `test/unit/fetch.test.ts`                   | Typed fetch client (9 tests)                                   |
+| `test/unit/ws.test.ts`                      | Typed websocket client (3 tests)                               |
 | `test/unit/route-types.test.ts`             | Route type codegen output (6 tests)                            |
 | `test/unit/route-type-extraction.test.ts`   | Type extraction pipeline (Serialize + ExtractInput) (14 tests) |
 | `test/unit/db.test.ts`                      | Drizzle D1 instance + schema wiring (25 tests)                 |

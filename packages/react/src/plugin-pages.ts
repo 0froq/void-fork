@@ -265,7 +265,7 @@ state = {
 };
 
 function App() {
-  const snap = useSyncExternalStore(subscribe, getSnapshot);
+  const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   if (!snap.component) return null;
 

@@ -150,6 +150,7 @@ Local apps for testing features end-to-end. Run scripts with `pnpm -C playground
 | [`kitchen-sink`](./playground/kitchen-sink)               | Vue Pages mode — DB, KV, R2, AI, Auth, Cron, Queues, Env, ISR (exercises every major feature)         |
 | [`spa`](./playground/spa/README.md)                       | React SPA — API routes, valibot validation, typed DB, typed fetch client, middleware, cron jobs       |
 | [`ssr`](./playground/ssr/README.md)                       | React SSR — `defineRender()`, client hydration, KV storage, dynamic markdown blog                     |
+| [`websockets`](./playground/websockets/README.md)         | React Pages mode — typed chat room and single-socket notification stream via `void/ws`                |
 | [`vue-pages`](./playground/vue-pages/README.md)           | Vue Pages mode — companion `.server.ts` files, Inertia protocol, SSR, layouts, `useForm`, `useShared` |
 | [`svelte-pages`](./playground/svelte-pages)               | Svelte 5 Pages mode — companion `.server.ts` files, Inertia protocol, SSR, layouts, `useForm`         |
 | [`solid-pages`](./playground/solid-pages)                 | SolidJS Pages mode — companion `.server.ts` files, Inertia protocol, SSR, layouts, `useForm`          |

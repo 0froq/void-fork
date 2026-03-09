@@ -231,6 +231,7 @@ export default extendConfig(
             items: [
               { text: "AI", link: "/guide/ai" },
               { text: "Authentication", link: "/guide/auth" },
+              { text: "WebSockets", link: "/guide/websockets" },
               { text: "Cron Jobs", link: "/guide/jobs" },
               { text: "Queues", link: "/guide/queues" },
               { text: "Remote Development", link: "/guide/remote-dev" },

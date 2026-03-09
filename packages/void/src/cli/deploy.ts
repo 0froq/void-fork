@@ -25,6 +25,7 @@ import { collectMigrations } from "../migrations/collect";
 import { validateMigrations } from "../migrations/validate";
 import { scanJobsSync } from "../crons/scan";
 import { scanQueuesSync } from "../queues/scan";
+import { scanWebSocketRoutesSync } from "../router/websocket";
 import { validateSsrEntry } from "../ssr/entry";
 import { scanPages } from "../pages/scan";
 import { collectPrerenderPaths, collectPrerenderPathsNode } from "../prerender";
@@ -752,6 +753,7 @@ async function runFullDeploy(
       cron,
     })),
   );
+  const webSockets = scanWebSocketRoutesSync(root);
   const queues = scanQueuesSync(root).map((q) => ({
     name: q.name,
     bindingName: q.bindingName,
@@ -890,6 +892,7 @@ async function runFullDeploy(
     headerRules,
     redirectRules,
     dialect,
+    webSockets,
   );
   if (neededSet) formData.append("assetManifest", JSON.stringify(assetManifest));
   formData.append("source", getTokenSource());

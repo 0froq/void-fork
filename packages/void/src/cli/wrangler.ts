@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { InferredBindings } from "../inference/walk";
 import type { VoidConfig } from "../config";
+import type { WebSocketRouteDefinition } from "../router/websocket";
 
 /** Known-good default compatibility date — bumped when we test against newer runtime versions. */
 export const DEFAULT_COMPAT_DATE = "2026-02-12";
@@ -81,6 +82,7 @@ export function syncWranglerBindings(
   options?: {
     auth?: boolean;
     bindingNames?: { d1?: string; kv?: string; r2?: string };
+    websockets?: WebSocketRouteDefinition[];
   },
 ): boolean {
   // Find the wrangler config file
@@ -146,6 +148,29 @@ export function syncWranglerBindings(
     const existing = (parsed.r2_buckets as { binding: string }[] | undefined) ?? [];
     if (!existing.some((b) => b.binding === r2Name)) {
       parsed.r2_buckets = [...existing, { binding: r2Name, bucket_name: "default" }];
+      modified = true;
+    }
+  }
+
+  if (options?.websockets && options.websockets.length > 0) {
+    const existing =
+      ((parsed.durable_objects as { bindings?: { name: string; class_name: string }[] } | undefined)
+        ?.bindings as { name: string; class_name: string }[] | undefined) ?? [];
+    const additions = options.websockets
+      .filter((route) => !existing.some((binding) => binding.name === route.bindingName))
+      .map((route) => ({ name: route.bindingName, class_name: route.className }));
+    if (additions.length > 0) {
+      parsed.durable_objects = { bindings: [...existing, ...additions] };
+      modified = true;
+    }
+
+    if (!Array.isArray(parsed.migrations)) {
+      parsed.migrations = [
+        {
+          tag: "void-ws-v1",
+          new_classes: options.websockets.map((route) => route.className),
+        },
+      ];
       modified = true;
     }
   }

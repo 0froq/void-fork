@@ -46,6 +46,9 @@ function defineClientTests(getBase: () => string) {
         errors.push(msg.text());
       }
     });
+    page.on("pageerror", (error) => {
+      errors.push(error.message);
+    });
 
     try {
       await page.goto(BASE + "/");
@@ -54,7 +57,9 @@ function defineClientTests(getBase: () => string) {
       );
       const text = await page.textContent("body");
       expect(text).toContain("Welcome");
-      expect(errors.filter((e) => e.includes("Hydration"))).toEqual([]);
+      expect(
+        errors.filter((e) => e.includes("Hydration") || e.includes("error while hydrating")),
+      ).toEqual([]);
     } finally {
       await page.context().close();
     }

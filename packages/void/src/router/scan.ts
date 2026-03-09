@@ -6,9 +6,15 @@ import { scanJobs, type JobDefinition } from "../crons/scan";
 import { scanQueues, type QueueDefinition } from "../queues/scan";
 import { scanPages } from "../pages/scan";
 import type { PageScanResult } from "../pages/types";
+import {
+  isWebSocketPatternFile,
+  scanWebSocketRoutes,
+  type WebSocketRouteDefinition,
+} from "./websocket";
 
 export interface ScanResult {
   routes: RouteDefinition[];
+  websockets?: WebSocketRouteDefinition[];
   middleware: MiddlewareDefinition[];
   jobs: JobDefinition[];
   queues: QueueDefinition[];
@@ -34,8 +40,9 @@ export async function scanRoutes(
 ): Promise<ScanResult> {
   const pattern = `**/*.{${HANDLER_EXTENSIONS.join(",")}}`;
 
-  const [routeFiles, middlewareFiles, jobs, queues, pages] = await Promise.all([
+  const [routeFiles, websockets, middlewareFiles, jobs, queues, pages] = await Promise.all([
     glob(pattern, { cwd: `${root}/routes`, absolute: false }),
+    scanWebSocketRoutes(root),
     glob(pattern, { cwd: `${root}/middleware`, absolute: false }).catch(() => [] as string[]),
     scanJobs(root),
     scanQueues(root),
@@ -46,6 +53,7 @@ export async function scanRoutes(
 
   // Parse routes, filtering out files starting with _
   const routes = routeFiles
+    .filter((f) => !isWebSocketPatternFile(f))
     .filter((f) => !f.split("/").some((s) => s.startsWith("_")))
     .map((f) => {
       const route = parseRouteFilename(f);
@@ -71,5 +79,5 @@ export async function scanRoutes(
     })
     .sort((a, b) => a.order - b.order);
 
-  return { routes, middleware, jobs, queues, pages };
+  return { routes, websockets, middleware, jobs, queues, pages };
 }

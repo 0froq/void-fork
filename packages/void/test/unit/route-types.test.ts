@@ -215,6 +215,39 @@ describe("generateRouteTypes", () => {
     expect(dts).toContain("params: { id: string }");
   });
 
+  it("generates WebSocketRouteMap entries", () => {
+    const scan: ScanResult = {
+      routes: [],
+      websockets: [
+        {
+          pattern: "/chat/:room",
+          methods: [],
+          params: ["room"],
+          catchAll: false,
+          env: null,
+          filePath: "chat/[room].ws.ts",
+          className: "ChatRoomWs",
+          bindingName: "ChatRoomWs",
+          mode: "room",
+          hasAuthGate: true,
+        },
+      ],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: { pages: [], layouts: [], namedLayouts: [] },
+    };
+
+    const { dts } = generateRouteTypes(scan, "/project/routes", "/project/.void");
+
+    expect(dts).toContain("interface WebSocketRouteMap");
+    expect(dts).toContain('"/chat/:room"');
+    expect(dts).toContain('typeof import("../routes/chat/[room].ws")');
+    expect(dts).toContain("client:");
+    expect(dts).toContain("server:");
+    expect(dts).toContain('params: RouteParams<["room"]>');
+  });
+
   it("skips pages without action in PageActionMap", () => {
     const scan: ScanResult = {
       routes: [],

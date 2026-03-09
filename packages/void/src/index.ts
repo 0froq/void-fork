@@ -14,6 +14,7 @@ import {
 import { inferBindingsFromSource } from "./inference/walk";
 import { scanJobsSync } from "./crons/scan";
 import { scanQueuesSync } from "./queues/scan";
+import { scanWebSocketRoutesSync } from "./router/websocket";
 import { validateSsrEntry } from "./ssr/entry";
 import {
   readConfig,
@@ -328,6 +329,7 @@ export function voidPlugin(options?: {
         const synced = syncWranglerBindings(root, bindings, {
           auth: hasAuth,
           bindingNames,
+          websockets: websocketRoutes,
         });
         if (synced) {
           voidLog("Synced bindings to wrangler.jsonc");
@@ -415,6 +417,7 @@ export function voidPlugin(options?: {
   // Scan queues early so mergeBindings can reference them in both branches.
   // Framework mode skips queue scanning (empty array).
   const queues = framework ? [] : scanQueuesSync(root);
+  const websocketRoutes = framework ? [] : scanWebSocketRoutesSync(root);
 
   // Config function that merges inferred bindings with the resolved config.
   // When the user has a wrangler.json with real binding IDs (for raw CF
@@ -466,6 +469,37 @@ export function voidPlugin(options?: {
           ...(q.retryDelay != null && { retry_delay: q.retryDelay }),
         })),
       };
+    }
+
+    if (websocketRoutes.length > 0) {
+      const existingDurableObjectBindings =
+        ((resolved as Record<string, any>).durable_objects?.bindings as
+          | { name: string; class_name: string }[]
+          | undefined) ?? [];
+      const missingDurableObjectBindings = websocketRoutes
+        .filter(
+          (route) =>
+            !existingDurableObjectBindings.some((binding) => binding.name === route.bindingName),
+        )
+        .map((route) => ({
+          name: route.bindingName,
+          class_name: route.className,
+        }));
+
+      if (missingDurableObjectBindings.length > 0) {
+        (result as Record<string, unknown>).durable_objects = {
+          bindings: [...existingDurableObjectBindings, ...missingDurableObjectBindings],
+        };
+      }
+
+      if (!Array.isArray((resolved as Record<string, unknown>).migrations)) {
+        (result as Record<string, unknown>).migrations = [
+          {
+            tag: "void-ws-v1",
+            new_classes: websocketRoutes.map((route) => route.className),
+          },
+        ];
+      }
     }
 
     // AI — in local dev, inject VC credentials for HTTPS proxy path.

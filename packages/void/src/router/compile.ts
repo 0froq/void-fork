@@ -48,6 +48,8 @@ export interface CompileOptions {
   redirectRules?: RedirectRule[];
   /** Explicit prerender paths from void.json routing.prerender */
   explicitPrerenderPaths?: string[];
+  /** Absolute path to the internal WebSocket runtime module */
+  webSocketRuntimePath?: string;
 }
 
 export interface SsrCompileOptions {
@@ -92,6 +94,7 @@ export function compileRouteTable(
 ): string {
   const lines: string[] = [];
   const auth = options.auth;
+  const webSockets = scan.websockets ?? [];
 
   lines.push(`import { AsyncLocalStorage } from "node:async_hooks";`);
   lines.push(`import { Hono } from ${JSON.stringify(options.honoPath)};`);
@@ -118,6 +121,14 @@ export function compileRouteTable(
       lines.push(`import { googleAuth } from ${JSON.stringify(auth.googleProviderPath)};`);
     }
     lines.push(`import { authContext } from ${JSON.stringify(auth.authRuntimePath)};`);
+    lines.push(
+      `import { resolveAuthUserFromRequest } from ${JSON.stringify(auth.authRuntimePath)};`,
+    );
+  }
+  if (webSockets.length > 0 && options.webSocketRuntimePath) {
+    lines.push(
+      `import { createWebSocketDurableObject as __createWebSocketDurableObject, handleWebSocketUpgrade as __handleWebSocketUpgrade, forwardWebSocketRequest as __forwardWebSocketRequest } from ${JSON.stringify(options.webSocketRuntimePath)};`,
+    );
   }
   lines.push("");
 
@@ -125,6 +136,10 @@ export function compileRouteTable(
   for (let i = 0; i < scan.middleware.length; i++) {
     const mw = scan.middleware[i];
     lines.push(`import middleware${i} from ${JSON.stringify(`${middlewareDir}/${mw.filePath}`)};`);
+  }
+  for (let i = 0; i < webSockets.length; i++) {
+    const route = webSockets[i];
+    lines.push(`import websocket${i} from ${JSON.stringify(`${routesDir}/${route.filePath}`)};`);
   }
   lines.push("");
 
@@ -164,20 +179,8 @@ export function compileRouteTable(
     lines.push("});");
     lines.push("");
     lines.push("app.use(async (c, next) => {");
-    lines.push('  const sid = parseSessionCookie(c.req.header("cookie"));');
-    lines.push("  if (sid) {");
-    lines.push('    const session = await c.env.AUTH_KV.get("session:" + sid, "json");');
-    lines.push("    if (session && session.expiresAt > Date.now()) {");
-    lines.push('      c.set("user", {');
-    lines.push("        id: session.userId,");
-    lines.push("        provider: session.provider,");
-    lines.push("        email: session.email,");
-    lines.push("        name: session.name,");
-    lines.push("        avatar_url: session.avatar_url,");
-    lines.push("      });");
-    lines.push("    }");
-    lines.push("  }");
-    lines.push('  const __user = c.get("user") ?? null;');
+    lines.push("  const __user = await resolveAuthUserFromRequest(c.req.raw, c.env);");
+    lines.push('  if (__user) c.set("user", __user);');
     lines.push("  await authContext.run({ user: __user }, next);");
     lines.push("});");
     lines.push("");
@@ -229,6 +232,49 @@ export function compileRouteTable(
     }
   }
   lines.push("");
+
+  if (webSockets.length > 0) {
+    for (let i = 0; i < webSockets.length; i++) {
+      const route = webSockets[i];
+      lines.push(
+        `export const ${route.className} = __createWebSocketDurableObject(websocket${i}, ${JSON.stringify(
+          {
+            pattern: route.pattern,
+            params: route.params,
+            className: route.className,
+            bindingName: route.bindingName,
+          },
+        )});`,
+      );
+    }
+    lines.push("");
+    lines.push(
+      `const __voidWebSocketRoutes = ${JSON.stringify(
+        webSockets.map((route) => ({
+          pattern: route.pattern,
+          params: route.params,
+          className: route.className,
+          bindingName: route.bindingName,
+        })),
+      )};`,
+    );
+    lines.push("export async function __voidHandleWebSocket(request, env) {");
+    lines.push("  return __handleWebSocketUpgrade(request, env, __voidWebSocketRoutes);");
+    lines.push("}");
+    lines.push("");
+    for (let i = 0; i < webSockets.length; i++) {
+      const route = webSockets[i];
+      lines.push(`app.all(${JSON.stringify(route.pattern)}, async (c) => {`);
+      lines.push(
+        `  return __forwardWebSocketRequest(c.req.raw, c.env, __voidWebSocketRoutes[${i}]);`,
+      );
+      lines.push("});");
+    }
+    lines.push("");
+  } else {
+    lines.push("export async function __voidHandleWebSocket() { return null; }");
+    lines.push("");
+  }
 
   // Pages mode — generate page route handlers
   if (pages && scan.pages.pages.length > 0) {
@@ -1126,6 +1172,7 @@ export function compileWorkerEntry(
   hasQueues = false,
   remote?: { remotePath: string; envPath: string },
   assetsDir = "assets",
+  webSocketClasses: string[] = [],
 ): string {
   const remotePath = remote?.remotePath;
   const remoteImport = remote
@@ -1153,6 +1200,8 @@ async function serveWithAssets(request, env, response) {
 
   const fetchHandler = remotePath
     ? `async (request, env, ctx) => {
+  const ws = await __voidHandleWebSocket(request, env);
+  if (ws) return ws;
   if (env.__VOID_REMOTE === "1") {
     env = createRemoteEnv(env);
     const internal = await __handleInternal(request, env, ctx);
@@ -1164,6 +1213,8 @@ async function serveWithAssets(request, env, response) {
   return serveWithAssets(request, env, await app.fetch(request, env, ctx));
 }`
     : `async (request, env, ctx) => {
+  const ws = await __voidHandleWebSocket(request, env);
+  if (ws) return ws;
   const internal = await __handleInternal(request, env, ctx);
   if (internal) return internal;
   return serveWithAssets(request, env, await app.fetch(request, env, ctx));
@@ -1200,7 +1251,7 @@ async function serveWithAssets(request, env, response) {
 }`;
 
   if (hasQueues) {
-    return `import app, { scheduled, __voidCollectPrerenderPaths } from 'virtual:void-routes';
+    return `import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(", ")}` : ""} } from 'virtual:void-routes';
 ${remoteImport}${assetHelper}
 ${internalRouteHelper}
 async function queue(batch, env, ctx) {
@@ -1217,11 +1268,13 @@ async function queue(batch, env, ctx) {
   ${queueDecisionCode}
 }
 
+${webSocketClasses.map((name) => `export { ${name} };`).join("\n")}
 export default { fetch: ${fetchHandler}, scheduled, queue };`;
   }
-  return `import app, { scheduled, __voidCollectPrerenderPaths } from 'virtual:void-routes';
+  return `import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(", ")}` : ""} } from 'virtual:void-routes';
 ${remoteImport}${assetHelper}
 ${internalRouteHelper}
+${webSocketClasses.map((name) => `export { ${name} };`).join("\n")}
 export default { fetch: ${fetchHandler}, scheduled };`;
 }
 

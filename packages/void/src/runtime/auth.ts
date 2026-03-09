@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Context, Env } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { parseSessionCookie } from "../auth/session";
 
 /** The authenticated user stored in the session and set on context by the auth middleware. */
 export interface AuthUser {
@@ -40,6 +41,50 @@ export const authContext: AsyncLocalStorage<{ user: AuthUser | null }> = new Asy
  */
 export function getUser(): AuthUser | null {
   return authContext.getStore()?.user ?? null;
+}
+
+function toAuthUser(session: {
+  userId: string;
+  provider: string;
+  email: string | null;
+  name: string | null;
+  avatar_url: string | null;
+}): AuthUser {
+  return {
+    id: session.userId,
+    provider: session.provider,
+    email: session.email,
+    name: session.name,
+    avatar_url: session.avatar_url,
+  };
+}
+
+/**
+ * Resolve the authenticated user from the current request and AUTH_KV session store.
+ *
+ * Shared by:
+ * - generated HTTP auth middleware
+ * - generated WebSocket upgrade handling
+ */
+export async function resolveAuthUserFromRequest(
+  request: Request,
+  env: { AUTH_KV?: KVNamespace } | undefined,
+): Promise<AuthUser | null> {
+  const sid = parseSessionCookie(request.headers.get("cookie"));
+  if (!sid || !env?.AUTH_KV) return null;
+
+  const session = await env.AUTH_KV.get(`session:${sid}`, "json");
+  if (
+    !session ||
+    typeof session !== "object" ||
+    !("expiresAt" in session) ||
+    typeof session.expiresAt !== "number" ||
+    session.expiresAt <= Date.now()
+  ) {
+    return null;
+  }
+
+  return toAuthUser(session as any);
 }
 
 /**

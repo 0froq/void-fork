@@ -31,6 +31,26 @@ export interface AssetConfig {
   html_handling?: "auto-trailing-slash" | "force-trailing-slash" | "drop-trailing-slash" | "none";
 }
 
+export interface WebSocketRouteMeta {
+  pattern: string;
+  filePath: string;
+  className: string;
+  mode: "room" | "socket";
+  hasAuthGate: boolean;
+}
+
+export interface WebSocketMigrationMeta {
+  tag: string;
+  newClasses?: string[];
+  deletedClasses?: string[];
+}
+
+export interface WebSocketManifestMeta {
+  routes: WebSocketRouteMeta[];
+  classes: string[];
+  migrations?: WebSocketMigrationMeta[];
+}
+
 export interface DeployManifest {
   version: number;
   bindings: {
@@ -59,6 +79,7 @@ export interface DeployManifest {
   hashedAssetsPrefix?: string;
   headerRules?: HeaderRule[];
   redirectRules?: RedirectRule[];
+  websocket?: WebSocketManifestMeta;
 }
 
 export type DeployEvent =

@@ -40,6 +40,9 @@ export function generateRouteTypes(
   lines.push("  type InferInput<Schema extends StandardSchemaV1> = NonNullable<");
   lines.push('    Schema["~standard"]["types"]');
   lines.push('  >["input"];');
+  lines.push("  type InferOutput<Schema extends StandardSchemaV1> = NonNullable<");
+  lines.push('    Schema["~standard"]["types"]');
+  lines.push('  >["output"];');
   lines.push("}");
   lines.push("");
   lines.push("type Serialize<T> =");
@@ -60,6 +63,12 @@ export function generateRouteTypes(
   lines.push("  [K in keyof V as V[K] extends StandardSchemaV1 ? K : never]:");
   lines.push("    V[K] extends StandardSchemaV1 ? StandardSchemaV1.InferInput<V[K]> : never;");
   lines.push("};");
+  lines.push("");
+  lines.push("type ExtractOutput<S> =");
+  lines.push("  S extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<S> : never;");
+  lines.push("");
+  lines.push("type RouteParams<P extends readonly string[]> =");
+  lines.push("  P extends readonly [] ? Record<string, never> : { [K in P[number]]: string };");
   lines.push("");
 
   lines.push('declare module "void/routes" {');
@@ -87,6 +96,26 @@ export function generateRouteTypes(
       lines.push("      };");
     }
 
+    lines.push("    };");
+  }
+
+  lines.push("  }");
+  lines.push("");
+  lines.push("  interface WebSocketRouteMap {");
+
+  for (const route of scan.websockets ?? []) {
+    const absRoutePath = `${routesDir}/${route.filePath}`;
+    const relPath = relative(outDir, absRoutePath).replace(/\\/g, "/");
+    const importPath = relPath.replace(/\.(ts|mts|js|mjs)$/, "");
+
+    lines.push(`    ${JSON.stringify(route.pattern)}: {`);
+    lines.push(`      params: RouteParams<${JSON.stringify(route.params)}>;`);
+    lines.push(
+      `      client: ExtractInput<(typeof import(${JSON.stringify(importPath)}))["default"]["messages"]["client"]>;`,
+    );
+    lines.push(
+      `      server: ExtractOutput<(typeof import(${JSON.stringify(importPath)}))["default"]["messages"]["server"]>;`,
+    );
     lines.push("    };");
   }
 
