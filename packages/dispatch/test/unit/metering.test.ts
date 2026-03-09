@@ -91,9 +91,9 @@ describe("recordRequest", () => {
     expect(dp.doubles[2]).toBe(100);
   });
 
-  it("handles all four request types", () => {
+  it("handles all supported request types", () => {
     const { env, writes } = createMockEnv();
-    const types = ["api", "static", "ssr", "isr"] as const;
+    const types = ["api", "static", "ssr", "isr", "websocket"] as const;
 
     for (const type of types) {
       recordRequest(env, {
@@ -107,8 +107,8 @@ describe("recordRequest", () => {
       });
     }
 
-    expect(writes).toHaveLength(4);
+    expect(writes).toHaveLength(5);
     const recordedTypes = (writes as { blobs: string[] }[]).map((w) => w.blobs[1]);
-    expect(recordedTypes).toEqual(["api", "static", "ssr", "isr"]);
+    expect(recordedTypes).toEqual(["api", "static", "ssr", "isr", "websocket"]);
   });
 });

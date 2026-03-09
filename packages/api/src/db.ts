@@ -162,6 +162,14 @@ export async function updateProjectType(db: Db, id: string, type: Project["type"
   await db.update(projects).set({ type }).where(eq(projects.id, id));
 }
 
+export async function updateProjectWebSocketVersion(
+  db: Db,
+  id: string,
+  websocketVersion: number,
+): Promise<void> {
+  await db.update(projects).set({ websocket_version: websocketVersion }).where(eq(projects.id, id));
+}
+
 // --- Deployments ---
 
 export async function createDeployment(

@@ -39,6 +39,19 @@ describe("DeployManifest contract", () => {
       workerMain: "index.mjs",
       compatibilityDate: "2026-02-24",
       compatibilityFlags: ["nodejs_compat", "nodejs_als"],
+      websocket: {
+        routes: [
+          {
+            pattern: "/chat/:room",
+            filePath: "chat/[room].ws.ts",
+            className: "ChatRoom",
+            mode: "room",
+            hasAuthGate: true,
+          },
+        ],
+        classes: ["ChatRoom"],
+        migrations: [{ tag: "ws-v1", newClasses: ["ChatRoom"] }],
+      },
     };
 
     expect(manifest.version).toBe(3);
@@ -49,6 +62,7 @@ describe("DeployManifest contract", () => {
     expect(manifest.workerMain).toBe("index.mjs");
     expect(manifest.compatibilityDate).toBe("2026-02-24");
     expect(manifest.compatibilityFlags).toEqual(["nodejs_compat", "nodejs_als"]);
+    expect(manifest.websocket?.classes).toEqual(["ChatRoom"]);
   });
 
   it("rejects unknown manifest versions", () => {

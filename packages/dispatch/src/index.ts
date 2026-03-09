@@ -72,7 +72,8 @@ export default {
     }
 
     const pathname = url.pathname;
-    let requestType: RequestType = "static";
+    let requestType: RequestType =
+      request.headers.get("upgrade")?.toLowerCase() === "websocket" ? "websocket" : "static";
 
     const meter = (response: Response) => {
       const responseBytes = Number(response.headers.get("content-length") ?? 0);

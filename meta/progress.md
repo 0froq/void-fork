@@ -133,7 +133,7 @@
 - [ ] Workers AI, Vectorize, Hyperdrive (one-line config)
 - [ ] Durable Objects (`src/objects/` convention)
 - [ ] D1 → Hyperdrive upgrade path
-- [ ] Edge WebSockets via `defineWebSocket`
+- [x] Edge WebSockets via `defineWebSocket`
 
 ### Team & Enterprise
 

@@ -1,6 +1,6 @@
 import type { Env } from "./env";
 
-export type RequestType = "api" | "static" | "ssr" | "isr";
+export type RequestType = "api" | "static" | "ssr" | "isr" | "websocket";
 
 export function recordRequest(
   env: Env,

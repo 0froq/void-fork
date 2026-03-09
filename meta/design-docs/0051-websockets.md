@@ -8,210 +8,466 @@ created: 2026-03-05
 
 ## Summary
 
-Add first-class WebSocket support to Void, built on top of Cloudflare Durable Objects via the `partyserver` library. Two API layers: a high-level `defineRoom` (room-based with broadcast/connections) and a low-level `defineWebSocket` (raw connection lifecycle). File-based routing via `.ws.ts` extension. Fully automatic DO provisioning at deploy. Thin client helper with auto-reconnect.
+Add first-class WebSocket support to Void, built on top of Cloudflare Durable Objects via `partyserver`, with a typed, framework-level API surface:
+
+- file-based `.ws.ts` routes in `routes/`
+- two server APIs: `defineRoom()` and `defineWebSocket()`
+- ambient auth/session context across the WebSocket lifecycle
+- typed messages in v1 via Standard Schema-compatible validators
+- typed `connect()` client with auto-reconnect
+- automatic Durable Object exports, bindings, and migration wiring at deploy
+
+This feature is Cloudflare-only in v1. If a project uses `.ws.ts` routes with `target: "node" | "bun" | "deno"`, Void should fail the build with a clear error.
 
 ## Motivation
 
-Real-time features (collaborative editing, chat, live dashboards, multiplayer) are increasingly expected. Today, Void has no WebSocket support — users would need to manually configure Durable Objects and handle upgrades. This design makes WebSockets a first-class primitive, consistent with Void's philosophy of zero-config infrastructure.
+Real-time features are now table stakes for many apps: chat, collaborative editing, live dashboards, AI copilots, deployment logs, notifications, and multiplayer lobbies.
+
+Today, Void has no first-class WebSocket story. Users would need to manually wire Durable Objects, upgrades, auth, and client reconnection. That is too far outside Void's normal DX bar.
+
+WebSockets should feel like the rest of the framework:
+
+- URL-addressable through file-based routing
+- zero-config infrastructure on the hosted platform
+- typed end to end
+- auth-aware by default
+- simple for the common case, with lower-level escape hatches later
+
+## What This Enables
+
+This design is intended to work well for the kinds of apps Durable Objects and the PartyKit ecosystem already fit well:
+
+- chat rooms and presence
+- shared cursors and collaborative rooms
+- collaborative documents and whiteboards
+- per-user notifications and activity streams
+- AI/live token streaming UIs
+- deployment logs and admin consoles
+- lightweight multiplayer lobbies and turn-based coordination
+
+These app shapes all share the same core pattern: a URL-scoped coordination point with shared state, ordered message handling, and server push.
+
+## V1 Constraints and Non-Goals
+
+This is not a Socket.IO clone, and it should not pretend to be one.
+
+V1 explicitly does **not** include:
+
+- Socket.IO-style `join()` / `leave()` room membership after connect
+- global pubsub or cross-room fanout primitives
+- generic Hono middleware execution before WebSocket upgrades
+- Node/Bun/Deno target support
+- framework-specific hooks/composables for Vue/React
+- CRDT-specific collaboration helpers
+- message metering or per-plan WS limits
+- binary/raw frame APIs as the primary DX
+
+Users should still be able to build sophisticated apps on top of this, but the primary model is:
+
+- one WebSocket route
+- one deterministic Durable Object instance identity per matched URL
+- typed JSON messages
+- ambient auth/session context
 
 ## Dependencies
 
-- [`partyserver`](https://github.com/cloudflare/partykit/tree/main/packages/partyserver) (v0.3.x) — thin DX layer over CF Durable Objects. Handles hibernation, connection lifecycle, broadcasting. Only dependency: `nanoid`.
-- [`partysocket`](https://github.com/cloudflare/partykit/tree/main/packages/partysocket) — client-side WebSocket with auto-reconnect and buffering. Wrapped by Void's client helper.
+- [`partyserver`](https://github.com/cloudflare/partykit/tree/main/packages/partyserver) — Durable Object + WebSocket lifecycle layer
+- [`partysocket`](https://github.com/cloudflare/partykit/tree/main/packages/partysocket) — reconnecting client transport
 
-Void owns: file-based routing, API surface (`defineRoom`/`defineWebSocket`), DO class generation, deploy provisioning, binding injection, client helper. PartyServer owns: DO internals, hibernation, connection management.
+Void owns:
+
+- file-based routing
+- API surface (`defineRoom` / `defineWebSocket`)
+- typed message validation
+- ambient auth/session context
+- codegen and typed client surface
+- Durable Object export generation
+- deploy manifest / migration management
+
+PartyServer owns:
+
+- Durable Object internals
+- hibernation behavior
+- connection lifecycle plumbing
+- connection indexing / room broadcast mechanics
 
 ## File Convention
 
-```
+```txt
 routes/
-  chat/[room].ws.ts       # WebSocket route (room or connection-based)
-  notifications.ws.ts     # Single-instance WebSocket endpoint
-  api/health.ts           # Regular HTTP route (unchanged)
+  chat/[room].ws.ts
+  docs/[docId].ws.ts
+  notifications.ws.ts
+  api/health.ts
 ```
 
-- `.ws.ts` extension signals a WebSocket route
-- Each `.ws.ts` file compiles to one DO class
-- Dynamic route params (e.g. `[room]`) determine the DO instance ID
-- Lives in `routes/` because WebSocket endpoints are URL-addressable
+- `.ws.ts` marks a WebSocket route
+- each `.ws.ts` file compiles to one Durable Object class
+- the matched URL params determine the Durable Object instance ID
+- the file still lives under `routes/` because the endpoint is URL-addressable
 
-## API Layer 1: `defineRoom` (high-level)
+Examples:
 
-For multi-client scenarios: chat, collaboration, multiplayer.
+- `routes/chat/[room].ws.ts` -> one room instance per `room`
+- `routes/docs/[docId].ws.ts` -> one coordination object per document
+- `routes/notifications.ws.ts` -> one shared singleton instance
+
+## Typed Message Model
+
+Typed messages are required in v1.
+
+Void should use the same Standard Schema-compatible model already used elsewhere in the framework. That keeps the feature aligned with `defineHandler.withValidator()` and avoids inventing a parallel type system.
+
+The default payload model is a discriminated JSON event union:
+
+```ts
+type ClientEvent =
+  | { type: "chat.message"; text: string }
+  | { type: "chat.typing"; active: boolean };
+
+type ServerEvent =
+  | { type: "chat.message"; id: string; userId: string; text: string }
+  | { type: "presence.joined"; userId: string; name: string }
+  | { type: "presence.left"; userId: string };
+```
+
+V1 should validate and type these event objects directly. It should not make users hand-roll `JSON.parse()` or invent their own wire format for common JSON cases.
+
+Raw/binary frames can be added later as an explicit escape hatch. They are not part of the core v1 design.
+
+## Ambient Auth and Context
+
+WebSocket routes should participate in Void auth/session resolution by default.
+
+That means:
+
+- `ctx.user` is available in `onBeforeConnect`, `onConnect`, `onMessage`, `onClose`, and `onRequest`
+- cookie/session auth works the same way it does for HTTP routes
+- users do not need to rebuild auth parsing inside each `.ws.ts` file
+
+This does **not** mean arbitrary Hono middleware runs before the upgrade. Instead, Void should extract the framework's auth/session resolution into a shared internal helper used by both:
+
+- the existing HTTP path
+- the generated WebSocket upgrade path
+
+This keeps auth ambient without over-promising full middleware reuse.
+
+## API Layer 1: `defineRoom()`
+
+`defineRoom()` is the high-level API for chat, collaboration, shared cursors, and multiplayer lobbies.
 
 ```ts
 // routes/chat/[room].ws.ts
+import * as v from "valibot";
 import { defineRoom } from "void/ws";
 
+const ClientEvent = v.variant("type", [
+  v.object({
+    type: v.literal("chat.message"),
+    text: v.string(),
+  }),
+  v.object({
+    type: v.literal("chat.typing"),
+    active: v.boolean(),
+  }),
+]);
+
+const ServerEvent = v.variant("type", [
+  v.object({
+    type: v.literal("chat.message"),
+    id: v.string(),
+    userId: v.string(),
+    text: v.string(),
+  }),
+  v.object({
+    type: v.literal("presence.joined"),
+    userId: v.string(),
+    name: v.string(),
+  }),
+  v.object({
+    type: v.literal("presence.left"),
+    userId: v.string(),
+  }),
+]);
+
 export default defineRoom({
-  // Called when DO wakes (first connection or after hibernation)
-  onStart(room) {
-    // room.storage  — per-DO persistent KV (PartyServer/DO storage)
-    // room.env      — full Void bindings (db, kv, storage, ai)
-    // room.id       — instance ID (derived from route params)
+  messages: {
+    client: ClientEvent,
+    server: ServerEvent,
   },
 
-  onConnect(room, connection) {
-    room.broadcast(`${connection.id} joined`);
+  async onBeforeConnect(ctx) {
+    if (!ctx.user) {
+      return new Response("Unauthorized", { status: 401 });
+    }
   },
 
-  onMessage(room, connection, message) {
-    // room.broadcast(msg, [excludeIds])
-    // room.getConnections(tag?)
-    // room.getConnection(id)
-    room.broadcast(message, [connection.id]);
+  async onConnect(ctx) {
+    ctx.room.broadcast({
+      type: "presence.joined",
+      userId: ctx.user.id,
+      name: ctx.user.name ?? ctx.user.email ?? "anonymous",
+    });
   },
 
-  onClose(room, connection) {
-    room.broadcast(`${connection.id} left`);
+  async onMessage(ctx, event) {
+    if (event.type === "chat.message") {
+      ctx.room.broadcast(
+        {
+          type: "chat.message",
+          id: crypto.randomUUID(),
+          userId: ctx.user!.id,
+          text: event.text,
+        },
+        [ctx.connection.id],
+      );
+    }
   },
 
-  // Optional: handle HTTP requests to the same route
-  onRequest(room, request) {
-    const count = [...room.getConnections()].length;
-    return Response.json({ connections: count });
+  async onClose(ctx) {
+    if (!ctx.user) return;
+    ctx.room.broadcast({
+      type: "presence.left",
+      userId: ctx.user.id,
+    });
+  },
+
+  async onRequest(ctx) {
+    return Response.json({
+      room: ctx.id,
+      authenticated: Boolean(ctx.user),
+      connections: [...ctx.room.getConnections()].length,
+    });
   },
 });
 ```
 
-### Room API
+### Room Context
 
-| Property/Method                 | Type                                        | Description                              |
-| ------------------------------- | ------------------------------------------- | ---------------------------------------- |
-| `room.id`                       | `string`                                    | Instance ID derived from route params    |
-| `room.env`                      | `CloudEnv`                                  | Full Void bindings (db, kv, storage, ai) |
-| `room.storage`                  | `DurableObjectStorage`                      | Per-DO persistent key-value store        |
-| `room.broadcast(msg, exclude?)` | `(string \| ArrayBuffer, string[]) => void` | Send to all connections                  |
-| `room.getConnections(tag?)`     | `(string?) => Iterable<Connection>`         | Iterate connections                      |
-| `room.getConnection(id)`        | `(string) => Connection \| undefined`       | Get specific connection                  |
+| Property/Method                       | Description                                                  |
+| ------------------------------------- | ------------------------------------------------------------ |
+| `ctx.id`                              | Durable Object instance ID derived from matched route params |
+| `ctx.params`                          | Route params from the matched `.ws.ts` file                  |
+| `ctx.user`                            | Authenticated user or `null`                                 |
+| `ctx.request`                         | The upgrade request or HTTP request hitting the route        |
+| `ctx.env`                             | Full Void bindings                                           |
+| `ctx.storage`                         | Durable Object storage                                       |
+| `ctx.room.broadcast(event, exclude?)` | Broadcast a typed server event                               |
+| `ctx.room.getConnections()`           | Iterate active connections                                   |
+| `ctx.room.getConnection(id)`          | Look up a connection by ID                                   |
+| `ctx.connection.id`                   | Stable connection identifier                                 |
+| `ctx.connection.send(event)`          | Send a typed server event to one client                      |
+| `ctx.connection.close()`              | Close the socket                                             |
 
-### Connection API
+## API Layer 2: `defineWebSocket()`
 
-| Property/Method             | Type                              | Description                       |
-| --------------------------- | --------------------------------- | --------------------------------- |
-| `connection.id`             | `string`                          | Unique connection identifier      |
-| `connection.send(msg)`      | `(string \| ArrayBuffer) => void` | Send to this client               |
-| `connection.close()`        | `() => void`                      | Terminate connection              |
-| `connection.state`          | `unknown`                         | Connection-scoped ephemeral state |
-| `connection.setState(data)` | `(unknown) => void`               | Set connection state              |
-
-## API Layer 2: `defineWebSocket` (low-level)
-
-For per-user persistent connections: notifications, streaming, live data.
+`defineWebSocket()` is the lower-level API for per-user streams, notifications, AI token streams, and live dashboards.
 
 ```ts
 // routes/notifications.ws.ts
+import * as v from "valibot";
 import { defineWebSocket } from "void/ws";
 
+const ClientEvent = v.variant("type", [
+  v.object({
+    type: v.literal("notifications.ack"),
+    id: v.string(),
+  }),
+]);
+
+const ServerEvent = v.variant("type", [
+  v.object({
+    type: v.literal("notifications.item"),
+    id: v.string(),
+    title: v.string(),
+  }),
+  v.object({
+    type: v.literal("notifications.error"),
+    message: v.string(),
+  }),
+]);
+
 export default defineWebSocket({
-  onConnect(ws) {
-    // ws.send(), ws.close(), ws.id, ws.env
+  messages: {
+    client: ClientEvent,
+    server: ServerEvent,
   },
 
-  onMessage(ws, message) {
-    const data = JSON.parse(message);
-    const result = await ws.env.ai.run("@cf/meta/llama-3-8b", data);
-    ws.send(JSON.stringify(result));
+  async onBeforeConnect(ctx) {
+    if (!ctx.user) {
+      return new Response("Unauthorized", { status: 401 });
+    }
   },
 
-  onClose(ws) {},
+  async onConnect(ctx) {
+    ctx.socket.send({
+      type: "notifications.item",
+      id: crypto.randomUUID(),
+      title: `Connected as ${ctx.user!.id}`,
+    });
+  },
+
+  async onMessage(ctx, event) {
+    if (event.type === "notifications.ack") {
+      // app-defined acknowledgment behavior
+    }
+  },
 });
 ```
 
-No room abstraction — just individual connection lifecycle. Under the hood, still compiles to a PartyServer `Server` subclass (one connection per DO instance, or all connections sharing one instance depending on route params).
+This API omits room helpers but keeps the same typed message contract and ambient auth/session context.
 
 ## Client API
 
+The client should be framework-agnostic in v1 and should mirror the typed `fetch()` philosophy.
+
 ```ts
-import { connect } from "void/ws"
+import { connect } from "void/ws";
 
-const ws = connect("/chat/room-123")
+const socket = connect("/chat/:room", {
+  params: { room: "general" },
+});
 
-ws.send("hello")
-ws.on("message", (msg) => console.log(msg))
-ws.on("open", () => { ... })
-ws.on("close", () => { ... })
+socket.send({ type: "chat.message", text: "hello" });
 
-// Auto-reconnects by default
-// Buffers messages sent while disconnected
-// Resolves URL relative to the app's origin
+socket.on("message", (event) => {
+  if (event.type === "chat.message") {
+    console.log(event.text);
+  }
+});
 ```
 
-Wraps `partysocket` with Void-aware URL resolution. Framework-specific helpers (Vue composable, React hook) are a follow-up.
+`connect()` should provide:
+
+- route-aware param typing
+- typed `send()` based on the route's client schema
+- typed incoming `message` events based on the route's server schema
+- auto-reconnect
+- buffering while reconnecting
+- URL resolution relative to the current origin
+
+Framework-specific hooks/composables remain follow-up work and should wrap this typed core client rather than inventing new semantics.
 
 ## Compilation
 
-The Void compiler (`framework/packages/void/src/router/compile.ts`):
+The Void compiler should:
 
-1. Scans `routes/` for `.ws.ts` files alongside existing route scanning
-2. Each `.ws.ts` file generates a DO class extending `partyserver.Server`
-3. Class name derived from file path: `routes/chat/[room].ws.ts` -> `ChatRoomWs`
-4. The compiled worker entry exports DO classes alongside `fetch`/`queue`/`scheduled`
-5. The `fetch` handler detects WebSocket upgrades and routes to the correct DO via `getServerByName()`
-6. Dynamic route params in the URL -> DO instance ID (e.g. `[room]` param value becomes the DO name)
+1. scan `routes/` for `.ws.ts` files alongside HTTP routes
+2. generate one Durable Object class per `.ws.ts` file
+3. export those classes from the compiled worker entry alongside `fetch`, `scheduled`, and `queue`
+4. generate a WebSocket route manifest for typed client/codegen
+5. detect `Upgrade: websocket` in the worker `fetch` handler
+6. match the upgrade request against the WebSocket route table
+7. resolve route params and a deterministic Durable Object instance ID
+8. resolve ambient auth/session context
+9. run `onBeforeConnect`
+10. forward the request to the matched Durable Object stub
+
+Class names should be deterministic from the file path, e.g.:
+
+- `routes/chat/[room].ws.ts` -> `ChatRoomWs`
+- `routes/notifications.ws.ts` -> `NotificationsWs`
+
+Durable Object instance naming should also be deterministic:
+
+- no params -> `"default"`
+- params -> serialized from the matched param values in route-param order
 
 ## Deploy Pipeline
 
-Changes to `packages/api`:
-
-### Manifest Extension
+The deploy manifest needs richer WebSocket metadata than a bare list of class names.
 
 ```ts
 interface DeployManifest {
-  // ... existing fields
+  version: number;
   bindings: {
-    // ... existing
-    websocket?: string[]; // DO class names, e.g. ["ChatRoomWs"]
+    d1?: string[];
+    kv?: string[];
+    r2?: string[];
+    ai?: boolean;
+    hyperdrive?: string[];
+  };
+  websocket?: {
+    routes: {
+      pattern: string;
+      filePath: string;
+      className: string;
+      mode: "room" | "socket";
+      hasAuthGate: boolean;
+    }[];
+    classes: string[];
+    migrations: {
+      tag: string;
+      newClasses?: string[];
+      deletedClasses?: string[];
+    }[];
   };
 }
 ```
 
 ### Provisioning Flow
 
-1. Compiler detects `.ws.ts` files, adds DO class names to `bindings.websocket`
-2. API reads class names from manifest
-3. API generates `durable_objects.bindings` entries in wrangler config
-4. API appends DO migration tags automatically (monotonic counter per project)
-5. Worker upload includes DO class exports
+1. the compiler detects `.ws.ts` files and emits WebSocket manifest metadata
+2. the API compares the current classes against the active deployment's classes
+3. if the class set changed, the project's WebSocket migration counter increments and a new append-only migration entry is added
+4. worker upload metadata includes:
+   - Durable Object bindings
+   - Durable Object migrations
+   - exported Durable Object classes
 
 ### Migration Tracking
 
-DO migrations are append-only. Each project tracks its current migration tag counter (new column on `projects` table or separate table). When a deploy adds or removes a `.ws.ts` file, the counter increments and a new migration entry is appended:
+Durable Object migrations are append-only.
+
+Each project tracks its current WebSocket migration version. A new migration tag is emitted only when the WebSocket class set changes.
+
+Example:
 
 ```json
 {
-  "migrations": [
-    { "tag": "ws-v1", "new_classes": ["ChatRoomWs"] },
-    { "tag": "ws-v2", "new_classes": ["NotificationsWs"], "deleted_classes": ["OldWs"] }
-  ]
+  "websocket": {
+    "classes": ["ChatRoomWs", "NotificationsWs"],
+    "migrations": [
+      { "tag": "ws-v1", "newClasses": ["ChatRoomWs"] },
+      { "tag": "ws-v2", "newClasses": ["NotificationsWs"] }
+    ]
+  }
 }
 ```
 
-## Dispatch Routing
+## Dispatch and Metering
 
-The dispatch worker (`packages/dispatch`) passes WebSocket upgrade requests through to user workers — Workers for Platforms supports this natively. The DO routing happens inside the user worker's generated `fetch` handler.
+Workers for Platforms already supports WebSocket pass-through, so the dispatch worker does not need a new routing architecture.
 
-No changes needed to dispatch beyond ensuring `Upgrade: websocket` headers are forwarded (they already are in the standard `fetch` passthrough).
+The dispatch worker should:
+
+- continue forwarding upgrade requests to user workers
+- meter the upgrade request as a new request type: `websocket`
+- not meter individual messages in v1
+
+This keeps hosted usage accounting simple while avoiding premature message-level metering or plan enforcement.
 
 ## Responsibility Split
 
-| Concern                                         | Owner                                    |
-| ----------------------------------------------- | ---------------------------------------- |
-| File-based routing -> DO class generation       | Void                                     |
-| `defineRoom` / `defineWebSocket` API            | Void                                     |
-| URL -> DO instance routing                      | Void (via partyserver `getServerByName`) |
-| Binding injection (D1, KV, R2, AI) into room/ws | Void                                     |
-| DO migration management at deploy               | Void                                     |
-| Client helper with auto-reconnect               | Void (wrapping `partysocket`)            |
-| WebSocket hibernation                           | PartyServer                              |
-| Connection lifecycle management                 | PartyServer                              |
-| Broadcast / getConnections                      | PartyServer                              |
-| DO storage API                                  | PartyServer / CF Durable Objects         |
+| Concern                                         | Owner       |
+| ----------------------------------------------- | ----------- |
+| File-based routing -> Durable Object generation | Void        |
+| `defineRoom()` / `defineWebSocket()` API        | Void        |
+| Typed message validation and inference          | Void        |
+| Ambient auth/session context                    | Void        |
+| URL -> Durable Object instance routing          | Void        |
+| Typed client helper                             | Void        |
+| Durable Object migration management at deploy   | Void        |
+| Durable Object internals and hibernation        | PartyServer |
+| Reconnecting client transport                   | PartySocket |
 
-## Open Questions
+## Future Work
 
-- **Metering**: Should WebSocket messages be metered like HTTP requests? Or just connection upgrades? Impacts Analytics Engine schema in dispatch.
-- **Limits**: Per-plan connection limits? Message rate limiting?
-- **Auth**: Should `onBeforeConnect` (edge-level auth check) be exposed? Or rely on existing Void auth middleware?
-- **Type safety**: Typed message schemas (e.g. `defineRoom<{ type: "chat", text: string }>`)? Nice to have but not required for v1.
-- **Vue/React composables**: Follow-up work. `connect()` is framework-agnostic for v1.
+Follow-up work after v1:
+
+- framework-specific Vue/React composables
+- raw/binary frame escape hatches
+- server-side helpers for cross-room or per-user fanout from non-WS routes
+- optional presence helpers
+- optional request/reply or RPC-style message conventions
+- per-plan connection limits and message rate limiting

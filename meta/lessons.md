@@ -103,3 +103,37 @@ AE SQL is ClickHouse-based with several non-obvious limitations:
 - public docs can intentionally omit on-hold integrations; confirm before "fixing" those omissions
 - root scripts must be described exactly as implemented, not as idealized monorepo commands
 - in this repo specifically, root `dev` and `build` are dashboard-only unless the source changes
+
+## Design Doc Revisions: Do Not Jump to Implementation
+
+**Problem:** When a user is still refining or revising a design doc, it is easy to slip into implementation mode after producing a plan.
+
+**Rule:** If the user asks to revise a design doc, stay in design/doc mode until they explicitly ask to build it. Non-mutating research is fine; code changes are not.
+
+## Framework DX Design: Preserve Namespaces and Prefer Conventions
+
+**Problem:** In auth design work, it is easy to invent new CLI entrypoints or expose too much configuration, even when the product already has established namespace boundaries and a convention-first philosophy.
+
+**Rule:** When designing framework UX:
+
+- preserve existing CLI namespace meanings (`void auth` is platform auth; app scaffolding belongs under `void gen`)
+- default to convention-over-configuration for first-class features
+- keep advanced hooks like `defineAuth()` as escape hatches, not the primary setup path
+- if the user says a v1 surface is out of scope or wants a clean break, reflect that directly instead of carrying legacy or compatibility machinery forward by default
+
+## Platform vs App-Owned Integrations in Design Work
+
+**Problem:** When a later platform-managed integration is planned, it is easy to fill the gap with temporary Void-owned stubs even when the user wants the v1 story to rely on app-owned provider wiring instead.
+
+**Rule:** If the user distinguishes between:
+
+- v1: app-owned provider integration
+- later: platform-managed integration
+
+then the design must reflect that split directly. Do not insert a temporary platform-owned stub layer unless the user explicitly asks for it.
+
+## Playground UI: Match the Existing Minimal Style
+
+**Problem:** When adding a playground app, it is easy to over-design the UI and introduce unnecessary visual styling that distracts from the feature being demonstrated.
+
+**Rule:** Playground apps should default to the same bare-minimum presentation as the existing demos like `kitchen-sink`: simple layout, light inline structure when needed, and focus on feature behavior over visual design unless the user explicitly asks for design work.

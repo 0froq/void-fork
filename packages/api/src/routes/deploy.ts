@@ -4,9 +4,11 @@ import { SUPPORTED_MANIFEST_VERSIONS, type DeployManifest, type DeployEvent } fr
 import {
   getProject,
   getUser,
+  getDeployment,
   createDeployment,
   updateDeploymentStatus,
   updateProjectType,
+  updateProjectWebSocketVersion,
   getDomainsByProjectId,
   countUserDeploymentsToday,
   getActiveDeployment,
@@ -38,6 +40,76 @@ const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
 
 const app = new Hono<ApiEnv>();
 
+function sameClassSet(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function sortUnique(values: string[] | undefined): string[] {
+  return [...new Set(values ?? [])].sort((a, b) => a.localeCompare(b));
+}
+
+function parseManifest(raw: string | null | undefined): DeployManifest | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as DeployManifest;
+  } catch {
+    return null;
+  }
+}
+
+export function enrichWebSocketManifest(
+  manifest: DeployManifest,
+  previousManifest: DeployManifest | null,
+  currentVersion: number,
+): { manifest: DeployManifest; changed: boolean; nextVersion: number } {
+  const nextClasses = sortUnique(manifest.websocket?.classes);
+  const previousClasses = sortUnique(previousManifest?.websocket?.classes);
+  const previousMigrations = previousManifest?.websocket?.migrations ?? [];
+  const changed = !sameClassSet(nextClasses, previousClasses);
+
+  if (!changed) {
+    if (!manifest.websocket && previousMigrations.length === 0) {
+      return { manifest, changed: false, nextVersion: currentVersion };
+    }
+    return {
+      manifest: {
+        ...manifest,
+        websocket: manifest.websocket
+          ? {
+              ...manifest.websocket,
+              classes: nextClasses,
+              migrations: previousMigrations,
+            }
+          : previousManifest?.websocket,
+      },
+      changed: false,
+      nextVersion: currentVersion,
+    };
+  }
+
+  const newClasses = nextClasses.filter((name) => !previousClasses.includes(name));
+  const deletedClasses = previousClasses.filter((name) => !nextClasses.includes(name));
+  const nextVersion = currentVersion + 1;
+  const migration = {
+    tag: `ws-v${nextVersion}`,
+    ...(newClasses.length > 0 ? { newClasses } : {}),
+    ...(deletedClasses.length > 0 ? { deletedClasses } : {}),
+  };
+
+  return {
+    manifest: {
+      ...manifest,
+      websocket: {
+        routes: manifest.websocket?.routes ?? [],
+        classes: nextClasses,
+        migrations: [...previousMigrations, migration],
+      },
+    },
+    changed: true,
+    nextVersion,
+  };
+}
+
 // Deploy to a project
 app.post("/:id/deploy", async (c) => {
   const projectId = c.req.param("id");
@@ -51,8 +123,11 @@ app.post("/:id/deploy", async (c) => {
   }
 
   // Run independent pre-checks in parallel
-  const [activeDeploy, user] = await Promise.all([
+  const [activeDeploy, currentLiveDeployment, user] = await Promise.all([
     getActiveDeployment(c.get("db"), projectId),
+    project.active_deployment_id
+      ? getDeployment(c.get("db"), project.active_deployment_id)
+      : Promise.resolve(null),
     getUser(c.get("db"), c.get("userId")),
   ]);
 
@@ -82,27 +157,47 @@ app.post("/:id/deploy", async (c) => {
 
   const formData = await c.req.formData();
   const manifestRaw = formData.get("manifest") as string | null;
-  const manifest: DeployManifest = manifestRaw
+  const incomingManifest: DeployManifest = manifestRaw
     ? (JSON.parse(manifestRaw) as DeployManifest)
     : { version: 3, bindings: {} };
 
   // Validate deploy manifest version
-  if (manifest.version == null || !SUPPORTED_MANIFEST_VERSIONS.includes(manifest.version)) {
+  if (
+    incomingManifest.version == null ||
+    !SUPPORTED_MANIFEST_VERSIONS.includes(incomingManifest.version)
+  ) {
     return c.json(
       {
         error: "Unsupported deploy manifest version. Please update void.",
-        version: manifest.version ?? null,
+        version: incomingManifest.version ?? null,
         supported: SUPPORTED_MANIFEST_VERSIONS,
       },
       400,
     );
   }
 
+  const enrichedManifestResult = enrichWebSocketManifest(
+    incomingManifest,
+    parseManifest(currentLiveDeployment?.manifest),
+    project.websocket_version,
+  );
+  const manifest = enrichedManifestResult.manifest;
+  const finalManifestRaw = JSON.stringify(manifest);
+
   const source = (formData.get("source") as string | null) ?? null;
   const commit = (formData.get("commit") as string | null) ?? null;
 
   // Create deployment record
-  const deployment = await createDeployment(c.get("db"), projectId, manifestRaw, source, commit);
+  const deployment = await createDeployment(
+    c.get("db"),
+    projectId,
+    finalManifestRaw,
+    source,
+    commit,
+  );
+  if (enrichedManifestResult.changed) {
+    await updateProjectWebSocketVersion(c.get("db"), projectId, enrichedManifestResult.nextVersion);
+  }
   const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
   const workerName = `user-${project.slug}-${deployment.id}`;
 
@@ -452,11 +547,30 @@ app.post("/:id/deploy", async (c) => {
         }
 
         const assetConfig = manifest.assetConfig ?? { not_found_handling: "none" };
+        const websocketBindings =
+          manifest.websocket?.classes.map((className) => ({
+            name: className,
+            class_name: className,
+          })) ?? [];
         const metadata: Record<string, unknown> = {
           main_module: manifest.workerMain ?? "index.js",
           compatibility_date: manifest.compatibilityDate ?? "2026-02-12",
           compatibility_flags: manifest.compatibilityFlags ?? ["nodejs_compat"],
           bindings: allBindings,
+          ...(websocketBindings.length > 0
+            ? { durable_objects: { bindings: websocketBindings } }
+            : {}),
+          ...(manifest.websocket?.migrations?.length
+            ? {
+                migrations: manifest.websocket.migrations.map((migration) => ({
+                  tag: migration.tag,
+                  ...(migration.newClasses?.length ? { new_classes: migration.newClasses } : {}),
+                  ...(migration.deletedClasses?.length
+                    ? { deleted_classes: migration.deletedClasses }
+                    : {}),
+                })),
+              }
+            : {}),
           ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
           observability: {
             enabled: true,

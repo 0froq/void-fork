@@ -147,6 +147,23 @@ describe("dispatch fetch handler", () => {
     expect(await response.text()).toBe("api");
   });
 
+  it("meters websocket upgrade requests as websocket while forwarding them", async () => {
+    const { env, workerFetch, analyticsWrites } = createEnv({
+      routing: { workerName: "user-app", projectId: "proj_1" },
+      workerResponse: new Response("switching", { status: 200 }),
+    });
+
+    const request = new Request("https://my-app.void.app/chat/general", {
+      headers: { Upgrade: "websocket", Connection: "Upgrade" },
+    });
+    const response = await app.fetch(request, env, createCtx());
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(workerFetch.mock.calls[0]?.[0].headers.get("upgrade")).toBe("websocket");
+    expect((analyticsWrites[0] as { blobs: string[] }).blobs[1]).toBe("websocket");
+    expect(response.headers.get("X-Hosted-By")).toBe("void.cloud");
+  });
+
   it("dispatches SSR requests to worker", async () => {
     const { env, workerFetch } = createEnv({
       routing: { workerName: "user-app", projectId: "proj_1", ssr: true },

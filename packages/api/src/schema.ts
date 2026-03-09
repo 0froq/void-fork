@@ -1,4 +1,13 @@
-import { boolean, index, pgTable, text, timestamp, unique, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 import type { PlanId } from "./tiers";
 import type { PlatformWorkerName, PlatformEnv } from "./admin/platform-workers";
 
@@ -60,6 +69,7 @@ export const projects = pgTable(
     slug: text("slug").notNull(),
     type: text("mode").notNull().default("worker").$type<"void" | "spa" | "static" | "framework">(),
     active_deployment_id: text("active_deployment_id"),
+    websocket_version: integer("websocket_version").notNull().default(0),
     created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
   },
   (t) => [
