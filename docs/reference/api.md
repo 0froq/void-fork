@@ -724,18 +724,21 @@ Imported from `"void/svelte"`.
 
 ## Subpath Exports
 
-| Import path      | Contents                                                                                                                                                         |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `void`           | `voidPlugin` named export + all handler/type re-exports                                                                                                          |
-| `void/handler`   | `defineHandler`, `defineMiddleware`, `defineScheduled`, `defineQueue`, `defineRender`, `defineHead`, types                                                       |
-| `void/auth`      | `defineAuth`, `getUser`, `getSession`, `requireAuth`, `AuthUser`, `AuthSession`, `AuthState`                                                                     |
-| `void/client`    | `fetch`, `fetchStream`, `FetchError`, `auth`, `createAuthClient`, `AuthUser`, `AuthSession`, `AuthState`                                                         |
-| `void/ws`        | `defineRoom`, `defineWebSocket`, `connect`, WebSocket context and connection types                                                                               |
-| `void/response`  | `convertReturnValue`                                                                                                                                             |
-| `void/validator` | `runValidation`, `ValidatorSlots`, `HandlerInput`                                                                                                                |
-| `void/schema-d1` | Re-exports [`drizzle-orm/sqlite-core`](https://orm.drizzle.team/docs/column-types/sqlite) — D1 table/column builders                                             |
-| `void/schema-pg` | Re-exports [`drizzle-orm/pg-core`](https://orm.drizzle.team/docs/column-types/pg) — PostgreSQL table/column builders                                             |
-| `void/db`        | `db` ([Drizzle D1](https://orm.drizzle.team/docs/get-started/d1-new) instance), `createDb`, query operators (`eq`, `and`, `or`, `desc`, `like`, `inArray`, etc.) |
-| `void/routes`    | `RouteMap` and `WebSocketRouteMap` stubs (types only)                                                                                                            |
-| `void/queues`    | `queues` proxy for sending messages to typed queues                                                                                                              |
-| `void/env`       | Global Cloudflare env types (types only)                                                                                                                         |
+| Import path            | Contents                                                                                                                                                         |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `void`                 | `voidPlugin` named export + all handler/type re-exports                                                                                                          |
+| `void/handler`         | `defineHandler`, `defineMiddleware`, `defineScheduled`, `defineQueue`, `defineRender`, `defineHead`, types                                                       |
+| `void/auth`            | `defineAuth`, `getUser`, `getSession`, `requireAuth`, `AuthUser`, `AuthSession`, `AuthState`                                                                     |
+| `void/client`          | `fetch`, `fetchStream`, `FetchError`, `auth`, `createAuthClient`, `AuthUser`, `AuthSession`, `AuthState`                                                         |
+| `void/ws`              | `defineRoom`, `defineWebSocket`, `connect`, WebSocket context and connection types                                                                               |
+| `void/response`        | `convertReturnValue`                                                                                                                                             |
+| `void/validator`       | `runValidation`, `ValidatorSlots`, `HandlerInput`                                                                                                                |
+| `void/drizzle-zod`     | Re-exports [`drizzle-zod`](https://orm.drizzle.team/docs/zod) — schema-derived Zod validators for Drizzle tables                                                 |
+| `void/drizzle-valibot` | Re-exports [`drizzle-valibot`](https://orm.drizzle.team/docs/typebox) — schema-derived Valibot validators for Drizzle tables                                     |
+| `void/drizzle-arktype` | Re-exports [`drizzle-arktype`](https://orm.drizzle.team/docs/arktype) — schema-derived ArkType validators for Drizzle tables                                     |
+| `void/schema-d1`       | Re-exports [`drizzle-orm/sqlite-core`](https://orm.drizzle.team/docs/column-types/sqlite) — D1 table/column builders                                             |
+| `void/schema-pg`       | Re-exports [`drizzle-orm/pg-core`](https://orm.drizzle.team/docs/column-types/pg) — PostgreSQL table/column builders                                             |
+| `void/db`              | `db` ([Drizzle D1](https://orm.drizzle.team/docs/get-started/d1-new) instance), `createDb`, query operators (`eq`, `and`, `or`, `desc`, `like`, `inArray`, etc.) |
+| `void/routes`          | `RouteMap` and `WebSocketRouteMap` stubs (types only)                                                                                                            |
+| `void/queues`          | `queues` proxy for sending messages to typed queues                                                                                                              |
+| `void/env`             | Global Cloudflare env types (types only)                                                                                                                         |

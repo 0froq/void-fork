@@ -1,5 +1,6 @@
 import { pgTable, serial, text, boolean, timestamp } from "void/schema-pg";
-import * as v from "valibot";
+import { createInsertSchema } from "void/drizzle-valibot";
+import { minLength, pipe } from "valibot";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -9,21 +10,21 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const insertUserSchema = v.object({
-  name: v.pipe(v.string(), v.minLength(1)),
-  email: v.pipe(v.string(), v.minLength(1)),
+export const insertUserSchema = createInsertSchema(users, {
+  name: (schema) => pipe(schema, minLength(1)),
+  email: (schema) => pipe(schema, minLength(1)),
 });
 
 export const posts = pgTable("posts", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
   body: text("body").notNull(),
-  authorId: serial("author_id").references(() => users.id),
+  authorId: serial("author_id")
+    .notNull()
+    .references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const insertPostSchema = v.object({
-  title: v.pipe(v.string(), v.minLength(1)),
-  body: v.string(),
-  authorId: v.number(),
+export const insertPostSchema = createInsertSchema(posts, {
+  title: (schema) => pipe(schema, minLength(1)),
 });
