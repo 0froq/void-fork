@@ -298,6 +298,11 @@ export function voidPlugin(options?: {
     },
   };
 
+  // Scan queues/websocket routes early so both framework-mode and default-mode
+  // branches can safely close over these bindings.
+  const queues = framework ? [] : scanQueuesSync(root);
+  const websocketRoutes = framework ? [] : scanWebSocketRoutesSync(root);
+
   // Class B/C: lighter composition — DB types + migrations only.
   // The framework's own adapter handles the CF worker build and dev server.
   // voidPlugin() only provides DB type codegen, migration management, and
@@ -413,11 +418,6 @@ export function voidPlugin(options?: {
 
   const outDir = join(root, ".void");
   mkdirSync(outDir, { recursive: true });
-
-  // Scan queues early so mergeBindings can reference them in both branches.
-  // Framework mode skips queue scanning (empty array).
-  const queues = framework ? [] : scanQueuesSync(root);
-  const websocketRoutes = framework ? [] : scanWebSocketRoutesSync(root);
 
   // Config function that merges inferred bindings with the resolved config.
   // When the user has a wrangler.json with real binding IDs (for raw CF

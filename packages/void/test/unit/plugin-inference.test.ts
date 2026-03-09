@@ -1,8 +1,9 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { inferProjectBindings, detectFramework } from "../../src/plugin-inference";
+import { voidPlugin } from "../../src/index";
 
 const tempDirs: string[] = [];
 
@@ -198,5 +199,31 @@ describe("detectFramework", () => {
     );
     const result = detectFramework(root);
     expect(result).toEqual({ name: "vinext-pages", class: "a" });
+  });
+
+  it("lets framework-mode configResolved run without touching websocket TDZ state", () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({ dependencies: { astro: "^5.0.0" } }),
+    );
+
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+
+    try {
+      const plugins = voidPlugin();
+      const wranglerSyncPlugin = plugins.find((plugin) => plugin.name === "void:wrangler-sync");
+      const configResolved = wranglerSyncPlugin?.configResolved;
+      const handler =
+        typeof configResolved === "function" ? configResolved : configResolved?.handler;
+
+      expect(wranglerSyncPlugin).toBeTruthy();
+      expect(handler).toBeTypeOf("function");
+      expect(() =>
+        handler?.call({} as never, { command: "serve" } as import("vite").ResolvedConfig),
+      ).not.toThrow();
+    } finally {
+      cwd.mockRestore();
+    }
   });
 });

@@ -148,13 +148,15 @@ describe("compileRouteTable with auth", () => {
     expect(code).toContain("authReady = true;");
   });
 
-  it("generates session middleware that reads from AUTH_KV", () => {
+  it("generates session middleware that resolves auth user and sets context", () => {
     const code = compileRouteTable(emptyScan, "/routes", "/middleware", "/crons", "/queues", null, {
       ...baseOptions,
       auth: emailAuth,
     });
-    expect(code).toContain('c.env.AUTH_KV.get("session:" + sid');
+    expect(code).toContain("resolveAuthUserFromRequest");
+    expect(code).toContain("resolveAuthUserFromRequest(c.req.raw, c.env)");
     expect(code).toContain('c.set("user"');
+    expect(code).toContain("authContext.run");
   });
 
   it("places auth middleware before user middleware", () => {
