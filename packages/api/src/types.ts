@@ -4,6 +4,7 @@ import type {
   oauthAccounts,
   projects,
   deployments,
+  projectSecrets,
   resources,
   domains,
   platformEvents,
@@ -13,6 +14,7 @@ export type User = InferSelectModel<typeof users>;
 export type OAuthAccount = InferSelectModel<typeof oauthAccounts>;
 export type Project = InferSelectModel<typeof projects>;
 export type Deployment = InferSelectModel<typeof deployments>;
+export type ProjectSecret = InferSelectModel<typeof projectSecrets>;
 export type Resource = InferSelectModel<typeof resources>;
 export type Domain = InferSelectModel<typeof domains>;
 export type PlatformEvent = InferSelectModel<typeof platformEvents>;
@@ -66,6 +68,7 @@ export interface WebSocketManifestMeta {
 
 export interface DeployManifest {
   version: number;
+  auth?: boolean;
   bindings: {
     d1?: string[];
     kv?: string[];

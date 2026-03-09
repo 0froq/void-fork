@@ -1,7 +1,18 @@
 import { Hono } from "hono";
 import type { ApiEnv } from "../env";
-import { getProject } from "../db";
+import {
+  deleteProjectSecret,
+  getProject,
+  listProjectSecretNames,
+  upsertProjectSecret,
+} from "../db";
 import { DEFAULT_DISPATCH_NAMESPACE } from "../constants";
+import {
+  deleteWorkerSecret,
+  encryptProjectSecret,
+  getVersionedWorkerName,
+  putWorkerSecret,
+} from "../project-secrets";
 
 function isValidSecretName(name: string): boolean {
   return /^[A-Z][A-Z0-9_]*$/.test(name);
@@ -19,32 +30,7 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "forbidden" }, 403);
     }
 
-    // Dev bypass — skip CF API call for secrets listing
-    if (c.env.DEV_AUTH_BYPASS) {
-      return c.json([]);
-    }
-
-    const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
-    const workerName = `user-${project.slug}`;
-    const cfRes = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}/secrets`,
-      {
-        headers: {
-          Authorization: `Bearer ${c.env.CF_API_TOKEN}`,
-        },
-      },
-    );
-
-    if (!cfRes.ok) {
-      if (cfRes.status === 404) {
-        return c.json([]);
-      }
-      const details = await cfRes.text();
-      return c.json({ error: "failed to list secrets", details }, 502);
-    }
-
-    const result = await cfRes.json<{ result: { name: string; type: string }[] }>();
-    return c.json(result.result.map((s) => ({ name: s.name })));
+    return c.json(await listProjectSecretNames(c.get("db"), projectId));
   })
 
   .put("/:id/secrets/:name", async (c) => {
@@ -72,27 +58,32 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "value is required" }, 400);
     }
 
-    const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
-    const workerName = `user-${project.slug}`;
-    const cfRes = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}/secrets`,
-      {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${c.env.CF_API_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: secretName,
-          text: body.value,
-          type: "secret_text",
-        }),
-      },
+    const encrypted = await encryptProjectSecret(c.env, projectId, secretName, body.value);
+    await upsertProjectSecret(
+      c.get("db"),
+      projectId,
+      secretName,
+      encrypted.ciphertext,
+      encrypted.iv,
+      encrypted.keyVersion,
     );
 
-    if (!cfRes.ok) {
-      const details = await cfRes.text();
-      return c.json({ error: "secret update failed", details }, 502);
+    if (project.active_deployment_id) {
+      const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
+      const workerName = getVersionedWorkerName(project.slug, project.active_deployment_id);
+      try {
+        await putWorkerSecret(c.env, dispatchNamespace, workerName, secretName, body.value);
+      } catch (error) {
+        return c.json(
+          {
+            error: "secret stored but live propagation failed",
+            name: secretName,
+            liveUpdated: false,
+            details: error instanceof Error ? error.message : String(error),
+          },
+          502,
+        );
+      }
     }
 
     return c.json({ ok: true, name: secretName });
@@ -113,21 +104,24 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "forbidden" }, 403);
     }
 
-    const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
-    const workerName = `user-${project.slug}`;
-    const cfRes = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}/secrets/${encodeURIComponent(secretName)}`,
-      {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${c.env.CF_API_TOKEN}`,
-        },
-      },
-    );
+    await deleteProjectSecret(c.get("db"), projectId, secretName);
 
-    if (!cfRes.ok) {
-      const details = await cfRes.text();
-      return c.json({ error: "secret delete failed", details }, 502);
+    if (project.active_deployment_id) {
+      const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
+      const workerName = getVersionedWorkerName(project.slug, project.active_deployment_id);
+      try {
+        await deleteWorkerSecret(c.env, dispatchNamespace, workerName, secretName);
+      } catch (error) {
+        return c.json(
+          {
+            error: "secret deleted from storage but live propagation failed",
+            name: secretName,
+            liveUpdated: false,
+            details: error instanceof Error ? error.message : String(error),
+          },
+          502,
+        );
+      }
     }
 
     return c.json({ ok: true, name: secretName });

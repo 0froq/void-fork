@@ -1,6 +1,6 @@
 import { Miniflare } from "miniflare";
 import { PGlite } from "@electric-sql/pglite";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
@@ -9,9 +9,18 @@ import { fileURLToPath } from "node:url";
 import { vi } from "vitest";
 import type { Db } from "../../src/db";
 import * as schema from "../../src/schema";
-import { users, oauthAccounts, projects, deployments, resources, domains } from "../../src/schema";
+import {
+  users,
+  oauthAccounts,
+  projects,
+  deployments,
+  projectSecrets,
+  resources,
+  domains,
+} from "../../src/schema";
 import { signJwt } from "../../src/auth/jwt";
 import { generateId } from "../../src/id";
+import { encryptProjectSecret } from "../../src/project-secrets";
 import type { PlanId } from "../../src/tiers";
 import { setTestDb, clearTestDb } from "./setup";
 
@@ -19,6 +28,12 @@ export const JWT_SECRET = "test-jwt-secret";
 export const CF_API_TOKEN = "test-cf-token";
 export const CF_ACCOUNT_ID = "test-account-id";
 export const CF_ZONE_ID = "test-zone-id";
+export const PROJECT_SECRET_ACTIVE_KEY_VERSION = "1";
+export const PROJECT_SECRET_KEYS_JSON = JSON.stringify({
+  [PROJECT_SECRET_ACTIVE_KEY_VERSION]: Buffer.from("0123456789abcdef0123456789abcdef").toString(
+    "base64",
+  ),
+});
 
 export type TestEnv = {
   db: Db;
@@ -32,6 +47,8 @@ export type TestEnv = {
   CF_ACCOUNT_ID: string;
   CF_ZONE_ID: string;
   JWT_SECRET: string;
+  PROJECT_SECRET_KEYS_JSON: string;
+  PROJECT_SECRET_ACTIVE_KEY_VERSION: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   GOOGLE_CLIENT_ID: string;
@@ -102,6 +119,8 @@ export async function setupEnv(): Promise<TestEnv> {
     CF_ACCOUNT_ID,
     CF_ZONE_ID,
     JWT_SECRET,
+    PROJECT_SECRET_KEYS_JSON,
+    PROJECT_SECRET_ACTIVE_KEY_VERSION,
     GITHUB_CLIENT_ID: "test-github-client-id",
     GITHUB_CLIENT_SECRET: "test-github-client-secret",
     GOOGLE_CLIENT_ID: "test-google-client-id",
@@ -127,6 +146,7 @@ export async function teardownEnv(): Promise<void> {
 export async function clearTables(db: Db): Promise<void> {
   await db.delete(domains);
   await db.delete(resources);
+  await db.delete(projectSecrets);
   await db.delete(deployments);
   await db.delete(projects);
   await db.delete(oauthAccounts);
@@ -202,6 +222,38 @@ export async function createTestDeployment(
   return { id };
 }
 
+export async function createTestProjectSecret(
+  db: Db,
+  env: Pick<TestEnv, "PROJECT_SECRET_KEYS_JSON" | "PROJECT_SECRET_ACTIVE_KEY_VERSION">,
+  projectId: string,
+  name: string,
+  value: string,
+  managedReason: string | null = null,
+): Promise<void> {
+  const encrypted = await encryptProjectSecret(env, projectId, name, value);
+  await db
+    .insert(projectSecrets)
+    .values({
+      id: generateId("psc"),
+      project_id: projectId,
+      name,
+      ciphertext: encrypted.ciphertext,
+      iv: encrypted.iv,
+      key_version: encrypted.keyVersion,
+      managed_reason: managedReason,
+    })
+    .onConflictDoUpdate({
+      target: [projectSecrets.project_id, projectSecrets.name],
+      set: {
+        ciphertext: encrypted.ciphertext,
+        iv: encrypted.iv,
+        key_version: encrypted.keyVersion,
+        managed_reason: managedReason,
+        updated_at: sql`now()`,
+      },
+    });
+}
+
 // --- Fetch mocking ---
 
 export function cfSuccess(result: unknown): Response {
@@ -227,6 +279,7 @@ export interface CfApiMocks {
   uploadWorker: (url: string, init?: RequestInit) => Response | Promise<Response>;
   assetUploadSession: (url: string, init?: RequestInit) => Response | Promise<Response>;
   assetUpload: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  listWorkerSecrets: (url: string, init?: RequestInit) => Response | Promise<Response>;
   setWorkerSecret: (url: string, init?: RequestInit) => Response | Promise<Response>;
   deleteWorkerSecret: (url: string, init?: RequestInit) => Response | Promise<Response>;
   createCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -252,6 +305,7 @@ const defaultMocks: CfApiMocks = {
   uploadWorker: () => new Response("ok", { status: 200 }),
   assetUploadSession: () => cfSuccess({ jwt: "test-asset-jwt", buckets: [["hash1"]] }),
   assetUpload: () => cfSuccess({ jwt: "test-completion-jwt" }),
+  listWorkerSecrets: () => cfSuccess([]),
   setWorkerSecret: () => cfSuccess({}),
   deleteWorkerSecret: () => cfSuccess({}),
   createCustomHostname: () =>
@@ -302,6 +356,9 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
     }
     if (method === "POST" && url.includes("/workers/assets/upload")) {
       return mocks.assetUpload(url, init);
+    }
+    if (method === "GET" && url.includes("/workers/dispatch/") && url.includes("/secrets")) {
+      return mocks.listWorkerSecrets(url, init);
     }
     if (method === "PUT" && url.includes("/workers/dispatch/") && url.includes("/secrets")) {
       return mocks.setWorkerSecret(url, init);

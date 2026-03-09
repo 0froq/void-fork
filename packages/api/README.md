@@ -160,10 +160,14 @@ Secrets used at runtime:
 - `CF_ACCOUNT_ID`
 - `CF_ZONE_ID`
 - `JWT_SECRET`
+- `PROJECT_SECRET_KEYS_JSON`
+- `PROJECT_SECRET_ACTIVE_KEY_VERSION`
 - `GITHUB_CLIENT_ID`
 - `GITHUB_CLIENT_SECRET`
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
+
+`PROJECT_SECRET_KEYS_JSON` is a JSON object mapping key-version strings to base64-encoded 32-byte AES keys. `PROJECT_SECRET_ACTIVE_KEY_VERSION` selects which version is used for new project-secret writes.
 
 Optional vars:
 

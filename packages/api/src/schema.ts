@@ -110,6 +110,30 @@ export const deployments = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// project_secrets
+// ---------------------------------------------------------------------------
+export const projectSecrets = pgTable(
+  "project_secrets",
+  {
+    id: text("id").primaryKey(),
+    project_id: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    ciphertext: text("ciphertext").notNull(),
+    iv: text("iv").notNull(),
+    key_version: text("key_version").notNull(),
+    managed_reason: text("managed_reason"),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique().on(t.project_id, t.name),
+    index("idx_project_secrets_project_id").on(t.project_id),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // resources
 // ---------------------------------------------------------------------------
 export const resources = pgTable(

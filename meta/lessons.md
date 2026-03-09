@@ -9,6 +9,7 @@
 - `pnpm test` filtering: run `pnpm test <path-or-pattern>` without `--`.
 - Cloudflare Analytics Engine SQL: include `timestamp` in `SELECT` if you filter or sort on it, use `GROUP BY` instead of `DISTINCT`, cast with `toDateTime(...)`, do not alias over `timestamp`, and format datetimes as `YYYY-MM-DD HH:MM:SS`.
 - Docs sweeps: code is the source of truth for implemented behavior, but public docs can intentionally omit paused features. Describe root scripts exactly as implemented; in this repo, root `dev` and `build` are dashboard-only unless source changes.
+- Pre-launch transitions: if the user says a feature is not live yet, prefer a clean cutover over legacy migration work.
 - Design doc revisions: stay in design/doc mode until the user explicitly asks for implementation.
 - Framework DX design: preserve existing CLI namespaces, prefer convention over configuration, keep advanced hooks as escape hatches, and honor explicit clean breaks instead of carrying legacy surfaces forward.
 - Integration ownership in design work: if the user distinguishes v1 app-owned integration from later platform-managed integration, reflect that split directly and do not add a temporary platform-owned stub unless asked.

@@ -113,16 +113,38 @@ All secrets are stored in a dedicated 1Password vault.
 
 Set via `wrangler secret put <NAME>` (separate values per environment):
 
-| Secret                 | Purpose                                      |
-| ---------------------- | -------------------------------------------- |
-| `CF_API_TOKEN`         | Cloudflare API token (see permissions below) |
-| `CF_ACCOUNT_ID`        | Cloudflare account ID                        |
-| `CF_ZONE_ID`           | DNS zone ID (`void.app` zone)                |
-| `JWT_SECRET`           | Signs auth JWTs                              |
-| `GITHUB_CLIENT_ID`     | GitHub OAuth app client ID                   |
-| `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret               |
-| `GOOGLE_CLIENT_ID`     | Google OAuth app client ID                   |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth app client secret               |
+| Secret                              | Purpose                                          |
+| ----------------------------------- | ------------------------------------------------ |
+| `CF_API_TOKEN`                      | Cloudflare API token (see permissions below)     |
+| `CF_ACCOUNT_ID`                     | Cloudflare account ID                            |
+| `CF_ZONE_ID`                        | DNS zone ID (`void.app` zone)                    |
+| `JWT_SECRET`                        | Signs auth JWTs                                  |
+| `PROJECT_SECRET_KEYS_JSON`          | JSON keyring for encrypted project secrets       |
+| `PROJECT_SECRET_ACTIVE_KEY_VERSION` | Active key version for new project-secret writes |
+| `GITHUB_CLIENT_ID`                  | GitHub OAuth app client ID                       |
+| `GITHUB_CLIENT_SECRET`              | GitHub OAuth app client secret                   |
+| `GOOGLE_CLIENT_ID`                  | Google OAuth app client ID                       |
+| `GOOGLE_CLIENT_SECRET`              | Google OAuth app client secret                   |
+
+`PROJECT_SECRET_KEYS_JSON` should be a JSON object mapping key-version strings to base64-encoded 32-byte AES keys. `PROJECT_SECRET_ACTIVE_KEY_VERSION` must match one of those configured versions.
+
+Example:
+
+```json
+{ "1": "<base64-32-byte-key>" }
+```
+
+With:
+
+```text
+PROJECT_SECRET_ACTIVE_KEY_VERSION=1
+```
+
+Generate a new 32-byte key with:
+
+```bash
+openssl rand -base64 32
+```
 
 **API worker `CF_API_TOKEN` permissions** — this is the broad-scope token used at runtime to provision and manage user resources. Separate from the GitHub Actions deploy token.
 
@@ -237,6 +259,18 @@ deploy:staging
 
 Deploy order matters: proxy deploys first (user workers depend on it via service binding), then api runs PostgreSQL migrations via drizzle-kit before deploying (ensures schema is ready for new code), and dispatch deploys last. Dashboard is deployed separately (not included in `deploy` / `deploy:staging` scripts).
 
+### API rollout notes for DB-backed project secrets
+
+When rolling out the API version that introduces encrypted DB-backed project secrets:
+
+1. set `PROJECT_SECRET_KEYS_JSON` and `PROJECT_SECRET_ACTIVE_KEY_VERSION` on the API worker before deploy
+2. run the normal API migrate-then-deploy flow (`pnpm deploy:api` or `pnpm deploy:staging:api`)
+3. roll out the framework/runtime side after the API is live
+
+The API migration creates the `project_secrets` table. The deploy scripts above already run the migration before `wrangler deploy`.
+
+This is a clean cutover. The API only reads project secrets from `project_secrets`; any older worker-only secrets set directly on Cloudflare workers are ignored after rollout. If there are existing staging/test projects with secrets you still need, re-add them with `void secret put` or `void secret sync` after the API deploy.
+
 ### GitHub Actions
 
 Three workflows in `.github/workflows/`:
@@ -308,6 +342,8 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    wrangler secret put CF_ACCOUNT_ID --env <name>
    wrangler secret put CF_ZONE_ID --env <name>
    wrangler secret put JWT_SECRET --env <name>
+   wrangler secret put PROJECT_SECRET_KEYS_JSON --env <name>
+   wrangler secret put PROJECT_SECRET_ACTIVE_KEY_VERSION --env <name>
    wrangler secret put GITHUB_CLIENT_ID --env <name>
    wrangler secret put GITHUB_CLIENT_SECRET --env <name>
    wrangler secret put GOOGLE_CLIENT_ID --env <name>

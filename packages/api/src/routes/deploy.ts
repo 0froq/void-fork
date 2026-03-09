@@ -17,6 +17,8 @@ import {
   markDeploymentRetained,
   setAppliedMigrations,
   getRetainedDeploymentsExcluding,
+  getProjectSecrets,
+  upsertProjectSecret,
 } from "../db";
 import { eq } from "drizzle-orm";
 import { deployments } from "../schema";
@@ -35,6 +37,12 @@ import {
   deleteUnreferencedAssets,
 } from "../assets";
 import type { WebSocketMigrationMeta } from "../types";
+import {
+  BETTER_AUTH_SECRET_NAME,
+  decryptProjectSecret,
+  generateManagedAuthSecret,
+  encryptProjectSecret,
+} from "../project-secrets";
 
 const DEFAULT_DISPATCH_NAMESPACE = "void-users";
 const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
@@ -516,6 +524,45 @@ app.post("/:id/deploy", async (c) => {
           emit({ event: "provisioning_done" });
         }
 
+        if (typeof manifest.vars?.[BETTER_AUTH_SECRET_NAME] === "string") {
+          throw new Error(
+            `${BETTER_AUTH_SECRET_NAME} must be configured via project secrets, not manifest.vars`,
+          );
+        }
+
+        let projectSecretRows = await getProjectSecrets(c.get("db"), projectId);
+        if (manifest.auth) {
+          const existingAuthSecret = projectSecretRows.find(
+            (row) => row.name === BETTER_AUTH_SECRET_NAME,
+          );
+          if (!existingAuthSecret) {
+            const managedSecret = generateManagedAuthSecret();
+            const encrypted = await encryptProjectSecret(
+              c.env,
+              projectId,
+              BETTER_AUTH_SECRET_NAME,
+              managedSecret,
+            );
+            await upsertProjectSecret(
+              c.get("db"),
+              projectId,
+              BETTER_AUTH_SECRET_NAME,
+              encrypted.ciphertext,
+              encrypted.iv,
+              encrypted.keyVersion,
+              "auth-default",
+            );
+            projectSecretRows = await getProjectSecrets(c.get("db"), projectId);
+          }
+        }
+        const secretBindings = await Promise.all(
+          projectSecretRows.map(async (row) => ({
+            type: "secret_text" as const,
+            name: row.name,
+            text: await decryptProjectSecret(c.env, projectId, row),
+          })),
+        );
+
         // Upload assets via CF asset upload API (3-step flow)
         let completionJwt: string | undefined;
         if (assetCount > 0) {
@@ -587,6 +634,7 @@ app.post("/:id/deploy", async (c) => {
         const websocketBindings = buildWebSocketUploadBindings(manifest.websocket);
         const allBindings = [
           ...plainTextBindings,
+          ...secretBindings,
           ...workerBindings,
           ...websocketBindings,
           ...(completionJwt ? [{ name: "ASSETS", type: "assets" }] : []),

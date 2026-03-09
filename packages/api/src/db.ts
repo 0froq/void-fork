@@ -19,6 +19,7 @@ import {
   oauthAccounts,
   projects,
   deployments,
+  projectSecrets,
   resources,
   domains,
   platformEvents,
@@ -30,6 +31,7 @@ import type {
   Domain,
   OAuthAccount,
   PlatformEvent,
+  ProjectSecret,
   Project,
   Resource,
   User,
@@ -346,6 +348,80 @@ export async function getRetainedDeploymentsExcluding(
     .orderBy(desc(deployments.created_at));
 }
 
+// --- Project secrets ---
+
+export async function listProjectSecretNames(
+  db: Db,
+  projectId: string,
+): Promise<Array<{ name: string }>> {
+  return db
+    .select({ name: projectSecrets.name })
+    .from(projectSecrets)
+    .where(eq(projectSecrets.project_id, projectId))
+    .orderBy(asc(projectSecrets.name));
+}
+
+export async function getProjectSecret(
+  db: Db,
+  projectId: string,
+  name: string,
+): Promise<ProjectSecret | null> {
+  const [row] = await db
+    .select()
+    .from(projectSecrets)
+    .where(and(eq(projectSecrets.project_id, projectId), eq(projectSecrets.name, name)))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function getProjectSecrets(db: Db, projectId: string): Promise<ProjectSecret[]> {
+  return db
+    .select()
+    .from(projectSecrets)
+    .where(eq(projectSecrets.project_id, projectId))
+    .orderBy(asc(projectSecrets.name));
+}
+
+export async function upsertProjectSecret(
+  db: Db,
+  projectId: string,
+  name: string,
+  ciphertext: string,
+  iv: string,
+  keyVersion: string,
+  managedReason: string | null = null,
+): Promise<ProjectSecret> {
+  const [row] = await db
+    .insert(projectSecrets)
+    .values({
+      id: generateId("psc"),
+      project_id: projectId,
+      name,
+      ciphertext,
+      iv,
+      key_version: keyVersion,
+      managed_reason: managedReason,
+    })
+    .onConflictDoUpdate({
+      target: [projectSecrets.project_id, projectSecrets.name],
+      set: {
+        ciphertext,
+        iv,
+        key_version: keyVersion,
+        managed_reason: managedReason,
+        updated_at: sql`now()`,
+      },
+    })
+    .returning();
+  return row;
+}
+
+export async function deleteProjectSecret(db: Db, projectId: string, name: string): Promise<void> {
+  await db
+    .delete(projectSecrets)
+    .where(and(eq(projectSecrets.project_id, projectId), eq(projectSecrets.name, name)));
+}
+
 // --- Resources ---
 
 export async function createResource(
@@ -473,6 +549,7 @@ export async function deleteProjectCascade(db: Db, projectId: string): Promise<v
   await db.transaction(async (tx) => {
     await tx.delete(domains).where(eq(domains.project_id, projectId));
     await tx.delete(resources).where(eq(resources.project_id, projectId));
+    await tx.delete(projectSecrets).where(eq(projectSecrets.project_id, projectId));
     await tx.delete(deployments).where(eq(deployments.project_id, projectId));
     await tx.delete(projects).where(eq(projects.id, projectId));
   });

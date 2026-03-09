@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
 import app from "../../src/index";
 import { eq, sql } from "drizzle-orm";
-import { deployments, resources, domains, projects } from "../../src/schema";
+import { deployments, resources, domains, projects, projectSecrets } from "../../src/schema";
 import {
   setupEnv,
   teardownEnv,
@@ -9,6 +9,7 @@ import {
   createTestUser,
   createTestProject,
   createTestDeployment,
+  createTestProjectSecret,
   mockCfApi,
   cfSuccess,
   readAllEvents,
@@ -650,6 +651,101 @@ describe("POST /projects/:id/deploy", () => {
         { type: "plain_text", name: "API_URL", text: "https://api.example.com" },
         { type: "plain_text", name: "NODE_ENV", text: "production" },
       ]),
+    );
+  });
+
+  it("injects worker secrets as secret_text bindings and auto-creates BETTER_AUTH_SECRET", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "auth-secret-app");
+    await createTestProjectSecret(env.db, env, project.id, "OPENAI_API_KEY", "openai-secret");
+    const fetchMock = mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: { version: 3, auth: true, bindings: {} },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+
+    const setSecretCall = fetchMock.mock.calls.find((call: unknown[]) => {
+      const url = typeof call[0] === "string" ? call[0] : String(call[0]);
+      return url.includes("/workers/dispatch/") && url.includes("/secrets");
+    });
+    expect(setSecretCall).toBeUndefined();
+
+    const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
+      const url = typeof call[0] === "string" ? call[0] : String(call[0]);
+      return (
+        url.includes("/workers/dispatch/") &&
+        (call[1] as RequestInit)?.method === "PUT" &&
+        !url.includes("/secrets")
+      );
+    });
+    expect(uploadCall).toBeDefined();
+
+    const workerFormData = (uploadCall![1] as RequestInit).body as FormData;
+    const metadataBlob = workerFormData.get("metadata");
+    expect(metadataBlob).toBeInstanceOf(Blob);
+    const metadata = JSON.parse(await (metadataBlob as Blob).text()) as {
+      bindings?: { type: string; name: string; text?: string }[];
+    };
+
+    const secretBindings = (metadata.bindings ?? []).filter((b) => b.type === "secret_text");
+    expect(secretBindings).toEqual(
+      expect.arrayContaining([
+        { type: "secret_text", name: "OPENAI_API_KEY", text: "openai-secret" },
+        {
+          type: "secret_text",
+          name: "BETTER_AUTH_SECRET",
+          text: expect.stringMatching(/^[0-9a-f]{64}$/),
+        },
+      ]),
+    );
+
+    const [storedSecret] = await env.db
+      .select({ name: projectSecrets.name, managed_reason: projectSecrets.managed_reason })
+      .from(projectSecrets)
+      .where(
+        sql`${projectSecrets.project_id} = ${project.id} and ${projectSecrets.name} = 'BETTER_AUTH_SECRET'`,
+      );
+    expect(storedSecret).toEqual({
+      name: "BETTER_AUTH_SECRET",
+      managed_reason: "auth-default",
+    });
+  });
+
+  it("rejects BETTER_AUTH_SECRET in manifest vars", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "auth-secret-var-app");
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            version: 3,
+            auth: true,
+            bindings: {},
+            vars: { BETTER_AUTH_SECRET: "plaintext-secret" },
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const events = await readAllEvents(res);
+    const error = events.find((event: any) => event.event === "error") as any;
+    expect(error.message).toContain(
+      "BETTER_AUTH_SECRET must be configured via project secrets, not manifest.vars",
     );
   });
 
