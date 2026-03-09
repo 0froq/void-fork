@@ -93,7 +93,11 @@ export function compileRouteTable(
   lines.push(`import { AsyncLocalStorage } from "node:async_hooks";`);
   lines.push(`import { Hono } from ${JSON.stringify(options.honoPath)};`);
   lines.push(`import { convertReturnValue } from ${JSON.stringify(options.responsePath)};`);
-  lines.push(`import { withRuntimeEnv } from ${JSON.stringify(options.runtimeEnvPath)};`);
+  if (options.nodeTarget) {
+    lines.push(`const withRuntimeEnv = (_env, fn) => fn();`);
+  } else {
+    lines.push(`import { withRuntimeEnv } from ${JSON.stringify(options.runtimeEnvPath)};`);
+  }
 
   if (auth) {
     const authImports = ["runVoidAuthMiddleware", "handleVoidAuthRequest", "runVoidAuthMigrations"];

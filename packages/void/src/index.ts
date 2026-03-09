@@ -107,6 +107,25 @@ function hasBinding(list: readonly { binding: string }[] | undefined, name: stri
   return Array.isArray(list) && list.some((b) => b.binding === name);
 }
 
+const CLOUDFLARE_BUILTIN_IMPORT = /^cloudflare:/;
+
+function createCloudflareBuiltinsExternalPlugin(): Plugin {
+  return {
+    name: "void:cloudflare-builtins-external",
+    config(_, env) {
+      if (env.command !== "build") return;
+
+      return {
+        build: {
+          rollupOptions: {
+            external: [CLOUDFLARE_BUILTIN_IMPORT],
+          },
+        },
+      };
+    },
+  };
+}
+
 type CredentialStatus =
   | { status: "ok"; token: string; projectId: string; staging?: boolean }
   | { status: "no-token" }
@@ -374,6 +393,7 @@ export function voidPlugin(options?: {
     };
 
     return [
+      createCloudflareBuiltinsExternalPlugin(),
       wranglerCompatPlugin,
       wranglerSyncPlugin,
       svelteKitHooksInjectPlugin,
@@ -727,6 +747,7 @@ export function voidPlugin(options?: {
         : undefined;
 
     return [
+      createCloudflareBuiltinsExternalPlugin(),
       restartPlugin(),
       bindingWatchPlugin,
       envPlugin,
@@ -822,6 +843,7 @@ export function voidPlugin(options?: {
   }
 
   return [
+    createCloudflareBuiltinsExternalPlugin(),
     restartPlugin(),
     bindingWatchPlugin,
     envPlugin,

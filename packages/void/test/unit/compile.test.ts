@@ -164,6 +164,24 @@ describe("compileRouteTable", () => {
     expect(code).toContain("export default app");
   });
 
+  it("does not import runtime env helpers for node targets", () => {
+    const scan: ScanResult = {
+      routes: [],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: { pages: [], layouts: [], namedLayouts: [] },
+    };
+
+    const code = compileRouteTable(scan, "/routes", "/middleware", "/crons", "/queues", null, {
+      ...testOptions,
+      nodeTarget: true,
+    });
+
+    expect(code).not.toContain(`import { withRuntimeEnv }`);
+    expect(code).toContain("const withRuntimeEnv = (_env, fn) => fn();");
+  });
+
   it("adds SSR fallback handler when ssr entry is provided", () => {
     const scan: ScanResult = {
       routes: [],
