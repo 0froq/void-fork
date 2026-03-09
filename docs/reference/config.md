@@ -54,6 +54,44 @@ Use `auth.providers` to select which built-in auth providers Void should enable 
 
 If `auth` is omitted but auth is active via imports, Void enables email/password only. For provider-specific options, scopes, plugins, or custom OAuth flows, use a root `auth.ts` with `defineAuth(...)`.
 
+Supported values for `auth.providers`:
+
+- `email`
+- `apple`
+- `atlassian`
+- `cognito`
+- `discord`
+- `dropbox`
+- `facebook`
+- `figma`
+- `github`
+- `gitlab`
+- `google`
+- `huggingface`
+- `kakao`
+- `kick`
+- `line`
+- `linear`
+- `linkedin`
+- `microsoft`
+- `naver`
+- `notion`
+- `paybin`
+- `paypal`
+- `polar`
+- `railway`
+- `reddit`
+- `roblox`
+- `salesforce`
+- `slack`
+- `spotify`
+- `tiktok`
+- `twitch`
+- `twitter`
+- `vercel`
+- `vk`
+- `zoom`
+
 ### `database`
 
 Database backend. Omit for D1/SQLite (default). Set to `"pg"` for PostgreSQL via Hyperdrive.

@@ -4,45 +4,45 @@ outline: deep
 
 # Authentication
 
+::: warning ⚠️ Void Apps Only
+Void-managed auth currently works only for Void apps. Meta-framework mode is not supported yet.
+:::
+
 Void uses [Better Auth](https://www.better-auth.com/) as the auth engine for Void apps. Void owns the conventions and wiring; Better Auth owns the auth behavior.
 
-## How Auth Turns On
+## Config
 
-Auth is enabled automatically for Void apps when you:
+Auth turns on automatically when you:
 
 - import anything from `void/auth`
 - import `auth` from `void/client`
 - add `auth` to `void.json`
 - add a root-level `auth.ts` file
 
-## Defaults
-
-When auth is active, Void configures Better Auth with these conventions:
-
-- mount path: `/api/auth/*`
-- email/password enabled by default unless `auth.providers` is set without `"email"`
-- `auth.providers` can enable any built-in Better Auth social provider
-- social provider credentials come from `AUTH_<PROVIDER>_CLIENT_ID` and `AUTH_<PROVIDER>_CLIENT_SECRET`
-- D1/SQLite uses the app `DB` binding
-- PostgreSQL apps (`"database": "pg"`) use the app `HYPERDRIVE` binding
-
-Auth sessions live in the same database system as the rest of the app. `AUTH_KV` is no longer used.
+The simplest setup is no config at all. Email/password auth is enabled by default.
 
 Example:
 
 ```json
 {
   "auth": {
-    "providers": ["email", "google", "github", "discord"]
+    "providers": ["email", "google", "github"]
   }
 }
 ```
 
-For example, `github` uses `AUTH_GITHUB_CLIENT_ID` and `AUTH_GITHUB_CLIENT_SECRET`.
+Use `auth.providers` when you want to enable social providers explicitly. Provider credentials come from `AUTH_<PROVIDER>_CLIENT_ID` and `AUTH_<PROVIDER>_CLIENT_SECRET`.
+
+See the full provider list in the [config reference](../reference/config.md#auth).
+
+For example, `github` uses:
+
+- `AUTH_GITHUB_CLIENT_ID`
+- `AUTH_GITHUB_CLIENT_SECRET`
 
 ## Client Usage
 
-`void/client` now exports a preconfigured Better Auth client:
+`void/client` exports a preconfigured Better Auth client:
 
 ```ts
 import { auth } from "void/client";
@@ -63,6 +63,8 @@ await auth.signOut();
 
 The exact client API comes from Better Auth. Void just preconfigures the client with `basePath: "/api/auth"`.
 
+See the official [Better Auth client docs](https://www.better-auth.com/docs/concepts/client) for the full client API.
+
 Framework-specific clients are selected automatically:
 
 - React pages apps use `better-auth/react`
@@ -73,9 +75,9 @@ Framework-specific clients are selected automatically:
 
 For advanced usage, `void/client` also exports `createAuthClient`.
 
-## Server Helpers
+## Server Usage
 
-`void/auth` keeps the server-side convenience helpers:
+`void/auth` provides the server-side helpers:
 
 ```ts
 import { getSession, getUser, requireAuth } from "void/auth";
@@ -130,7 +132,24 @@ interface AuthSession {
 }
 ```
 
-## Customizing Better Auth
+## Behavior
+
+When auth is active, Void configures Better Auth with these conventions:
+
+- mount path: `/api/auth/*`
+- email/password enabled by default unless `auth.providers` is set without `"email"`
+- `auth.providers` can enable any built-in Better Auth social provider
+- deployed apps need an auth secret via `BETTER_AUTH_SECRET` or `AUTH_SECRET`
+- D1/SQLite uses the app `DB` binding
+- PostgreSQL apps (`"database": "pg"`) use the app `HYPERDRIVE` binding
+
+Auth sessions live in the same database system as the rest of the app. `AUTH_KV` is no longer used.
+
+On Void Cloud, Void auto-creates `BETTER_AUTH_SECRET` for auth-enabled apps if you have not set `BETTER_AUTH_SECRET` or `AUTH_SECRET` yourself through project secrets.
+
+Localhost dev uses a built-in fallback secret automatically. Outside the managed Void Cloud deploy flow, set `BETTER_AUTH_SECRET` or `AUTH_SECRET` yourself.
+
+## Customization
 
 For advanced configuration, create `auth.ts` at the project root and export `defineAuth(...)`:
 
@@ -144,6 +163,8 @@ export default defineAuth(({ defaults }) => ({
 ```
 
 `defaults` already includes Void's conventions. Extend it explicitly instead of expecting a deep merge.
+
+For the full set of available options, see the official [Better Auth options reference](https://www.better-auth.com/docs/reference/options).
 
 ## Database and Migrations
 
