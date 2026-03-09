@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..", "..");
@@ -33,4 +33,30 @@ describe("playground/kitchen-sink build", () => {
     expect(buildOutput).not.toContain('Unexpected Node.js imports for environment "ssr"');
     expect(buildOutput).not.toContain("pg-pool");
   });
+
+  it("does not emit deploy-blocking top-level await in env or db runtime chunks", () => {
+    const jsFiles = collectFiles(join(DIST, "ssr")).filter((file) => file.endsWith(".js"));
+    const runtimeFiles = jsFiles.filter(
+      (file) => /\/env-[^/]+\.js$/.test(file) || /\/_virtual_void-db-[^/]+\.js$/.test(file),
+    );
+
+    expect(runtimeFiles.length).toBeGreaterThan(0);
+
+    for (const file of runtimeFiles) {
+      expect(readFileSync(file, "utf8")).not.toContain("await import(");
+    }
+  });
 });
+
+function collectFiles(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const entryPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...collectFiles(entryPath));
+    } else {
+      files.push(entryPath);
+    }
+  }
+  return files;
+}

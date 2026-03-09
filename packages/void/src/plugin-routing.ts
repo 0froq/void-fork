@@ -196,7 +196,10 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     writeFileSync(join(outDir, "app.ts"), compileNodeApp(options.target, compileOptions.honoPath));
     writeFileSync(join(outDir, "index.ts"), compileNodeServer(options.target));
   } else {
-    writeFileSync(join(outDir, "entry.ts"), compileWorkerEntry(false, remote));
+    writeFileSync(
+      join(outDir, "entry.ts"),
+      compileWorkerEntry(false, remote, undefined, undefined, compileOptions.runtimeEnvPath),
+    );
   }
 
   return {
@@ -266,6 +269,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
             remote,
             resolvedConfig?.build.assetsDir,
             (scan!.websockets ?? []).map((route) => route.className),
+            compileOptions.runtimeEnvPath,
           ),
         );
       }
@@ -366,6 +370,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
               remote,
               resolvedConfig?.build.assetsDir,
               (scan!.websockets ?? []).map((route) => route.className),
+              compileOptions.runtimeEnvPath,
             ),
           );
         }

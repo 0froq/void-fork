@@ -976,10 +976,12 @@ export function compileWorkerEntry(
   remote?: { remotePath: string; envPath: string },
   assetsDir = "assets",
   webSocketClasses: string[] = [],
+  runtimeEnvPath = "void/_env",
 ): string {
   const remotePath = remote?.remotePath;
+  const runtimeEnvImport = `import { withRuntimeEnv } from ${JSON.stringify(runtimeEnvPath)};\n`;
   const remoteImport = remote
-    ? `import { createRemoteEnv } from ${JSON.stringify(remote.remotePath)};\nimport { withRuntimeEnv } from ${JSON.stringify(remote.envPath)};\n`
+    ? `import { createRemoteEnv } from ${JSON.stringify(remote.remotePath)};\n`
     : "";
 
   // Asset fallthrough helper — if the app returns 404, check ASSETS binding
@@ -1005,33 +1007,27 @@ async function serveWithAssets(request, env, response) {
     ? `async (request, env, ctx) => {
   const ws = await __voidHandleWebSocket(request, env);
   if (ws) return ws;
-  if (env.__VOID_REMOTE === "1") {
-    env = createRemoteEnv(env);
+  if (env.__VOID_REMOTE === "1") env = createRemoteEnv(env);
+  return withRuntimeEnv(env, async () => {
     const internal = await __handleInternal(request, env, ctx);
     if (internal) return internal;
-    return serveWithAssets(request, env, await withRuntimeEnv(env, () => app.fetch(request, env, ctx)));
-  }
-  const internal = await __handleInternal(request, env, ctx);
-  if (internal) return internal;
-  return serveWithAssets(request, env, await app.fetch(request, env, ctx));
+    return serveWithAssets(request, env, await app.fetch(request, env, ctx));
+  });
 }`
     : `async (request, env, ctx) => {
   const ws = await __voidHandleWebSocket(request, env);
   if (ws) return ws;
-  const internal = await __handleInternal(request, env, ctx);
-  if (internal) return internal;
-  return serveWithAssets(request, env, await app.fetch(request, env, ctx));
+  return withRuntimeEnv(env, async () => {
+    const internal = await __handleInternal(request, env, ctx);
+    if (internal) return internal;
+    return serveWithAssets(request, env, await app.fetch(request, env, ctx));
+  });
 }`;
 
   const queueFetchCall = remotePath
-    ? `let __queueRes;
-  if (env.__VOID_REMOTE === "1") {
-    env = createRemoteEnv(env);
-    __queueRes = await withRuntimeEnv(env, () => app.fetch(req, env, ctx));
-  } else {
-    __queueRes = await app.fetch(req, env, ctx);
-  }`
-    : "const __queueRes = await app.fetch(req, env, ctx);";
+    ? `if (env.__VOID_REMOTE === "1") env = createRemoteEnv(env);
+  const __queueRes = await withRuntimeEnv(env, () => app.fetch(req, env, ctx));`
+    : "const __queueRes = await withRuntimeEnv(env, () => app.fetch(req, env, ctx));";
 
   const queueDecisionCode = `const __qr = await __queueRes.json();
   if (__qr.decisions) {
@@ -1053,10 +1049,20 @@ async function serveWithAssets(request, env, response) {
   return Response.json({ paths });
 }`;
 
+  const scheduledHandler = remotePath
+    ? `async function handleScheduled(controller, env, ctx) {
+  if (env.__VOID_REMOTE === "1") env = createRemoteEnv(env);
+  return withRuntimeEnv(env, () => scheduled(controller, env, ctx));
+}`
+    : `async function handleScheduled(controller, env, ctx) {
+  return withRuntimeEnv(env, () => scheduled(controller, env, ctx));
+}`;
+
   if (hasQueues) {
     return `import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(", ")}` : ""} } from 'virtual:void-routes';
-${remoteImport}${assetHelper}
+${runtimeEnvImport}${remoteImport}${assetHelper}
 ${internalRouteHelper}
+${scheduledHandler}
 async function queue(batch, env, ctx) {
   const messages = [...batch.messages].map(m => ({
     id: m.id, timestamp: m.timestamp.toISOString(),
@@ -1072,13 +1078,14 @@ async function queue(batch, env, ctx) {
 }
 
 ${webSocketClasses.map((name) => `export { ${name} };`).join("\n")}
-export default { fetch: ${fetchHandler}, scheduled, queue };`;
+export default { fetch: ${fetchHandler}, scheduled: handleScheduled, queue };`;
   }
   return `import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(", ")}` : ""} } from 'virtual:void-routes';
-${remoteImport}${assetHelper}
+${runtimeEnvImport}${remoteImport}${assetHelper}
 ${internalRouteHelper}
+${scheduledHandler}
 ${webSocketClasses.map((name) => `export { ${name} };`).join("\n")}
-export default { fetch: ${fetchHandler}, scheduled };`;
+export default { fetch: ${fetchHandler}, scheduled: handleScheduled };`;
 }
 
 /**
