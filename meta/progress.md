@@ -40,7 +40,7 @@
 - [x] Cron jobs (`crons/` directory, `defineScheduled`)
 - [x] Queues (`queues/` directory, `defineQueue`, typed producers/consumers)
 - [x] SSR support (`defineRender` in `src/main.ssr.ts`)
-- [x] Zero-config auth (email/password + OAuth, auto-detected from imports)
+- [x] Zero-config auth for Void apps via Better Auth (`/api/auth`, import-activated)
 - [x] `defineHandler.withValidator()` — Standard Schema input validation (body/query/params)
 - [x] Route type codegen (`.void/routes.d.ts` with `Serialize<T>` + `ExtractInput<V>`)
 - [x] Typed `fetch` client (`void/client`) with path/method/input/output inference
@@ -66,7 +66,7 @@
 - [x] AI binding (`void/ai` with metered proxy)
 - [x] Remote bindings (`remote: true` — D1/KV/R2 via proxy for local dev)
 - [ ] Drizzle integration
-- [ ] Better-auth integration
+- [x] Better-auth integration
 - [ ] More framework adapters (React Router, Astro, SvelteKit, Nuxt, SolidStart)
   - [ ] Make backend features (queues, crons, ISR) work alongside these
 

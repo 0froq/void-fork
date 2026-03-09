@@ -137,3 +137,9 @@ then the design must reflect that split directly. Do not insert a temporary plat
 **Problem:** When adding a playground app, it is easy to over-design the UI and introduce unnecessary visual styling that distracts from the feature being demonstrated.
 
 **Rule:** Playground apps should default to the same bare-minimum presentation as the existing demos like `kitchen-sink`: simple layout, light inline structure when needed, and focus on feature behavior over visual design unless the user explicitly asks for design work.
+
+## Clean-Break Docs: Do Not Call Out Deprecated Keys Unprompted
+
+**Problem:** In clean-break docs, naming removed config keys adds migration noise and keeps old APIs visible longer than necessary.
+
+**Rule:** If a feature is a clean break, document only the new surface by default. Mention deprecated or removed key names only when the user explicitly asks for migration guidance or compatibility notes.
