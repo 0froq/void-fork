@@ -8,6 +8,8 @@ import { readProjectConfig } from "./project";
 import type { DbArgs } from "./db-args";
 import { cliTitle, dim, pc } from "./output";
 import { readConfig, getDatabaseDialect, type DatabaseDialect } from "../config";
+import { collectMigrations } from "../migrations/collect";
+import { validateMigrations } from "../migrations/validate";
 
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve("drizzle-kit")), "..", "bin.cjs");
 
@@ -55,6 +57,15 @@ async function withPgClient<T>(root: string, fn: (client: any) => Promise<T>): P
   } finally {
     await client.end();
   }
+}
+
+function validatePendingMigrations(
+  migrations: { name: string; sql: string }[],
+  appliedNames: Set<string>,
+): void {
+  const pending = migrations.filter((migration) => !appliedNames.has(migration.name));
+  if (pending.length === 0) return;
+  validateMigrations(pending);
 }
 
 export async function runDbCommand(root: string, args: DbArgs): Promise<void> {
@@ -389,11 +400,29 @@ function printTable(rows: Record<string, unknown>[]): void {
 }
 
 async function runMigrate(root: string, dialect: DatabaseDialect): Promise<void> {
+  const migrationsDir = join(root, "db", "migrations");
+  const rawMigrations = collectMigrations(migrationsDir);
+
   if (dialect === "postgresql") {
-    const migrationsDir = join(root, "db", "migrations");
-    const url = getPgUrl(root);
-    const { runPgMigrations } = await import("../migrations/runner-pg");
-    const applied = await runPgMigrations(migrationsDir, url);
+    const { applyPgMigrations } = await import("../migrations/runner-pg");
+    const applied = await withPgClient(root, async (client) => {
+      let existingRows: { name: string }[] = [];
+      try {
+        const result = await client.query("SELECT name FROM _void_migrations");
+        existingRows = result.rows;
+      } catch {
+        existingRows = [];
+      }
+
+      try {
+        validatePendingMigrations(rawMigrations, new Set(existingRows.map((row) => row.name)));
+      } catch (err: any) {
+        log.error(err.message);
+        process.exit(1);
+      }
+
+      return applyPgMigrations(client, rawMigrations);
+    });
 
     if (applied.length === 0) {
       log.info("All migrations are up to date.");
@@ -407,10 +436,18 @@ async function runMigrate(root: string, dialect: DatabaseDialect): Promise<void>
     return;
   }
 
-  const { getMiniflareDatabasePath, runMigrations } = await import("../migrations/runner");
+  const { getMiniflareDatabasePath, getAppliedMigrations, runMigrations } =
+    await import("../migrations/runner");
   const persistRoot = join(root, ".void");
   const dbPath = getMiniflareDatabasePath(persistRoot, "local");
-  const migrationsDir = join(root, "db", "migrations");
+
+  try {
+    const existingRows = await getAppliedMigrations(dbPath);
+    validatePendingMigrations(rawMigrations, new Set(existingRows.map((row) => row.name)));
+  } catch (err: any) {
+    log.error(err.message);
+    process.exit(1);
+  }
 
   const applied = await runMigrations(migrationsDir, dbPath);
   if (applied.length === 0) {

@@ -43,7 +43,7 @@ export function validateMigrations(files: { name: string; sql: string }[]): Migr
     throw new Error(
       `Destructive migrations detected without pragma:\n` +
         errors.map((f) => `  - ${f}`).join("\n") +
-        `\n\nAdd "${PRAGMA_COMMENT}" to each file to allow deployment.`,
+        `\n\nAdd "${PRAGMA_COMMENT}" to each file to allow the migration locally and on deploy.`,
     );
   }
 
