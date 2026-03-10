@@ -353,5 +353,58 @@ describe("playground/kitchen-sink", () => {
     }
   });
 
+  it("Reset: clears Better Auth users so the same email can register again", async () => {
+    const page = await newPage();
+    const email = `reset-${Date.now()}@example.com`;
+    const password = "s3cureP@ss!";
+
+    try {
+      await page.goto(`${BASE}/auth`);
+      await waitForHydration(page);
+      await page.waitForFunction(() => document.body.textContent?.includes("Not logged in"));
+
+      const registerTab = page.locator("button", { hasText: "Register" }).first();
+      await registerTab.click();
+      await page.waitForSelector('input[placeholder="Email"][type="email"]');
+
+      const regSection = page.locator("section", {
+        has: page.locator('h2:has-text("Email Register")'),
+      });
+      await regSection.locator('input[type="email"]').fill(email);
+      await regSection.locator('input[type="password"]').fill(password);
+      await regSection.locator('input[type="text"]').fill("Reset User");
+      await regSection.locator('button[type="submit"]').click();
+
+      await page.waitForFunction(() => !document.body.textContent?.includes("Not logged in"));
+      expect(await page.textContent("body")).toContain(email);
+
+      const resetResult = await page.evaluate(async () => {
+        const res = await fetch("/api/reset", { method: "POST" });
+        return {
+          status: res.status,
+          body: await res.json(),
+        };
+      });
+      expect(resetResult.status).toBe(200);
+      expect(resetResult.body).toEqual({ ok: true });
+
+      await page.goto(`${BASE}/auth`);
+      await waitForHydration(page);
+      await page.waitForFunction(() => document.body.textContent?.includes("Not logged in"));
+
+      await registerTab.click();
+      await page.waitForSelector('input[placeholder="Email"][type="email"]');
+      await regSection.locator('input[type="email"]').fill(email);
+      await regSection.locator('input[type="password"]').fill(password);
+      await regSection.locator('input[type="text"]').fill("Reset User");
+      await regSection.locator('button[type="submit"]').click();
+
+      await page.waitForFunction(() => !document.body.textContent?.includes("Not logged in"));
+      expect(await page.textContent("body")).toContain(email);
+    } finally {
+      await page.context().close();
+    }
+  });
+
   // Cron: skipped — __scheduled endpoint is only available via wrangler, not Vite dev
 }, 120_000);

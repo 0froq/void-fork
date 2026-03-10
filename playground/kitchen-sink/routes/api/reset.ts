@@ -1,13 +1,34 @@
 import { defineHandler } from "void";
-import { db } from "void/db";
-import { notes, queueResults } from "@schema";
 import { kv } from "void/kv";
 import { storage } from "void/storage";
 
-export const POST = defineHandler(async () => {
-  // Clear all D1 tables
-  await db.delete(notes);
-  await db.delete(queueResults);
+const D1_TABLES_TO_CLEAR = [
+  "notes",
+  "queue_results",
+  "verification",
+  "session",
+  "account",
+  "user",
+] as const;
+
+export const POST = defineHandler(async (c) => {
+  // Clear all app + auth D1 tables, but tolerate fresh environments where
+  // some tables may not exist yet.
+  const existingTableRows =
+    (
+      await c.env.DB.prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${D1_TABLES_TO_CLEAR.map(
+          (name) => `'${name}'`,
+        ).join(", ")})`,
+      ).all()
+    ).results ?? [];
+  const existingTables = new Set(existingTableRows.map((row) => String(row.name)));
+  const deleteStatements = D1_TABLES_TO_CLEAR.filter((name) => existingTables.has(name)).map(
+    (name) => c.env.DB.prepare(`DELETE FROM "${name}"`),
+  );
+  if (deleteStatements.length > 0) {
+    await c.env.DB.batch(deleteStatements);
+  }
 
   // Clear all KV keys (paginated)
   let kvComplete = false;
