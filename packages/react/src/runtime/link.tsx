@@ -31,6 +31,7 @@ export function Link({
 }: LinkProps): JSX.Element {
   const router = useContext(RouterContext);
   const elRef = useRef<HTMLElement | null>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function getStrategies(): PrefetchStrategy[] {
     if (prefetchProp === false) return [];
@@ -63,16 +64,20 @@ export function Link({
     });
   }
 
-  let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+  const strategies = getStrategies();
+  const strategiesKey = strategies.join("|");
 
   function onMouseEnter() {
-    hoverTimer = setTimeout(doPrefetch, router?._hoverDelay ?? 75);
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+    }
+    hoverTimerRef.current = setTimeout(doPrefetch, router?._hoverDelay ?? 75);
   }
 
   function onMouseLeave() {
-    if (hoverTimer) {
-      clearTimeout(hoverTimer);
-      hoverTimer = null;
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
     }
   }
 
@@ -81,7 +86,6 @@ export function Link({
   }
 
   useEffect(() => {
-    const strategies = getStrategies();
     if (strategies.length === 0) return;
 
     if (strategies.includes("mount")) {
@@ -104,14 +108,15 @@ export function Link({
     }
 
     return () => {
-      if (hoverTimer) clearTimeout(hoverTimer);
+      if (hoverTimerRef.current) {
+        clearTimeout(hoverTimerRef.current);
+        hoverTimerRef.current = null;
+      }
       if (observer) {
         observer.disconnect();
       }
     };
-  });
-
-  const strategies = getStrategies();
+  }, [cacheFor, href, method, router, strategiesKey]);
   const isGet = method.toUpperCase() === "GET";
 
   const eventHandlers: Record<string, any> = { onClick };
