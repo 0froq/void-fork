@@ -1,9 +1,19 @@
 import { execFileSync, execSync } from "node:child_process";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve("drizzle-kit")), "..", "bin.cjs");
+const deployDriftCheckDir = join(".void", "deploy-drift-check");
 import { intro, outro, log, note, spinner, confirm, isCancel } from "@clack/prompts";
 import { getToken, getTokenSource } from "./auth";
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
@@ -33,6 +43,7 @@ import { detectPreset, FRAMEWORK_PRESETS, type StaticPreset, type FrameworkPrese
 import {
   readConfig,
   resolveBindingNames,
+  type DatabaseDialect,
   type VoidConfig,
   getDatabaseDialect,
   isNodeTarget,
@@ -46,6 +57,8 @@ import { parseHeadersFile, parseRedirectsFile } from "./headers";
 import { convertHeadersConfig, convertRedirectsConfig } from "../config";
 import type { AssetConfig, DeployEvent, HeaderRule, RedirectRule } from "./types";
 import { findVoidAuthConfig } from "../auth/config";
+import { discoverSchema } from "../drizzle/discover";
+import { writeDrizzleConfig } from "../drizzle/config";
 
 export interface RunDeployOptions {
   projectSlug?: string;
@@ -399,52 +412,7 @@ async function runFrameworkDeploy(
     }
   }
 
-  // Check for Drizzle schema drift
-  const { discoverSchema: discoverDrizzleSchema } = await import("../drizzle/discover");
-  const drizzleSchema = discoverDrizzleSchema(root);
-  if (drizzleSchema) {
-    const { execSync: execSyncDrift } = await import("node:child_process");
-    const { writeDrizzleConfig } = await import("../drizzle/config");
-
-    try {
-      const driftConfigPath = writeDrizzleConfig(
-        root,
-        dialect === "postgresql" ? "postgresql://dummy" : ":memory:",
-        dialect,
-      );
-      execSyncDrift(`node ${drizzleKitBin} generate --config ${driftConfigPath}`, {
-        cwd: root,
-        stdio: "pipe",
-      });
-
-      // Check if new migration files were generated
-      const gitStatus = execSyncDrift("git status --porcelain db/migrations/", {
-        cwd: root,
-        encoding: "utf-8",
-      }).trim();
-
-      if (gitStatus) {
-        const shouldCommit = await confirm({
-          message: "Schema changes detected. Generate and commit the migrations?",
-        });
-
-        if (!shouldCommit || isCancel(shouldCommit)) {
-          execSyncDrift("git checkout -- db/migrations/", { cwd: root, stdio: "pipe" });
-          log.error("Deploy aborted — migrations not committed.");
-          process.exit(1);
-        }
-
-        execSyncDrift("git add db/migrations/", { cwd: root, stdio: "pipe" });
-        execSyncDrift('git commit -m "db: generate migrations"', {
-          cwd: root,
-          stdio: "pipe",
-        });
-        log.success("Migrations generated and committed.");
-      }
-    } catch {
-      // drizzle-kit generate failed or git not available — continue without drift check
-    }
-  }
+  assertDeploySchemaDriftFree(root, dialect);
 
   // 4. Collect migrations
   const migrationsDir = join(root, "db", "migrations");
@@ -696,52 +664,7 @@ async function runFullDeploy(
   const cfgRedirectRules = convertRedirectsConfig(deployConfig.routing?.redirects);
   const redirectRules: RedirectRule[] = [...(userRedirectRules ?? []), ...(cfgRedirectRules ?? [])];
 
-  // Check for Drizzle schema drift
-  const { discoverSchema: discoverDrizzleSchema } = await import("../drizzle/discover");
-  const drizzleSchema = discoverDrizzleSchema(root);
-  if (drizzleSchema) {
-    const { execSync: execSyncDrift } = await import("node:child_process");
-    const { writeDrizzleConfig } = await import("../drizzle/config");
-
-    try {
-      const driftConfigPath = writeDrizzleConfig(
-        root,
-        dialect === "postgresql" ? "postgresql://dummy" : ":memory:",
-        dialect,
-      );
-      execSyncDrift(`node ${drizzleKitBin} generate --config ${driftConfigPath}`, {
-        cwd: root,
-        stdio: "pipe",
-      });
-
-      // Check if new migration files were generated
-      const gitStatus = execSyncDrift("git status --porcelain db/migrations/", {
-        cwd: root,
-        encoding: "utf-8",
-      }).trim();
-
-      if (gitStatus) {
-        const shouldCommit = await confirm({
-          message: "Schema changes detected. Generate and commit the migrations?",
-        });
-
-        if (!shouldCommit || isCancel(shouldCommit)) {
-          execSyncDrift("git checkout -- db/migrations/", { cwd: root, stdio: "pipe" });
-          log.error("Deploy aborted — migrations not committed.");
-          process.exit(1);
-        }
-
-        execSyncDrift("git add db/migrations/", { cwd: root, stdio: "pipe" });
-        execSyncDrift('git commit -m "db: generate migrations"', {
-          cwd: root,
-          stdio: "pipe",
-        });
-        log.success("Migrations generated and committed.");
-      }
-    } catch {
-      // drizzle-kit generate failed or git not available — continue without drift check
-    }
-  }
+  assertDeploySchemaDriftFree(root, dialect);
 
   // 7. Collect and validate migrations
   const migrationsDir = join(root, "db", "migrations");
@@ -974,6 +897,204 @@ function getGitCommit(root: string): string | null {
   } catch {
     return null;
   }
+}
+
+function assertDeploySchemaDriftFree(root: string, dialect: DatabaseDialect): void {
+  try {
+    if (!hasDeploySchemaDrift(root, dialect)) {
+      return;
+    }
+  } catch (error: any) {
+    log.error(error.message);
+    process.exit(1);
+  }
+
+  log.error(getDeploySchemaDriftMessage());
+  process.exit(1);
+}
+
+export function hasDeploySchemaDrift(root: string, dialect: DatabaseDialect): boolean {
+  if (!discoverSchema(root)) {
+    return false;
+  }
+
+  const driftRoot = mkDeployDriftCheckRoot();
+  const driftProjectRoot = join(driftRoot, "project");
+
+  rmSync(driftRoot, { recursive: true, force: true });
+  mkdirSync(driftRoot, { recursive: true });
+  createDeployDriftProject(root, driftProjectRoot);
+
+  try {
+    const migrationsDir = join(driftProjectRoot, "db", "migrations");
+    const before = snapshotDir(migrationsDir);
+    const driftConfigPath = writeDrizzleConfig(
+      driftProjectRoot,
+      dialect === "postgresql" ? "postgresql://dummy" : ":memory:",
+      dialect,
+    );
+
+    execFileSync(process.execPath, [drizzleKitBin, "generate", "--config", driftConfigPath], {
+      cwd: driftProjectRoot,
+      stdio: "pipe",
+    });
+
+    return !migrationSnapshotsEqual(before, snapshotDir(migrationsDir));
+  } catch (error) {
+    throw new Error(formatDeploySchemaDriftCheckError(error));
+  } finally {
+    rmSync(driftRoot, { recursive: true, force: true });
+  }
+}
+
+function getDeploySchemaDriftMessage(): string {
+  return [
+    "Schema drift detected between your Drizzle schema and db/migrations/.",
+    "Run `void db generate`, review the generated migration, commit it yourself, then rerun `void deploy`.",
+  ].join("\n");
+}
+
+function formatDeploySchemaDriftCheckError(error: unknown): string {
+  const detail = extractExecErrorOutput(error);
+  return [
+    "Failed to check Drizzle schema drift during deploy.",
+    "Run `void db generate` locally, fix any reported issues, review the generated migration, commit it yourself, then rerun `void deploy`.",
+    ...(detail ? [detail] : []),
+  ].join("\n\n");
+}
+
+function extractExecErrorOutput(error: unknown): string {
+  if (!error || typeof error !== "object") {
+    return "";
+  }
+
+  const details = [];
+  const stderr = "stderr" in error ? bufferToString(error.stderr) : "";
+  const stdout = "stdout" in error ? bufferToString(error.stdout) : "";
+
+  if (stderr) {
+    details.push(stderr);
+  }
+  if (stdout) {
+    details.push(stdout);
+  }
+
+  return details.join("\n").trim();
+}
+
+function bufferToString(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (value instanceof Buffer) {
+    return value.toString("utf-8").trim();
+  }
+  return "";
+}
+
+function createDeployDriftProject(root: string, driftProjectRoot: string): void {
+  mkdirSync(driftProjectRoot, { recursive: true });
+
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (entry.name === ".git" || entry.name === ".void" || entry.name === "node_modules") {
+      continue;
+    }
+    if (
+      entry.name === "dist" ||
+      entry.name === "build" ||
+      entry.name === ".wrangler" ||
+      entry.name === ".turbo" ||
+      entry.name === ".next" ||
+      entry.name === ".svelte-kit" ||
+      entry.name === ".output"
+    ) {
+      continue;
+    }
+
+    const source = join(root, entry.name);
+    const target = join(driftProjectRoot, entry.name);
+
+    if (entry.name === "db") {
+      cpSync(source, target, { recursive: true });
+      continue;
+    }
+
+    symlinkSync(source, target, entry.isDirectory() ? symlinkDirType() : "file");
+  }
+
+  const nodeModules = findNearestNodeModules(root);
+  if (nodeModules) {
+    symlinkSync(nodeModules, join(driftProjectRoot, "node_modules"), symlinkDirType());
+  }
+}
+
+function findNearestNodeModules(root: string): string | null {
+  let current = root;
+  while (true) {
+    const candidate = join(current, "node_modules");
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+
+    const parent = resolve(current, "..");
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+function mkDeployDriftCheckRoot(): string {
+  return join(
+    tmpdir(),
+    `${deployDriftCheckDir.replaceAll("/", "-").replaceAll("\\", "-")}-${Date.now()}`,
+  );
+}
+
+function symlinkDirType(): "dir" | "junction" {
+  return process.platform === "win32" ? "junction" : "dir";
+}
+
+function snapshotDir(root: string): Record<string, string> {
+  if (!existsSync(root)) {
+    return {};
+  }
+
+  const snapshot: Record<string, string> = {};
+  collectSnapshotFiles(root, root, snapshot);
+  return snapshot;
+}
+
+function collectSnapshotFiles(
+  current: string,
+  root: string,
+  snapshot: Record<string, string>,
+): void {
+  for (const entry of readdirSync(current, { withFileTypes: true })) {
+    const fullPath = join(current, entry.name);
+    if (entry.isDirectory()) {
+      collectSnapshotFiles(fullPath, root, snapshot);
+      continue;
+    }
+    snapshot[relative(root, fullPath)] = readFileSync(fullPath, "utf-8");
+  }
+}
+
+function migrationSnapshotsEqual(
+  left: Record<string, string>,
+  right: Record<string, string>,
+): boolean {
+  const leftEntries = Object.entries(left).sort(([a], [b]) => a.localeCompare(b));
+  const rightEntries = Object.entries(right).sort(([a], [b]) => a.localeCompare(b));
+
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+
+  return leftEntries.every(([leftPath, leftContent], index) => {
+    const [rightPath, rightContent] = rightEntries[index] ?? [];
+    return leftPath === rightPath && leftContent === rightContent;
+  });
 }
 
 /**

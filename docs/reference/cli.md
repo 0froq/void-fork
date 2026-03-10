@@ -149,6 +149,8 @@ void deploy [--project <name>] [--dir <path>] [--spa] [--skip-build]
 
 Auto-detects your project type and chooses the right pipeline. See [Supported App Types](../guide/app-types.md) and [Deployment](../guide/deployment.md) for details.
 
+For Drizzle projects, deploy performs a read-only schema drift check. If a new migration would be generated, deploy stops and tells you to run `void db generate`, review the migration, commit it yourself, and rerun `void deploy`.
+
 | Flag               | Purpose                                           |
 | ------------------ | ------------------------------------------------- |
 | `--project <name>` | Target a specific project by slug                 |

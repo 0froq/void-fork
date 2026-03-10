@@ -17,6 +17,18 @@ void deploy             # auto-detects app type, builds, deploys
 
 On first deploy, the CLI prompts you to create or select a project. The project link is saved to `.void/project.json` for subsequent deploys.
 
+### Migrations
+
+If your app uses Drizzle, `void deploy` runs migrations as part of the deploy flow:
+
+1. Build the app
+2. Read SQL migrations from `db/migrations/`
+3. Fail if the schema has drifted ahead of the committed migrations
+4. Apply pending migrations to the target database
+5. Make the new deploy live
+
+Deploy always uses checked-in migration files. If drift is detected, run `void db generate`, review the generated migration, commit it yourself, then rerun deploy. For the full database workflow and backend-specific details, see the [Database guide](./database.md).
+
 ### Flags
 
 ```bash
