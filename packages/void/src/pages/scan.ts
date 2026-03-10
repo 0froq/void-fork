@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, dirname, basename, extname } from "node:path";
 import { glob } from "tinyglobby";
 import { parseRouteFilename } from "../router/parse-filename";
+import { resolveNamedLayout } from "./layout-resolution";
 import type {
   PageDefinition,
   LayoutDefinition,
@@ -272,73 +273,8 @@ function extractFrontmatterLayout(source: string): string | false | undefined {
   return value;
 }
 
-/** Resolve the layout chain for a component (innermost last) */
-export function resolveLayoutChain(
-  componentId: string,
-  layouts: LayoutDefinition[],
-): LayoutDefinition[] {
-  const parts = componentId.split("/");
-  const chain: LayoutDefinition[] = [];
-
-  // Check root layout
-  const root = layouts.find((l) => l.directory === "");
-  if (root) chain.push(root);
-
-  // Check each directory level
-  let dir = "";
-  for (let i = 0; i < parts.length - 1; i++) {
-    dir = dir ? `${dir}/${parts[i]}` : parts[i];
-    const layout = layouts.find((l) => l.directory === dir);
-    if (layout) chain.push(layout);
-  }
-
-  return chain;
-}
-
-/** Walk up directory tree to find closest _layouts/<name> */
-export function resolveNamedLayout(
-  name: string,
-  componentId: string,
-  namedLayouts: NamedLayoutDefinition[],
-): NamedLayoutDefinition | null {
-  const parts = componentId.split("/");
-  // Build dirs from closest to root
-  const dirs: string[] = [];
-  let dir = "";
-  for (let i = 0; i < parts.length - 1; i++) {
-    dir = dir ? `${dir}/${parts[i]}` : parts[i];
-    dirs.push(dir);
-  }
-  dirs.reverse(); // closest first
-  dirs.push(""); // root last
-  for (const d of dirs) {
-    const found = namedLayouts.find((nl) => nl.name === name && nl.directory === d);
-    if (found) return found;
-  }
-  return null;
-}
-
-/** Resolve effective layout chain accounting for named layout selection */
-export function resolveEffectiveLayoutChain(
-  page: { componentId: string; layout?: string | false },
-  layouts: LayoutDefinition[],
-  namedLayouts: NamedLayoutDefinition[],
-): (LayoutDefinition | NamedLayoutDefinition)[] {
-  if (page.layout === false) return [];
-  const defaultChain = resolveLayoutChain(page.componentId, layouts);
-  if (page.layout === undefined) return defaultChain;
-
-  const isExclusive = page.layout.startsWith("!");
-  const name = isExclusive ? page.layout.slice(1) : page.layout;
-  // Relative paths: passthrough default chain
-  if (name.startsWith(".") || name.startsWith("/")) return defaultChain;
-
-  const resolved = resolveNamedLayout(name, page.componentId, namedLayouts);
-  if (!resolved) return defaultChain;
-  if (isExclusive) return [resolved];
-  if (defaultChain.length === 0) return [resolved];
-
-  const chain = [...defaultChain];
-  chain[chain.length - 1] = resolved;
-  return chain;
-}
+export {
+  resolveLayoutChain,
+  resolveNamedLayout,
+  resolveEffectiveLayoutChain,
+} from "./layout-resolution";

@@ -8,6 +8,7 @@ import {
   resolveEffectiveLayoutChain,
   MAX_REVALIDATE,
 } from "../../src/pages/scan";
+import { resolveLayoutIds } from "../../src/pages/layout-resolution";
 
 const TMP = join(import.meta.dirname, "__tmp_pages_scan__");
 
@@ -687,5 +688,35 @@ describe("resolveEffectiveLayoutChain", () => {
     expect(chain).toHaveLength(2);
     expect(chain[0].directory).toBe("");
     expect(chain[1].directory).toBe("guide");
+  });
+});
+
+describe("resolveLayoutIds", () => {
+  const layouts = [
+    { directory: "", filePath: "layout.vue" },
+    { directory: "guide", filePath: "guide/layout.vue" },
+  ];
+  const namedLayouts = [
+    { name: "home", directory: "", filePath: "_layouts/home.vue" },
+    { name: "api", directory: "guide", filePath: "guide/_layouts/api.vue" },
+  ];
+
+  it("returns default layout ids", () => {
+    expect(resolveLayoutIds({ componentId: "guide/intro" }, layouts, namedLayouts)).toEqual([
+      "layout",
+      "guide/layout",
+    ]);
+  });
+
+  it("replaces the innermost layout id for named layouts", () => {
+    expect(
+      resolveLayoutIds({ componentId: "guide/intro", layout: "api" }, layouts, namedLayouts),
+    ).toEqual(["layout", "guide/_layouts/api"]);
+  });
+
+  it("returns only the exclusive named layout id", () => {
+    expect(
+      resolveLayoutIds({ componentId: "guide/intro", layout: "!home" }, layouts, namedLayouts),
+    ).toEqual(["_layouts/home"]);
   });
 });
