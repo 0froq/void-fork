@@ -12,6 +12,8 @@ export interface VisitOptions {
   preserveScroll?: boolean;
   preserveState?: boolean;
   viewTransition?: boolean;
+  /** @internal Used by popstate handler to pass saved scroll position */
+  _scrollPosition?: { x: number; y: number } | null;
 }
 
 export interface PrefetchOptions {
@@ -220,10 +222,32 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
     async visit(url, options = {}) {
       for (const l of _navListeners) l.onStart?.();
       try {
+        // Extract hash before fetching (hash is not sent to server)
+        const hashIndex = url.indexOf("#");
+        const hash = hashIndex !== -1 ? url.slice(hashIndex) : "";
+        const fetchUrl = hashIndex !== -1 ? url.slice(0, hashIndex) : url;
+
+        // Same-page hash navigation — skip server fetch, just scroll
+        const currentPath = window.location.pathname + window.location.search;
+        const effectiveFetchUrl = fetchUrl || currentPath;
+        const method = (options.method || "GET").toUpperCase();
+        if (
+          effectiveFetchUrl === currentPath &&
+          hash &&
+          method === "GET" &&
+          !options.data &&
+          !options.preserveState
+        ) {
+          history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, "");
+          history.pushState({}, "", effectiveFetchUrl + hash);
+          const el = document.getElementById(hash.slice(1));
+          if (el) el.scrollIntoView();
+          else window.scrollTo(0, 0);
+          return;
+        }
+
         _abortController?.abort();
         _abortController = new AbortController();
-
-        const method = (options.method || "GET").toUpperCase();
 
         if (method !== "GET") {
           _prefetchCache.flushAll();
@@ -245,11 +269,11 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
         }
 
         let pageData: any;
-        const cacheEntry = method === "GET" ? _prefetchCache.get(url, method) : null;
+        const cacheEntry = method === "GET" ? _prefetchCache.get(fetchUrl, method) : null;
 
         if (cacheEntry) {
           pageData = await cacheEntry.response;
-          _prefetchCache.consume(url, method);
+          _prefetchCache.consume(fetchUrl, method);
           if (pageData === null) {
             window.location.href = url;
             return;
@@ -269,14 +293,14 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
               Accept: "application/json",
               Purpose: "prefetch",
             };
-            const bgFetch = fetch(url, { method, headers: bgHeaders }).then((r) => {
+            const bgFetch = fetch(fetchUrl, { method, headers: bgHeaders }).then((r) => {
               if (!r.headers.get("X-VoidPages")) return null;
               return r.json();
             });
-            _prefetchCache.set(url, method, bgFetch, PREFETCH_DEFAULT_CACHE_FOR);
+            _prefetchCache.set(fetchUrl, method, bgFetch, PREFETCH_DEFAULT_CACHE_FOR);
           }
         } else {
-          const response = await fetch(url, fetchOptions);
+          const response = await fetch(fetchUrl, fetchOptions);
 
           if (response.redirected) {
             return router.visit(response.url);
@@ -371,21 +395,37 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
           resolveLayouts(pageData.component),
         ]);
 
-        const useTransition = options.viewTransition ?? VIEW_TRANSITIONS_ENABLED;
-        if (useTransition && document.startViewTransition) {
-          document.startViewTransition(() => adapter.applyUpdate(pageData, comp, layouts));
-        } else {
-          adapter.applyUpdate(pageData, comp, layouts);
-        }
-
+        // Head and pushState don't depend on DOM paint — run before transition
         applyClientHead(pageData.head);
 
         if (!options.preserveState) {
-          window.history.pushState({}, "", pageData.url);
+          history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, "");
+          history.pushState({}, "", pageData.url + hash);
         }
 
-        if (!options.preserveScroll) {
-          window.scrollTo(0, 0);
+        // Scroll logic — runs after DOM update
+        const doScroll = () => {
+          if (options.preserveScroll) return;
+          if (options._scrollPosition) {
+            window.scrollTo(options._scrollPosition.x, options._scrollPosition.y);
+          } else if (hash) {
+            const el = document.getElementById(hash.slice(1));
+            if (el) el.scrollIntoView();
+            else window.scrollTo(0, 0);
+          } else {
+            window.scrollTo(0, 0);
+          }
+        };
+
+        const useTransition = options.viewTransition ?? VIEW_TRANSITIONS_ENABLED;
+        if (useTransition && document.startViewTransition) {
+          const transition = document.startViewTransition(() =>
+            adapter.applyUpdate(pageData, comp, layouts),
+          );
+          transition.updateCallbackDone.then(doScroll, doScroll);
+        } else {
+          adapter.applyUpdate(pageData, comp, layouts);
+          requestAnimationFrame(doScroll);
         }
 
         return pageData;
@@ -415,19 +455,23 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
         if (components[lid]) components[lid]();
       }
 
+      // Strip hash — it's client-only, and cache keys must match visit()
+      const hashIdx = url.indexOf("#");
+      const prefetchUrl = hashIdx !== -1 ? url.slice(0, hashIdx) : url;
+
       const method = (options.method || "GET").toUpperCase();
-      if (_prefetchCache.has(url, method)) return;
+      if (_prefetchCache.has(prefetchUrl, method)) return;
       const ttl = options.cacheFor ? parseCacheFor(options.cacheFor) : PREFETCH_DEFAULT_CACHE_FOR;
       const headers = {
         "X-VoidPages": "true",
         Accept: "application/json",
         Purpose: "prefetch",
       };
-      const fetchPromise = fetch(url, { method, headers }).then((r) => {
+      const fetchPromise = fetch(prefetchUrl, { method, headers }).then((r) => {
         if (!r.headers.get("X-VoidPages")) return null;
         return r.json();
       });
-      _prefetchCache.set(url, method, fetchPromise, ttl);
+      _prefetchCache.set(prefetchUrl, method, fetchPromise, ttl);
     },
 
     flush(url, method = "GET") {
@@ -473,6 +517,9 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
   currentPropsObj = initialPageData.props;
 
   function start(): void {
+    history.scrollRestoration = "manual";
+    history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, "");
+
     initClientHead(initialPageData.head);
 
     // Drain any deferred resolutions that arrived before the module loaded
@@ -484,9 +531,11 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
       delete (window as any).__deferredQueue;
     }
 
-    window.addEventListener("popstate", () => {
-      router.visit(window.location.pathname + window.location.search, {
+    window.addEventListener("popstate", (e) => {
+      const saved = e.state;
+      router.visit(window.location.pathname + window.location.search + window.location.hash, {
         preserveState: true,
+        _scrollPosition: saved ? { x: saved.scrollX ?? 0, y: saved.scrollY ?? 0 } : null,
       });
     });
   }

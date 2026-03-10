@@ -165,3 +165,43 @@ router.visit("/users");
 router.reload(); // re-fetch current page props
 router.post("/logout"); // non-GET navigation
 ```
+
+## Scroll Restoration
+
+The pages router automatically saves and restores scroll position during client-side navigation:
+
+- **Back/forward navigation** restores the exact scroll position you were at before navigating away.
+- **Forward navigation** scrolls to the top of the page.
+- **Hash links** (`/docs#api`) scroll to the target element. Same-page hash links (`#section`) skip the server fetch entirely.
+
+This works out of the box with no configuration. If you need to opt out for a specific navigation, pass `preserveScroll: true`:
+
+```ts
+router.visit("/users", { preserveScroll: true });
+```
+
+`Link` also accepts `preserveScroll`:
+
+::: code-group
+
+```tsx [React]
+<Link href="/users" preserveScroll>
+  Users
+</Link>
+```
+
+```vue [Vue]
+<Link href="/users" preserve-scroll>Users</Link>
+```
+
+```svelte [Svelte]
+<Link href="/users" preserveScroll>Users</Link>
+```
+
+```tsx [Solid]
+<Link href="/users" preserveScroll>
+  Users
+</Link>
+```
+
+:::
