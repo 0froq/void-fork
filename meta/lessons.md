@@ -18,3 +18,4 @@
 - Clean-break docs: document only the new surface by default. Mention removed or deprecated keys only when the user asks for migration guidance.
 - Framework full build: in `framework/`, use `pnpm build:all` for a full build. `pnpm build` is packages-only.
 - Drizzle validators: on `drizzle-orm@0.45.x`, use `drizzle-zod`, `drizzle-valibot`, and `drizzle-arktype`, not `drizzle-orm/*` validator entrypoints.
+- SQLite PRAGMA syntax: use bare names or single-quoted strings for `PRAGMA table_info(...)` / `PRAGMA index_list(...)`; do not pass double-quoted SQL identifiers there.
