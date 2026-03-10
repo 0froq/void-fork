@@ -356,6 +356,15 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
           }
         }
 
+        // Preserve stale deferred values after mutations (non-GET can't stream)
+        if (method !== "GET") {
+          for (const key of Object.keys(activeKeyRefs)) {
+            if (pageData.props[key] === null && currentPropsObj[key] !== undefined) {
+              pageData.props[key] = currentPropsObj[key];
+            }
+          }
+        }
+
         // Resolve async work before starting the transition
         const [comp, layouts] = await Promise.all([
           resolveComponent(pageData.component),
