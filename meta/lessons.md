@@ -5,6 +5,7 @@
 - `void.json` changes: update `framework/packages/void/schema.json`, `framework/docs/config.md`, and any related types, validation, or README references.
 - Drizzle `push` -> `migrate`: if the schema was created with `drizzle-kit push`, seed `drizzle.__drizzle_migrations` from `drizzle/meta/_journal.json` before switching to `drizzle-kit migrate`.
 - Cloudflare Workers + CJS: when Vite/Rolldown bundles CJS packages for Workers, add `esmExternalRequirePlugin` to the actual worker environment in `vite.config.ts`. The env name is the Wrangler worker name, not `"ssr"`.
+- Dual SQLite/Postgres features: keep dialect-specific imports in dialect-specific modules. Do not put `pg` imports or PostgreSQL-only dynamic imports in shared code that is also used by D1/SQLite paths, or Workers bundles will pull `pg` into the SQLite branch and emit Node builtin import warnings.
 - Schema deploy safety: migrations must remain backward compatible while old code is still running. Additive changes are safe; renames, drops, and type changes need a two-phase rollout. Use `VOID_TEST_DATABASE_URL` for real-Postgres compat checks and keep `fileParallelism: false`.
 - Git commit HEREDOCs: avoid apostrophes in `git commit -m "$(cat <<'EOF' ...)"` messages, or avoid that pattern entirely.
 - `pnpm test` filtering: run `pnpm test <path-or-pattern>` without `--`.
