@@ -15,11 +15,12 @@ Every page can have a companion `.server.ts` file that exports a `loader`. Serve
 import { defineHandler } from "void";
 import type { InferProps } from "void";
 import { db } from "void/db";
+import { users } from "@schema";
 
 export type Props = InferProps<typeof loader>; // [!code highlight]
 
 export const loader = defineHandler(async (c) => {
-  return { users: await db.list("users") };
+  return { users: await db.select().from(users) };
 });
 ```
 
@@ -31,7 +32,7 @@ export interface Props {
 }
 
 export const loader = defineHandler<Props>(async (c) => {
-  return { users: await db.list("users") };
+  return { users: await db.select().from(users) };
 });
 ```
 
@@ -114,13 +115,15 @@ Loaders sometimes need to fetch data that's slow — analytics, external APIs, A
 // pages/dashboard.server.ts
 import { defineHandler, defer } from "void";
 import type { InferProps } from "void";
+import { db } from "void/db";
+import { projects } from "@schema";
 
 export type Props = InferProps<typeof loader>;
 
 export const loader = defineHandler(async (c) => {
-  const projects = await db.list("projects"); // fast — returns immediately
+  const allProjects = await db.select().from(projects); // fast — returns immediately
   return {
-    projects,
+    projects: allProjects,
     usage: defer(async () => {
       return await fetchUsageMetrics(); // slow — streams when ready
     }),
@@ -235,7 +238,7 @@ export const loader = defineHandler<Props>(async (c) => {
   };
 
   return {
-    projects: await db.list("projects"),
+    projects: await db.select().from(projects),
     metrics: defer("analytics", analyticsResolver),
     chart: defer("analytics", analyticsResolver),
   };

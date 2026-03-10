@@ -676,11 +676,11 @@ interface VoidReactOptions {
 
 Imported from `"void/react"`.
 
-| Export              | Description                                                                                                                                   |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Link`              | React component for SPA navigation. Renders `<a>` for GET, `<button>` for non-GET methods. Props: `href`, `method`, `data`, `preserveScroll`. |
-| `useForm(defaults)` | Form helper hook. Returns `{ data, setData, post, put, patch, delete, processing, errors, isDirty, reset, clearErrors }`.                     |
-| `useShared()`       | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                      |
+| Export                             | Description                                                                                                                                   |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Link`                             | React component for SPA navigation. Renders `<a>` for GET, `<button>` for non-GET methods. Props: `href`, `method`, `data`, `preserveScroll`. |
+| `useForm(url, defaults, options?)` | Form helper hook. Returns `{ data, setData, post, put, patch, delete, processing, errors, isDirty, reset, clearErrors }`.                     |
+| `useShared()`                      | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                      |
 
 ### `@void-x/svelte`
 
@@ -715,12 +715,12 @@ interface VoidSvelteOptions {
 
 Imported from `"void/svelte"`.
 
-| Export              | Description                                                                                                                                    |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Link`              | Svelte component for SPA navigation. Renders `<a>` for GET, `<button>` for non-GET methods. Props: `href`, `method`, `data`, `preserveScroll`. |
-| `useForm(defaults)` | Form helper using Svelte 5 runes. Returns `{ data, post, put, patch, delete, processing, errors, isDirty, reset, clearErrors }`.               |
-| `useShared()`       | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                       |
-| `useRouter()`       | Returns the page router for programmatic navigation: `visit`, `reload`, `post`, `put`, `patch`, `delete`.                                      |
+| Export                             | Description                                                                                                                                    |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Link`                             | Svelte component for SPA navigation. Renders `<a>` for GET, `<button>` for non-GET methods. Props: `href`, `method`, `data`, `preserveScroll`. |
+| `useForm(url, defaults, options?)` | Form helper using Svelte 5 runes. Returns `{ data, post, put, patch, delete, processing, errors, isDirty, reset, clearErrors }`.               |
+| `useShared()`                      | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                       |
+| `useRouter()`                      | Returns the page router for programmatic navigation: `visit`, `reload`, `post`, `put`, `patch`, `delete`.                                      |
 
 ## Subpath Exports
 

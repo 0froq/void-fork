@@ -83,6 +83,7 @@ First, define the action in your server handler:
 // pages/users/create.server.ts
 import { defineHandler } from "void";
 import { db } from "void/db";
+import { users } from "@schema";
 import * as v from "valibot";
 
 const createUserSchema = v.object({
@@ -93,7 +94,7 @@ const createUserSchema = v.object({
 export const action = defineHandler.withValidator({
   body: createUserSchema,
 })(async (c, { body }) => {
-  await db.insert("users", body);
+  await db.insert(users).values(body);
   return c.redirect("/users");
 });
 ```

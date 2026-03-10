@@ -619,9 +619,7 @@ async function runSetUrl(root: string): Promise<void> {
   const dialect = getDialect(config);
 
   if (dialect !== "postgresql") {
-    log.error(
-      'This command is only for PostgreSQL projects. Set "database.dialect": "postgresql" in void.json.',
-    );
+    log.error('This command is only for PostgreSQL projects. Set "database": "pg" in void.json.');
     process.exit(1);
   }
 

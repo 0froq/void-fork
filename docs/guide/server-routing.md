@@ -33,15 +33,15 @@ A file can export multiple methods:
 // routes/api/users/index.ts  →  GET + POST /api/users
 import { defineHandler } from "void";
 import { db } from "void/db";
+import { users } from "@schema";
 
 export const GET = defineHandler(async () => {
-  const users = await db.list("users");
-  return users;
+  return await db.select().from(users);
 });
 
 export const POST = defineHandler(async (c) => {
   const body = await c.req.json();
-  await db.insert("users", { name: body.name });
+  await db.insert(users).values({ name: body.name });
   return { created: true };
 });
 ```

@@ -104,12 +104,16 @@ export * from "./schema/posts";
 
 ## Querying
 
-Void re-exports all common [Drizzle query operators](https://orm.drizzle.team/docs/select) from `void/db` so you don't need to install `drizzle-orm` separately. Import `db` from `void/db` and your tables from `@schema` (an alias for `db/schema.ts` that the framework configures automatically):
+Void re-exports all common [Drizzle query operators](https://orm.drizzle.team/docs/select) from `void/db` so you don't need to install `drizzle-orm` separately. Import `db` from `void/db` and your tables from `@schema`:
 
 ```ts
 import { db } from "void/db";
 import { users } from "@schema";
 ```
+
+::: info What is `@schema`?
+`@schema` is a Vite path alias that the Void plugin configures automatically to point to your `db/schema.ts` file (or `db/schema/` directory). You don't need to set it up — just use it to import your table definitions.
+:::
 
 ### List rows
 
