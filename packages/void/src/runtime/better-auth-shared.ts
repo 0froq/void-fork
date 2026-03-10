@@ -1,6 +1,6 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
-import { getMigrations } from "better-auth/db/migration";
 import type { Context } from "hono";
+import type { VoidAuthMigrationSchema } from "../auth/drizzle";
 import {
   VOID_EMAIL_AUTH_PROVIDER,
   getVoidAuthProviderEnvNames,
@@ -8,6 +8,7 @@ import {
   type VoidAuthProvider,
   type VoidSocialAuthProvider,
 } from "../auth/providers";
+import { applyPgAuthMigrations, applySqliteAuthMigrations } from "./auth-migrations";
 import { authContext, type AuthState, type VoidAuthConfig } from "./auth";
 
 export type VoidAuthDialect = "sqlite" | "postgresql";
@@ -48,22 +49,34 @@ export interface VoidAuthRuntimeApi {
     request: Request,
     env: VoidAuthEnv,
     runtime: VoidAuthRuntimeOptions,
+    databaseOverride?: NonNullable<BetterAuthOptions["database"]>,
+    disposeOverride?: () => Promise<void>,
   ): Promise<{ auth: ReturnType<typeof betterAuth>; dispose(): Promise<void> }>;
   resolveVoidAuthState(
     request: Request,
     env: VoidAuthEnv,
     runtime: VoidAuthRuntimeOptions,
+    databaseOverride?: NonNullable<BetterAuthOptions["database"]>,
+    disposeOverride?: () => Promise<void>,
   ): Promise<AuthState | null>;
   runVoidAuthMiddleware(
     c: Context,
     next: () => Promise<void>,
     runtime: VoidAuthRuntimeOptions,
+    databaseOverride?: NonNullable<BetterAuthOptions["database"]>,
+    disposeOverride?: () => Promise<void>,
   ): Promise<void>;
-  handleVoidAuthRequest(c: Context, runtime: VoidAuthRuntimeOptions): Promise<Response>;
+  handleVoidAuthRequest(
+    c: Context,
+    runtime: VoidAuthRuntimeOptions,
+    databaseOverride?: NonNullable<BetterAuthOptions["database"]>,
+    disposeOverride?: () => Promise<void>,
+  ): Promise<Response>;
   runVoidAuthMigrations(
     request: Request,
     env: VoidAuthEnv,
     runtime: VoidAuthRuntimeOptions,
+    migrationSchema: VoidAuthMigrationSchema,
   ): Promise<void>;
 }
 
@@ -221,8 +234,16 @@ export function createVoidAuthRuntime(
     request: Request,
     env: VoidAuthEnv,
     runtime: VoidAuthRuntimeOptions,
+    databaseOverride?: NonNullable<BetterAuthOptions["database"]>,
+    disposeOverride?: () => Promise<void>,
   ): Promise<{ auth: ReturnType<typeof betterAuth>; dispose(): Promise<void> }> {
-    const { options, dispose } = await resolveVoidAuthOptions(request, env, runtime);
+    const { options, dispose } = await resolveVoidAuthOptions(
+      request,
+      env,
+      runtime,
+      databaseOverride,
+      disposeOverride,
+    );
     return {
       auth: betterAuth(options),
       dispose,
@@ -233,8 +254,16 @@ export function createVoidAuthRuntime(
     request: Request,
     env: VoidAuthEnv,
     runtime: VoidAuthRuntimeOptions,
+    databaseOverride?: NonNullable<BetterAuthOptions["database"]>,
+    disposeOverride?: () => Promise<void>,
   ): Promise<AuthState | null> {
-    const { auth, dispose } = await createVoidAuth(request, env, runtime);
+    const { auth, dispose } = await createVoidAuth(
+      request,
+      env,
+      runtime,
+      databaseOverride,
+      disposeOverride,
+    );
 
     try {
       const result = await auth.api.getSession({
@@ -253,8 +282,17 @@ export function createVoidAuthRuntime(
     c: Context,
     next: () => Promise<void>,
     runtime: VoidAuthRuntimeOptions,
+    databaseOverride?: NonNullable<BetterAuthOptions["database"]>,
+    disposeOverride?: () => Promise<void>,
   ): Promise<void> {
-    const { auth, dispose } = await createVoidAuth(c.req.raw, c.env as VoidAuthEnv, runtime);
+    const { auth, dispose } = await createVoidAuth(
+      c.req.raw,
+      c.env as VoidAuthEnv,
+      runtime,
+      databaseOverride,
+      disposeOverride,
+    );
+    c.set("__voidAuth", auth);
 
     try {
       const result = await auth.api.getSession({
@@ -280,8 +318,21 @@ export function createVoidAuthRuntime(
   async function handleVoidAuthRequest(
     c: Context,
     runtime: VoidAuthRuntimeOptions,
+    databaseOverride?: NonNullable<BetterAuthOptions["database"]>,
+    disposeOverride?: () => Promise<void>,
   ): Promise<Response> {
-    const { auth, dispose } = await createVoidAuth(c.req.raw, c.env as VoidAuthEnv, runtime);
+    const existingAuth = c.get("__voidAuth") as ReturnType<typeof betterAuth> | undefined;
+    if (existingAuth) {
+      return existingAuth.handler(c.req.raw);
+    }
+
+    const { auth, dispose } = await createVoidAuth(
+      c.req.raw,
+      c.env as VoidAuthEnv,
+      runtime,
+      databaseOverride,
+      disposeOverride,
+    );
     try {
       return await auth.handler(c.req.raw);
     } finally {
@@ -290,16 +341,67 @@ export function createVoidAuthRuntime(
   }
 
   async function runVoidAuthMigrations(
-    request: Request,
+    _request: Request,
     env: VoidAuthEnv,
     runtime: VoidAuthRuntimeOptions,
+    migrationSchema: VoidAuthMigrationSchema,
   ): Promise<void> {
-    const { options, dispose } = await resolveVoidAuthOptions(request, env, runtime);
+    if (!migrationSchema) {
+      throw new Error("Void auth migration schema is unavailable.");
+    }
+    assertRuntimeDialect(runtime, migrationSchema.dialect);
+
+    if (runtime.dialect === "sqlite") {
+      if (!env.DB) {
+        throw new Error('Better Auth requires the "DB" D1 binding for sqlite apps.');
+      }
+      await applySqliteAuthMigrations(
+        {
+          async all<T extends Record<string, unknown>>(sql: string) {
+            const result = await env.DB!.prepare(sql).all();
+            return (result.results ?? []) as T[];
+          },
+          async run(sql: string) {
+            await env.DB!.prepare(sql).run();
+          },
+        },
+        migrationSchema,
+      );
+      return;
+    }
+
+    const connectionString =
+      typeof env.HYPERDRIVE?.connectionString === "string" &&
+      env.HYPERDRIVE.connectionString.length > 0
+        ? env.HYPERDRIVE.connectionString
+        : typeof env.DATABASE_URL === "string" && env.DATABASE_URL.length > 0
+          ? env.DATABASE_URL
+          : undefined;
+
+    if (!connectionString) {
+      throw new Error(
+        "Better Auth requires DATABASE_URL for local PostgreSQL dev or HYPERDRIVE in production.",
+      );
+    }
+
+    const { Client } = await import("pg");
+    const client = new Client({ connectionString });
+    await client.connect();
     try {
-      const { runMigrations } = await getMigrations(options);
-      await runMigrations();
+      await applyPgAuthMigrations(
+        {
+          async all<T extends Record<string, unknown>>(sql: string, params?: unknown[]) {
+            const result = await client.query(sql, params);
+            return result.rows as T[];
+          },
+          async run(sql: string, params?: unknown[]) {
+            await client.query(sql, params);
+          },
+        },
+        migrationSchema,
+      );
     } finally {
-      await dispose();
+      await client.end();
     }
   }
 

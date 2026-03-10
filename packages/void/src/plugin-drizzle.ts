@@ -19,29 +19,36 @@ const VIRTUAL_SCHEMA_DB_ID = "\0virtual:void-db-schema";
 const DRIZZLE_OPERATORS =
   "sql, eq, ne, gt, gte, lt, lte, and, or, not, desc, asc, like, ilike, notLike, inArray, notInArray, isNull, isNotNull, between, notBetween, exists, notExists, count, sum, avg, min, max";
 
+interface DrizzlePluginOptions {
+  forceVirtualDb?: boolean;
+}
+
 /**
  * Vite plugin for Drizzle integration.
  *
  * - Intercepts `void/db` imports in SSR/worker environments and serves
- *   a virtual module that creates a Drizzle D1 instance with the user's schema.
+ *   a virtual module that creates a Drizzle DB instance, using the user's
+ *   schema when present.
  * - Generates `.void/db.d.ts` with proper Drizzle types.
- * - Sets up `@schema` Vite alias for convenient imports.
+ * - Sets up `@schema` Vite alias for convenient imports when a schema exists.
  * - Updates `.void/tsconfig.json` with TypeScript paths.
  */
 export function drizzlePlugin(
   root: string,
   hasRouteTypes: boolean,
   dialect: "sqlite" | "postgresql" = "sqlite",
+  options: DrizzlePluginOptions = {},
 ): Plugin {
   const outDir = join(root, ".void");
   const schema = discoverSchema(root);
+  const hasDbRuntime = schema != null || options.forceVirtualDb === true;
 
   // Always write tsconfig (for routes.d.ts, queues.d.ts, etc.)
-  ensureProjectTsconfig(root, hasRouteTypes, schema != null);
+  ensureProjectTsconfig(root, hasRouteTypes, hasDbRuntime, schema != null);
 
-  // Generate db.d.ts if schema exists
-  if (schema) {
-    generateDbDts(outDir, schema, dialect);
+  // Generate db.d.ts when void/db is available, even without a user schema.
+  if (hasDbRuntime) {
+    generateDbDts(outDir, schema ?? null, dialect);
   }
 
   let isBuild = false;
@@ -74,11 +81,11 @@ export function drizzlePlugin(
 
         // Only intercept void/db in server/worker environments (not client)
         if (id === "void/db" && this.environment?.name !== "client") {
-          if (!schema) return; // Fall through to the real module (stub)
+          if (!hasDbRuntime) return; // Fall through to the real module (stub)
           // Don't redirect schema files to avoid circular dependency
           // (virtual:void-db imports the schema, which imports void/db).
           // Schema files only need SQL helpers, not the runtime DB instance.
-          if (importer) {
+          if (schema && importer) {
             if (schema.type === "file" && importer === schema.path) return VIRTUAL_SCHEMA_DB_ID;
             if (schema.type === "directory" && importer.startsWith(schema.path)) {
               return VIRTUAL_SCHEMA_DB_ID;
@@ -112,14 +119,17 @@ export function createDb() {
         }
 
         // void/db virtual module
-        const schemaImport = JSON.stringify(schema!.path);
+        const schemaImport = schema
+          ? `import * as schema from ${JSON.stringify(schema.path)};`
+          : "";
+        const drizzleConfig = schema ? ", { schema }" : "";
 
         if (dialect === "postgresql") {
           return `
 import { drizzle } from ${JSON.stringify(drizzleNodePgResolved)};
 import pg from "pg";
 import { getRuntimeBinding } from ${JSON.stringify(envModuleResolved)};
-import * as schema from ${schemaImport};
+${schemaImport}
 export { ${DRIZZLE_OPERATORS} } from ${JSON.stringify(drizzleOrmResolved)};
 
 let _prodInstance;
@@ -137,10 +147,10 @@ function getInstance() {
   // workerd kills TCP sockets between requests, so pg.Pool's cached
   // connections go stale and hang. Fresh Pool = fresh connection every time.
   if (getRuntimeBinding("DATABASE_URL")) {
-    return drizzle(new pg.Pool({ connectionString: getRuntimeBinding("DATABASE_URL"), max: 1 }), { schema });
+    return drizzle(new pg.Pool({ connectionString: getRuntimeBinding("DATABASE_URL"), max: 1 })${drizzleConfig});
   }
   // Production (Hyperdrive): cache the instance — Hyperdrive handles pooling.
-  _prodInstance ??= drizzle(getConnectionString(), { schema });
+  _prodInstance ??= drizzle(getConnectionString()${drizzleConfig});
   return _prodInstance;
 }
 
@@ -151,7 +161,7 @@ export const db = new Proxy({}, {
 });
 
 export function createDb(connectionString) {
-  return drizzle(connectionString, { schema });
+  return drizzle(connectionString${drizzleConfig});
 }
 `;
         }
@@ -160,20 +170,20 @@ export function createDb(connectionString) {
         return `
 import { drizzle } from ${JSON.stringify(drizzleD1Resolved)};
 import { requireRuntimeBinding } from ${JSON.stringify(envModuleResolved)};
-import * as schema from ${schemaImport};
+${schemaImport}
 export { ${DRIZZLE_OPERATORS} } from ${JSON.stringify(drizzleOrmResolved)};
 
 let _instance;
 
 export const db = new Proxy({}, {
   get(_, prop) {
-    _instance ??= drizzle(requireRuntimeBinding("DB"), { schema });
+    _instance ??= drizzle(requireRuntimeBinding("DB")${drizzleConfig});
     return Reflect.get(_instance, prop);
   },
 });
 
 export function createDb(d1) {
-  return drizzle(d1, { schema });
+  return drizzle(d1${drizzleConfig});
 }
 `;
       },
@@ -221,36 +231,57 @@ export function createDb(d1) {
  */
 function generateDbDts(
   outDir: string,
-  _schema: SchemaLocation,
+  schema: SchemaLocation | null,
   dialect: "sqlite" | "postgresql",
 ): void {
   mkdirSync(outDir, { recursive: true });
 
   const lines =
     dialect === "postgresql"
-      ? [
-          "// Auto-generated by void — do not edit",
-          `import type { NodePgDatabase } from "void/_db-pg";`,
-          `import type * as schema from "@schema";`,
-          "type Schema = typeof schema;",
-          "export declare const db: NodePgDatabase<Schema>;",
-          "export declare function createDb(connectionString: string): NodePgDatabase<Schema>;",
-          `export { ${DRIZZLE_OPERATORS} } from "void/_db";`,
-          `export type { NodePgDatabase } from "void/_db-pg";`,
-          "",
-        ]
-      : [
-          "// Auto-generated by void — do not edit",
-          '/// <reference types="@cloudflare/workers-types" />',
-          `import type { DrizzleD1Database } from "void/_db";`,
-          `import type * as schema from "@schema";`,
-          "type Schema = typeof schema;",
-          "export declare const db: DrizzleD1Database<Schema>;",
-          "export declare function createDb(d1: D1Database): DrizzleD1Database<Schema>;",
-          `export { ${DRIZZLE_OPERATORS} } from "void/_db";`,
-          `export type { DrizzleD1Database } from "void/_db";`,
-          "",
-        ];
+      ? schema
+        ? [
+            "// Auto-generated by void — do not edit",
+            `import type { NodePgDatabase } from "void/_db-pg";`,
+            `import type * as schema from "@schema";`,
+            "type Schema = typeof schema;",
+            "export declare const db: NodePgDatabase<Schema>;",
+            "export declare function createDb(connectionString: string): NodePgDatabase<Schema>;",
+            `export { ${DRIZZLE_OPERATORS} } from "void/_db";`,
+            `export type { NodePgDatabase } from "void/_db-pg";`,
+            "",
+          ]
+        : [
+            "// Auto-generated by void — do not edit",
+            `import type { NodePgDatabase } from "void/_db-pg";`,
+            "export declare const db: NodePgDatabase<Record<string, never>>;",
+            "export declare function createDb(connectionString: string): NodePgDatabase<Record<string, never>>;",
+            `export { ${DRIZZLE_OPERATORS} } from "void/_db";`,
+            `export type { NodePgDatabase } from "void/_db-pg";`,
+            "",
+          ]
+      : schema
+        ? [
+            "// Auto-generated by void — do not edit",
+            '/// <reference types="@cloudflare/workers-types" />',
+            `import type { DrizzleD1Database } from "void/_db";`,
+            `import type * as schema from "@schema";`,
+            "type Schema = typeof schema;",
+            "export declare const db: DrizzleD1Database<Schema>;",
+            "export declare function createDb(d1: D1Database): DrizzleD1Database<Schema>;",
+            `export { ${DRIZZLE_OPERATORS} } from "void/_db";`,
+            `export type { DrizzleD1Database } from "void/_db";`,
+            "",
+          ]
+        : [
+            "// Auto-generated by void — do not edit",
+            '/// <reference types="@cloudflare/workers-types" />',
+            `import type { DrizzleD1Database } from "void/_db";`,
+            "export declare const db: DrizzleD1Database<Record<string, never>>;",
+            "export declare function createDb(d1: D1Database): DrizzleD1Database<Record<string, never>>;",
+            `export { ${DRIZZLE_OPERATORS} } from "void/_db";`,
+            `export type { DrizzleD1Database } from "void/_db";`,
+            "",
+          ];
 
   writeFileSync(join(outDir, "db.d.ts"), lines.join("\n"));
 }

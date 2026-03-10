@@ -14,7 +14,8 @@ import { join } from "node:path";
 export function ensureProjectTsconfig(
   root: string,
   hasRouteTypes?: boolean,
-  hasDrizzle?: boolean,
+  hasDb?: boolean,
+  hasSchema?: boolean,
 ): void {
   const outDir = join(root, ".void");
   mkdirSync(outDir, { recursive: true });
@@ -22,29 +23,32 @@ export function ensureProjectTsconfig(
   const includeQueues = existsSync(join(root, "queues"));
   const files = [
     ...(includeRoutes ? ["routes.d.ts"] : []),
-    ...(hasDrizzle ? ["db.d.ts"] : []),
+    ...(hasDb ? ["db.d.ts"] : []),
     ...(includeQueues ? ["queues.d.ts"] : []),
   ];
 
   const tsconfig: Record<string, unknown> = { files };
 
-  if (hasDrizzle) {
-    // Determine whether schema is a file or directory
-    const isDir =
-      existsSync(join(root, "db", "schema")) && !existsSync(join(root, "db", "schema.ts"));
-
-    // Paths are relative to .void/ (where this tsconfig lives), so use ../
-    tsconfig.compilerOptions = {
-      paths: {
-        "@schema": isDir ? ["../db/schema/index.ts"] : ["../db/schema.ts"],
-        "@schema/*": ["../db/schema/*"],
-        // Redirect void/db to the generated db.d.ts so TypeScript uses
-        // schema-aware types instead of the generic base module.
-        // (moduleResolution: "bundler" ignores ambient `declare module`
-        // when the module resolves to a real file — paths is the fix.)
-        "void/db": ["./db.d.ts"],
-      },
+  if (hasDb) {
+    const paths: Record<string, string[]> = {
+      // Redirect void/db to the generated db.d.ts so TypeScript uses
+      // schema-aware types instead of the generic base module.
+      // (moduleResolution: "bundler" ignores ambient `declare module`
+      // when the module resolves to a real file — paths is the fix.)
+      "void/db": ["./db.d.ts"],
     };
+
+    if (hasSchema) {
+      // Determine whether schema is a file or directory
+      const isDir =
+        existsSync(join(root, "db", "schema")) && !existsSync(join(root, "db", "schema.ts"));
+
+      // Paths are relative to .void/ (where this tsconfig lives), so use ../
+      paths["@schema"] = [isDir ? "../db/schema/index.ts" : "../db/schema.ts"];
+      paths["@schema/*"] = ["../db/schema/*"];
+    }
+
+    tsconfig.compilerOptions = { paths };
   }
 
   writeFileSync(join(outDir, "tsconfig.json"), JSON.stringify(tsconfig, null, 2) + "\n");

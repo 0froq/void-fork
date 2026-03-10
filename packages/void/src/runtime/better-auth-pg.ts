@@ -1,4 +1,3 @@
-import pg from "pg";
 import {
   createVoidAuthRuntime,
   type ResolvedDatabase,
@@ -7,6 +6,7 @@ import {
 } from "./better-auth-shared";
 
 async function resolveDatabase(env: VoidAuthEnv): Promise<ResolvedDatabase> {
+  const { default: pg } = await import("pg");
   const connectionString =
     typeof env.DATABASE_URL === "string" && env.DATABASE_URL.length > 0
       ? env.DATABASE_URL

@@ -398,7 +398,7 @@ export function voidPlugin(options?: {
       wranglerSyncPlugin,
       svelteKitHooksInjectPlugin,
       clientStubsPlugin,
-      drizzlePlugin(root, false, dialect),
+      drizzlePlugin(root, false, dialect, { forceVirtualDb: authEnabled }),
       migrationPlugin(root, dialect, "local", frameworkPersistRoot, {
         enabled: false,
       }),
@@ -752,7 +752,7 @@ export function voidPlugin(options?: {
       bindingWatchPlugin,
       envPlugin,
       clientStubsPlugin,
-      drizzlePlugin(root, false, getDatabaseDialect(config)),
+      drizzlePlugin(root, false, getDatabaseDialect(config), { forceVirtualDb: authEnabled }),
       migrationPlugin(root, getDatabaseDialect(config)),
       ...(vinextCompat ? [vinextCompat] : []),
       ...cloudflare({
@@ -855,7 +855,7 @@ export function voidPlugin(options?: {
       prerenderPaths: config.routing?.prerender,
       remoteMode,
     }),
-    drizzlePlugin(root, true, dialect),
+    drizzlePlugin(root, true, dialect, { forceVirtualDb: authEnabled }),
     migrationPlugin(root, dialect, "local", join(root, ".void"), {
       enabled: authEnabled,
       configPath: authConfigPath,

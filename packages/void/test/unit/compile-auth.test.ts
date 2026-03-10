@@ -20,6 +20,8 @@ const baseOptions = {
 const sqliteAuth: AuthCompileOptions = {
   authRuntimePath: "/resolved/void/runtime/better-auth.mjs",
   authConfigPath: null,
+  authDatabasePath: "/project/.void/better-auth-db.ts",
+  authSchemaPath: "/project/.void/better-auth-schema.ts",
   dialect: "sqlite",
   providers: null,
 };
@@ -27,6 +29,8 @@ const sqliteAuth: AuthCompileOptions = {
 const pgAuth: AuthCompileOptions = {
   authRuntimePath: "/resolved/void/runtime/better-auth.mjs",
   authConfigPath: "/app/auth.ts",
+  authDatabasePath: "/project/.void/better-auth-db.ts",
+  authSchemaPath: "/project/.void/better-auth-schema.ts",
   dialect: "postgresql",
   providers: ["email", "github"],
 };
@@ -50,8 +54,14 @@ describe("compileRouteTable auth integration", () => {
     });
 
     expect(code).toContain('from "/resolved/void/runtime/better-auth.mjs"');
+    expect(code).toContain('import { __voidAuthDatabase } from "/project/.void/better-auth-db.ts"');
+    expect(code).toContain(
+      'import { migrationSchema as __voidAuthMigrationSchema } from "/project/.void/better-auth-schema.ts"',
+    );
     expect(code).toContain("runVoidAuthMiddleware");
     expect(code).toContain("handleVoidAuthRequest");
+    expect(code).toContain("runVoidAuthMiddleware(c, next, __voidAuthOptions, __voidAuthDatabase)");
+    expect(code).toContain("handleVoidAuthRequest(c, __voidAuthOptions, __voidAuthDatabase)");
     expect(code).toContain('app.all("/api/auth"');
     expect(code).toContain('app.all("/api/auth/*"');
     expect(code).not.toContain('app.post("/auth/register"');
@@ -123,6 +133,9 @@ describe("compileRouteTable auth integration", () => {
     });
 
     expect(code).toContain("runVoidAuthMigrations");
+    expect(code).toContain(
+      "runVoidAuthMigrations(new Request(c.req.url), c.env, __voidAuthOptions, __voidAuthMigrationSchema)",
+    );
     expect(code).toContain('app.post("/__void/migrate"');
   });
 });

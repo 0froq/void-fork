@@ -502,7 +502,7 @@ async function runModel(root: string, name: string, columns: ColumnSpec[]): Prom
   }
 
   // 3. Regenerate .void/tsconfig.json and db.d.ts
-  ensureProjectTsconfig(root, undefined, true);
+  ensureProjectTsconfig(root, undefined, true, true);
 
   log.success(`Created ${relative(root, modelPath)}`);
   log.success(`Updated ${relative(root, barrelPath)}`);

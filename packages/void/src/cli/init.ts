@@ -790,7 +790,7 @@ export const GET = defineHandler(async () => {
 `,
   );
   log.success("Created routes/api/posts.ts");
-  ensureProjectTsconfig(root, undefined, true);
+  ensureProjectTsconfig(root, undefined, true, true);
 
   // Frontend demo
   mkdirSync(join(root, "src"), { recursive: true });
@@ -1045,7 +1045,8 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   // Generate .void/tsconfig.json so the root tsconfig can extend it
   if (state.typescriptWanted) {
-    ensureProjectTsconfig(root, undefined, hasDrizzleSchema(root));
+    const hasSchema = hasDrizzleSchema(root);
+    ensureProjectTsconfig(root, undefined, hasSchema, hasSchema);
   }
 
   // Step 2: Wrangler config (class B/C meta-frameworks)

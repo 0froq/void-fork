@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { readConfig, getDatabaseDialect } from "./config";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Plugin } from "vite";
+import { loadEnv, type Plugin } from "vite";
 import { scanRoutes, type ScanResult } from "./router/scan";
 import {
   compileRouteTable,
@@ -18,7 +18,9 @@ import {
 } from "./router/compile";
 import { generateRouteTypes } from "./codegen/route-types";
 import { generateQueueTypes } from "./codegen/queue-types";
-import { findVoidAuthConfig } from "./auth/config";
+import { findVoidAuthConfig, loadVoidAuthConfig } from "./auth/config";
+import { generateVoidAuthDatabaseModule, generateVoidAuthDrizzleSchema } from "./auth/drizzle";
+import type { VoidAuthRuntimeOptions } from "./runtime/better-auth-shared";
 import {
   validateSsrEntries,
   SSR_SERVER_ENTRY_RELATIVE_PATHS,
@@ -102,6 +104,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   const runtimeDir = dirname(resolveFile("void/client"));
   const fetchPath = resolveFile("void/runtime/fetch");
   const fetchStreamPath = resolveFile("void/runtime/fetch-stream");
+  const drizzleAdapterPath = resolveFile("better-auth/adapters/drizzle");
   let authClientPath = join(runtimeDir, "auth-client.mjs");
   const remote = options.remoteMode
     ? { remotePath: resolveFile("void/remote"), envPath: resolveFile("void/_env") }
@@ -135,9 +138,36 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
           ? join(runtimeDir, "better-auth-pg.mjs")
           : join(runtimeDir, "better-auth.mjs"),
       authConfigPath,
+      authDatabasePath: null,
+      authSchemaPath: null,
       dialect,
       providers: config.auth?.providers ?? null,
     };
+  }
+
+  async function writeAuthDatabaseFiles(): Promise<void> {
+    if (!compileOptions.auth) return;
+
+    const authRuntime: VoidAuthRuntimeOptions = {
+      dialect: compileOptions.auth.dialect,
+      providers: compileOptions.auth.providers,
+      userConfig: await loadVoidAuthConfig(compileOptions.auth.authConfigPath),
+    };
+    const env = loadEnv(resolvedConfig?.mode ?? "development", root, "") as Record<string, unknown>;
+    const schemaPath = join(outDir, "better-auth-schema.ts");
+    const databasePath = join(outDir, "better-auth-db.ts");
+
+    writeFileSync(schemaPath, generateVoidAuthDrizzleSchema(authRuntime, env));
+    writeFileSync(
+      databasePath,
+      generateVoidAuthDatabaseModule({
+        dialect: compileOptions.auth.dialect,
+        schemaImportPath: schemaPath,
+        drizzleAdapterPath,
+      }),
+    );
+    compileOptions.auth.authSchemaPath = schemaPath;
+    compileOptions.auth.authDatabasePath = databasePath;
   }
 
   let resolvedConfig: import("vite").ResolvedConfig | null = null;
@@ -235,6 +265,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         throw new Error("WebSocket routes require the default Cloudflare target.");
       }
       resolveAuthCompileOptions();
+      await writeAuthDatabaseFiles();
       writeRouteTypes();
       writeQueueTypes();
 
@@ -354,6 +385,8 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         // The route table virtual module lives in the workerd environment,
         // not the client — so we must iterate all environments.
         await rescan();
+        resolveAuthCompileOptions();
+        await writeAuthDatabaseFiles();
         writeRouteTypes();
         writeQueueTypes();
         if (options.target) {

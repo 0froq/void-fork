@@ -1,4 +1,5 @@
 import type { HeaderRule, RedirectRule } from "../cli/types";
+import type { VoidAuthProvider } from "../auth/providers";
 import type { ScanResult } from "./scan";
 
 /**
@@ -11,8 +12,10 @@ const BINDING_HINT_SCRIPT = `<script type="module" src="/@id/virtual:void/bindin
 export interface AuthCompileOptions {
   authRuntimePath: string;
   authConfigPath: string | null;
+  authDatabasePath: string | null;
+  authSchemaPath: string | null;
   dialect: "sqlite" | "postgresql";
-  providers: string[] | null;
+  providers: readonly VoidAuthProvider[] | null;
 }
 
 export interface CompileOptions {
@@ -102,11 +105,19 @@ export function compileRouteTable(
   if (auth) {
     const authImports = ["runVoidAuthMiddleware", "handleVoidAuthRequest", "runVoidAuthMigrations"];
     if (webSockets.length > 0) {
-      authImports.push("resolveVoidAuthState as __resolveVoidAuthState");
+      authImports.push("resolveVoidAuthState as __resolveVoidAuthStateRuntime");
     }
     lines.push(
       `import { ${authImports.join(", ")} } from ${JSON.stringify(auth.authRuntimePath)};`,
     );
+    if (auth.authDatabasePath) {
+      lines.push(`import { __voidAuthDatabase } from ${JSON.stringify(auth.authDatabasePath)};`);
+    }
+    if (auth.authSchemaPath) {
+      lines.push(
+        `import { migrationSchema as __voidAuthMigrationSchema } from ${JSON.stringify(auth.authSchemaPath)};`,
+      );
+    }
     if (auth.authConfigPath) {
       lines.push(`import __voidAuthConfig from ${JSON.stringify(auth.authConfigPath)};`);
     }
@@ -133,6 +144,11 @@ export function compileRouteTable(
     lines.push(
       `const __voidAuthOptions = { dialect: ${JSON.stringify(auth.dialect)}, providers: ${JSON.stringify(auth.providers)}, userConfig: ${auth.authConfigPath ? "__voidAuthConfig" : "undefined"} };`,
     );
+    if (webSockets.length > 0) {
+      lines.push(
+        `const __resolveVoidAuthState = (request, env, runtime) => __resolveVoidAuthStateRuntime(request, env, runtime${auth.authDatabasePath ? ", __voidAuthDatabase" : ""});`,
+      );
+    }
     lines.push("");
   }
 
@@ -162,7 +178,9 @@ export function compileRouteTable(
 
   if (auth) {
     lines.push("app.use(async (c, next) => {");
-    lines.push("  return runVoidAuthMiddleware(c, next, __voidAuthOptions);");
+    lines.push(
+      `  return runVoidAuthMiddleware(c, next, __voidAuthOptions${auth.authDatabasePath ? ", __voidAuthDatabase" : ""});`,
+    );
     lines.push("});");
     lines.push("");
   }
@@ -177,11 +195,15 @@ export function compileRouteTable(
 
   if (auth) {
     lines.push('app.all("/api/auth", async (c) => {');
-    lines.push("  return handleVoidAuthRequest(c, __voidAuthOptions);");
+    lines.push(
+      `  return handleVoidAuthRequest(c, __voidAuthOptions${auth.authDatabasePath ? ", __voidAuthDatabase" : ""});`,
+    );
     lines.push("});");
     lines.push("");
     lines.push('app.all("/api/auth/*", async (c) => {');
-    lines.push("  return handleVoidAuthRequest(c, __voidAuthOptions);");
+    lines.push(
+      `  return handleVoidAuthRequest(c, __voidAuthOptions${auth.authDatabasePath ? ", __voidAuthDatabase" : ""});`,
+    );
     lines.push("});");
     lines.push("");
   }
@@ -526,7 +548,9 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push("    __migrationDialect,");
     if (auth) {
       lines.push(
-        "    () => runVoidAuthMigrations(new Request(c.req.url), c.env, __voidAuthOptions),",
+        `    () => runVoidAuthMigrations(new Request(c.req.url), c.env, __voidAuthOptions${
+          auth.authSchemaPath ? ", __voidAuthMigrationSchema" : ""
+        }),`,
       );
     } else {
       lines.push("    undefined,");

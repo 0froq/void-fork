@@ -6,10 +6,12 @@ import { drizzlePlugin } from "../../src/plugin-drizzle";
 
 const roots: string[] = [];
 
-function createProjectRoot(): string {
+function createProjectRoot(options?: { schema?: boolean }): string {
   const root = mkdtempSync(join(tmpdir(), "void-drizzle-"));
-  mkdirSync(join(root, "db"), { recursive: true });
-  writeFileSync(join(root, "db", "schema.ts"), "export {};\n");
+  if (options?.schema !== false) {
+    mkdirSync(join(root, "db"), { recursive: true });
+    writeFileSync(join(root, "db", "schema.ts"), "export {};\n");
+  }
   roots.push(root);
   return root;
 }
@@ -73,5 +75,35 @@ describe("drizzlePlugin db typing generation", () => {
       "export { sql, eq, ne, gt, gte, lt, lte, and, or, not, desc, asc, like, ilike, notLike, inArray, notInArray, isNull, isNotNull, between, notBetween, exists, notExists, count, sum, avg, min, max }",
     );
     expect(code).not.toContain("requireRuntimeBinding");
+  });
+
+  it("can virtualize void/db without a user schema when forced", () => {
+    const root = createProjectRoot({ schema: false });
+    const plugin = drizzlePlugin(root, false, "postgresql", { forceVirtualDb: true });
+    const resolveId = getHookHandler(plugin.resolveId) as (
+      this: { environment: { name: string } },
+      source: string,
+      importer: string | undefined,
+      options: { isEntry: boolean },
+    ) => string | undefined;
+    const load = getHookHandler(plugin.load) as (this: object, id: string) => string;
+    const resolved = resolveId.call({ environment: { name: "ssr" } }, "void/db", undefined, {
+      isEntry: false,
+    });
+
+    expect(resolved).toBe("\0virtual:void-db");
+
+    const dts = readFileSync(join(root, ".void", "db.d.ts"), "utf8");
+    expect(dts).toContain("NodePgDatabase<Record<string, never>>");
+    expect(dts).not.toContain("@schema");
+
+    const tsconfig = JSON.parse(readFileSync(join(root, ".void", "tsconfig.json"), "utf8"));
+    expect(tsconfig.compilerOptions.paths["void/db"]).toEqual(["./db.d.ts"]);
+    expect(tsconfig.compilerOptions.paths["@schema"]).toBeUndefined();
+
+    const code = load.call({}, "\0virtual:void-db");
+    expect(code).toContain('import { drizzle } from "');
+    expect(code).not.toContain("import * as schema");
+    expect(code).toContain("drizzle(getConnectionString())");
   });
 });
