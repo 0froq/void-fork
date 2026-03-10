@@ -1,6 +1,7 @@
 # Lessons
 
 - Worktrees: if the user asks for a worktree, create a real git worktree with `git worktree add` under `.worktrees/`. Never use a branch in the active tree as a substitute.
+- Worktree results: NEVER apply work from a worktree back to the main working tree without explicit user confirmation. Leave changes in the worktree and ask the user how they want to proceed (cherry-pick, patch, keep worktree alive, etc.).
 - `void.json` changes: update `framework/packages/void/schema.json`, `framework/docs/config.md`, and any related types, validation, or README references.
 - Drizzle `push` -> `migrate`: if the schema was created with `drizzle-kit push`, seed `drizzle.__drizzle_migrations` from `drizzle/meta/_journal.json` before switching to `drizzle-kit migrate`.
 - Cloudflare Workers + CJS: when Vite/Rolldown bundles CJS packages for Workers, add `esmExternalRequirePlugin` to the actual worker environment in `vite.config.ts`. The env name is the Wrangler worker name, not `"ssr"`.
