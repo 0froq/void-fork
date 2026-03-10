@@ -35,7 +35,7 @@ See the individual framework guides for setup instructions:
 With `voidPlugin()` added to the framework's Vite config, all frameworks get the same features as [Void apps](../../guide/app-types.md#void-apps):
 
 - **Binding inference** — D1, KV, R2, AI, queues, and auth detected from source code
-- **Typed database** — query helpers generated from `migrations/*.sql`
+- **Typed database** — query helpers generated from `db/migrations/*.sql`
 - **Migrations** — applied to local D1 on dev startup, validated and deployed with `void deploy`
 - **Runtime helpers** — `void/db`, `void/kv`, `void/storage`, `void/ai` for typed access to Cloudflare bindings in dev and production
 - **Auth** — built-in [authentication](../../guide/auth.md) with `getUser()`, auto-detected from `void/auth` imports
@@ -112,7 +112,7 @@ void deploy
   ├─ 3. Analyze
   │    ├─ Locate worker entry + static assets from known output paths
   │    ├─ Infer bindings from source or read from void.json
-  │    ├─ Collect migrations from migrations/*.sql
+  │    ├─ Collect migrations from db/migrations/*.sql
   │    ├─ Detect auth, cron, and queue handlers
   │    └─ Read wrangler.jsonc compat settings
   │

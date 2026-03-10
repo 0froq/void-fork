@@ -267,7 +267,7 @@ If your app uses D1, apply migrations before deploying:
 wrangler d1 migrations apply DB --remote
 ```
 
-This uses the same `migrations/` directory that Void uses locally.
+This uses the same `db/migrations/` directory that Void uses locally.
 
 ### 4. Build and deploy
 

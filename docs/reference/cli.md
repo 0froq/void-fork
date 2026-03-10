@@ -240,7 +240,7 @@ void gen model posts title:string body:text published:boolean
 
 Creates:
 
-- `migrations/NNN_create_posts.sql` — CREATE TABLE with `id` (autoincrement), your columns, and `created_at`
+- `db/migrations/NNN_create_posts.sql` — CREATE TABLE with `id` (autoincrement), your columns, and `created_at`
 - `routes/api/posts/index.ts` — GET (list all) + POST (insert with validation)
 - `routes/api/posts/[id].ts` — GET by id with 404 handling
 - Regenerated `.void/db.d.ts`
@@ -261,7 +261,7 @@ Create an empty migration file with auto-numbered prefix. The number is one grea
 
 ```sh
 void gen migration add_avatar_to_users
-# → migrations/002_add_avatar_to_users.sql
+# → db/migrations/002_add_avatar_to_users.sql
 ```
 
 ### `void gen route`
