@@ -85,7 +85,11 @@ async function runD1Migrations(
 
     const start = Date.now();
     try {
-      await db.prepare(m.sql).run();
+      const statements = m.sql
+        .split(";")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      await db.batch(statements.map((s) => db.prepare(s)));
       await db
         .prepare("INSERT INTO _void_migrations (name, applied_at) VALUES (?, ?)")
         .bind(m.name, new Date().toISOString())
