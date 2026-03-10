@@ -50,40 +50,31 @@ async function main() {
     }
   }
 
-  // 3. Resolve latest versions in parallel
-  const [voidVersion, viteVersion, honoVersion, tsVersion] = await Promise.all([
-    getLatestVersion("void"),
-    getLatestVersion("vite"),
-    getLatestVersion("hono"),
-    getLatestVersion("typescript"),
-  ]);
+  // 3. Resolve the CLI version first so we can run void init locally
+  const voidVersion = await getLatestVersion("void");
 
-  // 4. Scaffold: create dir, write package.json, install, void init
+  // 4. Scaffold: create dir, write package.json, install void, run init, install starter deps
   mkdirSync(targetDir, { recursive: true });
 
   const pkg = {
     name: appName,
     private: true,
     type: "module",
-    scripts: {
-      dev: "vite",
-      build: "vite build",
-      preview: "vite preview",
-    },
-    dependencies: {
+    devDependencies: {
       void: voidVersion,
-      vite: viteVersion,
-      hono: honoVersion,
-      typescript: tsVersion,
     },
   };
 
   writeFileSync(resolve(targetDir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
 
-  p.log.step("Installing dependencies...");
+  p.log.step("Installing Void...");
   await run([...pmInstall(pm)], targetDir);
 
+  p.log.step("Scaffolding starter...");
   await run([...pmExec(pm), "void", "init"], targetDir);
+
+  p.log.step("Installing starter dependencies...");
+  await run([...pmInstall(pm)], targetDir);
 
   p.log.success(`Created ${pc.bold(appName)}`);
   p.outro(`cd ${appName} && ${pm === "npm" ? "npm run" : pm} dev`);

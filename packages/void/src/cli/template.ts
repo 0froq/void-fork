@@ -7,46 +7,362 @@ export const SCAFFOLD_GITIGNORE_LINES = [
   ".DS_Store",
 ] as const;
 
-export const SCAFFOLD_RUNTIME_DEPENDENCIES = {
+export type ScaffoldFramework = "react" | "vue" | "svelte" | "solid";
+export type ScaffoldDatabaseDialect = "sqlite" | "postgresql";
+
+export const SCAFFOLD_BASE_DEPENDENCIES = {
   hono: "^4.11.9",
-  vite: "^8.0.0-beta.14",
 } as const;
 
-export const SCAFFOLD_FILES = {
-  "index.html": `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My App</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="./src/main.ts"></script>
-  </body>
-</html>
-`,
-  "vite.config.ts": `import { defineConfig } from "vite";
+export const SCAFFOLD_BASE_DEV_DEPENDENCIES = {
+  vite: "^8.0.0-beta.14",
+  typescript: "^5.9.3",
+} as const;
+
+export const SCAFFOLD_FRAMEWORK_OPTIONS = [
+  { value: "react", label: "React", hint: "TSX Pages starter with the React adapter." },
+  { value: "vue", label: "Vue", hint: "Vue SFC Pages starter with the Vue adapter." },
+  { value: "svelte", label: "Svelte", hint: "Svelte 5 Pages starter with the Svelte adapter." },
+  {
+    value: "solid",
+    label: "Solid",
+    hint: "Fine-grained TSX Pages starter with the Solid adapter.",
+  },
+] as const;
+
+interface ScaffoldFrameworkConfig {
+  label: string;
+  adapterPackage: string;
+  adapterVersion: string;
+  adapterImport: string;
+  adapterPlugin: string;
+  pageExtension: string;
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+  tsconfigCompilerOptions: Record<string, string>;
+}
+
+export const SCAFFOLD_FRAMEWORKS: Record<ScaffoldFramework, ScaffoldFrameworkConfig> = {
+  react: {
+    label: "React",
+    adapterPackage: "@void-x/react",
+    adapterVersion: "^0.0.1",
+    adapterImport: "voidReact",
+    adapterPlugin: "@void-x/react",
+    pageExtension: "tsx",
+    dependencies: {
+      react: "^19.2.4",
+      "react-dom": "^19.2.4",
+    },
+    devDependencies: {
+      "@types/react": "^19.2.14",
+      "@types/react-dom": "^19.2.3",
+    },
+    tsconfigCompilerOptions: {
+      jsx: "react-jsx",
+    },
+  },
+  vue: {
+    label: "Vue",
+    adapterPackage: "@void-x/vue",
+    adapterVersion: "^0.0.1",
+    adapterImport: "voidVue",
+    adapterPlugin: "@void-x/vue",
+    pageExtension: "vue",
+    dependencies: {
+      vue: "^3.5.30",
+    },
+    devDependencies: {},
+    tsconfigCompilerOptions: {
+      jsx: "preserve",
+    },
+  },
+  svelte: {
+    label: "Svelte",
+    adapterPackage: "@void-x/svelte",
+    adapterVersion: "^0.0.1",
+    adapterImport: "voidSvelte",
+    adapterPlugin: "@void-x/svelte",
+    pageExtension: "svelte",
+    dependencies: {
+      svelte: "^5.53.9",
+    },
+    devDependencies: {},
+    tsconfigCompilerOptions: {},
+  },
+  solid: {
+    label: "Solid",
+    adapterPackage: "@void-x/solid",
+    adapterVersion: "^0.0.1",
+    adapterImport: "voidSolid",
+    adapterPlugin: "@void-x/solid",
+    pageExtension: "tsx",
+    dependencies: {
+      "solid-js": "^1.9.11",
+    },
+    devDependencies: {},
+    tsconfigCompilerOptions: {
+      jsx: "preserve",
+      jsxImportSource: "solid-js",
+    },
+  },
+};
+
+export interface PagesStarterTemplate {
+  scripts: Record<string, string>;
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+  files: Record<string, string>;
+}
+
+export function detectScaffoldFrameworkFromDependencies(
+  deps: Record<string, unknown>,
+): ScaffoldFramework | undefined {
+  for (const [framework, config] of Object.entries(SCAFFOLD_FRAMEWORKS) as [
+    ScaffoldFramework,
+    ScaffoldFrameworkConfig,
+  ][]) {
+    if (config.adapterPackage in deps) {
+      return framework;
+    }
+  }
+  return undefined;
+}
+
+export function getScaffoldTsconfigCompilerOptions(
+  framework?: ScaffoldFramework,
+): Record<string, string> {
+  return framework ? { ...SCAFFOLD_FRAMEWORKS[framework].tsconfigCompilerOptions } : {};
+}
+
+export function createPagesStarterTemplate(options: {
+  framework: ScaffoldFramework;
+  dialect: ScaffoldDatabaseDialect;
+  voidVersion: string;
+}): PagesStarterTemplate {
+  const { framework, dialect, voidVersion } = options;
+  const config = SCAFFOLD_FRAMEWORKS[framework];
+
+  return {
+    scripts: {
+      dev: "vite",
+      build: "vite build",
+      preview: "vite preview",
+    },
+    dependencies: {
+      ...SCAFFOLD_BASE_DEPENDENCIES,
+      ...config.dependencies,
+    },
+    devDependencies: {
+      void: `^${voidVersion}`,
+      ...SCAFFOLD_BASE_DEV_DEPENDENCIES,
+      [config.adapterPackage]: config.adapterVersion,
+      ...config.devDependencies,
+    },
+    files: {
+      "vite.config.ts": getViteConfig(config),
+      [`pages/index.${config.pageExtension}`]: getIndexPage(framework),
+      "pages/index.server.ts": getIndexServer(),
+      "routes/api/hello.ts": getHelloRoute(config.label, dialect),
+      "db/schema.ts": getSchemaFile(dialect),
+      "db/migrations/0000_initial.sql": getMigrationFile(dialect),
+    },
+  };
+}
+
+function getViteConfig(config: ScaffoldFrameworkConfig): string {
+  return `import { defineConfig } from "vite";
 import { voidPlugin } from "void";
+import { ${config.adapterImport} } from "${config.adapterPlugin}";
 
 export default defineConfig({
-  plugins: [voidPlugin()],
+  plugins: [voidPlugin(), ${config.adapterImport}()],
 });
-`,
-  "src/main.ts": `const app = document.getElementById("app")!;
+`;
+}
 
-const res = await fetch("/api/hello");
-const data = await res.json();
+function getIndexServer(): string {
+  return `import { defineHandler, type InferProps } from "void";
+import { db, desc } from "void/db";
+import { messages } from "@schema";
 
-app.innerHTML = \`
+export type Props = InferProps<typeof loader>;
+
+export const loader = defineHandler(async () => {
+  const rows = await db.select().from(messages).orderBy(desc(messages.id));
+  return { messages: rows };
+});
+`;
+}
+
+function getHelloRoute(frameworkLabel: string, dialect: ScaffoldDatabaseDialect): string {
+  const databaseLabel = dialect === "postgresql" ? "PostgreSQL" : "D1";
+  return `import { defineHandler } from "void";
+
+export const GET = defineHandler(() => {
+  return {
+    message: "Hello from Void",
+    framework: "${frameworkLabel}",
+    database: "${databaseLabel}",
+  };
+});
+`;
+}
+
+function getSchemaFile(dialect: ScaffoldDatabaseDialect): string {
+  if (dialect === "postgresql") {
+    return `import { pgTable, serial, text, timestamp } from "void/schema-pg";
+
+export const messages = pgTable("messages", {
+  id: serial("id").primaryKey(),
+  text: text("text").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+`;
+  }
+
+  return `import { sql } from "void/db";
+import { integer, sqliteTable, text } from "void/schema-d1";
+
+export const messages = sqliteTable("messages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  text: text("text").notNull(),
+  createdAt: text("created_at").notNull().default(sql\`(datetime('now'))\`),
+});
+`;
+}
+
+function getMigrationFile(dialect: ScaffoldDatabaseDialect): string {
+  if (dialect === "postgresql") {
+    return `CREATE TABLE IF NOT EXISTS messages (
+  id SERIAL PRIMARY KEY,
+  text TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+INSERT INTO messages (text) VALUES ('Hello from Void');
+`;
+  }
+
+  return `CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  text TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+INSERT INTO messages (text) VALUES ('Hello from Void');
+`;
+}
+
+function getIndexPage(framework: ScaffoldFramework): string {
+  switch (framework) {
+    case "react":
+      return `import type { Props } from "./index.server";
+
+export default function HomePage({ messages }: Props) {
+  return (
+    <main>
+      <h1>Welcome to Void</h1>
+      <p>
+        This starter is running in Pages mode. The list below is loaded from your database in
+        <code> pages/index.server.ts</code>.
+      </p>
+      <p>
+        API example: <a href="/api/hello">/api/hello</a>
+      </p>
+      <ul>
+        {messages.map((message) => (
+          <li key={message.id}>
+            <strong>{message.text}</strong>
+            <br />
+            <small>{String(message.createdAt)}</small>
+          </li>
+        ))}
+      </ul>
+    </main>
+  );
+}
+`;
+    case "vue":
+      return `<script setup lang="ts">
+import type { Props } from "./index.server";
+
+defineProps<Props>();
+</script>
+
+<template>
+  <main>
+    <h1>Welcome to Void</h1>
+    <p>
+      This starter is running in Pages mode. The list below is loaded from your database in
+      <code>pages/index.server.ts</code>.
+    </p>
+    <p>
+      API example: <a href="/api/hello">/api/hello</a>
+    </p>
+    <ul>
+      <li v-for="message in messages" :key="message.id">
+        <strong>{{ message.text }}</strong>
+        <br />
+        <small>{{ String(message.createdAt) }}</small>
+      </li>
+    </ul>
+  </main>
+</template>
+`;
+    case "svelte":
+      return `<script lang="ts">
+  import type { Props } from "./index.server";
+
+  let { messages }: Props = $props();
+</script>
+
+<main>
   <h1>Welcome to Void</h1>
-  <pre>\${JSON.stringify(data, null, 2)}</pre>
-\`;
-`,
-  "routes/api/hello.get.ts": `import { defineHandler } from "void";
+  <p>
+    This starter is running in Pages mode. The list below is loaded from your database in
+    <code>pages/index.server.ts</code>.
+  </p>
+  <p>
+    API example: <a href="/api/hello">/api/hello</a>
+  </p>
+  <ul>
+    {#each messages as message (message.id)}
+      <li>
+        <strong>{message.text}</strong>
+        <br />
+        <small>{String(message.createdAt)}</small>
+      </li>
+    {/each}
+  </ul>
+</main>
+`;
+    case "solid":
+      return `import type { Props } from "./index.server";
 
-export default defineHandler(() => {
-  return { message: "Hello from Void!", timestamp: Date.now() };
-});
-`,
-} as const;
+export default function HomePage(props: Props) {
+  return (
+    <main>
+      <h1>Welcome to Void</h1>
+      <p>
+        This starter is running in Pages mode. The list below is loaded from your database in
+        <code> pages/index.server.ts</code>.
+      </p>
+      <p>
+        API example: <a href="/api/hello">/api/hello</a>
+      </p>
+      <ul>
+        {props.messages.map((message) => (
+          <li>
+            <strong>{message.text}</strong>
+            <br />
+            <small>{String(message.createdAt)}</small>
+          </li>
+        ))}
+      </ul>
+    </main>
+  );
+}
+`;
+  }
+}

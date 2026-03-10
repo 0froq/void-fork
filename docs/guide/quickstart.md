@@ -30,9 +30,11 @@ bunx void init
 
 :::
 
-This scaffolds a starter Void app with an interactive setup flow.
+This scaffolds a Pages-mode starter with an interactive setup flow.
 
-As part of `void init`, you'll choose a database: D1 is the zero-config default for prototyping and read-heavy apps, while PostgreSQL is better when you already have Postgres infrastructure or need heavier writes and more complex queries.
+As part of `void init`, you'll choose a Pages framework (React, Vue, Svelte, or Solid) and a database. The scaffold writes a framework-specific `vite.config.ts`, a `pages/` home page with a `.server.ts` loader companion, `db/schema.ts`, `db/migrations/0000_initial.sql`, and `routes/api/hello.ts`.
+
+For the database, D1 is the zero-config default for prototyping and read-heavy apps, while PostgreSQL is better when you already have Postgres infrastructure or need heavier writes and more complex queries.
 
 <details>
 <summary style="cursor:pointer">
@@ -118,9 +120,9 @@ bunx void init
 
 ## Once You Have a Working App
 
-### 1. Add your first API route
+### 1. Edit the generated API route
 
-Create `routes/api/hello.ts`:
+Your starter already includes `routes/api/hello.ts` with a named `GET` export:
 
 ```ts
 import { defineHandler } from "void";

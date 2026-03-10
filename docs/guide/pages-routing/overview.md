@@ -12,7 +12,9 @@ Pages mode is also entirely optional - you can use any client-side router to bui
 
 ## Setup
 
-Install a framework adapter alongside `void`:
+If you start in a scaffoldable empty directory, `void init` can generate this setup for you: it asks whether you want React, Vue, Svelte, or Solid Pages mode and writes the adapter-aware `vite.config.ts`, `pages/`, and `db/` starter files.
+
+If you're adding Pages mode manually, install a framework adapter alongside `void`:
 
 ::: code-group
 

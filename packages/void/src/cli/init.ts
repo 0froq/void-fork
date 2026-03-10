@@ -13,9 +13,12 @@ import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
 import { getDatabaseDialect, readConfig, type DatabaseDialect } from "../config";
 import { detectFramework, type DetectedFramework } from "../plugin-inference";
 import {
-  SCAFFOLD_FILES,
+  createPagesStarterTemplate,
+  detectScaffoldFrameworkFromDependencies,
+  getScaffoldTsconfigCompilerOptions,
+  SCAFFOLD_FRAMEWORK_OPTIONS,
   SCAFFOLD_GITIGNORE_LINES,
-  SCAFFOLD_RUNTIME_DEPENDENCIES,
+  type ScaffoldFramework,
 } from "./template";
 import {
   detectAgents,
@@ -110,7 +113,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 export function isScaffoldableEmptyProject(root: string): boolean {
-  for (const dir of ["src", "routes", "migrations", "middleware", "crons", "queues", "pages"]) {
+  for (const dir of [
+    "src",
+    "routes",
+    "db",
+    "migrations",
+    "middleware",
+    "crons",
+    "queues",
+    "pages",
+  ]) {
     if (existsSync(join(root, dir))) return false;
   }
   if (existsSync(join(root, "index.html"))) return false;
@@ -154,6 +166,7 @@ interface ProjectState {
   hasGithubWorkflows: boolean;
   hasRoutes: boolean;
   hasMigrations: boolean;
+  hasPages: boolean;
   packageManager: "pnpm" | "yarn" | "bun" | "npm";
   typescriptWanted: boolean;
 }
@@ -182,13 +195,36 @@ function detectProjectState(root: string): ProjectState {
     hasTsconfig: existsSync(join(root, "tsconfig.json")),
     hasGithubWorkflows: existsSync(join(root, ".github", "workflows")),
     hasRoutes: existsSync(join(root, "routes")),
-    hasMigrations: existsSync(join(root, "migrations")),
+    hasMigrations:
+      existsSync(join(root, "db", "migrations")) || existsSync(join(root, "migrations")),
+    hasPages: existsSync(join(root, "pages")),
     packageManager,
     typescriptWanted: hasTypescript,
   };
 }
 
-function setupTsconfig(root: string, state: ProjectState): void {
+function hasDrizzleSchema(root: string): boolean {
+  return existsSync(join(root, "db", "schema.ts")) || existsSync(join(root, "db", "schema"));
+}
+
+function detectPagesFramework(root: string): ScaffoldFramework | undefined {
+  try {
+    const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
+    const deps = {
+      ...(asRecord(pkg.dependencies) ?? {}),
+      ...(asRecord(pkg.devDependencies) ?? {}),
+    };
+    return detectScaffoldFrameworkFromDependencies(deps);
+  } catch {
+    return undefined;
+  }
+}
+
+function setupTsconfig(
+  root: string,
+  state: ProjectState,
+  pagesFramework?: ScaffoldFramework,
+): void {
   const tsconfigPath = join(root, "tsconfig.json");
 
   if (state.hasTsconfig) {
@@ -278,14 +314,15 @@ function setupTsconfig(root: string, state: ProjectState): void {
       extends: "./.void/tsconfig.json",
       compilerOptions: {
         target: "ES2022",
-        module: "ES2022",
+        module: "ESNext",
         moduleResolution: "bundler",
         strict: true,
         esModuleInterop: true,
         skipLibCheck: true,
         types: ["void/env"],
+        ...getScaffoldTsconfigCompilerOptions(pagesFramework),
       },
-      include: ["src", "routes", "middleware", "crons", "queues"],
+      include: ["src", "pages", "routes", "middleware", "crons", "queues", "db"],
     };
     writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2) + "\n");
     log.success("Created tsconfig.json");
@@ -403,7 +440,7 @@ function applyDatabaseDialect(root: string, dialect: DatabaseDialect): void {
   log.success("Updated void.json to use the default D1 (SQLite) configuration");
 }
 
-async function setupDatabaseDialect(root: string): Promise<void> {
+async function setupDatabaseDialect(root: string): Promise<DatabaseDialect> {
   const currentDialect = getDatabaseDialect(readConfig(root));
 
   const choice = await select({
@@ -427,7 +464,21 @@ async function setupDatabaseDialect(root: string): Promise<void> {
     process.exit(0);
   }
 
-  applyDatabaseDialect(root, choice as DatabaseDialect);
+  return choice as DatabaseDialect;
+}
+
+async function promptScaffoldFramework(): Promise<ScaffoldFramework> {
+  const choice = await select({
+    message: "Choose a Pages framework to scaffold:",
+    options: [...SCAFFOLD_FRAMEWORK_OPTIONS],
+  });
+
+  if (isCancel(choice)) {
+    cancel("Setup cancelled.");
+    process.exit(0);
+  }
+
+  return choice as ScaffoldFramework;
 }
 
 /** Get the dev command for a detected framework. */
@@ -585,8 +636,18 @@ function ensureGitignore(root: string): void {
   log.success("Updated .gitignore with Void defaults");
 }
 
-function scaffoldBasicApp(root: string, packageManager: ProjectState["packageManager"]): void {
+function scaffoldPagesApp(
+  root: string,
+  packageManager: ProjectState["packageManager"],
+  framework: ScaffoldFramework,
+  dialect: DatabaseDialect,
+): void {
   const packageJsonPath = join(root, "package.json");
+  const template = createPagesStarterTemplate({
+    framework,
+    dialect,
+    voidVersion: getOwnVersion(),
+  });
   let pkg: Record<string, any> = {};
 
   if (existsSync(packageJsonPath)) {
@@ -614,9 +675,11 @@ function scaffoldBasicApp(root: string, packageManager: ProjectState["packageMan
   if (!pkg.scripts || typeof pkg.scripts !== "object" || Array.isArray(pkg.scripts)) {
     pkg.scripts = {};
   }
-  if (!pkg.scripts.dev) pkg.scripts.dev = "vite";
-  if (!pkg.scripts.build) pkg.scripts.build = "vite build";
-  if (!pkg.scripts.preview) pkg.scripts.preview = "vite preview";
+  for (const [name, command] of Object.entries(template.scripts)) {
+    if (!pkg.scripts[name]) {
+      pkg.scripts[name] = command;
+    }
+  }
 
   if (
     !pkg.dependencies ||
@@ -634,35 +697,47 @@ function scaffoldBasicApp(root: string, packageManager: ProjectState["packageMan
   }
 
   let dependencyAdded = false;
-  const ensureRuntimeDependency = (name: string, fallbackVersion: string) => {
-    const existing = pkg.dependencies[name] ?? pkg.devDependencies[name];
-    if (!pkg.dependencies[name]) {
-      pkg.dependencies[name] = existing ?? fallbackVersion;
+  const ensureDependency = (
+    group: "dependencies" | "devDependencies",
+    name: string,
+    fallbackVersion: string,
+  ) => {
+    const otherGroup = group === "dependencies" ? "devDependencies" : "dependencies";
+    const existing = pkg[group][name] ?? pkg[otherGroup][name];
+    if (!pkg[group][name]) {
+      pkg[group][name] = existing ?? fallbackVersion;
       dependencyAdded = true;
     }
-    if (pkg.devDependencies[name]) {
-      delete pkg.devDependencies[name];
+    if (pkg[otherGroup][name]) {
+      delete pkg[otherGroup][name];
       dependencyAdded = true;
     }
   };
 
-  ensureRuntimeDependency("void", `^${getOwnVersion()}`);
-  ensureRuntimeDependency("vite", SCAFFOLD_RUNTIME_DEPENDENCIES.vite);
-  ensureRuntimeDependency("hono", SCAFFOLD_RUNTIME_DEPENDENCIES.hono);
-
-  if (!pkg.devDependencies.typescript && !pkg.dependencies.typescript) {
-    pkg.devDependencies.typescript = "^5.9.3";
-    dependencyAdded = true;
+  for (const [name, version] of Object.entries(template.dependencies)) {
+    ensureDependency("dependencies", name, version);
+  }
+  for (const [name, version] of Object.entries(template.devDependencies)) {
+    ensureDependency("devDependencies", name, version);
   }
 
   writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + "\n");
   log.success("Updated package.json with starter scripts and dependencies");
 
-  for (const [filePath, content] of Object.entries(SCAFFOLD_FILES)) {
+  for (const [filePath, content] of Object.entries(template.files)) {
     writeFileIfMissing(root, filePath, content);
   }
 
   ensureGitignore(root);
+  applyDatabaseDialect(root, dialect);
+
+  if (dialect === "postgresql") {
+    note(
+      "Add DATABASE_URL to .env.local before running `vite dev`.\n" +
+        "Void uses that direct connection for local PostgreSQL development.",
+      "PostgreSQL local dev",
+    );
+  }
 
   if (dependencyAdded) {
     log.info(`Run \`${packageManager} install\` to install the new dependencies.`);
@@ -671,9 +746,9 @@ function scaffoldBasicApp(root: string, packageManager: ProjectState["packageMan
 
 function scaffoldDemo(root: string): void {
   // Migration
-  mkdirSync(join(root, "migrations"), { recursive: true });
+  mkdirSync(join(root, "db", "migrations"), { recursive: true });
   writeFileSync(
-    join(root, "migrations", "001_create_posts.sql"),
+    join(root, "db", "migrations", "001_create_posts.sql"),
     `CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,
@@ -682,7 +757,23 @@ function scaffoldDemo(root: string): void {
 );
 `,
   );
-  log.success("Created migrations/001_create_posts.sql");
+  log.success("Created db/migrations/001_create_posts.sql");
+
+  mkdirSync(join(root, "db"), { recursive: true });
+  writeFileSync(
+    join(root, "db", "schema.ts"),
+    `import { sql } from "void/db";
+import { integer, sqliteTable, text } from "void/schema-d1";
+
+export const posts = sqliteTable("posts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  createdAt: text("created_at").notNull().default(sql\`(datetime('now'))\`),
+});
+`,
+  );
+  log.success("Created db/schema.ts");
 
   // API route
   mkdirSync(join(root, "routes", "api"), { recursive: true });
@@ -690,14 +781,16 @@ function scaffoldDemo(root: string): void {
     join(root, "routes", "api", "posts.ts"),
     `import { defineHandler } from "void";
 import { db } from "void/db";
+import { posts } from "@schema";
 
 // GET /api/posts — returns all posts, fully typed from migration schema
 export const GET = defineHandler(async () => {
-  return db.list("posts");
+  return db.select().from(posts);
 });
 `,
   );
   log.success("Created routes/api/posts.ts");
+  ensureProjectTsconfig(root, undefined, true);
 
   // Frontend demo
   mkdirSync(join(root, "src"), { recursive: true });
@@ -926,27 +1019,33 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   const targeted = Boolean(initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agents));
   const framework = detectFramework(root);
   const preScaffoldState = detectProjectState(root);
+  let scaffoldedPagesFramework: ScaffoldFramework | undefined;
+  let didScaffoldStarter = false;
 
   if (framework) {
     log.info(`Detected ${framework.name} framework`);
   }
 
-  if (!framework && isScaffoldableEmptyProject(root)) {
-    log.info("Empty project detected. Scaffolding starter files...");
-    scaffoldBasicApp(root, preScaffoldState.packageManager);
+  if (!targeted && !framework && isScaffoldableEmptyProject(root)) {
+    log.info("Empty project detected. Scaffolding a Pages starter...");
+    scaffoldedPagesFramework = await promptScaffoldFramework();
+    const dialect = await setupDatabaseDialect(root);
+    scaffoldPagesApp(root, preScaffoldState.packageManager, scaffoldedPagesFramework, dialect);
+    didScaffoldStarter = true;
   }
 
   const state = detectProjectState(root);
+  const pagesFramework = scaffoldedPagesFramework ?? detectPagesFramework(root);
 
   // Step 1: TypeScript / tsconfig
   if (!targeted || initArgs?.tsconfig) {
     state.typescriptWanted = true;
-    setupTsconfig(root, state);
+    setupTsconfig(root, state, pagesFramework);
   }
 
   // Generate .void/tsconfig.json so the root tsconfig can extend it
   if (state.typescriptWanted) {
-    ensureProjectTsconfig(root);
+    ensureProjectTsconfig(root, undefined, hasDrizzleSchema(root));
   }
 
   // Step 2: Wrangler config (class B/C meta-frameworks)
@@ -955,8 +1054,8 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   }
 
   // Step 3: Database dialect
-  if (!targeted) {
-    await setupDatabaseDialect(root);
+  if (!targeted && !didScaffoldStarter) {
+    applyDatabaseDialect(root, await setupDatabaseDialect(root));
   }
 
   // Steps 4–6: Agent instructions, skills, MCP config
@@ -980,8 +1079,8 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   // Step 7: Demo code (only in full interactive flow, not for meta-frameworks)
   if (!targeted && !framework) {
-    if (state.hasRoutes || state.hasMigrations) {
-      log.info("Project already has routes or migrations, skipping demo");
+    if (didScaffoldStarter || state.hasRoutes || state.hasMigrations || state.hasPages) {
+      log.info("Project already has pages, routes, or migrations, skipping demo");
     } else if (!state.typescriptWanted) {
       // Demo requires TypeScript for the type pipeline
     } else {

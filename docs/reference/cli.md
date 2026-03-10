@@ -8,22 +8,22 @@ outline: deep
 
 ## Cheat Sheet
 
-| Command                           | Purpose                                 |
-| --------------------------------- | --------------------------------------- |
-| `void deploy`                     | Build and deploy to Void                |
-| `void gen model <name> [cols...]` | Scaffold migration + CRUD routes        |
-| `void gen route <path>`           | Create an API route                     |
-| `void db status`                  | Show local/remote migration status      |
-| `void db reset`                   | Drop and re-apply all migrations        |
-| `void db seed`                    | Reset + seed local database             |
-| `void db studio`                  | Open Drizzle Studio for local database  |
-| `void secret put <name=value>`    | Set a production secret                 |
-| `void secret sync .env.local`     | Bulk upload secrets from dotenv file    |
-| `void auth login`                 | Authenticate with Void                  |
-| `void project link`               | Link directory to a project             |
-| `void project logs`               | Show runtime logs from deployed project |
-| `void project rollback`           | Roll back to a previous deployment      |
-| `void init`                       | Setup wizard (tsconfig, agents, CI)     |
+| Command                           | Purpose                                             |
+| --------------------------------- | --------------------------------------------------- |
+| `void deploy`                     | Build and deploy to Void                            |
+| `void gen model <name> [cols...]` | Scaffold migration + CRUD routes                    |
+| `void gen route <path>`           | Create an API route                                 |
+| `void db status`                  | Show local/remote migration status                  |
+| `void db reset`                   | Drop and re-apply all migrations                    |
+| `void db seed`                    | Reset + seed local database                         |
+| `void db studio`                  | Open Drizzle Studio for local database              |
+| `void secret put <name=value>`    | Set a production secret                             |
+| `void secret sync .env.local`     | Bulk upload secrets from dotenv file                |
+| `void auth login`                 | Authenticate with Void                              |
+| `void project link`               | Link directory to a project                         |
+| `void project logs`               | Show runtime logs from deployed project             |
+| `void project rollback`           | Roll back to a previous deployment                  |
+| `void init`                       | Setup wizard (Pages scaffold, tsconfig, agents, CI) |
 
 ## Binary Invocation
 
@@ -43,14 +43,18 @@ We do not recommend installing `void` globally, because the CLI needs to be in s
 void init [--tsconfig] [--github] [--agents]
 ```
 
-Setup wizard for void projects (new or existing). If run in an empty directory, it scaffolds a starter app first. Then it walks through:
+Setup wizard for void projects (new or existing).
+
+If run in a scaffoldable empty directory, `void init` first asks which Pages framework to scaffold (React, Vue, Svelte, or Solid), then asks which database to use (D1 or PostgreSQL). It writes a framework-specific `vite.config.ts`, a `pages/` home page plus `.server.ts` loader, `db/schema.ts`, `db/migrations/0000_initial.sql`, and `routes/api/hello.ts`.
+
+After that, the full interactive flow walks through:
 
 1. **TypeScript** — creates or updates `tsconfig.json` (adds `extends .void/tsconfig.json` and `void/env` types)
 2. **Database** — asks whether you want D1 (SQLite, zero-config default) or PostgreSQL (existing infra, write-heavy apps, complex queries). Picking PostgreSQL writes `"database": "pg"` to `void.json`; D1 remains implicit.
 3. **Agent instructions** — detects agents once and injects instructions into `CLAUDE.md` or `AGENTS.md`
 4. **Skills** — links void skills using the same detected/selected agent context
 5. **MCP config** — writes MCP server config using the same detected/selected agent context
-6. **Demo code** — optionally scaffolds a migration, API route, and typed fetch example
+6. **Demo code** — for existing non-Pages projects, optionally scaffolds a `db/migrations/` + API route + typed fetch example
 7. **GitHub Actions** — optionally creates `.github/workflows/deploy.yml` with the correct package manager commands
 
 If no agent is detected, `void init` asks you to choose one from a short list (Claude, Cursor, Codex, Gemini CLI, Generic). That single choice is reused across all agent steps.

@@ -89,38 +89,112 @@ describe("isScaffoldableEmptyProject", () => {
     });
   });
 
-  it("scaffolds package.json with runtime dependencies", async () => {
+  it("scaffolds a React Pages starter in an empty directory", async () => {
     const root = mkdtempSync(join(tmpdir(), "void-init-"));
     try {
-      await runInitCommand(root, {
-        tsconfig: true,
-        github: false,
-        agents: false,
-      });
+      mockSelect
+        .mockResolvedValueOnce("react")
+        .mockResolvedValueOnce("sqlite")
+        .mockResolvedValueOnce("generic");
+      mockConfirm.mockResolvedValueOnce(false);
+
+      await runInitCommand(root);
 
       const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
-      expect(pkg.dependencies.vite).toBeDefined();
-      expect(pkg.dependencies["void"]).toBeDefined();
+      expect(pkg.dependencies.react).toBeDefined();
+      expect(pkg.dependencies["react-dom"]).toBeDefined();
       expect(pkg.dependencies.hono).toBeDefined();
+      expect(pkg.devDependencies.vite).toBeDefined();
+      expect(pkg.devDependencies.void).toBeDefined();
+      expect(pkg.devDependencies.typescript).toBeDefined();
+      expect(pkg.devDependencies["@void-x/react"]).toBeDefined();
+      expect(pkg.devDependencies["@types/react"]).toBeDefined();
+      expect(pkg.devDependencies["@types/react-dom"]).toBeDefined();
+
+      expect(readFileSync(join(root, "vite.config.ts"), "utf-8")).toContain("voidReact()");
+      expect(readFileSync(join(root, "pages", "index.tsx"), "utf-8")).toContain("Welcome to Void");
+      expect(readFileSync(join(root, "pages", "index.server.ts"), "utf-8")).toContain(
+        'import { messages } from "@schema";',
+      );
+      expect(readFileSync(join(root, "routes", "api", "hello.ts"), "utf-8")).toContain(
+        "export const GET = defineHandler",
+      );
+      expect(readFileSync(join(root, "db", "schema.ts"), "utf-8")).toContain(
+        'from "void/schema-d1"',
+      );
+      expect(readFileSync(join(root, "db", "migrations", "0000_initial.sql"), "utf-8")).toContain(
+        "CREATE TABLE IF NOT EXISTS messages",
+      );
+
+      expect(() => readFileSync(join(root, "routes", "api", "hello.get.ts"), "utf-8")).toThrow();
+      expect(() => readFileSync(join(root, "index.html"), "utf-8")).toThrow();
+      expect(() => readFileSync(join(root, "src", "main.ts"), "utf-8")).toThrow();
+      expect(() => readFileSync(join(root, "void.json"), "utf-8")).toThrow();
+
+      const tsconfig = JSON.parse(readFileSync(join(root, "tsconfig.json"), "utf-8"));
+      expect(tsconfig.compilerOptions.jsx).toBe("react-jsx");
+      expect(tsconfig.include).toContain("pages");
+      expect(tsconfig.include).toContain("db");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it("prompts for a database choice and writes pg config when selected", async () => {
+  it("scaffolds a Vue Pages starter with PostgreSQL config", async () => {
     const root = mkdtempSync(join(tmpdir(), "void-init-"));
     try {
-      mockSelect.mockResolvedValueOnce("postgresql").mockResolvedValueOnce("generic");
-      mockConfirm.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+      mockSelect
+        .mockResolvedValueOnce("vue")
+        .mockResolvedValueOnce("postgresql")
+        .mockResolvedValueOnce("generic");
+      mockConfirm.mockResolvedValueOnce(false);
 
       await runInitCommand(root);
+
+      const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
+      expect(pkg.dependencies.vue).toBeDefined();
+      expect(pkg.devDependencies["@void-x/vue"]).toBeDefined();
+      expect(pkg.devDependencies.void).toBeDefined();
 
       expect(JSON.parse(readFileSync(join(root, "void.json"), "utf-8"))).toEqual({
         database: "pg",
       });
 
-      expect(mockSelect).toHaveBeenCalled();
-      const databasePrompt = mockSelect.mock.calls[0]?.[0];
+      expect(readFileSync(join(root, "vite.config.ts"), "utf-8")).toContain("voidVue()");
+      expect(readFileSync(join(root, "pages", "index.vue"), "utf-8")).toContain("Welcome to Void");
+      expect(readFileSync(join(root, "db", "schema.ts"), "utf-8")).toContain(
+        'from "void/schema-pg"',
+      );
+      expect(readFileSync(join(root, "db", "migrations", "0000_initial.sql"), "utf-8")).toContain(
+        "SERIAL PRIMARY KEY",
+      );
+
+      const frameworkPrompt = mockSelect.mock.calls[0]?.[0];
+      expect(frameworkPrompt.message).toBe("Choose a Pages framework to scaffold:");
+      expect(frameworkPrompt.options).toEqual([
+        {
+          value: "react",
+          label: "React",
+          hint: "TSX Pages starter with the React adapter.",
+        },
+        {
+          value: "vue",
+          label: "Vue",
+          hint: "Vue SFC Pages starter with the Vue adapter.",
+        },
+        {
+          value: "svelte",
+          label: "Svelte",
+          hint: "Svelte 5 Pages starter with the Svelte adapter.",
+        },
+        {
+          value: "solid",
+          label: "Solid",
+          hint: "Fine-grained TSX Pages starter with the Solid adapter.",
+        },
+      ]);
+
+      const databasePrompt = mockSelect.mock.calls[1]?.[0];
       expect(databasePrompt.message).toBe("Choose a database for this project:");
       expect(databasePrompt.options).toEqual([
         {
