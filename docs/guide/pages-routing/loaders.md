@@ -226,6 +226,12 @@ export default function Dashboard(props: Props) {
 
 On the initial page load (SSR), the page renders with deferred props in their loading state. As each deferred function resolves, the server streams an inline `<script>` tag that delivers the data — no extra HTTP request needed. On SPA navigation, deferred data streams via NDJSON over the same response.
 
+### Deferred Props After Mutations
+
+::: info
+When a mutation (form submission / action) runs, the loader re-runs to provide fresh props — but deferred props cannot stream over a mutation response. The client automatically preserves the last resolved value for each deferred prop, so the UI continues to display the previous data. The values refresh on the next full page load or SPA navigation (GET).
+:::
+
 ### Grouped Deferred Props
 
 When multiple props depend on the same slow operation, use a named group to resolve them together with a single function call:

@@ -114,6 +114,36 @@ When using `"pg"`:
 - `void/db` connects via Hyperdrive in production, direct connection locally
 - `void gen model` generates `pgTable` with `serial`, `timestamp`, etc.
 
+### `head`
+
+Site-wide HTML `<head>` defaults for pages mode. Sets a title template, default meta tags, links, scripts, and HTML/body attributes. Per-page `head()` exports and middleware defaults merge on top of these with clear precedence: **page > middleware > config**.
+
+| Field           | Type                     | Description                                                      |
+| --------------- | ------------------------ | ---------------------------------------------------------------- |
+| `title`         | `string`                 | Default page title (overridden by page `head()`)                 |
+| `titleTemplate` | `string`                 | Wraps the resolved title — `%s` is replaced with the page title  |
+| `meta`          | `Array<object>`          | Default `<meta>` tags (deduped by `name`/`property`, page wins)  |
+| `link`          | `Array<object>`          | Default `<link>` tags (concatenated: config, middleware, page)   |
+| `script`        | `Array<object>`          | Default `<script>` tags (concatenated: config, middleware, page) |
+| `htmlAttrs`     | `Record<string, string>` | Attributes on `<html>` (shallow merge, page wins)                |
+| `bodyAttrs`     | `Record<string, string>` | Attributes on `<body>` (shallow merge, page wins)                |
+
+```json
+{
+  "head": {
+    "titleTemplate": "%s | My Site",
+    "htmlAttrs": { "lang": "en" },
+    "meta": [
+      { "charset": "utf-8" },
+      { "name": "viewport", "content": "width=device-width, initial-scale=1" }
+    ],
+    "link": [{ "rel": "icon", "href": "/favicon.svg" }]
+  }
+}
+```
+
+See [Head Management](../guide/pages-routing/head) for the full merge behavior, `HeadDescriptor` shape, and per-page usage.
+
 ### `output`
 
 Output mode. Controls the default rendering strategy for pages.

@@ -10,6 +10,81 @@ Void-managed auth currently works only for Void apps. Meta-framework mode is not
 
 Void uses [Better Auth](https://www.better-auth.com/) as the auth engine for Void apps. Void owns the conventions and wiring; Better Auth owns the auth behavior.
 
+## Quick Start
+
+### 1. Enable auth
+
+Add a provider to `void.json`. Email/password is the default, so the simplest config is:
+
+```json
+{
+  "auth": {
+    "providers": ["email"]
+  }
+}
+```
+
+You can also skip this step entirely — auth activates automatically when you import from `void/auth` or `void/client`.
+
+### 2. Sign up and sign in
+
+Use the preconfigured auth client from `void/client`:
+
+```tsx
+import { auth } from "void/client";
+
+// sign up
+await auth.signUp.email({
+  email: "alice@example.com",
+  password: "s3cret",
+  name: "Alice",
+});
+
+// sign in
+await auth.signIn.email({
+  email: "alice@example.com",
+  password: "s3cret",
+});
+```
+
+### 3. Protect a server route
+
+Use `requireAuth` in an API route handler or a page loader to gate access. It returns the authenticated user or throws a `401`:
+
+```ts
+// routes/api/profile.ts
+import { defineHandler } from "void";
+import { requireAuth } from "void/auth";
+
+export const GET = defineHandler((c) => {
+  const user = requireAuth(c);
+  return { email: user.email };
+});
+```
+
+In a pages-mode loader, use `getUser` or `getSession` when you want to allow unauthenticated access:
+
+```ts
+// pages/dashboard.server.ts
+import { defineHandler, type InferProps } from "void";
+import { getUser } from "void/auth";
+
+export type Props = InferProps<typeof loader>;
+
+export const loader = defineHandler(() => {
+  const user = getUser();
+  return { user };
+});
+```
+
+### 4. Sign out
+
+```tsx
+await auth.signOut();
+```
+
+The rest of this page covers configuration, server helpers, and advanced customization in detail.
+
 ## Config
 
 Auth turns on automatically when you:

@@ -207,15 +207,17 @@ The types are inferred from your action's `withValidator()` schema in the compan
 
 `useForm` returns a reactive object with:
 
-| Property / Method                | Purpose                                                        |
-| -------------------------------- | -------------------------------------------------------------- |
-| `data` / `setData`               | Current form values, typed to match the action's body schema.  |
-| `errors`                         | Field-level validation errors, keys typed to body field names. |
-| `post`, `put`, `patch`, `delete` | Submit the form (URL is already bound).                        |
-| `processing`                     | `true` while the submission is in flight.                      |
-| `isDirty`                        | `true` if form data differs from initial values.               |
-| `reset(...fields)`               | Reset form data to initial values. Field names autocomplete.   |
-| `clearErrors(...fields)`         | Clear validation errors. Field names autocomplete.             |
+| Property / Method                | Purpose                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------ |
+| `data` / `setData`               | Current form values, typed to match the action's body schema.                  |
+| `errors`                         | Field-level validation errors, keys typed to body field names.                 |
+| `post`, `put`, `patch`, `delete` | Submit the form (URL is already bound).                                        |
+| `processing`                     | `true` while the submission is in flight.                                      |
+| `isDirty`                        | `true` if form data differs from initial values.                               |
+| `wasSuccessful`                  | `true` after a successful submission. Stays `true` until the next submission.  |
+| `recentlySuccessful`             | `true` for 2 seconds after a successful submission. Useful for flash messages. |
+| `reset(...fields)`               | Reset form data to initial values. Field names autocomplete.                   |
+| `clearErrors(...fields)`         | Clear validation errors. Field names autocomplete.                             |
 
 For dynamic routes, pass `params` in the options:
 
