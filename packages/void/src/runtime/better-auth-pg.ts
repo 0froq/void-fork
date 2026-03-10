@@ -4,9 +4,9 @@ import {
   type VoidAuthEnv,
   type VoidAuthRuntimeApi,
 } from "./better-auth-shared";
+import { applyPgAuthMigrations } from "./auth-migrations";
 
-async function resolveDatabase(env: VoidAuthEnv): Promise<ResolvedDatabase> {
-  const { default: pg } = await import("pg");
+function resolveConnectionString(env: VoidAuthEnv): string {
   const connectionString =
     typeof env.DATABASE_URL === "string" && env.DATABASE_URL.length > 0
       ? env.DATABASE_URL
@@ -21,6 +21,12 @@ async function resolveDatabase(env: VoidAuthEnv): Promise<ResolvedDatabase> {
     );
   }
 
+  return connectionString;
+}
+
+async function resolveDatabase(env: VoidAuthEnv): Promise<ResolvedDatabase> {
+  const { default: pg } = await import("pg");
+  const connectionString = resolveConnectionString(env);
   const pool = new pg.Pool({ connectionString, max: 1 });
   return {
     database: pool,
@@ -30,7 +36,48 @@ async function resolveDatabase(env: VoidAuthEnv): Promise<ResolvedDatabase> {
   };
 }
 
-const runtime = createVoidAuthRuntime("postgresql", resolveDatabase);
+async function runPostgresAuthMigrations(
+  _request: Request,
+  env: VoidAuthEnv,
+  runtime: Parameters<VoidAuthRuntimeApi["runVoidAuthMigrations"]>[2],
+  migrationSchema: Parameters<VoidAuthRuntimeApi["runVoidAuthMigrations"]>[3],
+): Promise<void> {
+  if (!migrationSchema) {
+    throw new Error("Void auth migration schema is unavailable.");
+  }
+  if (runtime.dialect !== "postgresql") {
+    throw new Error(
+      `Void auth runtime mismatch: expected postgresql, received ${runtime.dialect}.`,
+    );
+  }
+  if (migrationSchema.dialect !== "postgresql") {
+    throw new Error(
+      `Void auth runtime mismatch: expected postgresql, received ${migrationSchema.dialect}.`,
+    );
+  }
+
+  const { Client } = await import("pg");
+  const client = new Client({ connectionString: resolveConnectionString(env) });
+  await client.connect();
+  try {
+    await applyPgAuthMigrations(
+      {
+        async all<T extends Record<string, unknown>>(sql: string, params?: unknown[]) {
+          const result = await client.query(sql, params);
+          return result.rows as T[];
+        },
+        async run(sql: string, params?: unknown[]) {
+          await client.query(sql, params);
+        },
+      },
+      migrationSchema,
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+const runtime = createVoidAuthRuntime("postgresql", resolveDatabase, runPostgresAuthMigrations);
 
 export const resolveVoidAuthOptions: VoidAuthRuntimeApi["resolveVoidAuthOptions"] =
   runtime.resolveVoidAuthOptions;

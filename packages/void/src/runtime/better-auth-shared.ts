@@ -8,7 +8,6 @@ import {
   type VoidAuthProvider,
   type VoidSocialAuthProvider,
 } from "../auth/providers";
-import { applyPgAuthMigrations, applySqliteAuthMigrations } from "./auth-migrations";
 import { authContext, type AuthState, type VoidAuthConfig } from "./auth";
 
 export type VoidAuthDialect = "sqlite" | "postgresql";
@@ -194,6 +193,7 @@ function assertRuntimeDialect(runtime: VoidAuthRuntimeOptions, dialect: VoidAuth
 export function createVoidAuthRuntime(
   dialect: VoidAuthDialect,
   resolveDatabase: ResolveDatabase,
+  runVoidAuthMigrations: VoidAuthRuntimeApi["runVoidAuthMigrations"],
 ): VoidAuthRuntimeApi {
   async function resolveVoidAuthOptions(
     request: Request,
@@ -337,71 +337,6 @@ export function createVoidAuthRuntime(
       return await auth.handler(c.req.raw);
     } finally {
       await dispose();
-    }
-  }
-
-  async function runVoidAuthMigrations(
-    _request: Request,
-    env: VoidAuthEnv,
-    runtime: VoidAuthRuntimeOptions,
-    migrationSchema: VoidAuthMigrationSchema,
-  ): Promise<void> {
-    if (!migrationSchema) {
-      throw new Error("Void auth migration schema is unavailable.");
-    }
-    assertRuntimeDialect(runtime, migrationSchema.dialect);
-
-    if (runtime.dialect === "sqlite") {
-      if (!env.DB) {
-        throw new Error('Better Auth requires the "DB" D1 binding for sqlite apps.');
-      }
-      await applySqliteAuthMigrations(
-        {
-          async all<T extends Record<string, unknown>>(sql: string) {
-            const result = await env.DB!.prepare(sql).all();
-            return (result.results ?? []) as T[];
-          },
-          async run(sql: string) {
-            await env.DB!.prepare(sql).run();
-          },
-        },
-        migrationSchema,
-      );
-      return;
-    }
-
-    const connectionString =
-      typeof env.HYPERDRIVE?.connectionString === "string" &&
-      env.HYPERDRIVE.connectionString.length > 0
-        ? env.HYPERDRIVE.connectionString
-        : typeof env.DATABASE_URL === "string" && env.DATABASE_URL.length > 0
-          ? env.DATABASE_URL
-          : undefined;
-
-    if (!connectionString) {
-      throw new Error(
-        "Better Auth requires DATABASE_URL for local PostgreSQL dev or HYPERDRIVE in production.",
-      );
-    }
-
-    const { Client } = await import("pg");
-    const client = new Client({ connectionString });
-    await client.connect();
-    try {
-      await applyPgAuthMigrations(
-        {
-          async all<T extends Record<string, unknown>>(sql: string, params?: unknown[]) {
-            const result = await client.query(sql, params);
-            return result.rows as T[];
-          },
-          async run(sql: string, params?: unknown[]) {
-            await client.query(sql, params);
-          },
-        },
-        migrationSchema,
-      );
-    } finally {
-      await client.end();
     }
   }
 
