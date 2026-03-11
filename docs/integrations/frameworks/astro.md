@@ -65,7 +65,9 @@ void deploy
 
 ## Using Void Platform Features
 
-All [Void platform features](../../guide/app-types.md#void-apps) work with Astro in both local dev and production when using Astro 6+ with `nodejs_als`.
+Most [Void platform features](../../guide/app-types.md#void-apps) work with Astro in both local dev and production when using Astro 6+ with `nodejs_als`.
+
+Void-managed auth is not supported in framework mode yet. Use Better Auth's official Astro integration directly for now.
 
 Pages that access runtime bindings must opt out of prerendering:
 
@@ -90,23 +92,6 @@ export const GET: APIRoute = async () => {
   return Response.json(rows);
 };
 ```
-
-### Auth
-
-Use `getUser()` from `void/auth` to access the authenticated user in API routes and middleware:
-
-```ts
-import type { APIRoute } from "astro";
-import { getUser } from "void/auth";
-
-export const GET: APIRoute = async () => {
-  const user = getUser();
-  if (!user) return new Response("Unauthorized", { status: 401 });
-  return Response.json(user);
-};
-```
-
-See [Authentication](../../guide/auth.md) for setup, providers, and the full API.
 
 ### KV Storage
 

@@ -65,7 +65,9 @@ void deploy
 
 ## Using Void Platform Features
 
-All [Void platform features](../../guide/app-types.md#void-apps) work with Nuxt. Use them in server routes, API handlers, and middleware:
+Most [Void platform features](../../guide/app-types.md#void-apps) work with Nuxt. Use them in server routes, API handlers, and middleware:
+
+Void-managed auth is not supported in framework mode yet. Use Better Auth's official Nuxt integration directly for now.
 
 ### Database
 
@@ -82,23 +84,6 @@ export default defineEventHandler(async () => {
 ::: warning ⚠️ Nuxt limitation
 Nuxt uses Nitro, which bundles server routes outside of Vite's plugin pipeline. The schema cannot be injected into the `db` instance, so `db.query.*` relational queries are not available in Nuxt. Use the standard query builder API (`db.select().from(table)`) instead.
 :::
-
-### Auth
-
-Use `getUser()` from `void/auth` to access the authenticated user in server routes and middleware:
-
-```ts
-// server/api/profile.get.ts
-import { getUser } from "void/auth";
-
-export default defineEventHandler(() => {
-  const user = getUser();
-  if (!user) throw createError({ statusCode: 401 });
-  return user;
-});
-```
-
-See [Authentication](../../guide/auth.md) for setup, providers, and the full API.
 
 ### KV Storage
 

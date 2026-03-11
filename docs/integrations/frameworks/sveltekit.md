@@ -64,7 +64,9 @@ void deploy
 
 ## Using Void Platform Features
 
-All [Void platform features](../../guide/app-types.md#void-apps) work with SvelteKit. Use them in server load functions, actions, and API routes:
+Most [Void platform features](../../guide/app-types.md#void-apps) work with SvelteKit. Use them in server load functions, actions, and API routes:
+
+Void-managed auth is not supported in framework mode yet. Use Better Auth's official SvelteKit integration directly for now.
 
 ### Database
 
@@ -77,23 +79,6 @@ export async function load() {
   return { users: await db.select().from(users) };
 }
 ```
-
-### Auth
-
-Use `getUser()` from `void/auth` to access the authenticated user in server load functions and actions:
-
-```ts
-// src/routes/profile/+page.server.ts
-import { getUser } from "void/auth";
-
-export async function load() {
-  const user = getUser();
-  if (!user) throw redirect(302, "/login");
-  return { user };
-}
-```
-
-See [Authentication](../../guide/auth.md) for setup, providers, and the full API.
 
 ### KV Storage
 

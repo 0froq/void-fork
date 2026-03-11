@@ -45,7 +45,9 @@ void deploy
 
 ## Using Void Platform Features
 
-All [Void platform features](../../guide/app-types.md#void-apps) work with React Router. Use them in loaders and actions:
+Most [Void platform features](../../guide/app-types.md#void-apps) work with React Router. Use them in loaders and actions:
+
+Void-managed auth is not supported in framework mode yet. Use Better Auth's official React Router integration directly for now.
 
 ### Database
 
@@ -58,22 +60,6 @@ export async function loader({}: Route.LoaderArgs) {
   return { users: await db.select().from(users) };
 }
 ```
-
-### Auth
-
-Use `getUser()` from `void/auth` to access the authenticated user in loaders and actions:
-
-```ts
-import { getUser } from "void/auth";
-
-export async function loader() {
-  const user = getUser();
-  if (!user) throw new Response("Unauthorized", { status: 401 });
-  return { user };
-}
-```
-
-See [Authentication](../../guide/auth.md) for setup, providers, and the full API.
 
 ### KV Storage
 

@@ -4,7 +4,7 @@ outline: deep
 
 # Meta-Frameworks
 
-Void supports deploying meta-framework apps to the Void platform via `void deploy`. Add `voidPlugin()` to your framework's Vite config to get binding inference, typed DB generation, migration management, auth, cron jobs, queues, and caching.
+Void supports deploying meta-framework apps to the Void platform via `void deploy`. Add `voidPlugin()` to your framework's Vite config to get binding inference, typed DB generation, migration management, cron jobs, queues, and caching.
 
 Some frameworks (TanStack Start, React Router) compose directly with `@cloudflare/vite-plugin`, which Void already depends on and covers. Others (SvelteKit, Nuxt, Astro) have their own Cloudflare integrations, which Void respects. In both cases, the framework owns routing and rendering — Void serves as the platform SDK that enhances backend DX.
 
@@ -32,13 +32,13 @@ See the individual framework guides for setup instructions:
 
 ## Feature Support
 
-With `voidPlugin()` added to the framework's Vite config, all frameworks get the same features as [Void apps](../../guide/app-types.md#void-apps):
+With `voidPlugin()` added to the framework's Vite config, frameworks get most of the same backend/platform features as [Void apps](../../guide/app-types.md#void-apps):
 
-- **Binding inference** — D1, KV, R2, AI, queues, and auth detected from source code
+- **Binding inference** — D1, KV, R2, AI, and queues detected from source code
 - **Typed database** — query helpers generated from `db/migrations/*.sql`
 - **Migrations** — applied to local D1 on dev startup, validated and deployed with `void deploy`
 - **Runtime helpers** — `void/db`, `void/kv`, `void/storage`, `void/ai` for typed access to Cloudflare bindings in dev and production
-- **Auth** — built-in [authentication](../../guide/auth.md) with `getUser()`, auto-detected from `void/auth` imports
+- **Auth** — Void-managed auth is not supported in framework mode yet. Use Better Auth's official integration for your framework directly for now.
 - **Cron jobs** — scheduled handlers via `crons/` directory
 - **Queue consumers** — typed producers and consumers via `queues/` directory
 - **Revalidation & prerendering** — configured via [`routing.revalidate`](../../guide/edge/revalidation.md) and [`routing.prerender`](../../guide/edge/prerendering.md) in `void.json` (Void apps can also configure these per-page in component files)
@@ -113,14 +113,14 @@ void deploy
   │    ├─ Locate worker entry + static assets from known output paths
   │    ├─ Infer bindings from source or read from void.json
   │    ├─ Collect migrations from db/migrations/*.sql
-  │    ├─ Detect auth, cron, and queue handlers
+  │    ├─ Detect cron and queue handlers
   │    └─ Read wrangler.jsonc compat settings
   │
   ├─ 4. Wrap (if needed)
-  │    If auth, crons, or queues are configured:
+  │    If crons or queues are configured:
   │    ├─ Generate wrapper entry module
   │    ├─ Bundle with Vite (wraps framework's worker)
-  │    └─ Wrapper adds auth middleware, scheduled/queue handlers
+  │    └─ Wrapper adds scheduled/queue handlers
   │
   ├─ 5. Package + upload
   │    Same as full-stack: hash-based asset diffing,

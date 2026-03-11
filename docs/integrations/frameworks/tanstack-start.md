@@ -47,7 +47,9 @@ void deploy
 
 ## Using Void Platform Features
 
-All [Void platform features](../../guide/app-types.md#void-apps) work with TanStack Start. Use them in server functions:
+Most [Void platform features](../../guide/app-types.md#void-apps) work with TanStack Start. Use them in server functions:
+
+Void-managed auth is not supported in framework mode yet. Use Better Auth's official TanStack Start integration directly for now.
 
 ### Database
 
@@ -60,23 +62,6 @@ const getUsers = createServerFn().handler(async () => {
   return db.select().from(users);
 });
 ```
-
-### Auth
-
-Use `getUser()` from `void/auth` to access the authenticated user in server functions:
-
-```tsx
-import { createServerFn } from "@tanstack/react-start";
-import { getUser } from "void/auth";
-
-const getProfile = createServerFn({ method: "GET" }).handler(async () => {
-  const user = getUser();
-  if (!user) throw new Error("Not authenticated");
-  return user;
-});
-```
-
-See [Authentication](../../guide/auth.md) for setup, providers, and the full API.
 
 ### KV Storage
 
