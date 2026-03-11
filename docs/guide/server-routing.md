@@ -147,14 +147,35 @@ Validator schemas also power the [typed fetch client](./typed-fetch.md) — `bod
 
 ## Middleware
 
-There are two ways to apply middleware:
+Void middlewares are just Hono middlewares. `defineMiddleware()` is a thin typing helper around the standard Hono `(c, next)` shape, and `defineHandler()` also accepts raw Hono middleware directly.
 
-- **Global middleware** — runs on every request. Place files in `middleware/`.
-- **Per-route middleware** — runs on a single route. Pass to `defineHandler()`.
+```ts
+import { defineMiddleware } from "void";
+
+export const addServerTiming = defineMiddleware(async (c, next) => {
+  const start = performance.now();
+  await next();
+  c.header("Server-Timing", `app;dur=${Math.round(performance.now() - start)}`);
+});
+```
+
+Any `hono/*` built-in middleware, response helpers, or third-party Hono ecosystem packages can be used in Void apps. If you want to import from `hono/*` in your app, make sure to install `hono` in your app first:
+
+```bash
+npm install hono
+```
+
+```ts
+import { cors } from "hono/cors";
+
+const allowDashboard = cors({ origin: "https://app.example.com" });
+```
+
+You can apply middleware globally or per-route.
 
 ### Global middleware
 
-Place global middleware in `middleware/`. Use numeric prefixes for ordering:
+Global middleware runs on every request. Place files in `middleware/` and use numeric prefixes for ordering:
 
 - `middleware/01.logger.ts`
 - `middleware/02.auth.ts`
@@ -201,21 +222,25 @@ defineHandler(middleware1, middleware2, handler);
 Middleware runs in order. Each can short-circuit (return a response without calling `next()`) or post-process (modify the response after `await next()`). Both `defineMiddleware`-wrapped functions and raw Hono `MiddlewareHandler` functions are accepted.
 
 ```ts
-// routes/api/admin/stats.ts
+// routes/api/stats.ts
 import { defineHandler } from "void";
-import { bearerAuth } from "hono/bearer-auth";
+import { cors } from "hono/cors";
 
-const requireAdmin = async (c, next) => {
-  const user = c.get("user");
-  if (!user?.isAdmin) return c.json({ error: "forbidden" }, 403);
+const addServerTiming = async (c, next) => {
+  const start = performance.now();
   await next();
+  c.header("Server-Timing", `app;dur=${Math.round(performance.now() - start)}`);
 };
 
-export const GET = defineHandler(bearerAuth({ token: "secret" }), requireAdmin, (c) => {
-  return { stats: "..." };
-});
+export const GET = defineHandler(
+  cors({ origin: "https://app.example.com" }),
+  addServerTiming,
+  (c) => {
+    return { stats: "..." };
+  },
+);
 ```
 
 Up to 5 middleware can be passed before the handler, with full type inference for each position.
 
-Since Void runs on Hono, you can use any `hono/*` built-in middleware, response helpers, and third-party packages directly. See [Hono integration guide](../integrations/hono.md) for details.
+See the [Hono integration guide](../integrations/hono.md) for more examples.

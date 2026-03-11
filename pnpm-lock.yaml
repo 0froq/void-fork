@@ -228,7 +228,7 @@ importers:
         version: 4.20260226.1
       '@hono/oauth-providers':
         specifier: ^0.8.5
-        version: 0.8.5(hono@4.11.9)
+        version: 0.8.5(hono@4.12.7)
       '@napi-rs/keyring':
         specifier: 1.2.0
         version: 1.2.0
@@ -269,8 +269,8 @@ importers:
         specifier: ^0.8.3
         version: 0.8.3(drizzle-orm@0.45.1(@cloudflare/workers-types@4.20260226.1)(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.6.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(typescript@5.9.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.18.0)(better-sqlite3@12.6.2)(kysely@0.28.11)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.6.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)))(zod@4.3.6)
       hono:
-        specifier: ^4.0.0
-        version: 4.11.9
+        specifier: ^4.12.7
+        version: 4.12.7
       pg:
         specifier: ^8.20.0
         version: 8.20.0
@@ -5534,6 +5534,10 @@ packages:
     resolution: {integrity: sha512-Eaw2YTGM6WOxA6CXbckaEvslr2Ne4NFsKrvc0v97JD5awbmeBLO5w9Ho9L9kmKonrwF9RJlW6BxT1PVv/agBHQ==}
     engines: {node: '>=16.9.0'}
 
+  hono@4.12.7:
+    resolution: {integrity: sha512-jq9l1DM0zVIvsm3lv9Nw9nlJnMNPOcAtsbsgiUhWcFzPE99Gvo6yRTlszSLLYacMeQ6quHD6hMfId8crVHvexw==}
+    engines: {node: '>=16.9.0'}
+
   hookable@5.5.3:
     resolution: {integrity: sha512-Yc+BQe8SvoXH1643Qez1zqLRmbA5rCL+sSmk6TVos0LWVfNIB7PGncdlId77WzLGSIB5KaWgTaNTs2lNVEI6VQ==}
 
@@ -8985,9 +8989,9 @@ snapshots:
     dependencies:
       hono: 4.11.9
 
-  '@hono/oauth-providers@0.8.5(hono@4.11.9)':
+  '@hono/oauth-providers@0.8.5(hono@4.12.7)':
     dependencies:
-      hono: 4.11.9
+      hono: 4.12.7
 
   '@iconify-json/logos@1.2.10':
     dependencies:
@@ -12909,6 +12913,8 @@ snapshots:
   hono@4.11.4: {}
 
   hono@4.11.9: {}
+
+  hono@4.12.7: {}
 
   hookable@5.5.3: {}
 

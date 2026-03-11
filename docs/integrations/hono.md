@@ -4,7 +4,13 @@ outline: deep
 
 # Hono
 
-Void handlers run on [Hono](https://hono.dev), and `hono` is a direct dependency of your project. You can import from any `hono/*` subpath — built-in middleware, helpers, and third-party Hono packages all work out of the box.
+Void handlers run on [Hono](https://hono.dev). Void depends on Hono internally, but if your app imports from `hono/*` directly, add `hono` to your app's dependencies first.
+
+```bash
+npm install hono
+```
+
+Once `hono` is installed in your app, you can use built-in middleware, helpers, and third-party Hono packages directly.
 
 ## Built-in Middleware
 
@@ -67,7 +73,7 @@ export const GET = defineHandler((c) => {
 
 ## Third-party Middleware
 
-Any `hono/*` or `@hono/*` package works. Install and use directly:
+Any `hono/*` or `@hono/*` package works. Install the package in your app, then use it directly:
 
 ```ts
 // middleware/01.rate-limit.ts
