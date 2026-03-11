@@ -16,7 +16,7 @@
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@void-x/react": "workspace:*",
+    "@void/react": "workspace:*",
     "vite": "catalog:",
     "void": "workspace:*"
   }

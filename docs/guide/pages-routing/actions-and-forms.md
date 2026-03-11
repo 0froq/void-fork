@@ -105,7 +105,7 @@ Then, use `useForm` in the page component to submit to this action:
 
 ```tsx [React]
 // pages/users/create.tsx
-import { useForm } from "void/react";
+import { useForm } from "@void/react";
 
 export default function CreateUser() {
   // "/users/create" autocompletes; { name, email } is typed from the action's validator
@@ -133,7 +133,7 @@ export default function CreateUser() {
 ```vue [Vue]
 <!-- pages/users/create.vue -->
 <script setup lang="ts">
-import { useForm } from "void/vue";
+import { useForm } from "@void/vue";
 
 // "/users/create" autocompletes; { name, email } is typed from the action's validator
 const form = useForm("/users/create", { name: "", email: "" });
@@ -155,7 +155,7 @@ const form = useForm("/users/create", { name: "", email: "" });
 ```svelte [Svelte]
 <!-- pages/users/create.svelte -->
 <script>
-  import { useForm } from "void/svelte";
+  import { useForm } from "@void/svelte";
 
   // "/users/create" autocompletes; { name, email } is typed from the action's validator
   const form = useForm("/users/create", { name: "", email: "" });
@@ -174,7 +174,7 @@ const form = useForm("/users/create", { name: "", email: "" });
 
 ```tsx [Solid]
 // pages/users/create.tsx
-import { useForm } from "void/solid";
+import { useForm } from "@void/solid";
 
 export default function CreateUser() {
   // "/users/create" autocompletes; { name, email } is typed from the action's validator
@@ -243,7 +243,7 @@ The URL, body fields, and error keys are all typed per-action — each named act
 For one-shot mutations that don't need form state (dirty tracking, reset, field-level errors), use `action()` instead of `useForm`. It sends a request to a page action and triggers an Inertia page update, just like `useForm` — but without the reactive form object:
 
 ```ts
-import { useForm, action } from "void/react"; // or "void/vue", "void/svelte", "void/solid"
+import { useForm, action } from "@void/react"; // or "@void/vue", "@void/svelte", "@void/solid"
 
 // Form with state + Inertia page update
 const form = useForm("/?create-user", { name: "", email: "" });
@@ -281,7 +281,7 @@ Or use `withValidator()` for automatic schema-based validation — errors are re
 ::: code-group
 
 ```tsx [React]
-import { useForm } from "void/react";
+import { useForm } from "@void/react";
 import { useRef } from "react";
 
 export default function Upload() {
@@ -310,7 +310,7 @@ export default function Upload() {
 ```vue [Vue]
 <script setup lang="ts">
 import { ref } from "vue";
-import { useForm } from "void/vue";
+import { useForm } from "@void/vue";
 
 const form = useForm("/photos", { title: "", photo: null as File | null });
 const fileInput = ref<HTMLInputElement>();
@@ -331,7 +331,7 @@ function onFileChange() {
 
 ```svelte [Svelte]
 <script>
-  import { useForm } from "void/svelte";
+  import { useForm } from "@void/svelte";
 
   const form = useForm("/photos", { title: "", photo: null });
 </script>
@@ -344,7 +344,7 @@ function onFileChange() {
 ```
 
 ```tsx [Solid]
-import { useForm } from "void/solid";
+import { useForm } from "@void/solid";
 
 export default function Upload() {
   const form = useForm("/photos", { title: "", photo: null as File | null });

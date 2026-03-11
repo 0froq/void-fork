@@ -1,4 +1,4 @@
-# @void-x/react
+# @void/react
 
 React adapter for Void Pages mode.
 
@@ -7,7 +7,7 @@ React adapter for Void Pages mode.
 ```ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidReact } from "@void-x/react";
+import { voidReact } from "@void/react/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidReact()],
@@ -30,7 +30,7 @@ Options:
 
 ## Runtime
 
-Main runtime APIs live at `void/react`:
+Main runtime APIs live at `@void/react`:
 
 - `Link`
 - `useRouter()`

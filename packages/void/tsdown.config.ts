@@ -1,4 +1,3 @@
-import { cpSync } from "node:fs";
 import { defineConfig } from "tsdown";
 
 const WORKERS_TYPES_REFERENCE = '/// <reference types="@cloudflare/workers-types" />';
@@ -90,28 +89,21 @@ export default defineConfig({
     "src/pages/prefetch.ts",
     "src/pages/client.ts",
     "src/pages/islands-plugin.ts",
-    "src/runtime/vue.ts",
-    "src/runtime/react.ts",
-    "src/runtime/svelte.ts",
-    "src/runtime/solid.ts",
     "src/cli/cli.ts",
   ],
   format: "esm",
   dts: true,
   clean: true,
-  onSuccess() {
-    cpSync("src/css", "dist/css", { recursive: true });
-  },
   plugins: [stripUseAsmPlugin(), injectWorkersTypesReferencePlugin()],
   external: [
     "vite",
     "@cloudflare/vite-plugin",
     "better-sqlite3",
     "cloudflare:workers",
-    "@void-x/vue",
-    "@void-x/react",
-    "@void-x/svelte",
-    "@void-x/solid",
+    "@void/vue",
+    "@void/react",
+    "@void/svelte",
+    "@void/solid",
     "@napi-rs/keyring",
     "undici", // ofetch imports this in types
   ],

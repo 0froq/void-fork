@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import { voidPlugin } from "void";
-import { voidVue } from "@void-x/vue";
+import { voidVue } from "@void/vue/plugin";
 
 function virtualTagsPlugin(): Plugin {
   const VIRTUAL_ID = "virtual:tags";

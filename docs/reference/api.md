@@ -599,20 +599,20 @@ Importing `"void/env"` provides global Cloudflare environment types:
 
 Declares the `Cloudflare.Env` namespace with `DB: D1Database`, `KV: KVNamespace`, and `STORAGE: R2Bucket`.
 
-For handler context variables (`c.set()` / `c.get()`), augment [`CloudContextVariables`](#cloudcontextvariables) — this is separate from `Cloudflare.Env`, which types the worker bindings. Framework adaptors (`void/vue`, `void/react`, `void/svelte`) also augment `CloudContextVariables` to add the `shared` key used by `useShared()`.
+For handler context variables (`c.set()` / `c.get()`), augment [`CloudContextVariables`](#cloudcontextvariables) — this is separate from `Cloudflare.Env`, which types the worker bindings. Framework adaptors (`@void/vue`, `@void/react`, `@void/svelte`) also augment `CloudContextVariables` to add the `shared` key used by `useShared()`.
 
 ## Framework Adaptors
 
 Framework adaptors for [Pages Routing](../guide/pages-routing/overview). Each adaptor provides a Vite plugin and client-side runtime.
 
-### `@void-x/vue`
+### `@void/vue`
 
 #### `voidVue(options?)`
 
-Imported from `"@void-x/vue"`. Returns an array of Vite plugins that handle Vue SFC compilation and SSR/hydration entry generation. Includes `@vitejs/plugin-vue` — no need to install or configure it separately.
+Imported from `"@void/vue/plugin"`. Returns an array of Vite plugins that handle Vue SFC compilation and SSR/hydration entry generation. Includes `@vitejs/plugin-vue` — no need to install or configure it separately.
 
 ```ts
-import { voidVue } from "@void-x/vue";
+import { voidVue } from "@void/vue/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue()],
@@ -635,7 +635,7 @@ interface VoidVueOptions {
 
 #### Vue Runtime
 
-Imported from `"void/vue"`.
+Imported from `"@void/vue"`.
 
 | Export                             | Description                                                                                                                                                                              |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -644,14 +644,14 @@ Imported from `"void/vue"`.
 | `useForm(url, defaults, options?)` | Typed reactive form helper bound to a page action URL. Returns `{ data, post, put, patch, delete, processing, errors, isDirty, wasSuccessful, recentlySuccessful, reset, clearErrors }`. |
 | `useShared()`                      | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                                                                 |
 
-### `@void-x/react`
+### `@void/react`
 
 #### `voidReact(options?)`
 
-Imported from `"@void-x/react"`. Returns an array of Vite plugins that handle SSR/hydration entry generation. Includes `@vitejs/plugin-react` — no need to install or configure it separately.
+Imported from `"@void/react/plugin"`. Returns an array of Vite plugins that handle SSR/hydration entry generation. Includes `@vitejs/plugin-react` — no need to install or configure it separately.
 
 ```ts
-import { voidReact } from "@void-x/react";
+import { voidReact } from "@void/react/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidReact()],
@@ -674,7 +674,7 @@ interface VoidReactOptions {
 
 #### React Runtime
 
-Imported from `"void/react"`.
+Imported from `"@void/react"`.
 
 | Export                             | Description                                                                                                                                                  |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -682,14 +682,14 @@ Imported from `"void/react"`.
 | `useForm(url, defaults, options?)` | Form helper hook. Returns `{ data, setData, post, put, patch, delete, processing, errors, isDirty, wasSuccessful, recentlySuccessful, reset, clearErrors }`. |
 | `useShared()`                      | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                                     |
 
-### `@void-x/svelte`
+### `@void/svelte`
 
 #### `voidSvelte(options?)`
 
-Imported from `"@void-x/svelte"`. Returns an array of Vite plugins that handle SSR/hydration entry generation for Svelte 5. Includes `@sveltejs/vite-plugin-svelte` — no need to install or configure it separately.
+Imported from `"@void/svelte/plugin"`. Returns an array of Vite plugins that handle SSR/hydration entry generation for Svelte 5. Includes `@sveltejs/vite-plugin-svelte` — no need to install or configure it separately.
 
 ```ts
-import { voidSvelte } from "@void-x/svelte";
+import { voidSvelte } from "@void/svelte/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSvelte()],
@@ -713,7 +713,7 @@ interface VoidSvelteOptions {
 
 #### Svelte Runtime
 
-Imported from `"void/svelte"`.
+Imported from `"@void/svelte"`.
 
 | Export                             | Description                                                                                                                                                         |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

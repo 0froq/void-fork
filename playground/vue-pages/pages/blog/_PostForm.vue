@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useIslandForm } from "void/vue";
+import { useIslandForm } from "@void/vue";
 
 const form = useIslandForm({ title: "", body: "" });
 </script>

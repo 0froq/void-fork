@@ -1,5 +1,5 @@
 {
-  "name": "@void-x/md",
+  "name": "@void/md",
   "version": "0.0.1",
   "files": [
     "dist"
@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
+    },
+    "./plugin": {
+      "types": "./dist/plugin.d.mts",
+      "import": "./dist/plugin.mjs"
     },
     "./runtime": {
       "types": "./dist/runtime/index.d.mts",

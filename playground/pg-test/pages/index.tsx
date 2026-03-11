@@ -1,4 +1,4 @@
-import { useForm, action } from "void/react";
+import { useForm, action } from "@void/react";
 import type { Props } from "./index.server";
 
 export default function DbPage({ users, posts }: Props) {

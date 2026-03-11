@@ -89,7 +89,7 @@ Place a layout file in any `pages/` directory to wrap all pages in that subtree:
 
 ```tsx [React]
 // pages/layout.tsx
-import { useShared, Link } from "void/react";
+import { useShared, Link } from "@void/react";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { auth } = useShared();
@@ -109,7 +109,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 ```vue [Vue]
 <!-- pages/layout.vue -->
 <script setup lang="ts">
-import { useShared, Link } from "void/vue";
+import { useShared, Link } from "@void/vue";
 const { auth } = useShared();
 </script>
 
@@ -128,7 +128,7 @@ const { auth } = useShared();
 ```svelte [Svelte]
 <!-- pages/layout.svelte -->
 <script>
-  import { useShared, Link } from "void/svelte";
+  import { useShared, Link } from "@void/svelte";
   let { children } = $props();
   const { auth } = useShared();
 </script>
@@ -145,7 +145,7 @@ const { auth } = useShared();
 
 ```tsx [Solid]
 // pages/layout.tsx
-import { useShared, Link } from "void/solid";
+import { useShared, Link } from "@void/solid";
 import type { JSX } from "solid-js";
 
 export default function Layout(props: { children: JSX.Element }) {
@@ -326,7 +326,7 @@ Access it on the client with `useShared()` — the return type is inferred from 
 ::: code-group
 
 ```tsx [React]
-import { useShared } from "void/react";
+import { useShared } from "@void/react";
 
 export default function Page() {
   const { auth } = useShared(); // { auth: { user: { name: string } | null } }
@@ -336,20 +336,20 @@ export default function Page() {
 
 ```vue [Vue]
 <script setup lang="ts">
-import { useShared } from "void/vue";
+import { useShared } from "@void/vue";
 const { auth } = useShared(); // { auth: { user: { name: string } | null } }
 </script>
 ```
 
 ```svelte [Svelte]
 <script>
-  import { useShared } from "void/svelte";
+  import { useShared } from "@void/svelte";
   const { auth } = useShared(); // { auth: { user: { name: string } | null } }
 </script>
 ```
 
 ```tsx [Solid]
-import { useShared } from "void/solid";
+import { useShared } from "@void/solid";
 
 export default function Page() {
   const shared = useShared(); // { auth: { user: { name: string } | null } }

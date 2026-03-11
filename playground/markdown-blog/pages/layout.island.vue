@@ -1,6 +1,6 @@
 <script setup>
 import ThemeToggle from "./_ThemeToggle.vue" with { island: "load" };
-import "void/md/theme.css";
+import "@void/md/theme.css";
 </script>
 
 <template>

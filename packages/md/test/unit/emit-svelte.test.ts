@@ -17,7 +17,7 @@ describe("emitSvelteComponent", () => {
     const code = emitSvelteComponent(makeResult());
     expect(code).toContain('<script context="module">');
     expect(code).toContain("export const frontmatter");
-    expect(code).toContain('import { setFrontmatter } from "void/md"');
+    expect(code).toContain('import { setFrontmatter } from "@void/md"');
     expect(code).toContain("setFrontmatter(__frontmatter)");
     expect(code).toContain("{@html");
   });

@@ -78,17 +78,17 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
     config(_, env) {
       if (!existsSync(pagesDir)) return;
 
-      // In dev mode, exclude @void-x/react from dep optimization so the
+      // In dev mode, exclude @void/react from dep optimization so the
       // virtual module and user components share the same React context objects.
-      // Without this, Vite pre-bundles @void-x/react, creating separate
+      // Without this, Vite pre-bundles @void/react, creating separate
       // context instances that break useContext (React contexts use object identity).
       if (env.command === "serve") {
         isDev = true;
         return {
           optimizeDeps: {
-            // Exclude @void-x/react so the virtual module and user
+            // Exclude @void/react so the virtual module and user
             // components share the same React context objects (identity).
-            exclude: ["@void-x/react"],
+            exclude: ["@void/react"],
             // Pre-include React entries that are discovered late via dynamic
             // imports during SPA navigation, avoiding a full-page reload
             // from Vite's dep optimizer.
@@ -131,7 +131,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string, isDev: b
   return `
 import React from "react";
 import { renderToString } from "react-dom/server";
-import { SharedContext, ErrorsContext, RouterContext } from "@void-x/react/runtime";
+import { SharedContext, ErrorsContext, RouterContext } from "@void/react";
 import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}
@@ -198,7 +198,7 @@ function generateClientEntry(
 import React, { useSyncExternalStore } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { SharedContext, ErrorsContext, RouterContext, setActionRouter } from "@void-x/react/runtime";
+import { SharedContext, ErrorsContext, RouterContext, setActionRouter } from "@void/react";
 import { createPageRouter } from "void/pages-client";
 import { parseCacheFor } from "void/pages-prefetch";
 

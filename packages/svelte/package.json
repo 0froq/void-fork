@@ -1,5 +1,5 @@
 {
-  "name": "@void-x/svelte",
+  "name": "@void/svelte",
   "version": "0.0.1",
   "files": [
     "dist",
@@ -8,8 +8,12 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.mts",
-      "import": "./dist/index.mjs"
+      "svelte": "./src/runtime/index.ts",
+      "default": "./src/runtime/index.ts"
+    },
+    "./plugin": {
+      "types": "./dist/plugin.d.mts",
+      "import": "./dist/plugin.mjs"
     },
     "./runtime": {
       "svelte": "./src/runtime/index.ts",

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { useRouter } from "void/vue";
+import { useRouter } from "@void/vue";
 import { auth } from "void/client";
 import type { Props } from "./auth.server";
 

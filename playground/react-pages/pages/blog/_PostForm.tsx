@@ -1,4 +1,4 @@
-import { useIslandForm } from "void/react";
+import { useIslandForm } from "@void/react";
 
 export default function PostForm() {
   const form = useIslandForm({ title: "", body: "" });

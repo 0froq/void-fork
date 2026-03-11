@@ -45,10 +45,10 @@ interface ScaffoldFrameworkConfig {
 export const SCAFFOLD_FRAMEWORKS: Record<ScaffoldFramework, ScaffoldFrameworkConfig> = {
   react: {
     label: "React",
-    adapterPackage: "@void-x/react",
+    adapterPackage: "@void/react",
     adapterVersion: "^0.0.1",
     adapterImport: "voidReact",
-    adapterPlugin: "@void-x/react",
+    adapterPlugin: "@void/react/plugin",
     pageExtension: "tsx",
     dependencies: {
       react: "^19.2.4",
@@ -64,10 +64,10 @@ export const SCAFFOLD_FRAMEWORKS: Record<ScaffoldFramework, ScaffoldFrameworkCon
   },
   vue: {
     label: "Vue",
-    adapterPackage: "@void-x/vue",
+    adapterPackage: "@void/vue",
     adapterVersion: "^0.0.1",
     adapterImport: "voidVue",
-    adapterPlugin: "@void-x/vue",
+    adapterPlugin: "@void/vue/plugin",
     pageExtension: "vue",
     dependencies: {
       vue: "^3.5.30",
@@ -79,10 +79,10 @@ export const SCAFFOLD_FRAMEWORKS: Record<ScaffoldFramework, ScaffoldFrameworkCon
   },
   svelte: {
     label: "Svelte",
-    adapterPackage: "@void-x/svelte",
+    adapterPackage: "@void/svelte",
     adapterVersion: "^0.0.1",
     adapterImport: "voidSvelte",
-    adapterPlugin: "@void-x/svelte",
+    adapterPlugin: "@void/svelte/plugin",
     pageExtension: "svelte",
     dependencies: {
       svelte: "^5.53.9",
@@ -92,10 +92,10 @@ export const SCAFFOLD_FRAMEWORKS: Record<ScaffoldFramework, ScaffoldFrameworkCon
   },
   solid: {
     label: "Solid",
-    adapterPackage: "@void-x/solid",
+    adapterPackage: "@void/solid",
     adapterVersion: "^0.0.1",
     adapterImport: "voidSolid",
-    adapterPlugin: "@void-x/solid",
+    adapterPlugin: "@void/solid/plugin",
     pageExtension: "tsx",
     dependencies: {
       "solid-js": "^1.9.11",

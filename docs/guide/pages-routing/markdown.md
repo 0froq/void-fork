@@ -35,28 +35,28 @@ function mdFileItems(ext) {
 
 Markdown pages let you use `.md` files as first-class pages in Void's file-based routing. They compile to static HTML at build time with zero client JavaScript, integrate with the layout chain, and can embed interactive framework components as [islands](./islands).
 
-The `@void-x/md` package is opt-in as it contains markdown processing and syntax highlighting dependencies that are not necessarily needed in every app.
+The `@void/md` package is opt-in as it contains markdown processing and syntax highlighting dependencies that are not necessarily needed in every app.
 
 ## Setup
 
-Install `@void-x/md` alongside your framework adapter:
+Install `@void/md` alongside your framework adapter:
 
 ::: code-group
 
 ```sh [React]
-npm install @void-x/md @void-x/react
+npm install @void/md @void/react
 ```
 
 ```sh [Vue]
-npm install @void-x/md @void-x/vue
+npm install @void/md @void/vue
 ```
 
 ```sh [Svelte]
-npm install @void-x/md @void-x/svelte
+npm install @void/md @void/svelte
 ```
 
 ```sh [Solid]
-npm install @void-x/md @void-x/solid
+npm install @void/md @void/solid
 ```
 
 :::
@@ -69,8 +69,8 @@ Add the plugin to your Vite config **after** the framework adapter:
 // vite.config.ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidReact } from "@void-x/react";
-import { voidMarkdown } from "@void-x/md";
+import { voidReact } from "@void/react/plugin";
+import { voidMarkdown } from "@void/md/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidReact(), voidMarkdown()],
@@ -81,8 +81,8 @@ export default defineConfig({
 // vite.config.ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidVue } from "@void-x/vue";
-import { voidMarkdown } from "@void-x/md";
+import { voidVue } from "@void/vue/plugin";
+import { voidMarkdown } from "@void/md/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue(), voidMarkdown()],
@@ -93,8 +93,8 @@ export default defineConfig({
 // vite.config.ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidSvelte } from "@void-x/svelte";
-import { voidMarkdown } from "@void-x/md";
+import { voidSvelte } from "@void/svelte/plugin";
+import { voidMarkdown } from "@void/md/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSvelte(), voidMarkdown()],
@@ -105,8 +105,8 @@ export default defineConfig({
 // vite.config.ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidSolid } from "@void-x/solid";
-import { voidMarkdown } from "@void-x/md";
+import { voidSolid } from "@void/solid/plugin";
+import { voidMarkdown } from "@void/md/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSolid(), voidMarkdown()],
@@ -187,7 +187,7 @@ Use `useFrontmatter()` in layout components to read the current page's frontmatt
 ::: code-group
 
 ```tsx [React]
-import { useFrontmatter } from "void/md";
+import { useFrontmatter } from "@void/md";
 
 export default function DocsLayout({ children }) {
   const fm = useFrontmatter();
@@ -202,7 +202,7 @@ export default function DocsLayout({ children }) {
 
 ```vue [Vue]
 <script setup>
-import { useFrontmatter } from "void/md";
+import { useFrontmatter } from "@void/md";
 
 const fm = useFrontmatter();
 // fm.title, fm.description, etc.
@@ -216,7 +216,7 @@ const fm = useFrontmatter();
 
 ```svelte [Svelte]
 <script>
-import { useFrontmatter } from "void/md";
+import { useFrontmatter } from "@void/md";
 
 const fm = useFrontmatter();
 </script>
@@ -226,7 +226,7 @@ const fm = useFrontmatter();
 ```
 
 ```tsx [Solid]
-import { useFrontmatter } from "void/md";
+import { useFrontmatter } from "@void/md";
 
 export default function DocsLayout(props) {
   const fm = useFrontmatter();
@@ -243,10 +243,10 @@ export default function DocsLayout(props) {
 
 ## Pages Virtual Module
 
-Import `void/md/pages` to get metadata for all markdown pages at build time. Use it to build sidebars, navigation, or search indexes:
+Import `@void/md/pages` to get metadata for all markdown pages at build time. Use it to build sidebars, navigation, or search indexes:
 
 ```ts
-import pages from "void/md/pages";
+import pages from "@void/md/pages";
 // [{ path: "/docs/getting-started", title: "Getting Started", frontmatter: {...}, headings: [...] }, ...]
 ```
 
@@ -272,7 +272,7 @@ The markdown plugin provides a minimal default theme. Unlike Vitepress, this the
 For standalone markdown sites that need a complete stylesheet — includes a modern CSS reset, baseline body styles, and all markdown content styles:
 
 ```css
-@import "void/md/theme.css";
+@import "@void/md/theme.css";
 ```
 
 ### Content only (scoped to `.void-md`)
@@ -280,7 +280,7 @@ For standalone markdown sites that need a complete stylesheet — includes a mod
 For embedding markdown in an existing app that already has its own reset and global styles — only includes the `.void-md`-scoped content styles:
 
 ```css
-@import "void/md/theme-content.css";
+@import "@void/md/theme-content.css";
 ```
 
 ### Usage
@@ -481,16 +481,16 @@ voidMarkdown({
 
 ## Example: Docs Layout with Sidebar
 
-Here's a full example of a docs layout using `useFrontmatter()` and `void/md/pages` to build a sidebar:
+Here's a full example of a docs layout using `useFrontmatter()` and `@void/md/pages` to build a sidebar:
 
 ::: code-group
 
 ```tsx [React]
 // pages/docs/layout.island.tsx
-import "void/md/theme-content.css";
-import { useFrontmatter } from "void/md";
-import pages from "void/md/pages";
-import { useRouter } from "void/react";
+import "@void/md/theme-content.css";
+import { useFrontmatter } from "@void/md";
+import pages from "@void/md/pages";
+import { useRouter } from "@void/react";
 
 const docPages = pages.filter((p) => p.path.startsWith("/docs/"));
 
@@ -521,9 +521,9 @@ export default function DocsLayout({ children }) {
 ```vue [Vue]
 <!-- pages/docs/layout.island.vue -->
 <script setup>
-import { useFrontmatter } from "void/md";
-import pages from "void/md/pages";
-import { useRouter } from "void/vue";
+import { useFrontmatter } from "@void/md";
+import pages from "@void/md/pages";
+import { useRouter } from "@void/vue";
 
 const fm = useFrontmatter();
 const { path } = useRouter();
@@ -531,7 +531,7 @@ const docPages = pages.filter((p) => p.path.startsWith("/docs/"));
 </script>
 
 <style>
-@import "void/md/theme-content.css";
+@import "@void/md/theme-content.css";
 </style>
 
 <template>
@@ -559,10 +559,10 @@ const docPages = pages.filter((p) => p.path.startsWith("/docs/"));
 ```svelte [Svelte]
 <!-- pages/docs/layout.island.svelte -->
 <script>
-import "void/md/theme-content.css";
-import { useFrontmatter } from "void/md";
-import pages from "void/md/pages";
-import { useRouter } from "void/svelte";
+import "@void/md/theme-content.css";
+import { useFrontmatter } from "@void/md";
+import pages from "@void/md/pages";
+import { useRouter } from "@void/svelte";
 
 const fm = useFrontmatter();
 const { path } = useRouter();
@@ -588,10 +588,10 @@ const docPages = pages.filter((p) => p.path.startsWith("/docs/"));
 
 ```tsx [Solid]
 // pages/docs/layout.island.tsx
-import "void/md/theme-content.css";
-import { useFrontmatter } from "void/md";
-import pages from "void/md/pages";
-import { useRouter } from "void/solid";
+import "@void/md/theme-content.css";
+import { useFrontmatter } from "@void/md";
+import pages from "@void/md/pages";
+import { useRouter } from "@void/solid";
 import { For } from "solid-js";
 
 const docPages = pages.filter((p) => p.path.startsWith("/docs/"));

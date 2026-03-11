@@ -17,7 +17,7 @@ export const headings = ${headings};
 </script>
 
 <script>
-import { setFrontmatter } from "void/md";
+import { setFrontmatter } from "@void/md";
 
 const __frontmatter = ${frontmatter};
 setFrontmatter(__frontmatter);
@@ -43,7 +43,7 @@ export const headings = ${headings};
 </script>
 
 <script>
-import { setFrontmatter } from "void/md";
+import { setFrontmatter } from "@void/md";
 `;
 
   for (let i = 0; i < islandImports.length; i++) {

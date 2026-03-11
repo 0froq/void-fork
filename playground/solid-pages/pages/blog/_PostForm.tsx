@@ -1,4 +1,4 @@
-import { useIslandForm } from "void/solid";
+import { useIslandForm } from "@void/solid";
 import { Show } from "solid-js";
 
 export default function PostForm() {

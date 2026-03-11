@@ -107,11 +107,13 @@ describe("isScaffoldableEmptyProject", () => {
       expect(pkg.devDependencies.vite).toBeDefined();
       expect(pkg.devDependencies.void).toBeDefined();
       expect(pkg.devDependencies.typescript).toBeDefined();
-      expect(pkg.devDependencies["@void-x/react"]).toBeDefined();
+      expect(pkg.devDependencies["@void/react"]).toBeDefined();
       expect(pkg.devDependencies["@types/react"]).toBeDefined();
       expect(pkg.devDependencies["@types/react-dom"]).toBeDefined();
 
-      expect(readFileSync(join(root, "vite.config.ts"), "utf-8")).toContain("voidReact()");
+      const reactViteConfig = readFileSync(join(root, "vite.config.ts"), "utf-8");
+      expect(reactViteConfig).toContain('from "@void/react/plugin"');
+      expect(reactViteConfig).toContain("voidReact()");
       expect(readFileSync(join(root, "pages", "index.tsx"), "utf-8")).toContain("Welcome to Void");
       expect(readFileSync(join(root, "pages", "index.server.ts"), "utf-8")).toContain(
         'import { messages } from "@schema";',
@@ -153,14 +155,16 @@ describe("isScaffoldableEmptyProject", () => {
 
       const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
       expect(pkg.dependencies.vue).toBeDefined();
-      expect(pkg.devDependencies["@void-x/vue"]).toBeDefined();
+      expect(pkg.devDependencies["@void/vue"]).toBeDefined();
       expect(pkg.devDependencies.void).toBeDefined();
 
       expect(JSON.parse(readFileSync(join(root, "void.json"), "utf-8"))).toEqual({
         database: "pg",
       });
 
-      expect(readFileSync(join(root, "vite.config.ts"), "utf-8")).toContain("voidVue()");
+      const vueViteConfig = readFileSync(join(root, "vite.config.ts"), "utf-8");
+      expect(vueViteConfig).toContain('from "@void/vue/plugin"');
+      expect(vueViteConfig).toContain("voidVue()");
       expect(readFileSync(join(root, "pages", "index.vue"), "utf-8")).toContain("Welcome to Void");
       expect(readFileSync(join(root, "db", "schema.ts"), "utf-8")).toContain(
         'from "void/schema-pg"',

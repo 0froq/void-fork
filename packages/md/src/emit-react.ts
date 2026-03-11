@@ -5,7 +5,7 @@ import { buildRenderChunks, toIslandId } from "./emit-shared";
 export function emitReactComponent(result: CompileResult): string {
   return `
 import React from "react";
-import { FrontmatterContext } from "void/md";
+import { FrontmatterContext } from "@void/md";
 
 const __frontmatter = ${JSON.stringify(result.frontmatter)};
 const __headings = ${JSON.stringify(result.headings)};
@@ -31,7 +31,7 @@ export function emitReactComponentWithIslands(
   const chunks = buildRenderChunks(result.html, islandImports);
 
   let code = `import React from "react";\n`;
-  code += `import { FrontmatterContext } from "void/md";\n`;
+  code += `import { FrontmatterContext } from "@void/md";\n`;
 
   for (let i = 0; i < islandImports.length; i++) {
     const item = islandImports[i];

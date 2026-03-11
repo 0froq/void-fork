@@ -51,15 +51,15 @@ pnpm -C packages/vue typecheck      # Typecheck a specific package
 
 pnpm workspaces. Shared dependency versions use the **pnpm catalog** in `pnpm-workspace.yaml` (typescript, tsdown, vite, @cloudflare/workers-types, wrangler). Make sure to run `pnpm install` after making package structure changes.
 
-| Package                                          | npm name         | Purpose                                                        |
-| ------------------------------------------------ | ---------------- | -------------------------------------------------------------- |
-| [`packages/void`](./packages/void/AGENTS.md)     | `void`           | Core Vite plugin — routing, inference, migrations, CLI         |
-| [`packages/react`](./packages/react/README.md)   | `@void-x/react`  | React framework adapter for Pages mode (SSR, Link, useForm)    |
-| [`packages/vue`](./packages/vue/README.md)       | `@void-x/vue`    | Vue framework adapter for Pages mode (SSR, Link, useForm)      |
-| [`packages/svelte`](./packages/svelte/README.md) | `@void-x/svelte` | Svelte 5 framework adapter for Pages mode (SSR, Link, useForm) |
-| [`packages/solid`](./packages/solid/README.md)   | `@void-x/solid`  | SolidJS framework adapter for Pages mode (SSR, Link, useForm)  |
-| [`docs`](./docs)                                 | (private)        | Documentation site (VitePress)                                 |
-| `playground/*`                                   | (private)        | local apps for testing                                         |
+| Package                                          | npm name       | Purpose                                                        |
+| ------------------------------------------------ | -------------- | -------------------------------------------------------------- |
+| [`packages/void`](./packages/void/AGENTS.md)     | `void`         | Core Vite plugin — routing, inference, migrations, CLI         |
+| [`packages/react`](./packages/react/README.md)   | `@void/react`  | React framework adapter for Pages mode (SSR, Link, useForm)    |
+| [`packages/vue`](./packages/vue/README.md)       | `@void/vue`    | Vue framework adapter for Pages mode (SSR, Link, useForm)      |
+| [`packages/svelte`](./packages/svelte/README.md) | `@void/svelte` | Svelte 5 framework adapter for Pages mode (SSR, Link, useForm) |
+| [`packages/solid`](./packages/solid/README.md)   | `@void/solid`  | SolidJS framework adapter for Pages mode (SSR, Link, useForm)  |
+| [`docs`](./docs)                                 | (private)      | Documentation site (VitePress)                                 |
+| `playground/*`                                   | (private)      | local apps for testing                                         |
 
 ## `void` Overview
 
@@ -94,32 +94,32 @@ See [`packages/void/AGENTS.md`](./packages/void/AGENTS.md) for architecture, sou
 
 **Note:** `packages/void/skills/void/docs` is ignored from git and is auto copied during build. Ignore files in this directory.
 
-## `@void-x/vue` Overview
+## `@void/vue` Overview
 
 Vue framework adapter for Pages mode — Inertia-inspired full-stack DX with SSR.
 
-- **Plugin** (`@void-x/vue`): `voidVue()` — compiles Vue SFCs, generates SSR + client hydration entries
-- **Runtime** (`void/vue`): `Link`, `useForm`, `useShared` composables
+- **Plugin** (`@void/vue/plugin`): `voidVue()` — compiles Vue SFCs, generates SSR + client hydration entries
+- **Runtime** (`@void/vue`): `Link`, `useForm`, `useShared` composables
 - **Server handlers**: Remix-style `loader` (GET → props) and `action` (mutations) exports in companion `.server.ts` files
 
 See [`packages/vue/README.md`](./packages/vue/README.md) for architecture.
 
-## `@void-x/svelte` Overview
+## `@void/svelte` Overview
 
 Svelte 5 framework adapter for Pages mode — same Inertia-inspired DX as Vue/React.
 
-- **Plugin** (`@void-x/svelte`): `voidSvelte()` — wraps `@sveltejs/vite-plugin-svelte`, generates SSR + client hydration entries
-- **Runtime** (`void/svelte`): `Link`, `useForm`, `useShared`, `useRouter` — uses Svelte 5 runes (`$state`, `$derived`) and `getContext`
+- **Plugin** (`@void/svelte/plugin`): `voidSvelte()` — wraps `@sveltejs/vite-plugin-svelte`, generates SSR + client hydration entries
+- **Runtime** (`@void/svelte`): `Link`, `useForm`, `useShared`, `useRouter` — uses Svelte 5 runes (`$state`, `$derived`) and `getContext`
 - **Server handlers**: companion `.server.ts` files with `loader` and `action` exports (same as React adapter)
 
 See [`packages/svelte/README.md`](./packages/svelte/README.md) for details.
 
-## `@void-x/solid` Overview
+## `@void/solid` Overview
 
 SolidJS framework adapter for Pages mode — same Inertia-inspired DX as Vue/React/Svelte.
 
-- **Plugin** (`@void-x/solid`): `voidSolid()` — wraps `vite-plugin-solid`, generates SSR + client hydration entries
-- **Runtime** (`void/solid`): `Link`, `useForm`, `useShared`, `useRouter` — uses Solid signals (`createSignal`, `createStore`) and `createContext`/`useContext`
+- **Plugin** (`@void/solid/plugin`): `voidSolid()` — wraps `vite-plugin-solid`, generates SSR + client hydration entries
+- **Runtime** (`@void/solid`): `Link`, `useForm`, `useShared`, `useRouter` — uses Solid signals (`createSignal`, `createStore`) and `createContext`/`useContext`
 - **Server handlers**: companion `.server.ts` files with `loader` and `action` exports (same as React/Svelte adapter)
 
 See [`packages/solid/README.md`](./packages/solid/README.md) for details.

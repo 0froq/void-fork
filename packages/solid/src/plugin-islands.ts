@@ -309,7 +309,7 @@ function generateIslandRenderer(
   return `
 import { renderToStringAsync, generateHydrationScript } from "solid-js/web";
 import { createComponent } from "solid-js";
-import { SharedContext, ErrorsContext } from "@void-x/solid/runtime";
+import { SharedContext, ErrorsContext } from "@void/solid";
 import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}

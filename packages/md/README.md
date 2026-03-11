@@ -1,4 +1,4 @@
-# @void-x/md
+# @void/md
 
 Markdown pages plugin for Void — `.md` files as first-class routes with zero client JS, islands support, and Shiki syntax highlighting.
 
@@ -8,8 +8,8 @@ Markdown pages plugin for Void — `.md` files as first-class routes with zero c
 // vite.config.ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidVue } from "@void-x/vue";
-import { voidMarkdown } from "@void-x/md";
+import { voidVue } from "@void/vue/plugin";
+import { voidMarkdown } from "@void/md/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue(), voidMarkdown()],
@@ -33,17 +33,17 @@ The plugin exposes an API:
 
 ## Runtime
 
-Import from `void/md`:
+Import from `@void/md`:
 
 - **`useFrontmatter()`** — access the current page's frontmatter object. Uses framework-native context (`provide`/`inject` for Vue, `createContext`/`useContext` for React/Solid, `setContext`/`getContext` for Svelte).
 
 ## Virtual Modules
 
-- **`void/md`** — resolves to `useFrontmatter()` runtime
-- **`void/md/pages`** — flat array of all `MdPage` objects (HMR-aware), useful for building navs, sidebars, and search indexes
+- **`@void/md`** — resolves to `useFrontmatter()` runtime
+- **`@void/md/pages`** — flat array of all `MdPage` objects (HMR-aware), useful for building navs, sidebars, and search indexes
 
 ```ts
-import { pages } from "void/md/pages";
+import pages from "@void/md/pages";
 // MdPage { path, title, frontmatter, headings }
 ```
 
@@ -125,19 +125,19 @@ Full VitePress-parity feature set:
 
 Two CSS exports for styling markdown content:
 
-- **`@void-x/md/theme.css`** — full standalone theme (reset + prose + code + containers)
-- **`@void-x/md/theme-content.css`** — content-only styles scoped to `.void-md` (prose + code + containers)
+- **`@void/md/theme.css`** — full standalone theme (reset + prose + code + containers)
+- **`@void/md/theme-content.css`** — content-only styles scoped to `.void-md` (prose + code + containers)
 
 ```ts
 // In your layout or entry
-import "@void-x/md/theme.css"; // or theme-content.css
+import "@void/md/theme.css"; // or theme-content.css
 ```
 
 ## Architecture
 
 - **Compilation pipeline** — `extractScript()` strips `<script>` blocks and collects island imports → `compile()` runs gray-matter + markdown-exit + Shiki → `emit-{framework}()` generates a framework-specific virtual component
 - **Framework-agnostic** — adapter auto-detected from plugin list; emitters for Vue (SFC), React (JSX), Svelte, and Solid
-- **Lightweight metadata extraction** — `extractMetadata()` parses frontmatter + headings without running Shiki, used for `void/md/pages` scanning
+- **Lightweight metadata extraction** — `extractMetadata()` parses frontmatter + headings without running Shiki, used for `@void/md/pages` scanning
 - **Islands integration** — pages with island imports split HTML into render chunks with `data-island` markers; pages without islands emit static HTML with a frontmatter context provider
 - **Svelte/Solid secondary modules** — emits a JS re-export pointing to a secondary virtual module (`/@void-md-svelte/` or `/@void-md-solid/`) so Vite processes through the framework's own plugin
 

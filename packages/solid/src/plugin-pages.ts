@@ -80,9 +80,9 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       if (env.command === "serve") {
         return {
           optimizeDeps: {
-            // Exclude @void-x/solid so the virtual module and user
+            // Exclude @void/solid so the virtual module and user
             // components share the same Solid context objects (identity).
-            exclude: ["@void-x/solid"],
+            exclude: ["@void/solid"],
             // Pre-include Solid entries discovered late via dynamic imports
             include: ["solid-js", "solid-js/web", "solid-js/store"],
           },
@@ -108,7 +108,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string): string 
   return `
 import { renderToStringAsync, generateHydrationScript } from "solid-js/web";
 import { createComponent } from "solid-js";
-import { SharedContext, ErrorsContext, RouterContext } from "@void-x/solid/runtime";
+import { SharedContext, ErrorsContext, RouterContext } from "@void/solid";
 import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}
@@ -179,7 +179,7 @@ function generateClientEntry(
   return `
 import { createSignal, createComponent, batch } from "solid-js";
 import { hydrate } from "solid-js/web";
-import { SharedContext, ErrorsContext, RouterContext, setActionRouter } from "@void-x/solid/runtime";
+import { SharedContext, ErrorsContext, RouterContext, setActionRouter } from "@void/solid";
 import { createPageRouter } from "void/pages-client";
 import { parseCacheFor } from "void/pages-prefetch";
 

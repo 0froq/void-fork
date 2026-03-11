@@ -1,5 +1,5 @@
 {
-  "name": "@void-x/solid",
+  "name": "@void/solid",
   "version": "0.0.1",
   "files": [
     "dist",
@@ -8,11 +8,15 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.mts",
-      "import": "./dist/index.mjs"
+      "types": "./src/runtime/index.ts",
+      "default": "./src/runtime/index.ts"
+    },
+    "./plugin": {
+      "types": "./dist/plugin.d.mts",
+      "import": "./dist/plugin.mjs"
     },
     "./runtime": {
-      "solid": "./src/runtime/index.ts",
+      "types": "./src/runtime/index.ts",
       "default": "./src/runtime/index.ts"
     },
     "./context": {

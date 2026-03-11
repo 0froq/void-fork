@@ -19,19 +19,19 @@ If you're adding Pages mode manually, install a framework adapter alongside `voi
 ::: code-group
 
 ```sh [React]
-npm install @void-x/react
+npm install @void/react
 ```
 
 ```sh [Vue]
-npm install @void-x/vue
+npm install @void/vue
 ```
 
 ```sh [Svelte]
-npm install @void-x/svelte
+npm install @void/svelte
 ```
 
 ```sh [Solid]
-npm install @void-x/solid
+npm install @void/solid
 ```
 
 :::
@@ -44,7 +44,7 @@ Add both plugins to your Vite config:
 // vite.config.ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidReact } from "@void-x/react";
+import { voidReact } from "@void/react/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidReact()],
@@ -55,7 +55,7 @@ export default defineConfig({
 // vite.config.ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidVue } from "@void-x/vue";
+import { voidVue } from "@void/vue/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue()],
@@ -66,7 +66,7 @@ export default defineConfig({
 // vite.config.ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidSvelte } from "@void-x/svelte";
+import { voidSvelte } from "@void/svelte/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSvelte()],
@@ -77,7 +77,7 @@ export default defineConfig({
 // vite.config.ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidSolid } from "@void-x/solid";
+import { voidSolid } from "@void/solid/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSolid()],
@@ -120,7 +120,7 @@ Use the `Link` component for SPA navigation between pages. It renders an `<a>` t
 ::: code-group
 
 ```tsx [React]
-import { Link } from "void/react";
+import { Link } from "@void/react";
 
 <Link href="/users">Users</Link>
 <Link href={`/users/${id}`}>View</Link>
@@ -128,7 +128,7 @@ import { Link } from "void/react";
 
 ```vue [Vue]
 <script setup lang="ts">
-import { Link } from "void/vue";
+import { Link } from "@void/vue";
 </script>
 
 <template>
@@ -139,7 +139,7 @@ import { Link } from "void/vue";
 
 ```svelte [Svelte]
 <script>
-  import { Link } from "void/svelte";
+  import { Link } from "@void/svelte";
 </script>
 
 <Link href="/users">Users</Link>
@@ -147,7 +147,7 @@ import { Link } from "void/vue";
 ```
 
 ```tsx [Solid]
-import { Link } from "void/solid";
+import { Link } from "@void/solid";
 
 <Link href="/users">Users</Link>
 <Link href={`/users/${id}`}>View</Link>
@@ -158,7 +158,7 @@ import { Link } from "void/solid";
 For programmatic navigation, use `useRouter()`:
 
 ```ts
-import { useRouter } from "void/vue"; // or "void/react", "void/svelte", "void/solid"
+import { useRouter } from "@void/vue"; // or "@void/react", "@void/svelte", "@void/solid"
 
 const router = useRouter();
 router.visit("/users");

@@ -1,4 +1,4 @@
-# @void-x/vue
+# @void/vue
 
 Vue adapter for Void Pages mode.
 
@@ -7,7 +7,7 @@ Vue adapter for Void Pages mode.
 ```ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidVue } from "@void-x/vue";
+import { voidVue } from "@void/vue/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue()],
@@ -29,7 +29,7 @@ Options:
 
 ## Runtime
 
-Main runtime APIs live at `void/vue`:
+Main runtime APIs live at `@void/vue`:
 
 - `Link`
 - `useRouter()`
@@ -39,7 +39,7 @@ Main runtime APIs live at `void/vue`:
 - `useIslandForm()`
 - `action()`
 
-Deferred helpers are exported from `@void-x/vue/deferred`.
+Deferred helpers are exported from `@void/vue/deferred`.
 
 ## Pages
 

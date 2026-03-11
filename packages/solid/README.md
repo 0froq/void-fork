@@ -1,4 +1,4 @@
-# @void-x/solid
+# @void/solid
 
 Solid adapter for Void Pages mode.
 
@@ -7,7 +7,7 @@ Solid adapter for Void Pages mode.
 ```ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidSolid } from "@void-x/solid";
+import { voidSolid } from "@void/solid/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSolid()],
@@ -30,7 +30,7 @@ Options:
 
 ## Runtime
 
-Main runtime APIs live at `void/solid`:
+Main runtime APIs live at `@void/solid`:
 
 - `Link`
 - `useRouter()`

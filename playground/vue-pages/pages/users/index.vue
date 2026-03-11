@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link, useForm } from "void/vue";
+import { Link, useForm } from "@void/vue";
 import type { Props } from "./index.server";
 
 const props = defineProps<Props>();

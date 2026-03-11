@@ -2,7 +2,7 @@ import { defineConfig } from "tsdown";
 import { cpSync } from "node:fs";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/runtime/index.ts"],
+  entry: ["src/index.ts", "src/plugin.ts", "src/runtime/index.ts"],
   format: "esm",
   dts: true,
   clean: true,

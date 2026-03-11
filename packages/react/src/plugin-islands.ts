@@ -291,7 +291,7 @@ function generateIslandRenderer(
   return `
 import React from "react";
 import { renderToString } from "react-dom/server";
-import { SharedContext, ErrorsContext } from "@void-x/react/runtime";
+import { SharedContext, ErrorsContext } from "@void/react";
 import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}

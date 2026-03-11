@@ -82,9 +82,9 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
         isDev = true;
         return {
           optimizeDeps: {
-            // Exclude @void-x/svelte so the virtual module and user
+            // Exclude @void/svelte so the virtual module and user
             // components share the same Svelte context (identity).
-            exclude: ["@void-x/svelte"],
+            exclude: ["@void/svelte"],
             // Pre-include Svelte so it's not discovered late via dynamic imports.
             include: ["svelte", "svelte/store", "svelte/internal", "svelte/internal/client"],
           },
@@ -109,7 +109,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
 function generateRendererModule(scan: PageScanResult, pagesDir: string, _isDev: boolean): string {
   return `
 import { render } from "svelte/server";
-import App from "@void-x/svelte/App.svelte";
+import App from "@void/svelte/App.svelte";
 import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}
@@ -163,8 +163,8 @@ function generateClientEntry(
   return `
 import { hydrate } from "svelte";
 import { writable } from "svelte/store";
-import App from "@void-x/svelte/App.svelte";
-import { setActionRouter } from "@void-x/svelte/runtime";
+import App from "@void/svelte/App.svelte";
+import { setActionRouter } from "@void/svelte";
 import { createPageRouter } from "void/pages-client";
 import { parseCacheFor } from "void/pages-prefetch";
 

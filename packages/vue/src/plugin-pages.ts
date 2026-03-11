@@ -240,8 +240,8 @@ function generateClientEntry(
 ): string {
   return `
 import { createSSRApp, h, reactive, provide, shallowRef, nextTick } from "vue";
-import { createDeferred, resolveDeferred, rejectDeferred } from "@void-x/vue/deferred";
-import { setActionRouter } from "@void-x/vue/runtime";
+import { createDeferred, resolveDeferred, rejectDeferred } from "@void/vue/deferred";
+import { setActionRouter } from "@void/vue";
 import { createPageRouter } from "void/pages-client";
 import { parseCacheFor } from "void/pages-prefetch";
 

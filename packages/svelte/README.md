@@ -1,4 +1,4 @@
-# @void-x/svelte
+# @void/svelte
 
 Svelte 5 adapter for Void Pages mode.
 
@@ -7,7 +7,7 @@ Svelte 5 adapter for Void Pages mode.
 ```ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidSvelte } from "@void-x/svelte";
+import { voidSvelte } from "@void/svelte/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidSvelte()],
@@ -30,7 +30,7 @@ Options:
 
 ## Runtime
 
-Main runtime APIs live at `void/svelte`:
+Main runtime APIs live at `@void/svelte`:
 
 - `Link`
 - `useRouter()`

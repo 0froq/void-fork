@@ -343,7 +343,7 @@ function generateIslandRenderer(
 
   return `
 import { render } from "svelte/server";
-import App from "@void-x/svelte/App.svelte";
+import App from "@void/svelte/App.svelte";
 import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}

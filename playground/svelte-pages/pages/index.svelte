@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Link } from "void/svelte";
+  import { Link } from "@void/svelte";
   import type { Props } from "./index.server";
 
   let { title }: Props = $props();

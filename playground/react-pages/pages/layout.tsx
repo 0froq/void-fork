@@ -1,4 +1,4 @@
-import { Link, useShared } from "void/react";
+import { Link, useShared } from "@void/react";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const shared = useShared();

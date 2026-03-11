@@ -234,7 +234,7 @@ describe("markdown-blog playground", () => {
       }
     });
 
-    it("injects style for @void-x/md/theme in dev mode", async () => {
+    it("injects style for @void/md/theme.css in dev mode", async () => {
       const res = await fetch(`${DEV_BASE}/posts/getting-started`);
       expect(res.status).toBe(200);
       const html = await res.text();

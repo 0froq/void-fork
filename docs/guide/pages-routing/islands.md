@@ -223,7 +223,7 @@ Island pages cannot use `useForm` (which depends on the client-side router). Use
 ::: code-group
 
 ```tsx [React]
-import { useIslandForm } from "void/react";
+import { useIslandForm } from "@void/react";
 
 export default function PostForm() {
   const form = useIslandForm({ title: "", body: "" });
@@ -259,7 +259,7 @@ export default function PostForm() {
 
 ```vue [Vue]
 <script setup>
-import { useIslandForm } from "void/vue";
+import { useIslandForm } from "@void/vue";
 
 const form = useIslandForm({ title: "", body: "" });
 
@@ -287,7 +287,7 @@ function submit() {
 
 ```svelte [Svelte]
 <script>
-import { useIslandForm } from "void/svelte";
+import { useIslandForm } from "@void/svelte";
 
 const form = useIslandForm({ title: "", body: "" });
 
@@ -312,7 +312,7 @@ function submit() {
 ```
 
 ```tsx [Solid]
-import { useIslandForm } from "void/solid";
+import { useIslandForm } from "@void/solid";
 import { Show } from "solid-js";
 
 export default function PostForm() {

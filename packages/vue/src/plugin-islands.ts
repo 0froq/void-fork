@@ -437,7 +437,7 @@ function generateIslandClientEntry(
         lines.push(`import ${JSON.stringify(file + query)};`);
         index++;
       }
-      // Extract JS-style CSS imports (e.g. import "void/md/theme.css")
+      // Extract JS-style CSS imports (e.g. import "@void/md/theme.css")
       cssImportRe.lastIndex = 0;
       while ((match = cssImportRe.exec(content)) !== null) {
         lines.push(match[0].trim() + ";");

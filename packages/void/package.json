@@ -160,25 +160,7 @@
     "./_db-pg": {
       "types": "./dist/runtime/db-pg.d.mts",
       "import": "./dist/runtime/db-pg.mjs"
-    },
-    "./vue": {
-      "types": "./dist/runtime/vue.d.mts",
-      "import": "./dist/runtime/vue.mjs"
-    },
-    "./react": {
-      "types": "./dist/runtime/react.d.mts",
-      "import": "./dist/runtime/react.mjs"
-    },
-    "./svelte": {
-      "types": "./dist/runtime/svelte.d.mts",
-      "import": "./dist/runtime/svelte.mjs"
-    },
-    "./solid": {
-      "types": "./dist/runtime/solid.d.mts",
-      "import": "./dist/runtime/solid.mjs"
-    },
-    "./md/theme.css": "./dist/css/md-theme.css",
-    "./md/theme-content.css": "./dist/css/md-theme-content.css"
+    }
   },
   "scripts": {
     "build": "node scripts/sync-skill-docs.mjs && tsdown",
@@ -220,11 +202,11 @@
     "zod": "^4.3.6"
   },
   "peerDependencies": {
-    "@void-x/md": "workspace:*",
-    "@void-x/react": "workspace:*",
-    "@void-x/solid": "workspace:*",
-    "@void-x/svelte": "workspace:*",
-    "@void-x/vue": "workspace:*",
+    "@void/md": "workspace:*",
+    "@void/react": "workspace:*",
+    "@void/solid": "workspace:*",
+    "@void/svelte": "workspace:*",
+    "@void/vue": "workspace:*",
     "arktype": ">=2.0.0",
     "hono": "^4.0.0",
     "valibot": ">=1.0.0-beta.7",
@@ -232,19 +214,19 @@
     "zod": "^3.25.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {
-    "@void-x/md": {
+    "@void/md": {
       "optional": true
     },
-    "@void-x/vue": {
+    "@void/vue": {
       "optional": true
     },
-    "@void-x/react": {
+    "@void/react": {
       "optional": true
     },
-    "@void-x/svelte": {
+    "@void/svelte": {
       "optional": true
     },
-    "@void-x/solid": {
+    "@void/solid": {
       "optional": true
     },
     "arktype": {

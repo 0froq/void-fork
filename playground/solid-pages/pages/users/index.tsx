@@ -1,4 +1,4 @@
-import { Link, useForm } from "void/solid";
+import { Link, useForm } from "@void/solid";
 import { For, Show } from "solid-js";
 import type { Props } from "./index.server";
 

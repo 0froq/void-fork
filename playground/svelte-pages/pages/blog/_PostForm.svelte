@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useIslandForm } from "void/svelte";
+  import { useIslandForm } from "@void/svelte";
 
   const form = useIslandForm({ title: "", body: "" });
 </script>

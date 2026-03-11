@@ -3,6 +3,7 @@ import { defineConfig } from "tsdown";
 export default defineConfig({
   entry: [
     "src/index.ts",
+    "src/plugin.ts",
     "src/runtime/index.ts",
     "src/runtime/use-deferred.ts",
     "src/runtime/prefetch.ts",

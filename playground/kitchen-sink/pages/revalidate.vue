@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useForm } from "void/vue";
+import { useForm } from "@void/vue";
 import type { Props } from "./revalidate.server";
 
 defineProps<Props>();

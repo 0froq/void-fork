@@ -4,7 +4,7 @@ import { buildRenderChunks, toIslandId } from "./emit-shared";
 
 export function emitSolidComponent(result: CompileResult): string {
   return `
-import { FrontmatterContext } from "void/md";
+import { FrontmatterContext } from "@void/md";
 
 const __frontmatter = ${JSON.stringify(result.frontmatter)};
 const __headings = ${JSON.stringify(result.headings)};
@@ -30,7 +30,7 @@ export function emitSolidComponentWithIslands(
   const chunks = buildRenderChunks(result.html, islandImports);
   const importAliasByName = new Map<string, string>();
 
-  let code = `import { FrontmatterContext } from "void/md";\n`;
+  let code = `import { FrontmatterContext } from "@void/md";\n`;
 
   for (let i = 0; i < islandImports.length; i++) {
     const item = islandImports[i];
