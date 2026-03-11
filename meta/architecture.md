@@ -41,10 +41,10 @@
                           │  │   └─ void db push/studio        │  │
                           │  │                                 │  │
                           │  │  Framework Integrations:        │  │
-                          │  │   ├─ @void-x/vue                │  │
-                          │  │   ├─ @void-x/react              │  │
-                          │  │   ├─ @void-x/solid              │  │
-                          │  │   └─ @void-x/svelte             │  │
+                          │  │   ├─ @void/vue                │  │
+                          │  │   ├─ @void/react              │  │
+                          │  │   ├─ @void/solid              │  │
+                          │  │   └─ @void/svelte             │  │
                           │  └─────────────────────────────────┘  │
                           └────────┬─────────────────┬────────────┘
                                    │                 │
@@ -177,7 +177,7 @@
          ┌───────────────────────────────────────────────────────┐
          │  void-dashboard  (dash.void.cloud)                    │
          │                                                       │
-         │  Vue SSR app (@void-x/vue)                            │
+         │  Vue SSR app (@void/vue)                            │
          │   ├─ Login (OAuth via API)                            │
          │   ├─ Projects (list, create, detail)                  │
          │   ├─ Deployments, Domains, Secrets                    │

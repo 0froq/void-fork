@@ -88,13 +88,13 @@ Named actions (and single actions) are consumed through three primitives, each s
 
 ```ts
 // 1. useForm — form state, errors, dirty tracking + Inertia page update
-import { useForm } from "void/vue";
+import { useForm } from "@void/vue";
 const form = useForm("/users/:id?update", { name: "", email: "" }, { params: { id } });
 form.errors.email; // typed from updateUserSchema
 form.put();
 
 // 2. action() — one-shot programmatic call + Inertia page update
-import { action } from "void/vue";
+import { action } from "@void/vue";
 await action("/users/:id?delete", { id: "42" });
 
 // 3. fetch — raw HTTP, no Inertia, framework-agnostic
@@ -108,7 +108,7 @@ await fetch("/users/:id?delete", { method: "POST", body: { id: "42" } });
 | `action()` | Yes                 | No                         | Yes                |
 | `fetch()`  | No (raw response)   | No                         | No                 |
 
-`useForm` and `action()` are exported from each adapter (`void/vue`, `void/react`, `void/svelte`, `void/solid`). `fetch` is from `void/client` and is framework-agnostic.
+`useForm` and `action()` are exported from each adapter (`@void/vue`, `@void/react`, `@void/svelte`, `@void/solid`). `fetch` is from `void/client` and is framework-agnostic.
 
 Both `useForm` and `action()` can target any page's actions, not just the current page's. The Inertia response from the server determines what page the user ends up on (same page with fresh props, or a redirect).
 
@@ -168,7 +168,7 @@ The codegen only needs to detect whether the page exports `action` (singular) vs
 Each adapter exports an `action()` function for one-shot programmatic calls that go through the Inertia router (page updates, redirects) without form state:
 
 ```ts
-// void/vue
+// @void/vue
 export async function action<U extends keyof PageActionMap & string>(
   url: U,
   data?: FormBody<U>,

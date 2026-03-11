@@ -142,7 +142,7 @@ Default behavior:
 
 - export `auth` as a ready-to-use client instance
 - export `createAuthClient` for advanced cases
-- use `better-auth/react` instead of `better-auth/client` when `@void-x/react` is detected
+- use `better-auth/react` instead of `better-auth/client` when `@void/react` is detected
 - otherwise use the generic Better Auth client
 
 This preserves the simple Void import while still aligning with Better Auth's framework-specific client packages.
@@ -360,7 +360,7 @@ Exports:
 
 Resolution behavior:
 
-- if `@void-x/react` is present, back `auth` and `createAuthClient` with `better-auth/react`
+- if `@void/react` is present, back `auth` and `createAuthClient` with `better-auth/react`
 - otherwise use the generic Better Auth client
 
 This gives us:

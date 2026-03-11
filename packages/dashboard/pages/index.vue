@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link } from "void/vue";
+import { Link } from "@void/vue";
 import type { Props } from "./index.server";
 
 const { projects, usage, siteDomain } = defineProps<Props>();

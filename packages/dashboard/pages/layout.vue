@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import "../app.css";
 import { ref } from "vue";
-import { Link, useShared, useNavigation } from "void/vue";
+import { Link, useShared, useNavigation } from "@void/vue";
 
 const shared = useShared<{ user: { login: string } | null }>();
 

@@ -85,7 +85,7 @@ export const action = defineHandler.withValidator({ body: createUserSchema })(as
 </script>
 
 <script setup lang="ts">
-import { useForm, useShared, Link } from "@void-x/vue";
+import { useForm, useShared, Link } from "@void/vue";
 
 interface User {
   id: number;
@@ -242,7 +242,7 @@ pages/
 
 ```tsx
 // pages/users/index.tsx
-import { useForm, useShared, Link } from "@void-x/react";
+import { useForm, useShared, Link } from "@void/react";
 
 export default function UsersPage({ users }: { users: User[] }) {
   const { auth } = useShared();
@@ -292,7 +292,7 @@ pages/
 ```vue
 <!-- pages/layout.vue -->
 <script setup>
-import { useShared, Link } from "@void-x/vue";
+import { useShared, Link } from "@void/vue";
 const { auth } = useShared();
 </script>
 
@@ -337,7 +337,7 @@ Client-side access via `useShared()`:
 
 ```vue
 <script setup>
-import { useShared } from "@void-x/vue";
+import { useShared } from "@void/vue";
 const { auth, flash } = useShared();
 </script>
 ```
@@ -397,7 +397,7 @@ Framework-agnostic. Handles:
 - Layout tree resolution from directory structure
 - Page object serialization
 
-### Framework Adapter (separate package, e.g. `@void-x/vue`)
+### Framework Adapter (separate package, e.g. `@void/vue`)
 
 Each adapter is a Vite plugin + runtime library. The adapter:
 
@@ -415,7 +415,7 @@ Each adapter is a Vite plugin + runtime library. The adapter:
 The Vue adapter's Vite plugin must extract `<script server>` **before** the framework plugin compiles the SFC:
 
 ```ts
-// @void-x/vue/plugin internals
+// @void/vue/plugin internals
 import vue from "@vitejs/plugin-vue";
 
 export function voidVue(options?) {
@@ -432,7 +432,7 @@ export function voidVue(options?) {
 React has no SFC custom blocks, so no `scriptServerPlugin` is needed. Only companion `.server.ts` files are supported:
 
 ```ts
-// @void-x/react/plugin internals
+// @void/react/plugin internals
 import react from "@vitejs/plugin-react";
 
 export function voidReact(options?) {
@@ -449,7 +449,7 @@ export function voidReact(options?) {
 // vite.config.ts
 import { defineConfig } from "vite";
 import { voidPlugin } from "void";
-import { voidVue } from "@void-x/vue/plugin";
+import { voidVue } from "@void/vue/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), ...voidVue()],

@@ -159,7 +159,7 @@ Void is split across two codebases in this repo:
 | User-facing dashboard                                                     | `packages/dashboard/pages/*`, `packages/dashboard/middleware/01.auth.ts`, `packages/dashboard/lib/api.ts`                                         |
 | Shared internal styling                                                   | `packages/ui/src/base.css`, `packages/ui/src/theme.css`                                                                                           |
 
-The dashboard depends on `void` and `@void-x/vue`, resolved via `pnpm.overrides` to `link:framework/...` (the git submodule). CI checks out the submodule and builds it before `pnpm install`.
+The dashboard depends on `void` and `@void/vue`, resolved via `pnpm.overrides` to `link:framework/...` (the git submodule). CI checks out the submodule and builds it before `pnpm install`.
 
 ## Framework Repo Overview
 

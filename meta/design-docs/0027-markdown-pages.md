@@ -1,4 +1,4 @@
-# Markdown Pages (`@void-x/md`)
+# Markdown Pages (`@void/md`)
 
 **Date:** 2026-02-25
 **Status:** Design
@@ -7,7 +7,7 @@
 
 ## Summary
 
-Add `.md` files as first-class pages in Void's file-based routing via a new `@void-x/md` package. Markdown pages compile to static HTML at build time, integrate with the existing layout chain, and can embed interactive framework components as islands. Ships a minimal default theme (prose typography, code highlighting, admonitions) and VitePress-equivalent markdown features.
+Add `.md` files as first-class pages in Void's file-based routing via a new `@void/md` package. Markdown pages compile to static HTML at build time, integrate with the existing layout chain, and can embed interactive framework components as islands. Ships a minimal default theme (prose typography, code highlighting, admonitions) and VitePress-equivalent markdown features.
 
 The package is opt-in — users who don't install it pay nothing.
 
@@ -20,8 +20,8 @@ The package is opt-in — users who don't install it pay nothing.
 ```ts
 // vite.config.ts
 import { voidPlugin } from "void";
-import { voidVue } from "@void-x/vue";
-import { voidMarkdown } from "@void-x/md";
+import { voidVue } from "@void/vue/plugin";
+import { voidMarkdown } from "@void/md/plugin";
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue(), voidMarkdown()],
@@ -77,7 +77,7 @@ And a playground that hydrates when idle:
 ### Frontmatter access
 
 ```ts
-import { useFrontmatter } from "void/md";
+import { useFrontmatter } from "@void/md";
 
 const fm = useFrontmatter();
 // fm.title, fm.description, etc.
@@ -88,7 +88,7 @@ Returns the current page's parsed frontmatter object. Used by layout components 
 ### Pages virtual module
 
 ```ts
-import pages from "void/md/pages";
+import pages from "@void/md/pages";
 // [{ path: "/docs/getting-started", title: "Getting Started", frontmatter: {...}, headings: [...] }, ...]
 ```
 
@@ -99,9 +99,9 @@ Generated at build time by scanning all `.md` pages. Provides path, title (from 
 ```vue
 <!-- pages/docs/layout.island.vue -->
 <script setup>
-import { useFrontmatter } from "void/md";
-import pages from "void/md/pages";
-import { useRouter } from "void/vue";
+import { useFrontmatter } from "@void/md";
+import pages from "@void/md/pages";
+import { useRouter } from "@void/vue";
 
 const fm = useFrontmatter();
 const { path } = useRouter();
@@ -109,7 +109,7 @@ const docPages = pages.filter((p) => p.path.startsWith("/docs/"));
 </script>
 
 <style>
-@import "@void-x/md/theme";
+@import "@void/md/theme.css";
 </style>
 
 <template>
@@ -139,7 +139,7 @@ const docPages = pages.filter((p) => p.path.startsWith("/docs/"));
 The `.void-md` scoping class keeps styles from bleeding into non-markdown pages. Import the theme stylesheet:
 
 ```css
-@import "@void-x/md/theme";
+@import "@void/md/theme.css";
 ```
 
 The `.void-md` scoping class keeps styles from bleeding into non-markdown pages. The theme covers:
@@ -207,12 +207,12 @@ The code block copy button is the only feature requiring client JS — a small i
 
 ## Architecture
 
-### Package: `@void-x/md`
+### Package: `@void/md`
 
 ```
 packages/md/
   src/
-    index.ts              # voidMarkdown() plugin entry
+    plugin.ts             # voidMarkdown() plugin entry
     compile.ts            # markdown-exit pipeline (init, compile)
     extract-script.ts     # <script> block extraction + island import parsing
     extract-frontmatter.ts # frontmatter parsing
@@ -233,7 +233,7 @@ packages/md/
       containers.css
     runtime/
       frontmatter.ts      # useFrontmatter() — framework-agnostic context read
-      pages.ts            # virtual module: void/md/pages — all md pages metadata
+      pages.ts            # virtual module: @void/md/pages — all md pages metadata
   package.json
 ```
 
@@ -247,7 +247,7 @@ packages/md/
   → emit framework-specific component
 ```
 
-The Vite plugin detects which framework adapter is active (`@void-x/vue`, `@void-x/react`, `@void-x/svelte`, `@void-x/solid`) and emits the component in the corresponding format:
+The Vite plugin detects which framework adapter is active (`@void/vue`, `@void/react`, `@void/svelte`, `@void/solid`) and emits the component in the corresponding format:
 
 - **Vue**: virtual SFC — `<template><div v-html="..." /></template>` + frontmatter injection via `provide()`
 - **React**: virtual component — `export default () => <div dangerouslySetInnerHTML={{__html}} />` + frontmatter via context
@@ -274,9 +274,9 @@ Implemented per-framework using each adapter's context mechanism:
 - **Svelte**: Svelte context (`setContext` / `getContext`)
 - **Solid**: Solid context (`createContext` / `useContext`)
 
-The generated page component provides the frontmatter; layout components consume it via `useFrontmatter()`. Exported from `void/md` (resolved to `@void-x/md/runtime`).
+The generated page component provides the frontmatter; layout components consume it via `useFrontmatter()`. Exported from `@void/md` and resolved by the markdown plugin at build time.
 
-### `void/md/pages` virtual module
+### `@void/md/pages` virtual module
 
 Generated at build time by scanning all `.md` files in `pages/`. Each entry contains:
 
@@ -289,7 +289,7 @@ interface MdPage {
 }
 ```
 
-Flat array, sorted by path. Users filter/sort/group as needed for sidebars and nav. The plugin resolves `void/md/pages` to a virtual module that exports this array. Updates on HMR in dev when `.md` files are added, removed, or their frontmatter changes.
+Flat array, sorted by path. Users filter/sort/group as needed for sidebars and nav. The plugin resolves `@void/md/pages` to a virtual module that exports this array. Updates on HMR in dev when `.md` files are added, removed, or their frontmatter changes.
 
 ### Dependencies
 
@@ -305,7 +305,7 @@ Flat array, sorted by path. Users filter/sort/group as needed for sidebars and n
 | `markdown-it-emoji`     | Emoji shortcodes                                                           |
 | `markdown-it-container` | Container syntax `:::type`                                                 |
 
-All dependencies stay in `@void-x/md`. Users who don't install the package pay zero cost.
+All dependencies stay in `@void/md`. Users who don't install the package pay zero cost.
 
 ---
 
@@ -322,7 +322,7 @@ Markdown pages with embedded islands still auto-prerender — islands hydrate cl
 
 ## Future extensions
 
-- **VitePress theme compatibility** — VitePress themes are Vue components. With `@void-x/vue` handling Vue SSR + islands, a VitePress theme could work as a Void layout with minimal adaptation. Maintained in a separate repo.
+- **VitePress theme compatibility** — VitePress themes are Vue components. With `@void/vue` handling Vue SSR + islands, a VitePress theme could work as a Void layout with minimal adaptation. Maintained in a separate repo.
 - **Content collections** — typed, schema-validated content queries for sites that need to list/filter/paginate content programmatically. Separate feature, opt-in.
 - **Math support** — LaTeX via MathJax/KaTeX, opt-in (following VitePress pattern).
 - **CJK emphasis fix** — `markdown-it-cjk-friendly` for CJK text emphasis handling.

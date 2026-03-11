@@ -20,7 +20,7 @@ Cloudflare's native `IMAGES` binding makes this cheap to implement — no extern
 ### Layers
 
 1. **`void/image`** — shared utilities in the base `void` package (URL construction, config types, validation)
-2. **Framework adapter components** — `<Image>` in each adapter (`@void-x/vue`, `@void-x/react`, `@void-x/svelte`, `@void-x/solid`), imported via `void/vue`, `void/react`, etc.
+2. **Framework adapter components** — `<Image>` in each adapter (`@void/vue`, `@void/react`, `@void/svelte`, `@void/solid`), imported via `@void/vue`, `@void/react`, etc.
 3. **`/_void/image` endpoint** — injected into the worker entry as middleware (before user routes)
 4. **Binding auto-detection** — `needsImages` flag in inference, provisions `IMAGES` binding
 5. **Vite plugin** — `void:image-imports` extracts width/height from static image imports
@@ -116,7 +116,7 @@ X-Content-Type-Options: nosniff
 
 Follows the existing `void/ai` pattern:
 
-**Tier 1 (import detection):** `import { Image } from "void/vue"` where the component is used → `needsImages = true`
+**Tier 1 (import detection):** `import { Image } from "@void/vue"` where the component is used → `needsImages = true`
 
 **Tier 2 (regex):** `/\benv\s*\.\s*IMAGES\b/`
 
@@ -157,12 +157,12 @@ All fields optional — sensible defaults if omitted. Config injected at build t
 
 Each adapter exports `Image` from its runtime module:
 
-- `@void-x/vue` → `<Image>` Vue component (SFC or render function)
-- `@void-x/react` → `Image` React component
-- `@void-x/svelte` → `<Image>` Svelte component
-- `@void-x/solid` → `Image` Solid component
+- `@void/vue` → `<Image>` Vue component (SFC or render function)
+- `@void/react` → `Image` React component
+- `@void/svelte` → `<Image>` Svelte component
+- `@void/solid` → `Image` Solid component
 
-All import shared utilities from `void/image` (URL construction, config, validation). Users import via their framework module: `import { Image } from "void/vue"`.
+All import shared utilities from `void/image` (URL construction, config, validation). Users import via their framework module: `import { Image } from "@void/vue"`.
 
 ## Open Questions
 

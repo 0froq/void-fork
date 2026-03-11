@@ -19,7 +19,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
     "@tailwindcss/vite": "^4.2.0",
-    "@void-x/vue": "^0.0.1",
+    "@void/vue": "^0.0.1",
     "@voidcloud/api": "workspace:*",
     "@voidcloud/ui": "workspace:*",
     "tailwindcss": "^4.2.0",

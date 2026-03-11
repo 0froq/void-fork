@@ -47,7 +47,7 @@
     ],
     "overrides": {
       "void": "link:framework/packages/void",
-      "@void-x/vue": "link:framework/packages/vue"
+      "@void/vue": "link:framework/packages/vue"
     }
   }
 }

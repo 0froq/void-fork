@@ -219,7 +219,7 @@ Theme authors ship a typed composable:
 
 ```ts
 // composables/useThemeConfig.ts
-import { inject } from "void/vue";
+import { inject } from "@void/vue";
 
 interface DocsThemeConfig {
   logo?: string;
@@ -309,12 +309,12 @@ Example:
 
 At app creation, the framework reads `theme.options` from the resolved config and provides it via the active adapter's context mechanism:
 
-| Adapter          | Mechanism                                        |
-| ---------------- | ------------------------------------------------ |
-| `@void-x/vue`    | `app.provide("void-theme-options", options)`     |
-| `@void-x/react`  | `<ThemeOptionsContext.Provider value={options}>` |
-| `@void-x/svelte` | `setContext("void-theme-options", options)`      |
-| `@void-x/solid`  | `<ThemeOptionsContext.Provider value={options}>` |
+| Adapter        | Mechanism                                        |
+| -------------- | ------------------------------------------------ |
+| `@void/vue`    | `app.provide("void-theme-options", options)`     |
+| `@void/react`  | `<ThemeOptionsContext.Provider value={options}>` |
+| `@void/svelte` | `setContext("void-theme-options", options)`      |
+| `@void/solid`  | `<ThemeOptionsContext.Provider value={options}>` |
 
 ### CSS auto-import
 
@@ -336,18 +336,18 @@ The framework resolves the theme package from `void.json`:
 
 ### Adapter validation errors
 
-The framework detects the active adapter by checking which `@void-x/*` plugin is present in the Vite config. If the theme's `adapter` field doesn't match:
+The framework detects the active adapter by checking which `@void/*` plugin is present in the Vite config. If the theme's `adapter` field doesn't match:
 
 ```
-Error: Theme "void-theme-docs" requires the "vue" adapter (@void-x/vue),
-but the active adapter is "react" (@void-x/react).
+Error: Theme "void-theme-docs" requires the "vue" adapter (@void/vue),
+but the active adapter is "react" (@void/react).
 ```
 
 If no adapter is detected:
 
 ```
-Error: Theme "void-theme-docs" requires the "vue" adapter (@void-x/vue),
-but no framework adapter was found. Install @void-x/vue and add it to your Vite config.
+Error: Theme "void-theme-docs" requires the "vue" adapter (@void/vue),
+but no framework adapter was found. Install @void/vue and add it to your Vite config.
 ```
 
 ---

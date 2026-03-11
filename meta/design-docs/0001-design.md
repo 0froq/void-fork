@@ -298,7 +298,7 @@ Key traits:
 - typed forms and action helpers
 - SSR on first load, lightweight client navigation after that
 
-The adapters in `@void-x/{vue,react,svelte,solid}` provide the framework-specific client/runtime layer.
+The adapters in `@void/{vue,react,svelte,solid}` provide the framework-specific client/runtime layer.
 
 ### Conventions Over Config
 
