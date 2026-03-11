@@ -18,11 +18,10 @@ cd my-app
 ### 2. Install dependencies
 
 ```bash
-npm install -D void
-npx nuxi module add nitro-cloudflare-dev
+npm install -D void wrangler
 ```
 
-The `nitro-cloudflare-dev` module enables `getPlatformProxy()` for local dev, giving you access to Cloudflare bindings during `nuxt dev`.
+The `wrangler` dependency is needed by Nuxt to create Cloudflare platform proxy during dev.
 
 ### 3. Configure `nuxt.config.ts`
 
@@ -39,7 +38,6 @@ export default defineNuxtConfig({
       "@schema": resolve(__dirname, "db/schema.ts"),
     },
   },
-  modules: ["nitro-cloudflare-dev"],
   vite: { plugins: [voidPlugin()] },
 });
 ```

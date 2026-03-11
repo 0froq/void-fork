@@ -11,7 +11,6 @@ export default defineNuxtConfig({
       "@schema": resolve(__dirname, "db/schema.ts"),
     },
   },
-  modules: ["nitro-cloudflare-dev"],
   vite: {
     plugins: [voidPlugin() as any],
   },
