@@ -8,7 +8,7 @@ outline: deep
 
 ::: warning Astro 6 required
 
-- [Astro 6+](https://astro.build/blog/astro-6-beta/) is required to use `import { x } from "void/x"` helpers in Astro apps.
+- [Astro 6+](https://astro.build/blog/astro-6/) is required to use `import { x } from "void/x"` helpers in Astro apps.
 - You also need to enable `"nodejs_als"` under `compatibility_flags` in your wrangler config.
   :::
 
@@ -24,7 +24,7 @@ cd my-app
 ### 2. Install dependencies
 
 ```bash
-npm install -D astro@^6 @astrojs/cloudflare@^13 void
+npm install -D @astrojs/cloudflare void
 ```
 
 ### 3. Configure `astro.config.mjs`

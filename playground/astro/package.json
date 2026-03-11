@@ -7,8 +7,8 @@
     "build": "astro build"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "beta",
-    "astro": "beta"
+    "@astrojs/cloudflare": "^13.0.0",
+    "astro": "^6.0.0"
   },
   "devDependencies": {
     "@typescript/native-preview": "catalog:",
