@@ -12,7 +12,8 @@
     "./auth/github": "./src/auth/github.ts",
     "./auth/google": "./src/auth/google.ts",
     "./usage": "./src/routes/usage.ts",
-    "./api": "./src/api.ts"
+    "./api": "./src/api.ts",
+    "./env": "./src/env.ts"
   },
   "scripts": {
     "dev": "wrangler dev",

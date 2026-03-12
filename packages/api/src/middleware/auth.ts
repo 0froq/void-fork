@@ -1,10 +1,10 @@
 import type { MiddlewareHandler } from "hono";
-import type { ApiEnv } from "../env";
+import { type ApiEnv, isDevBypass } from "../env";
 import { verifyJwt } from "../auth/jwt";
 import { users } from "../schema";
 
 export const authMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) => {
-  if (c.env.DEV_AUTH_BYPASS) {
+  if (isDevBypass(c.env)) {
     const first = await c
       .get("db")
       .select({ id: users.id, login: users.login })

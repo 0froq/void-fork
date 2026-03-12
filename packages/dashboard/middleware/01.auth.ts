@@ -2,6 +2,7 @@ import { defineMiddleware } from "void";
 import { deleteCookie, getCookie } from "hono/cookie";
 import { createDb, type Db } from "@voidcloud/api/db";
 import { authenticateDashboardToken } from "@voidcloud/api/auth/dashboard";
+import { isDevBypass } from "@voidcloud/api/env";
 
 declare module "void" {
   interface CloudContextVariables {
@@ -21,8 +22,7 @@ export default defineMiddleware(async (c, next) => {
   c.set("db", createDb(connectionString));
 
   // Dev bypass — skip auth entirely, platform also bypasses when DEV_AUTH_BYPASS is set
-  const devBypass = (c.env as Record<string, string>).DEV_AUTH_BYPASS;
-  if (devBypass) {
+  if (isDevBypass(c.env as Record<string, string>)) {
     c.set("token", "dev-bypass");
     c.set("userId", "user_seed1");
     c.set("shared", { user: { login: "dev" } });

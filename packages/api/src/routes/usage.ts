@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { ApiEnv } from "../env";
+import { type ApiEnv, isDevBypass } from "../env";
 import { getProject, getProjectsByUserId, getUser } from "../db";
 import { getCurrentBillingPeriodStart } from "../tiers";
 
@@ -17,7 +17,7 @@ const projectUsage = new Hono<ApiEnv>()
     }
 
     // Dev bypass — skip slow CF Analytics Engine API calls
-    if (c.env.DEV_AUTH_BYPASS) {
+    if (isDevBypass(c.env)) {
       return c.json({
         projectId,
         billingPeriodStart: new Date().toISOString(),
@@ -52,7 +52,7 @@ const accountUsage = new Hono<ApiEnv>()
     }
 
     // Dev bypass — skip slow CF Analytics Engine API calls
-    if (c.env.DEV_AUTH_BYPASS) {
+    if (isDevBypass(c.env)) {
       return c.json({
         billingPeriodStart: new Date().toISOString(),
         requests: 0,

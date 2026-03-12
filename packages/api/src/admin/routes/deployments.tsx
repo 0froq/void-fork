@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { ApiEnv } from "../../env";
+import { type ApiEnv, isDevBypass } from "../../env";
 import {
   getAllDeploymentsWithProject,
   countDeployments,
@@ -213,7 +213,7 @@ app.get("/:id/logs", async (c) => {
     return c.json({ error: "project not found" }, 404);
   }
 
-  if (c.env.DEV_AUTH_BYPASS) {
+  if (isDevBypass(c.env)) {
     return c.json({ data: mockLogData() });
   }
 

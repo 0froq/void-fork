@@ -1,11 +1,11 @@
 import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
-import type { ApiEnv } from "../../env";
+import { type ApiEnv, isDevBypass } from "../../env";
 import { verifyJwt } from "../../auth/jwt";
 import { getUser, getFirstAdmin } from "../../db";
 
 export const adminAuthMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) => {
-  if (c.env.DEV_AUTH_BYPASS) {
+  if (isDevBypass(c.env)) {
     const admin = await getFirstAdmin(c.get("db"));
     if (admin) {
       c.set("userId", admin.id);

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Handler } from "hono";
 import { sql } from "drizzle-orm";
-import type { ApiEnv } from "../../env";
+import { type ApiEnv, isDevBypass } from "../../env";
 import type { Db } from "../../db";
 import { getSystemStats, getAllProjectsWithOwner, getAllDeploymentsWithProject } from "../../db";
 import { DashboardPage } from "../views/dashboard";
@@ -73,7 +73,7 @@ function mockHealthResult(): HealthResult {
 export const adminSystem = new Hono<ApiEnv>();
 
 adminSystem.get("/health", async (c) => {
-  if (c.env.DEV_AUTH_BYPASS) {
+  if (isDevBypass(c.env)) {
     return c.json(mockHealthResult());
   }
 

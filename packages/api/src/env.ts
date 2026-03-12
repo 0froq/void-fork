@@ -1,6 +1,17 @@
 import type { Env } from "hono";
 import type { Db } from "./db";
 
+/**
+ * Returns true when DEV_AUTH_BYPASS is set and we are NOT in production.
+ * Defaults to production for unknown PLATFORM_ENV values — only unset
+ * (local dev) and "staging" are treated as non-production.
+ */
+export function isDevBypass(env: { DEV_AUTH_BYPASS?: string; PLATFORM_ENV?: string }): boolean {
+  if (!env.DEV_AUTH_BYPASS) return false;
+  const pe = env.PLATFORM_ENV;
+  return pe === undefined || pe === "" || pe === "staging";
+}
+
 export interface ApiEnv extends Env {
   Bindings: {
     HYPERDRIVE: Hyperdrive;
