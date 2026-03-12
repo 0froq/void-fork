@@ -626,6 +626,14 @@ app.post("/:id/deploy", async (c) => {
           throw new Error(`reserved binding names: ${reserved.join(", ")}`);
         }
 
+        const secretNames = new Set(secretBindings.map((s) => s.name));
+        const collisions = userVarNames.filter((n) => secretNames.has(n));
+        if (collisions.length > 0) {
+          console.warn(
+            `[deploy] manifest vars collide with project secrets (secrets win): ${collisions.join(", ")}`,
+          );
+        }
+
         const plainTextBindings = Object.entries(manifest.vars ?? {}).map(([name, text]) => ({
           type: "plain_text" as const,
           name,
