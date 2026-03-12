@@ -6,7 +6,11 @@ import {
   listProjectSecretNames,
   upsertProjectSecret,
 } from "../db";
-import { DEFAULT_DISPATCH_NAMESPACE } from "../constants";
+import {
+  DEFAULT_DISPATCH_NAMESPACE,
+  MAX_SECRET_NAME_LENGTH,
+  MAX_SECRET_VALUE_BYTES,
+} from "../constants";
 import {
   deleteWorkerSecret,
   encryptProjectSecret,
@@ -39,6 +43,9 @@ const app = new Hono<ApiEnv>()
     if (!isValidSecretName(secretName)) {
       return c.json({ error: "invalid secret name" }, 400);
     }
+    if (secretName.length > MAX_SECRET_NAME_LENGTH) {
+      return c.json({ error: "secret name too long" }, 400);
+    }
 
     const project = await getProject(c.get("db"), projectId);
     if (!project) {
@@ -56,6 +63,9 @@ const app = new Hono<ApiEnv>()
     }
     if (typeof body.value !== "string" || body.value.length === 0) {
       return c.json({ error: "value is required" }, 400);
+    }
+    if (new TextEncoder().encode(body.value).byteLength > MAX_SECRET_VALUE_BYTES) {
+      return c.json({ error: "secret value too large" }, 400);
     }
 
     const encrypted = await encryptProjectSecret(c.env, projectId, secretName, body.value);
