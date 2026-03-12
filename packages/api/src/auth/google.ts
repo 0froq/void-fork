@@ -2,6 +2,7 @@ export interface GoogleUser {
   id: string;
   email: string;
   name: string;
+  emailVerified: boolean;
 }
 
 export function getGoogleAuthorizeUrl(
@@ -62,6 +63,11 @@ export async function getGoogleUser(accessToken: string): Promise<GoogleUser> {
     throw new Error(`Google user fetch failed: ${res.status}`);
   }
 
-  const data = (await res.json()) as { id: string; email: string; name: string };
-  return { id: data.id, email: data.email, name: data.name };
+  const data = (await res.json()) as {
+    id: string;
+    email: string;
+    name: string;
+    verified_email: boolean;
+  };
+  return { id: data.id, email: data.email, name: data.name, emailVerified: data.verified_email };
 }

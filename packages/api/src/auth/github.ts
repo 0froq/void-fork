@@ -2,6 +2,7 @@ export interface GitHubUser {
   id: number;
   login: string;
   email: string | null;
+  emailVerified: boolean;
 }
 
 export function getGitHubAuthorizeUrl(
@@ -73,13 +74,19 @@ export async function getGitHubUser(accessToken: string): Promise<GitHubUser> {
   const user = (await userRes.json()) as { id: number; login: string; email: string | null };
 
   let email = user.email;
-  if (!email && emailsRes.ok) {
-    const emails = (await emailsRes.json()) as { email: string; primary: boolean }[];
+  let emailVerified = false;
+  if (emailsRes.ok) {
+    const emails = (await emailsRes.json()) as {
+      email: string;
+      primary: boolean;
+      verified: boolean;
+    }[];
     const primary = emails.find((e) => e.primary);
     if (primary) {
       email = primary.email;
+      emailVerified = primary.verified;
     }
   }
 
-  return { id: user.id, login: user.login, email };
+  return { id: user.id, login: user.login, email, emailVerified };
 }

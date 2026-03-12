@@ -117,6 +117,7 @@ app.get("/callback", async (c) => {
   let providerId: string;
   let login: string;
   let email: string | null;
+  let emailVerified: boolean;
 
   if (resolvedProvider === "google") {
     const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
@@ -130,6 +131,7 @@ app.get("/callback", async (c) => {
     providerId = googleUser.id;
     login = googleUser.email;
     email = googleUser.email;
+    emailVerified = googleUser.emailVerified;
   } else {
     const ghToken = await exchangeCodeForToken(
       c.env.GITHUB_CLIENT_ID,
@@ -140,6 +142,7 @@ app.get("/callback", async (c) => {
     providerId = String(ghUser.id);
     login = ghUser.login;
     email = ghUser.email;
+    emailVerified = ghUser.emailVerified;
   }
 
   // Upsert user — check oauth_accounts first, then email, then create
@@ -149,9 +152,15 @@ app.get("/callback", async (c) => {
     // Only update login/email when the provider matches the user's primary provider
     // (avoids overwriting GitHub username with Google email)
     if (user.provider === resolvedProvider) {
-      await updateUser(db, user.id, login, email);
+      // Only overwrite stored email when the new one is verified;
+      // a transient /user/emails failure must not wipe the existing email.
+      if (emailVerified) {
+        await updateUser(db, user.id, login, email);
+      } else {
+        await updateUser(db, user.id, login, user.email);
+      }
     }
-  } else if (email) {
+  } else if (email && emailVerified) {
     // Link new provider to existing account with the same email
     const existing = await getUserByEmail(db, email);
     if (existing) {
@@ -166,11 +175,11 @@ app.get("/callback", async (c) => {
     if (enabled === "true") {
       const raw = await c.env.ROUTING.get("signup:allowlist");
       const entries: AllowlistEntry[] = raw ? JSON.parse(raw) : [];
-      if (!isSignupAllowed(resolvedProvider, login, email, entries)) {
+      if (!isSignupAllowed(resolvedProvider, login, emailVerified ? email : null, entries)) {
         return c.redirect("/signup-restricted");
       }
     }
-    user = await createUser(db, resolvedProvider, providerId, login, email);
+    user = await createUser(db, resolvedProvider, providerId, login, emailVerified ? email : null);
     await createOAuthAccount(db, user.id, resolvedProvider, providerId);
   }
 
