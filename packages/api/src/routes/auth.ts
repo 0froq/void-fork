@@ -14,8 +14,9 @@ import {
   createUser,
   updateUser,
   createOAuthAccount,
+  acceptInvitationByEmail,
 } from "../db";
-import { isSignupAllowed, type AllowlistEntry } from "../signup-allowlist";
+import { isSignupAllowed, getAllowlist } from "../signup-allowlist";
 
 const DEFAULT_REDIRECT_URI = "https://api.void.cloud/auth/callback";
 
@@ -173,14 +174,30 @@ app.get("/callback", async (c) => {
     // Check signup allowlist (new users only)
     const enabled = await c.env.ROUTING.get("signup:enabled");
     if (enabled === "true") {
-      const raw = await c.env.ROUTING.get("signup:allowlist");
-      const entries: AllowlistEntry[] = raw ? JSON.parse(raw) : [];
+      const entries = await getAllowlist(c.env.ROUTING);
       if (!isSignupAllowed(resolvedProvider, login, emailVerified ? email : null, entries)) {
         return c.redirect("/signup-restricted");
       }
     }
-    user = await createUser(db, resolvedProvider, providerId, login, emailVerified ? email : null);
-    await createOAuthAccount(db, user.id, resolvedProvider, providerId);
+    user = await db.transaction(async (tx) => {
+      const txDb = tx as unknown as typeof db;
+      const newUser = await createUser(
+        txDb,
+        resolvedProvider,
+        providerId,
+        login,
+        emailVerified ? email : null,
+      );
+      await createOAuthAccount(txDb, newUser.id, resolvedProvider, providerId);
+      return newUser;
+    });
+    if (emailVerified && email) {
+      try {
+        await acceptInvitationByEmail(db, email, user.id);
+      } catch (err) {
+        console.error(`Failed to accept invitation for ${email} (user ${user.id}):`, err);
+      }
+    }
   }
 
   // Sign JWT

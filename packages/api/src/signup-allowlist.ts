@@ -4,6 +4,17 @@ export type AllowlistEntry = {
   note?: string;
 };
 
+const KV_KEY = "signup:allowlist";
+
+export async function getAllowlist(kv: KVNamespace): Promise<AllowlistEntry[]> {
+  const raw = await kv.get(KV_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+export async function putAllowlist(kv: KVNamespace, entries: AllowlistEntry[]): Promise<void> {
+  await kv.put(KV_KEY, JSON.stringify(entries));
+}
+
 /**
  * Check if a signup should be allowed based on the allowlist.
  * If entries is empty, all signups are allowed.

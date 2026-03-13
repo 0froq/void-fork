@@ -17,6 +17,7 @@ import {
   projectSecrets,
   resources,
   domains,
+  invitations,
 } from "../../src/schema";
 import { signJwt } from "../../src/auth/jwt";
 import { generateId } from "../../src/id";
@@ -149,6 +150,7 @@ export async function clearTables(db: Db): Promise<void> {
   await db.delete(projectSecrets);
   await db.delete(deployments);
   await db.delete(projects);
+  await db.delete(invitations);
   await db.delete(oauthAccounts);
   await db.delete(users);
 }

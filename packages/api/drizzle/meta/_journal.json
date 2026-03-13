@@ -43,6 +43,13 @@
       "when": 1773069751817,
       "tag": "0005_legal_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1773286257384,
+      "tag": "0006_wonderful_madame_masque",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,7 @@ import {
 } from "drizzle-orm/pg-core";
 import type { PlanId } from "./tiers";
 import type { PlatformWorkerName, PlatformEnv } from "./admin/platform-workers";
+import type { InvitationStatus } from "./types";
 
 // ---------------------------------------------------------------------------
 // users
@@ -195,4 +196,25 @@ export const platformEvents = pgTable(
     index("idx_platform_events_batch_id").on(t.batch_id),
     index("idx_platform_events_env_created").on(t.environment, t.created_at),
   ],
+);
+
+// ---------------------------------------------------------------------------
+// invitations
+// ---------------------------------------------------------------------------
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    status: text("status").notNull().default("pending").$type<InvitationStatus>(),
+    invited_by: text("invited_by")
+      .notNull()
+      .references(() => users.id),
+    accepted_by: text("accepted_by").references(() => users.id),
+    revoked_at: timestamp("revoked_at", { mode: "string" }),
+    revoked_by: text("revoked_by").references(() => users.id),
+    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+    accepted_at: timestamp("accepted_at", { mode: "string" }),
+  },
+  (t) => [index("idx_invitations_email").on(t.email), index("idx_invitations_status").on(t.status)],
 );

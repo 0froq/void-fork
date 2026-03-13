@@ -22,7 +22,9 @@ import adminUsers from "./admin/routes/users";
 import adminProjects from "./admin/routes/projects";
 import adminDeployments from "./admin/routes/deployments";
 import adminSignupControl from "./admin/routes/signup-control";
+import adminInvitations from "./admin/routes/invitations";
 import adminPlatform from "./admin/routes/platform";
+import { escapeHtml } from "./email";
 import me from "./routes/me";
 import { createDb, getUsersWithProjectsBatch, unsuspendUserIfReason, type Db } from "./db";
 import { getCurrentBillingPeriodStart, getPlanLimits } from "./tiers";
@@ -47,6 +49,23 @@ const app = new Hono<ApiEnv>()
 <div class="card"><h1>Private Beta</h1><p>Sorry, we are still in private beta and your login is not currently in the allowed list. Check back later!</p></div>
 </body></html>`),
   )
+  .get("/invite", (c) => {
+    const dashboardUrl = c.env.DASHBOARD_URL ?? "https://dash.void.cloud";
+    const loginUrl = escapeHtml(`${dashboardUrl}/auth/login`);
+    return c.html(`<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>You're Invited - Void</title>
+<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa}.card{text-align:center;max-width:440px;padding:40px}h1{font-size:1.5rem;margin-bottom:12px}p{color:#666;line-height:1.6;margin-bottom:20px}.btn{display:inline-block;background:#000;color:#fff;padding:12px 32px;text-decoration:none;border-radius:4px;font-weight:500;font-size:1rem}</style>
+</head><body>
+<div class="card">
+<h1>You're Invited to Void</h1>
+<p>Void is the deployment platform for the Vite ecosystem. Build and deploy full-stack apps with file-based routing, database bindings, AI integration, and edge-first infrastructure.</p>
+<a href="${loginUrl}" class="btn">Get Started</a>
+</div>
+</body></html>`);
+  })
   .route("/auth", auth)
   .route("/internal/revalidate", internalRevalidate)
   .route("/internal/resolve-resource", internalResolveResource)
@@ -72,6 +91,7 @@ app.route("/admin/users", adminUsers);
 app.route("/admin/projects", adminProjects);
 app.route("/admin/deployments", adminDeployments);
 app.route("/admin/signup-control", adminSignupControl);
+app.route("/admin/invitations", adminInvitations);
 app.route("/admin/platform", adminPlatform);
 app.route("/admin", adminSystem);
 

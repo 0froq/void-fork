@@ -74,6 +74,7 @@
       },
     ],
   },
+  "send_email": [{ "name": "EMAIL" }],
   "triggers": {
     "crons": ["0 * * * *"],
   },

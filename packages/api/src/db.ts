@@ -13,6 +13,7 @@ import {
   getTableColumns,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
+import { alias } from "drizzle-orm/pg-core";
 import * as schema from "./schema";
 import {
   users,
@@ -23,12 +24,14 @@ import {
   resources,
   domains,
   platformEvents,
+  invitations,
 } from "./schema";
 import { generateId } from "./id";
 import type { PlanId } from "./tiers";
 import type {
   Deployment,
   Domain,
+  Invitation,
   OAuthAccount,
   PlatformEvent,
   ProjectSecret,
@@ -73,7 +76,11 @@ export async function getUserByProvider(
 }
 
 export async function getUserByEmail(db: Db, email: string): Promise<User | null> {
-  const [row] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  const [row] = await db
+    .select()
+    .from(users)
+    .where(sql`lower(${users.email}) = lower(${email})`)
+    .limit(1);
   return row ?? null;
 }
 
@@ -853,4 +860,82 @@ export async function getRecentPlatformEvents(
     .where(eq(platformEvents.environment, environment))
     .orderBy(desc(platformEvents.created_at))
     .limit(limit);
+}
+
+// --- Invitations ---
+
+export async function createInvitation(
+  db: Db,
+  email: string,
+  invitedBy: string,
+): Promise<Invitation> {
+  const id = generateId("inv");
+  const [row] = await db
+    .insert(invitations)
+    .values({ id, email: email.toLowerCase(), invited_by: invitedBy })
+    .returning();
+  return row;
+}
+
+export async function revokeInvitation(db: Db, id: string, revokedBy: string): Promise<boolean> {
+  const rows = await db
+    .update(invitations)
+    .set({ status: "revoked", revoked_at: sql`now()`, revoked_by: revokedBy })
+    .where(and(eq(invitations.id, id), eq(invitations.status, "pending")))
+    .returning({ id: invitations.id });
+  return rows.length > 0;
+}
+
+export async function acceptInvitationByEmail(
+  db: Db,
+  email: string,
+  userId: string,
+): Promise<void> {
+  await db
+    .update(invitations)
+    .set({ status: "accepted", accepted_by: userId, accepted_at: sql`now()` })
+    .where(and(eq(invitations.email, email.toLowerCase()), eq(invitations.status, "pending")));
+}
+
+export async function getAllInvitations(
+  db: Db,
+  limit: number,
+  offset: number,
+): Promise<(Invitation & { invited_by_login: string | null; revoked_by_login: string | null })[]> {
+  const invitedByUser = alias(users, "invited_by_user");
+  const revokedByUser = alias(users, "revoked_by_user");
+  return db
+    .select({
+      ...getTableColumns(invitations),
+      invited_by_login: invitedByUser.login,
+      revoked_by_login: revokedByUser.login,
+    })
+    .from(invitations)
+    .leftJoin(invitedByUser, eq(invitations.invited_by, invitedByUser.id))
+    .leftJoin(revokedByUser, eq(invitations.revoked_by, revokedByUser.id))
+    .orderBy(desc(invitations.created_at))
+    .limit(limit)
+    .offset(offset);
+}
+
+export async function countInvitations(db: Db): Promise<number> {
+  const [result] = await db.select({ count: count() }).from(invitations);
+  return result?.count ?? 0;
+}
+
+export async function getInvitation(db: Db, id: string): Promise<Invitation | null> {
+  const [row] = await db.select().from(invitations).where(eq(invitations.id, id)).limit(1);
+  return row ?? null;
+}
+
+export async function getPendingInvitationByEmail(
+  db: Db,
+  email: string,
+): Promise<Invitation | null> {
+  const [row] = await db
+    .select()
+    .from(invitations)
+    .where(and(eq(invitations.email, email.toLowerCase()), eq(invitations.status, "pending")))
+    .limit(1);
+  return row ?? null;
 }

@@ -42,6 +42,7 @@ export interface ApiEnv extends Env {
     PLATFORM_ENV?: string;
     PROJECT_SECRET_KEYS_JSON: string;
     PROJECT_SECRET_ACTIVE_KEY_VERSION: string;
+    EMAIL?: SendEmail;
   };
   Variables: {
     userId: string;

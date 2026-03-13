@@ -1,19 +1,14 @@
 import { Hono } from "hono";
 import type { ApiEnv } from "../../env";
-import type { AllowlistEntry } from "../../signup-allowlist";
+import { getAllowlist, putAllowlist } from "../../signup-allowlist";
 import { SignupControlPage } from "../views/signup-control";
 
 const app = new Hono<ApiEnv>();
 
-async function getEntries(kv: KVNamespace): Promise<AllowlistEntry[]> {
-  const raw = await kv.get("signup:allowlist");
-  return raw ? JSON.parse(raw) : [];
-}
-
 // GET /signup-control
 app.get("/", async (c) => {
   const enabled = (await c.env.ROUTING.get("signup:enabled")) === "true";
-  const entries = await getEntries(c.env.ROUTING);
+  const entries = await getAllowlist(c.env.ROUTING);
   return c.html(
     <SignupControlPage enabled={enabled} entries={entries} username={c.get("userLogin")} />,
   );
@@ -37,9 +32,9 @@ app.post("/add", async (c) => {
     return c.html("<h1>Invalid entry</h1>", 400);
   }
 
-  const entries = await getEntries(c.env.ROUTING);
+  const entries = await getAllowlist(c.env.ROUTING);
   entries.push({ type: type as "github" | "email", pattern, note: note || undefined });
-  await c.env.ROUTING.put("signup:allowlist", JSON.stringify(entries));
+  await putAllowlist(c.env.ROUTING, entries);
   return c.redirect("/admin/signup-control");
 });
 
@@ -47,14 +42,14 @@ app.post("/add", async (c) => {
 app.post("/delete", async (c) => {
   const body = await c.req.parseBody();
   const index = parseInt(body.index as string, 10);
-  const entries = await getEntries(c.env.ROUTING);
+  const entries = await getAllowlist(c.env.ROUTING);
 
   if (isNaN(index) || index < 0 || index >= entries.length) {
     return c.html("<h1>Invalid index</h1>", 400);
   }
 
   entries.splice(index, 1);
-  await c.env.ROUTING.put("signup:allowlist", JSON.stringify(entries));
+  await putAllowlist(c.env.ROUTING, entries);
   return c.redirect("/admin/signup-control");
 });
 

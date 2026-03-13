@@ -8,7 +8,10 @@ import type {
   resources,
   domains,
   platformEvents,
+  invitations,
 } from "./schema";
+
+export type InvitationStatus = "pending" | "accepted" | "revoked";
 
 export type User = InferSelectModel<typeof users>;
 export type OAuthAccount = InferSelectModel<typeof oauthAccounts>;
@@ -18,6 +21,7 @@ export type ProjectSecret = InferSelectModel<typeof projectSecrets>;
 export type Resource = InferSelectModel<typeof resources>;
 export type Domain = InferSelectModel<typeof domains>;
 export type PlatformEvent = InferSelectModel<typeof platformEvents>;
+export type Invitation = InferSelectModel<typeof invitations>;
 
 export interface MigrationMeta {
   name: string;
