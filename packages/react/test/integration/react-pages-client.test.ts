@@ -474,11 +474,11 @@ describe("react-pages client (dev)", () => {
   });
 
   it("dev: SSR pages, Inertia protocol, form handling, API coexistence", async () => {
-    // 1. Initial page load returns SSR HTML with data-page attribute
+    // 1. Initial page load returns SSR HTML with embedded page data
     const rootRes = await fetch(`${DEV_BASE}/`);
     expect(rootRes.status).toBe(200);
     const rootHtml = await rootRes.text();
-    expect(rootHtml).toContain("data-page=");
+    expect(rootHtml).toContain("__VOID_PAGE_DATA__");
     expect(rootHtml).toContain("Welcome");
     expect(rootHtml).toContain("React Pages Demo"); // shared data from middleware
 
@@ -495,7 +495,7 @@ describe("react-pages client (dev)", () => {
     const usersRes = await fetch(`${DEV_BASE}/users`);
     expect(usersRes.status).toBe(200);
     const usersHtml = await usersRes.text();
-    expect(usersHtml).toContain("data-page=");
+    expect(usersHtml).toContain("__VOID_PAGE_DATA__");
     expect(usersHtml).toContain("Alice");
     expect(usersHtml).toContain("Bob");
     expect(usersHtml).toContain("React Pages Demo"); // layout with shared data
@@ -618,14 +618,14 @@ describe("react-pages client (dev)", () => {
 
     // --- Island pages ---
 
-    // 12. Island page SSR — HTML with data-island markers, NOT data-page
+    // 12. Island page SSR — HTML with data-island markers, NOT embedded page data
     const blogRes = await fetch(`${DEV_BASE}/blog`);
     expect(blogRes.status).toBe(200);
     const blogHtml = await blogRes.text();
     expect(blogHtml).toContain("data-island=");
     expect(blogHtml).toContain("data-props=");
     expect(blogHtml).toContain("data-hydrate=");
-    expect(blogHtml).not.toContain("data-page=");
+    expect(blogHtml).not.toContain("__VOID_PAGE_DATA__");
     expect(blogHtml).toContain("Hello World");
     expect(blogHtml).toContain("Second Post");
     expect(blogHtml).toContain("Count:");
@@ -667,7 +667,7 @@ describe("react-pages client (dev)", () => {
     const detailHtml = await detailRes.text();
     expect(detailHtml).toContain("Hello World");
     expect(detailHtml).toContain("First post");
-    expect(detailHtml).not.toContain("data-page=");
+    expect(detailHtml).not.toContain("__VOID_PAGE_DATA__");
 
     // --- Deferred props ---
 
@@ -690,7 +690,7 @@ describe("react-pages client (dev)", () => {
     // 18. Deferred props: SSR includes resolution script tags
     const deferredSsr = await fetch(`${DEV_BASE}/deferred`);
     const deferredHtml = await deferredSsr.text();
-    expect(deferredHtml).toContain("data-page=");
+    expect(deferredHtml).toContain("__VOID_PAGE_DATA__");
     expect(deferredHtml).toContain("Deferred Page");
     expect(deferredHtml).toContain('window.__resolveDeferred("stats"');
     expect(deferredHtml).toContain('"count":42');

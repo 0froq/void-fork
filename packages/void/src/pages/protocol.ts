@@ -218,7 +218,6 @@ export async function handlePageGet(
     return new Response(html, {
       headers: {
         "content-type": "text/html; charset=utf-8",
-        "x-void-page-data": JSON.stringify(pageObj),
         ...POWERED_BY,
       },
     });
