@@ -22,6 +22,7 @@ export type Props = {
 
 export const loader = defineHandler<Props>(async (c) => {
   const id = c.req.param("id");
+  if (!id) return c.notFound();
   const db = c.get("db");
 
   // Direct D1
@@ -66,6 +67,7 @@ export const loader = defineHandler<Props>(async (c) => {
 
 export const action = defineHandler(async (c) => {
   const id = c.req.param("id");
+  if (!id) return c.notFound();
   const form = await c.req.json<Record<string, string>>();
   const intent = form._intent;
 

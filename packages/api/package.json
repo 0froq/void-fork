@@ -28,7 +28,7 @@
   "dependencies": {
     "cron-parser": "5.5.0",
     "drizzle-orm": "^0.45.1",
-    "hono": "^4.11.9",
+    "hono": "catalog:",
     "pg": "8.19.0"
   },
   "devDependencies": {

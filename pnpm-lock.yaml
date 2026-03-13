@@ -12,6 +12,9 @@ catalogs:
     '@typescript/native-preview':
       specifier: latest
       version: 7.0.0-dev.20260301.1
+    hono:
+      specifier: ^4.12.7
+      version: 4.12.7
     wrangler:
       specifier: ^4.69.0
       version: 4.69.0
@@ -58,8 +61,8 @@ importers:
         specifier: ^0.45.1
         version: 0.45.1(@cloudflare/workers-types@4.20260305.0)(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@12.6.2)(pg@8.19.0)
       hono:
-        specifier: ^4.11.9
-        version: 4.11.9
+        specifier: 'catalog:'
+        version: 4.12.7
       pg:
         specifier: 8.19.0
         version: 8.19.0
@@ -96,8 +99,8 @@ importers:
         specifier: ^0.45.1
         version: 0.45.1(@cloudflare/workers-types@4.20260305.0)(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@12.6.2)(pg@8.19.0)
       hono:
-        specifier: ^4.11.9
-        version: 4.11.9
+        specifier: 'catalog:'
+        version: 4.12.7
       vue:
         specifier: ^3.5.0
         version: 3.5.28(typescript@5.8.3)
@@ -151,8 +154,8 @@ importers:
   packages/proxy:
     dependencies:
       hono:
-        specifier: ^4.12.3
-        version: 4.12.3
+        specifier: 'catalog:'
+        version: 4.12.7
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
@@ -2051,12 +2054,8 @@ packages:
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
-  hono@4.11.9:
-    resolution: {integrity: sha512-Eaw2YTGM6WOxA6CXbckaEvslr2Ne4NFsKrvc0v97JD5awbmeBLO5w9Ho9L9kmKonrwF9RJlW6BxT1PVv/agBHQ==}
-    engines: {node: '>=16.9.0'}
-
-  hono@4.12.3:
-    resolution: {integrity: sha512-SFsVSjp8sj5UumXOOFlkZOG6XS9SJDKw0TbwFeV+AJ8xlST8kxK5Z/5EYa111UY8732lK2S/xB653ceuaoGwpg==}
+  hono@4.12.7:
+    resolution: {integrity: sha512-jq9l1DM0zVIvsm3lv9Nw9nlJnMNPOcAtsbsgiUhWcFzPE99Gvo6yRTlszSLLYacMeQ6quHD6hMfId8crVHvexw==}
     engines: {node: '>=16.9.0'}
 
   husky@9.1.7:
@@ -4018,9 +4017,7 @@ snapshots:
 
   graceful-fs@4.2.11: {}
 
-  hono@4.11.9: {}
-
-  hono@4.12.3: {}
+  hono@4.12.7: {}
 
   husky@9.1.7: {}
 
