@@ -4,14 +4,12 @@ import type { Props } from "./db.server";
 
 defineProps<Props>();
 
-const form = useForm("/db", {
-  intent: "create",
+const form = useForm("/db?create", {
   title: "",
   body: "",
 });
 
-const deleteForm = useForm("/db", {
-  intent: "delete",
+const deleteForm = useForm("/db?delete", {
   id: 0,
 });
 
