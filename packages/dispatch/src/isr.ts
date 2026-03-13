@@ -18,6 +18,9 @@ export interface IsrCacheMetadata {
   t: number;
 }
 
+const PAGE_DATA_SCRIPT_RE =
+  /<script\b[^>]*\bid=(["'])__VOID_PAGE_DATA__\1[^>]*>([\s\S]*?)<\/script>/i;
+
 /**
  * Pack response headers + body into a single ArrayBuffer.
  * Format: [4 bytes uint32 LE header length][UTF-8 header JSON][raw body]
@@ -215,6 +218,24 @@ export function resolvePathTtl(
     if (matchPattern(pattern, pathname)) return ttl;
   }
   return 0;
+}
+
+export function normalizePageDataForJsonCache(raw: string): string | null {
+  try {
+    const parsed = JSON.parse(raw) as { deferred?: unknown; deferredKeys?: unknown };
+    if (parsed.deferred !== undefined || parsed.deferredKeys !== undefined) {
+      return null;
+    }
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+export function extractPageDataFromHtml(html: string): string | null {
+  const match = html.match(PAGE_DATA_SCRIPT_RE);
+  if (!match) return null;
+  return normalizePageDataForJsonCache(match[2]);
 }
 
 /**

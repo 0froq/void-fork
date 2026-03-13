@@ -15,6 +15,8 @@ import {
   resolveRevalidateTtl,
   resolvePathTtl,
   shouldBypassIsr,
+  extractPageDataFromHtml,
+  normalizePageDataForJsonCache,
 } from "./isr";
 import { recordRequest, sendUsageEvent, type RequestType } from "./metering";
 
@@ -38,6 +40,31 @@ interface QueueRoutingEntry {
   workerName: string;
   projectId: string;
   queueName: string;
+}
+
+function jsonCacheResponse(pageData: string, ttl: number, state: "HIT" | "MISS"): Response {
+  return new Response(pageData, {
+    headers: {
+      "content-type": "application/json",
+      "Cache-Control": `public, s-maxage=${ttl}, max-age=0, must-revalidate`,
+      "x-isr-cache": state,
+    },
+  });
+}
+
+async function populateJsonEdgeCache(
+  cache: Cache,
+  cacheKey: Request,
+  response: Response,
+  ttl: number,
+  state: "HIT" | "MISS",
+): Promise<void> {
+  const fromHeader = response.headers.get("x-void-page-data");
+  const pageData = fromHeader
+    ? normalizePageDataForJsonCache(fromHeader)
+    : extractPageDataFromHtml(await response.clone().text());
+  if (!pageData) return;
+  await cache.put(cacheKey, jsonCacheResponse(pageData, ttl, state));
 }
 
 export default {
@@ -220,22 +247,7 @@ export default {
           const ttl = resolveRevalidateTtl(workerResponse, isrTtl);
           if (ttl > 0 && workerResponse.ok) {
             ctx.waitUntil(writeIsrCache(env, routing.projectId, pathname, workerResponse, ttl));
-            // Populate JSON edge cache from x-void-page-data header
-            const pageData = workerResponse.headers.get("x-void-page-data");
-            if (pageData) {
-              ctx.waitUntil(
-                cache.put(
-                  jsonCacheKey,
-                  new Response(pageData, {
-                    headers: {
-                      "content-type": "application/json",
-                      "Cache-Control": `public, s-maxage=${ttl}, max-age=0, must-revalidate`,
-                      "x-isr-cache": "MISS",
-                    },
-                  }),
-                ),
-              );
-            }
+            ctx.waitUntil(populateJsonEdgeCache(cache, jsonCacheKey, workerResponse, ttl, "MISS"));
             const headers = new Headers(workerResponse.headers);
             headers.set("Cache-Control", `public, s-maxage=${ttl}, max-age=0, must-revalidate`);
             headers.set("x-isr-cache", "MISS");
@@ -356,23 +368,10 @@ export default {
         const isrTtl = resolvePathTtl(routing.revalidate, pathname);
         if (isrTtl > 0 && response.ok && requestType === "ssr") {
           ctx.waitUntil(writeIsrCache(env, routing.projectId, pathname, response, isrTtl));
-          // Also populate JSON edge cache from x-void-page-data header
-          const pageData = response.headers.get("x-void-page-data");
-          if (pageData) {
-            const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname);
-            ctx.waitUntil(
-              caches.default.put(
-                jsonCacheKey,
-                new Response(pageData, {
-                  headers: {
-                    "content-type": "application/json",
-                    "Cache-Control": `public, s-maxage=${isrTtl}, max-age=0, must-revalidate`,
-                    "x-isr-cache": "MISS",
-                  },
-                }),
-              ),
-            );
-          }
+          const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname);
+          ctx.waitUntil(
+            populateJsonEdgeCache(caches.default, jsonCacheKey, response, isrTtl, "MISS"),
+          );
         }
       }
 
@@ -509,7 +508,7 @@ function getWorker(env: Env, routing: RoutingEntry): Fetcher {
 /**
  * Revalidate an ISR page in the background.
  * Dispatches to the user worker (always as HTML, no X-VoidPages), writes HTML
- * to R2 + HTML edge cache, and populates JSON edge cache from x-void-page-data.
+ * to R2 + HTML edge cache, and populates JSON edge cache from embedded page data.
  * Errors are caught and logged — serve stale, don't retry.
  */
 async function revalidateInBackground(
@@ -548,20 +547,7 @@ async function revalidateInBackground(
           headers,
         }),
       );
-      // Update JSON edge cache from x-void-page-data header
-      const pageData = response.headers.get("x-void-page-data");
-      if (pageData) {
-        await cache.put(
-          jsonCacheKey,
-          new Response(pageData, {
-            headers: {
-              "content-type": "application/json",
-              "Cache-Control": `public, s-maxage=${ttl}, max-age=0, must-revalidate`,
-              "x-isr-cache": "HIT",
-            },
-          }),
-        );
-      }
+      await populateJsonEdgeCache(cache, jsonCacheKey, response, ttl, "HIT");
     } else if (ttl === 0) {
       // Worker permanently opted out — remove stale R2 + edge entries + JSON edge
       await deleteIsrCache(env, routing.projectId, pathname);

@@ -10,6 +10,8 @@ import {
   serializeHeaders,
   packIsrValue,
   unpackIsrValue,
+  extractPageDataFromHtml,
+  normalizePageDataForJsonCache,
   type IsrCacheEntry,
 } from "../../src/isr";
 
@@ -266,6 +268,31 @@ describe("serializeHeaders", () => {
     expect(result["cache-control"]).toBeUndefined();
     expect(result["x-isr-cache"]).toBeUndefined();
     expect(result["content-type"]).toBe("text/html");
+  });
+});
+
+describe("page data extraction", () => {
+  it("extracts embedded page data from the JSON script tag", () => {
+    const pageData = '{"component":"Index","props":{"title":"hello"}}';
+    const html = `<html><body><script id="__VOID_PAGE_DATA__" type="application/json">${pageData}</script><div id="app"></div></body></html>`;
+    expect(extractPageDataFromHtml(html)).toBe(pageData);
+  });
+
+  it("skips embedded payloads with deferred metadata", () => {
+    const html =
+      '<script id="__VOID_PAGE_DATA__" type="application/json">{"component":"Index","props":{},"deferred":["stats"],"deferredKeys":{"stats":"stats"}}</script>';
+    expect(extractPageDataFromHtml(html)).toBeNull();
+  });
+
+  it("normalizes legacy header payloads and rejects deferred ones", () => {
+    expect(normalizePageDataForJsonCache('{"component":"Index","props":{}}')).toBe(
+      '{"component":"Index","props":{}}',
+    );
+    expect(
+      normalizePageDataForJsonCache(
+        '{"component":"Index","props":{},"deferred":["stats"],"deferredKeys":{"stats":"stats"}}',
+      ),
+    ).toBeNull();
   });
 });
 

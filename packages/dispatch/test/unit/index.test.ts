@@ -555,6 +555,9 @@ describe("ISR JSON edge cache (pages protocol)", () => {
     url: "/dashboard",
   });
 
+  const pageHtml = (payload = pageData) =>
+    `<html><body><script id="__VOID_PAGE_DATA__" type="application/json">${payload}</script><div id="app">rendered</div></body></html>`;
+
   it("pages request serves from JSON edge cache when populated", async () => {
     // Pre-populate JSON edge cache
     edgeCacheStore.set(
@@ -604,11 +607,8 @@ describe("ISR JSON edge cache (pages protocol)", () => {
   it("HTML cache miss populates both HTML and JSON edge caches", async () => {
     const { env, workerFetch } = createEnv({
       routing: isrRouting,
-      workerResponse: new Response("<html>rendered</html>", {
-        headers: {
-          "Content-Type": "text/html",
-          "x-void-page-data": pageData,
-        },
+      workerResponse: new Response(pageHtml(), {
+        headers: { "Content-Type": "text/html" },
       }),
     });
 
@@ -618,9 +618,9 @@ describe("ISR JSON edge cache (pages protocol)", () => {
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(response.status).toBe(200);
     expect(response.headers.get("x-isr-cache")).toBe("MISS");
-    // x-void-page-data should be stripped from client response
+    // Internal transport header should not leak to the client response
     expect(response.headers.has("x-void-page-data")).toBe(false);
-    expect(await response.text()).toBe("<html>rendered</html>");
+    expect(await response.text()).toBe(pageHtml());
 
     // Wait for background writes
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
@@ -644,11 +644,8 @@ describe("ISR JSON edge cache (pages protocol)", () => {
           headers: { "Content-Type": "text/html" },
         },
       },
-      workerResponse: new Response("<html>fresh</html>", {
-        headers: {
-          "Content-Type": "text/html",
-          "x-void-page-data": pageData,
-        },
+      workerResponse: new Response(pageHtml(), {
+        headers: { "Content-Type": "text/html" },
       }),
     });
 
@@ -732,7 +729,7 @@ describe("ISR JSON edge cache (pages protocol)", () => {
     expect(edgeCacheStore.has("https://my-app.void.app/dashboard?__void=json")).toBe(false);
   });
 
-  it("write-behind populates JSON edge cache from x-void-page-data", async () => {
+  it("write-behind populates JSON edge cache from embedded page data", async () => {
     // Non-ISR path (no revalidate config matching this path's ISR block) but
     // still has revalidate in routing — this tests the write-behind code path
     const { env, workerFetch } = createEnv({
@@ -742,11 +739,8 @@ describe("ISR JSON edge cache (pages protocol)", () => {
         ssr: true,
         revalidate: { "/dashboard": 60 },
       },
-      workerResponse: new Response("<html>ssr</html>", {
-        headers: {
-          "Content-Type": "text/html",
-          "x-void-page-data": pageData,
-        },
+      workerResponse: new Response(pageHtml(), {
+        headers: { "Content-Type": "text/html" },
       }),
     });
 
@@ -757,11 +751,11 @@ describe("ISR JSON edge cache (pages protocol)", () => {
     const response = await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
 
     expect(workerFetch).toHaveBeenCalledOnce();
-    // x-void-page-data should be stripped from response
+    // Internal transport header should not leak to the client response
     expect(response.headers.has("x-void-page-data")).toBe(false);
   });
 
-  it("HTML response without x-void-page-data does not populate JSON cache", async () => {
+  it("HTML response without embedded page data does not populate JSON cache", async () => {
     const { env } = createEnv({
       routing: isrRouting,
       workerResponse: new Response("<html>no-page-data</html>", {
@@ -776,6 +770,24 @@ describe("ISR JSON edge cache (pages protocol)", () => {
 
     // HTML cache is populated, but no JSON cache
     expect(edgeCacheStore.has("https://my-app.void.app/dashboard")).toBe(true);
+    expect(edgeCacheStore.has("https://my-app.void.app/dashboard?__void=json")).toBe(false);
+  });
+
+  it("HTML response with deferred page data does not populate JSON cache", async () => {
+    const deferredPageData =
+      '{"component":"Dashboard","props":{"count":42},"url":"/dashboard","deferred":["stats"],"deferredKeys":{"stats":"stats"}}';
+    const { env } = createEnv({
+      routing: isrRouting,
+      workerResponse: new Response(pageHtml(deferredPageData), {
+        headers: { "Content-Type": "text/html" },
+      }),
+    });
+
+    const ctx = createCtx();
+    await app.fetch(new Request("https://my-app.void.app/dashboard"), env, ctx);
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
     expect(edgeCacheStore.has("https://my-app.void.app/dashboard?__void=json")).toBe(false);
   });
 });
