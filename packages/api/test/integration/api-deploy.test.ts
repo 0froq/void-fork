@@ -63,6 +63,13 @@ function buildDeployForm(opts?: {
   return form;
 }
 
+function parseDeployStream(text: string): unknown[] {
+  return text
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line));
+}
+
 describe("POST /projects/:id/deploy", () => {
   it("returns 401 without auth", async () => {
     const res = await app.fetch(
@@ -946,8 +953,39 @@ describe("POST /projects/:id/deploy", () => {
     );
 
     expect(res.status).toBe(200);
-    const events = await readAllEvents(res);
+    const raw = await res.text();
+    expect(raw).not.toContain("Assets have already been uploaded");
+    const events = parseDeployStream(raw);
     expect(events.at(-1)).toMatchObject({ event: "done" });
+  });
+
+  it("does not leak raw Cloudflare asset text into deploy error events", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "asset-text-error-test");
+    mockCfApi({
+      assetUploadSession: () => new Response("Assets have already been uploaded."),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          assets: { "index.html": "<h1>hi</h1>" },
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    expect(raw).not.toContain("Assets have already been uploaded");
+    const events = parseDeployStream(raw);
+    expect(events.at(-1)).toMatchObject({
+      event: "error",
+      step: "asset_upload",
+      message: "asset upload returned an unexpected Cloudflare response",
+    });
   });
 });
 

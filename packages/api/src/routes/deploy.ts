@@ -46,6 +46,10 @@ import {
 
 const DEFAULT_DISPATCH_NAMESPACE = "void-users";
 const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
+const CF_ASSET_TEXT_RESPONSES = new Set([
+  "Assets have already been uploaded",
+  "Assets have already been uploaded.",
+]);
 
 const app = new Hono<ApiEnv>();
 
@@ -64,6 +68,17 @@ function parseManifest(raw: string | null | undefined): DeployManifest | null {
   } catch {
     return null;
   }
+}
+
+function sanitizeDeployErrorMessage(message: string): string {
+  const trimmed = message.trim();
+  if (
+    CF_ASSET_TEXT_RESPONSES.has(trimmed) ||
+    trimmed.includes("Assets have already been uploaded")
+  ) {
+    return "asset upload returned an unexpected Cloudflare response";
+  }
+  return message;
 }
 
 export function buildWebSocketUploadMigrations(migrations: WebSocketMigrationMeta[] | undefined):
@@ -566,6 +581,7 @@ app.post("/:id/deploy", async (c) => {
         // Upload assets via CF asset upload API (3-step flow)
         let completionJwt: string | undefined;
         if (assetCount > 0) {
+          currentStep = "asset_upload";
           const newAssets = Object.keys(assetsByHash).length;
           emit({
             event: "asset_upload",
@@ -977,7 +993,7 @@ app.post("/:id/deploy", async (c) => {
           ...(migrationsApplied > 0 && { migrations: migrationsApplied }),
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = sanitizeDeployErrorMessage(err instanceof Error ? err.message : String(err));
         await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
         emit({ event: "error", message: msg, step: currentStep });
       } finally {
