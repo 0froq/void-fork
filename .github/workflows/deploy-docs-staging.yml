@@ -2,10 +2,10 @@ name: Deploy Docs Staging
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - docs/**
+  # push:
+  # branches: [main]
+  # paths:
+  # - docs/**
 
 jobs:
   deploy:
