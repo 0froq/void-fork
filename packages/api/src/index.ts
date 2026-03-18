@@ -51,7 +51,7 @@ const app = new Hono<ApiEnv>()
   )
   .get("/invite", (c) => {
     const dashboardUrl = c.env.DASHBOARD_URL ?? "https://dash.void.cloud";
-    const loginUrl = escapeHtml(`${dashboardUrl}/auth/login`);
+    const loginUrl = escapeHtml(`${dashboardUrl}/login`);
     return c.html(`<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
