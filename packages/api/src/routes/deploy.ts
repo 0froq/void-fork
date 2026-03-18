@@ -220,15 +220,6 @@ app.post("/:id/deploy", async (c) => {
     await updateDeploymentStatus(c.get("db"), activeDeploy.id, "failed", "timed out");
   }
 
-  // Enforce deploy count limit
-  const planLimits = getPlanLimits(user?.plan ?? "free");
-  if (planLimits.deploysPerDay > 0) {
-    const todayCount = await countUserDeploymentsToday(c.get("db"), c.get("userId"));
-    if (!isWithinLimit(planLimits.deploysPerDay, todayCount)) {
-      return c.json({ error: "deploy limit exceeded", limit: planLimits.deploysPerDay }, 429);
-    }
-  }
-
   const formData = await c.req.formData();
   const manifestRaw = formData.get("manifest") as string | null;
   const incomingManifest: DeployManifest = manifestRaw
@@ -257,6 +248,61 @@ app.post("/:id/deploy", async (c) => {
   );
   const manifest = enrichedManifestResult.manifest;
   const finalManifestRaw = JSON.stringify(manifest);
+
+  // Skip deploy if identical to the current live deployment (same manifest + same assets).
+  // Secrets are not checked: the secrets API already live-pushes values to the active
+  // worker via putWorkerSecret.
+  if (currentLiveDeployment && currentLiveDeployment.status === "live") {
+    const sameManifest = currentLiveDeployment.manifest === finalManifestRaw;
+    const incomingAssetManifest = formData.get("assetManifest") as string | null;
+    const sameAssets =
+      incomingAssetManifest != null &&
+      currentLiveDeployment.asset_hashes != null &&
+      incomingAssetManifest === currentLiveDeployment.asset_hashes;
+    if (sameManifest && sameAssets) {
+      const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+      const projectDomains = await getDomainsByProjectId(c.get("db"), projectId);
+      const activeDomains = projectDomains.filter((d) => d.status === "active");
+      const fullUrl =
+        activeDomains.length > 0
+          ? `https://${activeDomains[0].hostname}`
+          : `https://${project.slug}.${siteDomain}`;
+
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          const emit = (event: DeployEvent) => {
+            controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+          };
+          emit({ event: "start", deploymentId: currentLiveDeployment.id });
+          emit({
+            event: "done",
+            deployment: currentLiveDeployment.id,
+            url: fullUrl,
+            urls: [
+              ...activeDomains.map((d) => `https://${d.hostname}`),
+              `https://${project.slug}.${siteDomain}`,
+            ],
+            assets: 0,
+            workers: 0,
+          });
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        headers: { "Content-Type": "application/x-ndjson" },
+      });
+    }
+  }
+
+  // Enforce deploy count limit
+  const planLimits = getPlanLimits(user?.plan ?? "free");
+  if (planLimits.deploysPerDay > 0) {
+    const todayCount = await countUserDeploymentsToday(c.get("db"), c.get("userId"));
+    if (!isWithinLimit(planLimits.deploysPerDay, todayCount)) {
+      return c.json({ error: "deploy limit exceeded", limit: planLimits.deploysPerDay }, 429);
+    }
+  }
 
   const source = (formData.get("source") as string | null) ?? null;
   const commit = (formData.get("commit") as string | null) ?? null;

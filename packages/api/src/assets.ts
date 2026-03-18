@@ -26,10 +26,18 @@ function tryParseJson<T>(text: string): T | null {
   }
 }
 
+const ASSET_SESSION_MAX_RETRIES = 3;
+const ASSET_SESSION_RETRY_DELAY_MS = 1000;
+
 /**
  * Step 1: Create an asset upload session with CF.
  * Sends the asset manifest (path → {hash, size}) and receives a completion JWT
  * plus "buckets" — groups of hashes that CF needs uploaded.
+ *
+ * CF's WfP assets API sometimes returns plain text (e.g. "Assets have already
+ * been uploaded") instead of JSON when all asset hashes already exist. This is
+ * a CF bug — the response varies by edge node. Retrying typically hits a
+ * different node that returns proper JSON.
  */
 export async function createAssetUploadSession(
   accountId: string,
@@ -37,30 +45,38 @@ export async function createAssetUploadSession(
   namespace: string,
   workerName: string,
   manifest: Record<string, AssetManifestEntry>,
+  { retryDelayMs = ASSET_SESSION_RETRY_DELAY_MS }: { retryDelayMs?: number } = {},
 ): Promise<{ jwt: string; buckets: string[][] }> {
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${workerName}/assets-upload-session`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ manifest }),
-    },
-  );
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${workerName}/assets-upload-session`;
+  const headers = {
+    Authorization: `Bearer ${apiToken}`,
+    "Content-Type": "application/json",
+  };
+  const body = JSON.stringify({ manifest });
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`asset upload session failed: ${error}`);
+  let lastText = "";
+  for (let attempt = 0; attempt <= ASSET_SESSION_MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, retryDelayMs * attempt));
+    }
+
+    const response = await fetch(url, { method: "POST", headers, body });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`asset upload session failed: ${error}`);
+    }
+
+    const text = await response.text();
+    const data = tryParseJson<UploadSessionResponse>(text);
+    if (data?.result?.jwt && Array.isArray(data.result.buckets)) {
+      return { jwt: data.result.jwt, buckets: data.result.buckets };
+    }
+
+    lastText = text;
   }
 
-  const text = await response.text();
-  const data = tryParseJson<UploadSessionResponse>(text);
-  if (!data?.result?.jwt || !Array.isArray(data.result.buckets)) {
-    throw new Error(`asset upload session returned invalid response: ${text}`);
-  }
-  return { jwt: data.result.jwt, buckets: data.result.buckets };
+  throw new Error(`asset upload session returned invalid response: ${lastText}`);
 }
 
 /**

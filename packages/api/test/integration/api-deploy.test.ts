@@ -959,33 +959,167 @@ describe("POST /projects/:id/deploy", () => {
     expect(events.at(-1)).toMatchObject({ event: "done" });
   });
 
-  it("does not leak raw Cloudflare asset text into deploy error events", async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "asset-text-error-test");
-    mockCfApi({
-      assetUploadSession: () => new Response("Assets have already been uploaded."),
-    });
+  it(
+    "sanitizes error after retries exhausted on persistent plain-text session response",
+    { timeout: 15_000 },
+    async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, "asset-text-error-test");
+      mockCfApi({
+        assetUploadSession: () => new Response("Assets have already been uploaded."),
+      });
 
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${user.jwt}` },
+          body: buildDeployForm({
+            assets: { "index.html": "<h1>hi</h1>" },
+          }),
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      const raw = await res.text();
+      expect(raw).not.toContain("Assets have already been uploaded");
+      const events = parseDeployStream(raw);
+      expect(events.at(-1)).toMatchObject({
+        event: "error",
+        step: "asset_upload",
+        message: "asset upload returned an unexpected Cloudflare response",
+      });
+    },
+  );
+});
+
+describe("Deploy deduplication (skip identical deploys)", () => {
+  const manifest = { version: 3, bindings: {} };
+  const assetManifest = { "/index.html": { hash: "abc12345678901234567890123456789", size: 100 } };
+
+  it("skips deploy when manifest and assets are identical to live deployment", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "dedupe-app");
+
+    // Insert a live deployment with known manifest and asset_hashes
+    const liveDeployId = "dpl_live_dedupe";
+    await env.db.insert(deployments).values({
+      id: liveDeployId,
+      project_id: project.id,
+      status: "live",
+      manifest: JSON.stringify(manifest),
+      asset_hashes: JSON.stringify(assetManifest),
+      created_at: sql`now()`,
+    });
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: liveDeployId })
+      .where(eq(projects.id, project.id));
+
+    // Deploy with the same manifest and assetManifest
+    const form = buildDeployForm({ manifest, assets: { "index.html": "<h1>hi</h1>" } });
+    form.append("assetManifest", JSON.stringify(assetManifest));
+    form.append("preflight", "true");
+
+    // No CF API mock needed — deploy should be skipped entirely
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
         method: "POST",
         headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildDeployForm({
-          assets: { "index.html": "<h1>hi</h1>" },
-        }),
+        body: form,
       }),
       env,
     );
 
     expect(res.status).toBe(200);
-    const raw = await res.text();
-    expect(raw).not.toContain("Assets have already been uploaded");
-    const events = parseDeployStream(raw);
-    expect(events.at(-1)).toMatchObject({
-      event: "error",
-      step: "asset_upload",
-      message: "asset upload returned an unexpected Cloudflare response",
+    const events = parseDeployStream(await res.text());
+    expect(events).toHaveLength(2); // start + done only
+    expect(events[0]).toMatchObject({ event: "start", deploymentId: liveDeployId });
+    expect(events[1]).toMatchObject({ event: "done", deployment: liveDeployId });
+  });
+
+  it("skips deploy even when secrets changed (secrets are live-pushed via API)", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "dedupe-secret-app");
+
+    // Insert a live deployment created in the past
+    const liveDeployId = "dpl_live_secret";
+    await env.db.insert(deployments).values({
+      id: liveDeployId,
+      project_id: project.id,
+      status: "live",
+      manifest: JSON.stringify(manifest),
+      asset_hashes: JSON.stringify(assetManifest),
+      created_at: sql`now() - interval '1 hour'`,
     });
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: liveDeployId })
+      .where(eq(projects.id, project.id));
+
+    // Add a secret AFTER the deployment — secrets API already pushed it to the worker
+    await createTestProjectSecret(env.db, env, project.id, "API_KEY", "secret-value");
+
+    // Deploy with the same manifest — should still be skipped
+    const form = buildDeployForm({ manifest, assets: { "index.html": "<h1>hi</h1>" } });
+    form.append("assetManifest", JSON.stringify(assetManifest));
+    form.append("preflight", "true");
+
+    // No CF API mock needed — deploy should be skipped entirely
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text());
+    expect(events).toHaveLength(2); // start + done only
+    expect(events[0]).toMatchObject({ event: "start", deploymentId: liveDeployId });
+    expect(events[1]).toMatchObject({ event: "done", deployment: liveDeployId });
+  });
+
+  it("proceeds with deploy when manifest differs from live deployment", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "dedupe-manifest-app");
+    mockCfApi();
+
+    // Insert a live deployment with a different manifest
+    const liveDeployId = "dpl_live_diff";
+    await env.db.insert(deployments).values({
+      id: liveDeployId,
+      project_id: project.id,
+      status: "live",
+      manifest: JSON.stringify({ version: 3, bindings: { d1: ["DB"] } }),
+      asset_hashes: JSON.stringify(assetManifest),
+      created_at: sql`now()`,
+    });
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: liveDeployId })
+      .where(eq(projects.id, project.id));
+
+    // Deploy with a different manifest (no d1 binding)
+    const form = buildDeployForm({ manifest, assets: { "index.html": "<h1>hi</h1>" } });
+    form.append("assetManifest", JSON.stringify(assetManifest));
+    form.append("preflight", "true");
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text());
+    expect(events.length).toBeGreaterThan(2);
+    expect(events.at(-1)).toMatchObject({ event: "done" });
   });
 });
 

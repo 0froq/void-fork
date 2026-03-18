@@ -1,5 +1,10 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { deleteUnreferencedAssets, uploadAssetBuckets, uploadStaticAssets } from "../../src/assets";
+import {
+  createAssetUploadSession,
+  deleteUnreferencedAssets,
+  uploadAssetBuckets,
+  uploadStaticAssets,
+} from "../../src/assets";
 
 function createMockKV() {
   const store = new Map<string, ArrayBuffer>();
@@ -209,6 +214,66 @@ describe("uploadAssetBuckets", () => {
     );
 
     expect(completionJwt).toBe("completion-jwt");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createAssetUploadSession", () => {
+  const manifest = { "/index.html": { hash: "abc123", size: 100 } };
+
+  it("returns jwt and buckets on success", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({ result: { jwt: "session-jwt", buckets: [["abc123"]] } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createAssetUploadSession("acct", "token", "ns", "worker", manifest, {
+      retryDelayMs: 0,
+    });
+
+    expect(result).toEqual({ jwt: "session-jwt", buckets: [["abc123"]] });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries on plain-text response and succeeds", async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls++;
+      if (calls <= 2) {
+        return new Response("Assets have already been uploaded.");
+      }
+      return Response.json({ result: { jwt: "retry-jwt", buckets: [] } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createAssetUploadSession("acct", "token", "ns", "worker", manifest, {
+      retryDelayMs: 0,
+    });
+
+    expect(result).toEqual({ jwt: "retry-jwt", buckets: [] });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("throws after exhausting retries on plain-text responses", async () => {
+    const fetchMock = vi.fn(async () => new Response("Assets have already been uploaded."));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createAssetUploadSession("acct", "token", "ns", "worker", manifest, { retryDelayMs: 0 }),
+    ).rejects.toThrow("asset upload session returned invalid response");
+
+    // 1 initial + 3 retries = 4 total
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not retry on HTTP error responses", async () => {
+    const fetchMock = vi.fn(async () => new Response("Unauthorized", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createAssetUploadSession("acct", "token", "ns", "worker", manifest, { retryDelayMs: 0 }),
+    ).rejects.toThrow("asset upload session failed: Unauthorized");
+
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
