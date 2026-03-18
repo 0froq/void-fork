@@ -37,6 +37,7 @@ function makeBindings(e: TestEnv) {
     GOOGLE_CLIENT_SECRET: e.GOOGLE_CLIENT_SECRET,
     USAGE_COUNTER: e.USAGE_COUNTER,
     CRON_SCHEDULER: e.CRON_SCHEDULER,
+    ERROR_ALERT_MONITOR: e.ERROR_ALERT_MONITOR,
   };
 }
 
@@ -62,12 +63,12 @@ describe("scheduled()", () => {
     const proj = await createTestProject(env.db, id);
     await env.ROUTING.put(proj.slug, JSON.stringify({ worker: "test" }));
 
-    // Should complete without errors (skips unlimited plans)
+    // Should complete without errors (skips unlimited plans for usage counting)
     await scheduled(mockController, makeBindings(env), mockCtx);
 
-    // Routing entry should be unchanged (no userId backfill since user was skipped)
+    // userId backfill still runs for all plans (needed for 5xx alerting)
     const routing = JSON.parse((await env.ROUTING.get(proj.slug))!);
-    expect(routing.userId).toBeUndefined();
+    expect(routing.userId).toBe(id);
   });
 
   it("skips users with no projects", async () => {

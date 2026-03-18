@@ -53,6 +53,10 @@
         "name": "CRON_SCHEDULER",
         "class_name": "CronScheduler",
       },
+      {
+        "name": "ERROR_ALERT_MONITOR",
+        "class_name": "ErrorAlertMonitor",
+      },
     ],
   },
   "migrations": [
@@ -64,6 +68,10 @@
       "tag": "v2",
       "new_classes": ["CronScheduler"],
     },
+    {
+      "tag": "v3",
+      "new_classes": ["ErrorAlertMonitor"],
+    },
   ],
   "queues": {
     "consumers": [
@@ -74,7 +82,9 @@
       },
     ],
   },
-  "send_email": [{ "name": "EMAIL" }],
+  "send_email": [
+    { "name": "EMAIL", "remote": true, "allowed_sender_addresses": ["noreply@void.cloud"] },
+  ],
   "triggers": {
     "crons": ["0 * * * *"],
   },
@@ -130,6 +140,10 @@
           {
             "name": "CRON_SCHEDULER",
             "class_name": "CronScheduler",
+          },
+          {
+            "name": "ERROR_ALERT_MONITOR",
+            "class_name": "ErrorAlertMonitor",
           },
         ],
       },

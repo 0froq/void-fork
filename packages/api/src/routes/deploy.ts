@@ -43,6 +43,8 @@ import {
   generateManagedAuthSecret,
   encryptProjectSecret,
 } from "../project-secrets";
+import { sendDeployFailedEmail } from "../email";
+import { DEFAULT_DASHBOARD_URL } from "../constants";
 
 const DEFAULT_DISPATCH_NAMESPACE = "void-users";
 const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
@@ -1042,6 +1044,14 @@ app.post("/:id/deploy", async (c) => {
         const msg = sanitizeDeployErrorMessage(err instanceof Error ? err.message : String(err));
         await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
         emit({ event: "error", message: msg, step: currentStep });
+        if (c.env.EMAIL && user?.email) {
+          const dashboardUrl = c.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
+          c.executionCtx.waitUntil(
+            sendDeployFailedEmail(c.env.EMAIL, user.email, project.slug, msg, dashboardUrl).catch(
+              (err) => console.error(`[deploy-failed-email] Failed for ${project.slug}:`, err),
+            ),
+          );
+        }
       } finally {
         controller.close();
       }

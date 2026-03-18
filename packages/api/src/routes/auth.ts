@@ -17,6 +17,8 @@ import {
   acceptInvitationByEmail,
 } from "../db";
 import { isSignupAllowed, getAllowlist } from "../signup-allowlist";
+import { sendWelcomeEmail } from "../email";
+import { DEFAULT_DASHBOARD_URL } from "../constants";
 
 const DEFAULT_REDIRECT_URI = "https://api.void.cloud/auth/callback";
 
@@ -196,6 +198,14 @@ app.get("/callback", async (c) => {
         await acceptInvitationByEmail(db, email, user.id);
       } catch (err) {
         console.error(`Failed to accept invitation for ${email} (user ${user.id}):`, err);
+      }
+      if (c.env.EMAIL) {
+        const dashboardUrl = c.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
+        c.executionCtx.waitUntil(
+          sendWelcomeEmail(c.env.EMAIL, email, login, dashboardUrl).catch((err) =>
+            console.error(`[welcome-email] Failed for ${email}:`, err),
+          ),
+        );
       }
     }
   }

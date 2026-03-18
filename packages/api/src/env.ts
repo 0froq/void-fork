@@ -38,6 +38,7 @@ export interface ApiEnv extends Env {
     DASHBOARD_URL?: string;
     USAGE_COUNTER: DurableObjectNamespace;
     CRON_SCHEDULER: DurableObjectNamespace;
+    ERROR_ALERT_MONITOR: DurableObjectNamespace;
     LOGS_DATASET?: string;
     PLATFORM_ENV?: string;
     PROJECT_SECRET_KEYS_JSON: string;

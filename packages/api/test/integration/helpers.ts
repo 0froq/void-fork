@@ -58,6 +58,7 @@ export type TestEnv = {
   SITE_DOMAIN?: string;
   USAGE_COUNTER: DurableObjectNamespace;
   CRON_SCHEDULER: DurableObjectNamespace;
+  ERROR_ALERT_MONITOR: DurableObjectNamespace;
 };
 
 function createMockDoNamespace(): DurableObjectNamespace {
@@ -128,6 +129,7 @@ export async function setupEnv(): Promise<TestEnv> {
     GOOGLE_CLIENT_SECRET: "test-google-client-secret",
     USAGE_COUNTER: createMockDoNamespace(),
     CRON_SCHEDULER: createMockDoNamespace(),
+    ERROR_ALERT_MONITOR: createMockDoNamespace(),
   };
 }
 

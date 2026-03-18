@@ -29,6 +29,7 @@ export function sendUsageEvent(
     slug: string;
     requests: number;
     responseBytes: number;
+    status?: number;
   },
 ): Promise<void> {
   return env.USAGE_QUEUE.send(data);

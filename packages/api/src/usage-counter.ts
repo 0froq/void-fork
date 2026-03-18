@@ -22,6 +22,7 @@ export interface UsageEvent {
   slug: string;
   requests: number;
   responseBytes: number;
+  status?: number;
 }
 
 // --- Pure functions (exported for unit testing) ---

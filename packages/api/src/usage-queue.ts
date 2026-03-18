@@ -50,11 +50,49 @@ export async function processUsageEventBatch(
     }),
   );
 
-  // If any DO calls failed, retry the whole batch
+  // If any UsageCounter DO calls failed, retry the whole batch
+  // Route 5xx events only on the ack path to avoid double-counting on redelivery
   const failures = results.filter((r) => r.status === "rejected");
   if (failures.length > 0) {
     batch.retryAll();
   } else {
+    // Best-effort: route 5xx events to ErrorAlertMonitor (failures don't block ack)
+    const errorEvents = events.filter((e) => e.status !== undefined && e.status >= 500);
+    if (errorEvents.length > 0) {
+      const errorsByProject = new Map<string, { count: number; userId: string; slug: string }>();
+      for (const event of errorEvents) {
+        const existing = errorsByProject.get(event.projectId);
+        if (existing) {
+          existing.count++;
+        } else {
+          errorsByProject.set(event.projectId, {
+            count: 1,
+            userId: event.userId,
+            slug: event.slug,
+          });
+        }
+      }
+
+      await Promise.allSettled(
+        [...errorsByProject.entries()].map(async ([projectId, { count, userId, slug }]) => {
+          const doId = env.ERROR_ALERT_MONITOR.idFromName(projectId);
+          const stub = env.ERROR_ALERT_MONITOR.get(doId);
+          const res = await stub.fetch(
+            new Request("https://do/record", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ projectId, count, userId, slug }),
+            }),
+          );
+          if (!res.ok) {
+            console.error(
+              `[error-alert] DO /record failed for project ${projectId}: ${res.status}`,
+            );
+          }
+        }),
+      );
+    }
+
     batch.ackAll();
   }
 }

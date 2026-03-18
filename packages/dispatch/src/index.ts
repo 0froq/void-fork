@@ -121,6 +121,7 @@ export default {
             slug: slug ?? url.hostname,
             requests: 1,
             responseBytes,
+            ...(response.status >= 500 && { status: response.status }),
           }),
         );
       }

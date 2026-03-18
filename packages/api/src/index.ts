@@ -26,8 +26,15 @@ import adminInvitations from "./admin/routes/invitations";
 import adminPlatform from "./admin/routes/platform";
 import { escapeHtml } from "./email";
 import me from "./routes/me";
-import { createDb, getUsersWithProjectsBatch, unsuspendUserIfReason, type Db } from "./db";
+import {
+  createDb,
+  getUsersWithProjectsBatch,
+  unsuspendUserIfReason,
+  getDomainsByProjectIds,
+  type Db,
+} from "./db";
 import { getCurrentBillingPeriodStart, getPlanLimits } from "./tiers";
+import { ErrorAlertMonitor } from "./error-alert-monitor";
 
 const app = new Hono<ApiEnv>()
 
@@ -123,6 +130,43 @@ async function processUserRollover(
   user: { id: string; plan: string; billing_cycle_start: string; suspended_reason: string | null },
   userProjects: { id: string; slug: string }[],
 ): Promise<void> {
+  // Backfill userId into old KV routing entries (all plans, before early return).
+  // Wrapped in try/catch so a malformed KV entry doesn't block rollover/unsuspension.
+  try {
+    for (const project of userProjects) {
+      const raw = await env.ROUTING.get(project.slug);
+      if (!raw) continue;
+      const routing = JSON.parse(raw);
+      if (!routing.userId) {
+        routing.userId = user.id;
+        await env.ROUTING.put(project.slug, JSON.stringify(routing));
+      }
+    }
+
+    // Also backfill domain:* entries — check all projects, not just those that needed
+    // slug backfill (slug may have been patched in a prior run before domain support).
+    const projectIds = userProjects.map((p) => p.id);
+    if (projectIds.length > 0) {
+      const domainMap = await getDomainsByProjectIds(db, projectIds);
+      for (const projectId of projectIds) {
+        const projectDomains = domainMap.get(projectId);
+        if (!projectDomains) continue;
+        for (const domain of projectDomains) {
+          if (domain.status !== "active") continue;
+          const raw = await env.ROUTING.get(`domain:${domain.hostname}`);
+          if (!raw) continue;
+          const routing = JSON.parse(raw);
+          if (!routing.userId) {
+            routing.userId = user.id;
+            await env.ROUTING.put(`domain:${domain.hostname}`, JSON.stringify(routing));
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[backfill] userId backfill failed for user ${user.id}:`, err);
+  }
+
   const limits = getPlanLimits(user.plan);
   // Skip unlimited plans (no enforcement needed)
   if (limits.requestsPerMonth === 0 && limits.aiNeuronsPerMonth === 0) return;
@@ -167,20 +211,9 @@ async function processUserRollover(
       body: JSON.stringify({ plan: user.plan, billingPeriodStart, projectSlugs }),
     }),
   );
-
-  // Backfill userId into old KV routing entries
-  for (const project of userProjects) {
-    const raw = await env.ROUTING.get(project.slug);
-    if (!raw) continue;
-    const routing = JSON.parse(raw);
-    if (!routing.userId) {
-      routing.userId = user.id;
-      await env.ROUTING.put(project.slug, JSON.stringify(routing));
-    }
-  }
 }
 
-export { UsageCounter, CronScheduler };
+export { UsageCounter, CronScheduler, ErrorAlertMonitor };
 export type AppType = typeof app;
 export { app, scheduled };
 
