@@ -142,6 +142,7 @@
           },
         ],
       },
+      "send_email": [{ "name": "EMAIL" }],
       "routes": [{ "pattern": "api.staging.void.cloud", "custom_domain": true }],
       "vars": {
         "DISPATCH_NAMESPACE": "void-users-staging",
