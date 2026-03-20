@@ -25,6 +25,7 @@ import {
   domains,
   platformEvents,
   invitations,
+  oauthNonces,
 } from "./schema";
 import { generateId } from "./id";
 import type { PlanId } from "./tiers";
@@ -938,4 +939,28 @@ export async function getPendingInvitationByEmail(
     .where(and(eq(invitations.email, email.toLowerCase()), eq(invitations.status, "pending")))
     .limit(1);
   return row ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// oauth nonces
+// ---------------------------------------------------------------------------
+
+export async function storeOAuthNonce(db: Db, nonce: string, ttlSeconds: number): Promise<void> {
+  await db
+    .insert(oauthNonces)
+    .values({ nonce, expires_at: sql`now() + ${String(ttlSeconds)} * interval '1 second'` });
+}
+
+/** Atomically consume a nonce — returns true if it existed and was not expired. */
+export async function consumeOAuthNonce(db: Db, nonce: string): Promise<boolean> {
+  const rows = await db
+    .delete(oauthNonces)
+    .where(and(eq(oauthNonces.nonce, nonce), sql`expires_at > now()`))
+    .returning({ nonce: oauthNonces.nonce });
+  return rows.length > 0;
+}
+
+/** Delete expired nonces left behind by abandoned login flows. */
+export async function purgeExpiredOAuthNonces(db: Db): Promise<void> {
+  await db.delete(oauthNonces).where(sql`expires_at <= now()`);
 }

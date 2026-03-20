@@ -8,6 +8,7 @@ import {
   teardownEnv,
   clearTables,
   createTestUser,
+  seedOAuthNonce,
   JWT_SECRET,
   type TestEnv,
 } from "./helpers";
@@ -83,6 +84,7 @@ describe("email verification gating on account linking", () => {
       .where(eq(users.id, existing.id));
 
     const state = await buildSignedState("github");
+    await seedOAuthNonce(env.db, "test-nonce");
     vi.stubGlobal(
       "fetch",
       mockGitHubApi({
@@ -116,6 +118,7 @@ describe("email verification gating on account linking", () => {
       .where(eq(users.id, existing.id));
 
     const state = await buildSignedState("github");
+    await seedOAuthNonce(env.db, "test-nonce");
     vi.stubGlobal(
       "fetch",
       mockGitHubApi({
@@ -150,6 +153,7 @@ describe("email verification gating on account linking", () => {
       .where(eq(users.id, existing.id));
 
     const state = await buildSignedState("github");
+    await seedOAuthNonce(env.db, "test-nonce");
     vi.stubGlobal(
       "fetch",
       mockGitHubApi({

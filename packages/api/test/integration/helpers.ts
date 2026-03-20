@@ -18,6 +18,7 @@ import {
   resources,
   domains,
   invitations,
+  oauthNonces,
 } from "../../src/schema";
 import { signJwt } from "../../src/auth/jwt";
 import { generateId } from "../../src/id";
@@ -155,6 +156,11 @@ export async function clearTables(db: Db): Promise<void> {
   await db.delete(invitations);
   await db.delete(oauthAccounts);
   await db.delete(users);
+  await db.delete(oauthNonces);
+}
+
+export async function seedOAuthNonce(db: Db, nonce: string): Promise<void> {
+  await db.insert(oauthNonces).values({ nonce, expires_at: sql`now() + interval '600 seconds'` });
 }
 
 let userCounter = 0;

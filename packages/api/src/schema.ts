@@ -199,6 +199,17 @@ export const platformEvents = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// oauth_nonces — short-lived, single-use tokens for OAuth CSRF/replay protection.
+// Stored in PostgreSQL (not KV) because the login and callback requests can hit
+// different CF colos, and KV's eventual consistency would make nonce lookups flaky.
+// Atomic DELETE … RETURNING guarantees true single-use semantics.
+// ---------------------------------------------------------------------------
+export const oauthNonces = pgTable("oauth_nonces", {
+  nonce: text("nonce").primaryKey(),
+  expires_at: timestamp("expires_at", { mode: "string" }).notNull(),
+});
+
+// ---------------------------------------------------------------------------
 // invitations
 // ---------------------------------------------------------------------------
 export const invitations = pgTable(

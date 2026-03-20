@@ -15,6 +15,8 @@ import {
   updateUser,
   createOAuthAccount,
   acceptInvitationByEmail,
+  storeOAuthNonce,
+  consumeOAuthNonce,
 } from "../db";
 import { isSignupAllowed, getAllowlist } from "../signup-allowlist";
 import { sendWelcomeEmail } from "../email";
@@ -66,6 +68,13 @@ app.get("/login", async (c) => {
   }
 
   const nonce = crypto.randomUUID();
+
+  // Store nonce in PostgreSQL so callback can validate it (prevents login CSRF / replay).
+  // Not KV: login and callback can hit different CF colos, and KV's eventual consistency
+  // would make the lookup flaky. PG also gives us atomic DELETE for true single-use.
+  const db = c.get("db");
+  await storeOAuthNonce(db, nonce, 600);
+
   const stateData = JSON.stringify({ redirect, nonce, provider });
   const stateEncoded = btoa(stateData);
   const signature = await hmacSignState(stateEncoded, c.env.JWT_SECRET);
@@ -105,11 +114,19 @@ app.get("/callback", async (c) => {
     return c.json({ error: "invalid state signature" }, 400);
   }
 
-  const { redirect, provider } = JSON.parse(atob(stateEncoded)) as {
+  const { redirect, nonce, provider } = JSON.parse(atob(stateEncoded)) as {
     redirect: string;
     nonce: string;
     provider?: string;
   };
+
+  // Validate and consume nonce atomically (single-use, 10-minute TTL).
+  // Uses PostgreSQL — not KV — for strong consistency across colos.
+  const db = c.get("db");
+  const nonceValid = await consumeOAuthNonce(db, nonce);
+  if (!nonceValid) {
+    return c.json({ error: "invalid or expired OAuth state" }, 400);
+  }
 
   // Re-validate redirect after decoding
   if (!isAllowedRedirect(redirect, c.env.DASHBOARD_URL)) {
@@ -149,7 +166,6 @@ app.get("/callback", async (c) => {
   }
 
   // Upsert user — check oauth_accounts first, then email, then create
-  const db = c.get("db");
   let user = await getUserByOAuthAccount(db, resolvedProvider, providerId);
   if (user) {
     // Only update login/email when the provider matches the user's primary provider

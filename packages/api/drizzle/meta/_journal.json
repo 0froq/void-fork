@@ -50,6 +50,13 @@
       "when": 1773286257384,
       "tag": "0006_wonderful_madame_masque",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1774007038000,
+      "tag": "0007_normal_skin",
+      "breakpoints": true
     }
   ]
 }
