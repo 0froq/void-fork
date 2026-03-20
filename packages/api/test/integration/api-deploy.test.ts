@@ -991,6 +991,158 @@ describe("POST /projects/:id/deploy", () => {
       });
     },
   );
+
+  it(
+    "cleans up worker script when deploy fails before routing is switched",
+    { timeout: 15_000 },
+    async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, "cleanup-pre-routing-test");
+      // Worker upload always returns the plain-text bug → exhausts retries → fails before routing
+      const fetchMock = mockCfApi({
+        uploadWorker: () => new Response("Assets have already been uploaded."),
+      });
+
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${user.jwt}` },
+          body: buildDeployForm({
+            assets: { "index.html": "<h1>hi</h1>" },
+          }),
+        }),
+        env,
+      );
+      // Consume the stream to drive the deploy handler to completion (including the catch block)
+      await res.text();
+
+      // The outer catch should have called deleteDispatchScript (DELETE to workers/dispatch/...scripts/)
+      const deleteCalls = fetchMock.mock.calls.filter((args: unknown[]) => {
+        const url = typeof args[0] === "string" ? args[0] : "";
+        const init = args[1] as RequestInit | undefined;
+        return (
+          url.includes("/workers/dispatch/") &&
+          url.includes("/scripts/") &&
+          init?.method === "DELETE"
+        );
+      });
+      expect(deleteCalls.length).toBeGreaterThanOrEqual(1);
+      // At least one delete should target the new worker name
+      const targetedNewWorker = deleteCalls.some((args: unknown[]) => {
+        const url = args[0] as string;
+        return url.includes(`user-${project.slug}-`);
+      });
+      expect(targetedNewWorker).toBe(true);
+    },
+  );
+
+  it("does not delete new worker when deploy succeeds (routing switched)", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "no-cleanup-success-test");
+    const fetchMock = mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          assets: { "index.html": "<h1>hi</h1>" },
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text());
+    expect(events.at(-1)).toMatchObject({ event: "done" });
+
+    // Check DELETEs to dispatch scripts — the newly deployed versioned worker
+    // (user-{slug}-{deploymentId}) must NOT be deleted
+    const deleteCalls = fetchMock.mock.calls.filter((args: unknown[]) => {
+      const url = typeof args[0] === "string" ? args[0] : "";
+      const init = args[1] as RequestInit | undefined;
+      return (
+        url.includes("/workers/dispatch/") && url.includes("/scripts/") && init?.method === "DELETE"
+      );
+    });
+    for (const args of deleteCalls) {
+      const url = args[0] as string;
+      // Legacy cleanup (user-{slug}) is OK; versioned cleanup (user-{slug}-dpl_*) for OLD
+      // deployments is OK. But the new deployment's worker must not be deleted.
+      // New deployment IDs start with "dpl_test" from createTestDeployment,
+      // but deploy route creates its own ID. Just verify no delete targets a
+      // versioned worker for this project (no previous deploys exist).
+      if (url.includes(`user-${project.slug}-`)) {
+        // This would be a versioned worker delete — shouldn't happen for a
+        // project with no previous deployments
+        expect(url).toBe("should not delete versioned worker");
+      }
+    }
+  });
+
+  it("retries worker upload when CF returns plain-text asset response", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "worker-upload-text-test");
+    let uploadCalls = 0;
+    mockCfApi({
+      uploadWorker: () => {
+        uploadCalls++;
+        if (uploadCalls <= 2) {
+          return new Response("Assets have already been uploaded.");
+        }
+        return new Response("ok", { status: 200 });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          assets: { "index.html": "<h1>hi</h1>" },
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text());
+    expect(events.at(-1)).toMatchObject({ event: "done" });
+    expect(uploadCalls).toBe(3);
+  });
+
+  it(
+    "sanitizes error after worker upload retries exhausted on persistent plain-text response",
+    { timeout: 15_000 },
+    async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, "worker-upload-text-error-test");
+      mockCfApi({
+        uploadWorker: () => new Response("Assets have already been uploaded."),
+      });
+
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${user.jwt}` },
+          body: buildDeployForm({
+            assets: { "index.html": "<h1>hi</h1>" },
+          }),
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      const raw = await res.text();
+      expect(raw).not.toContain("Assets have already been uploaded");
+      const events = parseDeployStream(raw);
+      expect(events.at(-1)).toMatchObject({
+        event: "error",
+        step: "worker_upload",
+        message: "worker upload returned an unexpected Cloudflare response",
+      });
+    },
+  );
 });
 
 describe("Deploy deduplication (skip identical deploys)", () => {

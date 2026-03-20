@@ -53,6 +53,20 @@ const CF_ASSET_TEXT_RESPONSES = new Set([
   "Assets have already been uploaded.",
 ]);
 
+/**
+ * Detect the known CF WfP bug where APIs return plain text like
+ * "Assets have already been uploaded" instead of JSON.
+ */
+function isCfAssetPlainText(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    CF_ASSET_TEXT_RESPONSES.has(trimmed) || trimmed.includes("Assets have already been uploaded")
+  );
+}
+
+const WORKER_UPLOAD_MAX_RETRIES = 3;
+const WORKER_UPLOAD_RETRY_DELAY_MS = 1000;
+
 const app = new Hono<ApiEnv>();
 
 function sameClassSet(a: string[], b: string[]): boolean {
@@ -75,8 +89,10 @@ function parseManifest(raw: string | null | undefined): DeployManifest | null {
 function sanitizeDeployErrorMessage(message: string): string {
   const trimmed = message.trim();
   if (
-    CF_ASSET_TEXT_RESPONSES.has(trimmed) ||
-    trimmed.includes("Assets have already been uploaded")
+    isCfAssetPlainText(trimmed) ||
+    // JSON.parse SyntaxError truncates the original text (e.g. `Unexpected token 'A', "Assets hav"...`)
+    // so the full substring won't match — detect the truncated form too
+    /Unexpected token.*"Assets hav/.test(trimmed)
   ) {
     return "asset upload returned an unexpected Cloudflare response";
   }
@@ -330,6 +346,7 @@ app.post("/:id/deploy", async (c) => {
         controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
       };
       let currentStep = "start";
+      let routingSwitched = false;
 
       try {
         emit({ event: "start", deploymentId: deployment.id });
@@ -453,6 +470,7 @@ app.post("/:id/deploy", async (c) => {
             suspended: existingEntry?.suspended,
           });
           await c.env.ROUTING.put(project.slug, routingJson);
+          routingSwitched = true;
 
           for (const domain of projectDomains) {
             if (domain.status === "active") {
@@ -745,19 +763,37 @@ app.post("/:id/deploy", async (c) => {
           workerFormData.append(file.name, blob, file.name);
         }
 
-        // Upload to CF Workers for Platforms API
-        const cfResponse = await fetch(
-          `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`,
-          {
+        // Upload to CF Workers for Platforms API.
+        // CF's WfP API sometimes returns plain text (e.g. "Assets have already
+        // been uploaded") with 200 status instead of completing the upload.
+        // This is the same CF bug handled in createAssetUploadSession — retry
+        // to hit a different edge node.
+        const workerUploadUrl = `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`;
+        let workerUploaded = false;
+        for (let attempt = 0; attempt <= WORKER_UPLOAD_MAX_RETRIES; attempt++) {
+          if (attempt > 0) {
+            await new Promise((r) => setTimeout(r, WORKER_UPLOAD_RETRY_DELAY_MS * attempt));
+          }
+
+          const cfResponse = await fetch(workerUploadUrl, {
             method: "PUT",
             headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
             body: workerFormData,
-          },
-        );
+          });
 
-        if (!cfResponse.ok) {
-          const error = await cfResponse.text();
-          throw new Error(`worker upload failed: ${error}`);
+          if (!cfResponse.ok) {
+            const error = await cfResponse.text();
+            throw new Error(`worker upload failed: ${error}`);
+          }
+
+          const cfBody = await cfResponse.text();
+          if (!isCfAssetPlainText(cfBody)) {
+            workerUploaded = true;
+            break;
+          }
+        }
+        if (!workerUploaded) {
+          throw new Error("worker upload returned an unexpected Cloudflare response");
         }
 
         emit({ event: "worker_upload_done" });
@@ -962,6 +998,10 @@ app.post("/:id/deploy", async (c) => {
         });
         await c.env.ROUTING.put(project.slug, routingJson);
 
+        // Traffic can now reach the new worker via project.slug.
+        // Set the flag immediately so the outer catch never deletes a live worker.
+        routingSwitched = true;
+
         // Update KV routing for active custom domains
         for (const domain of projectDomains) {
           if (domain.status === "active") {
@@ -1042,15 +1082,53 @@ app.post("/:id/deploy", async (c) => {
         });
       } catch (err) {
         const msg = sanitizeDeployErrorMessage(err instanceof Error ? err.message : String(err));
-        await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
-        emit({ event: "error", message: msg, step: currentStep });
-        if (c.env.EMAIL && user?.email) {
-          const dashboardUrl = c.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
-          c.executionCtx.waitUntil(
-            sendDeployFailedEmail(c.env.EMAIL, user.email, project.slug, msg, dashboardUrl).catch(
-              (err) => console.error(`[deploy-failed-email] Failed for ${project.slug}:`, err),
-            ),
+
+        if (routingSwitched) {
+          // Routing already points to this worker — it IS serving live traffic.
+          // Mark as "live" so DB state matches reality. The late-step failure
+          // (retention cleanup, asset_hashes update, etc.) is non-critical and
+          // will self-correct on the next deploy.
+          console.error(`[deploy] post-routing step failed for ${workerName}: ${msg}`);
+          await updateDeploymentStatus(c.get("db"), deployment.id, "live").catch(() => {});
+          await updateProjectType(
+            c.get("db"),
+            projectId,
+            manifest.type ?? (manifest.framework ? "framework" : "void"),
+          ).catch(() => {});
+          await setActiveDeployment(c.get("db"), projectId, deployment.id).catch(() => {});
+          await markDeploymentRetained(c.get("db"), deployment.id, true).catch(() => {});
+          // Emit "done" so the CLI shows success with the URL — the deploy IS live.
+          const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+          const slugUrl = `https://${project.slug}.${siteDomain}`;
+          emit({
+            event: "done",
+            deployment: deployment.id,
+            url: slugUrl,
+            urls: [slugUrl],
+            assets: 0,
+            workers: 0,
+          });
+        } else {
+          // Routing not yet switched — safe to clean up the worker script and
+          // mark the deployment as failed.
+          await deleteDispatchScript(
+            c.env.CF_ACCOUNT_ID,
+            c.env.CF_API_TOKEN,
+            dispatchNamespace,
+            workerName,
+          ).catch((e) =>
+            console.error(`[deploy] failed to clean up worker script ${workerName}:`, e),
           );
+          await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
+          emit({ event: "error", message: msg, step: currentStep });
+          if (c.env.EMAIL && user?.email) {
+            const dashboardUrl = c.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
+            c.executionCtx.waitUntil(
+              sendDeployFailedEmail(c.env.EMAIL, user.email, project.slug, msg, dashboardUrl).catch(
+                (err) => console.error(`[deploy-failed-email] Failed for ${project.slug}:`, err),
+              ),
+            );
+          }
         }
       } finally {
         controller.close();

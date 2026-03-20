@@ -168,11 +168,17 @@ describe("GET /admin/users/:id", () => {
     await createTestDeployment(env.db, project.id, "live");
     await createTestDeployment(env.db, project.id, "live");
 
+    // Mock CF API — the user detail page calls queryBatchProjectUsage which
+    // fetches from Analytics Engine. Without a mock, the real fetch hangs in CI.
+    mockCfApi();
+
     const res = await req(`/admin/users/${user.id}`, admin.jwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     // Should show "2 / 100" (2 deploys today, free tier limit 100)
     expect(html).toContain("2 / 100");
+
+    vi.restoreAllMocks();
   });
 });
 
