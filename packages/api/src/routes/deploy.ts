@@ -48,20 +48,14 @@ import { DEFAULT_DASHBOARD_URL } from "../constants";
 
 const DEFAULT_DISPATCH_NAMESPACE = "void-users";
 const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
-const CF_ASSET_TEXT_RESPONSES = new Set([
-  "Assets have already been uploaded",
-  "Assets have already been uploaded.",
-]);
-
 /**
- * Detect the known CF WfP bug where APIs return plain text like
- * "Assets have already been uploaded" instead of JSON.
+ * Detect the known CF WfP bug where APIs return plain text about asset state
+ * instead of JSON. CF returns different messages depending on propagation state
+ * (e.g. "Assets have already been uploaded", "Assets have not yet been deployed").
+ * Valid JSON always starts with `{` or `[`, so `startsWith` avoids false positives.
  */
 function isCfAssetPlainText(text: string): boolean {
-  const trimmed = text.trim();
-  return (
-    CF_ASSET_TEXT_RESPONSES.has(trimmed) || trimmed.includes("Assets have already been uploaded")
-  );
+  return text.trimStart().startsWith("Assets have");
 }
 
 const CF_RETRY = { maxRetries: 3, delayMs: 1000 };
@@ -833,10 +827,16 @@ app.post("/:id/deploy", async (c) => {
                 try {
                   return JSON.parse(text) as MigrationResult;
                 } catch {
-                  console.error(
-                    `[deploy] migration returned non-JSON response: ${text.slice(0, 500)}`,
+                  if (migrateResponse.ok) {
+                    // 2xx but non-JSON — likely CF propagation lag, retry.
+                    console.warn(
+                      `[deploy] migration returned non-JSON 2xx, retrying: ${text.slice(0, 500)}`,
+                    );
+                    return undefined; // retry
+                  }
+                  throw new Error(
+                    `migration failed (${migrateResponse.status}): ${text.slice(0, 200)}`,
                   );
-                  throw new Error(`migration returned invalid response: ${text.slice(0, 200)}`);
                 }
               },
               {
