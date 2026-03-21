@@ -17,6 +17,8 @@ import {
   acceptInvitationByEmail,
   storeOAuthNonce,
   consumeOAuthNonce,
+  storeAuthCode,
+  consumeAuthCode,
 } from "../db";
 import { isSignupAllowed, getAllowlist } from "../signup-allowlist";
 import { sendWelcomeEmail } from "../email";
@@ -229,10 +231,37 @@ app.get("/callback", async (c) => {
   // Sign JWT
   const jwt = await signJwt({ sub: user.id, login }, c.env.JWT_SECRET);
 
-  // Redirect back to CLI
   const redirectUrl = new URL(redirect);
-  redirectUrl.searchParams.set("token", jwt);
+
+  if (redirectUrl.hostname === "localhost" || redirectUrl.hostname === "127.0.0.1") {
+    // CLI / local dev: token in query param (localhost-only, safe)
+    redirectUrl.searchParams.set("token", jwt);
+  } else {
+    // Dashboard: short-lived auth code exchanged server-side, so the JWT never appears in the URL.
+    // Stored in PostgreSQL (not KV) for strong cross-colo consistency and atomic single-use
+    // via DELETE … RETURNING — same rationale as the OAuth nonce flow.
+    const authCode = crypto.randomUUID();
+    await storeAuthCode(db, authCode, jwt, 60);
+    redirectUrl.searchParams.set("code", authCode);
+  }
+
   return c.redirect(redirectUrl.toString());
+});
+
+// POST /auth/exchange — single-use code → JWT (called by dashboard callback)
+app.post("/exchange", async (c) => {
+  const { code } = await c.req.json<{ code: string }>();
+  if (!code) {
+    return c.json({ error: "missing code" }, 400);
+  }
+
+  const db = c.get("db");
+  const jwt = await consumeAuthCode(db, code);
+  if (!jwt) {
+    return c.json({ error: "invalid or expired code" }, 400);
+  }
+
+  return c.json({ token: jwt });
 });
 
 export default app;

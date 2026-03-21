@@ -26,6 +26,7 @@ import {
   platformEvents,
   invitations,
   oauthNonces,
+  authCodes,
 } from "./schema";
 import { generateId } from "./id";
 import type { PlanId } from "./tiers";
@@ -963,4 +964,33 @@ export async function consumeOAuthNonce(db: Db, nonce: string): Promise<boolean>
 /** Delete expired nonces left behind by abandoned login flows. */
 export async function purgeExpiredOAuthNonces(db: Db): Promise<void> {
   await db.delete(oauthNonces).where(sql`expires_at <= now()`);
+}
+
+// ---------------------------------------------------------------------------
+// auth codes (dashboard login code exchange)
+// ---------------------------------------------------------------------------
+
+export async function storeAuthCode(
+  db: Db,
+  code: string,
+  jwt: string,
+  ttlSeconds: number,
+): Promise<void> {
+  await db
+    .insert(authCodes)
+    .values({ code, jwt, expires_at: sql`now() + ${String(ttlSeconds)} * interval '1 second'` });
+}
+
+/** Atomically consume an auth code — returns the JWT if valid, null otherwise. */
+export async function consumeAuthCode(db: Db, code: string): Promise<string | null> {
+  const rows = await db
+    .delete(authCodes)
+    .where(and(eq(authCodes.code, code), sql`expires_at > now()`))
+    .returning({ jwt: authCodes.jwt });
+  return rows[0]?.jwt ?? null;
+}
+
+/** Delete expired auth codes left behind by abandoned login flows. */
+export async function purgeExpiredAuthCodes(db: Db): Promise<void> {
+  await db.delete(authCodes).where(sql`expires_at <= now()`);
 }

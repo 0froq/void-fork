@@ -32,6 +32,7 @@ import {
   unsuspendUserIfReason,
   getDomainsByProjectIds,
   purgeExpiredOAuthNonces,
+  purgeExpiredAuthCodes,
   type Db,
 } from "./db";
 import { getCurrentBillingPeriodStart, getPlanLimits } from "./tiers";
@@ -112,9 +113,12 @@ async function scheduled(
 ): Promise<void> {
   const db = createDb(env.HYPERDRIVE.connectionString);
 
-  // Purge expired OAuth nonces left by abandoned login flows (best-effort — must not block billing)
+  // Purge expired OAuth nonces and auth codes left by abandoned login flows (best-effort)
   await purgeExpiredOAuthNonces(db).catch((err) =>
     console.error("[scheduled] failed to purge expired OAuth nonces:", err),
+  );
+  await purgeExpiredAuthCodes(db).catch((err) =>
+    console.error("[scheduled] failed to purge expired auth codes:", err),
   );
 
   let offset = 0;

@@ -210,6 +210,17 @@ export const oauthNonces = pgTable("oauth_nonces", {
 });
 
 // ---------------------------------------------------------------------------
+// auth_codes — short-lived, single-use authorization codes for dashboard login.
+// Same rationale as oauth_nonces: cross-colo consistency requires PostgreSQL,
+// and atomic DELETE … RETURNING guarantees single-use.
+// ---------------------------------------------------------------------------
+export const authCodes = pgTable("auth_codes", {
+  code: text("code").primaryKey(),
+  jwt: text("jwt").notNull(),
+  expires_at: timestamp("expires_at", { mode: "string" }).notNull(),
+});
+
+// ---------------------------------------------------------------------------
 // invitations
 // ---------------------------------------------------------------------------
 export const invitations = pgTable(
