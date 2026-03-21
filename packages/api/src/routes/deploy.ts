@@ -885,30 +885,18 @@ app.post("/:id/deploy", async (c) => {
               (b) => b.type === "queue" && b.name === q.bindingName,
             );
             if (queueBinding?.queue_id) {
-              try {
-                await addQueueConsumer(
-                  c.env.CF_ACCOUNT_ID,
-                  c.env.CF_API_TOKEN,
-                  queueBinding.queue_id,
-                  dispatchWorkerName,
-                  {
-                    ...(q.maxBatchSize != null && { max_batch_size: q.maxBatchSize }),
-                    ...(q.maxBatchTimeout != null && { max_batch_timeout: q.maxBatchTimeout }),
-                    ...(q.maxRetries != null && { max_retries: q.maxRetries }),
-                    ...(q.retryDelay != null && { retry_delay: q.retryDelay }),
-                  },
-                );
-              } catch (err) {
-                // Consumer may already exist — swallow "already exists" / "already has a consumer"
-                if (err instanceof Error) {
-                  const msg = err.message.toLowerCase();
-                  if (!msg.includes("already exists") && !msg.includes("already has a consumer")) {
-                    throw err;
-                  }
-                } else {
-                  throw err;
-                }
-              }
+              await addQueueConsumer(
+                c.env.CF_ACCOUNT_ID,
+                c.env.CF_API_TOKEN,
+                queueBinding.queue_id,
+                dispatchWorkerName,
+                {
+                  ...(q.maxBatchSize != null && { batch_size: q.maxBatchSize }),
+                  ...(q.maxBatchTimeout != null && { max_wait_time_ms: q.maxBatchTimeout * 1000 }),
+                  ...(q.maxRetries != null && { max_retries: q.maxRetries }),
+                  ...(q.retryDelay != null && { retry_delay: q.retryDelay }),
+                },
+              );
               // Store queue→worker mapping for relay routing
               await c.env.ROUTING.put(
                 `queue:${queueBinding.queue_name}`,

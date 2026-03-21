@@ -158,26 +158,76 @@ export async function createQueue(
   });
 }
 
+interface QueueConsumerSettings {
+  batch_size?: number;
+  max_wait_time_ms?: number;
+  max_retries?: number;
+  retry_delay?: number;
+}
+
+interface QueueConsumerInfo {
+  consumer_id: string;
+  script_name: string;
+  type: string;
+  settings: QueueConsumerSettings;
+}
+
+/**
+ * Create or update a queue consumer. POST creates on first deploy; on
+ * subsequent deploys the POST fails with "already exists" and we PUT
+ * to update settings instead.
+ */
 export async function addQueueConsumer(
   accountId: string,
   apiToken: string,
   queueId: string,
   scriptName: string,
-  settings?: {
-    max_batch_size?: number;
-    max_batch_timeout?: number;
-    max_retries?: number;
-    retry_delay?: number;
-  },
+  settings?: QueueConsumerSettings,
 ): Promise<void> {
-  await cfFetch(`${CF_API_BASE}/${accountId}/queues/${queueId}/consumers`, apiToken, {
-    method: "POST",
-    body: JSON.stringify({
-      script_name: scriptName,
-      type: "worker",
-      ...(settings && { settings }),
-    }),
-  });
+  const consumersUrl = `${CF_API_BASE}/${accountId}/queues/${queueId}/consumers`;
+  const consumerBody = {
+    script_name: scriptName,
+    type: "worker",
+    ...(settings && { settings }),
+  };
+
+  // Fast path: try to create the consumer directly
+  try {
+    await cfFetch(consumersUrl, apiToken, {
+      method: "POST",
+      body: JSON.stringify(consumerBody),
+    });
+    return;
+  } catch (err) {
+    if (
+      !(err instanceof Error) ||
+      (!err.message.toLowerCase().includes("already exists") &&
+        !err.message.toLowerCase().includes("already has a consumer"))
+    ) {
+      throw err;
+    }
+  }
+
+  // Consumer exists — find ours and update settings
+  const consumers = await cfFetch<QueueConsumerInfo[]>(consumersUrl, apiToken);
+  const ours = consumers.find((c) => c.script_name === scriptName);
+
+  if (!ours) {
+    // A different script owns this consumer — log and continue.
+    // Queue names are derived from projectId so this is effectively
+    // unreachable, but if it happens the deploy should not fail.
+    console.warn(
+      `[queue] consumer for "${scriptName}" not found on queue ${queueId} — a different script may own it`,
+    );
+    return;
+  }
+
+  if (settings) {
+    await cfFetch(`${consumersUrl}/${ours.consumer_id}`, apiToken, {
+      method: "PUT",
+      body: JSON.stringify(consumerBody),
+    });
+  }
 }
 
 export async function deleteQueue(
