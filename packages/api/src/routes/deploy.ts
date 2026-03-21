@@ -24,7 +24,7 @@ import { eq } from "drizzle-orm";
 import { deployments } from "../schema";
 import { provisionBindings } from "../provisioning/provision";
 import { addQueueConsumer } from "../provisioning/cloudflare-api";
-import { deleteDispatchScript } from "../cf-api";
+import { deleteDispatchScript, retryWithBackoff } from "../cf-api";
 import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT } from "../tiers";
 import { SITE_DOMAIN } from "../constants";
 import { buildRoutingJson, buildStaticRoutingJson } from "../routing";
@@ -64,8 +64,7 @@ function isCfAssetPlainText(text: string): boolean {
   );
 }
 
-const WORKER_UPLOAD_MAX_RETRIES = 3;
-const WORKER_UPLOAD_RETRY_DELAY_MS = 1000;
+const CF_RETRY = { maxRetries: 3, delayMs: 1000 };
 
 const app = new Hono<ApiEnv>();
 
@@ -769,32 +768,25 @@ app.post("/:id/deploy", async (c) => {
         // This is the same CF bug handled in createAssetUploadSession — retry
         // to hit a different edge node.
         const workerUploadUrl = `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`;
-        let workerUploaded = false;
-        for (let attempt = 0; attempt <= WORKER_UPLOAD_MAX_RETRIES; attempt++) {
-          if (attempt > 0) {
-            await new Promise((r) => setTimeout(r, WORKER_UPLOAD_RETRY_DELAY_MS * attempt));
-          }
+        await retryWithBackoff(
+          async () => {
+            const cfResponse = await fetch(workerUploadUrl, {
+              method: "PUT",
+              headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
+              body: workerFormData,
+            });
 
-          const cfResponse = await fetch(workerUploadUrl, {
-            method: "PUT",
-            headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
-            body: workerFormData,
-          });
+            if (!cfResponse.ok) {
+              const error = await cfResponse.text();
+              throw new Error(`worker upload failed: ${error}`);
+            }
 
-          if (!cfResponse.ok) {
-            const error = await cfResponse.text();
-            throw new Error(`worker upload failed: ${error}`);
-          }
-
-          const cfBody = await cfResponse.text();
-          if (!isCfAssetPlainText(cfBody)) {
-            workerUploaded = true;
-            break;
-          }
-        }
-        if (!workerUploaded) {
-          throw new Error("worker upload returned an unexpected Cloudflare response");
-        }
+            const cfBody = await cfResponse.text();
+            if (isCfAssetPlainText(cfBody)) return undefined; // retry
+            return true;
+          },
+          { ...CF_RETRY, errorMessage: "worker upload returned an unexpected Cloudflare response" },
+        );
 
         emit({ event: "worker_upload_done" });
 
@@ -806,16 +798,13 @@ app.post("/:id/deploy", async (c) => {
           emit({ event: "migration_start", pending: manifest.migrations.pending });
 
           try {
-            const userWorker = c.env.DISPATCH.get(workerName);
             const proxyTokenBinding = workerBindings.find((b) => b.name === "__VOID_PROXY_TOKEN");
-            const migrateResponse = await userWorker.fetch(
-              new Request("https://internal/__void/migrate", {
-                method: "POST",
-                headers: { "x-void-internal": proxyTokenBinding?.text ?? "" },
-              }),
-            );
 
-            const result = (await migrateResponse.json()) as {
+            // CF's WfP dispatch can return the same "Assets have already been
+            // uploaded" plain text on the first invocation after a worker upload
+            // (asset state propagation lag). Retry with backoff, same as the
+            // worker upload step.
+            type MigrationResult = {
               ok: boolean;
               migrations: {
                 name: string;
@@ -825,6 +814,37 @@ app.post("/:id/deploy", async (c) => {
               }[];
               error?: string;
             };
+            const result = await retryWithBackoff<MigrationResult>(
+              async () => {
+                const userWorker = c.env.DISPATCH.get(workerName);
+                const migrateResponse = await userWorker.fetch(
+                  new Request("https://internal/__void/migrate", {
+                    method: "POST",
+                    headers: { "x-void-internal": proxyTokenBinding?.text ?? "" },
+                  }),
+                );
+
+                const text = await migrateResponse.text();
+                if (isCfAssetPlainText(text)) {
+                  console.warn(`[deploy] migration dispatch returned CF plain text: ${text}`);
+                  return undefined; // retry
+                }
+
+                try {
+                  return JSON.parse(text) as MigrationResult;
+                } catch {
+                  console.error(
+                    `[deploy] migration returned non-JSON response: ${text.slice(0, 500)}`,
+                  );
+                  throw new Error(`migration returned invalid response: ${text.slice(0, 200)}`);
+                }
+              },
+              {
+                ...CF_RETRY,
+                errorMessage:
+                  "migration dispatch failed: CF returned plain-text asset response after retries",
+              },
+            );
 
             if (!result.ok) {
               throw new Error(`migration failed: ${result.error ?? "unknown error"}`);
@@ -1081,7 +1101,11 @@ app.post("/:id/deploy", async (c) => {
           ...(migrationsApplied > 0 && { migrations: migrationsApplied }),
         });
       } catch (err) {
-        const msg = sanitizeDeployErrorMessage(err instanceof Error ? err.message : String(err));
+        const raw = err instanceof Error ? err.message : String(err);
+        const msg = sanitizeDeployErrorMessage(raw);
+        if (msg !== raw) {
+          console.error(`[deploy] raw error before sanitization for ${workerName}: ${raw}`);
+        }
 
         if (routingSwitched) {
           // Routing already points to this worker — it IS serving live traffic.

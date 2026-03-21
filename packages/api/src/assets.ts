@@ -1,4 +1,5 @@
 import type { AssetConfig } from "./types";
+import { retryWithBackoff } from "./cf-api";
 
 interface AssetManifestEntry {
   hash: string;
@@ -54,29 +55,28 @@ export async function createAssetUploadSession(
   };
   const body = JSON.stringify({ manifest });
 
-  let lastText = "";
-  for (let attempt = 0; attempt <= ASSET_SESSION_MAX_RETRIES; attempt++) {
-    if (attempt > 0) {
-      await new Promise((r) => setTimeout(r, retryDelayMs * attempt));
-    }
+  return retryWithBackoff(
+    async () => {
+      const response = await fetch(url, { method: "POST", headers, body });
 
-    const response = await fetch(url, { method: "POST", headers, body });
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`asset upload session failed: ${error}`);
+      }
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`asset upload session failed: ${error}`);
-    }
-
-    const text = await response.text();
-    const data = tryParseJson<UploadSessionResponse>(text);
-    if (data?.result?.jwt && Array.isArray(data.result.buckets)) {
-      return { jwt: data.result.jwt, buckets: data.result.buckets };
-    }
-
-    lastText = text;
-  }
-
-  throw new Error(`asset upload session returned invalid response: ${lastText}`);
+      const text = await response.text();
+      const data = tryParseJson<UploadSessionResponse>(text);
+      if (data?.result?.jwt && Array.isArray(data.result.buckets)) {
+        return { jwt: data.result.jwt, buckets: data.result.buckets };
+      }
+      return undefined; // retry — likely CF plain-text bug
+    },
+    {
+      maxRetries: ASSET_SESSION_MAX_RETRIES,
+      delayMs: retryDelayMs,
+      errorMessage: "asset upload session returned invalid response after retries",
+    },
+  );
 }
 
 /**

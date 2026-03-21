@@ -1,3 +1,22 @@
+/**
+ * Retry an async operation with linear backoff.
+ * `fn` returns `T` on success, or `undefined` to signal a retry.
+ * Throws immediately if `fn` itself throws.
+ */
+export async function retryWithBackoff<T>(
+  fn: (attempt: number) => Promise<T | undefined>,
+  opts: { maxRetries: number; delayMs: number; errorMessage: string },
+): Promise<T> {
+  for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, opts.delayMs * attempt));
+    }
+    const result = await fn(attempt);
+    if (result !== undefined) return result;
+  }
+  throw new Error(opts.errorMessage);
+}
+
 export async function deleteDispatchScript(
   accountId: string,
   apiToken: string,

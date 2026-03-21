@@ -987,7 +987,7 @@ describe("POST /projects/:id/deploy", () => {
       expect(events.at(-1)).toMatchObject({
         event: "error",
         step: "asset_upload",
-        message: "asset upload returned an unexpected Cloudflare response",
+        message: "asset upload session returned invalid response after retries",
       });
     },
   );
