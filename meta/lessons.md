@@ -22,3 +22,4 @@
 - Drizzle validators: on `drizzle-orm@0.45.x`, use `drizzle-zod`, `drizzle-valibot`, and `drizzle-arktype`, not `drizzle-orm/*` validator entrypoints.
 - SQLite PRAGMA syntax: use bare names or single-quoted strings for `PRAGMA table_info(...)` / `PRAGMA index_list(...)`; do not pass double-quoted SQL identifiers there.
 - Schema-derived validator requests: when the user asks for inferred validators, define them from the Drizzle schema in `db/schema.ts` via `void/drizzle-valibot` and import them from `@schema` instead of hand-writing Valibot object schemas in the handler.
+- Progress docs: do not mark a feature done just because code or a package exists. For product-readiness tracking, treat "implemented", "shipped", and "done for milestone" as separate states unless the user confirms they are equivalent.

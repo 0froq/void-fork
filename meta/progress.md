@@ -55,20 +55,19 @@
 - [x] CLI skills for coding agents (Claude Code, Cursor, Codex, etc.)
 - [x] MCP server shipped in-package (`void mcp`)
 - [x] CLI lazy loading for startup performance
-- [x] Pages mode — Inertia-inspired full-stack DX with Vue adapter (`@void/vue`)
-- [x] Meta-framework adapters (TanStack Start — framework mode)
+- [x] Pages mode — Inertia-inspired full-stack DX with Vue, React, Svelte, and Solid adapters (`@void/vue`, `@void/react`, `@void/svelte`, `@void/solid`)
+- [x] Meta-framework adapters (TanStack Start, React Router, SvelteKit, Nuxt, Astro)
+- [x] Pre-rendering / SSG (`output: "static"` and deploy-time prerendering)
+- [x] Drizzle integration
 
 ### Remaining
 
-- [ ] Pages mode: React adapter
 - [ ] Pages mode: update agent prompts for pages
-- [ ] Pre-rendering (bring back with new architecture)
 - [x] AI binding (`void/ai` with metered proxy)
 - [x] Remote bindings (`remote: true` — D1/KV/R2 via proxy for local dev)
-- [ ] Drizzle integration
 - [x] Better-auth integration
-- [ ] More framework adapters (React Router, Astro, SvelteKit, Nuxt, SolidStart)
-  - [ ] Make backend features (queues, crons, ISR) work alongside these
+- [ ] More framework adapters (SolidStart)
+  - [ ] Make backend features (queues, crons, ISR) work alongside framework adapters
 
 **Milestone:** Fully typed API routes end-to-end. Route handlers with validators produce typed `RouteMap` via codegen. Client `fetch()` infers path, method, input, and output types automatically.
 
@@ -81,6 +80,7 @@
 - [x] Admin dashboard (Hono JSX, merged into platform worker)
 - [x] Staging environment with isolated CF resources
 - [x] Staging sign-up allowlist (VoidZero Google accounts only)
+- [x] Sign-up allowlist / whitelist controls (private beta)
 - [x] Platform worker rollback admin page (per-worker version history + rollback)
 - [x] Platform rollback audit log (`platform_events` table), unified "Rollback All" with orchestration
 
@@ -92,7 +92,6 @@
 - [ ] Improve sign-up page
 - [ ] User token management (CF Secret Store?)
 - [ ] Terms of Service
-- [ ] Sign-up whitelist (public)
 - [ ] Billing integration (Stripe)
 - [ ] Email & webhook notifications (failed deploys, billing)
 
