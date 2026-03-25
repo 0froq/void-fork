@@ -17,6 +17,8 @@ import {
   type TestEnv,
 } from "./helpers";
 
+const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
+
 let env: TestEnv;
 
 beforeAll(async () => {
@@ -68,6 +70,11 @@ function parseDeployStream(text: string): unknown[] {
     .split("\n")
     .filter((line) => line.trim())
     .map((line) => JSON.parse(line));
+}
+
+function mockSetTimeout() {
+  vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: TimerHandler, ...args: unknown[]) =>
+    nativeSetTimeout(fn, 0, ...args)) as typeof setTimeout);
 }
 
 describe("POST /projects/:id/deploy", () => {
@@ -959,14 +966,100 @@ describe("POST /projects/:id/deploy", () => {
     expect(events.at(-1)).toMatchObject({ event: "done" });
   });
 
-  it(
-    "sanitizes error after retries exhausted on persistent plain-text session response",
-    { timeout: 15_000 },
-    async () => {
+  describe("retry-path behavior", () => {
+    beforeEach(() => {
+      mockSetTimeout();
+    });
+
+    it(
+      "sanitizes error after retries exhausted on persistent plain-text session response",
+      { timeout: 15_000 },
+      async () => {
+        const user = await createTestUser(env.db);
+        const project = await createTestProject(env.db, user.id, "asset-text-error-test");
+        mockCfApi({
+          assetUploadSession: () => new Response("Assets have already been uploaded."),
+        });
+
+        const res = await app.fetch(
+          new Request(`http://localhost/projects/${project.id}/deploy`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${user.jwt}` },
+            body: buildDeployForm({
+              assets: { "index.html": "<h1>hi</h1>" },
+            }),
+          }),
+          env,
+        );
+
+        expect(res.status).toBe(200);
+        const raw = await res.text();
+        expect(raw).not.toContain("Assets have already been uploaded");
+        const events = parseDeployStream(raw);
+        expect(events.at(-1)).toMatchObject({
+          event: "error",
+          step: "asset_upload",
+          message: "asset upload session returned invalid response after retries",
+        });
+      },
+    );
+
+    it(
+      "cleans up worker script when deploy fails before routing is switched",
+      { timeout: 15_000 },
+      async () => {
+        const user = await createTestUser(env.db);
+        const project = await createTestProject(env.db, user.id, "cleanup-pre-routing-test");
+        // Worker upload always returns the plain-text bug → exhausts retries → fails before routing
+        const fetchMock = mockCfApi({
+          uploadWorker: () => new Response("Assets have already been uploaded."),
+        });
+
+        const res = await app.fetch(
+          new Request(`http://localhost/projects/${project.id}/deploy`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${user.jwt}` },
+            body: buildDeployForm({
+              assets: { "index.html": "<h1>hi</h1>" },
+            }),
+          }),
+          env,
+        );
+        // Consume the stream to drive the deploy handler to completion (including the catch block)
+        await res.text();
+
+        // The outer catch should have called deleteDispatchScript (DELETE to workers/dispatch/...scripts/)
+        const deleteCalls = fetchMock.mock.calls.filter((args: unknown[]) => {
+          const url = typeof args[0] === "string" ? args[0] : "";
+          const init = args[1] as RequestInit | undefined;
+          return (
+            url.includes("/workers/dispatch/") &&
+            url.includes("/scripts/") &&
+            init?.method === "DELETE"
+          );
+        });
+        expect(deleteCalls.length).toBeGreaterThanOrEqual(1);
+        // At least one delete should target the new worker name
+        const targetedNewWorker = deleteCalls.some((args: unknown[]) => {
+          const url = args[0] as string;
+          return url.includes(`user-${project.slug}-`);
+        });
+        expect(targetedNewWorker).toBe(true);
+      },
+    );
+
+    it("retries worker upload when CF returns plain-text asset response", async () => {
       const user = await createTestUser(env.db);
-      const project = await createTestProject(env.db, user.id, "asset-text-error-test");
+      const project = await createTestProject(env.db, user.id, "worker-upload-text-test");
+      let uploadCalls = 0;
       mockCfApi({
-        assetUploadSession: () => new Response("Assets have already been uploaded."),
+        uploadWorker: () => {
+          uploadCalls++;
+          if (uploadCalls <= 2) {
+            return new Response("Assets have already been uploaded.");
+          }
+          return new Response("ok", { status: 200 });
+        },
       });
 
       const res = await app.fetch(
@@ -981,60 +1074,44 @@ describe("POST /projects/:id/deploy", () => {
       );
 
       expect(res.status).toBe(200);
-      const raw = await res.text();
-      expect(raw).not.toContain("Assets have already been uploaded");
-      const events = parseDeployStream(raw);
-      expect(events.at(-1)).toMatchObject({
-        event: "error",
-        step: "asset_upload",
-        message: "asset upload session returned invalid response after retries",
-      });
-    },
-  );
+      const events = parseDeployStream(await res.text());
+      expect(events.at(-1)).toMatchObject({ event: "done" });
+      expect(uploadCalls).toBe(3);
+    });
 
-  it(
-    "cleans up worker script when deploy fails before routing is switched",
-    { timeout: 15_000 },
-    async () => {
-      const user = await createTestUser(env.db);
-      const project = await createTestProject(env.db, user.id, "cleanup-pre-routing-test");
-      // Worker upload always returns the plain-text bug → exhausts retries → fails before routing
-      const fetchMock = mockCfApi({
-        uploadWorker: () => new Response("Assets have already been uploaded."),
-      });
+    it(
+      "sanitizes error after worker upload retries exhausted on persistent plain-text response",
+      { timeout: 15_000 },
+      async () => {
+        const user = await createTestUser(env.db);
+        const project = await createTestProject(env.db, user.id, "worker-upload-text-error-test");
+        mockCfApi({
+          uploadWorker: () => new Response("Assets have already been uploaded."),
+        });
 
-      const res = await app.fetch(
-        new Request(`http://localhost/projects/${project.id}/deploy`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${user.jwt}` },
-          body: buildDeployForm({
-            assets: { "index.html": "<h1>hi</h1>" },
+        const res = await app.fetch(
+          new Request(`http://localhost/projects/${project.id}/deploy`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${user.jwt}` },
+            body: buildDeployForm({
+              assets: { "index.html": "<h1>hi</h1>" },
+            }),
           }),
-        }),
-        env,
-      );
-      // Consume the stream to drive the deploy handler to completion (including the catch block)
-      await res.text();
-
-      // The outer catch should have called deleteDispatchScript (DELETE to workers/dispatch/...scripts/)
-      const deleteCalls = fetchMock.mock.calls.filter((args: unknown[]) => {
-        const url = typeof args[0] === "string" ? args[0] : "";
-        const init = args[1] as RequestInit | undefined;
-        return (
-          url.includes("/workers/dispatch/") &&
-          url.includes("/scripts/") &&
-          init?.method === "DELETE"
+          env,
         );
-      });
-      expect(deleteCalls.length).toBeGreaterThanOrEqual(1);
-      // At least one delete should target the new worker name
-      const targetedNewWorker = deleteCalls.some((args: unknown[]) => {
-        const url = args[0] as string;
-        return url.includes(`user-${project.slug}-`);
-      });
-      expect(targetedNewWorker).toBe(true);
-    },
-  );
+
+        expect(res.status).toBe(200);
+        const raw = await res.text();
+        expect(raw).not.toContain("Assets have already been uploaded");
+        const events = parseDeployStream(raw);
+        expect(events.at(-1)).toMatchObject({
+          event: "error",
+          step: "worker_upload",
+          message: "worker upload returned an unexpected Cloudflare response",
+        });
+      },
+    );
+  });
 
   it("does not delete new worker when deploy succeeds (routing switched)", async () => {
     const user = await createTestUser(env.db);
@@ -1079,70 +1156,6 @@ describe("POST /projects/:id/deploy", () => {
       }
     }
   });
-
-  it("retries worker upload when CF returns plain-text asset response", async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "worker-upload-text-test");
-    let uploadCalls = 0;
-    mockCfApi({
-      uploadWorker: () => {
-        uploadCalls++;
-        if (uploadCalls <= 2) {
-          return new Response("Assets have already been uploaded.");
-        }
-        return new Response("ok", { status: 200 });
-      },
-    });
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildDeployForm({
-          assets: { "index.html": "<h1>hi</h1>" },
-        }),
-      }),
-      env,
-    );
-
-    expect(res.status).toBe(200);
-    const events = parseDeployStream(await res.text());
-    expect(events.at(-1)).toMatchObject({ event: "done" });
-    expect(uploadCalls).toBe(3);
-  });
-
-  it(
-    "sanitizes error after worker upload retries exhausted on persistent plain-text response",
-    { timeout: 15_000 },
-    async () => {
-      const user = await createTestUser(env.db);
-      const project = await createTestProject(env.db, user.id, "worker-upload-text-error-test");
-      mockCfApi({
-        uploadWorker: () => new Response("Assets have already been uploaded."),
-      });
-
-      const res = await app.fetch(
-        new Request(`http://localhost/projects/${project.id}/deploy`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${user.jwt}` },
-          body: buildDeployForm({
-            assets: { "index.html": "<h1>hi</h1>" },
-          }),
-        }),
-        env,
-      );
-
-      expect(res.status).toBe(200);
-      const raw = await res.text();
-      expect(raw).not.toContain("Assets have already been uploaded");
-      const events = parseDeployStream(raw);
-      expect(events.at(-1)).toMatchObject({
-        event: "error",
-        step: "worker_upload",
-        message: "worker upload returned an unexpected Cloudflare response",
-      });
-    },
-  );
 });
 
 describe("Deploy deduplication (skip identical deploys)", () => {
