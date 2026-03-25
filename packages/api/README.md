@@ -154,6 +154,19 @@ pnpm -C packages/api db:generate
 pnpm -C packages/api migrate
 ```
 
+`pnpm -C packages/api setup` also ensures `packages/api/.dev.vars` and
+`packages/dashboard/.dev.vars` include the local development overrides:
+`DEV_AUTH_BYPASS=true`, `PLATFORM_ENV=staging`, `JWT_SECRET=dev`, and the local
+Hyperdrive connection string. It also prompts for the local admin email and
+upserts the seeded `user_admin` record to match it. For non-interactive use,
+pass `pnpm -C packages/api setup -- --admin-email you@example.com`.
+
+To run the API locally, use:
+
+```bash
+pnpm -C packages/api exec wrangler dev --local --host localhost --port 8787
+```
+
 Secrets used at runtime:
 
 - `CF_API_TOKEN`

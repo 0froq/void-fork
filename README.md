@@ -112,6 +112,25 @@ Root `dev` and `build` are intentionally dashboard-only. Dashboard work is curre
 
 **Manual deploys only. Do not ask to push or deploy.**
 
+## Local Development
+
+For the platform API and internal admin UI, start with:
+
+```bash
+pnpm -C packages/api setup
+pnpm -C packages/api exec wrangler dev --local --host localhost --port 8787
+```
+
+Then open `http://localhost:8787/admin/`.
+
+If you also need the dashboard, run it separately:
+
+```bash
+pnpm dev
+```
+
+Root `pnpm dev` is the dashboard only. It does not start the platform API worker.
+
 ## Monorepo Structure
 
 Void is split across two codebases in this repo:
