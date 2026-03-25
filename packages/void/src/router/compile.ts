@@ -1040,16 +1040,50 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`}`);
   lines.push("");
 
-  // Page fallback — renders index page for unmatched non-API, non-asset paths.
+  // Custom error page helper — serves {status}.html from static assets (e.g. 404.html, 500.html)
+  lines.push(`async function serveCustomErrorPage(c, status, fallbackText) {`);
+  lines.push(`  try {`);
+  lines.push(`    const assets = c.env?.ASSETS;`);
+  lines.push(`    if (assets && typeof assets.fetch === "function") {`);
+  lines.push(`      const errReq = new Request(new URL("/" + status + ".html", c.req.url));`);
+  lines.push(`      const errRes = await assets.fetch(errReq);`);
+  lines.push(`      if (errRes.ok) {`);
+  lines.push(
+    `        return new Response(errRes.body, { status, headers: { "content-type": "text/html; charset=utf-8" } });`,
+  );
+  lines.push(`      }`);
+  lines.push(`    }`);
+  lines.push(`  } catch {}`);
+  lines.push(`  return new Response(fallbackText, { status });`);
+  lines.push(`}`);
+  lines.push("");
+
+  // Global error handler — preserve HTTPException responses (e.g. 401 from requireAuth),
+  // serve custom 500.html for unexpected errors
+  lines.push(`app.onError((err, c) => {`);
+  lines.push(`  if ("getResponse" in err) return err.getResponse();`);
+  lines.push(`  console.error(err);`);
+  lines.push(`  return serveCustomErrorPage(c, 500, "Internal Server Error");`);
+  lines.push(`});`);
+  lines.push("");
+
+  // Page fallback — for unmatched non-API paths, try static assets first,
+  // then attempt to render the index page as an SPA fallback.
   // Uses notFound (not get("*")) so Vite's module pipeline can serve .vue/.ts files in dev.
   lines.push(`app.notFound(async (c) => {`);
   lines.push(`  const path = c.req.path;`);
   lines.push(`  if (path === "/api" || path.startsWith("/api/")) {`);
   lines.push(`    return c.text("Not Found", 404);`);
   lines.push(`  }`);
+  // Try static assets for any path (not just dot-containing last segments)
+  lines.push(`  const assetRes = await fetchPagesAsset(c);`);
+  lines.push(`  if (assetRes.status !== 404) return assetRes;`);
+  // If path has a file extension (e.g. /missing.css), don't fall through to SPA —
+  // serve 404 so the browser doesn't try to parse HTML as CSS/JS/image
   lines.push(`  if (/\\/[^/]+\\.[^/]+$/.test(path)) {`);
-  lines.push(`    return fetchPagesAsset(c);`);
+  lines.push(`    return serveCustomErrorPage(c, 404, "Not Found");`);
   lines.push(`  }`);
+  // SPA fallback — render the index page; errors propagate to app.onError (500)
   lines.push(
     `  return handlePageGet(undefined, undefined, c, "index", renderPage, getPagesAssetTags, __voidHeadConfig);`,
   );
