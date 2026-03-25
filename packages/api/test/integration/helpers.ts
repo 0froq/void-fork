@@ -1,11 +1,8 @@
-import { Miniflare } from "miniflare";
 import { PGlite } from "@electric-sql/pglite";
 import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
-import { migrate } from "drizzle-orm/pglite/migrator";
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
 import pg from "pg";
-import { fileURLToPath } from "node:url";
 import { vi } from "vitest";
 import type { Db } from "../../src/db";
 import * as schema from "../../src/schema";
@@ -24,6 +21,7 @@ import { signJwt } from "../../src/auth/jwt";
 import { generateId } from "../../src/id";
 import { encryptProjectSecret } from "../../src/project-secrets";
 import type { PlanId } from "../../src/tiers";
+import { loadPGliteTemplateBundle } from "./db-template";
 import { setTestDb, clearTestDb } from "./setup";
 
 export const JWT_SECRET = "test-jwt-secret";
@@ -77,22 +75,133 @@ function createMockDoNamespace(): DurableObjectNamespace {
   } as unknown as DurableObjectNamespace;
 }
 
-let mf: Miniflare;
+type StoredValue = {
+  value: string | ArrayBuffer;
+  metadata?: unknown;
+};
+
+function toArrayBuffer(value: ArrayBuffer | ArrayBufferView): ArrayBuffer {
+  if (value instanceof ArrayBuffer) {
+    return value.slice(0);
+  }
+
+  return new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice().buffer;
+}
+
+class MemoryKVNamespace {
+  private readonly store = new Map<string, StoredValue>();
+
+  async get(
+    key: string,
+    type?: "text" | "json" | "arrayBuffer" | "stream",
+  ): Promise<string | ArrayBuffer | ReadableStream | unknown | null> {
+    const entry = this.store.get(key);
+    if (!entry) return null;
+
+    if (type === "arrayBuffer") {
+      return entry.value instanceof ArrayBuffer
+        ? entry.value.slice(0)
+        : toArrayBuffer(new TextEncoder().encode(entry.value));
+    }
+
+    const text =
+      typeof entry.value === "string"
+        ? entry.value
+        : new TextDecoder().decode(new Uint8Array(entry.value));
+
+    if (type === "json") {
+      return JSON.parse(text);
+    }
+
+    if (type === "stream") {
+      return new Blob([typeof entry.value === "string" ? entry.value : entry.value]).stream();
+    }
+
+    return text;
+  }
+
+  async getWithMetadata<T>(
+    key: string,
+    type?: "text" | "json" | "arrayBuffer" | "stream",
+  ): Promise<{
+    value: string | ArrayBuffer | ReadableStream | unknown | null;
+    metadata: T | null;
+  }> {
+    const entry = this.store.get(key);
+    return {
+      value: await this.get(key, type),
+      metadata: (entry?.metadata as T | undefined) ?? null,
+    };
+  }
+
+  async put(
+    key: string,
+    value: string | ArrayBuffer | ArrayBufferView,
+    options?: { metadata?: unknown },
+  ): Promise<void> {
+    const normalized = typeof value === "string" ? value : toArrayBuffer(value);
+
+    this.store.set(key, {
+      value: normalized,
+      metadata: options?.metadata === undefined ? undefined : structuredClone(options.metadata),
+    });
+  }
+
+  async delete(key: string): Promise<void> {
+    this.store.delete(key);
+  }
+
+  async list(options?: {
+    prefix?: string;
+    cursor?: string;
+  }): Promise<{ keys: { name: string }[]; list_complete: boolean; cursor: string }> {
+    const prefix = options?.prefix ?? "";
+    const offset = options?.cursor ? Number(options.cursor) : 0;
+    const keys = Array.from(this.store.keys())
+      .filter((key) => key.startsWith(prefix))
+      .sort()
+      .slice(offset)
+      .map((name) => ({ name }));
+
+    return {
+      keys,
+      list_complete: true,
+      cursor: "",
+    };
+  }
+}
+
+class MemoryR2Bucket {
+  private readonly store = new Map<string, { body: ArrayBuffer; httpMetadata?: unknown }>();
+
+  async put(
+    key: string,
+    value: ArrayBuffer | ArrayBufferView | string,
+    options?: { httpMetadata?: unknown },
+  ): Promise<void> {
+    const body =
+      typeof value === "string"
+        ? toArrayBuffer(new TextEncoder().encode(value))
+        : toArrayBuffer(value);
+    this.store.set(key, { body, httpMetadata: options?.httpMetadata });
+  }
+
+  async delete(keys: string | string[]): Promise<void> {
+    const list = Array.isArray(keys) ? keys : [keys];
+    for (const key of list) {
+      this.store.delete(key);
+    }
+  }
+}
+
 let pglite: PGlite | undefined;
 let pgPool: pg.Pool | undefined;
 
 export async function setupEnv(): Promise<TestEnv> {
-  mf = new Miniflare({
-    modules: true,
-    script: "export default { fetch() { return new Response(''); } }",
-    kvNamespaces: ["ROUTING", "ISR_CACHE", "STATIC_ASSETS"],
-    r2Buckets: ["STATIC_ASSETS_R2"],
-  });
-
-  const kv = await mf.getKVNamespace("ROUTING");
-  const isrCache = await mf.getKVNamespace("ISR_CACHE");
-  const staticAssets = await mf.getKVNamespace("STATIC_ASSETS");
-  const staticAssetsR2 = await mf.getR2Bucket("STATIC_ASSETS_R2");
+  const kv = new MemoryKVNamespace();
+  const isrCache = new MemoryKVNamespace();
+  const staticAssets = new MemoryKVNamespace();
+  const staticAssetsR2 = new MemoryR2Bucket();
 
   const databaseUrl = process.env.VOID_TEST_DATABASE_URL;
   let db: Db;
@@ -100,11 +209,11 @@ export async function setupEnv(): Promise<TestEnv> {
     pgPool = new pg.Pool({ connectionString: databaseUrl });
     db = drizzlePg(pgPool, { schema }) as unknown as Db;
   } else {
-    pglite = new PGlite();
-    db = drizzle(pglite, { schema }) as unknown as Db;
-    await migrate(drizzle(pglite, { schema }), {
-      migrationsFolder: fileURLToPath(new URL("../../drizzle", import.meta.url)),
+    pglite = new PGlite({
+      loadDataDir: await loadPGliteTemplateBundle(),
+      relaxedDurability: true,
     });
+    db = drizzle(pglite, { schema }) as unknown as Db;
   }
 
   // Register the test db so the vi.mock in setup.ts routes createDb() here
@@ -136,7 +245,6 @@ export async function setupEnv(): Promise<TestEnv> {
 
 export async function teardownEnv(): Promise<void> {
   clearTestDb();
-  await mf.dispose();
   if (pgPool) {
     await pgPool.end();
     pgPool = undefined;
