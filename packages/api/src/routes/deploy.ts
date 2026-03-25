@@ -340,6 +340,7 @@ app.post("/:id/deploy", async (c) => {
       };
       let currentStep = "start";
       let routingSwitched = false;
+      let cronSynced = false;
 
       try {
         emit({ event: "start", deploymentId: deployment.id });
@@ -926,6 +927,7 @@ app.post("/:id/deploy", async (c) => {
               }),
             }),
           );
+          cronSynced = true;
         } else {
           // Only clear if previous deploy had crons (avoid creating empty DOs)
           const prevRouting = await c.env.ROUTING.get(project.slug);
@@ -1131,6 +1133,15 @@ app.post("/:id/deploy", async (c) => {
           ).catch((e) =>
             console.error(`[deploy] failed to clean up worker script ${workerName}:`, e),
           );
+          // Clear cron DO if we synced it before the failure (step 2c runs before routing switch)
+          if (cronSynced) {
+            const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
+            await c.env.CRON_SCHEDULER.get(cronId)
+              .fetch(new Request("https://do/clear", { method: "POST" }))
+              .catch((e) =>
+                console.error(`[deploy] failed to clear cron scheduler for ${projectId}:`, e),
+              );
+          }
           await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
           emit({ event: "error", message: msg, step: currentStep });
           if (c.env.EMAIL && user?.email) {

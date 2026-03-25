@@ -7,6 +7,9 @@ interface CronState {
   schedules: { name: string; cron: string }[];
 }
 
+/** Thrown when the worker script cannot be reached (deleted/evicted). */
+class WorkerUnreachableError extends Error {}
+
 /**
  * Convert a CF/Quartz-style cron expression to Unix-style for cron-parser.
  *
@@ -85,6 +88,8 @@ export function getNextFireTime(schedules: { cron: string }[], now: number): num
   return earliest < Infinity ? earliest : null;
 }
 
+const MAX_CONSECUTIVE_FAILURES = 5;
+
 export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
   private state: CronState | null = null;
 
@@ -120,6 +125,7 @@ export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
   private async handleSync(request: Request): Promise<Response> {
     const body = await request.json<CronState>();
     await this.saveState(body);
+    await this.ctx.storage.put("failures", 0);
     await this.scheduleNextAlarm();
     return Response.json({ ok: true });
   }
@@ -134,7 +140,8 @@ export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
   private async handleStatus(): Promise<Response> {
     const state = await this.getState();
     const alarm = await this.ctx.storage.getAlarm();
-    return Response.json({ state, nextAlarm: alarm });
+    const failures = (await this.ctx.storage.get<number>("failures")) ?? 0;
+    return Response.json({ state, nextAlarm: alarm, failures });
   }
 
   async alarm(): Promise<void> {
@@ -142,16 +149,45 @@ export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
     if (!state || state.schedules.length === 0) return;
 
     const now = Date.now();
+    const matching = state.schedules.filter((s) => cronMatchesMinute(s.cron, now));
 
-    const invocations = state.schedules
-      .filter((s) => cronMatchesMinute(s.cron, now))
-      .map((s) =>
-        this.invokeWorker(state.workerName, s.cron, now).catch((err) => {
-          console.error(`cron ${s.name} (${s.cron}) failed for ${state.workerName}:`, err);
-        }),
-      );
+    if (matching.length === 0) {
+      await this.scheduleNextAlarm();
+      return;
+    }
 
-    await Promise.allSettled(invocations);
+    const results = await Promise.allSettled(
+      matching.map((s) => this.invokeWorker(state.workerName, s.cron, now)),
+    );
+
+    for (let i = 0; i < results.length; i++) {
+      if (results[i].status === "rejected") {
+        console.error(
+          `cron ${matching[i].name} (${matching[i].cron}) failed for ${state.workerName}:`,
+          (results[i] as PromiseRejectedResult).reason,
+        );
+      }
+    }
+
+    // Only count toward circuit breaker when the worker itself is unreachable
+    // (deleted/evicted), not when the handler returns an application-level error.
+    const allUnreachable = results.every(
+      (r) => r.status === "rejected" && r.reason instanceof WorkerUnreachableError,
+    );
+    if (allUnreachable) {
+      const failures = ((await this.ctx.storage.get<number>("failures")) ?? 0) + 1;
+      await this.ctx.storage.put("failures", failures);
+      if (failures >= MAX_CONSECUTIVE_FAILURES) {
+        console.error(
+          `CronScheduler: ${failures} consecutive failures for ${state.workerName}, auto-clearing`,
+        );
+        await this.handleClear();
+        return;
+      }
+    } else {
+      await this.ctx.storage.put("failures", 0);
+    }
+
     await this.scheduleNextAlarm();
   }
 
@@ -160,14 +196,26 @@ export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
     cron: string,
     scheduledTime: number,
   ): Promise<void> {
-    const worker = this.env.DISPATCH.get(workerName);
-    const res = await worker.fetch(
-      new Request("https://internal/__scheduled", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cron, scheduledTime }),
-      }),
-    );
+    let res: Response;
+    try {
+      const worker = this.env.DISPATCH.get(workerName);
+      res = await worker.fetch(
+        new Request("https://internal/__scheduled", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cron, scheduledTime }),
+        }),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Only classify as unreachable when the worker script is definitively gone.
+      // Other thrown errors (CPU limit, transient infra, compilation) mean the
+      // worker exists or the failure is transient — don't count toward circuit breaker.
+      if (msg.includes("Worker not found")) {
+        throw new WorkerUnreachableError(msg);
+      }
+      throw new Error(msg);
+    }
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`${res.status}: ${text}`);

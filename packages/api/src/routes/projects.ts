@@ -199,6 +199,23 @@ const app = new Hono<ApiEnv>()
 
     await c.env.ROUTING.put(project.slug, routingJson);
 
+    // Sync cron scheduler to point at the rollback target
+    if (manifest?.schedules?.length) {
+      const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
+      await c.env.CRON_SCHEDULER.get(cronId).fetch(
+        new Request("https://do/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workerName, schedules: manifest.schedules }),
+        }),
+      );
+    } else if (existingEntry?.hasCrons) {
+      const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
+      await c.env.CRON_SCHEDULER.get(cronId).fetch(
+        new Request("https://do/clear", { method: "POST" }),
+      );
+    }
+
     // Update custom domain routing
     const projectDomains = await getDomainsByProjectId(c.get("db"), projectId);
     for (const domain of projectDomains) {
