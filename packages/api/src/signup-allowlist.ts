@@ -17,7 +17,7 @@ export async function putAllowlist(kv: KVNamespace, entries: AllowlistEntry[]): 
 
 /**
  * Check if a signup should be allowed based on the allowlist.
- * If entries is empty, all signups are allowed.
+ * If entries is empty, no one is allowed (restrictions are on but nobody is listed).
  */
 export function isSignupAllowed(
   provider: string,
@@ -25,7 +25,7 @@ export function isSignupAllowed(
   email: string | null,
   entries: AllowlistEntry[],
 ): boolean {
-  if (entries.length === 0) return true;
+  if (entries.length === 0) return false;
 
   return entries.some((entry) => {
     if (entry.type === "github") {

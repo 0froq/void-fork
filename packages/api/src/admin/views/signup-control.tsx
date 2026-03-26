@@ -77,7 +77,10 @@ export function SignupControlPage({
       {entries.length === 0 && (
         <p>
           <em>
-            No entries. {enabled ? "All signups will be blocked!" : "All signups are allowed."}
+            No entries.{" "}
+            {enabled
+              ? "All signups are blocked. Add entries to allow specific users."
+              : "All signups are allowed."}
           </em>
         </p>
       )}

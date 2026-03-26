@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { isSignupAllowed, type AllowlistEntry } from "../../src/signup-allowlist";
 
 describe("isSignupAllowed", () => {
-  it("allows any signup when entries list is empty", () => {
-    expect(isSignupAllowed("github", "octocat", null, [])).toBe(true);
+  it("blocks all signups when entries list is empty", () => {
+    expect(isSignupAllowed("github", "octocat", null, [])).toBe(false);
   });
 
   it("matches github username (case-insensitive)", () => {
