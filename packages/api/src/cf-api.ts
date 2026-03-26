@@ -1,5 +1,5 @@
 /**
- * Retry an async operation with linear backoff.
+ * Retry an async operation with exponential backoff.
  * `fn` returns `T` on success, or `undefined` to signal a retry.
  * Throws immediately if `fn` itself throws.
  */
@@ -9,7 +9,7 @@ export async function retryWithBackoff<T>(
 ): Promise<T> {
   for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
     if (attempt > 0) {
-      await new Promise((r) => setTimeout(r, opts.delayMs * attempt));
+      await new Promise((r) => setTimeout(r, opts.delayMs * 2 ** (attempt - 1)));
     }
     const result = await fn(attempt);
     if (result !== undefined) return result;

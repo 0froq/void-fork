@@ -59,6 +59,7 @@ function isCfAssetPlainText(text: string): boolean {
 }
 
 const CF_RETRY = { maxRetries: 3, delayMs: 1000 };
+const CF_MIGRATION_RETRY = { maxRetries: 5, delayMs: 1000 };
 
 const app = new Hono<ApiEnv>();
 
@@ -836,7 +837,7 @@ app.post("/:id/deploy", async (c) => {
                 }
               },
               {
-                ...CF_RETRY,
+                ...CF_MIGRATION_RETRY,
                 errorMessage:
                   "migration dispatch failed: CF returned plain-text asset response after retries",
               },
