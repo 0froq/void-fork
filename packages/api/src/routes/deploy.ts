@@ -659,12 +659,17 @@ app.post("/:id/deploy", async (c) => {
             assetManifest,
           );
 
-          completionJwt = await uploadAssetBuckets(
-            c.env.CF_ACCOUNT_ID,
-            session.jwt,
-            session.buckets,
-            assetsByHash,
-          );
+          if (session.buckets.length > 0) {
+            completionJwt = await uploadAssetBuckets(
+              c.env.CF_ACCOUNT_ID,
+              c.env.CF_API_TOKEN,
+              session.jwt,
+              session.buckets,
+              assetsByHash,
+            );
+          } else {
+            completionJwt = session.jwt;
+          }
           emit({ event: "asset_upload_done" });
         }
 

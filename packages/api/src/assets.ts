@@ -29,8 +29,6 @@ function tryParseJson<T>(text: string): T | null {
 
 const ASSET_SESSION_MAX_RETRIES = 3;
 const ASSET_SESSION_RETRY_DELAY_MS = 1000;
-const ASSET_UPLOAD_COMPLETE_MAX_RETRIES = 3;
-const ASSET_UPLOAD_COMPLETE_RETRY_DELAY_MS = 1000;
 
 /**
  * Step 1: Create an asset upload session with CF.
@@ -90,10 +88,10 @@ export async function createAssetUploadSession(
  */
 export async function uploadAssetBuckets(
   accountId: string,
+  apiToken: string,
   jwt: string,
   buckets: string[][],
   assetsByHash: Map<string, AssetEntry>,
-  { retryDelayMs = ASSET_UPLOAD_COMPLETE_RETRY_DELAY_MS }: { retryDelayMs?: number } = {},
 ): Promise<string> {
   let completionJwt = jwt;
   for (const bucket of buckets) {
@@ -106,51 +104,29 @@ export async function uploadAssetBuckets(
       formData.append(hash, new File([base64], hash, { type: entry.contentType }), hash);
     }
 
-    completionJwt = await postAssetUpload(accountId, completionJwt, formData);
-  }
-
-  // When all assets are cached (empty buckets), CF still requires an upload
-  // call to exchange the session JWT for a completion JWT (CF error 10021).
-  // Wrapped in retryWithBackoff because CF edge nodes sometimes return
-  // plain-text instead of JSON — without retry the fallback would silently
-  // return the session JWT, reintroducing the original bug.
-  if (buckets.length === 0) {
-    completionJwt = await retryWithBackoff(
-      async () => {
-        const result = await postAssetUpload(accountId, jwt, new FormData());
-        return result !== jwt ? result : undefined;
-      },
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/assets/upload?base64=true`,
       {
-        maxRetries: ASSET_UPLOAD_COMPLETE_MAX_RETRIES,
-        delayMs: retryDelayMs,
-        errorMessage: "asset upload completion returned no JWT after retries",
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+        },
+        body: formData,
       },
     );
-  }
 
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`asset upload failed: ${error}`);
+    }
+
+    const text = await response.text();
+    const data = tryParseJson<{ result?: { jwt?: string } }>(text);
+    if (data?.result?.jwt) {
+      completionJwt = data.result.jwt;
+    }
+  }
   return completionJwt;
-}
-
-async function postAssetUpload(accountId: string, jwt: string, body: FormData): Promise<string> {
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/assets/upload?base64=true`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-      },
-      body,
-    },
-  );
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`asset upload failed: ${error}`);
-  }
-
-  const text = await response.text();
-  const data = tryParseJson<{ result?: { jwt?: string } }>(text);
-  return data?.result?.jwt ?? jwt;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {

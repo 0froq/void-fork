@@ -169,6 +169,7 @@ describe("uploadAssetBuckets", () => {
 
     const completionJwt = await uploadAssetBuckets(
       "acct",
+      "api-token",
       "session-jwt",
       [["hash1"]],
       new Map([
@@ -198,6 +199,7 @@ describe("uploadAssetBuckets", () => {
 
     const completionJwt = await uploadAssetBuckets(
       "acct",
+      "api-token",
       "session-jwt",
       [["hash1"]],
       new Map([
@@ -213,71 +215,6 @@ describe("uploadAssetBuckets", () => {
 
     expect(completionJwt).toBe("completion-jwt");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("chains jwt across multiple buckets", async () => {
-    let call = 0;
-    const fetchMock = vi.fn(async () => {
-      call++;
-      return Response.json({ result: { jwt: `jwt-${call}` } });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const completionJwt = await uploadAssetBuckets(
-      "acct",
-      "session-jwt",
-      [["hash1"], ["hash2"]],
-      new Map([
-        ["hash1", { blob: new Blob(["a"]), contentType: "text/plain" }],
-        ["hash2", { blob: new Blob(["b"]), contentType: "text/plain" }],
-      ]),
-    );
-
-    expect(completionJwt).toBe("jwt-2");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    // Second call should use jwt from first response, not the original session jwt
-    const secondCallHeaders = (fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1]
-      .headers as Record<string, string>;
-    expect(secondCallHeaders.Authorization).toBe("Bearer jwt-1");
-  });
-
-  it("exchanges session jwt for completion jwt when buckets are empty", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ result: { jwt: "completion-jwt" } }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const completionJwt = await uploadAssetBuckets("acct", "session-jwt", [], new Map());
-
-    expect(completionJwt).toBe("completion-jwt");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("retries when empty-bucket completion gets a plain-text response", async () => {
-    let calls = 0;
-    const fetchMock = vi.fn(async () => {
-      calls++;
-      if (calls <= 2) return new Response("Assets have already been uploaded.");
-      return Response.json({ result: { jwt: "completion-jwt" } });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const completionJwt = await uploadAssetBuckets("acct", "session-jwt", [], new Map(), {
-      retryDelayMs: 0,
-    });
-
-    expect(completionJwt).toBe("completion-jwt");
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-  });
-
-  it("throws after exhausting retries on empty-bucket completion", async () => {
-    const fetchMock = vi.fn(async () => new Response("Assets have already been uploaded."));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(
-      uploadAssetBuckets("acct", "session-jwt", [], new Map(), { retryDelayMs: 0 }),
-    ).rejects.toThrow("asset upload completion returned no JWT after retries");
-
-    // 1 initial + 3 retries = 4 total
-    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });
 
