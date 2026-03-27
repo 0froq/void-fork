@@ -389,7 +389,7 @@ app.post("/:id/deploy", async (c) => {
           };
 
           // Upload new assets to KV (< 2 MB) or R2 (>= 2 MB)
-          const newAssets = Object.keys(assetsByHash).length;
+          const newAssets = assetsByHash.size;
           emit({
             event: "asset_upload",
             total: assetCount,
@@ -643,7 +643,7 @@ app.post("/:id/deploy", async (c) => {
         let completionJwt: string | undefined;
         if (assetCount > 0) {
           currentStep = "asset_upload";
-          const newAssets = Object.keys(assetsByHash).length;
+          const newAssets = assetsByHash.size;
           emit({
             event: "asset_upload",
             total: assetCount,
@@ -658,18 +658,21 @@ app.post("/:id/deploy", async (c) => {
             workerName,
             assetManifest,
           );
+          console.log(
+            `[deploy] ${projectId}: asset session created, ${Object.keys(assetManifest).length} manifest entries, ${session.buckets.length} bucket(s), ${assetsByHash.size} blobs available`,
+          );
 
-          if (session.buckets.length > 0) {
-            completionJwt = await uploadAssetBuckets(
-              c.env.CF_ACCOUNT_ID,
-              c.env.CF_API_TOKEN,
-              session.jwt,
-              session.buckets,
-              assetsByHash,
-            );
-          } else {
-            completionJwt = session.jwt;
-          }
+          // Upload asset buckets to CF. When all assets are cached (empty buckets),
+          // the session JWT is already the completion token — no exchange needed.
+          completionJwt = await uploadAssetBuckets(
+            c.env.CF_ACCOUNT_ID,
+            session.jwt,
+            session.buckets,
+            assetsByHash,
+          );
+          console.log(
+            `[deploy] ${projectId}: asset upload complete, got completion JWT: ${completionJwt ? "yes" : "no"}`,
+          );
           emit({ event: "asset_upload_done" });
         }
 
@@ -774,11 +777,19 @@ app.post("/:id/deploy", async (c) => {
 
             if (!cfResponse.ok) {
               const error = await cfResponse.text();
+              console.error(
+                `[deploy] ${projectId}: worker upload failed (${cfResponse.status}): ${error.slice(0, 500)}`,
+              );
               throw new Error(`worker upload failed: ${error}`);
             }
 
             const cfBody = await cfResponse.text();
-            if (isCfAssetPlainText(cfBody)) return undefined; // retry
+            if (isCfAssetPlainText(cfBody)) {
+              console.warn(
+                `[deploy] ${projectId}: worker upload got CF plain-text response, retrying: ${cfBody.slice(0, 100)}`,
+              );
+              return undefined; // retry
+            }
             return true;
           },
           { ...CF_RETRY, errorMessage: "worker upload returned an unexpected Cloudflare response" },

@@ -941,11 +941,18 @@ describe("POST /projects/:id/deploy", () => {
     expect(eventNames).toContain("worker_upload_done");
   });
 
-  it("tolerates plain-text success responses from Cloudflare asset upload", async () => {
+  it("retries plain-text asset upload response and succeeds on next attempt", async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, "asset-text-test");
+    let uploadCalls = 0;
     mockCfApi({
-      assetUpload: () => new Response("Assets have already been uploaded."),
+      assetUpload: () => {
+        uploadCalls++;
+        if (uploadCalls <= 1) {
+          return new Response("Assets have already been uploaded.");
+        }
+        return cfSuccess({ jwt: "test-completion-jwt" });
+      },
     });
 
     const res = await app.fetch(

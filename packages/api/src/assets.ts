@@ -29,6 +29,8 @@ function tryParseJson<T>(text: string): T | null {
 
 const ASSET_SESSION_MAX_RETRIES = 3;
 const ASSET_SESSION_RETRY_DELAY_MS = 1000;
+const ASSET_BUCKET_UPLOAD_MAX_RETRIES = 4; // 5 total attempts, matching Wrangler
+const ASSET_BUCKET_UPLOAD_RETRY_DELAY_MS = 1000;
 
 /**
  * Step 1: Create an asset upload session with CF.
@@ -61,14 +63,26 @@ export async function createAssetUploadSession(
 
       if (!response.ok) {
         const error = await response.text();
+        console.error(`[assets] upload session failed (${response.status}): ${error}`);
         throw new Error(`asset upload session failed: ${error}`);
       }
 
       const text = await response.text();
       const data = tryParseJson<UploadSessionResponse>(text);
       if (data?.result?.jwt && Array.isArray(data.result.buckets)) {
+        const bucketCount = data.result.buckets.length;
+        const hashCount = data.result.buckets.flat().length;
+        console.log(
+          `[assets] session created: ${bucketCount} bucket(s), ${hashCount} hash(es) to upload`,
+        );
+        if (hashCount === 0) {
+          console.log("[assets] all assets cached — no uploads needed");
+        }
         return { jwt: data.result.jwt, buckets: data.result.buckets };
       }
+      console.warn(
+        `[assets] session response missing jwt or buckets, retrying. raw: ${text.slice(0, 200)}`,
+      );
       return undefined; // retry — likely CF plain-text bug
     },
     {
@@ -84,49 +98,103 @@ export async function createAssetUploadSession(
  * Each bucket is a group of hashes that CF wants uploaded together.
  * Files are sent as base64-encoded multipart form data with ?base64=true.
  * The Content-Type on each form part is preserved by CF when serving the asset.
- * Returns the completion JWT from the final upload response.
+ *
+ * When all assets are already cached, CF returns empty buckets and the session
+ * JWT is already the completion token — no uploads or exchanges needed.
+ *
+ * Returns the completion JWT from the final upload response (or the session JWT
+ * when no uploads were needed).
  */
 export async function uploadAssetBuckets(
   accountId: string,
-  apiToken: string,
   jwt: string,
   buckets: string[][],
   assetsByHash: Map<string, AssetEntry>,
 ): Promise<string> {
-  let completionJwt = jwt;
-  for (const bucket of buckets) {
-    const formData = new FormData();
-    for (const hash of bucket) {
-      const entry = assetsByHash.get(hash);
-      if (!entry) continue;
-      const buffer = await entry.blob.arrayBuffer();
-      const base64 = arrayBufferToBase64(buffer);
-      formData.append(hash, new File([base64], hash, { type: entry.contentType }), hash);
-    }
+  // When all assets are cached, CF returns empty buckets and the session JWT
+  // is already the completion token. Use .flat().length to handle both [] and [[]].
+  if (buckets.flat().length === 0) {
+    console.log("[assets] all assets cached — session JWT is completion token");
+    return jwt;
+  }
 
-    const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/assets/upload?base64=true`,
+  let completionJwt = jwt;
+
+  for (let i = 0; i < buckets.length; i++) {
+    const bucket = buckets[i];
+    if (bucket.length === 0) continue;
+
+    console.log(`[assets] uploading bucket ${i + 1}/${buckets.length}: ${bucket.length} file(s)`);
+
+    completionJwt = await retryWithBackoff(
+      async () => {
+        const formData = new FormData();
+        for (const hash of bucket) {
+          const entry = assetsByHash.get(hash);
+          if (!entry) {
+            console.warn(`[assets] bucket ${i}: hash ${hash} not found in assetsByHash, skipping`);
+            continue;
+          }
+          const buffer = await entry.blob.arrayBuffer();
+          const base64 = arrayBufferToBase64(buffer);
+          formData.append(hash, new File([base64], hash, { type: entry.contentType }), hash);
+        }
+
+        try {
+          return await postAssetUpload(accountId, completionJwt, formData);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          // Retry on: server errors (5xx status in message), gateway/timeout keywords,
+          // and CF's known plain-text bug where the upload endpoint returns a 2xx with
+          // no JWT (e.g. "Assets have already been uploaded.") — retrying typically
+          // hits a different edge node that returns proper JSON.
+          if (
+            /\b(5\d{2})\b/.test(msg) ||
+            /gateway|timeout/i.test(msg) ||
+            /upload response missing jwt/i.test(msg)
+          ) {
+            console.warn(`[assets] bucket ${i + 1} retryable error: ${msg}`);
+            return undefined;
+          }
+          throw err;
+        }
+      },
       {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${jwt}`,
-        },
-        body: formData,
+        maxRetries: ASSET_BUCKET_UPLOAD_MAX_RETRIES,
+        delayMs: ASSET_BUCKET_UPLOAD_RETRY_DELAY_MS,
+        errorMessage: `asset upload failed for bucket ${i + 1}/${buckets.length} after retries`,
       },
     );
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`asset upload failed: ${error}`);
-    }
-
-    const text = await response.text();
-    const data = tryParseJson<{ result?: { jwt?: string } }>(text);
-    if (data?.result?.jwt) {
-      completionJwt = data.result.jwt;
-    }
   }
+
   return completionJwt;
+}
+
+async function postAssetUpload(accountId: string, jwt: string, body: FormData): Promise<string> {
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/assets/upload?base64=true`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+      },
+      body,
+    },
+  );
+
+  if (!response.ok) {
+    const status = response.status;
+    const error = await response.text();
+    console.error(`[assets] upload failed (${status}): ${error.slice(0, 500)}`);
+    throw new Error(`asset upload failed (${status}): ${error}`);
+  }
+
+  const text = await response.text();
+  const data = tryParseJson<{ result?: { jwt?: string } }>(text);
+  if (!data?.result?.jwt) {
+    throw new Error(`[assets] upload response missing jwt. raw: ${text.slice(0, 200)}`);
+  }
+  return data.result.jwt;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {

@@ -163,57 +163,97 @@ describe("deleteUnreferencedAssets", () => {
 });
 
 describe("uploadAssetBuckets", () => {
-  it("falls back to the current jwt when Cloudflare returns plain-text success", async () => {
-    const fetchMock = vi.fn(async () => new Response("Assets have already been uploaded."));
+  const singleAssetMap = new Map([
+    ["hash1", { blob: new Blob(["hello"]), contentType: "text/plain" }],
+  ]);
+
+  it("returns session JWT directly when buckets are empty (all cached)", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const completionJwt = await uploadAssetBuckets(
-      "acct",
-      "api-token",
-      "session-jwt",
-      [["hash1"]],
-      new Map([
-        [
-          "hash1",
-          {
-            blob: new Blob(["hello"]),
-            contentType: "text/plain",
-          },
-        ],
-      ]),
-    );
+    const completionJwt = await uploadAssetBuckets("acct", "session-jwt", [], singleAssetMap);
 
     expect(completionJwt).toBe("session-jwt");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns session JWT directly when buckets contain only empty arrays", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const completionJwt = await uploadAssetBuckets("acct", "session-jwt", [[]], singleAssetMap);
+
+    expect(completionJwt).toBe("session-jwt");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("uses the returned jwt when Cloudflare responds with JSON", async () => {
-    const fetchMock = vi.fn(async () =>
-      Response.json({
-        result: {
-          jwt: "completion-jwt",
-        },
-      }),
-    );
+    const fetchMock = vi.fn(async () => Response.json({ result: { jwt: "completion-jwt" } }));
     vi.stubGlobal("fetch", fetchMock);
 
     const completionJwt = await uploadAssetBuckets(
       "acct",
-      "api-token",
       "session-jwt",
       [["hash1"]],
-      new Map([
-        [
-          "hash1",
-          {
-            blob: new Blob(["hello"]),
-            contentType: "text/plain",
-          },
-        ],
-      ]),
+      singleAssetMap,
     );
 
     expect(completionJwt).toBe("completion-jwt");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries on 5xx errors and succeeds", async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls++;
+      if (calls <= 2) {
+        return new Response("Bad Gateway", { status: 502 });
+      }
+      return Response.json({ result: { jwt: "completion-jwt" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const completionJwt = await uploadAssetBuckets(
+      "acct",
+      "session-jwt",
+      [["hash1"]],
+      singleAssetMap,
+    );
+
+    expect(completionJwt).toBe("completion-jwt");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries on plain-text 2xx response (CF bug) and succeeds", async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls++;
+      if (calls <= 1) {
+        return new Response("Assets have already been uploaded.");
+      }
+      return Response.json({ result: { jwt: "completion-jwt" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const completionJwt = await uploadAssetBuckets(
+      "acct",
+      "session-jwt",
+      [["hash1"]],
+      singleAssetMap,
+    );
+
+    expect(completionJwt).toBe("completion-jwt");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws on non-retryable errors", async () => {
+    const fetchMock = vi.fn(async () => new Response("Unauthorized", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      uploadAssetBuckets("acct", "session-jwt", [["hash1"]], singleAssetMap),
+    ).rejects.toThrow("asset upload failed (401)");
+
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
