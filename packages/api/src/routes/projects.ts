@@ -49,8 +49,8 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "slug is required" }, 400);
     }
 
-    // Validate slug format: lowercase alphanumeric + dashes
-    if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(body.slug) && body.slug.length > 1) {
+    // Validate slug format: lowercase alphanumeric + dashes, no leading/trailing dashes
+    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(body.slug)) {
       return c.json({ error: "slug must be lowercase alphanumeric with dashes" }, 400);
     }
 
@@ -320,6 +320,9 @@ const app = new Hono<ApiEnv>()
 
     const limit = Math.min(parseInt(c.req.query("limit") ?? "200", 10) || 200, 500);
     const deploymentId = c.req.query("deploymentId");
+    if (deploymentId && !/^dpl_[0-9a-z]+$/.test(deploymentId)) {
+      return c.json({ error: "invalid deploymentId format" }, 400);
+    }
     const workerName = `user-${project.slug}`;
     const sinceStr = new Date(Date.now() - sinceMs).toISOString().replace("T", " ").slice(0, 19);
     const dataset = c.env.LOGS_DATASET ?? "void_logs";
