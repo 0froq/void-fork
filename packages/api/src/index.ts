@@ -11,6 +11,7 @@ import revalidate from "./routes/revalidate";
 import internalRevalidate from "./routes/internal-revalidate";
 import internalResolveResource from "./routes/internal-resolve-resource";
 import internalResolveWorker from "./routes/internal-resolve-worker";
+import internalVerifyOwner from "./routes/internal-verify-owner";
 import secrets from "./routes/secrets";
 import domains from "./routes/domains";
 import { projectUsage, accountUsage } from "./routes/usage";
@@ -79,6 +80,7 @@ const app = new Hono<ApiEnv>()
   .route("/internal/revalidate", internalRevalidate)
   .route("/internal/resolve-resource", internalResolveResource)
   .route("/internal/resolve-worker", internalResolveWorker)
+  .route("/internal/verify-owner", internalVerifyOwner)
   .use("/me", authMiddleware)
   .route("/me", me)
   .use("/projects/*", authMiddleware)

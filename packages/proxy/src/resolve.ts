@@ -43,6 +43,32 @@ export async function resolveResource(
   return data.cf_id;
 }
 
+/**
+ * Verifies that a user owns a project via the API service binding.
+ * Called on the JWT auth path to prevent cross-tenant access.
+ */
+export async function verifyProjectOwner(
+  api: Fetcher,
+  jwtSecret: string,
+  projectId: string,
+  userId: string,
+): Promise<boolean> {
+  try {
+    const token = await hmacSign(projectId, jwtSecret);
+    const res = await api.fetch(`https://api/internal/verify-owner/${projectId}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-void-internal": token,
+      },
+      body: JSON.stringify({ userId }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // --- HMAC signing (mirrors packages/api/src/auth/hmac.ts) ---
 
 const encoder = new TextEncoder();

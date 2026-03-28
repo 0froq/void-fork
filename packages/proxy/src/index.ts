@@ -6,6 +6,7 @@ import { d1 } from "./d1";
 import { kv } from "./kv";
 import { r2 } from "./r2";
 import { revalidate } from "./revalidate";
+import { verifyProjectOwner } from "./resolve";
 
 const app = new Hono<ProxyEnv>();
 
@@ -60,6 +61,16 @@ app.post("/*", async (c, next) => {
     }
     if (!body.projectId) {
       return c.json({ error: "projectId required" }, 400);
+    }
+    // Verify the authenticated user owns this project
+    const owns = await verifyProjectOwner(
+      c.env.API,
+      c.env.JWT_SECRET,
+      body.projectId as string,
+      payload.sub,
+    );
+    if (!owns) {
+      return c.json({ error: "forbidden" }, 403);
     }
     c.set("projectId", body.projectId as string);
   } else {

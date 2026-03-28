@@ -73,17 +73,46 @@ function createMockKv(data: Record<string, string> = {}) {
   };
 }
 
-function createMockApi(handler?: (req: Request) => Promise<Response>) {
-  return {
-    fetch:
-      handler ??
-      vi.fn(
-        async () =>
-          new Response(JSON.stringify({ purged: 1 }), {
-            headers: { "content-type": "application/json" },
-          }),
-      ),
+/**
+ * User-to-project ownership map used by the mock API for verify-owner checks.
+ * Default: user_1 owns proj_1, proj_42, proj_99, and p.
+ */
+const DEFAULT_OWNERSHIP: Record<string, string[]> = {
+  user_1: ["proj_1", "proj_42", "proj_99", "p"],
+};
+
+function createMockApi(
+  handler?: (...args: any[]) => Promise<Response>,
+  ownership: Record<string, string[]> = DEFAULT_OWNERSHIP,
+) {
+  // Fetcher.fetch() is called as (url: string, init: RequestInit), not (Request).
+  const defaultHandler = async (input: string | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.url;
+    const body = init?.body ?? (input instanceof Request ? await input.text() : undefined);
+
+    // Handle verify-owner requests
+    if (url.includes("/internal/verify-owner/")) {
+      const projectId = url.split("/").pop()!;
+      const parsed = typeof body === "string" ? JSON.parse(body) : {};
+      const userProjects = ownership[parsed.userId] ?? [];
+      if (userProjects.includes(projectId)) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ error: "forbidden" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    // Default: generic success response
+    return new Response(JSON.stringify({ purged: 1 }), {
+      headers: { "content-type": "application/json" },
+    });
   };
+
+  return { fetch: handler ?? defaultHandler };
 }
 
 function createEnv(
@@ -226,6 +255,90 @@ describe("proxy worker", () => {
 
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "projectId required" });
+    });
+  });
+
+  describe("JWT project ownership verification", () => {
+    it("allows access when user owns the project", async () => {
+      const env = createEnv();
+      const res = await worker.fetch(
+        post(
+          "/ai/run",
+          { model: "test-model", inputs: {}, projectId: "proj_1" },
+          { authorization: `Bearer ${validToken}` },
+        ),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(env.AI.run).toHaveBeenCalled();
+    });
+
+    it("rejects access when user does not own the project", async () => {
+      // user_1 does not own "proj_other"
+      const env = createEnv();
+      const res = await worker.fetch(
+        post(
+          "/ai/run",
+          { model: "test-model", inputs: {}, projectId: "proj_other" },
+          { authorization: `Bearer ${validToken}` },
+        ),
+        env,
+      );
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "forbidden" });
+    });
+
+    it("rejects cross-tenant access to another user's project", async () => {
+      // user_2 owns proj_cross but user_1 (validToken) does not
+      const ownership = { user_2: ["proj_cross"] };
+      const env = createEnv(undefined, undefined, createMockApi(undefined, ownership));
+      const res = await worker.fetch(
+        post(
+          "/ai/run",
+          { model: "test-model", inputs: {}, projectId: "proj_cross" },
+          { authorization: `Bearer ${validToken}` },
+        ),
+        env,
+      );
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "forbidden" });
+    });
+
+    it("returns 403 when verify-owner API call fails", async () => {
+      // API returns 500 for all requests
+      const failingApi = createMockApi(async () => new Response("error", { status: 500 }));
+      const env = createEnv(undefined, undefined, failingApi);
+      const res = await worker.fetch(
+        post(
+          "/ai/run",
+          { model: "test-model", inputs: {}, projectId: "proj_1" },
+          { authorization: `Bearer ${validToken}` },
+        ),
+        env,
+      );
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "forbidden" });
+    });
+
+    it("HMAC path bypasses ownership check (service binding is trusted)", async () => {
+      // Even for a project not in user_1's ownership, HMAC path should work
+      const env = createEnv(undefined, undefined, createMockApi(undefined, {}));
+      const res = await worker.fetch(
+        post("/ai/run", {
+          model: "test-model",
+          inputs: {},
+          projectId: "proj_1",
+          aiToken: aiTokens["proj_1"],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(env.AI.run).toHaveBeenCalled();
     });
   });
 
