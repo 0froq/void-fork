@@ -85,15 +85,15 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
 
     var header = '<span style="color:#999;margin-right:8px">' + formatTime(entry.timestamp) + '</span>';
     if (entry.method && entry.url) {
-      header += '<span style="margin-right:8px;font-weight:600">' + entry.method + '</span>';
-      header += '<span style="margin-right:8px">' + entry.url + '</span>';
+      header += '<span style="margin-right:8px;font-weight:600">' + escapeHtml(entry.method) + '</span>';
+      header += '<span style="margin-right:8px">' + escapeHtml(entry.url) + '</span>';
     }
     if (entry.status) {
       var sc = parseInt(entry.status);
       var statusColor = sc >= 500 ? '#dc2626' : sc >= 400 ? '#d97706' : '#16a34a';
-      header += '<span style="color:' + statusColor + ';font-weight:600;margin-right:8px">' + entry.status + '</span>';
+      header += '<span style="color:' + statusColor + ';font-weight:600;margin-right:8px">' + escapeHtml(entry.status) + '</span>';
     }
-    header += '<span style="color:' + (entry.outcome === 'ok' ? '#16a34a' : '#dc2626') + '">' + entry.outcome + '</span>';
+    header += '<span style="color:' + (entry.outcome === 'ok' ? '#16a34a' : '#dc2626') + '">' + escapeHtml(entry.outcome) + '</span>';
 
     var messages = [];
     if (entry.logs && entry.logs.length > 0) {
@@ -168,7 +168,7 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
         renderData(lastData);
       })
       .catch(function(err) {
-        container.innerHTML = '<p style="color:red;font-size:0.8rem">Failed to load logs: ' + err.message + '</p>';
+        container.innerHTML = '<p style="color:red;font-size:0.8rem">Failed to load logs: ' + escapeHtml(err.message) + '</p>';
       });
   }
 
