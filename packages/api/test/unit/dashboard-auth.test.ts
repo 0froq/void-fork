@@ -10,7 +10,7 @@ function base64url(input: string): string {
 
 describe("authenticateDashboardToken", () => {
   it("accepts a valid signed token", async () => {
-    const token = await signJwt({ sub: "user_123", login: "octocat" }, SECRET);
+    const token = await signJwt({ sub: "user_123", login: "octocat", aud: "api" }, SECRET);
     const session = await authenticateDashboardToken(token, SECRET);
 
     expect(session).toEqual({
@@ -36,7 +36,7 @@ describe("authenticateDashboardToken", () => {
     const pastMs = Date.now() - 31 * 24 * 60 * 60 * 1000;
     vi.spyOn(Date, "now").mockReturnValueOnce(pastMs);
 
-    const token = await signJwt({ sub: "user_123", login: "octocat" }, SECRET);
+    const token = await signJwt({ sub: "user_123", login: "octocat", aud: "api" }, SECRET);
 
     Date.now = realDateNow;
     const session = await authenticateDashboardToken(token, SECRET);

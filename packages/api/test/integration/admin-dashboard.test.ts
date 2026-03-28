@@ -53,13 +53,13 @@ describe("auth middleware", () => {
 
   test("returns 403 for non-admin user", async () => {
     const user = await createTestUser(env.db, "regular");
-    const res = await req("/admin/", user.jwt);
+    const res = await req("/admin/", user.adminJwt);
     expect(res.status).toBe(403);
   });
 
   test("allows admin user", async () => {
     const admin = await createTestUser(env.db, "admin", "github", undefined, "free", "admin");
-    const res = await req("/admin/", admin.jwt);
+    const res = await req("/admin/", admin.adminJwt);
     expect(res.status).toBe(200);
   });
 });
@@ -70,7 +70,7 @@ describe("GET /admin/ (dashboard)", () => {
     await createTestUser(env.db, "user1");
     await createTestProject(env.db, admin.id, "dash-proj");
 
-    const res = await req("/admin/", admin.jwt);
+    const res = await req("/admin/", admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Dashboard");
@@ -81,7 +81,7 @@ describe("GET /admin/ (dashboard)", () => {
 
   test("stat cards link to views", async () => {
     const admin = await createTestUser(env.db, "admin1b", "github", undefined, "free", "admin");
-    const res = await req("/admin/", admin.jwt);
+    const res = await req("/admin/", admin.adminJwt);
     const html = await res.text();
     expect(html).toContain('href="/admin/users"');
     expect(html).toContain('href="/admin/projects"');
@@ -94,7 +94,7 @@ describe("GET /admin/users", () => {
     const admin = await createTestUser(env.db, "admin2", "github", undefined, "free", "admin");
     await createTestUser(env.db, "user2");
 
-    const res = await req("/admin/users", admin.jwt);
+    const res = await req("/admin/users", admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("user2");
@@ -107,13 +107,13 @@ describe("GET /admin/users", () => {
       await createTestUser(env.db, `paguser-${String(i).padStart(2, "0")}`);
     }
 
-    const res1 = await req("/admin/users", admin.jwt);
+    const res1 = await req("/admin/users", admin.adminJwt);
     expect(res1.status).toBe(200);
     const html1 = await res1.text();
     expect(html1).toContain("1 / 2");
     expect(html1).toContain("?page=2");
 
-    const res2 = await req("/admin/users?page=2", admin.jwt);
+    const res2 = await req("/admin/users?page=2", admin.adminJwt);
     expect(res2.status).toBe(200);
     const html2 = await res2.text();
     expect(html2).toContain("2 / 2");
@@ -124,7 +124,7 @@ describe("GET /admin/users", () => {
     await createTestUser(env.db, "findable");
     await createTestUser(env.db, "hidden");
 
-    const res = await req("/admin/users?search=findable", admin.jwt);
+    const res = await req("/admin/users?search=findable", admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("findable");
@@ -137,7 +137,7 @@ describe("GET /admin/users/:id", () => {
     const admin = await createTestUser(env.db, "admin4", "github", undefined, "free", "admin");
     const user = await createTestUser(env.db, "detailuser");
 
-    const res = await req(`/admin/users/${user.id}`, admin.jwt);
+    const res = await req(`/admin/users/${user.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("detailuser");
@@ -149,7 +149,7 @@ describe("GET /admin/users/:id", () => {
     const admin = await createTestUser(env.db, "admin4b", "github", undefined, "free", "admin");
     const user = await createTestUser(env.db, "limitsuser");
 
-    const res = await req(`/admin/users/${user.id}`, admin.jwt);
+    const res = await req(`/admin/users/${user.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain(">Plan<");
@@ -172,7 +172,7 @@ describe("GET /admin/users/:id", () => {
     // fetches from Analytics Engine. Without a mock, the real fetch hangs in CI.
     mockCfApi();
 
-    const res = await req(`/admin/users/${user.id}`, admin.jwt);
+    const res = await req(`/admin/users/${user.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     // Should show "2 / 100" (2 deploys today, free tier limit 100)
@@ -188,7 +188,7 @@ describe("POST /admin/users/:id/plan", () => {
     const user = await createTestUser(env.db, "planuser");
 
     const body = new URLSearchParams({ plan: "pro" });
-    const res = await req(`/admin/users/${user.id}/plan`, admin.jwt, {
+    const res = await req(`/admin/users/${user.id}/plan`, admin.adminJwt, {
       method: "POST",
       body: body.toString(),
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -207,7 +207,7 @@ describe("POST /admin/users/:id/suspend + unsuspend", () => {
 
     // Suspend
     const suspBody = new URLSearchParams({ reason: "test_reason" });
-    const suspRes = await req(`/admin/users/${user.id}/suspend`, admin.jwt, {
+    const suspRes = await req(`/admin/users/${user.id}/suspend`, admin.adminJwt, {
       method: "POST",
       body: suspBody.toString(),
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -218,7 +218,7 @@ describe("POST /admin/users/:id/suspend + unsuspend", () => {
     expect(routingAfter.suspended).toBe("test_reason");
 
     // Unsuspend
-    const unsuspRes = await req(`/admin/users/${user.id}/unsuspend`, admin.jwt, {
+    const unsuspRes = await req(`/admin/users/${user.id}/unsuspend`, admin.adminJwt, {
       method: "POST",
       body: "",
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -236,7 +236,7 @@ describe("GET /admin/projects", () => {
     const user = await createTestUser(env.db, "projowner");
     await createTestProject(env.db, user.id, "my-proj");
 
-    const res = await req("/admin/projects", admin.jwt);
+    const res = await req("/admin/projects", admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("my-proj");
@@ -250,14 +250,14 @@ describe("GET /admin/projects", () => {
     }
 
     // Page 1: should have 20 projects and a Next link
-    const res1 = await req("/admin/projects?page=1", admin.jwt);
+    const res1 = await req("/admin/projects?page=1", admin.adminJwt);
     expect(res1.status).toBe(200);
     const html1 = await res1.text();
     expect(html1).toContain("1 / 2");
     expect(html1).toContain("?page=2");
 
     // Page 2: should have 1 project and no Next link
-    const res2 = await req("/admin/projects?page=2", admin.jwt);
+    const res2 = await req("/admin/projects?page=2", admin.adminJwt);
     expect(res2.status).toBe(200);
     const html2 = await res2.text();
     expect(html2).toContain("2 / 2");
@@ -271,7 +271,7 @@ describe("GET /admin/projects/:id", () => {
     const user = await createTestUser(env.db, "projowner2");
     const project = await createTestProject(env.db, user.id, "detail-proj");
 
-    const res = await req(`/admin/projects/${project.id}`, admin.jwt);
+    const res = await req(`/admin/projects/${project.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("detail-proj");
@@ -284,7 +284,7 @@ describe("GET /admin/projects/:id", () => {
     const project = await createTestProject(env.db, admin.id, "proj-err");
     await createTestDeployment(env.db, project.id, "failed", "cli", "worker upload failed: 500");
 
-    const res = await req(`/admin/projects/${project.id}`, admin.jwt);
+    const res = await req(`/admin/projects/${project.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("worker upload failed: 500");
@@ -295,7 +295,7 @@ describe("GET /admin/projects/:id", () => {
     const project = await createTestProject(env.db, admin.id, "proj-link");
     const deployment = await createTestDeployment(env.db, project.id, "live");
 
-    const res = await req(`/admin/projects/${project.id}`, admin.jwt);
+    const res = await req(`/admin/projects/${project.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain(`/admin/deployments/${deployment.id}`);
@@ -309,7 +309,7 @@ describe("GET /admin/deployments", () => {
     const project = await createTestProject(env.db, user.id, "depl-proj");
     await createTestDeployment(env.db, project.id, "live", "cli");
 
-    const res = await req("/admin/deployments", admin.jwt);
+    const res = await req("/admin/deployments", admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Deployments");
@@ -323,7 +323,7 @@ describe("GET /admin/deployments", () => {
     const project = await createTestProject(env.db, admin.id, "errl-proj");
     await createTestDeployment(env.db, project.id, "failed", "cli", "migration failed: syntax");
 
-    const res = await req("/admin/deployments", admin.jwt);
+    const res = await req("/admin/deployments", admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("migration failed: syntax");
@@ -336,13 +336,13 @@ describe("GET /admin/deployments", () => {
       await createTestDeployment(env.db, project.id, "live");
     }
 
-    const res1 = await req("/admin/deployments?page=1", admin.jwt);
+    const res1 = await req("/admin/deployments?page=1", admin.adminJwt);
     expect(res1.status).toBe(200);
     const html1 = await res1.text();
     expect(html1).toContain("1 / 2");
     expect(html1).toContain("?page=2");
 
-    const res2 = await req("/admin/deployments?page=2", admin.jwt);
+    const res2 = await req("/admin/deployments?page=2", admin.adminJwt);
     expect(res2.status).toBe(200);
     const html2 = await res2.text();
     expect(html2).toContain("2 / 2");
@@ -356,7 +356,7 @@ describe("GET /admin/deployments/:id", () => {
     const project = await createTestProject(env.db, admin.id, "depldetail-proj");
     const deployment = await createTestDeployment(env.db, project.id, "live", "cli");
 
-    const res = await req(`/admin/deployments/${deployment.id}`, admin.jwt);
+    const res = await req(`/admin/deployments/${deployment.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain(deployment.id);
@@ -376,7 +376,7 @@ describe("GET /admin/deployments/:id", () => {
       "worker upload failed: internal error",
     );
 
-    const res = await req(`/admin/deployments/${deployment.id}`, admin.jwt);
+    const res = await req(`/admin/deployments/${deployment.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Error");
@@ -400,7 +400,7 @@ describe("GET /admin/deployments/:id", () => {
       manifest,
     });
 
-    const res = await req(`/admin/deployments/${id}`, admin.jwt);
+    const res = await req(`/admin/deployments/${id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Manifest");
@@ -417,7 +417,7 @@ describe("GET /admin/deployments/:id", () => {
 
   test("returns 404 for unknown deployment", async () => {
     const admin = await createTestUser(env.db, "admin13", "github", undefined, "free", "admin");
-    const res = await req("/admin/deployments/dpl_nonexistent", admin.jwt);
+    const res = await req("/admin/deployments/dpl_nonexistent", admin.adminJwt);
     expect(res.status).toBe(404);
   });
 });
@@ -435,7 +435,7 @@ describe("GET /admin/login", () => {
 describe("GET /admin/logout", () => {
   test("clears cookie and redirects", async () => {
     const admin = await createTestUser(env.db, "admin9", "github", undefined, "free", "admin");
-    const res = await req("/admin/logout", admin.jwt);
+    const res = await req("/admin/logout", admin.adminJwt);
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toBe("/admin/login");
     const setCookie = res.headers.get("Set-Cookie");
@@ -451,7 +451,7 @@ describe("POST /admin/projects/:id/delete", () => {
     const project = await createTestProject(env.db, user.id, "del-proj");
     await createTestDeployment(env.db, project.id, "live");
 
-    const res = await req(`/admin/projects/${project.id}/delete`, admin.jwt, {
+    const res = await req(`/admin/projects/${project.id}/delete`, admin.adminJwt, {
       method: "POST",
       body: "",
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -467,7 +467,7 @@ describe("POST /admin/projects/:id/delete", () => {
 
   test("returns 404 for unknown project", async () => {
     const admin = await createTestUser(env.db, "admin-pdel2", "github", undefined, "free", "admin");
-    const res = await req("/admin/projects/proj_nonexistent/delete", admin.jwt, {
+    const res = await req("/admin/projects/proj_nonexistent/delete", admin.adminJwt, {
       method: "POST",
       body: "",
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -479,7 +479,7 @@ describe("POST /admin/projects/:id/delete", () => {
     const admin = await createTestUser(env.db, "admin-pdel3", "github", undefined, "free", "admin");
     const project = await createTestProject(env.db, admin.id, "delbtn-proj");
 
-    const res = await req(`/admin/projects/${project.id}`, admin.jwt);
+    const res = await req(`/admin/projects/${project.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Danger Zone");
@@ -498,7 +498,7 @@ describe("POST /admin/users/:id/delete", () => {
     await createTestDeployment(env.db, project1.id, "live");
     await createTestDeployment(env.db, project2.id, "live");
 
-    const res = await req(`/admin/users/${user.id}/delete`, admin.jwt, {
+    const res = await req(`/admin/users/${user.id}/delete`, admin.adminJwt, {
       method: "POST",
       body: "",
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -517,7 +517,7 @@ describe("POST /admin/users/:id/delete", () => {
 
   test("returns 404 for unknown user", async () => {
     const admin = await createTestUser(env.db, "admin-udel2", "github", undefined, "free", "admin");
-    const res = await req("/admin/users/user_nonexistent/delete", admin.jwt, {
+    const res = await req("/admin/users/user_nonexistent/delete", admin.adminJwt, {
       method: "POST",
       body: "",
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -530,7 +530,7 @@ describe("POST /admin/users/:id/delete", () => {
     const user = await createTestUser(env.db, "delbtnuser");
     await createTestProject(env.db, user.id, "ubtn-proj");
 
-    const res = await req(`/admin/users/${user.id}`, admin.jwt);
+    const res = await req(`/admin/users/${user.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Danger Zone");
@@ -563,7 +563,7 @@ describe("GET /admin/deployments/:id/logs", () => {
         }),
     });
 
-    const res = await req(`/admin/deployments/${deployment.id}/logs`, admin.jwt);
+    const res = await req(`/admin/deployments/${deployment.id}/logs`, admin.adminJwt);
     expect(res.status).toBe(200);
     const json = (await res.json()) as { data: { outcome: string; logs: unknown[] }[] };
     expect(json.data).toHaveLength(1);
@@ -574,7 +574,7 @@ describe("GET /admin/deployments/:id/logs", () => {
 
   test("returns 404 for unknown deployment", async () => {
     const admin = await createTestUser(env.db, "admin-logs2", "github", undefined, "free", "admin");
-    const res = await req("/admin/deployments/dpl_unknown/logs", admin.jwt);
+    const res = await req("/admin/deployments/dpl_unknown/logs", admin.adminJwt);
     expect(res.status).toBe(404);
   });
 });
@@ -592,7 +592,7 @@ describe("GET /admin/deployments/:id (logs section)", () => {
     const project = await createTestProject(env.db, admin.id, "logsui-proj");
     const deployment = await createTestDeployment(env.db, project.id, "live");
 
-    const res = await req(`/admin/deployments/${deployment.id}`, admin.jwt);
+    const res = await req(`/admin/deployments/${deployment.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Runtime Logs");
@@ -618,7 +618,7 @@ describe("GET /admin/deployments/:id (logs section)", () => {
       "some error",
     );
 
-    const res = await req(`/admin/deployments/${deployment.id}`, admin.jwt);
+    const res = await req(`/admin/deployments/${deployment.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).not.toContain("Runtime Logs");
@@ -628,7 +628,7 @@ describe("GET /admin/deployments/:id (logs section)", () => {
 describe("GET /admin/signup-control", () => {
   test("renders signup control page with toggle off by default", async () => {
     const admin = await createTestUser(env.db, "admin-sc1", "github", undefined, "free", "admin");
-    const res = await req("/admin/signup-control", admin.jwt);
+    const res = await req("/admin/signup-control", admin.adminJwt);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Signup Control");
@@ -641,7 +641,7 @@ describe("GET /admin/signup-control", () => {
       "signup:allowlist",
       JSON.stringify([{ type: "github", pattern: "octocat", note: "Test" }]),
     );
-    const res = await req("/admin/signup-control", admin.jwt);
+    const res = await req("/admin/signup-control", admin.adminJwt);
     const html = await res.text();
     expect(html).toContain("octocat");
     expect(html).toContain("Test");
@@ -650,7 +650,7 @@ describe("GET /admin/signup-control", () => {
 
   test("nav bar includes Signup link", async () => {
     const admin = await createTestUser(env.db, "admin-sc2b", "github", undefined, "free", "admin");
-    const res = await req("/admin/signup-control", admin.jwt);
+    const res = await req("/admin/signup-control", admin.adminJwt);
     const html = await res.text();
     expect(html).toContain('href="/admin/signup-control"');
   });
@@ -661,7 +661,7 @@ describe("POST /admin/signup-control/toggle", () => {
     const admin = await createTestUser(env.db, "admin-sc3", "github", undefined, "free", "admin");
 
     // Toggle ON
-    const res1 = await req("/admin/signup-control/toggle", admin.jwt, {
+    const res1 = await req("/admin/signup-control/toggle", admin.adminJwt, {
       method: "POST",
       body: "",
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -670,7 +670,7 @@ describe("POST /admin/signup-control/toggle", () => {
     expect(await env.ROUTING.get("signup:enabled")).toBe("true");
 
     // Toggle OFF
-    const res2 = await req("/admin/signup-control/toggle", admin.jwt, {
+    const res2 = await req("/admin/signup-control/toggle", admin.adminJwt, {
       method: "POST",
       body: "",
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -688,7 +688,7 @@ describe("POST /admin/signup-control/add + delete", () => {
 
     // Add entry
     const addBody = new URLSearchParams({ type: "github", pattern: "testuser", note: "Test" });
-    const addRes = await req("/admin/signup-control/add", admin.jwt, {
+    const addRes = await req("/admin/signup-control/add", admin.adminJwt, {
       method: "POST",
       body: addBody.toString(),
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -702,7 +702,7 @@ describe("POST /admin/signup-control/add + delete", () => {
 
     // Delete entry
     const delBody = new URLSearchParams({ index: "0" });
-    const delRes = await req("/admin/signup-control/delete", admin.jwt, {
+    const delRes = await req("/admin/signup-control/delete", admin.adminJwt, {
       method: "POST",
       body: delBody.toString(),
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -719,7 +719,7 @@ describe("POST /admin/signup-control/add + delete", () => {
     const admin = await createTestUser(env.db, "admin-sc5", "github", undefined, "free", "admin");
 
     const body = new URLSearchParams({ type: "invalid", pattern: "test" });
-    const res = await req("/admin/signup-control/add", admin.jwt, {
+    const res = await req("/admin/signup-control/add", admin.adminJwt, {
       method: "POST",
       body: body.toString(),
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,
@@ -731,7 +731,7 @@ describe("POST /admin/signup-control/add + delete", () => {
     const admin = await createTestUser(env.db, "admin-sc6", "github", undefined, "free", "admin");
 
     const body = new URLSearchParams({ index: "99" });
-    const res = await req("/admin/signup-control/delete", admin.jwt, {
+    const res = await req("/admin/signup-control/delete", admin.adminJwt, {
       method: "POST",
       body: body.toString(),
       headers: { "Content-Type": "application/x-www-form-urlencoded" } as Record<string, string>,

@@ -14,7 +14,7 @@ function base64urlEncode(data: Uint8Array): string {
 }
 
 async function signJwt(
-  payload: { sub: string; login: string; exp?: number },
+  payload: { sub: string; login: string; aud?: string; exp?: number },
   secret: string,
 ): Promise<string> {
   const encoder = new TextEncoder();
@@ -23,6 +23,7 @@ async function signJwt(
     encoder.encode(
       JSON.stringify({
         ...payload,
+        aud: payload.aud ?? "api",
         iat: Math.floor(Date.now() / 1000),
         exp: payload.exp ?? Math.floor(Date.now() / 1000) + 3600,
       }),

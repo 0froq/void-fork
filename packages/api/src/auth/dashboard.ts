@@ -16,7 +16,7 @@ export async function authenticateDashboardToken(
     return null;
   }
 
-  const payload = await verifyJwt(token, jwtSecret);
+  const payload = await verifyJwt(token, jwtSecret, "api");
   if (!payload?.sub || !payload.login) {
     return null;
   }

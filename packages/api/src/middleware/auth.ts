@@ -24,7 +24,7 @@ export const authMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) => {
   }
 
   const token = header.slice(7);
-  const payload = await verifyJwt(token, c.env.JWT_SECRET);
+  const payload = await verifyJwt(token, c.env.JWT_SECRET, "api");
   if (!payload) {
     return c.json({ error: "invalid or expired token" }, 401);
   }

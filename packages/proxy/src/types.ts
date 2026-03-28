@@ -12,6 +12,7 @@ export interface Env {
 export interface JwtPayload {
   sub: string;
   login: string;
+  aud: string;
   iat: number;
   exp: number;
 }

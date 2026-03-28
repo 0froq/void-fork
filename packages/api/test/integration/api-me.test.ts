@@ -59,7 +59,7 @@ describe("GET /me", () => {
     // Sign JWT in the past so it's expired
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2020-01-01"));
-    const jwt = await signJwt({ sub: userId, login: "expired" }, JWT_SECRET);
+    const jwt = await signJwt({ sub: userId, login: "expired", aud: "api" }, JWT_SECRET);
     vi.useRealTimers();
 
     const res = await app.fetch(

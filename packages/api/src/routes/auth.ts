@@ -251,7 +251,7 @@ app.get("/callback", async (c) => {
   }
 
   // Sign JWT
-  const jwt = await signJwt({ sub: user.id, login }, c.env.JWT_SECRET);
+  const jwt = await signJwt({ sub: user.id, login, aud: "api" }, c.env.JWT_SECRET);
 
   const redirectUrl = new URL(redirect);
 

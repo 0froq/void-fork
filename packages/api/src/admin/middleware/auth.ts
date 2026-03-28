@@ -19,7 +19,7 @@ export const adminAuthMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) =>
     return c.redirect("/admin/login");
   }
 
-  const payload = await verifyJwt(token, c.env.JWT_SECRET);
+  const payload = await verifyJwt(token, c.env.JWT_SECRET, "admin");
   if (!payload) {
     return c.redirect("/admin/login");
   }

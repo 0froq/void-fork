@@ -1,6 +1,7 @@
 export interface JwtPayload {
   sub: string;
   login: string;
+  aud: string;
   iat: number;
   exp: number;
 }
@@ -87,7 +88,11 @@ export async function signJwt(
   return `${header}.${body}.${signature}`;
 }
 
-export async function verifyJwt(token: string, secret: string): Promise<JwtPayload | null> {
+export async function verifyJwt(
+  token: string,
+  secret: string,
+  expectedAud?: string,
+): Promise<JwtPayload | null> {
   const parts = token.split(".");
   if (parts.length !== 3) return null;
 
@@ -101,6 +106,8 @@ export async function verifyJwt(token: string, secret: string): Promise<JwtPaylo
 
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp <= now) return null;
+
+    if (expectedAud && payload.aud !== expectedAud) return null;
 
     return payload;
   } catch {

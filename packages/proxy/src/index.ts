@@ -165,6 +165,8 @@ async function verifyJwt(token: string, secret: string): Promise<JwtPayload | nu
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp <= now) return null;
 
+    if (payload.aud !== "api") return null;
+
     return payload;
   } catch {
     return null;

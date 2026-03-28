@@ -128,7 +128,7 @@ app.get("/callback", async (c) => {
     );
   }
 
-  const jwt = await signJwt({ sub: user.id, login }, c.env.JWT_SECRET);
+  const jwt = await signJwt({ sub: user.id, login, aud: "admin" }, c.env.JWT_SECRET);
 
   setCookie(c, "admin_token", jwt, {
     httpOnly: true,

@@ -280,7 +280,7 @@ export async function createTestUser(
   providerId?: string,
   plan: PlanId = "free",
   role: "user" | "admin" = "user",
-): Promise<{ id: string; login: string; jwt: string }> {
+): Promise<{ id: string; login: string; jwt: string; adminJwt: string }> {
   const id = `user_test${++userCounter}`;
   const pid = providerId ?? String(10000 + userCounter);
   await db.insert(users).values({
@@ -298,8 +298,9 @@ export async function createTestUser(
     provider,
     provider_id: pid,
   });
-  const jwt = await signJwt({ sub: id, login }, JWT_SECRET);
-  return { id, login, jwt };
+  const jwt = await signJwt({ sub: id, login, aud: "api" }, JWT_SECRET);
+  const adminJwt = await signJwt({ sub: id, login, aud: "admin" }, JWT_SECRET);
+  return { id, login, jwt, adminJwt };
 }
 
 let projectCounter = 0;
