@@ -96,7 +96,9 @@ describe("email verification gating on account linking", () => {
     );
 
     const res = await app.fetch(
-      new Request(`http://localhost/auth/callback?code=test-code&state=${state}`),
+      new Request(`http://localhost/auth/callback?code=test-code&state=${state}`, {
+        headers: { Cookie: "oauth_nonce=test-nonce" },
+      }),
       env,
     );
 
@@ -131,7 +133,9 @@ describe("email verification gating on account linking", () => {
     );
 
     const res = await app.fetch(
-      new Request(`http://localhost/auth/callback?code=test-code&state=${state}`),
+      new Request(`http://localhost/auth/callback?code=test-code&state=${state}`, {
+        headers: { Cookie: "oauth_nonce=test-nonce" },
+      }),
       env,
     );
 
@@ -165,7 +169,9 @@ describe("email verification gating on account linking", () => {
     );
 
     const res = await app.fetch(
-      new Request(`http://localhost/auth/callback?code=test-code&state=${state}`),
+      new Request(`http://localhost/auth/callback?code=test-code&state=${state}`, {
+        headers: { Cookie: "oauth_nonce=test-nonce" },
+      }),
       env,
     );
 

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { setCookie, deleteCookie } from "hono/cookie";
+import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import type { ApiEnv } from "../../env";
 import { getGoogleAuthorizeUrl, exchangeCodeForToken, getGoogleUser } from "../../auth/google";
 import { signJwt } from "../../auth/jwt";
@@ -9,6 +9,8 @@ import {
   getUserByEmail,
   updateUserProviderId,
   createOAuthAccount,
+  storeOAuthNonce,
+  consumeOAuthNonce,
 } from "../../db";
 
 const app = new Hono<ApiEnv>();
@@ -32,11 +34,20 @@ app.get("/login", (c) => {
 app.get("/login/google", async (c) => {
   const redirectUri = new URL(c.req.url).origin + "/admin/callback";
   const nonce = crypto.randomUUID();
+  await storeOAuthNonce(c.get("db"), nonce, 600);
   const stateData = JSON.stringify({ nonce });
   const stateEncoded = btoa(stateData);
   const signature = await hmacSignState(stateEncoded, c.env.JWT_SECRET);
   const state = `${stateEncoded}.${signature}`;
   const url = getGoogleAuthorizeUrl(c.env.GOOGLE_CLIENT_ID, redirectUri, state);
+  // Bind nonce to this browser to prevent login CSRF / session swapping
+  setCookie(c, "oauth_nonce", nonce, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    path: "/admin/callback",
+    maxAge: 600,
+  });
   return c.redirect(url);
 });
 
@@ -61,6 +72,29 @@ app.get("/callback", async (c) => {
   if (!valid) {
     return c.html("<h1>Login failed</h1><p>Invalid state signature.</p>", 400);
   }
+
+  // Consume the nonce atomically — prevents replay of the callback URL
+  let nonce: string;
+  try {
+    nonce = JSON.parse(atob(stateEncoded)).nonce;
+  } catch {
+    return c.html("<h1>Login failed</h1><p>Invalid state data.</p>", 400);
+  }
+
+  // Verify the nonce matches the cookie set during login redirect.
+  // This binds the OAuth flow to the browser that initiated it,
+  // preventing login CSRF / session swapping attacks.
+  const cookieNonce = getCookie(c, "oauth_nonce");
+  if (!cookieNonce || cookieNonce !== nonce) {
+    return c.html("<h1>Login failed</h1><p>OAuth session mismatch.</p>", 400);
+  }
+
+  const nonceValid = await consumeOAuthNonce(c.get("db"), nonce);
+  if (!nonceValid) {
+    return c.html("<h1>Login failed</h1><p>Invalid or expired login state.</p>", 400);
+  }
+
+  deleteCookie(c, "oauth_nonce", { path: "/admin/callback" });
 
   const redirectUri = new URL(c.req.url).origin + "/admin/callback";
   const googleToken = await exchangeCodeForToken(

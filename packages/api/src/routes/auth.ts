@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import type { ApiEnv } from "../env";
 import { getGitHubAuthorizeUrl, exchangeCodeForToken, getGitHubUser } from "../auth/github";
 import {
@@ -84,6 +85,15 @@ app.get("/login", async (c) => {
 
   const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
 
+  // Bind nonce to this browser to prevent login CSRF / session swapping
+  setCookie(c, "oauth_nonce", nonce, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    path: "/auth/callback",
+    maxAge: 600,
+  });
+
   if (provider === "google") {
     const url = getGoogleAuthorizeUrl(c.env.GOOGLE_CLIENT_ID, redirectUri, state);
     return c.redirect(url);
@@ -122,6 +132,14 @@ app.get("/callback", async (c) => {
     provider?: string;
   };
 
+  // Verify the nonce matches the cookie set during login redirect.
+  // This binds the OAuth flow to the browser that initiated it,
+  // preventing login CSRF / session swapping attacks.
+  const cookieNonce = getCookie(c, "oauth_nonce");
+  if (!cookieNonce || cookieNonce !== nonce) {
+    return c.json({ error: "OAuth session mismatch" }, 400);
+  }
+
   // Validate and consume nonce atomically (single-use, 10-minute TTL).
   // Uses PostgreSQL — not KV — for strong consistency across colos.
   const db = c.get("db");
@@ -129,6 +147,10 @@ app.get("/callback", async (c) => {
   if (!nonceValid) {
     return c.json({ error: "invalid or expired OAuth state" }, 400);
   }
+
+  // Clear the cookie only after successful validation so stale callbacks
+  // from duplicate tabs don't invalidate a legitimate in-progress login.
+  deleteCookie(c, "oauth_nonce", { path: "/auth/callback" });
 
   // Re-validate redirect after decoding
   if (!isAllowedRedirect(redirect, c.env.DASHBOARD_URL)) {
