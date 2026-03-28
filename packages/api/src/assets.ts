@@ -118,15 +118,30 @@ export async function uploadAssetBuckets(
     return jwt;
   }
 
-  let completionJwt = jwt;
+  // CF's asset upload protocol: the session JWT is used for auth on ALL bucket
+  // uploads. Only the final bucket response contains a completion JWT. Non-final
+  // buckets return 202 with no JWT. This matches Wrangler's implementation.
+  let completionJwt = "";
+
+  // Find the last non-empty bucket index — CF returns the completion JWT only
+  // for this bucket. If CF's edge-node bug returns plain text (2xx, no JWT) on
+  // the final bucket, we must retry (hitting a different node usually works).
+  let lastNonEmptyIndex = -1;
+  for (let j = buckets.length - 1; j >= 0; j--) {
+    if (buckets[j].length > 0) {
+      lastNonEmptyIndex = j;
+      break;
+    }
+  }
 
   for (let i = 0; i < buckets.length; i++) {
     const bucket = buckets[i];
     if (bucket.length === 0) continue;
 
+    const isFinalBucket = i === lastNonEmptyIndex;
     console.log(`[assets] uploading bucket ${i + 1}/${buckets.length}: ${bucket.length} file(s)`);
 
-    completionJwt = await retryWithBackoff(
+    const responseJwt = await retryWithBackoff(
       async () => {
         const formData = new FormData();
         for (const hash of bucket) {
@@ -141,18 +156,18 @@ export async function uploadAssetBuckets(
         }
 
         try {
-          return await postAssetUpload(accountId, completionJwt, formData);
+          // Always use the session JWT for auth, not a chained JWT
+          const result = await postAssetUpload(accountId, jwt, formData);
+          // Non-final buckets: null (no JWT) is expected — return it as success.
+          // Final bucket: null means CF's edge-node bug (plain-text 2xx) — retry.
+          if (result === null && isFinalBucket) {
+            console.warn(`[assets] final bucket missing JWT (CF edge bug), retrying`);
+            return undefined;
+          }
+          return result;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          // Retry on: server errors (5xx status in message), gateway/timeout keywords,
-          // and CF's known plain-text bug where the upload endpoint returns a 2xx with
-          // no JWT (e.g. "Assets have already been uploaded.") — retrying typically
-          // hits a different edge node that returns proper JSON.
-          if (
-            /\b(5\d{2})\b/.test(msg) ||
-            /gateway|timeout/i.test(msg) ||
-            /upload response missing jwt/i.test(msg)
-          ) {
+          if (/\b(5\d{2})\b/.test(msg) || /gateway|timeout/i.test(msg)) {
             console.warn(`[assets] bucket ${i + 1} retryable error: ${msg}`);
             return undefined;
           }
@@ -165,12 +180,24 @@ export async function uploadAssetBuckets(
         errorMessage: `asset upload failed for bucket ${i + 1}/${buckets.length} after retries`,
       },
     );
+
+    if (responseJwt) {
+      completionJwt = responseJwt;
+    }
+  }
+
+  if (!completionJwt) {
+    throw new Error("asset upload completed but no completion JWT received from CF");
   }
 
   return completionJwt;
 }
 
-async function postAssetUpload(accountId: string, jwt: string, body: FormData): Promise<string> {
+async function postAssetUpload(
+  accountId: string,
+  jwt: string,
+  body: FormData,
+): Promise<string | null> {
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/assets/upload?base64=true`,
     {
@@ -189,12 +216,11 @@ async function postAssetUpload(accountId: string, jwt: string, body: FormData): 
     throw new Error(`asset upload failed (${status}): ${error}`);
   }
 
+  // CF only returns a JWT in the final bucket response. Non-final buckets
+  // return 202 with { result: {} }. This is expected, not an error.
   const text = await response.text();
   const data = tryParseJson<{ result?: { jwt?: string } }>(text);
-  if (!data?.result?.jwt) {
-    throw new Error(`[assets] upload response missing jwt. raw: ${text.slice(0, 200)}`);
-  }
-  return data.result.jwt;
+  return data?.result?.jwt ?? null;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {

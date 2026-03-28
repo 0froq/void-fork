@@ -224,7 +224,58 @@ describe("uploadAssetBuckets", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("retries on plain-text 2xx response (CF bug) and succeeds", async () => {
+  it("accepts missing JWT for non-final buckets", async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls++;
+      // First bucket (non-final): 202 with no JWT
+      if (calls === 1) {
+        return Response.json({ result: {} }, { status: 202 });
+      }
+      // Second bucket (final): 200 with completion JWT
+      return Response.json({ result: { jwt: "completion-jwt" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const completionJwt = await uploadAssetBuckets(
+      "acct",
+      "session-jwt",
+      [["hash1"], ["hash2"]],
+      new Map([
+        ["hash1", { blob: new Blob(["a"]), contentType: "text/plain" }],
+        ["hash2", { blob: new Blob(["b"]), contentType: "text/plain" }],
+      ]),
+    );
+
+    expect(completionJwt).toBe("completion-jwt");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses session JWT for auth on all buckets (no chaining)", async () => {
+    const fetchMock = vi.fn(async () => {
+      return Response.json({ result: { jwt: "completion-jwt" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await uploadAssetBuckets(
+      "acct",
+      "session-jwt",
+      [["hash1"], ["hash2"]],
+      new Map([
+        ["hash1", { blob: new Blob(["a"]), contentType: "text/plain" }],
+        ["hash2", { blob: new Blob(["b"]), contentType: "text/plain" }],
+      ]),
+    );
+
+    // Both calls should use session JWT, not the response JWT from bucket 1
+    for (const call of fetchMock.mock.calls) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const options = (call as any)[1] as { headers: { Authorization: string } };
+      expect(options.headers.Authorization).toBe("Bearer session-jwt");
+    }
+  });
+
+  it("retries plain-text 2xx on final bucket (CF edge bug) and succeeds", async () => {
     let calls = 0;
     const fetchMock = vi.fn(async () => {
       calls++;
@@ -245,6 +296,18 @@ describe("uploadAssetBuckets", () => {
     expect(completionJwt).toBe("completion-jwt");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("throws after exhausting retries on final bucket with no JWT", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ result: {} }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      uploadAssetBuckets("acct", "session-jwt", [["hash1"]], singleAssetMap),
+    ).rejects.toThrow("asset upload failed for bucket");
+
+    // 1 initial + 4 retries = 5 total attempts
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  }, 20_000);
 
   it("throws on non-retryable errors", async () => {
     const fetchMock = vi.fn(async () => new Response("Unauthorized", { status: 401 }));
