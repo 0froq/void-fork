@@ -53,6 +53,13 @@ function createMockR2() {
   } as unknown as R2Bucket & { store: Map<string, ArrayBuffer> };
 }
 
+/** Create a JWT with the given expiration time (Unix seconds). */
+function makeJwt(exp: number): string {
+  const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const payload = btoa(JSON.stringify({ exp }));
+  return `${header}.${payload}.fake-signature`;
+}
+
 const KV_THRESHOLD = 2 * 1024 * 1024; // 2 MB
 
 afterEach(() => {
@@ -166,12 +173,13 @@ describe("uploadAssetBuckets", () => {
   const singleAssetMap = new Map([
     ["hash1", { blob: new Blob(["hello"]), contentType: "text/plain" }],
   ]);
+  const opts = { retryDelayMs: 0, gatewayDelayMs: 0 };
 
   it("returns session JWT directly when buckets are empty (all cached)", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const completionJwt = await uploadAssetBuckets("acct", "session-jwt", [], singleAssetMap);
+    const completionJwt = await uploadAssetBuckets("acct", "session-jwt", [], singleAssetMap, opts);
 
     expect(completionJwt).toBe("session-jwt");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -181,7 +189,13 @@ describe("uploadAssetBuckets", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const completionJwt = await uploadAssetBuckets("acct", "session-jwt", [[]], singleAssetMap);
+    const completionJwt = await uploadAssetBuckets(
+      "acct",
+      "session-jwt",
+      [[]],
+      singleAssetMap,
+      opts,
+    );
 
     expect(completionJwt).toBe("session-jwt");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -196,6 +210,7 @@ describe("uploadAssetBuckets", () => {
       "session-jwt",
       [["hash1"]],
       singleAssetMap,
+      opts,
     );
 
     expect(completionJwt).toBe("completion-jwt");
@@ -218,6 +233,7 @@ describe("uploadAssetBuckets", () => {
       "session-jwt",
       [["hash1"]],
       singleAssetMap,
+      opts,
     );
 
     expect(completionJwt).toBe("completion-jwt");
@@ -245,6 +261,7 @@ describe("uploadAssetBuckets", () => {
         ["hash1", { blob: new Blob(["a"]), contentType: "text/plain" }],
         ["hash2", { blob: new Blob(["b"]), contentType: "text/plain" }],
       ]),
+      opts,
     );
 
     expect(completionJwt).toBe("completion-jwt");
@@ -265,6 +282,7 @@ describe("uploadAssetBuckets", () => {
         ["hash1", { blob: new Blob(["a"]), contentType: "text/plain" }],
         ["hash2", { blob: new Blob(["b"]), contentType: "text/plain" }],
       ]),
+      opts,
     );
 
     // Both calls should use session JWT, not the response JWT from bucket 1
@@ -275,7 +293,7 @@ describe("uploadAssetBuckets", () => {
     }
   });
 
-  it("retries plain-text 2xx on final bucket (CF edge bug) and succeeds", async () => {
+  it("retries malformed 2xx (CF edge bug) and succeeds", async () => {
     let calls = 0;
     const fetchMock = vi.fn(async () => {
       calls++;
@@ -291,33 +309,132 @@ describe("uploadAssetBuckets", () => {
       "session-jwt",
       [["hash1"]],
       singleAssetMap,
+      opts,
     );
 
     expect(completionJwt).toBe("completion-jwt");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("throws after exhausting retries on final bucket with no JWT", async () => {
+  it("throws when no bucket returns a completion JWT", async () => {
     const fetchMock = vi.fn(async () => Response.json({ result: {} }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      uploadAssetBuckets("acct", "session-jwt", [["hash1"]], singleAssetMap),
-    ).rejects.toThrow("asset upload failed for bucket");
+      uploadAssetBuckets("acct", "session-jwt", [["hash1"]], singleAssetMap, opts),
+    ).rejects.toThrow("no completion JWT received");
 
-    // 1 initial + 4 retries = 5 total attempts
-    expect(fetchMock).toHaveBeenCalledTimes(5);
-  }, 20_000);
+    // Valid response — no retries burned, just 1 call
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 
-  it("throws on non-retryable errors", async () => {
+  it("retries 4xx errors before throwing (matches Wrangler)", async () => {
     const fetchMock = vi.fn(async () => new Response("Unauthorized", { status: 401 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      uploadAssetBuckets("acct", "session-jwt", [["hash1"]], singleAssetMap),
+      uploadAssetBuckets("acct", "session-jwt", [["hash1"]], singleAssetMap, opts),
     ).rejects.toThrow("asset upload failed (401)");
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // 4xx errors are retried just like 5xx (matching Wrangler's behavior)
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it("524 gateway errors get free retries before counting as attempts", async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls++;
+      // Return 524 for the first 6 calls, then succeed
+      if (calls <= 6) {
+        return new Response("A timeout occurred", { status: 524 });
+      }
+      return Response.json({ result: { jwt: "completion-jwt" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const completionJwt = await uploadAssetBuckets(
+      "acct",
+      "session-jwt",
+      [["hash1"]],
+      singleAssetMap,
+      opts,
+    );
+
+    expect(completionJwt).toBe("completion-jwt");
+    // 6 failures + 1 success = 7 calls. The first 4 gateway errors are free
+    // (gwErr 1-4, attempts stays 0). The 5th (gwErr=5 >= MAX=5) increments
+    // attempts to 1, the 6th increments to 2. Call 7 succeeds.
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+  });
+
+  it("throws after exhausting gateway + regular retries", async () => {
+    // Always return 524 — eventually should exhaust all retries
+    const fetchMock = vi.fn(async () => new Response("A timeout occurred", { status: 524 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Rethrows the original AssetUploadError (matching Wrangler's `throw e;`)
+    await expect(
+      uploadAssetBuckets("acct", "session-jwt", [["hash1"]], singleAssetMap, opts),
+    ).rejects.toThrow("asset upload failed (524)");
+
+    // 4 free gateway errors (gwErr 1-4, attempts stays 0)
+    // + 6 counted (gwErr 5-10, each increments attempts 1→2→3→4→5→check fails)
+    // = 10 total calls
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+  });
+
+  it("uploads buckets concurrently", async () => {
+    let maxConcurrent = 0;
+    let currentConcurrent = 0;
+
+    const fetchMock = vi.fn(async () => {
+      currentConcurrent++;
+      maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
+      // Yield to let other concurrent tasks start
+      await new Promise((r) => setTimeout(r, 1));
+      currentConcurrent--;
+      return Response.json({ result: { jwt: "completion-jwt" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await uploadAssetBuckets(
+      "acct",
+      "session-jwt",
+      [["h1"], ["h2"], ["h3"]],
+      new Map([
+        ["h1", { blob: new Blob(["a"]), contentType: "text/plain" }],
+        ["h2", { blob: new Blob(["b"]), contentType: "text/plain" }],
+        ["h3", { blob: new Blob(["c"]), contentType: "text/plain" }],
+      ]),
+      opts,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    // All 3 should run concurrently since UPLOAD_CONCURRENCY=3
+    expect(maxConcurrent).toBe(3);
+  });
+
+  it("JWT expiration gives specific error message when retries exhausted", async () => {
+    // JWT that expired 1 hour ago
+    const expiredJwt = makeJwt(Math.floor(Date.now() / 1000) - 3600);
+    const fetchMock = vi.fn(async () => new Response("Server Error", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      uploadAssetBuckets("acct", expiredJwt, [["hash1"]], singleAssetMap, opts),
+    ).rejects.toThrow(/upload session has expired/);
+  });
+
+  it("rethrows original error when retries exhausted and JWT valid", async () => {
+    // JWT that expires in 1 hour
+    const validJwt = makeJwt(Math.floor(Date.now() / 1000) + 3600);
+    const fetchMock = vi.fn(async () => new Response("Server Error", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Original AssetUploadError is rethrown (matching Wrangler's `throw e;`)
+    await expect(
+      uploadAssetBuckets("acct", validJwt, [["hash1"]], singleAssetMap, opts),
+    ).rejects.toThrow("asset upload failed (500)");
   });
 });
 

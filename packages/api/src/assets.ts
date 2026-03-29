@@ -1,6 +1,15 @@
 import type { AssetConfig } from "./types";
 import { retryWithBackoff } from "./cf-api";
 
+class AssetUploadError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 interface AssetManifestEntry {
   hash: string;
   size: number;
@@ -29,8 +38,12 @@ function tryParseJson<T>(text: string): T | null {
 
 const ASSET_SESSION_MAX_RETRIES = 3;
 const ASSET_SESSION_RETRY_DELAY_MS = 1000;
-const ASSET_BUCKET_UPLOAD_MAX_RETRIES = 4; // 5 total attempts, matching Wrangler
 const ASSET_BUCKET_UPLOAD_RETRY_DELAY_MS = 1000;
+
+const MAX_UPLOAD_RETRIES = 5; // 5 retries + 1 initial = 6 total tries (matching Wrangler)
+const UPLOAD_CONCURRENCY = 3;
+const GATEWAY_BACKOFF_BASE_MS = 5000;
+const MAX_GATEWAY_ERRORS = 5; // start counting attempts after this many 524s (4 free retries)
 
 /**
  * Step 1: Create an asset upload session with CF.
@@ -95,102 +108,156 @@ export async function createAssetUploadSession(
 
 /**
  * Step 2: Upload asset file contents for each bucket.
- * Each bucket is a group of hashes that CF wants uploaded together.
- * Files are sent as base64-encoded multipart form data with ?base64=true.
- * The Content-Type on each form part is preserved by CF when serving the asset.
  *
- * When all assets are already cached, CF returns empty buckets and the session
- * JWT is already the completion token — no uploads or exchanges needed.
- *
- * Returns the completion JWT from the final upload response (or the session JWT
- * when no uploads were needed).
+ * Buckets are uploaded concurrently (up to UPLOAD_CONCURRENCY). On CF gateway
+ * errors (524), concurrency drops to 1 and gateway-specific backoff applies.
+ * Gateway errors get several free retries before counting against the attempt
+ * limit, matching Wrangler's behavior.
  */
 export async function uploadAssetBuckets(
   accountId: string,
   jwt: string,
   buckets: string[][],
   assetsByHash: Map<string, AssetEntry>,
+  {
+    retryDelayMs = ASSET_BUCKET_UPLOAD_RETRY_DELAY_MS,
+    gatewayDelayMs = GATEWAY_BACKOFF_BASE_MS,
+  }: { retryDelayMs?: number; gatewayDelayMs?: number } = {},
 ): Promise<string> {
-  // When all assets are cached, CF returns empty buckets and the session JWT
-  // is already the completion token. Use .flat().length to handle both [] and [[]].
-  if (buckets.flat().length === 0) {
+  if (!buckets.some((b) => b.length > 0)) {
     console.log("[assets] all assets cached — session JWT is completion token");
     return jwt;
   }
 
-  // CF's asset upload protocol: the session JWT is used for auth on ALL bucket
-  // uploads. Only the final bucket response contains a completion JWT. Non-final
-  // buckets return 202 with no JWT. This matches Wrangler's implementation.
   let completionJwt = "";
 
-  // Find the last non-empty bucket index — CF returns the completion JWT only
-  // for this bucket. If CF's edge-node bug returns plain text (2xx, no JWT) on
-  // the final bucket, we must retry (hitting a different node usually works).
-  let lastNonEmptyIndex = -1;
-  for (let j = buckets.length - 1; j >= 0; j--) {
-    if (buckets[j].length > 0) {
-      lastNonEmptyIndex = j;
-      break;
+  // Adaptive concurrency — shared across bucket tasks, drops to 1 on 524
+  let concurrency = UPLOAD_CONCURRENCY;
+  let activeCount = 0;
+  const waiters: (() => void)[] = [];
+
+  async function acquireSlot(): Promise<void> {
+    while (activeCount >= concurrency) {
+      await new Promise<void>((r) => waiters.push(r));
     }
+    activeCount++;
   }
 
-  for (let i = 0; i < buckets.length; i++) {
-    const bucket = buckets[i];
-    if (bucket.length === 0) continue;
+  function releaseSlot(): void {
+    activeCount--;
+    const next = waiters.shift();
+    if (next) next();
+  }
 
-    const isFinalBucket = i === lastNonEmptyIndex;
-    console.log(`[assets] uploading bucket ${i + 1}/${buckets.length}: ${bucket.length} file(s)`);
-
-    const responseJwt = await retryWithBackoff(
-      async () => {
-        const formData = new FormData();
-        for (const hash of bucket) {
-          const entry = assetsByHash.get(hash);
-          if (!entry) {
-            console.warn(`[assets] bucket ${i}: hash ${hash} not found in assetsByHash, skipping`);
-            continue;
-          }
-          const buffer = await entry.blob.arrayBuffer();
-          const base64 = arrayBufferToBase64(buffer);
-          formData.append(hash, new File([base64], hash, { type: entry.contentType }), hash);
-        }
-
-        try {
-          // Always use the session JWT for auth, not a chained JWT
-          const result = await postAssetUpload(accountId, jwt, formData);
-          // Non-final buckets: null (no JWT) is expected — return it as success.
-          // Final bucket: null means CF's edge-node bug (plain-text 2xx) — retry.
-          if (result === null && isFinalBucket) {
-            console.warn(`[assets] final bucket missing JWT (CF edge bug), retrying`);
-            return undefined;
-          }
-          return result;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (/\b(5\d{2})\b/.test(msg) || /gateway|timeout/i.test(msg)) {
-            console.warn(`[assets] bucket ${i + 1} retryable error: ${msg}`);
-            return undefined;
-          }
-          throw err;
-        }
-      },
-      {
-        maxRetries: ASSET_BUCKET_UPLOAD_MAX_RETRIES,
-        delayMs: ASSET_BUCKET_UPLOAD_RETRY_DELAY_MS,
-        errorMessage: `asset upload failed for bucket ${i + 1}/${buckets.length} after retries`,
-      },
+  async function uploadBucket(bucket: string[], bucketIndex: number): Promise<void> {
+    console.log(
+      `[assets] uploading bucket ${bucketIndex + 1}/${buckets.length}: ${bucket.length} file(s)`,
     );
 
-    if (responseJwt) {
-      completionJwt = responseJwt;
+    let attempts = 0;
+    let bucketGatewayErrors = 0;
+    let lastErr: unknown;
+
+    // Base64 entries are computed once (on first slot acquisition) and reused
+    // for retries. Lazy init ensures encoding happens under the concurrency
+    // limit, not all-at-once when buckets are dispatched.
+    let entries: { hash: string; base64: string; contentType: string }[] | null = null;
+
+    while (true) {
+      // Short-circuit: another bucket already got the JWT — upload is complete
+      if (completionJwt) return;
+
+      await acquireSlot();
+      try {
+        if (!entries) {
+          const built: { hash: string; base64: string; contentType: string }[] = [];
+          for (const hash of bucket) {
+            const entry = assetsByHash.get(hash);
+            if (!entry) {
+              console.warn(
+                `[assets] bucket ${bucketIndex}: hash ${hash} not found in assetsByHash, skipping`,
+              );
+              continue;
+            }
+            const buffer = await entry.blob.arrayBuffer();
+            built.push({
+              hash,
+              base64: arrayBufferToBase64(buffer),
+              contentType: entry.contentType,
+            });
+          }
+          entries = built;
+        }
+
+        const formData = new FormData();
+        for (const { hash, base64, contentType } of entries) {
+          formData.append(hash, new File([base64], hash, { type: contentType }), hash);
+        }
+
+        const result = await postAssetUpload(accountId, jwt, formData);
+        if (result) completionJwt = result;
+        return;
+      } catch (err) {
+        lastErr = err;
+        if (attempts >= MAX_UPLOAD_RETRIES) break;
+      } finally {
+        releaseSlot();
+      }
+
+      // Error path — slot already released, backoff outside the concurrency limit
+      console.warn(
+        `[assets] bucket ${bucketIndex + 1} upload failed, retrying...`,
+        lastErr instanceof Error ? lastErr.message : lastErr,
+      );
+
+      await new Promise((r) => setTimeout(r, Math.pow(2, attempts) * retryDelayMs));
+
+      if (lastErr instanceof AssetUploadError && lastErr.status === 524) {
+        // Gateway error — throttle concurrency + additional backoff
+        concurrency = 1;
+        while (waiters.length > 0) waiters.shift()!();
+
+        await new Promise((r) => setTimeout(r, Math.pow(2, bucketGatewayErrors) * gatewayDelayMs));
+        bucketGatewayErrors++;
+        console.warn(
+          `[assets] bucket ${bucketIndex + 1} gateway error (524), ` +
+            `concurrency → 1, gateway errors: ${bucketGatewayErrors}/${MAX_GATEWAY_ERRORS}`,
+        );
+        if (bucketGatewayErrors >= MAX_GATEWAY_ERRORS) {
+          attempts++;
+        }
+      } else {
+        attempts++;
+      }
     }
+
+    // All retries exhausted
+    if (isJwtExpired(jwt)) {
+      throw new Error(
+        `Asset upload timed out on bucket ${bucketIndex + 1}/${buckets.length} — the upload session has expired. ` +
+          `Assets already uploaded have been saved, so the next attempt will automatically resume from this point.`,
+      );
+    }
+    throw lastErr;
   }
 
-  if (!completionJwt) {
-    throw new Error("asset upload completed but no completion JWT received from CF");
+  const tasks: Promise<void>[] = [];
+  for (let i = 0; i < buckets.length; i++) {
+    if (buckets[i].length === 0) continue;
+    const bucketIndex = i;
+    tasks.push(uploadBucket(buckets[bucketIndex], bucketIndex));
   }
+  // Use allSettled so a late bucket failure doesn't abort the deploy when the
+  // completion JWT was already received (CF confirmed all hashes are present).
+  const results = await Promise.allSettled(tasks);
 
-  return completionJwt;
+  if (completionJwt) return completionJwt;
+
+  // No JWT — find the first bucket error to surface, or throw a generic message
+  const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+  throw (
+    failed?.reason ?? new Error("asset upload completed but no completion JWT received from CF")
+  );
 }
 
 async function postAssetUpload(
@@ -213,14 +280,29 @@ async function postAssetUpload(
     const status = response.status;
     const error = await response.text();
     console.error(`[assets] upload failed (${status}): ${error.slice(0, 500)}`);
-    throw new Error(`asset upload failed (${status}): ${error}`);
+    throw new AssetUploadError(status, `asset upload failed (${status}): ${error}`);
   }
 
-  // CF only returns a JWT in the final bucket response. Non-final buckets
-  // return 202 with { result: {} }. This is expected, not an error.
   const text = await response.text();
   const data = tryParseJson<{ result?: { jwt?: string } }>(text);
-  return data?.result?.jwt ?? null;
+  // Wrangler's fetchResult throws on malformed JSON responses. Match that:
+  // a valid CF response always has a `result` key. Plain-text 2xx bodies
+  // (CF edge-node bug) or unexpected JSON shapes should be retried.
+  if (!data?.result) {
+    throw new AssetUploadError(response.status, `malformed upload response: ${text.slice(0, 200)}`);
+  }
+  return data.result.jwt ?? null;
+}
+
+function isJwtExpired(jwt: string): boolean {
+  try {
+    // CF JWTs use base64url encoding — normalize to standard base64 before decoding
+    const raw = jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(raw));
+    return typeof payload.exp === "number" && payload.exp < Date.now() / 1000;
+  } catch {
+    return false;
+  }
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
