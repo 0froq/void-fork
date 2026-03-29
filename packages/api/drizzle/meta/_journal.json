@@ -64,6 +64,13 @@
       "when": 1774093438000,
       "tag": "0008_auth_codes",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1774748243151,
+      "tag": "0009_chubby_masked_marvel",
+      "breakpoints": true
     }
   ]
 }

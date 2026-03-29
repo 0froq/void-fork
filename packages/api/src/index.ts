@@ -34,6 +34,7 @@ import {
   getDomainsByProjectIds,
   purgeExpiredOAuthNonces,
   purgeExpiredAuthCodes,
+  failStaleDeployments,
   type Db,
 } from "./db";
 import { getCurrentBillingPeriodStart, getPlanLimits } from "./tiers";
@@ -114,6 +115,13 @@ async function scheduled(
   _ctx: ExecutionContext,
 ): Promise<void> {
   const db = createDb(env.HYPERDRIVE.connectionString);
+
+  // Auto-fail deployments stuck in active states for more than 30 minutes
+  await failStaleDeployments(db)
+    .then((n) => {
+      if (n > 0) console.log(`[scheduled] auto-failed ${n} stale deployment(s)`);
+    })
+    .catch((err) => console.error("[scheduled] failed to clean up stale deployments:", err));
 
   // Purge expired OAuth nonces and auth codes left by abandoned login flows (best-effort)
   await purgeExpiredOAuthNonces(db).catch((err) =>

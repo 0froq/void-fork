@@ -214,6 +214,7 @@ export async function updateDeploymentStatus(
     .update(deployments)
     .set({
       status,
+      updated_at: sql`now()`,
       deployed_at:
         status === "live"
           ? sql`COALESCE(${deployments.deployed_at}, now())`
@@ -270,6 +271,23 @@ export async function getAllDeploymentsWithProject(
 export async function countDeployments(db: Db): Promise<number> {
   const [result] = await db.select({ count: count() }).from(deployments);
   return result?.count ?? 0;
+}
+
+export async function failStaleDeployments(db: Db): Promise<number> {
+  const result = await db
+    .update(deployments)
+    .set({
+      status: "failed",
+      updated_at: sql`now()`,
+      error_message: sql`COALESCE(${deployments.error_message}, 'timed out')`,
+    })
+    .where(
+      and(
+        notInArray(deployments.status, ["live", "failed"]),
+        sql`${deployments.updated_at} < now() - interval '30 minutes'`,
+      ),
+    );
+  return result.rowCount ?? 0;
 }
 
 export async function getActiveDeployment(db: Db, projectId: string): Promise<Deployment | null> {

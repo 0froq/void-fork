@@ -100,6 +100,7 @@ export const deployments = pgTable(
     error_message: text("error_message"),
     asset_hashes: text("asset_hashes"),
     created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+    updated_at: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
     deployed_at: timestamp("deployed_at", { mode: "string" }),
     retained: boolean("retained").notNull().default(false),
     applied_migrations: text("applied_migrations"),

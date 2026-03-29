@@ -828,6 +828,7 @@ app.post("/:id/deploy", async (c) => {
                   new Request("https://internal/__void/migrate", {
                     method: "POST",
                     headers: { "x-void-internal": proxyTokenBinding?.text ?? "" },
+                    signal: AbortSignal.timeout(300_000),
                   }),
                 );
 
