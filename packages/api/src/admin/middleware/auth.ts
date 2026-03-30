@@ -8,9 +8,11 @@ export const adminAuthMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) =>
   if (isDevBypass(c.env)) {
     const admin = await getFirstAdmin(c.get("db"));
     if (admin) {
-      c.set("userId", admin.id);
-      c.set("userLogin", admin.login);
-      return next();
+      const user = await getUser(c.get("db"), admin.id);
+      if (user) {
+        c.set("user", user);
+        return next();
+      }
     }
   }
 
@@ -29,7 +31,6 @@ export const adminAuthMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) =>
     return c.html("<h1>403 Forbidden</h1><p>Admin access required.</p>", 403);
   }
 
-  c.set("userId", payload.sub);
-  c.set("userLogin", payload.login);
+  c.set("user", user);
   await next();
 };

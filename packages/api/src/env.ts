@@ -1,5 +1,6 @@
 import type { Env } from "hono";
 import type { Db } from "./db";
+import type { User } from "./types";
 
 /**
  * Returns true when DEV_AUTH_BYPASS is set and we are NOT in production.
@@ -46,8 +47,7 @@ export interface ApiEnv extends Env {
     EMAIL?: SendEmail;
   };
   Variables: {
-    userId: string;
-    userLogin: string;
+    user: User;
     db: Db;
   };
 }

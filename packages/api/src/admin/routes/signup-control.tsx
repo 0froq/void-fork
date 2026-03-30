@@ -10,7 +10,7 @@ app.get("/", async (c) => {
   const enabled = (await c.env.ROUTING.get("signup:enabled")) === "true";
   const entries = await getAllowlist(c.env.ROUTING);
   return c.html(
-    <SignupControlPage enabled={enabled} entries={entries} username={c.get("userLogin")} />,
+    <SignupControlPage enabled={enabled} entries={entries} username={c.get("user").login} />,
   );
 });
 

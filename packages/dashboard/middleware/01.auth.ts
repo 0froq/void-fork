@@ -1,8 +1,9 @@
 import { defineMiddleware } from "void";
 import { deleteCookie, getCookie } from "hono/cookie";
-import { createDb, type Db } from "@voidcloud/api/db";
+import { createDb, getUser, type Db } from "@voidcloud/api/db";
 import { authenticateDashboardToken } from "@voidcloud/api/auth/dashboard";
 import { isDevBypass } from "@voidcloud/api/env";
+import { isAdminSuspended } from "@voidcloud/api/suspension";
 
 declare module "void" {
   interface CloudContextVariables {
@@ -46,9 +47,16 @@ export default defineMiddleware(async (c, next) => {
     return c.redirect("/login");
   }
 
+  const user = await getUser(c.get("db"), session.user.id);
+  if (!user || isAdminSuspended(user.suspended_reason)) {
+    deleteCookie(c, "void_token", { path: "/" });
+    c.set("shared", { user: null });
+    return c.redirect("/login");
+  }
+
   c.set("token", session.token);
-  c.set("userId", session.user.id);
-  c.set("shared", { user: { login: session.user.login } });
+  c.set("userId", user.id);
+  c.set("shared", { user: { login: user.login } });
 
   return next();
 });

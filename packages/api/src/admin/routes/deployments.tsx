@@ -27,7 +27,7 @@ app.get("/", async (c) => {
       <DeploymentsListPage
         deployments={deployments}
         search={search}
-        username={c.get("userLogin")}
+        username={c.get("user").login}
         tz={tz}
       />,
     );
@@ -44,7 +44,7 @@ app.get("/", async (c) => {
       deployments={deployments}
       page={page}
       totalPages={totalPages}
-      username={c.get("userLogin")}
+      username={c.get("user").login}
       tz={tz}
     />,
   );
@@ -69,7 +69,7 @@ app.get("/:id", async (c) => {
   }
 
   return c.html(
-    <Layout title={`Deployment ${deployment.id}`} username={c.get("userLogin")}>
+    <Layout title={`Deployment ${deployment.id}`} username={c.get("user").login}>
       <h1>Deployment {deployment.id}</h1>
 
       {deployment.status === "failed" && deployment.error_message && (

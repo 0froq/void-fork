@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { ApiEnv } from "./env";
+import { REASON_REQUESTS_EXCEEDED } from "./suspension";
 import { UsageCounter } from "./usage-counter";
 import { CronScheduler } from "./cron-scheduler";
 import { processUsageEventBatch } from "./usage-queue";
@@ -219,7 +220,7 @@ async function processUserRollover(
 
     // If period rolled and user was request-suspended, unsuspend in DB
     if (result.rolled && result.unsuspendRequests) {
-      await unsuspendUserIfReason(db, user.id, "requests_exceeded");
+      await unsuspendUserIfReason(db, user.id, REASON_REQUESTS_EXCEEDED);
     }
   }
 

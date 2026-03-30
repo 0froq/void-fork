@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { type ApiEnv, isDevBypass } from "../env";
-import { getProject, getProjectsByUserId, getUser } from "../db";
+import { getProject, getProjectsByUserId } from "../db";
 import { getCurrentBillingPeriodStart } from "../tiers";
 
 const projectUsage = new Hono<ApiEnv>()
@@ -12,7 +12,7 @@ const projectUsage = new Hono<ApiEnv>()
     if (!project) {
       return c.json({ error: "project not found" }, 404);
     }
-    if (project.user_id !== c.get("userId")) {
+    if (project.user_id !== c.get("user").id) {
       return c.json({ error: "forbidden" }, 403);
     }
 
@@ -27,8 +27,7 @@ const projectUsage = new Hono<ApiEnv>()
       });
     }
 
-    const user = await getUser(c.get("db"), c.get("userId"));
-    const since = getCurrentBillingPeriodStart(user!.billing_cycle_start);
+    const since = getCurrentBillingPeriodStart(c.get("user").billing_cycle_start);
     const [usage, aiUsage] = await Promise.all([
       queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since),
       queryProjectAiUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since),
@@ -46,7 +45,7 @@ const accountUsage = new Hono<ApiEnv>()
 
   // Aggregate usage across all user's projects
   .get("/", async (c) => {
-    const projects = await getProjectsByUserId(c.get("db"), c.get("userId"));
+    const projects = await getProjectsByUserId(c.get("db"), c.get("user").id);
     if (projects.length === 0) {
       return c.json({ requests: 0, bandwidthBytes: 0, aiNeurons: 0, projects: [] });
     }
@@ -68,8 +67,7 @@ const accountUsage = new Hono<ApiEnv>()
       });
     }
 
-    const user = await getUser(c.get("db"), c.get("userId"));
-    const since = getCurrentBillingPeriodStart(user!.billing_cycle_start);
+    const since = getCurrentBillingPeriodStart(c.get("user").billing_cycle_start);
 
     const [usageMap, ...aiUsages] = await Promise.all([
       queryBatchProjectUsage(

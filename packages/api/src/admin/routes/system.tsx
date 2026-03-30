@@ -111,7 +111,7 @@ export const dashboardHandler: Handler<ApiEnv> = async (c) => {
       projects={projects}
       deployments={deployments}
       siteDomain={siteDomain}
-      username={c.get("userLogin")}
+      username={c.get("user").login}
     />,
   );
 };

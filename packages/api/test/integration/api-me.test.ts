@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import app from "../../src/index";
 import { signJwt } from "../../src/auth/jwt";
 import { users } from "../../src/schema";
@@ -69,6 +70,55 @@ describe("GET /me", () => {
       env,
     );
     expect(res.status).toBe(401);
+  });
+
+  it("returns 401 when user has been deleted", async () => {
+    const user = await createTestUser(env.db, "deleted-user");
+    await env.db.delete(users).where(eq(users.id, user.id));
+
+    const res = await app.fetch(
+      new Request("http://localhost/me", {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "user not found" });
+  });
+
+  it("returns 403 when user is admin-suspended", async () => {
+    const user = await createTestUser(env.db, "suspended-user");
+    await env.db
+      .update(users)
+      .set({ suspended_reason: "admin_suspended" })
+      .where(eq(users.id, user.id));
+
+    const res = await app.fetch(
+      new Request("http://localhost/me", {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "account suspended" });
+  });
+
+  it("allows usage-suspended user through", async () => {
+    const user = await createTestUser(env.db, "usage-limited");
+    await env.db
+      .update(users)
+      .set({ suspended_reason: "requests_exceeded" })
+      .where(eq(users.id, user.id));
+
+    const res = await app.fetch(
+      new Request("http://localhost/me", {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    expect(body.login).toBe("usage-limited");
   });
 
   it("returns user login with valid JWT", async () => {

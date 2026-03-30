@@ -3,6 +3,7 @@ import { getPlanLimits, isWithinLimit } from "./tiers";
 import { createDb, suspendUser } from "./db";
 import { queryProjectAiUsage } from "./routes/usage";
 import type { ApiEnv } from "./env";
+import { REASON_REQUESTS_EXCEEDED } from "./suspension";
 
 // --- Exported types ---
 
@@ -116,9 +117,9 @@ export class UsageCounter extends DurableObject<ApiEnv["Bindings"]> {
     const exceedsLimit = evaluateRequestLimit(state, 0); // already added above
     if (exceedsLimit && !state.requestsSuspended) {
       state.requestsSuspended = true;
-      await this.suspendProjects(state.projectSlugs, "requests_exceeded");
+      await this.suspendProjects(state.projectSlugs, REASON_REQUESTS_EXCEEDED);
       const db = createDb(this.env.HYPERDRIVE.connectionString);
-      await suspendUser(db, body.userId, "requests_exceeded");
+      await suspendUser(db, body.userId, REASON_REQUESTS_EXCEEDED);
     }
 
     // Schedule AI alarm if not already set

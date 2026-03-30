@@ -3,7 +3,6 @@ import type { ApiEnv } from "../env";
 import { SUPPORTED_MANIFEST_VERSIONS, type DeployManifest, type DeployEvent } from "../types";
 import {
   getProject,
-  getUser,
   getDeployment,
   createDeployment,
   updateDeploymentStatus,
@@ -204,18 +203,18 @@ app.post("/:id/deploy", async (c) => {
     return c.json({ error: "project not found" }, 404);
   }
 
-  if (project.user_id !== c.get("userId")) {
+  if (project.user_id !== c.get("user").id) {
     return c.json({ error: "forbidden" }, 403);
   }
 
   // Run independent pre-checks in parallel
-  const [activeDeploy, currentLiveDeployment, user] = await Promise.all([
+  const [activeDeploy, currentLiveDeployment] = await Promise.all([
     getActiveDeployment(c.get("db"), projectId),
     project.active_deployment_id
       ? getDeployment(c.get("db"), project.active_deployment_id)
       : Promise.resolve(null),
-    getUser(c.get("db"), c.get("userId")),
   ]);
+  const user = c.get("user");
 
   // Reject concurrent deploys to the same project
   if (activeDeploy) {
@@ -308,9 +307,9 @@ app.post("/:id/deploy", async (c) => {
   }
 
   // Enforce deploy count limit
-  const planLimits = getPlanLimits(user?.plan ?? "free");
+  const planLimits = getPlanLimits(user.plan);
   if (planLimits.deploysPerDay > 0) {
-    const todayCount = await countUserDeploymentsToday(c.get("db"), c.get("userId"));
+    const todayCount = await countUserDeploymentsToday(c.get("db"), c.get("user").id);
     if (!isWithinLimit(planLimits.deploysPerDay, todayCount)) {
       return c.json({ error: "deploy limit exceeded", limit: planLimits.deploysPerDay }, 429);
     }
@@ -1157,7 +1156,7 @@ app.post("/:id/deploy", async (c) => {
           }
           await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
           emit({ event: "error", message: msg, step: currentStep });
-          if (c.env.EMAIL && user?.email) {
+          if (c.env.EMAIL && user.email) {
             const dashboardUrl = c.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
             c.executionCtx.waitUntil(
               sendDeployFailedEmail(c.env.EMAIL, user.email, project.slug, msg, dashboardUrl).catch(
@@ -1185,7 +1184,7 @@ app.post("/:id/deploy/preflight", async (c) => {
     return c.json({ error: "project not found" }, 404);
   }
 
-  if (project.user_id !== c.get("userId")) {
+  if (project.user_id !== c.get("user").id) {
     return c.json({ error: "forbidden" }, 403);
   }
 

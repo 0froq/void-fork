@@ -28,7 +28,7 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "project not found" }, 404);
     }
 
-    if (project.user_id !== c.get("userId")) {
+    if (project.user_id !== c.get("user").id) {
       return c.json({ error: "forbidden" }, 403);
     }
 
@@ -75,7 +75,7 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "project not found" }, 404);
     }
 
-    if (project.user_id !== c.get("userId")) {
+    if (project.user_id !== c.get("user").id) {
       return c.json({ error: "forbidden" }, 403);
     }
 
@@ -93,7 +93,7 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "project not found" }, 404);
     }
 
-    if (project.user_id !== c.get("userId")) {
+    if (project.user_id !== c.get("user").id) {
       return c.json({ error: "forbidden" }, 403);
     }
 
@@ -138,7 +138,7 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "project not found" }, 404);
     }
 
-    if (project.user_id !== c.get("userId")) {
+    if (project.user_id !== c.get("user").id) {
       return c.json({ error: "forbidden" }, 403);
     }
 

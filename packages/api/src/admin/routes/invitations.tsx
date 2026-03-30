@@ -35,7 +35,7 @@ app.get("/", async (c) => {
       invitations={rows}
       page={page}
       totalPages={totalPages}
-      username={c.get("userLogin")}
+      username={c.get("user").login}
     />,
   );
 });
@@ -68,8 +68,8 @@ app.post("/send", async (c) => {
     return c.html("<h1>This email is already on the signup allowlist</h1>", 400);
   }
 
-  const userId = c.get("userId");
-  const login = c.get("userLogin");
+  const userId = c.get("user").id;
+  const login = c.get("user").login;
 
   await createInvitation(db, email, userId);
 
@@ -121,7 +121,7 @@ app.post("/revoke", async (c) => {
     await putAllowlist(c.env.ROUTING, filtered);
   }
 
-  await revokeInvitation(db, id, c.get("userId"));
+  await revokeInvitation(db, id, c.get("user").id);
 
   return c.redirect("/admin/invitations");
 });

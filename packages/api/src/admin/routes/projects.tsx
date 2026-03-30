@@ -31,7 +31,7 @@ app.get("/", async (c) => {
         projects={projects}
         search={search}
         siteDomain={siteDomain}
-        username={c.get("userLogin")}
+        username={c.get("user").login}
       />,
     );
   }
@@ -48,7 +48,7 @@ app.get("/", async (c) => {
       page={page}
       totalPages={totalPages}
       siteDomain={siteDomain}
-      username={c.get("userLogin")}
+      username={c.get("user").login}
     />,
   );
 });
@@ -72,7 +72,7 @@ app.get("/:id", async (c) => {
   const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
 
   return c.html(
-    <Layout title={project.slug} username={c.get("userLogin")}>
+    <Layout title={project.slug} username={c.get("user").login}>
       <h1>{project.slug}</h1>
 
       <table>

@@ -10,7 +10,6 @@ import {
   getDomainsByProjectId,
   getDomainsByProjectIds,
   getDeployment,
-  getUser,
   setActiveDeployment,
 } from "../db";
 import { queryD1 } from "../migrations/remote-runner";
@@ -23,7 +22,7 @@ const app = new Hono<ApiEnv>()
 
   // List all projects for the current user
   .get("/", async (c) => {
-    const userId = c.get("userId");
+    const userId = c.get("user").id;
     const projects = await getProjectsByUserId(c.get("db"), userId);
 
     // Batch-fetch domains for all projects in a single query
@@ -56,8 +55,7 @@ const app = new Hono<ApiEnv>()
 
     // Short slugs (5 chars or fewer) are reserved for paid plans
     if (body.slug.length <= 5) {
-      const user = await getUser(c.get("db"), c.get("userId"));
-      if (!user || user.plan === "free") {
+      if (c.get("user").plan === "free") {
         return c.json({ error: "short slugs (5 characters or fewer) require a paid plan" }, 403);
       }
     }
@@ -68,7 +66,7 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "slug already taken" }, 409);
     }
 
-    const userId = c.get("userId");
+    const userId = c.get("user").id;
     try {
       const project = await createProject(c.get("db"), userId, body.slug);
       return c.json(project, 201);
@@ -90,7 +88,7 @@ const app = new Hono<ApiEnv>()
     if (!project) {
       return c.json({ error: "project not found" }, 404);
     }
-    if (project.user_id !== c.get("userId")) {
+    if (project.user_id !== c.get("user").id) {
       return c.json({ error: "forbidden" }, 403);
     }
     return c.json(project);
@@ -103,7 +101,7 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "project not found" }, 404);
     }
 
-    if (project.user_id !== c.get("userId")) {
+    if (project.user_id !== c.get("user").id) {
       return c.json({ error: "forbidden" }, 403);
     }
 
@@ -121,7 +119,7 @@ const app = new Hono<ApiEnv>()
     if (!project) {
       return c.json({ error: "project not found" }, 404);
     }
-    if (project.user_id !== c.get("userId")) {
+    if (project.user_id !== c.get("user").id) {
       return c.json({ error: "forbidden" }, 403);
     }
 
@@ -152,8 +150,7 @@ const app = new Hono<ApiEnv>()
 
     // Build routing JSON from target deployment's manifest
     const workerName = getProjectDeploymentWorkerName(project.slug, target.id);
-    const user = await getUser(c.get("db"), project.user_id);
-    const planLimits = getPlanLimits(user?.plan ?? "free");
+    const planLimits = getPlanLimits(c.get("user").plan);
     const manifest: DeployManifest | null = target.manifest ? JSON.parse(target.manifest) : null;
     const dispatchLimits =
       planLimits.cpuMsPerRequest > 0 || planLimits.subRequestsPerInvocation > 0
@@ -264,7 +261,7 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: "project not found" }, 404);
     }
 
-    if (project.user_id !== c.get("userId")) {
+    if (project.user_id !== c.get("user").id) {
       return c.json({ error: "forbidden" }, 403);
     }
 
@@ -295,7 +292,7 @@ const app = new Hono<ApiEnv>()
     if (!project) {
       return c.json({ error: "project not found" }, 404);
     }
-    if (project.user_id !== c.get("userId")) {
+    if (project.user_id !== c.get("user").id) {
       return c.json({ error: "forbidden" }, 403);
     }
     const resources = await getProjectResources(c.get("db"), project.id);
@@ -308,7 +305,7 @@ const app = new Hono<ApiEnv>()
     if (!project) {
       return c.json({ error: "project not found" }, 404);
     }
-    if (project.user_id !== c.get("userId")) {
+    if (project.user_id !== c.get("user").id) {
       return c.json({ error: "forbidden" }, 403);
     }
 
@@ -391,7 +388,7 @@ const app = new Hono<ApiEnv>()
   .post("/:id/database", async (c) => {
     const projectId = c.req.param("id");
     const project = await getProject(c.get("db"), projectId);
-    if (!project || project.user_id !== c.get("userId")) {
+    if (!project || project.user_id !== c.get("user").id) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -441,7 +438,7 @@ const app = new Hono<ApiEnv>()
   .put("/:id/database-url", async (c) => {
     const projectId = c.req.param("id");
     const project = await getProject(c.get("db"), projectId);
-    if (!project || project.user_id !== c.get("userId")) {
+    if (!project || project.user_id !== c.get("user").id) {
       return c.json({ error: "Not found" }, 404);
     }
 

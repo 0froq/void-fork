@@ -130,7 +130,7 @@ app.get("/", async (c) => {
     <PlatformPage
       workers={workers}
       env={env}
-      username={c.get("userLogin")}
+      username={c.get("user").login}
       tz={tz}
       entries={entries}
       page={page}
@@ -181,8 +181,8 @@ app.post("/rollback-all", async (c) => {
         script_name: t.scriptName,
         status: "pending",
         error_message: null,
-        admin_user_id: c.get("userId"),
-        admin_login: c.get("userLogin"),
+        admin_user_id: c.get("user").id,
+        admin_login: c.get("user").login,
       }),
     ),
   );
@@ -212,7 +212,7 @@ app.post("/rollback-all", async (c) => {
       events={finalEvents}
       batchId={batchId}
       env={env}
-      username={c.get("userLogin")}
+      username={c.get("user").login}
       tz={tz}
     />,
   );
@@ -234,7 +234,7 @@ app.get("/events/:batchId", async (c) => {
       events={events}
       batchId={batchId}
       env={env}
-      username={c.get("userLogin")}
+      username={c.get("user").login}
       tz={tz}
     />,
   );
@@ -262,7 +262,7 @@ app.get("/:name", async (c) => {
       versions={versions}
       deployment={deployment}
       error={error}
-      username={c.get("userLogin")}
+      username={c.get("user").login}
       tz={tz}
     />,
   );
@@ -304,8 +304,8 @@ app.post("/:name/rollback", async (c) => {
     script_name: scriptName,
     status,
     error_message: errorMessage,
-    admin_user_id: c.get("userId"),
-    admin_login: c.get("userLogin"),
+    admin_user_id: c.get("user").id,
+    admin_login: c.get("user").login,
   });
 
   if (status === "failed") {
@@ -320,7 +320,7 @@ app.post("/:name/rollback", async (c) => {
         versions={versions}
         deployment={deployment}
         error={`Rollback failed: ${errorMessage}`}
-        username={c.get("userLogin")}
+        username={c.get("user").login}
         tz={tz}
       />,
       500,
