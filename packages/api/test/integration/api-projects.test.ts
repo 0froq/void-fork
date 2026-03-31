@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
+import { eq } from "drizzle-orm";
 import app from "../../src/index";
+import { users } from "../../src/schema";
 import {
   setupEnv,
   teardownEnv,
@@ -36,6 +38,53 @@ describe("GET /projects", () => {
   it("returns 401 without auth", async () => {
     const res = await app.fetch(new Request("http://localhost/projects"), env);
     expect(res.status).toBe(401);
+  });
+
+  it("returns 401 when user has been deleted", async () => {
+    const user = await createTestUser(env.db);
+    await env.db.delete(users).where(eq(users.id, user.id));
+
+    const res = await app.fetch(
+      new Request("http://localhost/projects", {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "user not found" });
+  });
+
+  it("returns 403 when user is admin-suspended", async () => {
+    const user = await createTestUser(env.db);
+    await env.db
+      .update(users)
+      .set({ suspended_reason: "admin_suspended" })
+      .where(eq(users.id, user.id));
+
+    const res = await app.fetch(
+      new Request("http://localhost/projects", {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "account suspended" });
+  });
+
+  it("allows usage-suspended user to list projects", async () => {
+    const user = await createTestUser(env.db);
+    await env.db
+      .update(users)
+      .set({ suspended_reason: "requests_exceeded" })
+      .where(eq(users.id, user.id));
+
+    const res = await app.fetch(
+      new Request("http://localhost/projects", {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
   });
 
   it("returns empty array when no projects", async () => {
