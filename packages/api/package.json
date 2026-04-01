@@ -27,9 +27,11 @@
     "setup": "node scripts/setup-local.ts"
   },
   "dependencies": {
+    "blake3-jit": "^1.0.0",
     "cron-parser": "5.5.0",
     "drizzle-orm": "^0.45.1",
     "hono": "catalog:",
+    "mime": "^4.1.0",
     "pg": "8.20.0"
   },
   "devDependencies": {

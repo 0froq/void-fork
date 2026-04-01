@@ -1,3 +1,6 @@
+import { extname } from "node:path";
+import { hash as blake3hash } from "blake3-jit";
+import mime from "mime";
 import type { AssetConfig } from "./types";
 import { retryWithBackoff } from "./cf-api";
 
@@ -9,6 +12,9 @@ class AssetUploadError extends Error {
     super(message);
   }
 }
+
+/** Non-retriable error — the hash will never appear locally. */
+class AssetHashMissError extends Error {}
 
 interface AssetManifestEntry {
   hash: string;
@@ -158,9 +164,8 @@ export async function uploadAssetBuckets(
     let bucketGatewayErrors = 0;
     let lastErr: unknown;
 
-    // Base64 entries are computed once (on first slot acquisition) and reused
-    // for retries. Lazy init ensures encoding happens under the concurrency
-    // limit, not all-at-once when buckets are dispatched.
+    // Base64 entries are computed once (before entering retry loop) and reused.
+    // Built under the concurrency limit to avoid loading all buckets at once.
     let entries: { hash: string; base64: string; contentType: string }[] | null = null;
 
     while (true) {
@@ -174,10 +179,11 @@ export async function uploadAssetBuckets(
           for (const hash of bucket) {
             const entry = assetsByHash.get(hash);
             if (!entry) {
-              console.warn(
-                `[assets] bucket ${bucketIndex}: hash ${hash} not found in assetsByHash, skipping`,
+              throw new AssetHashMissError(
+                `[assets] bucket ${bucketIndex}: hash ${hash} requested by CF but not found in assetsByHash. ` +
+                  `This indicates a manifest/upload mismatch — the hash was declared in the manifest ` +
+                  `but the corresponding file was not included in the upload.`,
               );
-              continue;
             }
             const buffer = await entry.blob.arrayBuffer();
             built.push({
@@ -198,6 +204,7 @@ export async function uploadAssetBuckets(
         if (result) completionJwt = result;
         return;
       } catch (err) {
+        if (err instanceof AssetHashMissError) throw err; // non-retriable
         lastErr = err;
         if (attempts >= MAX_UPLOAD_RETRIES) break;
       } finally {
@@ -314,13 +321,22 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
+const textEncoder = new TextEncoder();
+
 /**
- * Compute a CF-compatible asset hash: SHA-256, truncated to first 32 hex chars.
+ * Compute a CF-compatible asset hash: BLAKE3 of base64(content) + extension,
+ * first 32 hex chars. Matches Wrangler's hashFile algorithm exactly.
+ * Must match the CLI's computeAssetHash algorithm exactly.
  */
-export async function computeAssetHash(content: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", content);
-  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-  return hex.slice(0, 32);
+export function computeAssetHash(content: ArrayBuffer, filePath: string): string {
+  const base64 = arrayBufferToBase64(content);
+  const ext = extname(filePath).substring(1);
+  const input = textEncoder.encode(base64 + ext);
+  const digest = blake3hash(input);
+  return [...digest]
+    .slice(0, 16)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 /**
@@ -338,7 +354,7 @@ export async function collectAssets(formData: FormData): Promise<{
       const path = "/" + key.slice("asset:".length);
       const blob = value as Blob;
       const buffer = await blob.arrayBuffer();
-      const hash = await computeAssetHash(buffer);
+      const hash = computeAssetHash(buffer, path);
       manifest[path] = { hash, size: buffer.byteLength };
       assetsByHash.set(hash, {
         blob,
@@ -350,38 +366,28 @@ export async function collectAssets(formData: FormData): Promise<{
   return { manifest, assetsByHash };
 }
 
-const MIME_TYPES: Record<string, string> = {
-  html: "text/html; charset=utf-8",
-  htm: "text/html; charset=utf-8",
-  css: "text/css; charset=utf-8",
-  js: "text/javascript; charset=utf-8",
-  mjs: "text/javascript; charset=utf-8",
-  json: "application/json; charset=utf-8",
-  xml: "application/xml; charset=utf-8",
-  svg: "image/svg+xml; charset=utf-8",
-  txt: "text/plain; charset=utf-8",
-  csv: "text/csv; charset=utf-8",
-  ico: "image/x-icon",
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  avif: "image/avif",
-  woff: "font/woff",
-  woff2: "font/woff2",
-  ttf: "font/ttf",
-  otf: "font/otf",
-  eot: "application/vnd.ms-fontobject",
-  pdf: "application/pdf",
-  wasm: "application/wasm",
-  webmanifest: "application/manifest+json; charset=utf-8",
-  map: "application/json; charset=utf-8",
-};
+/**
+ * Determine content type from file path using the `mime` package (same as Wrangler).
+ * Falls back to "application/null" for unknown extensions — a sentinel value that
+ * signals CF to omit the Content-Type header. Matches Wrangler's behavior at
+ * workers-sdk/packages/wrangler/src/assets.ts.
+ */
+/** MIME types that are text-based and should include charset=utf-8. */
+const CHARSET_TYPES = new Set([
+  "application/json",
+  "application/xml",
+  "application/manifest+json",
+  "image/svg+xml",
+]);
 
-function getContentType(path: string): string {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  return MIME_TYPES[ext] ?? "application/octet-stream";
+export function getContentType(path: string): string {
+  let contentType = mime.getType(path);
+  if (contentType && !contentType.includes("charset")) {
+    if (contentType.startsWith("text/") || CHARSET_TYPES.has(contentType)) {
+      contentType = `${contentType}; charset=utf-8`;
+    }
+  }
+  return contentType ?? "application/null";
 }
 
 /**

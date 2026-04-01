@@ -475,13 +475,14 @@ async function fetchStaticAsset(env: Env, hash: string, path: string): Promise<R
   if (isLarge) {
     const obj = await env.STATIC_ASSETS_R2.get(key);
     if (!obj) return null;
-    return new Response(obj.body, {
-      headers: {
-        "Content-Type": obj.httpMetadata?.contentType ?? getContentType(path),
-        ETag: obj.httpEtag,
-        ...(obj.size ? { "Content-Length": String(obj.size) } : {}),
-      },
-    });
+    const ct = obj.httpMetadata?.contentType ?? getContentType(path);
+    const headers: HeadersInit = {
+      ETag: obj.httpEtag,
+      ...(obj.size ? { "Content-Length": String(obj.size) } : {}),
+    };
+    // "application/null" is a sentinel meaning "no Content-Type header" (matches Wrangler)
+    if (ct && ct !== "application/null") (headers as Record<string, string>)["Content-Type"] = ct;
+    return new Response(obj.body, { headers });
   }
 
   const { value, metadata } = await env.STATIC_ASSETS.getWithMetadata<{ ct: string }>(key, {
@@ -490,12 +491,14 @@ async function fetchStaticAsset(env: Env, hash: string, path: string): Promise<R
   });
   if (!value) return null;
   const contentType = metadata?.ct ?? getContentType(path);
-  return new Response(value, {
-    headers: {
-      "Content-Type": contentType,
-      "Content-Length": String((value as ArrayBuffer).byteLength),
-    },
-  });
+  const headers: HeadersInit = {
+    "Content-Length": String((value as ArrayBuffer).byteLength),
+  };
+  // "application/null" is a sentinel meaning "no Content-Type header" (matches Wrangler)
+  if (contentType && contentType !== "application/null") {
+    (headers as Record<string, string>)["Content-Type"] = contentType;
+  }
+  return new Response(value, { headers });
 }
 
 /** Get a dispatch worker, applying custom limits if configured. */

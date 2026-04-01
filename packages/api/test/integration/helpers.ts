@@ -422,7 +422,20 @@ const defaultMocks: CfApiMocks = {
   deleteWorker: () => new Response("ok", { status: 200 }),
   queryD1: () => cfSuccess([{ results: [] }]),
   uploadWorker: () => new Response("ok", { status: 200 }),
-  assetUploadSession: () => cfSuccess({ jwt: "test-asset-jwt", buckets: [["hash1"]] }),
+  assetUploadSession: async (_url: string, init?: RequestInit) => {
+    // Extract real hashes from the manifest in the request body so the mock
+    // bucket matches what collectAssets actually computed (BLAKE3 hashes).
+    try {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      if (body?.manifest) {
+        const hashes = [...new Set(Object.values(body.manifest).map((e: any) => e.hash))];
+        return cfSuccess({ jwt: "test-asset-jwt", buckets: [hashes] });
+      }
+    } catch {
+      // fall through to default
+    }
+    return cfSuccess({ jwt: "test-asset-jwt", buckets: [["hash1"]] });
+  },
   assetUpload: () => cfSuccess({ jwt: "test-completion-jwt" }),
   listWorkerSecrets: () => cfSuccess([]),
   setWorkerSecret: () => cfSuccess({}),
