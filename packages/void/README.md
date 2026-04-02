@@ -14,30 +14,35 @@ Vite plugin and CLI for building and deploying apps on Void.
 
 ## Quick Start
 
-```bash
-npm install -D void
-npx void init
+Void is currently in private preview. To install it for the first time, keep importing `void` and `@void/*` in source code, but install the preview artifacts with npm aliases.
+
+1. Create a project `.npmrc` with the scope mapping:
+
+```ini
+@void-sdk:registry=https://npm.pkg.github.com
 ```
 
-## Private Beta Install
+2. Create a GitHub classic PAT with `read:packages`:
 
-For the GitHub Packages private beta, keep importing `void` and `@void/*` in source code, but install the beta artifacts with npm aliases:
+- Token creation: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic
+- Packages permissions: https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages
+
+3. Put the token in your user `~/.npmrc` instead of the project:
+
+```ini
+//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT
+```
+
+4. Install the preview packages using package aliases:
 
 ```bash
 npm install -D void@npm:@void-sdk/void
 npm install -D @void/react@npm:@void-sdk/react
 ```
 
-Project `.npmrc`:
-
-```ini
-@void-sdk:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT
-```
-
 Use the same alias pattern for the other adapters and `@void/md`.
 
-The full interactive `void init` flow can scaffold a starter, configure local project files, log you in, and link or create your Void project so the next step is just `npx void deploy`.
+Then run `npx void init`. The full interactive flow can scaffold a starter, configure local project files, log you in, and link or create your Void project so the next step is just `npx void deploy`.
 
 ```ts
 // vite.config.ts

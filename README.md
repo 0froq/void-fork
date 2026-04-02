@@ -16,34 +16,51 @@ export default defineConfig({
 
 ## Quickstart
 
-```sh
-npm install -D void
-npx void init
+Void is currently in private preview. To install it for the first time:
+
+1. Create a project `.npmrc` with the GitHub Packages registry mapping:
+
+```ini
+@void-sdk:registry=https://npm.pkg.github.com
 ```
 
-## Private Beta
+2. Create a GitHub classic PAT with `read:packages` so your machine can install private packages:
 
-For the GitHub Packages private beta, keep your code imports on `void` and `@void/*`, but install the beta packages with npm aliases:
+- Token creation: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic
+- Packages permissions: https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages
+
+3. Add the token to your user `~/.npmrc` so you do not commit credentials into the project:
+
+```ini
+//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT
+```
+
+4. Install the preview packages using package aliases:
 
 ```sh
 npm install -D void@npm:@void-sdk/void
 npm install -D @void/react@npm:@void-sdk/react
 ```
 
-Add this to your project `.npmrc`:
+For example, the resulting `package.json` entries look like this:
 
-```ini
-@void-sdk:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT
+```json
+{
+  "devDependencies": {
+    "@void/react": "npm:@void-sdk/react@VERSION",
+    "void": "npm:@void-sdk/void@VERSION"
+  }
+}
 ```
 
-Framework and support packages follow the same pattern, for example `@void/vue@npm:@void-sdk/vue`, `@void/svelte@npm:@void-sdk/svelte`, `@void/solid@npm:@void-sdk/solid`, and `@void/md@npm:@void-sdk/md`.
+Framework and support packages follow the same alias pattern: `@void/vue@npm:@void-sdk/vue`, `@void/svelte@npm:@void-sdk/svelte`, `@void/solid@npm:@void-sdk/solid`, and `@void/md@npm:@void-sdk/md`.
 
-This scaffolds a starter app with an interactive setup flow and can also log you in and link or create your deploy project. Then:
+Then run:
 
 ```sh
+npx void init
 npm run dev          # local dev with workerd runtime
-npx void deploy       # deploy to void.app
+npx void deploy      # deploy to void.app
 ```
 
 ## Features

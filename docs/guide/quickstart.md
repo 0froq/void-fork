@@ -6,51 +6,93 @@ outline: deep
 
 ## Start in an Empty Directory
 
-::: code-group
+Void is currently in private preview. Keep imports in your app on `void` and `@void/*`. In the preview, only the installed package identities change.
 
-```sh [npm]
-npm install -D void
-npx void init
+1. Add this project `.npmrc` file:
+
+```ini
+@void-sdk:registry=https://npm.pkg.github.com
 ```
 
-```sh [pnpm]
-pnpm add -D void
-pnpm void init
+2. Create a GitHub classic PAT with `read:packages`:
+
+- Create token: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic
+- Packages permissions: https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages
+
+3. Add the token to your user `~/.npmrc` so it stays out of source control:
+
+```ini
+//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT
 ```
 
-```sh [yarn]
-yarn add -D void
-yarn void init
-```
+4. Install Void from GitHub Packages using package aliases:
 
-```sh [bun]
-bun add -D void
-bunx void init
-```
-
-:::
-
-This scaffolds a Pages-mode starter with an interactive setup flow.
-
-:::info Private beta via GitHub Packages
-Keep imports in your app on `void` and `@void/*`. For the private beta, only the installed package identities change:
+`npm`
 
 ```sh
 npm install -D void@npm:@void-sdk/void
 npm install -D @void/react@npm:@void-sdk/react
 ```
 
-```ini
-@void-sdk:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT
+`pnpm`
+
+```sh
+pnpm add -D void@npm:@void-sdk/void
+pnpm add -D @void/react@npm:@void-sdk/react
+```
+
+`yarn`
+
+```sh
+yarn add -D void@npm:@void-sdk/void
+yarn add -D @void/react@npm:@void-sdk/react
+```
+
+`bun`
+
+```sh
+bun add -D void@npm:@void-sdk/void
+bun add -D @void/react@npm:@void-sdk/react
+```
+
+Your `package.json` will then contain aliases like:
+
+```json
+{
+  "devDependencies": {
+    "@void/react": "npm:@void-sdk/react@VERSION",
+    "void": "npm:@void-sdk/void@VERSION"
+  }
+}
 ```
 
 Use the same alias pattern for `@void/vue`, `@void/svelte`, `@void/solid`, and `@void/md` when needed.
-:::
 
 As part of `void init`, you'll choose a Pages framework (React, Vue, Svelte, or Solid) and a starter type. D1 is the default top option and scaffolds a DB-backed page loader, schema, migration, and API route. PostgreSQL scaffolds the same starter and writes `"database": "pg"` to `void.json`. Static Pages skips the database and server starter files so you can start with static content and add Void features later.
 
-At the end of the full interactive flow, `void init` can also handle Void project setup by logging you in and linking or creating your Void project. That means the default first-time path is just `void init`, then `void deploy`.
+After installation, run the setup flow:
+
+::: code-group
+
+```sh [npm]
+npx void init
+```
+
+```sh [pnpm]
+pnpm void init
+```
+
+```sh [yarn]
+yarn void init
+```
+
+```sh [bun]
+bunx void init
+```
+
+:::
+
+At the end of the full interactive flow, `void init` can also handle Void project setup by logging you in and linking or creating your Void project. That means the default first-time path is install packages, run `void init`, then `void deploy`.
 
 For the database-backed starters, D1 is the zero-config default for prototyping and read-heavy apps, while PostgreSQL is better when you already have Postgres infrastructure or need heavier writes and more complex queries.
 
@@ -83,22 +125,24 @@ Void as a platform supports Vite-based meta frameworks, but the Void SDK itself 
 
 ## Adding to an Existing Vite App
 
+Void is currently in private preview, so use the alias install shown above instead of the plain `void` package name.
+
 ::: code-group
 
 ```sh [npm]
-npm install -D void
+npm install -D void@npm:@void-sdk/void
 ```
 
 ```sh [pnpm]
-pnpm add -D void
+pnpm add -D void@npm:@void-sdk/void
 ```
 
 ```sh [yarn]
-yarn add -D void
+yarn add -D void@npm:@void-sdk/void
 ```
 
 ```sh [bun]
-bun add -D void
+bun add -D void@npm:@void-sdk/void
 ```
 
 :::
