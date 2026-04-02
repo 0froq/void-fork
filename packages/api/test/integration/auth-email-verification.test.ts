@@ -8,12 +8,14 @@ import {
   teardownEnv,
   clearTables,
   createTestUser,
+  createMockExecutionContext,
   seedOAuthNonce,
   JWT_SECRET,
   type TestEnv,
 } from "./helpers";
 
 let env: TestEnv;
+const executionCtx = createMockExecutionContext();
 
 beforeAll(async () => {
   env = await setupEnv();
@@ -25,6 +27,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await clearTables(env.db);
+  delete env.GITHUB_PREVIEW_REPO_PAT;
 });
 
 afterEach(() => {
@@ -45,6 +48,12 @@ function mockGitHubApi(ghUser: {
   email: string | null;
   emailVerified: boolean;
   publicEmail?: boolean;
+  previewRepo?: {
+    owner: string;
+    repo: string;
+    collaboratorStatus?: number;
+    pendingInvite?: boolean;
+  };
 }) {
   return vi.fn(async (input: string | URL | Request, _init?: RequestInit): Promise<Response> => {
     const url =
@@ -69,6 +78,25 @@ function mockGitHubApi(ghUser: {
         ]);
       }
       return Response.json([]);
+    }
+
+    if (ghUser.previewRepo) {
+      const repoBase = `https://api.github.com/repos/${ghUser.previewRepo.owner}/${ghUser.previewRepo.repo}`;
+      const collaboratorUrl = `${repoBase}/collaborators/${ghUser.login}`;
+
+      if (url === collaboratorUrl) {
+        if (_init?.method === "PUT") {
+          return new Response(null, { status: 201 });
+        }
+
+        return new Response(null, { status: ghUser.previewRepo.collaboratorStatus ?? 404 });
+      }
+
+      if (url === `${repoBase}/invitations`) {
+        return Response.json(
+          ghUser.previewRepo.pendingInvite ? [{ id: 1, invitee: { login: ghUser.login } }] : [],
+        );
+      }
     }
 
     throw new Error(`Unmocked fetch: ${url}`);
@@ -100,6 +128,7 @@ describe("email verification gating on account linking", () => {
         headers: { Cookie: "oauth_nonce=test-nonce" },
       }),
       env,
+      executionCtx,
     );
 
     expect(res.status).toBe(302);
@@ -137,6 +166,7 @@ describe("email verification gating on account linking", () => {
         headers: { Cookie: "oauth_nonce=test-nonce" },
       }),
       env,
+      executionCtx,
     );
 
     expect(res.status).toBe(302);
@@ -173,6 +203,7 @@ describe("email verification gating on account linking", () => {
         headers: { Cookie: "oauth_nonce=test-nonce" },
       }),
       env,
+      executionCtx,
     );
 
     expect(res.status).toBe(302);
@@ -183,5 +214,69 @@ describe("email verification gating on account linking", () => {
     const payload = await verifyJwt(token, JWT_SECRET);
     expect(payload).toBeDefined();
     expect(payload!.sub).toBe(existing.id);
+  });
+
+  it("invites the GitHub user to the preview repo when configured", async () => {
+    env.GITHUB_PREVIEW_REPO_PAT = "test-preview-pat";
+
+    const fetchMock = mockGitHubApi({
+      id: 55555,
+      login: "preview-gh-user",
+      email: "preview@example.com",
+      emailVerified: true,
+      previewRepo: { owner: "void-sdk", repo: "void" },
+    });
+
+    const state = await buildSignedState("github");
+    await seedOAuthNonce(env.db, "test-nonce");
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/auth/callback?code=test-code&state=${state}`, {
+        headers: { Cookie: "oauth_nonce=test-nonce" },
+      }),
+      env,
+      executionCtx,
+    );
+
+    expect(res.status).toBe(302);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/void-sdk/void/collaborators/preview-gh-user",
+      expect.objectContaining({ method: "PUT" }),
+    );
+  });
+
+  it("does not create a duplicate preview repo invitation when one is already pending", async () => {
+    env.GITHUB_PREVIEW_REPO_PAT = "test-preview-pat";
+
+    const fetchMock = mockGitHubApi({
+      id: 66666,
+      login: "pending-preview-gh-user",
+      email: "pending-preview@example.com",
+      emailVerified: true,
+      previewRepo: {
+        owner: "void-sdk",
+        repo: "void",
+        pendingInvite: true,
+      },
+    });
+
+    const state = await buildSignedState("github");
+    await seedOAuthNonce(env.db, "test-nonce");
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/auth/callback?code=test-code&state=${state}`, {
+        headers: { Cookie: "oauth_nonce=test-nonce" },
+      }),
+      env,
+      executionCtx,
+    );
+
+    expect(res.status).toBe(302);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://api.github.com/repos/void-sdk/void/collaborators/pending-preview-gh-user",
+      expect.objectContaining({ method: "PUT" }),
+    );
   });
 });

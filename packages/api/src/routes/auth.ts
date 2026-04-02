@@ -9,6 +9,7 @@ import {
 } from "../auth/google";
 import { signJwt } from "../auth/jwt";
 import { hmacSignState, hmacVerifyState } from "../auth/hmac";
+import { ensureGitHubPreviewRepoAccess, getGitHubPreviewRepoConfig } from "../auth/github-preview";
 import {
   getUserByOAuthAccount,
   getUserByEmail,
@@ -247,6 +248,17 @@ app.get("/callback", async (c) => {
           ),
         );
       }
+    }
+  }
+
+  if (resolvedProvider === "github") {
+    const previewRepo = getGitHubPreviewRepoConfig(c.env);
+    if (previewRepo) {
+      c.executionCtx.waitUntil(
+        ensureGitHubPreviewRepoAccess(previewRepo, login).catch((err) =>
+          console.error(`[github-preview] Failed to grant void-sdk/void access to ${login}:`, err),
+        ),
+      );
     }
   }
 

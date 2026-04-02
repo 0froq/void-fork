@@ -51,6 +51,7 @@ export type TestEnv = {
   PROJECT_SECRET_ACTIVE_KEY_VERSION: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
+  GITHUB_PREVIEW_REPO_PAT?: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   DEV_AUTH_BYPASS?: string;
@@ -59,6 +60,13 @@ export type TestEnv = {
   CRON_SCHEDULER: DurableObjectNamespace;
   ERROR_ALERT_MONITOR: DurableObjectNamespace;
 };
+
+export function createMockExecutionContext(): ExecutionContext {
+  return {
+    waitUntil: () => {},
+    passThroughOnException: () => {},
+  } as unknown as ExecutionContext;
+}
 
 function createMockDoNamespace(): DurableObjectNamespace {
   return {

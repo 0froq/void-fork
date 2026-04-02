@@ -97,7 +97,8 @@ drizzle/
 3. looks up an existing OAuth account
 4. if needed, links the provider to an existing user with the same email
 5. otherwise creates a new user
-6. signs a JWT and redirects back with `?token=...`
+6. for GitHub logins, optionally grants preview access to a configured GitHub repository
+7. signs a JWT and redirects back with `?token=...`
 
 The CLI entrypoint is `void auth login`, not `void login`.
 
@@ -186,8 +187,11 @@ Optional vars:
 
 - `AUTH_REDIRECT_URI`
 - `DASHBOARD_URL`
+- `GITHUB_PREVIEW_REPO_PAT`
 - `VOID_PROXY_SERVICE`
 - `SITE_DOMAIN`
+
+Set `GITHUB_PREVIEW_REPO_PAT` to automatically invite GitHub-authenticated users to `void-sdk/void` with read-only access. The PAT should be a fine-grained token with `Administration` repository permission `write` for that repository.
 
 ## Tests
 
