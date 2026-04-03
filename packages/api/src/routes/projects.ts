@@ -339,7 +339,7 @@ const app = new Hono<ApiEnv>()
       FROM ${dataset}
       WHERE index1 = '${workerName}'
         AND timestamp >= toDateTime('${sinceStr}')${deployFilter}
-      ORDER BY double1 ASC
+      ORDER BY timestamp DESC
       LIMIT ${limit}
     `;
 
@@ -356,7 +356,11 @@ const app = new Hono<ApiEnv>()
     );
 
     if (!response.ok) {
-      return c.json({ error: "log query failed" }, 502);
+      const detail = await response.text();
+      console.error(
+        `[logs] query failed for project ${project.id} (${response.status}): ${detail.slice(0, 500)}`,
+      );
+      return c.json({ error: "log query failed", status: response.status, detail }, 502);
     }
 
     const result = (await response.json()) as {
@@ -371,7 +375,9 @@ const app = new Hono<ApiEnv>()
       }[];
     };
 
-    const data = (result.data ?? []).map((row) => ({
+    // Query newest-first to match the working admin path, then return entries
+    // in chronological order for CLI readability.
+    const data = [...(result.data ?? [])].reverse().map((row) => ({
       timestamp: row.ts,
       outcome: row.outcome,
       logs: tryParse(row.logData),

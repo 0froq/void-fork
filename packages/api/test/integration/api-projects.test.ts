@@ -663,6 +663,7 @@ describe("GET /projects/:id/logs", () => {
       analyticsQuery: (_url, init) => {
         const body = typeof init?.body === "string" ? init.body : "";
         expect(body).toContain("user-my-app");
+        expect(body).toContain("ORDER BY timestamp DESC");
         return Response.json(mockData);
       },
     });
@@ -681,6 +682,30 @@ describe("GET /projects/:id/logs", () => {
       url: "https://my-app.void.app/api/test",
       method: "GET",
       status: "200",
+    });
+  });
+
+  it("returns analytics error details when the log query fails", async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, "broken-logs");
+
+    mockCfApi({
+      analyticsQuery: () => new Response("SQL compilation failed", { status: 400 }),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/logs`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(502);
+    const json = (await res.json()) as { error: string; status: number; detail: string };
+    expect(json).toMatchObject({
+      error: "log query failed",
+      status: 400,
+      detail: "SQL compilation failed",
     });
   });
 
