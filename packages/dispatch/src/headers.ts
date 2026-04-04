@@ -3,6 +3,19 @@ export interface HeaderRule {
   headers: [string, string][];
 }
 
+/**
+ * Headers that user header rules are not allowed to set.
+ * Only set-cookie is blocked because on the shared *.void.app domain
+ * (not on the PSL), a cookie with Domain=.void.app is readable by all
+ * tenants. HSTS and other per-domain headers are safe — they don't
+ * cross subdomain boundaries.
+ *
+ * TODO: Once void.app is registered on the Public Suffix List, this
+ * denylist can be removed entirely — browsers will reject cross-subdomain
+ * cookies automatically. Until then, this is the primary defense.
+ */
+const BLOCKED_HEADERS = new Set(["set-cookie"]);
+
 const MAX_CACHE = 256;
 const regexCache = new Map<string, RegExp>();
 
@@ -51,6 +64,9 @@ export function applyHeaderRules(
   // Clone response to modify headers
   const newResponse = new Response(response.body, response);
   for (const [name, value] of matched) {
+    if (BLOCKED_HEADERS.has(name.toLowerCase())) {
+      continue;
+    }
     newResponse.headers.set(name, value);
   }
 

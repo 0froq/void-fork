@@ -72,6 +72,11 @@ export default {
     const startTime = Date.now();
     const url = new URL(request.url);
 
+    // Block internal framework routes from external HTTP access
+    if (url.pathname.startsWith("/__")) {
+      return new Response("Not Found", { status: 404 });
+    }
+
     // Health check short-circuit — bypass KV lookup entirely
     if (url.pathname === "/health" && request.headers.get("X-Health-Check") === "void-admin") {
       return Response.json({ ok: true });
@@ -158,7 +163,7 @@ export default {
           const assetManifest: Record<string, string> = manifestRaw ? JSON.parse(manifestRaw) : {};
           const hash = assetManifest[pathname];
           const response = hash
-            ? ((await fetchStaticAsset(env, hash, pathname)) ??
+            ? ((await fetchStaticAsset(env, hash, pathname, routing.projectId)) ??
               new Response("Not Found", { status: 404 }))
             : new Response("Not Found", { status: 404 });
           if (response.ok) {
@@ -253,6 +258,7 @@ export default {
             headers.set("Cache-Control", `public, s-maxage=${ttl}, max-age=0, must-revalidate`);
             headers.set("x-isr-cache", "MISS");
             headers.delete("x-void-page-data");
+            headers.delete("set-cookie");
             const response = new Response(workerResponse.body, {
               status: workerResponse.status,
               headers,
@@ -309,7 +315,12 @@ export default {
         );
       }
 
-      const assetResponse = await fetchStaticAsset(env, resolved.hash, resolved.path);
+      const assetResponse = await fetchStaticAsset(
+        env,
+        resolved.hash,
+        resolved.path,
+        routing.projectId,
+      );
       if (!assetResponse) {
         return meter(new Response("Asset not found", { status: 404 }));
       }
@@ -365,8 +376,16 @@ export default {
       }
 
       // Write ISR cache on miss — skip pages protocol responses (JSON, not HTML)
-      if (routing.revalidate && !request.headers.has("X-VoidPages")) {
-        const isrTtl = resolvePathTtl(routing.revalidate, pathname);
+      // Guard: only cache GET requests without credentials, and respect worker x-revalidate
+      if (
+        routing.revalidate &&
+        !request.headers.has("X-VoidPages") &&
+        request.method === "GET" &&
+        !shouldBypassIsr(request)
+      ) {
+        const configTtl = resolvePathTtl(routing.revalidate, pathname);
+        // Config TTL is the gatekeeper — worker x-revalidate can reduce but not enable ISR
+        const isrTtl = configTtl > 0 ? resolveRevalidateTtl(response, configTtl) : 0;
         if (isrTtl > 0 && response.ok && requestType === "ssr") {
           ctx.waitUntil(writeIsrCache(env, routing.projectId, pathname, response, isrTtl));
           const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname);
@@ -465,15 +484,27 @@ export default {
 
 /**
  * Fetch a static asset from KV (small files) or R2 (large files, prefixed with `!`).
+ * Tries the project-scoped key first (`assets/{projectId}/{hash}`), then falls back
+ * to the legacy shared key (`assets/{hash}`) for backward compatibility with
+ * deployments created before asset key scoping was introduced.
  * Returns null if the asset is not found.
  */
-async function fetchStaticAsset(env: Env, hash: string, path: string): Promise<Response | null> {
+async function fetchStaticAsset(
+  env: Env,
+  hash: string,
+  path: string,
+  projectId?: string,
+): Promise<Response | null> {
   const isLarge = hash.startsWith("!");
   const cleanHash = isLarge ? hash.slice(1) : hash;
-  const key = `assets/${cleanHash}`;
+  const scopedKey = projectId ? `assets/${projectId}/${cleanHash}` : null;
+  const legacyKey = `assets/${cleanHash}`;
 
   if (isLarge) {
-    const obj = await env.STATIC_ASSETS_R2.get(key);
+    // Try scoped key first, then legacy
+    const obj = scopedKey
+      ? ((await env.STATIC_ASSETS_R2.get(scopedKey)) ?? (await env.STATIC_ASSETS_R2.get(legacyKey)))
+      : await env.STATIC_ASSETS_R2.get(legacyKey);
     if (!obj) return null;
     const ct = obj.httpMetadata?.contentType ?? getContentType(path);
     const headers: HeadersInit = {
@@ -485,7 +516,25 @@ async function fetchStaticAsset(env: Env, hash: string, path: string): Promise<R
     return new Response(obj.body, { headers });
   }
 
-  const { value, metadata } = await env.STATIC_ASSETS.getWithMetadata<{ ct: string }>(key, {
+  // Try scoped key first, then legacy
+  if (scopedKey) {
+    const scoped = await env.STATIC_ASSETS.getWithMetadata<{ ct: string }>(scopedKey, {
+      type: "arrayBuffer",
+      cacheTtl: 86400,
+    });
+    if (scoped.value) {
+      const contentType = scoped.metadata?.ct ?? getContentType(path);
+      const headers: HeadersInit = {
+        "Content-Length": String((scoped.value as ArrayBuffer).byteLength),
+      };
+      if (contentType && contentType !== "application/null") {
+        (headers as Record<string, string>)["Content-Type"] = contentType;
+      }
+      return new Response(scoped.value, { headers });
+    }
+  }
+
+  const { value, metadata } = await env.STATIC_ASSETS.getWithMetadata<{ ct: string }>(legacyKey, {
     type: "arrayBuffer",
     cacheTtl: 86400,
   });

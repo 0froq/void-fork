@@ -116,4 +116,62 @@ describe("applyHeaderRules", () => {
     expect(result.status).toBe(201);
     expect(await result.text()).toBe("hello");
   });
+
+  it("blocks Set-Cookie header", () => {
+    const rules: HeaderRule[] = [{ pattern: "/*", headers: [["Set-Cookie", "session=abc123"]] }];
+    const result = applyHeaderRules(new Response("body"), "/index.html", rules);
+    expect(result.headers.get("Set-Cookie")).toBeNull();
+  });
+
+  it("blocks set-cookie header (lowercase)", () => {
+    const rules: HeaderRule[] = [{ pattern: "/*", headers: [["set-cookie", "session=abc123"]] }];
+    const result = applyHeaderRules(new Response("body"), "/index.html", rules);
+    expect(result.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("allows Strict-Transport-Security header (per-domain, safe)", () => {
+    const rules: HeaderRule[] = [
+      { pattern: "/*", headers: [["Strict-Transport-Security", "max-age=31536000"]] },
+    ];
+    const result = applyHeaderRules(new Response("body"), "/index.html", rules);
+    expect(result.headers.get("Strict-Transport-Security")).toBe("max-age=31536000");
+  });
+
+  it("allows normal headers like X-Custom-Header", () => {
+    const rules: HeaderRule[] = [{ pattern: "/*", headers: [["X-Custom-Header", "hello"]] }];
+    const result = applyHeaderRules(new Response("body"), "/index.html", rules);
+    expect(result.headers.get("X-Custom-Header")).toBe("hello");
+  });
+
+  it("allows Cache-Control and Content-Type headers", () => {
+    const rules: HeaderRule[] = [
+      {
+        pattern: "/*",
+        headers: [
+          ["Cache-Control", "public, max-age=3600"],
+          ["Content-Type", "text/plain"],
+        ],
+      },
+    ];
+    const result = applyHeaderRules(new Response("body"), "/index.html", rules);
+    expect(result.headers.get("Cache-Control")).toBe("public, max-age=3600");
+    expect(result.headers.get("Content-Type")).toBe("text/plain");
+  });
+
+  it("blocks only blocked headers while allowing others in same rule", () => {
+    const rules: HeaderRule[] = [
+      {
+        pattern: "/*",
+        headers: [
+          ["X-Frame-Options", "DENY"],
+          ["Set-Cookie", "evil=true"],
+          ["Cache-Control", "no-cache"],
+        ],
+      },
+    ];
+    const result = applyHeaderRules(new Response("body"), "/index.html", rules);
+    expect(result.headers.get("X-Frame-Options")).toBe("DENY");
+    expect(result.headers.get("Set-Cookie")).toBeNull();
+    expect(result.headers.get("Cache-Control")).toBe("no-cache");
+  });
 });

@@ -18,6 +18,43 @@ import { getPlanLimits } from "../tiers";
 import type { DeployManifest } from "../types";
 import { getProjectDeploymentWorkerName, getProjectQueueName } from "../naming";
 
+export const RESERVED_SLUGS = new Set([
+  "admin",
+  "api",
+  "app",
+  "assets",
+  "auth",
+  "billing",
+  "blog",
+  "cdn",
+  "cname",
+  "dash",
+  "dashboard",
+  "docs",
+  "ftp",
+  "gateway",
+  "help",
+  "imap",
+  "login",
+  "mail",
+  "ns1",
+  "ns2",
+  "ns3",
+  "ns4",
+  "oauth",
+  "pop",
+  "proxy",
+  "register",
+  "signup",
+  "smtp",
+  "sso",
+  "staging",
+  "static",
+  "status",
+  "support",
+  "www",
+]);
+
 const app = new Hono<ApiEnv>()
 
   // List all projects for the current user
@@ -51,6 +88,10 @@ const app = new Hono<ApiEnv>()
     // Validate slug format: lowercase alphanumeric + dashes, no leading/trailing dashes
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(body.slug)) {
       return c.json({ error: "slug must be lowercase alphanumeric with dashes" }, 400);
+    }
+
+    if (RESERVED_SLUGS.has(body.slug)) {
+      return c.json({ error: "this name is reserved" }, 400);
     }
 
     // Short slugs (5 chars or fewer) are reserved for paid plans

@@ -241,7 +241,7 @@ export function extractPageDataFromHtml(html: string): string | null {
 /**
  * Extract response headers as a plain object, skipping ISR-managed headers.
  */
-const SKIP_HEADERS = new Set(["cache-control", "x-isr-cache", "x-void-page-data"]);
+const SKIP_HEADERS = new Set(["cache-control", "x-isr-cache", "x-void-page-data", "set-cookie"]);
 
 export function serializeHeaders(response: Response): Record<string, string> {
   const result: Record<string, string> = {};

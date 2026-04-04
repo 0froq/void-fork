@@ -269,6 +269,20 @@ describe("serializeHeaders", () => {
     expect(result["x-isr-cache"]).toBeUndefined();
     expect(result["content-type"]).toBe("text/html");
   });
+
+  it("strips set-cookie to prevent cross-user session replay", () => {
+    const response = new Response("ok", {
+      headers: {
+        "content-type": "text/html",
+        "set-cookie": "session=abc123; Path=/; HttpOnly",
+        "x-custom": "keep",
+      },
+    });
+    const result = serializeHeaders(response);
+    expect(result["set-cookie"]).toBeUndefined();
+    expect(result["content-type"]).toBe("text/html");
+    expect(result["x-custom"]).toBe("keep");
+  });
 });
 
 describe("page data extraction", () => {

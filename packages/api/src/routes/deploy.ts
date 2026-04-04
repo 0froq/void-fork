@@ -207,6 +207,11 @@ app.post("/:id/deploy", async (c) => {
     return c.json({ error: "forbidden" }, 403);
   }
 
+  // Block deploys for suspended users
+  if (c.get("user").suspended_reason) {
+    return c.json({ error: "account suspended: " + c.get("user").suspended_reason }, 403);
+  }
+
   // Run independent pre-checks in parallel
   const [activeDeploy, currentLiveDeployment] = await Promise.all([
     getActiveDeployment(c.get("db"), projectId),
@@ -399,6 +404,7 @@ app.post("/:id/deploy", async (c) => {
             c.env.STATIC_ASSETS,
             c.env.STATIC_ASSETS_R2,
             assetsByHash,
+            projectId,
           );
           emit({ event: "asset_upload_done" });
 
@@ -540,6 +546,7 @@ app.post("/:id/deploy", async (c) => {
                     c.env.STATIC_ASSETS_R2,
                     evictedHashes,
                     retainedHashes,
+                    projectId,
                   );
                 }
                 // Delete serving manifest from ROUTING KV
@@ -1325,7 +1332,7 @@ function matchPattern(pattern: string, pathname: string): boolean {
  */
 function serializePrerenderHeaders(response: Response): Record<string, string> {
   const result: Record<string, string> = {};
-  const skip = new Set(["cache-control", "x-isr-cache"]);
+  const skip = new Set(["cache-control", "x-isr-cache", "x-void-page-data", "set-cookie"]);
 
   response.headers.forEach((value, key) => {
     if (!skip.has(key.toLowerCase())) {

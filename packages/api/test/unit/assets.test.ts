@@ -80,7 +80,7 @@ describe("uploadStaticAssets", () => {
       ["largehash0000000000000000000000", { blob: largeContent, contentType: "video/mp4" }],
     ]);
 
-    const largeHashes = await uploadStaticAssets(kv, r2, assetsByHash);
+    const largeHashes = await uploadStaticAssets(kv, r2, assetsByHash, "proj_test");
 
     expect(kv.put).toHaveBeenCalledTimes(1); // small asset
     expect(r2.put).toHaveBeenCalledTimes(1); // large asset
@@ -91,14 +91,14 @@ describe("uploadStaticAssets", () => {
   it("overwrites assets that already exist in KV (idempotent puts)", async () => {
     const kv = createMockKV();
     const r2 = createMockR2();
-    kv.store.set("assets/existinghash000000000000000000", new ArrayBuffer(1));
+    kv.store.set("assets/proj_test/existinghash000000000000000000", new ArrayBuffer(1));
 
     const assetsByHash = new Map([
       ["existinghash000000000000000000", { blob: new Blob(["exists"]), contentType: "text/html" }],
       ["newhash00000000000000000000000", { blob: new Blob(["new"]), contentType: "text/css" }],
     ]);
 
-    await uploadStaticAssets(kv, r2, assetsByHash);
+    await uploadStaticAssets(kv, r2, assetsByHash, "proj_test");
 
     expect(kv.put).toHaveBeenCalledTimes(2); // both assets, no existence check
   });
@@ -106,7 +106,10 @@ describe("uploadStaticAssets", () => {
   it("overwrites assets that already exist in R2 (idempotent puts)", async () => {
     const kv = createMockKV();
     const r2 = createMockR2();
-    r2.store.set("assets/existinglarge00000000000000000", new ArrayBuffer(KV_THRESHOLD + 1));
+    r2.store.set(
+      "assets/proj_test/existinglarge00000000000000000",
+      new ArrayBuffer(KV_THRESHOLD + 1),
+    );
 
     const assetsByHash = new Map([
       [
@@ -118,10 +121,50 @@ describe("uploadStaticAssets", () => {
       ],
     ]);
 
-    const largeHashes = await uploadStaticAssets(kv, r2, assetsByHash);
+    const largeHashes = await uploadStaticAssets(kv, r2, assetsByHash, "proj_test");
 
     expect(r2.put).toHaveBeenCalledTimes(1); // idempotent put, no existence check
     expect(largeHashes.has("existinglarge00000000000000000")).toBe(true);
+  });
+
+  it("scopes asset keys by project ID", async () => {
+    const kv = createMockKV();
+    const r2 = createMockR2();
+
+    const assetsByHash = new Map([
+      ["deadbeef12345678", { blob: new Blob(["test"]), contentType: "text/plain" }],
+    ]);
+
+    await uploadStaticAssets(kv, r2, assetsByHash, "proj_abc123");
+
+    expect(kv.put).toHaveBeenCalledWith(
+      "assets/proj_abc123/deadbeef12345678",
+      expect.any(ArrayBuffer),
+      expect.anything(),
+    );
+  });
+
+  it("different projects get different keys for same hash", async () => {
+    const kv = createMockKV();
+    const r2 = createMockR2();
+
+    const assetsByHash = new Map([
+      ["deadbeef12345678", { blob: new Blob(["test"]), contentType: "text/plain" }],
+    ]);
+
+    await uploadStaticAssets(kv, r2, assetsByHash, "proj_aaa");
+    await uploadStaticAssets(kv, r2, assetsByHash, "proj_bbb");
+
+    expect(kv.put).toHaveBeenCalledWith(
+      "assets/proj_aaa/deadbeef12345678",
+      expect.any(ArrayBuffer),
+      expect.anything(),
+    );
+    expect(kv.put).toHaveBeenCalledWith(
+      "assets/proj_bbb/deadbeef12345678",
+      expect.any(ArrayBuffer),
+      expect.anything(),
+    );
   });
 });
 
@@ -129,43 +172,62 @@ describe("deleteUnreferencedAssets", () => {
   it("deletes only hashes not referenced by retained deployments", async () => {
     const kv = createMockKV();
     const r2 = createMockR2();
-    kv.store.set("assets/hash_a", new ArrayBuffer(0));
-    kv.store.set("assets/hash_b", new ArrayBuffer(0));
-    r2.store.set("assets/hash_c", new ArrayBuffer(0));
+    kv.store.set("assets/proj_test/hash_a", new ArrayBuffer(0));
+    kv.store.set("assets/proj_test/hash_b", new ArrayBuffer(0));
+    r2.store.set("assets/proj_test/hash_c", new ArrayBuffer(0));
 
     const evictedHashes = ["hash_a", "hash_b", "hash_c"];
     const retainedHashes = new Set(["hash_b"]);
 
-    await deleteUnreferencedAssets(kv, r2, evictedHashes, retainedHashes);
+    await deleteUnreferencedAssets(kv, r2, evictedHashes, retainedHashes, "proj_test");
 
-    expect(kv.store.has("assets/hash_a")).toBe(false);
-    expect(kv.store.has("assets/hash_b")).toBe(true);
-    expect(r2.store.has("assets/hash_c")).toBe(false);
+    expect(kv.store.has("assets/proj_test/hash_a")).toBe(false);
+    expect(kv.store.has("assets/proj_test/hash_b")).toBe(true);
+    expect(r2.store.has("assets/proj_test/hash_c")).toBe(false);
   });
 
   it("does nothing when all evicted hashes are retained", async () => {
     const kv = createMockKV();
     const r2 = createMockR2();
-    kv.store.set("assets/hash_a", new ArrayBuffer(0));
+    kv.store.set("assets/proj_test/hash_a", new ArrayBuffer(0));
 
     const evictedHashes = ["hash_a"];
     const retainedHashes = new Set(["hash_a"]);
 
-    await deleteUnreferencedAssets(kv, r2, evictedHashes, retainedHashes);
+    await deleteUnreferencedAssets(kv, r2, evictedHashes, retainedHashes, "proj_test");
 
     expect(kv.delete).not.toHaveBeenCalled();
     expect(r2.delete).not.toHaveBeenCalled();
-    expect(kv.store.has("assets/hash_a")).toBe(true);
+    expect(kv.store.has("assets/proj_test/hash_a")).toBe(true);
   });
 
   it("does nothing when evictedHashes is empty", async () => {
     const kv = createMockKV();
     const r2 = createMockR2();
 
-    await deleteUnreferencedAssets(kv, r2, [], new Set());
+    await deleteUnreferencedAssets(kv, r2, [], new Set(), "proj_test");
 
     expect(kv.delete).not.toHaveBeenCalled();
     expect(r2.delete).not.toHaveBeenCalled();
+  });
+
+  it("only deletes project-scoped keys, not legacy shared keys", async () => {
+    const kv = createMockKV();
+    const r2 = createMockR2();
+    // Legacy key exists for the same hash
+    kv.store.set("assets/hash_a", new ArrayBuffer(0));
+    // Scoped key also exists
+    kv.store.set("assets/proj_test/hash_a", new ArrayBuffer(0));
+
+    const evictedHashes = ["hash_a"];
+    const retainedHashes = new Set<string>();
+
+    await deleteUnreferencedAssets(kv, r2, evictedHashes, retainedHashes, "proj_test");
+
+    // Scoped key deleted
+    expect(kv.store.has("assets/proj_test/hash_a")).toBe(false);
+    // Legacy key untouched
+    expect(kv.store.has("assets/hash_a")).toBe(true);
   });
 });
 

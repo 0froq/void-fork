@@ -191,6 +191,16 @@ export class UsageCounter extends DurableObject<ApiEnv["Bindings"]> {
     state.plan = body.plan;
     state.billingPeriodStart = body.billingPeriodStart;
 
+    // Re-suspend any newly added project slugs if user is currently suspended
+    if (state.requestsSuspended) {
+      await this.suspendProjects(state.projectSlugs, REASON_REQUESTS_EXCEEDED);
+    }
+    if (state.aiSuspended) {
+      for (const projectId of Object.keys(state.projectSlugs)) {
+        await this.env.ROUTING.put(`ai-block:${projectId}`, "1");
+      }
+    }
+
     await this.saveState(state);
     return Response.json({ ok: true });
   }

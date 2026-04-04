@@ -415,12 +415,13 @@ export async function uploadStaticAssets(
   kv: KVNamespace,
   r2: R2Bucket,
   assetsByHash: Map<string, AssetEntry>,
+  projectId: string,
 ): Promise<Set<string>> {
   const largeHashes = new Set<string>();
   const tasks: Promise<void>[] = [];
 
   for (const [hash, entry] of assetsByHash) {
-    const key = `assets/${hash}`;
+    const key = `assets/${projectId}/${hash}`;
     const task = entry.blob.arrayBuffer().then(async (buffer) => {
       if (buffer.byteLength >= KV_THRESHOLD) {
         await r2.put(key, buffer, {
@@ -450,17 +451,18 @@ export async function deleteUnreferencedAssets(
   r2: R2Bucket,
   evictedHashes: string[],
   retainedHashes: Set<string>,
+  projectId: string,
 ): Promise<void> {
   const toDelete = evictedHashes.filter((h) => !retainedHashes.has(h));
   if (toDelete.length === 0) return;
 
   for (const hash of toDelete) {
-    await kv.delete(`assets/${hash}`);
+    await kv.delete(`assets/${projectId}/${hash}`);
   }
 
   // R2 supports batch delete up to 1000 keys at a time
   for (let i = 0; i < toDelete.length; i += 1000) {
-    const batch = toDelete.slice(i, i + 1000).map((h) => `assets/${h}`);
+    const batch = toDelete.slice(i, i + 1000).map((h) => `assets/${projectId}/${h}`);
     await r2.delete(batch);
   }
 }
