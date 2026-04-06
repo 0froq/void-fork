@@ -133,7 +133,13 @@ async function scheduled(
 
   let offset = 0;
   while (true) {
-    const batch = await getUsersWithProjectsBatch(db, BATCH_SIZE, offset);
+    let batch;
+    try {
+      batch = await getUsersWithProjectsBatch(db, BATCH_SIZE, offset);
+    } catch (err) {
+      console.error("[scheduled] failed to fetch user batch at offset", offset, err);
+      break;
+    }
     if (batch.length === 0) break;
 
     await Promise.allSettled(
