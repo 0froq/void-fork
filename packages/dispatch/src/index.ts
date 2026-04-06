@@ -353,7 +353,14 @@ export default {
     // Dispatch to user worker — CF handles static assets transparently
     const worker = getWorker(env, routing);
     try {
-      const response = await worker.fetch(request);
+      let dispatchReq = request;
+      if (request.bodyUsed) {
+        const headers = new Headers(request.headers);
+        headers.delete("content-length");
+        headers.delete("transfer-encoding");
+        dispatchReq = new Request(request.url, { method: request.method, headers });
+      }
+      const response = await worker.fetch(dispatchReq);
 
       // Cache static asset at edge if eligible
       if (staticCacheKey && response.ok && !hasCacheOptOut(response)) {

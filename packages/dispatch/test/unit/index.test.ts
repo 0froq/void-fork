@@ -197,6 +197,33 @@ describe("dispatch fetch handler", () => {
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(await response.text()).toBe("ok");
   });
+
+  it("handles POST request with already-consumed body without throwing", async () => {
+    const { env, workerFetch } = createEnv({
+      routing: { workerName: "user-app", projectId: "proj_1" },
+      workerResponse: new Response("ok"),
+    });
+
+    // Simulate a request whose body was consumed by upstream edge processing
+    const request = new Request("https://my-app.void.app/xmlrpc.php", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Transfer-Encoding": "chunked" },
+      body: "payload",
+    });
+    await request.text(); // consume the body
+    expect(request.bodyUsed).toBe(true);
+
+    const response = await app.fetch(request, env, createCtx());
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    // The forwarded request should have no body and no stale body-size headers
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    expect(forwarded.method).toBe("POST");
+    expect(forwarded.bodyUsed).toBe(false);
+    expect(forwarded.headers.has("content-length")).toBe(false);
+    expect(forwarded.headers.has("transfer-encoding")).toBe(false);
+    expect(await response.text()).toBe("ok");
+  });
 });
 
 describe("custom domain routing", () => {
