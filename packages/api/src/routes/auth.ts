@@ -9,7 +9,11 @@ import {
 } from "../auth/google";
 import { signJwt } from "../auth/jwt";
 import { hmacSignState, hmacVerifyState } from "../auth/hmac";
-import { ensureGitHubPreviewRepoAccess, getGitHubPreviewRepoConfig } from "../auth/github-preview";
+import {
+  ensureGitHubPreviewRepoAccess,
+  getGitHubPreviewRepoConfig,
+  hasGitHubPreviewRepoAccess,
+} from "../auth/github-preview";
 import {
   getUserByOAuthAccount,
   getUserByEmail,
@@ -189,6 +193,7 @@ app.get("/callback", async (c) => {
     email = ghUser.email;
     emailVerified = ghUser.emailVerified;
   }
+  const previewRepo = resolvedProvider === "github" ? getGitHubPreviewRepoConfig(c.env) : null;
 
   // Upsert user — check oauth_accounts first, then email, then create
   let user = await getUserByOAuthAccount(db, resolvedProvider, providerId);
@@ -217,8 +222,20 @@ app.get("/callback", async (c) => {
     // Check signup allowlist (new users only)
     const enabled = await c.env.ROUTING.get("signup:enabled");
     if (enabled === "true") {
-      const entries = await getAllowlist(c.env.ROUTING);
-      if (!isSignupAllowed(resolvedProvider, login, emailVerified ? email : null, entries)) {
+      let allowedByRepoAccess = false;
+      if (resolvedProvider === "github" && previewRepo) {
+        try {
+          allowedByRepoAccess = await hasGitHubPreviewRepoAccess(previewRepo, login);
+        } catch (err) {
+          console.error(`[github-preview] Failed to check repo access for ${login}:`, err);
+        }
+      }
+
+      const entries = allowedByRepoAccess ? [] : await getAllowlist(c.env.ROUTING);
+      if (
+        !allowedByRepoAccess &&
+        !isSignupAllowed(resolvedProvider, login, emailVerified ? email : null, entries)
+      ) {
         return c.redirect("/signup-restricted");
       }
     }
@@ -252,7 +269,6 @@ app.get("/callback", async (c) => {
   }
 
   if (resolvedProvider === "github") {
-    const previewRepo = getGitHubPreviewRepoConfig(c.env);
     if (previewRepo) {
       c.executionCtx.waitUntil(
         ensureGitHubPreviewRepoAccess(previewRepo, login).catch((err) =>

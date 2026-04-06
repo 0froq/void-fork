@@ -21,6 +21,27 @@ export function getGitHubPreviewRepoConfig(env: {
   return pat ? { pat } : null;
 }
 
+export async function hasGitHubPreviewRepoAccess(
+  config: GitHubPreviewRepoConfig,
+  username: string,
+): Promise<boolean> {
+  const login = username.trim();
+  if (!login) return false;
+
+  const collaboratorRes = await githubRequest(config.pat, getCollaboratorUrl(login));
+  if (collaboratorRes.status === 204) {
+    return true;
+  }
+
+  if (collaboratorRes.status === 404) {
+    return false;
+  }
+
+  throw new Error(
+    `Collaborator check failed: ${collaboratorRes.status} ${await readErrorBody(collaboratorRes)}`,
+  );
+}
+
 export async function ensureGitHubPreviewRepoAccess(
   config: GitHubPreviewRepoConfig,
   username: string,
@@ -28,7 +49,7 @@ export async function ensureGitHubPreviewRepoAccess(
   const login = username.trim();
   if (!login) return;
 
-  const collaboratorUrl = `${GITHUB_API_BASE}/repos/${encodeURIComponent(PREVIEW_REPO_OWNER)}/${encodeURIComponent(PREVIEW_REPO_NAME)}/collaborators/${encodeURIComponent(login)}`;
+  const collaboratorUrl = getCollaboratorUrl(login);
   const collaboratorRes = await githubRequest(config.pat, collaboratorUrl);
 
   if (collaboratorRes.status === 204) {
@@ -69,6 +90,11 @@ export async function ensureGitHubPreviewRepoAccess(
 
   throw new Error(`Invite failed: ${inviteRes.status} ${await readErrorBody(inviteRes)}`);
 }
+
+function getCollaboratorUrl(login: string): string {
+  return `${GITHUB_API_BASE}/repos/${encodeURIComponent(PREVIEW_REPO_OWNER)}/${encodeURIComponent(PREVIEW_REPO_NAME)}/collaborators/${encodeURIComponent(login)}`;
+}
+
 function githubRequest(pat: string, url: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
   headers.set("Accept", "application/vnd.github+json");

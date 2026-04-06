@@ -28,6 +28,8 @@ afterAll(async () => {
 beforeEach(async () => {
   await clearTables(env.db);
   delete env.GITHUB_PREVIEW_REPO_PAT;
+  await env.ROUTING.delete("signup:enabled");
+  await env.ROUTING.delete("signup:allowlist");
 });
 
 afterEach(() => {
@@ -104,6 +106,78 @@ function mockGitHubApi(ghUser: {
 }
 
 describe("email verification gating on account linking", () => {
+  it("allows new GitHub signup when signup is restricted but the user already has preview repo access", async () => {
+    env.GITHUB_PREVIEW_REPO_PAT = "test-preview-pat";
+    await env.ROUTING.put("signup:enabled", "true");
+
+    const fetchMock = mockGitHubApi({
+      id: 44444,
+      login: "repo-collaborator",
+      email: "repo-collaborator@example.com",
+      emailVerified: true,
+      previewRepo: {
+        owner: "void-sdk",
+        repo: "void",
+        collaboratorStatus: 204,
+      },
+    });
+
+    const state = await buildSignedState("github");
+    await seedOAuthNonce(env.db, "test-nonce");
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/auth/callback?code=test-code&state=${state}`, {
+        headers: { Cookie: "oauth_nonce=test-nonce" },
+      }),
+      env,
+      executionCtx,
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toContain("http://localhost:9999/callback?token=");
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://api.github.com/repos/void-sdk/void/collaborators/repo-collaborator",
+      expect.objectContaining({ method: "PUT" }),
+    );
+  });
+
+  it("rejects new GitHub signup when signup is restricted and the user lacks preview repo access", async () => {
+    env.GITHUB_PREVIEW_REPO_PAT = "test-preview-pat";
+    await env.ROUTING.put("signup:enabled", "true");
+
+    const fetchMock = mockGitHubApi({
+      id: 33333,
+      login: "not-a-collaborator",
+      email: "not-a-collaborator@example.com",
+      emailVerified: true,
+      previewRepo: {
+        owner: "void-sdk",
+        repo: "void",
+        collaboratorStatus: 404,
+      },
+    });
+
+    const state = await buildSignedState("github");
+    await seedOAuthNonce(env.db, "test-nonce");
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/auth/callback?code=test-code&state=${state}`, {
+        headers: { Cookie: "oauth_nonce=test-nonce" },
+      }),
+      env,
+      executionCtx,
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("/signup-restricted");
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://api.github.com/repos/void-sdk/void/collaborators/not-a-collaborator",
+      expect.objectContaining({ method: "PUT" }),
+    );
+  });
+
   it("does not link to existing account when GitHub email is unverified", async () => {
     const existing = await createTestUser(env.db, "existing-user");
     await env.db
