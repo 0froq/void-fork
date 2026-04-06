@@ -62,8 +62,7 @@ const app = new Hono<ApiEnv>()
 </body></html>`),
   )
   .get("/invite", (c) => {
-    const dashboardUrl = c.env.DASHBOARD_URL ?? "https://dash.void.cloud";
-    const loginUrl = escapeHtml(`${dashboardUrl}/login`);
+    const quickstartUrl = escapeHtml("https://github.com/void-sdk/void#quickstart");
     return c.html(`<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
@@ -74,7 +73,7 @@ const app = new Hono<ApiEnv>()
 <div class="card">
 <h1>You're Invited to Void</h1>
 <p>Void is the deployment platform for the Vite ecosystem. Build and deploy full-stack apps with file-based routing, database bindings, AI integration, and edge-first infrastructure.</p>
-<a href="${loginUrl}" class="btn">Get Started</a>
+<a href="${quickstartUrl}" class="btn">Get Started</a>
 </div>
 </body></html>`);
   })
