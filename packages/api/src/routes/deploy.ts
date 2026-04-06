@@ -1197,8 +1197,9 @@ app.post("/:id/deploy/preflight", async (c) => {
 
   const body = await c.req.json<{
     assetManifest: Record<string, { hash: string; size: number }>;
+    hasWorker?: boolean;
   }>();
-  const { assetManifest } = body;
+  const { assetManifest, hasWorker } = body;
   const total = Object.keys(assetManifest).length;
 
   const prevManifest = await getLastLiveAssetManifest(c.get("db"), projectId);
@@ -1207,11 +1208,20 @@ app.post("/:id/deploy/preflight", async (c) => {
     return c.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
   }
 
-  // If the active deployment has no KV serving manifest, its assets live in
-  // WfP (ASSETS binding), not KV/R2.  All assets must be uploaded fresh.
+  // Detect storage mechanism changes between previous and current deploy.
+  // Static deploys store assets in KV/R2 (serving manifest in ROUTING KV).
+  // WfP deploys store assets via CF's asset upload API (ASSETS binding).
+  // Dedup is only safe when both deploys use the same storage mechanism.
   if (project.active_deployment_id) {
     const hasServingManifest = await c.env.ROUTING.get(`manifest:${project.active_deployment_id}`);
     if (!hasServingManifest) {
+      // Previous was WfP — assets are in CF's store, not KV/R2.
+      // All assets must be uploaded fresh.
+      return c.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
+    }
+    if (hasWorker) {
+      // Previous was static (KV/R2) but current is WfP — different storage.
+      // Assets must be re-uploaded to CF's asset API.
       return c.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
     }
   }

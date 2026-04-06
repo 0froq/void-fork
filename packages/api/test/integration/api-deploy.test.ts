@@ -2045,4 +2045,179 @@ describe("POST /projects/:id/deploy/preflight", () => {
       steps: [{ new_classes: ["WsChatRoomWs", "WsPresenceWs"] }],
     });
   });
+
+  describe("static → WfP project type transition", () => {
+    it("returns all assets as needed when previous deploy was static and current has worker", async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id);
+
+      // Create a previous STATIC deployment with known asset hashes
+      const prevManifest = {
+        "/index.html": { hash: "a".repeat(32), size: 100 },
+        "/app.js": { hash: "b".repeat(32), size: 200 },
+        "/style.css": { hash: "c".repeat(32), size: 300 },
+      };
+      const prevDeploy = await createTestDeployment(env.db, project.id, "live");
+      await env.db
+        .update(deployments)
+        .set({ asset_hashes: JSON.stringify(prevManifest) })
+        .where(eq(deployments.id, prevDeploy.id));
+
+      // Static deploys store a serving manifest in ROUTING KV
+      const servingManifest: Record<string, string> = {};
+      for (const [path, entry] of Object.entries(prevManifest)) {
+        servingManifest[path] = entry.hash;
+      }
+      await env.ROUTING.put(`manifest:${prevDeploy.id}`, JSON.stringify(servingManifest));
+
+      // Preflight with hasWorker=true (converting to a Void/WfP deploy)
+      // All assets should be returned as needed since they must be uploaded
+      // to CF's asset API (they only exist in KV/R2 from the static deploy)
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${user.jwt}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            assetManifest: {
+              "/index.html": { hash: "a".repeat(32), size: 100 }, // unchanged
+              "/app.js": { hash: "b".repeat(32), size: 200 }, // unchanged
+              "/style.css": { hash: "c".repeat(32), size: 300 }, // unchanged
+            },
+            hasWorker: true,
+          }),
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      const data = (await res.json()) as { needed: string[]; total: number; skipped: number };
+      // All assets must be re-uploaded — they're in KV/R2, not CF's asset store
+      expect(data.needed.sort()).toEqual(["/app.js", "/index.html", "/style.css"]);
+      expect(data.total).toBe(3);
+      expect(data.skipped).toBe(0);
+    });
+
+    it("still deduplicates when previous deploy was static and current is also static", async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id);
+
+      // Create a previous STATIC deployment
+      const prevManifest = {
+        "/index.html": { hash: "a".repeat(32), size: 100 },
+        "/app.js": { hash: "b".repeat(32), size: 200 },
+      };
+      const prevDeploy = await createTestDeployment(env.db, project.id, "live");
+      await env.db
+        .update(deployments)
+        .set({ asset_hashes: JSON.stringify(prevManifest) })
+        .where(eq(deployments.id, prevDeploy.id));
+      const servingManifest: Record<string, string> = {};
+      for (const [path, entry] of Object.entries(prevManifest)) {
+        servingManifest[path] = entry.hash;
+      }
+      await env.ROUTING.put(`manifest:${prevDeploy.id}`, JSON.stringify(servingManifest));
+
+      // Preflight WITHOUT hasWorker (staying as static deploy)
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${user.jwt}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            assetManifest: {
+              "/index.html": { hash: "a".repeat(32), size: 100 }, // unchanged
+              "/app.js": { hash: "x".repeat(32), size: 250 }, // changed
+            },
+          }),
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      const data = (await res.json()) as { needed: string[]; total: number; skipped: number };
+      // static→static should still dedup
+      expect(data.needed.sort()).toEqual(["/app.js"]);
+      expect(data.total).toBe(2);
+      expect(data.skipped).toBe(1);
+    });
+
+    it("does not crash on deploy when converting static project to WfP with preflight", async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, "static-to-void");
+
+      // 1. Do an initial static deploy
+      mockCfApi();
+      const staticForm = buildStaticDeployForm({
+        type: "spa",
+        assets: { "index.html": "<h1>hello</h1>", "app.js": "console.log(1)" },
+      });
+      const staticRes = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${user.jwt}` },
+          body: staticForm,
+        }),
+        env,
+      );
+      expect(staticRes.status).toBe(200);
+      const staticEvents = await readAllEvents(staticRes);
+      const staticDone = staticEvents.find((e: any) => e.event === "done");
+      expect(staticDone).toBeDefined();
+
+      // 2. Now convert to a WfP deploy with preflight
+      // Preflight should return all assets as needed (hasWorker=true)
+      const preflightRes = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${user.jwt}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            assetManifest: {
+              "/index.html": { hash: "a".repeat(32), size: 100 },
+              "/app.js": { hash: "b".repeat(32), size: 200 },
+            },
+            hasWorker: true,
+          }),
+        }),
+        env,
+      );
+      expect(preflightRes.status).toBe(200);
+      const pfData = (await preflightRes.json()) as {
+        needed: string[];
+        total: number;
+        skipped: number;
+      };
+      // All assets should be needed — they exist in KV/R2, not CF asset store
+      expect(pfData.skipped).toBe(0);
+      expect(pfData.needed.length).toBe(2);
+
+      // 3. Deploy as WfP with all assets (since preflight returned all as needed)
+      mockCfApi();
+      const form = buildDeployForm({
+        assets: { "index.html": "<h1>hello</h1>", "app.js": "console.log(1)" },
+      });
+      const deployRes = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${user.jwt}` },
+          body: form,
+        }),
+        env,
+      );
+      expect(deployRes.status).toBe(200);
+      const events = await readAllEvents(deployRes);
+      const done = events.find((e: any) => e.event === "done");
+      expect(done).toBeDefined();
+      // Should not have errored with AssetHashMissError
+      const error = events.find((e: any) => e.event === "error");
+      expect(error).toBeUndefined();
+    });
+  });
 });
