@@ -42,7 +42,8 @@ describe("internal route blocking", () => {
       createCtx(),
     );
     expect(response.status).toBe(404);
-    expect(await response.text()).toBe("Not Found");
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(await response.text()).toContain("404: Not Found");
   });
 
   it("blocks POST /__scheduled with 404", async () => {

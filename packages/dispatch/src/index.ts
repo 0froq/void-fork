@@ -4,6 +4,7 @@ import { applyRedirectRules, type RedirectRule } from "./redirects";
 import { extractSlug } from "./hostname";
 import { resolveStaticPath, getContentType } from "./static";
 import type { AssetConfig } from "./static";
+import { createErrorResponse } from "./error-page";
 import {
   readIsrCache,
   writeIsrCache,
@@ -74,7 +75,7 @@ export default {
 
     // Block internal framework routes from external HTTP access
     if (url.pathname.startsWith("/__")) {
-      return new Response("Not Found", { status: 404 });
+      return createErrorResponse(request, 404, "Not Found");
     }
 
     // Health check short-circuit — bypass KV lookup entirely
@@ -87,9 +88,8 @@ export default {
 
     const routingRaw = await env.ROUTING.get(routingKey, { cacheTtl: 60 });
     if (!routingRaw) {
-      return new Response("Not Found", {
-        status: 404,
-        headers: { "Cache-Control": "public, max-age=30" },
+      return createErrorResponse(request, 404, "Not Found", {
+        "Cache-Control": "public, max-age=30",
       });
     }
 
@@ -164,8 +164,8 @@ export default {
           const hash = assetManifest[pathname];
           const response = hash
             ? ((await fetchStaticAsset(env, hash, pathname, routing.projectId)) ??
-              new Response("Not Found", { status: 404 }))
-            : new Response("Not Found", { status: 404 });
+              createErrorResponse(request, 404, "Not Found"))
+            : createErrorResponse(request, 404, "Not Found");
           if (response.ok) {
             const res = new Response(response.body, response);
             res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
@@ -303,7 +303,7 @@ export default {
 
       const resolved = resolveStaticPath(pathname, assetManifest, assetConfig);
       if (!resolved) {
-        return meter(new Response("Not Found", { status: 404 }));
+        return meter(createErrorResponse(request, 404, "Not Found"));
       }
 
       if (resolved.redirect) {
@@ -322,7 +322,7 @@ export default {
         routing.projectId,
       );
       if (!assetResponse) {
-        return meter(new Response("Asset not found", { status: 404 }));
+        return meter(createErrorResponse(request, 404, "Not Found"));
       }
 
       const status = resolved.notFound ? 404 : 200;
