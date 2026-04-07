@@ -7,6 +7,11 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, labeled]
   workflow_call:
+    inputs:
+      skip_windows:
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   lint-and-check:
@@ -28,8 +33,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows runs on main pushes and PRs labeled "test: windows"
-        os: '${{ (github.event_name == ''push'' || contains(github.event.pull_request.labels.*.name, ''test: windows'')) && fromJSON(''["blacksmith-4vcpu-ubuntu-2404","windows-latest"]'') || fromJSON(''["blacksmith-4vcpu-ubuntu-2404"]'') }}'
+        # Windows runs on main pushes and on PRs labeled "test: windows",
+        # unless a reusable workflow caller explicitly disables it.
+        os: '${{ (((github.event_name == ''push'' && startsWith(github.ref, ''refs/heads/'')) || contains(github.event.pull_request.labels.*.name, ''test: windows'')) && !(github.event_name == ''workflow_call'' && inputs.skip_windows)) && fromJSON(''["blacksmith-4vcpu-ubuntu-2404","windows-latest"]'') || fromJSON(''["blacksmith-4vcpu-ubuntu-2404"]'') }}'
         suite: [unit, core-markdown, metaframeworks, pages-react-vue, pages-svelte-solid]
         include:
           - suite: unit
