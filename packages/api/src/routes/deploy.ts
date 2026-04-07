@@ -107,7 +107,6 @@ export function buildWebSocketUploadMigrations(migrations: WebSocketMigrationMet
     new_tag: migrations[migrations.length - 1].tag,
     steps: migrations.map((migration) => ({
       ...(migration.newClasses?.length ? { new_classes: migration.newClasses } : {}),
-      ...(migration.deletedClasses?.length ? { deleted_classes: migration.deletedClasses } : {}),
     })),
   };
 }
@@ -172,13 +171,38 @@ export function enrichWebSocketManifest(
     };
   }
 
-  const newClasses = nextClasses.filter((name) => !previousClasses.includes(name));
-  const deletedClasses = previousClasses.filter((name) => !nextClasses.includes(name));
+  // Compute classes that currently exist in Cloudflare by replaying
+  // migration history: add from newClasses, remove from deletedClasses.
+  // Also include previousClasses as fallback for legacy projects that
+  // predate the migration system.
+  const existingClasses = new Set(previousClasses);
+  for (const m of previousMigrations) {
+    for (const name of m.newClasses ?? []) existingClasses.add(name);
+    for (const name of m.deletedClasses ?? []) existingClasses.delete(name);
+  }
+  const newClasses = nextClasses.filter((name) => !existingClasses.has(name));
+
+  // If no new classes to create, no migration step is needed.
+  // The class list update is still recorded in the manifest.
+  if (newClasses.length === 0) {
+    return {
+      manifest: {
+        ...manifest,
+        websocket: {
+          routes: manifest.websocket?.routes ?? [],
+          classes: nextClasses,
+          migrations: previousMigrations,
+        },
+      },
+      changed: true,
+      nextVersion: currentVersion,
+    };
+  }
+
   const nextVersion = currentVersion + 1;
-  const migration = {
+  const migration: WebSocketMigrationMeta = {
     tag: `ws-v${nextVersion}`,
-    ...(newClasses.length > 0 ? { newClasses } : {}),
-    ...(deletedClasses.length > 0 ? { deletedClasses } : {}),
+    newClasses,
   };
 
   return {
