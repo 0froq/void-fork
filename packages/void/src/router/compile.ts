@@ -10,6 +10,105 @@ import { INTERNAL_BINDING_PREFIXES } from "../runtime/env-raw";
  * HMR events and shows a toast with a click-to-restart action.
  */
 const BINDING_HINT_SCRIPT = `<script type="module" src="/@id/virtual:void/binding-hint"></script>`;
+const DEFAULT_ERROR_PAGE_FONT_STACK =
+  'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+
+function pushDefaultErrorPageHelpers(lines: string[]): void {
+  lines.push(
+    `const __VOID_ERROR_PAGE_FONT_STACK = ${JSON.stringify(DEFAULT_ERROR_PAGE_FONT_STACK)};`,
+  );
+  lines.push(`function __voidEscapeHtml(value) {`);
+  lines.push(
+    `  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");`,
+  );
+  lines.push(`}`);
+  lines.push("");
+  lines.push(`function __voidShouldServeHtmlErrorPage(request) {`);
+  lines.push(`  if (request.method !== "GET" && request.method !== "HEAD") return false;`);
+  lines.push(`  const url = new URL(request.url);`);
+  lines.push(`  if (url.pathname === "/api" || url.pathname.startsWith("/api/")) return false;`);
+  lines.push(`  if (/\\/[^/]+\\.[^/]+$/.test(url.pathname)) return false;`);
+  lines.push(`  const destination = request.headers.get("sec-fetch-dest");`);
+  lines.push(
+    `  if (destination && destination !== "document" && destination !== "empty") return false;`,
+  );
+  lines.push(`  const accept = request.headers.get("accept");`);
+  lines.push(`  return !accept || accept.includes("text/html") || accept.includes("*/*");`);
+  lines.push(`}`);
+  lines.push("");
+  lines.push(`function __voidRenderErrorPage(status, title) {`);
+  lines.push(`  const heading = status + ": " + title;`);
+  lines.push(`  const prefix = status + ": ";`);
+  lines.push(`  return \`<!doctype html>`);
+  lines.push(`<html lang="en">`);
+  lines.push(`  <head>`);
+  lines.push(`    <meta charset="utf-8">`);
+  lines.push(`    <meta name="viewport" content="width=device-width, initial-scale=1">`);
+  lines.push(`    <title>\${__voidEscapeHtml(heading)}</title>`);
+  lines.push(`    <style>`);
+  lines.push(`      :root {`);
+  lines.push(`        color-scheme: light;`);
+  lines.push(`        font-family: \${__VOID_ERROR_PAGE_FONT_STACK};`);
+  lines.push(`        background: #f5f5f5;`);
+  lines.push(`        color: #171717;`);
+  lines.push(`      }`);
+  lines.push(`      * { box-sizing: border-box; }`);
+  lines.push(`      body {`);
+  lines.push(`        margin: 0;`);
+  lines.push(`        min-block-size: 100dvh;`);
+  lines.push(`        display: grid;`);
+  lines.push(`        place-items: center;`);
+  lines.push(`        padding: 24px;`);
+  lines.push(
+    `        background: radial-gradient(circle at top, rgba(255, 255, 255, 0.96), rgba(245, 245, 245, 0.96) 52%), linear-gradient(180deg, #fafafa 0%, #f1f1f1 100%);`,
+  );
+  lines.push(`        font: 500 16px/1.5 \${__VOID_ERROR_PAGE_FONT_STACK};`);
+  lines.push(`      }`);
+  lines.push(`      main {`);
+  lines.push(`        inline-size: min(100%, 560px);`);
+  lines.push(`        padding: 32px 36px;`);
+  lines.push(`        border: 1px solid #d4d4d8;`);
+  lines.push(`        border-radius: 32px;`);
+  lines.push(`        corner-shape: squircle;`);
+  lines.push(`        background: rgba(255, 255, 255, 0.88);`);
+  lines.push(`        text-align: center;`);
+  lines.push(`        backdrop-filter: blur(12px);`);
+  lines.push(`      }`);
+  lines.push(`      h1 {`);
+  lines.push(`        margin: 0;`);
+  lines.push(
+    `        font: 400 clamp(1.5rem, 1.2rem + 1vw, 2rem) / 1.1 \${__VOID_ERROR_PAGE_FONT_STACK};`,
+  );
+  lines.push(`        letter-spacing: -0.03em;`);
+  lines.push(`      }`);
+  lines.push(`      strong {`);
+  lines.push(`        font-weight: 600;`);
+  lines.push(`      }`);
+  lines.push(`    </style>`);
+  lines.push(`  </head>`);
+  lines.push(`  <body>`);
+  lines.push(`    <main>`);
+  lines.push(
+    `      <h1><strong>\${__voidEscapeHtml(prefix)}</strong>\${__voidEscapeHtml(title)}</h1>`,
+  );
+  lines.push(`    </main>`);
+  lines.push(`  </body>`);
+  lines.push(`</html>\`;`);
+  lines.push(`}`);
+  lines.push("");
+  lines.push(`function __voidCreateErrorResponse(request, status, title) {`);
+  lines.push(`  if (!__voidShouldServeHtmlErrorPage(request)) {`);
+  lines.push(`    return new Response(title, { status });`);
+  lines.push(`  }`);
+  lines.push(
+    `  return new Response(request.method === "HEAD" ? null : __voidRenderErrorPage(status, title), {`,
+  );
+  lines.push(`    status,`);
+  lines.push(`    headers: { "content-type": "text/html; charset=utf-8" },`);
+  lines.push(`  });`);
+  lines.push(`}`);
+  lines.push("");
+}
 
 export interface AuthCompileOptions {
   authRuntimePath: string;
@@ -715,6 +814,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   // Emit head config constant from void.json
   lines.push(`const __voidHeadConfig = ${JSON.stringify(pages.headConfig ?? null)};`);
   lines.push("");
+  pushDefaultErrorPageHelpers(lines);
 
   // Asset tags — reuse the SSR asset tags pattern with the pages client entry
   const clientEntryId = pages.clientEntryId;
@@ -1089,7 +1189,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`      }`);
   lines.push(`    }`);
   lines.push(`  } catch {}`);
-  lines.push(`  return new Response(fallbackText, { status });`);
+  lines.push(`  return __voidCreateErrorResponse(c.req.raw, status, fallbackText);`);
   lines.push(`}`);
   lines.push("");
 

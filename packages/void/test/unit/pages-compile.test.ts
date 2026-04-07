@@ -203,6 +203,40 @@ describe("compileRouteTable with pages", () => {
     expect(code).toContain('path.startsWith("/api/")');
   });
 
+  it("embeds the default self-contained error page helper", () => {
+    const scan = makeScan({
+      pages: [
+        {
+          pattern: "/",
+          params: [],
+          catchAll: false,
+          componentPath: "index.vue",
+          serverPath: null,
+          methods: [],
+          componentId: "index",
+        },
+      ],
+      layouts: [],
+      namedLayouts: [],
+    });
+
+    const code = compileRouteTable(
+      scan,
+      "/routes",
+      "/middleware",
+      "/crons",
+      "/queues",
+      null,
+      testOptions,
+      pagesOptions,
+    );
+
+    expect(code).toContain("place-items: center;");
+    expect(code).toContain("border-radius: 32px;");
+    expect(code).toContain("corner-shape: squircle;");
+    expect(code).toContain("return __voidCreateErrorResponse(c.req.raw, status, fallbackText);");
+  });
+
   it("does not generate page code when pages is null", () => {
     const scan = makeScan({ pages: [], layouts: [], namedLayouts: [] });
 
