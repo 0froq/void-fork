@@ -49,9 +49,13 @@ export async function waitForServer(
     try {
       const response = await fetch(url);
       if (response.status > 0) {
-        if (!options?.expectBody) return;
+        if (!options?.expectBody) {
+          return;
+        }
         const body = await response.text();
-        if (body.includes(options.expectBody)) return;
+        if (body.includes(options.expectBody)) {
+          return;
+        }
       }
     } catch {
       // retry

@@ -45,7 +45,9 @@ function mockContext(options: {
       param: () => options.params ?? {},
       url: url.toString(),
       json: async () => {
-        if (options.body === undefined) throw new Error('No body');
+        if (options.body === undefined) {
+          throw new Error('No body');
+        }
         return options.body;
       },
     },

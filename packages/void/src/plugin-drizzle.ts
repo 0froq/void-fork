@@ -62,7 +62,9 @@ export function drizzlePlugin(
 
     config(_, env) {
       isBuild = env.command === 'build';
-      if (!schema) return;
+      if (!schema) {
+        return;
+      }
 
       return {
         resolve: {
@@ -84,7 +86,9 @@ export function drizzlePlugin(
 
         // Only intercept void/db in server/worker environments (not client)
         if (id === 'void/db' && this.environment?.name !== 'client') {
-          if (!hasDbRuntime) return; // Fall through to the real module (stub)
+          if (!hasDbRuntime) {
+            return;
+          } // Fall through to the real module (stub)
           // Don't redirect schema files to avoid circular dependency
           // (virtual:void-db imports the schema, which imports void/db).
           // Schema files only need SQL helpers, not the runtime DB instance.
@@ -93,8 +97,9 @@ export function drizzlePlugin(
             // but schema.path from Node's path.join uses backslashes on Windows.
             const normalizedImporter = normalizePath(importer);
             const normalizedSchemaPath = normalizePath(schema.path);
-            if (schema.type === 'file' && normalizedImporter === normalizedSchemaPath)
+            if (schema.type === 'file' && normalizedImporter === normalizedSchemaPath) {
               return VIRTUAL_SCHEMA_DB_ID;
+            }
             if (
               schema.type === 'directory' &&
               normalizedImporter.startsWith(normalizedSchemaPath)
@@ -109,7 +114,9 @@ export function drizzlePlugin(
         // meta-framework SSR environments (Astro's workerd runner, etc.)
         // where Vite's config-level resolve.alias may not be applied.
         if (schema && (id === '@schema' || id.startsWith('@schema/'))) {
-          if (id === '@schema') return schema.path;
+          if (id === '@schema') {
+            return schema.path;
+          }
           return join(schema.path, id.slice('@schema/'.length));
         }
       },
@@ -201,7 +208,9 @@ export function createDb(d1) {
     },
 
     configureServer(server) {
-      if (!schema) return;
+      if (!schema) {
+        return;
+      }
 
       // Check for schema drift on startup
       const migrationsDir = join(root, 'db', 'migrations');

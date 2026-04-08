@@ -133,7 +133,9 @@ const VOID_CONFIG_FILE = 'void.json';
 type DatabaseSetupChoice = DatabaseDialect | 'none';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
   return value as Record<string, unknown>;
 }
 
@@ -148,21 +150,33 @@ export function isScaffoldableEmptyProject(root: string): boolean {
     'queues',
     'pages',
   ]) {
-    if (existsSync(join(root, dir))) return false;
+    if (existsSync(join(root, dir))) {
+      return false;
+    }
   }
-  if (existsSync(join(root, 'index.html'))) return false;
+  if (existsSync(join(root, 'index.html'))) {
+    return false;
+  }
   for (const file of VITE_CONFIG_FILES) {
-    if (existsSync(join(root, file))) return false;
+    if (existsSync(join(root, file))) {
+      return false;
+    }
   }
 
   for (const entry of readdirSync(root, { withFileTypes: true })) {
-    if (EMPTY_PROJECT_ALLOWED_ENTRIES.has(entry.name)) continue;
-    if (entry.name.startsWith('README')) continue;
+    if (EMPTY_PROJECT_ALLOWED_ENTRIES.has(entry.name)) {
+      continue;
+    }
+    if (entry.name.startsWith('README')) {
+      continue;
+    }
     return false;
   }
 
   const packageJsonPath = join(root, 'package.json');
-  if (!existsSync(packageJsonPath)) return true;
+  if (!existsSync(packageJsonPath)) {
+    return true;
+  }
 
   let pkgRaw: unknown;
   try {
@@ -171,16 +185,22 @@ export function isScaffoldableEmptyProject(root: string): boolean {
     return false;
   }
   const pkg = asRecord(pkgRaw);
-  if (!pkg) return false;
+  if (!pkg) {
+    return false;
+  }
 
   const deps = {
     ...(asRecord(pkg.dependencies) ?? {}),
     ...(asRecord(pkg.devDependencies) ?? {}),
   };
-  if (Object.keys(deps).some((dep) => !EMPTY_PROJECT_ALLOWED_PACKAGES.has(dep))) return false;
+  if (Object.keys(deps).some((dep) => !EMPTY_PROJECT_ALLOWED_PACKAGES.has(dep))) {
+    return false;
+  }
 
   const scripts = asRecord(pkg.scripts) ?? {};
-  if (Object.keys(scripts).some((name) => name !== 'test')) return false;
+  if (Object.keys(scripts).some((name) => name !== 'test')) {
+    return false;
+  }
 
   return true;
 }
@@ -256,7 +276,9 @@ function readPackageJson(root: string): Record<string, any> | undefined {
 
 function getDeclaredDependencySpec(root: string, packageName: string): string | undefined {
   const pkg = readPackageJson(root);
-  if (!pkg) return undefined;
+  if (!pkg) {
+    return undefined;
+  }
 
   const dependencies = asRecord(pkg.dependencies);
   if (typeof dependencies?.[packageName] === 'string') {
@@ -272,7 +294,9 @@ function getDeclaredDependencySpec(root: string, packageName: string): string | 
 }
 
 function toPreviewPackageName(publicPackageName: string): string {
-  if (publicPackageName === 'void') return '@void-sdk/void';
+  if (publicPackageName === 'void') {
+    return '@void-sdk/void';
+  }
   if (publicPackageName.startsWith('@void/')) {
     return publicPackageName.replace(/^@void\//, '@void-sdk/');
   }
@@ -457,7 +481,9 @@ function getTodayCompatDate(): string {
  * for class B/C meta-frameworks that need it for local dev.
  */
 function setupWranglerConfig(root: string, framework: DetectedFramework): void {
-  if (framework.class === 'a') return;
+  if (framework.class === 'a') {
+    return;
+  }
 
   let configPath: string | undefined;
   let parsed: Record<string, unknown> | undefined;
@@ -471,7 +497,9 @@ function setupWranglerConfig(root: string, framework: DetectedFramework): void {
         const raw = readFileSync(p, 'utf-8');
         const errors: ParseError[] = [];
         parsed = parse(raw, errors);
-        if (errors.length > 0) throw new SyntaxError('Failed to parse JSONC');
+        if (errors.length > 0) {
+          throw new SyntaxError('Failed to parse JSONC');
+        }
       } catch {
         // unparseable — start fresh
       }
@@ -669,7 +697,9 @@ async function promptDatabaseSetup(root: string): Promise<DatabaseSetupChoice> {
 
 /** Get the dev command for a detected framework. */
 function getDevCommand(root: string, framework?: DetectedFramework): string {
-  if (!framework) return formatProjectCommand(root, 'vite dev');
+  if (!framework) {
+    return formatProjectCommand(root, 'vite dev');
+  }
   switch (framework.name) {
     case 'nuxt':
       return 'nuxt dev';
@@ -793,7 +823,9 @@ function setupGithubActions(root: string, state: ProjectState): void {
 
 function writeFileIfMissing(root: string, filePath: string, content: string): void {
   const fullPath = join(root, filePath);
-  if (existsSync(fullPath)) return;
+  if (existsSync(fullPath)) {
+    return;
+  }
   mkdirSync(dirname(fullPath), { recursive: true });
   writeFileSync(fullPath, content);
   log.success(`Created ${filePath}`);
@@ -815,7 +847,9 @@ function ensureGitignore(root: string): void {
       .filter(Boolean),
   );
   const missing = SCAFFOLD_GITIGNORE_LINES.filter((line) => !existing.has(line));
-  if (missing.length === 0) return;
+  if (missing.length === 0) {
+    return;
+  }
 
   const separator = content.endsWith('\n') ? '' : '\n';
   writeFileSync(gitignorePath, content + separator + missing.join('\n') + '\n');

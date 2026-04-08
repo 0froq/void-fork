@@ -19,9 +19,13 @@ interface PagesPluginOptions {
 }
 
 function isVuePageFile(id: string, pagesDir: string): boolean {
-  if (!id.startsWith(pagesDir + '/')) return false;
+  if (!id.startsWith(pagesDir + '/')) {
+    return false;
+  }
   const rel = id.slice(pagesDir.length + 1);
-  if (rel.split('/').some((s) => s.startsWith('_'))) return false;
+  if (rel.split('/').some((s) => s.startsWith('_'))) {
+    return false;
+  }
   const basename = rel.slice(rel.lastIndexOf('/') + 1);
   return basename !== 'layout.vue' && !basename.endsWith('.island.vue');
 }
@@ -30,7 +34,9 @@ function stripDefinePropsTypeArgument(code: string): string | null {
   // Find defineProps<...>( and strip the generic using bracket counting
   // to handle nested generics like InferProps<typeof loader>
   const match = /\bdefineProps\s*</.exec(code);
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
 
   const start = match.index + match[0].length - 1; // position of '<'
   let depth = 0;
@@ -38,9 +44,11 @@ function stripDefinePropsTypeArgument(code: string): string | null {
   let newlineCount = 0;
   for (let i = start; i < code.length; i++) {
     const ch = code[i];
-    if (ch === '\n') newlineCount++;
-    else if (ch === '<') depth++;
-    else if (ch === '>') {
+    if (ch === '\n') {
+      newlineCount++;
+    } else if (ch === '<') {
+      depth++;
+    } else if (ch === '>') {
       depth--;
       if (depth === 0) {
         end = i;
@@ -48,7 +56,9 @@ function stripDefinePropsTypeArgument(code: string): string | null {
       }
     }
   }
-  if (end === -1) return null;
+  if (end === -1) {
+    return null;
+  }
 
   return code.slice(0, start) + '\n'.repeat(newlineCount) + code.slice(end + 1);
 }
@@ -57,10 +67,16 @@ function stripDefinePropsTypeArgument(code: string): string | null {
 function hasNonIslandPages(dir: string): boolean {
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
-      if (!entry.isFile()) continue;
+      if (!entry.isFile()) {
+        continue;
+      }
       const name = entry.name;
-      if (name.startsWith('_') || name.startsWith('layout.')) continue;
-      if (name.endsWith('.vue') && !name.includes('.island.')) return true;
+      if (name.startsWith('_') || name.startsWith('layout.')) {
+        continue;
+      }
+      if (name.endsWith('.vue') && !name.includes('.island.')) {
+        return true;
+      }
     }
   } catch {
     // ignore
@@ -80,9 +96,13 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       transform: {
         filter: { id: /\.vue$/ },
         handler(code, id) {
-          if (!isVuePageFile(id, pagesDir)) return;
+          if (!isVuePageFile(id, pagesDir)) {
+            return;
+          }
           const transformed = stripDefinePropsTypeArgument(code);
-          if (!transformed) return;
+          if (!transformed) {
+            return;
+          }
           return { code: transformed, map: { mappings: '' } };
         },
       },
@@ -90,7 +110,9 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       handleHotUpdate: {
         order: 'pre',
         handler(ctx) {
-          if (!isVuePageFile(ctx.file, pagesDir)) return;
+          if (!isVuePageFile(ctx.file, pagesDir)) {
+            return;
+          }
 
           const read = ctx.read;
           // Vue reparses raw SFC source during HMR, so apply the same rewrite here.
@@ -122,12 +144,15 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
         filter: { id: /^\0virtual:void-pages-(renderer|client)$/ },
         handler(id) {
           if (id === '\0' + RENDERER_ID) {
-            if (!pageScan)
+            if (!pageScan) {
               return "export function renderPage() { throw new Error('No pages found'); }";
+            }
             return generateRendererModule(pageScan, pagesDir);
           }
           if (id === '\0' + CLIENT_ENTRY_ID) {
-            if (!pageScan) return '';
+            if (!pageScan) {
+              return '';
+            }
             return generateClientEntry(
               pageScan,
               pagesDir,
@@ -139,7 +164,9 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       },
 
       config(_, env) {
-        if (!existsSync(pagesDir)) return;
+        if (!existsSync(pagesDir)) {
+          return;
+        }
 
         if (env.command === 'serve') {
           return {
@@ -153,7 +180,9 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
         }
 
         // Skip the pages-client bundle when all pages are island pages
-        if (!hasNonIslandPages(pagesDir)) return;
+        if (!hasNonIslandPages(pagesDir)) {
+          return;
+        }
 
         return {
           environments: {

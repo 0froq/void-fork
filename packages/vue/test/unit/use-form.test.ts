@@ -26,7 +26,7 @@ describe('useForm reactive logic', () => {
     const wasSuccessful = ref(false);
     const recentlySuccessful = ref(false);
 
-    let defaults_ = { ...formDefaults };
+    const defaults_ = { ...formDefaults };
 
     const isDirty = ref(false);
     watch(
@@ -51,9 +51,13 @@ describe('useForm reactive logic', () => {
 
     function clearErrors(...fields: string[]) {
       if (fields.length === 0) {
-        for (const key of Object.keys(errors)) delete errors[key];
+        for (const key of Object.keys(errors)) {
+          delete errors[key];
+        }
       } else {
-        for (const field of fields) delete errors[field];
+        for (const field of fields) {
+          delete errors[field];
+        }
       }
     }
 

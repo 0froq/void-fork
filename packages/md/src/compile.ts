@@ -43,7 +43,9 @@ export interface CompileOptions {
 let compilerPromise: Promise<MarkdownExit> | null = null;
 
 async function getCompiler(options?: CompileOptions): Promise<MarkdownExit> {
-  if (compilerPromise) return compilerPromise;
+  if (compilerPromise) {
+    return compilerPromise;
+  }
   compilerPromise = createCompiler(options);
   return compilerPromise;
 }

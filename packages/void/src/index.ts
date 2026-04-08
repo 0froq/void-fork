@@ -113,7 +113,9 @@ function createCloudflareBuiltinsExternalPlugin(): Plugin {
   return {
     name: 'void:cloudflare-builtins-external',
     config(_, env) {
-      if (env.command !== 'build') return;
+      if (env.command !== 'build') {
+        return;
+      }
 
       return {
         build: {
@@ -138,7 +140,9 @@ type CredentialStatus =
  */
 function readVoidDevCredentials(root: string): CredentialStatus {
   const token = getToken();
-  if (!token) return { status: 'no-token' };
+  if (!token) {
+    return { status: 'no-token' };
+  }
   const staging = isStagingMode() || undefined;
 
   const projectPath = join(root, '.void', 'project.json');
@@ -199,7 +203,9 @@ async function runAiSetupPrompt(
   log.info("[void] AI requires a linked project. Let's set one up:");
 
   const result = await select({ message: 'Select a project:', options });
-  if (isCancel(result)) return;
+  if (isCancel(result)) {
+    return;
+  }
 
   let projectId: string;
   let slug: string;
@@ -212,14 +218,20 @@ async function runAiSetupPrompt(
       initialValue: defaultSlug,
       validate(value) {
         const s = (value ?? '').trim();
-        if (s.length === 0) return 'Project slug is required.';
+        if (s.length === 0) {
+          return 'Project slug is required.';
+        }
         const valid =
           s.length === 1 ? /^[a-z0-9]$/.test(s) : /^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(s);
-        if (!valid) return 'Slug must be lowercase alphanumeric with dashes.';
+        if (!valid) {
+          return 'Slug must be lowercase alphanumeric with dashes.';
+        }
         return undefined;
       },
     });
-    if (isCancel(slugResult)) return;
+    if (isCancel(slugResult)) {
+      return;
+    }
 
     try {
       const created = await client.createProject(slugResult.trim());
@@ -343,7 +355,9 @@ export function voidPlugin(options?: {
       name: 'void:wrangler-compat',
       enforce: 'pre',
       config(_, env) {
-        if (env.command !== 'serve') return;
+        if (env.command !== 'serve') {
+          return;
+        }
         const synced = ensureWranglerNodejsAlsFlag(root);
         if (synced) {
           voidLog('Synced nodejs_als to wrangler config');
@@ -355,7 +369,9 @@ export function voidPlugin(options?: {
     const wranglerSyncPlugin: Plugin = {
       name: 'void:wrangler-sync',
       configResolved(resolvedConfig) {
-        if (resolvedConfig.command !== 'serve') return;
+        if (resolvedConfig.command !== 'serve') {
+          return;
+        }
         const synced = syncWranglerBindings(root, bindings, {
           bindingNames,
           websockets: websocketRoutes,
@@ -374,9 +390,15 @@ export function voidPlugin(options?: {
       name: 'void:sveltekit-hooks-inject',
       apply: 'serve',
       transform(code, id) {
-        if (detected.class !== 'b') return;
-        if (!id.includes('.svelte-kit/generated/server/internal')) return;
-        if (!code.includes('export async function get_hooks')) return;
+        if (detected.class !== 'b') {
+          return;
+        }
+        if (!id.includes('.svelte-kit/generated/server/internal')) {
+          return;
+        }
+        if (!code.includes('export async function get_hooks')) {
+          return;
+        }
 
         return code
           .replace(
@@ -528,7 +550,9 @@ export function voidPlugin(options?: {
         const vars = (result.vars as Record<string, string>) ?? {};
         vars.__VOID_TOKEN = credentials.token;
         vars.__VOID_PROJECT_ID = credentials.projectId;
-        if (credentials.staging) vars.__VOID_STAGING = '1';
+        if (credentials.staging) {
+          vars.__VOID_STAGING = '1';
+        }
         result.vars = vars;
       }
     }
@@ -603,9 +627,15 @@ export function voidPlugin(options?: {
         const credentials = readVoidDevCredentials(root);
         if (credentials.status === 'ok') {
           const lines = ['\x1b[36mRemote bindings active\x1b[39m'];
-          if (bindings.needsD1) lines.push('  DB      \x1b[2m→ remote D1\x1b[22m');
-          if (bindings.needsKV) lines.push('  KV      \x1b[2m→ remote KV\x1b[22m');
-          if (bindings.needsR2) lines.push('  STORAGE \x1b[2m→ remote R2\x1b[22m');
+          if (bindings.needsD1) {
+            lines.push('  DB      \x1b[2m→ remote D1\x1b[22m');
+          }
+          if (bindings.needsKV) {
+            lines.push('  KV      \x1b[2m→ remote KV\x1b[22m');
+          }
+          if (bindings.needsR2) {
+            lines.push('  STORAGE \x1b[2m→ remote R2\x1b[22m');
+          }
           afterReady(() => {
             console.log();
             voidLog(lines.join('\n         '));
@@ -661,22 +691,36 @@ export function voidPlugin(options?: {
     name: 'void:binding-watch',
     apply: 'serve',
     configureServer(server) {
-      if (!autoDetectBindings && !autoDetectAuth) return;
+      if (!autoDetectBindings && !autoDetectAuth) {
+        return;
+      }
       const effectiveDirs = scanDirs ?? ['routes', 'middleware', 'queues', 'pages', 'crons'];
       const watchDirs = [...new Set([...effectiveDirs, 'src'])].map((d) => join(root, d));
       let hintShown = false;
       const check = (path: string) => {
-        if (hintShown) return;
-        if (!watchDirs.some((d) => path.startsWith(d))) return;
+        if (hintShown) {
+          return;
+        }
+        if (!watchDirs.some((d) => path.startsWith(d))) {
+          return;
+        }
         try {
           const code = readFileSync(path, 'utf-8');
           const fileBindings = inferBindingsFromSource(code, path.split('/').pop()!);
           const newBindings: string[] = [];
           if (autoDetectBindings) {
-            if (fileBindings.needsD1 && !bindings.needsD1) newBindings.push('D1 (void/db)');
-            if (fileBindings.needsKV && !bindings.needsKV) newBindings.push('KV (void/kv)');
-            if (fileBindings.needsR2 && !bindings.needsR2) newBindings.push('R2 (void/storage)');
-            if (fileBindings.needsAI && !bindings.needsAI) newBindings.push('AI (void/ai)');
+            if (fileBindings.needsD1 && !bindings.needsD1) {
+              newBindings.push('D1 (void/db)');
+            }
+            if (fileBindings.needsKV && !bindings.needsKV) {
+              newBindings.push('KV (void/kv)');
+            }
+            if (fileBindings.needsR2 && !bindings.needsR2) {
+              newBindings.push('R2 (void/storage)');
+            }
+            if (fileBindings.needsAI && !bindings.needsAI) {
+              newBindings.push('AI (void/ai)');
+            }
           }
           if (autoDetectAuth && fileBindings.needsAuth) {
             newBindings.push('Auth (void/auth)');
@@ -693,7 +737,9 @@ export function voidPlugin(options?: {
               data: { message: `New ${detected} binding detected.` },
             });
           }
-        } catch {}
+        } catch {
+          // Ignore transient read errors while files are being written or removed.
+        }
       };
       // Attach after the HTTP server is listening so initial plugin file
       // writes (typegen, entry generation) don't trigger a spurious check.
@@ -778,18 +824,22 @@ export function voidPlugin(options?: {
         'Void-managed Better Auth is only supported in Cloudflare Void apps. Use Better Auth directly for this target instead.',
       );
     }
-    if (config.inference?.bindings)
+    if (config.inference?.bindings) {
       voidWarn('"inference.bindings" in void.json is ignored with target: "' + config.target + '"');
-    if (config.worker)
+    }
+    if (config.worker) {
       voidWarn('"worker" in void.json is ignored with target: "' + config.target + '"');
-    if (config.remote)
+    }
+    if (config.remote) {
       voidWarn('"remote" in void.json is ignored with target: "' + config.target + '"');
-    if (config.routing?.revalidate)
+    }
+    if (config.routing?.revalidate) {
       voidWarn(
         '"routing.revalidate" in void.json is ignored with target: "' +
           config.target +
           '" (edge caching is CF-only)',
       );
+    }
 
     return [
       restartPlugin(),

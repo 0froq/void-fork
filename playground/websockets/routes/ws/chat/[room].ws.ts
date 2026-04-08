@@ -84,7 +84,9 @@ const definition = defineRoom({
   },
   async onClose(ctx) {
     const state = (ctx.connection.state as ChatConnectionState | undefined) ?? {};
-    if (!state.name) return;
+    if (!state.name) {
+      return;
+    }
 
     const remaining = Math.max(0, activeConnectionCount(ctx.room) - 1);
     await ctx.room.broadcast({

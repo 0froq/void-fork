@@ -143,7 +143,9 @@ export function collectPrerenderWorkerModules(
   const modules: CollectedPrerenderWorkerModule[] = collectFiles(workerDir).flatMap((filePath) => {
     const relativePath = normalizeWorkerModulePath(relative(workerDir, filePath));
     const type = resolveWorkerModuleType(relativePath);
-    if (!type) return [];
+    if (!type) {
+      return [];
+    }
 
     const file = readFileSync(filePath);
     const contents: PrerenderWorkerModule['contents'] =
@@ -153,8 +155,12 @@ export function collectPrerenderWorkerModules(
   });
 
   modules.sort((a, b) => {
-    if (a.relativePath === normalizedEntry) return -1;
-    if (b.relativePath === normalizedEntry) return 1;
+    if (a.relativePath === normalizedEntry) {
+      return -1;
+    }
+    if (b.relativePath === normalizedEntry) {
+      return 1;
+    }
     return a.relativePath.localeCompare(b.relativePath);
   });
 
@@ -252,7 +258,9 @@ async function createCloudflarePrerenderRunner(options: {
   return {
     async collectPaths(): Promise<string[]> {
       const headers: Record<string, string> = {};
-      if (proxyToken) headers['x-void-internal'] = proxyToken;
+      if (proxyToken) {
+        headers['x-void-internal'] = proxyToken;
+      }
       return readPrerenderPathsResponse(
         await mf.dispatchFetch(`http://localhost${PRERENDER_PATHS_ENDPOINT}`, {
           method: 'POST',
@@ -297,7 +305,9 @@ export async function prerenderPages(options: {
   const runner = await createCloudflarePrerenderRunner(options);
   try {
     const paths = await runner.collectPaths();
-    if (paths.length === 0) return { paths, rendered: [], failed: [] };
+    if (paths.length === 0) {
+      return { paths, rendered: [], failed: [] };
+    }
 
     const result = await renderPrerenderPaths(paths, options.clientDir, (path) =>
       runner.fetchPath(path),
@@ -330,7 +340,9 @@ if (clientDir) {
   try {
     const manifestPath = join(clientDir, ".vite", "manifest.json");
     globalThis.__VITE_MANIFEST__ = JSON.parse(readFileSync(manifestPath, "utf-8"));
-  } catch {}
+  } catch {
+    // Ignore missing manifests so prerender can continue without client assets.
+  }
 }
 
 const appUrl = pathToFileURL(join(ssrDir, "app.js")).href;
@@ -399,7 +411,9 @@ if (mode === "collect") {
         [runnerPath, JSON.stringify(config)],
         { env: { ...process.env, ...env }, cwd: root, maxBuffer: 10 * 1024 * 1024 },
         (error, stdout, stderr) => {
-          if (stderr) process.stderr.write(stderr);
+          if (stderr) {
+            process.stderr.write(stderr);
+          }
           if (error) {
             reject(new Error(`Prerender child process failed: ${error.message}`));
             return;
@@ -415,7 +429,9 @@ if (mode === "collect") {
   } finally {
     try {
       unlinkSync(runnerPath);
-    } catch {}
+    } catch {
+      // Ignore cleanup failures for the temporary prerender runner.
+    }
   }
 }
 

@@ -34,26 +34,44 @@ export function Link({
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function getStrategies(): PrefetchStrategy[] {
-    if (prefetchProp === false) return [];
-    if (prefetchProp === true) return ['hover'];
-    if (typeof prefetchProp === 'string') return [prefetchProp];
+    if (prefetchProp === false) {
+      return [];
+    }
+    if (prefetchProp === true) {
+      return ['hover'];
+    }
+    if (typeof prefetchProp === 'string') {
+      return [prefetchProp];
+    }
     return prefetchProp;
   }
 
   function doPrefetch() {
-    if (!router?.prefetch) return;
+    if (!router?.prefetch) {
+      return;
+    }
     const current = window.location.pathname + window.location.search;
-    if (href === current) return;
+    if (href === current) {
+      return;
+    }
     const options: any = {};
-    if (cacheFor !== undefined) options.cacheFor = cacheFor;
-    if (method) options.method = method;
+    if (cacheFor !== undefined) {
+      options.cacheFor = cacheFor;
+    }
+    if (method) {
+      options.method = method;
+    }
     router.prefetch(href, options);
   }
 
   function onClick(e: MouseEvent) {
-    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) {
+      return;
+    }
     const url = new URL(href, window.location.origin);
-    if (url.origin !== window.location.origin) return;
+    if (url.origin !== window.location.origin) {
+      return;
+    }
 
     e.preventDefault();
     router.visit(href, {
@@ -65,7 +83,6 @@ export function Link({
   }
 
   const strategies = getStrategies();
-  const strategiesKey = strategies.join('|');
 
   function onMouseEnter() {
     if (hoverTimerRef.current) {
@@ -86,10 +103,38 @@ export function Link({
   }
 
   useEffect(() => {
-    if (strategies.length === 0) return;
+    const strategies =
+      prefetchProp === false
+        ? []
+        : prefetchProp === true
+          ? ['hover']
+          : typeof prefetchProp === 'string'
+            ? [prefetchProp]
+            : prefetchProp;
+    if (strategies.length === 0) {
+      return;
+    }
+
+    const prefetch = () => {
+      if (!router?.prefetch) {
+        return;
+      }
+      const current = window.location.pathname + window.location.search;
+      if (href === current) {
+        return;
+      }
+      const options: any = {};
+      if (cacheFor !== undefined) {
+        options.cacheFor = cacheFor;
+      }
+      if (method) {
+        options.method = method;
+      }
+      router.prefetch(href, options);
+    };
 
     if (strategies.includes('mount')) {
-      doPrefetch();
+      prefetch();
     }
 
     let observer: IntersectionObserver | null = null;
@@ -97,7 +142,7 @@ export function Link({
       observer = new IntersectionObserver(
         (entries) => {
           if (entries.some((e) => e.isIntersecting)) {
-            doPrefetch();
+            prefetch();
             observer?.disconnect();
             observer = null;
           }
@@ -116,7 +161,7 @@ export function Link({
         observer.disconnect();
       }
     };
-  }, [cacheFor, href, method, router, strategiesKey]);
+  }, [cacheFor, href, method, prefetchProp, router]);
   const isGet = method.toUpperCase() === 'GET';
 
   const eventHandlers: Record<string, any> = { onClick };

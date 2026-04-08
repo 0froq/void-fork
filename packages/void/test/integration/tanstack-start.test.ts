@@ -71,7 +71,9 @@ describe('playground/tanstack-start dev', () => {
   }, 30_000);
 
   afterAll(async () => {
-    if (child) await killChild(child);
+    if (child) {
+      await killChild(child);
+    }
     if (stderr.includes('error when starting dev server')) {
       throw new Error(stderr);
     }

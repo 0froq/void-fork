@@ -98,7 +98,9 @@ describe('playground/astro dev', () => {
   }, 60_000);
 
   afterAll(async () => {
-    if (child) await killChild(child);
+    if (child) {
+      await killChild(child);
+    }
   });
 
   it('syncs wrangler config with compat flag and inferred bindings', () => {

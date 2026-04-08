@@ -11,7 +11,9 @@ const loading = ref(false);
 const error = ref('');
 
 async function submit() {
-  if (!prompt.value.trim()) return;
+  if (!prompt.value.trim()) {
+    return;
+  }
   loading.value = true;
   response.value = '';
   error.value = '';
@@ -30,18 +32,24 @@ async function submit() {
     }
 
     const reader = res.body?.getReader();
-    if (!reader) return;
+    if (!reader) {
+      return;
+    }
 
     const decoder = new TextDecoder();
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        break;
+      }
       const chunk = decoder.decode(value, { stream: true });
       // Parse SSE lines
       for (const line of chunk.split('\n')) {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
-          if (data === '[DONE]') continue;
+          if (data === '[DONE]') {
+            continue;
+          }
           try {
             const parsed = JSON.parse(data);
             // Workers AI format: { response: "..." }

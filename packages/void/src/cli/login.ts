@@ -52,7 +52,9 @@ export async function runLoginCommand(): Promise<void> {
       outro('To re-login, run `void auth logout` first.');
       return;
     } catch (error) {
-      if (!isExpiredTokenError(error)) throw error;
+      if (!isExpiredTokenError(error)) {
+        throw error;
+      }
 
       if (tokenSource === 'ci') {
         expiredEnvToken = true;

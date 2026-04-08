@@ -59,7 +59,9 @@ export function flattenValidationErrors(body: any): Record<string, string> {
       for (const issue of slotIssue.issues) {
         // path is a dot-joined string from flattenIssues (e.g. "name", "address.city")
         const key = typeof issue.path === 'string' ? issue.path : slotIssue.slot;
-        if (typeof key === 'string') errors[key] = issue.message;
+        if (typeof key === 'string') {
+          errors[key] = issue.message;
+        }
       }
     }
   }
@@ -106,7 +108,9 @@ function streamDeferredResponse(
         ),
       )
       .finally(() => {
-        if (--remaining === 0) writer.close();
+        if (--remaining === 0) {
+          writer.close();
+        }
       });
   }
 
@@ -149,7 +153,9 @@ export async function handlePageGet(
     // as props for backward compat with loaders using c.json().
     if (result instanceof Response && !isConvertedResponse(result)) {
       const ct = result.headers.get('content-type') || '';
-      if (result.status >= 300 || !ct.includes('application/json')) return result;
+      if (result.status >= 300 || !ct.includes('application/json')) {
+        return result;
+      }
     }
     props = await extractProps(result);
   }
@@ -306,7 +312,9 @@ export async function handlePageMutation(
       const rawProps = getHandler ? await extractProps(await getHandler(c)) : {};
       const props = stripDeferred(rawProps);
       const pageObj = buildMutationPageObj(props, e.errors);
-      if (isPagesRequest(c)) return pageJsonResponse(pageObj);
+      if (isPagesRequest(c)) {
+        return pageJsonResponse(pageObj);
+      }
       const assetTags = await getAssetTags(c.req.raw, c.env, componentId);
       return new Response(await renderFn(pageObj, assetTags), {
         headers: { 'content-type': 'text/html; charset=utf-8', ...POWERED_BY },
@@ -319,7 +327,9 @@ export async function handlePageMutation(
   if (result instanceof Response) {
     const status = result.status;
     // Redirect
-    if (status >= 300 && status < 400) return result;
+    if (status >= 300 && status < 400) {
+      return result;
+    }
     // withValidator 400
     if (status === 400) {
       const body = await result.json();
@@ -330,14 +340,18 @@ export async function handlePageMutation(
       const rawProps = getHandler ? await extractProps(await getHandler(c)) : {};
       const props = stripDeferred(rawProps);
       const pageObj = buildMutationPageObj(props, errors);
-      if (isPagesRequest(c)) return pageJsonResponse(pageObj);
+      if (isPagesRequest(c)) {
+        return pageJsonResponse(pageObj);
+      }
       const assetTags = await getAssetTags(c.req.raw, c.env, componentId);
       return new Response(await renderFn(pageObj, assetTags), {
         headers: { 'content-type': 'text/html; charset=utf-8', ...POWERED_BY },
       });
     }
     // 204 (void from withValidator) — fall through to re-run GET
-    if (status !== 204) return result;
+    if (status !== 204) {
+      return result;
+    }
   }
 
   // void — re-run GET with fresh props
@@ -347,7 +361,9 @@ export async function handlePageMutation(
   const rawProps = getHandler ? await extractProps(await getHandler(c)) : {};
   const props = stripDeferred(rawProps);
   const pageObj = buildMutationPageObj(props, null);
-  if (isPagesRequest(c)) return pageJsonResponse(pageObj);
+  if (isPagesRequest(c)) {
+    return pageJsonResponse(pageObj);
+  }
   const assetTags = await getAssetTags(c.req.raw, c.env, componentId);
   return new Response(await renderFn(pageObj, assetTags), {
     headers: { 'content-type': 'text/html; charset=utf-8', ...POWERED_BY },

@@ -26,7 +26,9 @@ export async function scanPages(
   options?: { output?: 'server' | 'static' },
 ): Promise<PageScanResult> {
   const pagesDir = join(root, 'pages');
-  if (!existsSync(pagesDir)) return { pages: [], layouts: [], namedLayouts: [] };
+  if (!existsSync(pagesDir)) {
+    return { pages: [], layouts: [], namedLayouts: [] };
+  }
 
   const pattern = `**/*.{${COMPONENT_EXTENSIONS.join(',')}}`;
   const files = await glob(pattern, { cwd: pagesDir, absolute: false });
@@ -38,7 +40,9 @@ export async function scanPages(
   for (const file of files) {
     const segments = file.split('/');
     // Skip files starting with _ in any segment (except _layouts/)
-    if (segments.some((s) => s.startsWith('_') && s !== '_layouts')) continue;
+    if (segments.some((s) => s.startsWith('_') && s !== '_layouts')) {
+      continue;
+    }
 
     const ext = extname(file);
     let base = basename(file, ext);
@@ -99,7 +103,7 @@ export async function scanPages(
 
     // Check for companion .server.ts — server files never have .island suffix
     let serverPath: string | null = null;
-    let methods: string[] = [];
+    const methods: string[] = [];
     let revalidate: number | undefined;
     let prerender: boolean | undefined;
     let prerenderExplicitlyFalse = false;
@@ -194,16 +198,22 @@ export async function scanPages(
 
   // Sort: static before dynamic, catch-all last
   pages.sort((a, b) => {
-    if (a.catchAll !== b.catchAll) return a.catchAll ? 1 : -1;
+    if (a.catchAll !== b.catchAll) {
+      return a.catchAll ? 1 : -1;
+    }
     const aDynamic = a.pattern.includes(':');
     const bDynamic = b.pattern.includes(':');
-    if (aDynamic !== bDynamic) return aDynamic ? 1 : -1;
+    if (aDynamic !== bDynamic) {
+      return aDynamic ? 1 : -1;
+    }
     return a.pattern.localeCompare(b.pattern);
   });
 
   // Validate: throw when regular pages are under island layouts
   for (const page of pages) {
-    if (page.island) continue;
+    if (page.island) {
+      continue;
+    }
     const dir = dirname(page.componentPath);
     const segments = dir === '.' ? [] : dir.split('/');
     let current = '';
@@ -226,11 +236,15 @@ export async function scanPages(
 
   // Validate named layout references
   for (const page of pages) {
-    if (page.layout === undefined || page.layout === false) continue;
+    if (page.layout === undefined || page.layout === false) {
+      continue;
+    }
     const isExclusive = page.layout.startsWith('!');
     const name = isExclusive ? page.layout.slice(1) : page.layout;
     // Skip relative path layouts
-    if (name.startsWith('.') || name.startsWith('/')) continue;
+    if (name.startsWith('.') || name.startsWith('/')) {
+      continue;
+    }
     if (!resolveNamedLayout(name, page.componentId, namedLayouts)) {
       throw new Error(
         `[void] Page "${page.componentPath}" specifies layout "${page.layout}" but no _layouts/${name}.vue was found in any ancestor directory.`,
@@ -246,7 +260,9 @@ function extractFrontmatterMeta(
   source: string,
 ): { title?: string; description?: string } | undefined {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!match) return undefined;
+  if (!match) {
+    return undefined;
+  }
   const yaml = match[1];
   const title = yaml
     .match(/^title:\s*(.+)$/m)?.[1]
@@ -256,20 +272,28 @@ function extractFrontmatterMeta(
     .match(/^description:\s*(.+)$/m)?.[1]
     ?.trim()
     .replace(/^["']|["']$/g, '');
-  if (!title && !description) return undefined;
+  if (!title && !description) {
+    return undefined;
+  }
   return { title, description };
 }
 
 /** Extract layout field from YAML frontmatter in markdown source. */
 function extractFrontmatterLayout(source: string): string | false | undefined {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!match) return undefined;
+  if (!match) {
+    return undefined;
+  }
   const value = match[1]
     .match(/^layout:\s*(.+)$/m)?.[1]
     ?.trim()
     .replace(/^["']|["']$/g, '');
-  if (!value) return undefined;
-  if (value === 'false') return false;
+  if (!value) {
+    return undefined;
+  }
+  if (value === 'false') {
+    return false;
+  }
   return value;
 }
 

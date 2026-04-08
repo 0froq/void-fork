@@ -26,7 +26,9 @@ export function linkPlugin(md: MarkdownExit, options?: LinkOptions): void {
   ) => {
     const token = tokens[idx];
     const hrefIndex = token.attrIndex('href');
-    if (hrefIndex < 0) return self.renderToken(tokens, idx, mdOptions);
+    if (hrefIndex < 0) {
+      return self.renderToken(tokens, idx, mdOptions);
+    }
 
     const url = token.attrs[hrefIndex][1] as string;
 

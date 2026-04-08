@@ -1101,7 +1101,9 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     let mdHeadRef: string | null = null;
     if (!serverImportPath && page.metadata && (page.metadata.title || page.metadata.description)) {
       const headObj: Record<string, unknown> = {};
-      if (page.metadata.title) headObj.title = page.metadata.title;
+      if (page.metadata.title) {
+        headObj.title = page.metadata.title;
+      }
       if (page.metadata.description) {
         headObj.meta = [{ name: 'description', content: page.metadata.description }];
       }

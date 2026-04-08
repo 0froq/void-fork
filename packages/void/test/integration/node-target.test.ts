@@ -45,7 +45,9 @@ describe('playground/node-app dev', () => {
   }, 30_000);
 
   afterAll(async () => {
-    if (child) await killChild(child);
+    if (child) {
+      await killChild(child);
+    }
     if (stderr.includes('error when starting dev server')) {
       throw new Error(stderr);
     }
@@ -109,7 +111,9 @@ describe('playground/node-app build + production', () => {
   }, 60_000);
 
   afterAll(async () => {
-    if (child) await killChild(child);
+    if (child) {
+      await killChild(child);
+    }
   });
 
   it('emits app.js, index.js, and client assets', () => {

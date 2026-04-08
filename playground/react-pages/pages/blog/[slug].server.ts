@@ -8,7 +8,9 @@ export interface Props {
 export const loader = defineHandler<Props>((c) => {
   const slug = c.req.param('slug');
   const post = POSTS.find((p) => p.slug === slug);
-  if (!post) return c.notFound();
+  if (!post) {
+    return c.notFound();
+  }
   return { post };
 });
 

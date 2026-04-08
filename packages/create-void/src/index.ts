@@ -12,8 +12,12 @@ async function getLatestVersion(pkg: string): Promise<string> {
   try {
     const res = await fetch(`https://registry.npmjs.org/${pkg}/latest`);
     const data = (await res.json()) as { version?: string };
-    if (data.version) return `^${data.version}`;
-  } catch {}
+    if (data.version) {
+      return `^${data.version}`;
+    }
+  } catch {
+    // Empty.
+  }
   return 'latest';
 }
 
@@ -29,7 +33,9 @@ async function main() {
       message: 'Project name:',
       placeholder: 'my-app',
       validate(value) {
-        if (!value?.trim()) return 'Project name is required';
+        if (!value?.trim()) {
+          return 'Project name is required';
+        }
       },
     });
     if (p.isCancel(name)) {

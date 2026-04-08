@@ -82,7 +82,9 @@ describe('playground/kitchen-sink', () => {
   }, 120_000);
 
   afterAll(async () => {
-    if (child) await killChild(child);
+    if (child) {
+      await killChild(child);
+    }
   });
 
   // -- SSR + SPA navigation --

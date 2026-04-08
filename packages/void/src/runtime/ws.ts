@@ -215,7 +215,9 @@ export class VoidSocket<P extends keyof WebSocketRouteMap & string> {
           wasClean: event.wasClean,
         });
 
-        if (this.closedByUser || this.options.reconnect === false) return;
+        if (this.closedByUser || this.options.reconnect === false) {
+          return;
+        }
         if (
           this.options.maxReconnectAttempts != null &&
           this.reconnectAttempts >= this.options.maxReconnectAttempts
@@ -255,7 +257,9 @@ export class VoidSocket<P extends keyof WebSocketRouteMap & string> {
 }
 
 function resolveBaseUrl(baseURL?: string): URL {
-  if (baseURL) return new URL(baseURL);
+  if (baseURL) {
+    return new URL(baseURL);
+  }
   const location = (globalThis as { location?: { href: string } }).location;
   if (!location) {
     throw new Error('connect() requires a browser-like runtime or an explicit "baseURL"');

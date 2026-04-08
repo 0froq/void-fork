@@ -22,7 +22,9 @@ export async function action<U extends ActionUrl & string>(
     ? [data?: ResolveActionBody<U>, options?: ActionOptions<U>]
     : [data?: ResolveActionBody<U>]
 ): Promise<void> {
-  if (!_router) throw new Error('action() called before router initialized');
+  if (!_router) {
+    throw new Error('action() called before router initialized');
+  }
 
   const data = args[0];
   const options = args[1] as ActionOptions<U> | undefined;

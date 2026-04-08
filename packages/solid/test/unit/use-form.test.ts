@@ -21,11 +21,11 @@ describe('useForm core logic', () => {
 
     let data = { ...formDefaults };
     let errors: Record<string, string> = {};
-    let processing = false;
-    let wasSuccessful = false;
-    let recentlySuccessful = false;
+    const processing = false;
+    const wasSuccessful = false;
+    const recentlySuccessful = false;
 
-    let defaults_ = { ...formDefaults };
+    const defaults_ = { ...formDefaults };
 
     function isDirty() {
       return Object.keys(defaults_).some(

@@ -102,7 +102,9 @@ async function pushNext(
   total: number,
 ) {
   const state = readState(socket);
-  if (state.streamId !== streamId) return;
+  if (state.streamId !== streamId) {
+    return;
+  }
 
   await socket.send({
     type: 'notifications.item',

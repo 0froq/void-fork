@@ -48,7 +48,9 @@ export async function getAppliedMigrations(dbPath: string): Promise<AppliedMigra
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_migrations'")
       .get();
 
-    if (!table) return [];
+    if (!table) {
+      return [];
+    }
 
     return db
       .prepare('SELECT name, applied_at FROM _migrations ORDER BY name')

@@ -27,7 +27,9 @@ afterEach(() => {
 
 async function runConfigureServer(plugin: ReturnType<typeof migrationPlugin>) {
   const hook = plugin.configureServer as any;
-  if (!hook) return;
+  if (!hook) {
+    return;
+  }
   if (typeof hook === 'function') {
     await hook.call({} as any, {} as any);
     return;

@@ -60,11 +60,17 @@ export function useForm(
   const [localErrors, setLocalErrors] = createSignal<Record<string, string>>({});
   const errors = createMemo(() => {
     const local = localErrors();
-    if (Object.keys(local).length > 0) return local;
+    if (Object.keys(local).length > 0) {
+      return local;
+    }
     // globalErrors is a signal accessor (function) on the client, or a plain
     // object on the server. Handle both cases.
-    if (!globalErrors) return {};
-    if (typeof globalErrors === 'function') return globalErrors();
+    if (!globalErrors) {
+      return {};
+    }
+    if (typeof globalErrors === 'function') {
+      return globalErrors();
+    }
     return globalErrors as unknown as Record<string, string>;
   });
   const [processing, setProcessing] = createSignal(false);
@@ -112,7 +118,9 @@ export function useForm(
     setProcessing(true);
     setWasSuccessful(false);
     setRecentlySuccessful(false);
-    if (successTimeout) clearTimeout(successTimeout);
+    if (successTimeout) {
+      clearTimeout(successTimeout);
+    }
     setLocalErrors({});
 
     try {

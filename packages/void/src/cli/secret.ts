@@ -96,7 +96,9 @@ export function parseDotenvFile(filePath: string): Array<{ name: string; value: 
 
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
 
     const eqIndex = trimmed.indexOf('=');
     if (eqIndex === -1) {

@@ -49,7 +49,9 @@ describe('playground/ssr dev', () => {
   }, 30_000);
 
   afterAll(async () => {
-    if (child) await killChild(child);
+    if (child) {
+      await killChild(child);
+    }
     if (stderr.includes('error when starting dev server')) {
       throw new Error(stderr);
     }
@@ -115,7 +117,9 @@ describe('playground/ssr build + preview', () => {
   }, 60_000);
 
   afterAll(async () => {
-    if (child) await killChild(child);
+    if (child) {
+      await killChild(child);
+    }
     if (stderr.includes('error when starting preview server')) {
       throw new Error(stderr);
     }

@@ -112,30 +112,42 @@ export const selectedAdapter = ref(
 export function syncCodeGroups(title: string) {
   document.querySelectorAll('.vp-code-group').forEach((group) => {
     const label = group.querySelector(`.tabs label[data-title="${title}"]`);
-    if (!label) return;
+    if (!label) {
+      return;
+    }
     const input = group.querySelector(
       `#${CSS.escape(label.getAttribute('for')!)}`,
     ) as HTMLInputElement | null;
-    if (!input || input.checked) return;
+    if (!input || input.checked) {
+      return;
+    }
     const i = Array.from(group.querySelectorAll('.tabs input')).indexOf(input);
     const blocks = group.querySelector('.blocks');
-    if (!blocks || i < 0) return;
+    if (!blocks || i < 0) {
+      return;
+    }
     input.checked = true;
     const current = blocks.querySelector('.active');
-    if (current) current.classList.remove('active');
+    if (current) {
+      current.classList.remove('active');
+    }
     blocks.children[i]?.classList.add('active');
   });
 }
 
 let codeGroupListenerInstalled = false;
 export function installCodeGroupListener() {
-  if (codeGroupListenerInstalled) return;
+  if (codeGroupListenerInstalled) {
+    return;
+  }
   codeGroupListenerInstalled = true;
   window.addEventListener('click', (e) => {
     const label = (e.target as Element)?.closest?.(
       '.vp-code-group .tabs label',
     ) as HTMLElement | null;
-    if (!label) return;
+    if (!label) {
+      return;
+    }
     const title = label.getAttribute('data-title');
     if (title && (adapters as readonly string[]).includes(title)) {
       selectedAdapter.value = title;
@@ -151,16 +163,36 @@ const iconSize = { width: '16px', height: '16px', flexShrink: '0' };
 
 function getFileIcon(name: string, dark: boolean): string {
   const light = dark ? '' : 'light-';
-  if (name === 'vite.config.ts') return `vscode-icons:file-type-${light}vite`;
-  if (name.endsWith('.d.ts')) return 'vscode-icons:file-type-typescriptdef';
-  if (name.endsWith('.ts')) return 'vscode-icons:file-type-typescript';
-  if (name.endsWith('.vue')) return 'vscode-icons:file-type-vue';
-  if (name.endsWith('.tsx')) return 'vscode-icons:file-type-reactts';
-  if (name.endsWith('.svelte')) return 'vscode-icons:file-type-svelte';
-  if (name.endsWith('.sql')) return 'vscode-icons:file-type-sql';
-  if (name.endsWith('.json')) return `vscode-icons:file-type-${light}json`;
-  if (name === '.env') return 'vscode-icons:file-type-dotenv';
-  if (name.endsWith('.ico')) return 'vscode-icons:file-type-favicon';
+  if (name === 'vite.config.ts') {
+    return `vscode-icons:file-type-${light}vite`;
+  }
+  if (name.endsWith('.d.ts')) {
+    return 'vscode-icons:file-type-typescriptdef';
+  }
+  if (name.endsWith('.ts')) {
+    return 'vscode-icons:file-type-typescript';
+  }
+  if (name.endsWith('.vue')) {
+    return 'vscode-icons:file-type-vue';
+  }
+  if (name.endsWith('.tsx')) {
+    return 'vscode-icons:file-type-reactts';
+  }
+  if (name.endsWith('.svelte')) {
+    return 'vscode-icons:file-type-svelte';
+  }
+  if (name.endsWith('.sql')) {
+    return 'vscode-icons:file-type-sql';
+  }
+  if (name.endsWith('.json')) {
+    return `vscode-icons:file-type-${light}json`;
+  }
+  if (name === '.env') {
+    return 'vscode-icons:file-type-dotenv';
+  }
+  if (name.endsWith('.ico')) {
+    return 'vscode-icons:file-type-favicon';
+  }
   return 'lucide:file';
 }
 

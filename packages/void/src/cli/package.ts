@@ -63,7 +63,9 @@ function createAssetsIgnoreFunction(dir: string): {
  * but doesn't exclude _worker.js, the user intentionally wants to upload it).
  */
 function checkWorkerJsAsset(relativePath: string, assetsIgnoreFilePresent: boolean): void {
-  if (assetsIgnoreFilePresent) return;
+  if (assetsIgnoreFilePresent) {
+    return;
+  }
   const name = relativePath.startsWith('/') ? relativePath.slice(1) : relativePath;
   if (name === '_worker.js' || name.startsWith('_worker.js/')) {
     const type = name === '_worker.js' ? 'file' : 'directory';
@@ -97,7 +99,9 @@ export function collectAndHashAssets(dir: string): {
     const files = collectFiles(dir);
     for (const filePath of files) {
       const relativePath = '/' + toSlash(relative(dir, filePath));
-      if (isIgnored(relativePath)) continue;
+      if (isIgnored(relativePath)) {
+        continue;
+      }
       checkWorkerJsAsset(relativePath, assetsIgnoreFilePresent);
       const content = readFileSync(filePath);
       assetManifest[relativePath] = {
@@ -129,7 +133,9 @@ export function appendAssets(
   neededPaths: Set<string> | null,
 ): void {
   for (const [path, content] of assetFiles) {
-    if (neededPaths && !neededPaths.has(path)) continue;
+    if (neededPaths && !neededPaths.has(path)) {
+      continue;
+    }
     const key = path.startsWith('/') ? path.slice(1) : path;
     formData.append(`asset:${key}`, new Blob([new Uint8Array(content)]), key);
   }
@@ -158,7 +164,9 @@ export interface PackageOptions {
 function toWebSocketManifest(
   routes: WebSocketRouteDefinition[] | undefined,
 ): WebSocketManifestMeta | undefined {
-  if (!routes || routes.length === 0) return undefined;
+  if (!routes || routes.length === 0) {
+    return undefined;
+  }
   return {
     routes: routes.map((route) => ({
       pattern: route.pattern,
@@ -196,7 +204,9 @@ export function packageBuild(
 
   // Build manifest from inferred bindings
   const manifest: DeployManifest = { version: 3, bindings: {} };
-  if (bindings.needsAuth) manifest.auth = true;
+  if (bindings.needsAuth) {
+    manifest.auth = true;
+  }
   const hasMigrations = migrations && migrations.length > 0;
   if (bindings.needsD1 || bindings.needsAuth || hasMigrations) {
     if (dialect === 'postgresql') {
@@ -205,9 +215,15 @@ export function packageBuild(
       manifest.bindings.d1 = [options?.bindingNames?.d1 ?? 'DB'];
     }
   }
-  if (bindings.needsKV) manifest.bindings.kv = [options?.bindingNames?.kv ?? 'KV'];
-  if (bindings.needsR2) manifest.bindings.r2 = [options?.bindingNames?.r2 ?? 'STORAGE'];
-  if (bindings.needsAI) manifest.bindings.ai = true;
+  if (bindings.needsKV) {
+    manifest.bindings.kv = [options?.bindingNames?.kv ?? 'KV'];
+  }
+  if (bindings.needsR2) {
+    manifest.bindings.r2 = [options?.bindingNames?.r2 ?? 'STORAGE'];
+  }
+  if (bindings.needsAI) {
+    manifest.bindings.ai = true;
+  }
 
   // Add migration metadata to manifest + SQL content as FormData entries
   if (migrations && migrations.length > 0) {
@@ -288,7 +304,9 @@ export function packageBuild(
   const workerFiles = collectFiles(workerDir);
   for (const filePath of workerFiles) {
     const relativePath = toSlash(relative(workerDir, filePath));
-    if (!isWorkerModule(relativePath)) continue;
+    if (!isWorkerModule(relativePath)) {
+      continue;
+    }
     const content = readFileSync(filePath);
     formData.append(`worker:${relativePath}`, new Blob([content]), relativePath);
   }
@@ -300,9 +318,13 @@ export function packageBuild(
     const clientFiles = collectFiles(clientDir);
     for (const filePath of clientFiles) {
       const relativePath = toSlash(relative(clientDir, filePath));
-      if (isIgnored('/' + relativePath)) continue;
+      if (isIgnored('/' + relativePath)) {
+        continue;
+      }
       checkWorkerJsAsset(relativePath, assetsIgnoreFilePresent);
-      if (neededAssets && !neededAssets.has('/' + relativePath)) continue;
+      if (neededAssets && !neededAssets.has('/' + relativePath)) {
+        continue;
+      }
       const content = readFileSync(filePath);
       formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
     }
@@ -314,7 +336,9 @@ export function packageBuild(
     }
   }
 
-  if (neededAssets) formData.append('preflight', 'true');
+  if (neededAssets) {
+    formData.append('preflight', 'true');
+  }
 
   return formData;
 }
@@ -359,14 +383,20 @@ export function packageStaticBuild(
   const files = collectFiles(outputDir);
   for (const filePath of files) {
     const relativePath = toSlash(relative(outputDir, filePath));
-    if (isIgnored('/' + relativePath)) continue;
+    if (isIgnored('/' + relativePath)) {
+      continue;
+    }
     checkWorkerJsAsset(relativePath, assetsIgnoreFilePresent);
-    if (neededAssets && !neededAssets.has('/' + relativePath)) continue;
+    if (neededAssets && !neededAssets.has('/' + relativePath)) {
+      continue;
+    }
     const content = readFileSync(filePath);
     formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
   }
 
-  if (neededAssets) formData.append('preflight', 'true');
+  if (neededAssets) {
+    formData.append('preflight', 'true');
+  }
 
   return formData;
 }
@@ -413,9 +443,15 @@ export function packageFrameworkBuild(opts: {
       manifest.bindings.d1 = [po?.bindingNames?.d1 ?? 'DB'];
     }
   }
-  if (opts.bindings.needsKV) manifest.bindings.kv = [po?.bindingNames?.kv ?? 'KV'];
-  if (opts.bindings.needsR2) manifest.bindings.r2 = [po?.bindingNames?.r2 ?? 'STORAGE'];
-  if (opts.bindings.needsAI) manifest.bindings.ai = true;
+  if (opts.bindings.needsKV) {
+    manifest.bindings.kv = [po?.bindingNames?.kv ?? 'KV'];
+  }
+  if (opts.bindings.needsR2) {
+    manifest.bindings.r2 = [po?.bindingNames?.r2 ?? 'STORAGE'];
+  }
+  if (opts.bindings.needsAI) {
+    manifest.bindings.ai = true;
+  }
 
   if (opts.migrations && opts.migrations.length > 0) {
     manifest.migrations = {
@@ -427,18 +463,32 @@ export function packageFrameworkBuild(opts: {
     }
   }
 
-  if (opts.schedules && opts.schedules.length > 0) manifest.schedules = opts.schedules;
-  if (opts.queues && opts.queues.length > 0) manifest.queues = opts.queues;
-  if (opts.revalidate != null && opts.revalidate !== 0) manifest.revalidate = opts.revalidate;
-  if (opts.prerender && opts.prerender.length > 0) manifest.prerender = opts.prerender;
-  if (opts.assetConfig) manifest.assetConfig = opts.assetConfig;
-  if (opts.vars && Object.keys(opts.vars).length > 0) manifest.vars = opts.vars;
+  if (opts.schedules && opts.schedules.length > 0) {
+    manifest.schedules = opts.schedules;
+  }
+  if (opts.queues && opts.queues.length > 0) {
+    manifest.queues = opts.queues;
+  }
+  if (opts.revalidate != null && opts.revalidate !== 0) {
+    manifest.revalidate = opts.revalidate;
+  }
+  if (opts.prerender && opts.prerender.length > 0) {
+    manifest.prerender = opts.prerender;
+  }
+  if (opts.assetConfig) {
+    manifest.assetConfig = opts.assetConfig;
+  }
+  if (opts.vars && Object.keys(opts.vars).length > 0) {
+    manifest.vars = opts.vars;
+  }
 
   manifest.ssr = true;
   manifest.framework = opts.frameworkName;
   manifest.type = 'framework';
   manifest.workerMain = po?.workerMain ?? opts.workerMain;
-  if (po?.compatibilityDate) manifest.compatibilityDate = po.compatibilityDate;
+  if (po?.compatibilityDate) {
+    manifest.compatibilityDate = po.compatibilityDate;
+  }
   if (po?.compatibilityFlags && po.compatibilityFlags.length > 0) {
     manifest.compatibilityFlags = po.compatibilityFlags;
   }
@@ -472,7 +522,9 @@ export function packageFrameworkBuild(opts: {
   const workerFiles = collectFiles(opts.workerDir);
   for (const filePath of workerFiles) {
     const relativePath = toSlash(relative(opts.workerDir, filePath));
-    if (!isWorkerModule(relativePath)) continue;
+    if (!isWorkerModule(relativePath)) {
+      continue;
+    }
     const content = readFileSync(filePath);
     formData.append(`worker:${relativePath}`, new Blob([content]), relativePath);
   }
@@ -483,11 +535,17 @@ export function packageFrameworkBuild(opts: {
     const assetFiles = collectFiles(opts.assetsDir);
     for (const filePath of assetFiles) {
       // Skip worker files when workerDir overlaps with assetsDir
-      if (isOverlap && filePath.replace(/\\/g, '/').startsWith(workerDirNorm)) continue;
+      if (isOverlap && filePath.replace(/\\/g, '/').startsWith(workerDirNorm)) {
+        continue;
+      }
       const relativePath = toSlash(relative(opts.assetsDir, filePath));
-      if (isIgnored('/' + relativePath)) continue;
+      if (isIgnored('/' + relativePath)) {
+        continue;
+      }
       checkWorkerJsAsset(relativePath, assetsIgnoreFilePresent);
-      if (opts.neededAssets && !opts.neededAssets.has('/' + relativePath)) continue;
+      if (opts.neededAssets && !opts.neededAssets.has('/' + relativePath)) {
+        continue;
+      }
       const content = readFileSync(filePath);
       formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
     }
@@ -499,7 +557,9 @@ export function packageFrameworkBuild(opts: {
     }
   }
 
-  if (opts.neededAssets) formData.append('preflight', 'true');
+  if (opts.neededAssets) {
+    formData.append('preflight', 'true');
+  }
 
   return formData;
 }
@@ -511,9 +571,13 @@ export function packageFrameworkBuild(opts: {
 function isWorkerModule(relativePath: string): boolean {
   const norm = relativePath.replace(/\\/g, '/');
   // Skip build metadata at any depth
-  if (norm.includes('/.vite/') || norm.startsWith('.vite/')) return false;
+  if (norm.includes('/.vite/') || norm.startsWith('.vite/')) {
+    return false;
+  }
   // Skip wrangler config
-  if (norm === 'wrangler.json' || norm === 'wrangler.jsonc') return false;
+  if (norm === 'wrangler.json' || norm === 'wrangler.jsonc') {
+    return false;
+  }
   // Only include CF-compatible module extensions
   return /\.(js|mjs|cjs|wasm|map|txt)$/.test(norm);
 }

@@ -454,7 +454,9 @@ export function isNodeTarget(target: VoidConfig['target']): boolean {
 export function resolveBindingNames(
   bindings: InferenceConfig['bindings'],
 ): { d1?: string; kv?: string; r2?: string } | undefined {
-  if (!bindings) return undefined;
+  if (!bindings) {
+    return undefined;
+  }
   const names: { d1?: string; kv?: string; r2?: string } = {};
   let hasCustom = false;
   if (typeof bindings.db === 'string') {
@@ -488,7 +490,9 @@ export function getDatabaseDialect(config: VoidConfig): DatabaseDialect {
 export function convertHeadersConfig(
   headers: Record<string, string[]> | undefined,
 ): HeaderRule[] | undefined {
-  if (!headers) return undefined;
+  if (!headers) {
+    return undefined;
+  }
 
   const rules: HeaderRule[] = [];
 
@@ -496,7 +500,9 @@ export function convertHeadersConfig(
     const parsed: [string, string][] = [];
     for (const entry of values) {
       const colonIdx = entry.indexOf(':');
-      if (colonIdx === -1) continue;
+      if (colonIdx === -1) {
+        continue;
+      }
       const name = entry.slice(0, colonIdx).trim();
       const value = entry.slice(colonIdx + 1).trim();
       if (name) {
@@ -521,7 +527,9 @@ export function convertHeadersConfig(
 export function convertRedirectsConfig(
   redirects: Record<string, RedirectDestination> | undefined,
 ): RedirectRule[] | undefined {
-  if (!redirects) return undefined;
+  if (!redirects) {
+    return undefined;
+  }
 
   const rules: RedirectRule[] = [];
   for (const [source, dest] of Object.entries(redirects)) {

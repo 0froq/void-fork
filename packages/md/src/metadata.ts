@@ -6,7 +6,9 @@ import type { Heading } from './compile';
 let metadataCompiler: MarkdownExit | null = null;
 
 function getMetadataCompiler(): MarkdownExit {
-  if (metadataCompiler) return metadataCompiler;
+  if (metadataCompiler) {
+    return metadataCompiler;
+  }
   const md = new MarkdownExit({ html: true, linkify: true });
   // @ts-expect-error markdown-it-anchor types reference @types/markdown-it, structurally incompatible with markdown-exit
   md.use(anchor, {

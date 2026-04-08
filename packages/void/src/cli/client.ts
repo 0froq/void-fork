@@ -9,7 +9,9 @@ type PlatformErrorPayload = {
 function parsePlatformErrorBody(body: string): PlatformErrorPayload | null {
   try {
     const parsed = JSON.parse(body);
-    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
     return parsed as PlatformErrorPayload;
   } catch {
     return null;
@@ -220,14 +222,18 @@ export class PlatformClient {
 
       if (!res.ok) {
         const error = new PlatformApiError('Preflight failed', res.status, await res.text());
-        if (isExpiredTokenError(error)) throw error;
+        if (isExpiredTokenError(error)) {
+          throw error;
+        }
         // Preflight not supported or error — fall back to uploading everything
         return { needed: Object.keys(assetManifest), total, skipped: 0 };
       }
 
       return res.json();
     } catch (error) {
-      if (isExpiredTokenError(error)) throw error;
+      if (isExpiredTokenError(error)) {
+        throw error;
+      }
       // Network error — fall back to uploading everything
       return { needed: Object.keys(assetManifest), total, skipped: 0 };
     }
@@ -252,7 +258,9 @@ export class PlatformClient {
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        break;
+      }
       buffer += decoder.decode(value, { stream: true });
 
       let newlineIdx;
@@ -467,7 +475,9 @@ export class PlatformClient {
       since,
       limit: String(limit),
     });
-    if (deploymentId) params.set('deploymentId', deploymentId);
+    if (deploymentId) {
+      params.set('deploymentId', deploymentId);
+    }
 
     const res = await fetch(`${this.baseUrl}/projects/${projectId}/logs?${params}`, {
       headers: {

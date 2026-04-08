@@ -97,7 +97,9 @@ export default function ChatPage({ initialRoom, initialName }: Props) {
 
   const sendMessage = () => {
     const text = draft.trim();
-    if (!text) return;
+    if (!text) {
+      return;
+    }
     send({ type: 'chat.message', text });
     setDraft('');
   };

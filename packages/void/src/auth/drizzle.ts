@@ -59,12 +59,16 @@ function resolveEmailAndPassword(
 function resolvePlaceholderSocialProviders(
   configuredProviders: readonly VoidAuthProvider[] | null,
 ): BetterAuthOptions['socialProviders'] | undefined {
-  if (!configuredProviders) return undefined;
+  if (!configuredProviders) {
+    return undefined;
+  }
 
   const providers: Record<string, { clientId: string; clientSecret: string }> = {};
 
   for (const provider of configuredProviders) {
-    if (!isVoidSocialAuthProvider(provider)) continue;
+    if (!isVoidSocialAuthProvider(provider)) {
+      continue;
+    }
     providers[provider] = {
       clientId: `void-${provider}-client-id`,
       clientSecret: `void-${provider}-client-secret`,
@@ -80,7 +84,9 @@ function resolveSchemaUserConfig(
   dialect: 'sqlite' | 'postgresql',
   env: Record<string, unknown>,
 ): BetterAuthOptions {
-  if (!userConfig) return defaults;
+  if (!userConfig) {
+    return defaults;
+  }
 
   if (typeof userConfig === 'function') {
     return userConfig({
@@ -116,8 +122,12 @@ function resolveSchemaOptions(
 
 function resolveIdStrategy(options: BetterAuthOptions): AuthIdStrategy {
   const generateId = options.advanced?.database?.generateId;
-  if (generateId === 'serial') return 'serial';
-  if (generateId === 'uuid') return 'uuid';
+  if (generateId === 'serial') {
+    return 'serial';
+  }
+  if (generateId === 'uuid') {
+    return 'uuid';
+  }
   return 'text';
 }
 
@@ -143,7 +153,9 @@ function resolveReferenceFieldName(
   model: string,
   field: string,
 ): string {
-  if (field === 'id') return 'id';
+  if (field === 'id') {
+    return 'id';
+  }
   const referencedField = schema[model]?.fields[field];
   return referencedField ? resolveFieldName(field, referencedField) : field;
 }
@@ -158,8 +170,12 @@ function createColumnBuilder(
 
   if (dialect === 'postgresql') {
     if (useIdType) {
-      if (idStrategy === 'serial') return `integer(${JSON.stringify(fieldName)})`;
-      if (idStrategy === 'uuid') return `uuid(${JSON.stringify(fieldName)})`;
+      if (idStrategy === 'serial') {
+        return `integer(${JSON.stringify(fieldName)})`;
+      }
+      if (idStrategy === 'uuid') {
+        return `uuid(${JSON.stringify(fieldName)})`;
+      }
       return `text(${JSON.stringify(fieldName)})`;
     }
     if (Array.isArray(field.type)) {
@@ -185,7 +201,9 @@ function createColumnBuilder(
   }
 
   if (useIdType) {
-    if (idStrategy === 'serial') return `integer(${JSON.stringify(fieldName)})`;
+    if (idStrategy === 'serial') {
+      return `integer(${JSON.stringify(fieldName)})`;
+    }
     return `text(${JSON.stringify(fieldName)})`;
   }
   if (Array.isArray(field.type)) {
@@ -258,19 +276,29 @@ function collectCoreImports(
 ): string[] {
   const imports = new Set<string>([dialect === 'postgresql' ? 'pgTable' : 'sqliteTable', 'text']);
 
-  if (idStrategy === 'serial') imports.add('integer');
-  if (idStrategy === 'uuid' && dialect === 'postgresql') imports.add('uuid');
+  if (idStrategy === 'serial') {
+    imports.add('integer');
+  }
+  if (idStrategy === 'uuid' && dialect === 'postgresql') {
+    imports.add('uuid');
+  }
 
   for (const [, table] of Object.entries(schema)) {
     for (const [defaultFieldName, field] of Object.entries(table.fields)) {
       const actualFieldName = resolveFieldName(defaultFieldName, field);
       if (actualFieldName === 'id' || field.references?.field === 'id') {
-        if (idStrategy === 'serial') imports.add('integer');
-        if (idStrategy === 'uuid' && dialect === 'postgresql') imports.add('uuid');
+        if (idStrategy === 'serial') {
+          imports.add('integer');
+        }
+        if (idStrategy === 'uuid' && dialect === 'postgresql') {
+          imports.add('uuid');
+        }
         continue;
       }
 
-      if (field.index) imports.add('index');
+      if (field.index) {
+        imports.add('index');
+      }
 
       if (Array.isArray(field.type) || field.type === 'string') {
         imports.add('text');
@@ -290,7 +318,9 @@ function collectCoreImports(
       }
       if (field.type === 'number') {
         imports.add('integer');
-        if (field.bigint && dialect === 'postgresql') imports.add('bigint');
+        if (field.bigint && dialect === 'postgresql') {
+          imports.add('bigint');
+        }
       }
     }
   }

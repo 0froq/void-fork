@@ -49,7 +49,9 @@ export async function runLocalVoidAuthMigrations(
     typeof env.DATABASE_URL === 'string' && env.DATABASE_URL.length > 0
       ? env.DATABASE_URL
       : undefined;
-  if (!connectionString) return;
+  if (!connectionString) {
+    return;
+  }
 
   const { Client } = await import('pg');
   const client = new Client({ connectionString });

@@ -13,7 +13,9 @@ export function setShowTimestamp(value: boolean): void {
 }
 
 function prefix(): string {
-  if (!showTimestamp) return tag;
+  if (!showTimestamp) {
+    return tag;
+  }
   return `\x1b[2m${timeFormat.format()}\x1b[22m ${tag}`;
 }
 

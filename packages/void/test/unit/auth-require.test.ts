@@ -5,7 +5,9 @@ import { requireAuth, type AuthUser } from '../../src/runtime/auth';
 function mockContext(user: AuthUser | null) {
   return {
     get(key: string) {
-      if (key === 'user') return user;
+      if (key === 'user') {
+        return user;
+      }
       return undefined;
     },
   } as any;

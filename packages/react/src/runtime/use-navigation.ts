@@ -9,7 +9,9 @@ export function useNavigation(onStart?: () => void, onEnd?: () => void): void {
   endRef.current = onEnd;
 
   useEffect(() => {
-    if (!router) return;
+    if (!router) {
+      return;
+    }
     return router.onNavigation(
       () => startRef.current?.(),
       () => endRef.current?.(),

@@ -153,12 +153,12 @@ describe('fetchStream', () => {
       headers: new Headers(),
     } as any);
 
-    // eslint-disable-next-line no-empty -- consume the generator
     for await (const _ of fetchStream('/api/chat', {
       method: 'POST',
       body: { messages: [] },
       headers: { 'x-custom': 'value' },
     })) {
+      // Consume the generator to exhaust the mocked stream.
     }
 
     expect(ofetch.raw).toHaveBeenCalledWith('/api/chat', {

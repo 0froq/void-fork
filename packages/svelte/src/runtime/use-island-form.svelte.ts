@@ -42,7 +42,9 @@ export function useIslandForm(defaults: Record<string, unknown>): any {
     processing = true;
     wasSuccessful = false;
     recentlySuccessful = false;
-    if (successTimeout) clearTimeout(successTimeout);
+    if (successTimeout) {
+      clearTimeout(successTimeout);
+    }
     clearErrors();
 
     try {
@@ -67,7 +69,9 @@ export function useIslandForm(defaults: Record<string, unknown>): any {
         window.location.reload();
       } else if (response.status === 422) {
         const body = (await response.json()) as { errors?: Record<string, string> };
-        if (body?.errors) Object.assign(errors, body.errors);
+        if (body?.errors) {
+          Object.assign(errors, body.errors);
+        }
       }
     } catch {
       // Request failed

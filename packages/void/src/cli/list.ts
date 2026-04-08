@@ -78,7 +78,9 @@ async function showDeployments(
 
   console.log(prefix);
   console.log(header);
-  for (const line of lines) console.log(line);
+  for (const line of lines) {
+    console.log(line);
+  }
   outro(`${slug} — ${deployments.length} deployment(s)`);
 }
 
@@ -94,10 +96,18 @@ interface DeploymentRow {
 }
 
 function computeDisplayStatus(d: DeploymentResponse, activeDeploymentId: string | null): string {
-  if (d.status === 'failed') return 'failed';
-  if (d.status !== 'live') return d.status;
-  if (d.id === activeDeploymentId) return 'live';
-  if (d.retained) return 'retained';
+  if (d.status === 'failed') {
+    return 'failed';
+  }
+  if (d.status !== 'live') {
+    return d.status;
+  }
+  if (d.id === activeDeploymentId) {
+    return 'live';
+  }
+  if (d.retained) {
+    return 'retained';
+  }
   return 'evicted';
 }
 
@@ -152,16 +162,24 @@ function formatRelativeTime(iso: string): string {
   const then = new Date(iso).getTime();
   const diffMs = now - then;
 
-  if (diffMs < 0) return 'just now';
+  if (diffMs < 0) {
+    return 'just now';
+  }
 
   const seconds = Math.floor(diffMs / 1000);
-  if (seconds < 60) return 'just now';
+  if (seconds < 60) {
+    return 'just now';
+  }
 
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
 
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
 
   const days = Math.floor(hours / 24);
   return `${days}d ago`;

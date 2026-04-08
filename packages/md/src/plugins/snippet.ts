@@ -33,7 +33,9 @@ function dedent(text: string): string {
   const lines = text.split('\n');
   const minIndent = lines.reduce((acc, line) => {
     for (let i = 0; i < line.length; i++) {
-      if (line[i] !== ' ' && line[i] !== '\t') return Math.min(i, acc);
+      if (line[i] !== ' ' && line[i] !== '\t') {
+        return Math.min(i, acc);
+      }
     }
     return acc;
   }, Infinity);
@@ -86,12 +88,18 @@ export function snippetPlugin(md: MarkdownExit, srcDir?: string): void {
   const parser = (state: any, startLine: number, _endLine: number, silent: boolean): boolean => {
     const pos = state.bMarks[startLine] + state.tShift[startLine];
     const max = state.eMarks[startLine];
-    if (state.sCount[startLine] - state.blkIndent >= 4) return false;
+    if (state.sCount[startLine] - state.blkIndent >= 4) {
+      return false;
+    }
     for (let i = 0; i < 3; ++i) {
       const ch = state.src.charCodeAt(pos + i);
-      if (ch !== CH || pos + i >= max) return false;
+      if (ch !== CH || pos + i >= max) {
+        return false;
+      }
     }
-    if (silent) return true;
+    if (silent) {
+      return true;
+    }
 
     const start = pos + 3;
     const end = state.skipSpacesBack(max, pos);
@@ -121,7 +129,9 @@ export function snippetPlugin(md: MarkdownExit, srcDir?: string): void {
     const [tokens, idx] = args;
     const token = tokens[idx];
     const [src, regionName] = token.src ?? [];
-    if (!src) return (fence as Function)(...args);
+    if (!src) {
+      return (fence as Function)(...args);
+    }
 
     if (!existsSync(src) || !statSync(src).isFile()) {
       token.content = `Code snippet path not found: ${src}`;

@@ -85,10 +85,15 @@ export function promptSubcommand(
 
     function render() {
       clear();
-      if (phase === 'select') renderSelect();
-      else if (phase === 'flags') renderFlags();
-      else if (phase === 'multi-select') renderMultiSelect();
-      else renderRepeatInput();
+      if (phase === 'select') {
+        renderSelect();
+      } else if (phase === 'flags') {
+        renderFlags();
+      } else if (phase === 'multi-select') {
+        renderMultiSelect();
+      } else {
+        renderRepeatInput();
+      }
     }
 
     const title = command ? `void ${command}` : 'void';
@@ -253,7 +258,9 @@ export function promptSubcommand(
     // --- Lifecycle ---
 
     function cleanup() {
-      if (resolved) return;
+      if (resolved) {
+        return;
+      }
       resolved = true;
       stdin.setRawMode(wasRaw);
       stdin.pause();
@@ -267,11 +274,15 @@ export function promptSubcommand(
 
       if (result) {
         let summary = result.subcommand;
-        if (result.arg) summary += ` ${result.arg}`;
+        if (result.arg) {
+          summary += ` ${result.arg}`;
+        }
         if (result.flags) {
           for (const [flag, value] of Object.entries(result.flags)) {
             summary += ` ${flag}`;
-            if (typeof value === 'string') summary += ` ${value}`;
+            if (typeof value === 'string') {
+              summary += ` ${value}`;
+            }
           }
         }
         if (result.extraArgs && result.extraArgs.length > 0) {
@@ -357,7 +368,9 @@ export function promptSubcommand(
       // Enter
       if (key === '\r' || key === '\n') {
         const argRequired = focused.arg && focused.arg.startsWith('<');
-        if (argRequired && input.length === 0) return;
+        if (argRequired && input.length === 0) {
+          return;
+        }
         selectedSub = focused;
         selectedArg = focused.arg ? input || undefined : undefined;
         clear();
@@ -402,7 +415,9 @@ export function promptSubcommand(
       // Space — toggle flag
       if (key === ' ') {
         state.enabled = !state.enabled;
-        if (!state.enabled) state.value = '';
+        if (!state.enabled) {
+          state.value = '';
+        }
         render();
         return;
       }
@@ -439,7 +454,9 @@ export function promptSubcommand(
 
       // Printable characters — type value for enabled value flag (auto-enables)
       if (focused.arg && key.length === 1 && key >= ' ') {
-        if (!state.enabled) state.enabled = true;
+        if (!state.enabled) {
+          state.enabled = true;
+        }
         state.value += key;
         render();
       }
@@ -472,7 +489,9 @@ export function promptSubcommand(
       // Enter — submit
       if (key === '\r' || key === '\n') {
         const selected = options.filter((_, i) => multiSelectStates[i]);
-        if (selected.length === 0) return;
+        if (selected.length === 0) {
+          return;
+        }
         selectedFlags[followUp.flag] = selected.map((o) => o.value).join(',');
         clear();
         finalize();
@@ -513,7 +532,9 @@ export function promptSubcommand(
     // --- Main event handler ---
 
     function onData(data: Buffer) {
-      if (resolved) return;
+      if (resolved) {
+        return;
+      }
       const key = data.toString();
 
       // Ctrl+C
@@ -527,10 +548,15 @@ export function promptSubcommand(
         return;
       }
 
-      if (phase === 'select') handleSelectKey(key);
-      else if (phase === 'flags') handleFlagKey(key);
-      else if (phase === 'multi-select') handleMultiSelectKey(key);
-      else handleRepeatInputKey(key);
+      if (phase === 'select') {
+        handleSelectKey(key);
+      } else if (phase === 'flags') {
+        handleFlagKey(key);
+      } else if (phase === 'multi-select') {
+        handleMultiSelectKey(key);
+      } else {
+        handleRepeatInputKey(key);
+      }
     }
 
     stdin.on('data', onData);

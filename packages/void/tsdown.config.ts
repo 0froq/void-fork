@@ -24,7 +24,9 @@ function injectWorkersTypesReferencePlugin() {
     generateBundle(_options: unknown, bundle: Record<string, any>) {
       for (const output of Object.values(bundle)) {
         // Only patch the public handler declaration entrypoint.
-        if (output.fileName !== 'runtime/handler.d.mts') continue;
+        if (output.fileName !== 'runtime/handler.d.mts') {
+          continue;
+        }
 
         if (output.type === 'asset') {
           const source = String(output.source ?? '');

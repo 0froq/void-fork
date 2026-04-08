@@ -15,7 +15,9 @@ const UNITS: Record<string, number> = {
 
 function parseUnit(value: string): number {
   const match = value.match(/^(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)$/);
-  if (!match) throw new Error(`Invalid cacheFor value: ${value}`);
+  if (!match) {
+    throw new Error(`Invalid cacheFor value: ${value}`);
+  }
   return Number(match[1]) * UNITS[match[2]];
 }
 
@@ -53,7 +55,9 @@ export class PrefetchCache {
 
   get(url: string, method = 'GET'): CacheEntry | null {
     const entry = this.entries.get(this.key(url, method));
-    if (!entry) return null;
+    if (!entry) {
+      return null;
+    }
     if (Date.now() >= entry.expiresAt && !entry.singleUse) {
       this.entries.delete(this.key(url, method));
       return null;
@@ -73,7 +77,9 @@ export class PrefetchCache {
     const k = this.key(url, method);
     // Don't overwrite existing entry that is still usable
     const existing = this.entries.get(k);
-    if (existing && this.isUsable(existing)) return;
+    if (existing && this.isUsable(existing)) {
+      return;
+    }
 
     const now = Date.now();
     const singleUse = ttl.stale === 0 && ttl.expires === 0;
@@ -98,7 +104,9 @@ export class PrefetchCache {
   consume(url: string, method = 'GET'): void {
     const entry = this.entries.get(this.key(url, method));
     if (entry?.singleUse) {
-      if (entry.timer) clearTimeout(entry.timer);
+      if (entry.timer) {
+        clearTimeout(entry.timer);
+      }
       this.entries.delete(this.key(url, method));
     }
   }
@@ -106,13 +114,17 @@ export class PrefetchCache {
   flush(url: string, method = 'GET'): void {
     const k = this.key(url, method);
     const entry = this.entries.get(k);
-    if (entry?.timer) clearTimeout(entry.timer);
+    if (entry?.timer) {
+      clearTimeout(entry.timer);
+    }
     this.entries.delete(k);
   }
 
   flushAll(): void {
     for (const entry of this.entries.values()) {
-      if (entry.timer) clearTimeout(entry.timer);
+      if (entry.timer) {
+        clearTimeout(entry.timer);
+      }
     }
     this.entries.clear();
   }

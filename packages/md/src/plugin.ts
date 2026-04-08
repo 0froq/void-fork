@@ -42,7 +42,9 @@ function hasMdFilesWithScript(dir: string): boolean {
       if (entry.isFile() && entry.name.endsWith('.md')) {
         const fullPath = join(entry.parentPath, entry.name);
         const content = readFileSync(fullPath, 'utf-8');
-        if (/^<script\b/m.test(content)) return true;
+        if (/^<script\b/m.test(content)) {
+          return true;
+        }
       }
     }
   } catch {
@@ -54,7 +56,9 @@ function hasMdFilesWithScript(dir: string): boolean {
 function hasIslandFiles(dir: string): boolean {
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
-      if (entry.isFile() && /\.island\./.test(entry.name)) return true;
+      if (entry.isFile() && /\.island\./.test(entry.name)) {
+        return true;
+      }
     }
   } catch {
     // ignore
@@ -83,7 +87,9 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
 
   async function scanMdPages(): Promise<MdPage[]> {
     const pagesDir = join(root, 'pages');
-    if (!existsSync(pagesDir)) return [];
+    if (!existsSync(pagesDir)) {
+      return [];
+    }
 
     const mdFiles = await glob('**/*.md', { cwd: pagesDir });
     const pages = await Promise.all(
@@ -135,10 +141,14 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
       },
 
       config(config, env) {
-        if (env.command === 'serve') return;
+        if (env.command === 'serve') {
+          return;
+        }
         const configRoot = config.root || process.cwd();
         const pagesDir = join(configRoot, 'pages');
-        if (!existsSync(pagesDir)) return;
+        if (!existsSync(pagesDir)) {
+          return;
+        }
         if (hasMdFilesWithScript(pagesDir) && hasIslandFiles(pagesDir)) {
           return {
             environments: {
@@ -179,18 +189,26 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
 
       configureServer(server: ViteDevServer) {
         const handleMdChange = async (file: string) => {
-          if (!file.endsWith('.md') || !file.includes('/pages/')) return;
+          if (!file.endsWith('.md') || !file.includes('/pages/')) {
+            return;
+          }
           mdPages = await scanMdPages();
           const mod = server.moduleGraph.getModuleById('\0void-md-pages');
-          if (mod) server.moduleGraph.invalidateModule(mod);
+          if (mod) {
+            server.moduleGraph.invalidateModule(mod);
+          }
           for (const [compId] of clientScripts) {
             const scriptMod = server.moduleGraph.getModuleById(
               '\0virtual:void-md-script:' + compId,
             );
-            if (scriptMod) server.moduleGraph.invalidateModule(scriptMod);
+            if (scriptMod) {
+              server.moduleGraph.invalidateModule(scriptMod);
+            }
           }
           const clientMod = server.moduleGraph.getModuleById('\0' + MD_CLIENT_ENTRY_ID);
-          if (clientMod) server.moduleGraph.invalidateModule(clientMod);
+          if (clientMod) {
+            server.moduleGraph.invalidateModule(clientMod);
+          }
         };
         server.watcher.on('change', handleMdChange);
         server.watcher.on('add', handleMdChange);
@@ -232,18 +250,24 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
           if (id.startsWith('\0virtual:void-md-script:')) {
             const componentId = id.slice('\0virtual:void-md-script:'.length);
             const code = clientScripts.get(componentId);
-            if (code) return code;
+            if (code) {
+              return code;
+            }
             throw new Error(`[void-md] Missing client script for: ${componentId}`);
           }
 
           if (id.startsWith(SVELTE_VIRTUAL_PREFIX)) {
             const source = svelteModules.get(id);
-            if (source) return source;
+            if (source) {
+              return source;
+            }
             throw new Error(`[void-md] Missing Svelte markdown module: ${id}`);
           }
           if (id.startsWith(SOLID_VIRTUAL_PREFIX)) {
             const source = solidModules.get(id);
-            if (source) return source;
+            if (source) {
+              return source;
+            }
             throw new Error(`[void-md] Missing Solid markdown module: ${id}`);
           }
 
@@ -359,7 +383,9 @@ export function useFrontmatter() { return useContext(FrontmatterContext) ?? {}; 
 }
 
 function generateMdClientEntry(scripts: Map<string, string>): string {
-  if (scripts.size === 0) return '';
+  if (scripts.size === 0) {
+    return '';
+  }
   const lines: string[] = [];
   lines.push('const mdScripts = {');
   for (const id of scripts.keys()) {

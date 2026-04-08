@@ -13,10 +13,14 @@ const uploadForm = useForm('/storage', {
 
 async function handleUpload() {
   const file = fileInput.value?.files?.[0];
-  if (!file) return;
+  if (!file) {
+    return;
+  }
   uploadForm.data.file = file;
   await uploadForm.post();
-  if (fileInput.value) fileInput.value.value = '';
+  if (fileInput.value) {
+    fileInput.value.value = '';
+  }
   uploadForm.data.file = null;
 }
 
@@ -31,8 +35,12 @@ function deleteObject(key: string) {
 }
 
 function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1024) {
+    return bytes + ' B';
+  }
+  if (bytes < 1024 * 1024) {
+    return (bytes / 1024).toFixed(1) + ' KB';
+  }
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 </script>

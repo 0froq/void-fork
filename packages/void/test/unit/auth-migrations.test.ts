@@ -75,9 +75,15 @@ describe('auth migration runner', () => {
           if (sql.includes('current_schema')) {
             return [{ schema: 'public' }] as unknown as T[];
           }
-          if (sql.includes('information_schema.tables')) return [] as T[];
-          if (sql.includes('information_schema.columns')) return [] as T[];
-          if (sql.includes('pg_indexes')) return [] as T[];
+          if (sql.includes('information_schema.tables')) {
+            return [] as T[];
+          }
+          if (sql.includes('information_schema.columns')) {
+            return [] as T[];
+          }
+          if (sql.includes('pg_indexes')) {
+            return [] as T[];
+          }
           return [] as T[];
         },
         async run(sql: string) {

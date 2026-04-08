@@ -17,7 +17,9 @@ export type { RuntimeEnv };
 
 export function withRuntimeEnv<T>(env: unknown, fn: () => T): T {
   const resolved = asEnv(env);
-  if (!resolved) return fn();
+  if (!resolved) {
+    return fn();
+  }
   return envContext.run(resolved, fn);
 }
 
@@ -28,11 +30,15 @@ function isInternalBinding(name: string): boolean {
 function filterEnvProxy(env: RuntimeEnv): RuntimeEnv {
   return new Proxy(env, {
     get(target, prop, receiver) {
-      if (typeof prop === 'string' && isInternalBinding(prop)) return undefined;
+      if (typeof prop === 'string' && isInternalBinding(prop)) {
+        return undefined;
+      }
       return Reflect.get(target, prop, receiver);
     },
     has(target, prop) {
-      if (typeof prop === 'string' && isInternalBinding(prop)) return false;
+      if (typeof prop === 'string' && isInternalBinding(prop)) {
+        return false;
+      }
       return Reflect.has(target, prop);
     },
     ownKeys(target) {
@@ -41,7 +47,9 @@ function filterEnvProxy(env: RuntimeEnv): RuntimeEnv {
       );
     },
     getOwnPropertyDescriptor(target, prop) {
-      if (typeof prop === 'string' && isInternalBinding(prop)) return undefined;
+      if (typeof prop === 'string' && isInternalBinding(prop)) {
+        return undefined;
+      }
       return Reflect.getOwnPropertyDescriptor(target, prop);
     },
   });
@@ -53,12 +61,16 @@ export function getRuntimeEnv(): RuntimeEnv {
 }
 
 export function getRuntimeBinding<T = unknown>(name: string): T | undefined {
-  if (isInternalBinding(name)) return undefined;
+  if (isInternalBinding(name)) {
+    return undefined;
+  }
   return getRawRuntimeEnv()[name] as T | undefined;
 }
 
 export function requireRuntimeBinding<T = unknown>(name: string): T {
   const value = getRuntimeBinding<T>(name);
-  if (value !== undefined && value !== null) return value;
+  if (value !== undefined && value !== null) {
+    return value;
+  }
   throw new Error(`Missing Cloudflare binding "${name}".`);
 }

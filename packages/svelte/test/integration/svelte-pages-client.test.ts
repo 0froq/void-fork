@@ -428,7 +428,9 @@ describe('svelte-pages client (dev)', () => {
   }, 30_000);
 
   afterAll(async () => {
-    if (child) await killChild(child);
+    if (child) {
+      await killChild(child);
+    }
     if (stderr.includes('error when starting dev server')) {
       throw new Error(stderr);
     }
@@ -710,7 +712,9 @@ describe('svelte-pages client (dev)', () => {
         const res = await fetch(`${DEV_BASE}/blog`);
         expect(res.status).toBe(200);
         updatedHtml = await res.text();
-        if (updatedHtml.includes('Blog Updated')) break;
+        if (updatedHtml.includes('Blog Updated')) {
+          break;
+        }
       }
 
       expect(updatedHtml).toContain('<h1>Blog Updated</h1>');
@@ -763,7 +767,9 @@ describe('svelte-pages client (preview)', { retry: 2, timeout: 60_000 }, () => {
   }, 45_000);
 
   afterAll(async () => {
-    if (child) await killChild(child);
+    if (child) {
+      await killChild(child);
+    }
     if (stderr.includes('error when starting preview server')) {
       throw new Error(stderr);
     }

@@ -131,7 +131,9 @@ export function generateRouteTypes(
   lines.push('  interface RouteMap {');
 
   for (const route of scan.routes) {
-    if (route.methods.length === 0) continue;
+    if (route.methods.length === 0) {
+      continue;
+    }
 
     // Compute relative path from outDir (.void/) to the route file
     const absRoutePath = `${routesDir}/${route.filePath}`;

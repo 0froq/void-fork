@@ -172,14 +172,22 @@ type Validator = 'valibot' | 'zod' | 'arktype' | 'none';
 
 export function detectValidator(root: string): Validator | null {
   const pkgPath = join(root, 'package.json');
-  if (!existsSync(pkgPath)) return null;
+  if (!existsSync(pkgPath)) {
+    return null;
+  }
 
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
   const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
 
-  if ('valibot' in allDeps) return 'valibot';
-  if ('zod' in allDeps) return 'zod';
-  if ('arktype' in allDeps) return 'arktype';
+  if ('valibot' in allDeps) {
+    return 'valibot';
+  }
+  if ('zod' in allDeps) {
+    return 'zod';
+  }
+  if ('arktype' in allDeps) {
+    return 'arktype';
+  }
   return null;
 }
 
@@ -213,8 +221,12 @@ async function resolveValidator(root: string): Promise<Validator> {
 }
 
 function validatorTypeFor(validator: Validator, col: ColumnSpec): string {
-  if (validator === 'valibot') return valibotType(col);
-  if (validator === 'zod') return zodType(col);
+  if (validator === 'valibot') {
+    return valibotType(col);
+  }
+  if (validator === 'zod') {
+    return zodType(col);
+  }
   // arktype handled separately via string syntax
   return arktypeType(col);
 }
@@ -632,10 +644,18 @@ function detectFramework(root: string): 'react' | 'vue' | 'svelte' | 'solid' {
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
   const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
 
-  if ('react' in allDeps) return 'react';
-  if ('vue' in allDeps) return 'vue';
-  if ('svelte' in allDeps) return 'svelte';
-  if ('solid-js' in allDeps) return 'solid';
+  if ('react' in allDeps) {
+    return 'react';
+  }
+  if ('vue' in allDeps) {
+    return 'vue';
+  }
+  if ('svelte' in allDeps) {
+    return 'svelte';
+  }
+  if ('solid-js' in allDeps) {
+    return 'solid';
+  }
 
   log.error(
     'Could not detect framework from package.json. Use --react, --vue, --svelte, or --solid.',

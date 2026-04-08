@@ -95,13 +95,17 @@ export function printStagingBanner(): void {
  */
 export function getToken(): string | null {
   const envToken = process.env.VOID_TOKEN;
-  if (envToken) return envToken;
+  if (envToken) {
+    return envToken;
+  }
 
   const account = isStagingMode() ? 'stagingToken' : 'token';
 
   // Try keyring first
   const keyringToken = keyringGet(account);
-  if (keyringToken) return keyringToken;
+  if (keyringToken) {
+    return keyringToken;
+  }
 
   // File fallback — auto-migrate to keyring if available
   const config = readConfig();
@@ -124,7 +128,9 @@ export function getTokenSource(): 'ci' | 'manual' {
 
 export function saveToken(token: string): void {
   const account = isStagingMode() ? 'stagingToken' : 'token';
-  if (keyringSet(account, token)) return;
+  if (keyringSet(account, token)) {
+    return;
+  }
 
   // Keyring unavailable — fall back to file
   console.warn(pc.yellow('System keychain unavailable, storing token in ~/.void/config.json'));
@@ -138,7 +144,9 @@ export function removeToken(): boolean {
   let removed = false;
 
   // Remove from keyring
-  if (keyringDelete(account)) removed = true;
+  if (keyringDelete(account)) {
+    removed = true;
+  }
 
   // Also clean up config file if token exists there
   try {

@@ -103,7 +103,9 @@ export function useForm(
       setProcessing(true);
       setWasSuccessful(false);
       setRecentlySuccessful(false);
-      if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
       setErrors({});
 
       try {

@@ -39,12 +39,16 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
 
   /** Rebuild islandCssMap from current file contents (re-runs fileHasCssImports). */
   function rebuildIslandCssMap(): void {
-    if (!pageScan) return;
+    if (!pageScan) {
+      return;
+    }
     rebuildIslandCssMapShared(pageScan, pagesDir, islandCssMap, fileHasCssImports);
   }
 
   function computePagesNeedingClientJS(): Set<string> {
-    if (!pageScan) return new Set();
+    if (!pageScan) {
+      return new Set();
+    }
     return computePagesNeedingClientJSShared(pageScan, pagesDir, resolvedConfig);
   }
 
@@ -84,7 +88,9 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
             })),
           ];
           for (const entry of filesToScan) {
-            if (!entry.island) continue;
+            if (!entry.island) {
+              continue;
+            }
             const filePath = resolve(pagesDir, entry.filePath);
             const code = readFileSync(filePath, 'utf-8');
             const importerDir = dirname(filePath);
@@ -107,7 +113,9 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
 
           // Collect page and layout files needing CSS for island pages
           for (const page of pageScan.pages) {
-            if (!page.island) continue;
+            if (!page.island) {
+              continue;
+            }
             if (page.componentPath.endsWith('.svelte')) {
               islandCssFiles.add(normalizePath(resolve(pagesDir, page.componentPath)));
             }
@@ -143,10 +151,14 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
           // Return absolute path so CSS @import resolution uses the correct directory.
           if (source.endsWith('.css')) {
             const srcPath = normalizePath(source.slice(0, -4));
-            if (islandCssFiles.has(srcPath)) return srcPath + '.css';
+            if (islandCssFiles.has(srcPath)) {
+              return srcPath + '.css';
+            }
             if (srcPath.startsWith('/')) {
               const absPath = normalizePath(resolve(viteRoot, srcPath.slice(1)));
-              if (islandCssFiles.has(absPath)) return absPath + '.css';
+              if (islandCssFiles.has(absPath)) {
+                return absPath + '.css';
+              }
             }
           }
         },
@@ -178,7 +190,9 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
             );
           }
           if (id === '\0' + ISLANDS_CLIENT_ENTRY_ID) {
-            if (!pageScan) return '';
+            if (!pageScan) {
+              return '';
+            }
             return generateIslandClientEntry(islandManifest, islandCssFiles, isDev);
           }
           // Virtual wrapper component — generates a .svelte wrapper
@@ -258,7 +272,9 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
       },
 
       config(_, env) {
-        if (!existsSync(pagesDir)) return;
+        if (!existsSync(pagesDir)) {
+          return;
+        }
         if (env.command === 'serve') {
           return { optimizeDeps: { include: ['svelte'] } };
         }
@@ -301,7 +317,9 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
           let match;
           let i = 0;
           while ((match = styleBlockRe.exec(content)) !== null) {
-            if (i === index) return match[1];
+            if (i === index) {
+              return match[1];
+            }
             i++;
           }
           return '/* style block not found */';

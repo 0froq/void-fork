@@ -70,13 +70,17 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   );
 
   function writeRouteTypes() {
-    if (!scan) return;
+    if (!scan) {
+      return;
+    }
     const { dts } = generateRouteTypes(scan, routesDir, outDir, pagesDir);
     writeFileSync(join(outDir, 'routes.d.ts'), dts);
   }
 
   function writeQueueTypes() {
-    if (!scan) return;
+    if (!scan) {
+      return;
+    }
     const dts = generateQueueTypes(scan.queues, queuesDir, outDir);
     writeFileSync(join(outDir, 'queues.d.ts'), dts);
   }
@@ -149,7 +153,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   }
 
   async function writeAuthDatabaseFiles(): Promise<void> {
-    if (!compileOptions.auth) return;
+    if (!compileOptions.auth) {
+      return;
+    }
 
     const authRuntime: VoidAuthRuntimeOptions = {
       dialect: compileOptions.auth.dialect,
@@ -192,13 +198,17 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   }
 
   function isPotentialAuthConfigPath(path: string): boolean {
-    if (!path.startsWith(authConfigDir + '/')) return false;
+    if (!path.startsWith(authConfigDir + '/')) {
+      return false;
+    }
     const rel = path.slice(authConfigDir.length + 1);
     return /^auth\.(c|m)?[jt]s$/.test(rel);
   }
 
   function getPagesCompileOptions(): PagesCompileOptions | null {
-    if (!scan || scan.pages.pages.length === 0) return null;
+    if (!scan || scan.pages.pages.length === 0) {
+      return null;
+    }
     const hasIslandPages = scan.pages.pages.some((p) => p.island);
     // Detect md plugin and read its client entry ID for island pages
     const mdPlugin = resolvedConfig?.plugins?.find((p: any) => p.name === 'void-md');
@@ -269,7 +279,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       }
 
       const entries = validateSsrEntries(root);
-      if (!entries || env.command !== 'build') return;
+      if (!entries || env.command !== 'build') {
+        return;
+      }
 
       return {
         build: {
@@ -369,8 +381,12 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
           }
           return compileWorkerClient(authClientPath);
         }
-        if (id !== VIRTUAL_ROUTES_ID) return;
-        if (!scan) await rescan();
+        if (id !== VIRTUAL_ROUTES_ID) {
+          return;
+        }
+        if (!scan) {
+          await rescan();
+        }
         return compileRouteTable(
           scan!,
           routesDir,
@@ -401,7 +417,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
           return;
         }
 
-        if (path.startsWith(srcDir) && !ssrEntryAbsPaths.has(path)) return;
+        if (path.startsWith(srcDir) && !ssrEntryAbsPaths.has(path)) {
+          return;
+        }
 
         // Re-scan and invalidate the virtual module in ALL environments.
         // The route table virtual module lives in the workerd environment,

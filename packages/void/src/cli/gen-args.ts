@@ -208,13 +208,27 @@ function parseQueueArgs(args: string[]): GenArgs {
 export function parseGenArgs(args: string[]): GenArgs {
   const [subcommand, ...rest] = args;
 
-  if (subcommand === 'model') return parseModelArgs(rest);
-  if (subcommand === 'migration') return parseMigrationArgs(rest);
-  if (subcommand === 'route') return parseRouteArgs(rest);
-  if (subcommand === 'middleware') return parseMiddlewareArgs(rest);
-  if (subcommand === 'ssr') return parseSsrArgs(rest);
-  if (subcommand === 'cron') return parseCronArgs(rest);
-  if (subcommand === 'queue') return parseQueueArgs(rest);
+  if (subcommand === 'model') {
+    return parseModelArgs(rest);
+  }
+  if (subcommand === 'migration') {
+    return parseMigrationArgs(rest);
+  }
+  if (subcommand === 'route') {
+    return parseRouteArgs(rest);
+  }
+  if (subcommand === 'middleware') {
+    return parseMiddlewareArgs(rest);
+  }
+  if (subcommand === 'ssr') {
+    return parseSsrArgs(rest);
+  }
+  if (subcommand === 'cron') {
+    return parseCronArgs(rest);
+  }
+  if (subcommand === 'queue') {
+    return parseQueueArgs(rest);
+  }
 
   throw new Error('Error: Usage: void gen <model|migration|route|middleware|ssr|cron|queue>');
 }

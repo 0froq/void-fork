@@ -9,7 +9,9 @@ function virtualTagsPlugin(): Plugin {
   return {
     name: 'virtual-tags',
     resolveId(id) {
-      if (id === VIRTUAL_ID) return RESOLVED_ID;
+      if (id === VIRTUAL_ID) {
+        return RESOLVED_ID;
+      }
     },
     load(id) {
       if (id === RESOLVED_ID) {

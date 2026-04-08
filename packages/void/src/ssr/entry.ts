@@ -30,7 +30,9 @@ function resolveSingleEntry(
     }))
     .filter((entry) => existsSync(entry.absolutePath));
 
-  if (matches.length === 0) return null;
+  if (matches.length === 0) {
+    return null;
+  }
   if (matches.length > 1) {
     const names = matches.map((entry) => entry.relativePath).join(', ');
     throw new Error(`Multiple ${label} entry files found: ${names}. Keep only one.`);
@@ -119,7 +121,9 @@ export function validateSsrEntries(root: string): SsrEntries | null {
   const server = resolveSingleEntry(root, SSR_SERVER_ENTRY_RELATIVE_PATHS, 'SSR');
   const client = resolveSingleEntry(root, SSR_CLIENT_ENTRY_RELATIVE_PATHS, 'SSR client');
 
-  if (!server && !client) return null;
+  if (!server && !client) {
+    return null;
+  }
   if (server && !client) {
     throw new Error(
       `SSR mode requires a client entry. Add one of: ${SSR_CLIENT_ENTRY_RELATIVE_PATHS.join(', ')}`,
@@ -153,13 +157,17 @@ export function detectSsrPrerender(
   root: string,
 ): { prerender: boolean; hasGetPrerenderPaths: boolean } | null {
   const entryPath = getSsrServerEntryPath(root);
-  if (!entryPath) return null;
+  if (!entryPath) {
+    return null;
+  }
 
   const content = readFileSync(entryPath, 'utf-8');
   const prerender = PRERENDER_RE.test(content);
   const hasGetPrerenderPaths = GET_PRERENDER_PATHS_RE.test(content);
 
-  if (!prerender && !hasGetPrerenderPaths) return null;
+  if (!prerender && !hasGetPrerenderPaths) {
+    return null;
+  }
 
   return { prerender, hasGetPrerenderPaths };
 }

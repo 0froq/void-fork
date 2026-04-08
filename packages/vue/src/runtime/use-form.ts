@@ -78,9 +78,13 @@ export function useForm(
 
   function clearErrors(...fields: string[]) {
     if (fields.length === 0) {
-      for (const key of Object.keys(errors)) delete errors[key];
+      for (const key of Object.keys(errors)) {
+        delete errors[key];
+      }
     } else {
-      for (const field of fields) delete errors[field];
+      for (const field of fields) {
+        delete errors[field];
+      }
     }
   }
 
@@ -88,7 +92,9 @@ export function useForm(
     processing.value = true;
     wasSuccessful.value = false;
     recentlySuccessful.value = false;
-    if (successTimeout) clearTimeout(successTimeout);
+    if (successTimeout) {
+      clearTimeout(successTimeout);
+    }
     clearErrors();
 
     try {

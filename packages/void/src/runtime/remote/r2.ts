@@ -22,7 +22,9 @@ export class ProxyR2Bucket {
       lastModified: string;
       contentType: string;
     } | null;
-    if (!data) return null;
+    if (!data) {
+      return null;
+    }
     return makeR2Object(data);
   }
 
@@ -39,7 +41,9 @@ export class ProxyR2Bucket {
     if (ct.includes('application/json')) {
       const clone = res.clone();
       const data = await clone.json();
-      if (data === null) return null;
+      if (data === null) {
+        return null;
+      }
     }
 
     return makeR2ObjectBody(key, res);
@@ -70,7 +74,9 @@ export class ProxyR2Bucket {
       const chunks: Uint8Array[] = [];
       while (true) {
         const { done, value: chunk } = await reader.read();
-        if (done) break;
+        if (done) {
+          break;
+        }
         chunks.push(chunk);
       }
       const total = chunks.reduce((sum, c) => sum + c.length, 0);
@@ -87,8 +93,11 @@ export class ProxyR2Bucket {
       binding: this.binding,
       key,
     };
-    if (base64) body.base64 = base64;
-    else body.value = textValue;
+    if (base64) {
+      body.base64 = base64;
+    } else {
+      body.value = textValue;
+    }
     if (options?.httpMetadata) {
       const meta = options.httpMetadata;
       if (meta instanceof Headers) {
@@ -97,7 +106,9 @@ export class ProxyR2Bucket {
         body.contentType = meta.contentType;
       }
     }
-    if (options?.customMetadata) body.customMetadata = options.customMetadata;
+    if (options?.customMetadata) {
+      body.customMetadata = options.customMetadata;
+    }
 
     await this.client.fetch('/r2/put', body);
 

@@ -14,7 +14,9 @@ function sendRpc(proc: ChildProcess, request: object): Promise<Record<string, un
     const onData = (chunk: Buffer) => {
       buffer += chunk.toString();
       const newlineIndex = buffer.indexOf('\n');
-      if (newlineIndex === -1) return;
+      if (newlineIndex === -1) {
+        return;
+      }
 
       const line = buffer.slice(0, newlineIndex).trim();
       proc.stdout!.off('data', onData);

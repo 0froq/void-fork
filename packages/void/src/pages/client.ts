@@ -81,21 +81,36 @@ export function objectToFormData(
 ): FormData {
   form = form || new FormData();
   for (const key in source) {
-    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+    if (!Object.prototype.hasOwnProperty.call(source, key)) {
+      continue;
+    }
     const composed = parentKey ? parentKey + '[' + key + ']' : key;
     const value = source[key] as any;
-    if (value instanceof File) form.append(composed, value, value.name);
-    else if (value instanceof Blob) form.append(composed, value);
-    else if (typeof FileList !== 'undefined' && value instanceof FileList) {
-      for (let i = 0; i < value.length; i++) form.append(composed + '[]', value[i], value[i].name);
+    if (value instanceof File) {
+      form.append(composed, value, value.name);
+    } else if (value instanceof Blob) {
+      form.append(composed, value);
+    } else if (typeof FileList !== 'undefined' && value instanceof FileList) {
+      for (let i = 0; i < value.length; i++) {
+        form.append(composed + '[]', value[i], value[i].name);
+      }
     } else if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i++) objectToFormData({ [i]: value[i] }, form, composed);
-    } else if (value instanceof Date) form.append(composed, value.toISOString());
-    else if (typeof value === 'boolean') form.append(composed, value ? '1' : '0');
-    else if (typeof value === 'string') form.append(composed, value);
-    else if (typeof value === 'number') form.append(composed, String(value));
-    else if (value === null || value === undefined) form.append(composed, '');
-    else objectToFormData(value, form, composed);
+      for (let i = 0; i < value.length; i++) {
+        objectToFormData({ [i]: value[i] }, form, composed);
+      }
+    } else if (value instanceof Date) {
+      form.append(composed, value.toISOString());
+    } else if (typeof value === 'boolean') {
+      form.append(composed, value ? '1' : '0');
+    } else if (typeof value === 'string') {
+      form.append(composed, value);
+    } else if (typeof value === 'number') {
+      form.append(composed, String(value));
+    } else if (value === null || value === undefined) {
+      form.append(composed, '');
+    } else {
+      objectToFormData(value, form, composed);
+    }
   }
   return form;
 }
@@ -104,7 +119,9 @@ export function objectToFormData(
 
 export const ssrProxy: VoidRouter = new Proxy({} as VoidRouter, {
   get(_target, prop) {
-    if (typeof prop === 'symbol') return undefined;
+    if (typeof prop === 'symbol') {
+      return undefined;
+    }
     return () => {
       throw new Error(`router.${prop}() is not available during SSR`);
     };
@@ -149,7 +166,9 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
 
   async function resolveComponent(id: string) {
     const loader = components[id];
-    if (!loader) throw new Error('Unknown page component: ' + id);
+    if (!loader) {
+      throw new Error('Unknown page component: ' + id);
+    }
     return (await loader()).default;
   }
 
@@ -166,7 +185,9 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
 
   function setupDeferredProps(pageData: any): Record<string, unknown> {
     const keyRefs: Record<string, unknown> = {};
-    if (!pageData.deferredKeys) return keyRefs;
+    if (!pageData.deferredKeys) {
+      return keyRefs;
+    }
     for (const key of Object.keys(pageData.deferredKeys)) {
       const ref = adapter.createDeferred();
       keyRefs[key] = ref;
@@ -236,7 +257,9 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
     },
 
     async visit(url, options = {}) {
-      for (const l of _navListeners) l.onStart?.();
+      for (const l of _navListeners) {
+        l.onStart?.();
+      }
       try {
         // Extract hash before fetching (hash is not sent to server)
         const hashIndex = url.indexOf('#');
@@ -257,8 +280,11 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
           history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, '');
           history.pushState({}, '', effectiveFetchUrl + hash);
           const el = document.getElementById(hash.slice(1));
-          if (el) el.scrollIntoView();
-          else window.scrollTo(0, 0);
+          if (el) {
+            el.scrollIntoView();
+          } else {
+            window.scrollTo(0, 0);
+          }
           return;
         }
 
@@ -310,7 +336,9 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
               Purpose: 'prefetch',
             };
             const bgFetch = fetch(fetchUrl, { method, headers: bgHeaders }).then((r) => {
-              if (!r.headers.get('X-VoidPages')) return null;
+              if (!r.headers.get('X-VoidPages')) {
+                return null;
+              }
               return r.json();
             });
             _prefetchCache.set(fetchUrl, method, bgFetch, PREFETCH_DEFAULT_CACHE_FOR);
@@ -341,7 +369,9 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
               while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
                 const line = buffer.slice(0, newlineIdx);
                 buffer = buffer.slice(newlineIdx + 1);
-                if (!line) continue;
+                if (!line) {
+                  continue;
+                }
 
                 if (firstLine) {
                   pageData = JSON.parse(line);
@@ -360,7 +390,9 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
             // Read first line to get pageData for mounting
             while (firstLine) {
               const { done, value } = await reader.read();
-              if (done) break;
+              if (done) {
+                break;
+              }
               buffer += decoder.decode(value, { stream: true });
               processLines();
             }
@@ -370,11 +402,15 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
               try {
                 while (!signal.aborted) {
                   const { done, value } = await reader.read();
-                  if (done) break;
+                  if (done) {
+                    break;
+                  }
                   buffer += decoder.decode(value, { stream: true });
                   processLines();
                 }
-                if (buffer.trim()) processLines();
+                if (buffer.trim()) {
+                  processLines();
+                }
               } catch (e: any) {
                 if (e.name !== 'AbortError') {
                   for (const [key, ref] of Object.entries(activeKeyRefs)) {
@@ -421,13 +457,18 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
 
         // Scroll logic — runs after DOM update
         const doScroll = () => {
-          if (options.preserveScroll) return;
+          if (options.preserveScroll) {
+            return;
+          }
           if (options._scrollPosition) {
             window.scrollTo(options._scrollPosition.x, options._scrollPosition.y);
           } else if (hash) {
             const el = document.getElementById(hash.slice(1));
-            if (el) el.scrollIntoView();
-            else window.scrollTo(0, 0);
+            if (el) {
+              el.scrollIntoView();
+            } else {
+              window.scrollTo(0, 0);
+            }
           } else {
             window.scrollTo(0, 0);
           }
@@ -446,13 +487,17 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
 
         return pageData;
       } finally {
-        for (const l of _navListeners) l.onEnd?.();
+        for (const l of _navListeners) {
+          l.onEnd?.();
+        }
       }
     },
 
     prefetch(url, options = {}) {
       const id = matchRoute(url);
-      if (!id) return;
+      if (!id) {
+        return;
+      }
 
       if (routeMeta[id]?.island) {
         if (!document.querySelector('link[rel="prefetch"][href="' + url + '"]')) {
@@ -465,10 +510,14 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
         return;
       }
 
-      if (components[id]) components[id]();
+      if (components[id]) {
+        components[id]();
+      }
       const layoutIds = layoutTree[id] || [];
       for (const lid of layoutIds) {
-        if (components[lid]) components[lid]();
+        if (components[lid]) {
+          components[lid]();
+        }
       }
 
       // Strip hash — it's client-only, and cache keys must match visit()
@@ -476,7 +525,9 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
       const prefetchUrl = hashIdx !== -1 ? url.slice(0, hashIdx) : url;
 
       const method = (options.method || 'GET').toUpperCase();
-      if (_prefetchCache.has(prefetchUrl, method)) return;
+      if (_prefetchCache.has(prefetchUrl, method)) {
+        return;
+      }
       const ttl = options.cacheFor ? parseCacheFor(options.cacheFor) : PREFETCH_DEFAULT_CACHE_FOR;
       const headers = {
         'X-VoidPages': 'true',
@@ -484,7 +535,9 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
         Purpose: 'prefetch',
       };
       const fetchPromise = fetch(prefetchUrl, { method, headers }).then((r) => {
-        if (!r.headers.get('X-VoidPages')) return null;
+        if (!r.headers.get('X-VoidPages')) {
+          return null;
+        }
         return r.json();
       });
       _prefetchCache.set(prefetchUrl, method, fetchPromise, ttl);
@@ -541,8 +594,11 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
     // Drain any deferred resolutions that arrived before the module loaded
     if ((window as any).__deferredQueue) {
       for (const entry of (window as any).__deferredQueue) {
-        if (entry.length === 3) handleDeferredMessage(entry[0], undefined, entry[2]);
-        else handleDeferredMessage(entry[0], entry[1], undefined);
+        if (entry.length === 3) {
+          handleDeferredMessage(entry[0], undefined, entry[2]);
+        } else {
+          handleDeferredMessage(entry[0], entry[1], undefined);
+        }
       }
       delete (window as any).__deferredQueue;
     }
@@ -606,6 +662,8 @@ export function initIslands(
     const props = JSON.parse(el.getAttribute('data-props') || '{}');
     const strategy = el.getAttribute('data-hydrate') || 'load';
     const loader = islands[id];
-    if (loader) scheduleHydration(el, loader, props, strategy, hydrateFn);
+    if (loader) {
+      scheduleHydration(el, loader, props, strategy, hydrateFn);
+    }
   });
 }

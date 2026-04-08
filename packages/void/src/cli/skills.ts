@@ -17,16 +17,24 @@ interface SkillInfo {
 }
 
 function parseSkills(skillsDir: string): SkillInfo[] {
-  if (!existsSync(skillsDir)) return [];
+  if (!existsSync(skillsDir)) {
+    return [];
+  }
   const entries = readdirSync(skillsDir, { withFileTypes: true });
   const skills: SkillInfo[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
     const skillMd = join(skillsDir, entry.name, 'SKILL.md');
-    if (!existsSync(skillMd)) continue;
+    if (!existsSync(skillMd)) {
+      continue;
+    }
     const content = readFileSync(skillMd, 'utf-8');
     const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
-    if (!frontmatter) continue;
+    if (!frontmatter) {
+      continue;
+    }
     const nameMatch = frontmatter[1].match(/^name:\s*(.+)$/m);
     const descMatch = frontmatter[1].match(/^description:\s*(.+)$/m);
     skills.push({
@@ -82,10 +90,14 @@ export function linkSkillsForAgents(root: string): number {
   const packageDir = getPackageDir();
   const skillsDir = join(packageDir, 'skills');
   const skills = parseSkills(skillsDir);
-  if (skills.length === 0) return 0;
+  if (skills.length === 0) {
+    return 0;
+  }
 
   const detected = detectAgents(root);
-  if (detected.length === 0) return 0;
+  if (detected.length === 0) {
+    return 0;
+  }
 
   let totalLinked = 0;
   for (const agent of detected) {
@@ -99,9 +111,13 @@ export function linkSkillsForSpecificAgents(root: string, agents: AgentConfig[])
   const packageDir = getPackageDir();
   const skillsDir = join(packageDir, 'skills');
   const skills = parseSkills(skillsDir);
-  if (skills.length === 0) return 0;
+  if (skills.length === 0) {
+    return 0;
+  }
 
-  if (agents.length === 0) return 0;
+  if (agents.length === 0) {
+    return 0;
+  }
 
   let totalLinked = 0;
   for (const agent of agents) {

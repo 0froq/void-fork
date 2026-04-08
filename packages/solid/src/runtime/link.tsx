@@ -33,26 +33,44 @@ export function Link(props: LinkProps): JSX.Element {
 
   function getStrategies(): PrefetchStrategy[] {
     const p = local.prefetch;
-    if (p === false || p === undefined) return [];
-    if (p === true) return ['hover'];
-    if (typeof p === 'string') return [p];
+    if (p === false || p === undefined) {
+      return [];
+    }
+    if (p === true) {
+      return ['hover'];
+    }
+    if (typeof p === 'string') {
+      return [p];
+    }
     return p;
   }
 
   function doPrefetch() {
-    if (!router?.prefetch) return;
+    if (!router?.prefetch) {
+      return;
+    }
     const current = window.location.pathname + window.location.search;
-    if (local.href === current) return;
+    if (local.href === current) {
+      return;
+    }
     const options: any = {};
-    if (local.cacheFor !== undefined) options.cacheFor = local.cacheFor;
-    if (local.method) options.method = local.method;
+    if (local.cacheFor !== undefined) {
+      options.cacheFor = local.cacheFor;
+    }
+    if (local.method) {
+      options.method = local.method;
+    }
     router.prefetch(local.href, options);
   }
 
   function onClick(e: MouseEvent) {
-    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) {
+      return;
+    }
     const url = new URL(local.href, window.location.origin);
-    if (url.origin !== window.location.origin) return;
+    if (url.origin !== window.location.origin) {
+      return;
+    }
 
     e.preventDefault();
     router?.visit(local.href, {
@@ -103,7 +121,9 @@ export function Link(props: LinkProps): JSX.Element {
   });
 
   onCleanup(() => {
-    if (hoverTimer) clearTimeout(hoverTimer);
+    if (hoverTimer) {
+      clearTimeout(hoverTimer);
+    }
     if (observer) {
       observer.disconnect();
       observer = null;

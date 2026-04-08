@@ -26,7 +26,9 @@ async function prepareForViteHmr(page: Page) {
   await page.addInitScript(() => {
     const marker = '__void_vite_connected';
     const patched = '__void_vite_console_patched';
-    if ((window as any)[patched]) return;
+    if ((window as any)[patched]) {
+      return;
+    }
 
     const originalDebug = console.debug.bind(console);
     console.debug = (...args: unknown[]) => {
@@ -458,7 +460,9 @@ describe('vue-pages client (dev)', () => {
   }, 30_000);
 
   afterAll(async () => {
-    if (child) await killChild(child);
+    if (child) {
+      await killChild(child);
+    }
     if (stderr.includes('error when starting dev server')) {
       throw new Error(stderr);
     }
@@ -722,7 +726,9 @@ describe('vue-pages client (dev)', () => {
         expect(
           await page.evaluate(() => {
             const overlay = document.querySelector('vite-error-overlay') as HTMLElement | null;
-            if (!overlay) return '';
+            if (!overlay) {
+              return '';
+            }
             return (
               overlay.shadowRoot?.textContent?.replace(/\s+/g, ' ').trim() ??
               overlay.textContent?.replace(/\s+/g, ' ').trim() ??
@@ -822,7 +828,9 @@ describe('vue-pages client (dev)', () => {
         const res = await fetch(`${DEV_BASE}/blog`);
         expect(res.status).toBe(200);
         updatedHtml = await res.text();
-        if (updatedHtml.includes('Blog Updated')) break;
+        if (updatedHtml.includes('Blog Updated')) {
+          break;
+        }
       }
 
       expect(updatedHtml).toContain('<h1>Blog Updated</h1>');
@@ -875,7 +883,9 @@ describe('vue-pages client (preview)', { retry: 2, timeout: 60_000 }, () => {
   }, 45_000);
 
   afterAll(async () => {
-    if (child) await killChild(child);
+    if (child) {
+      await killChild(child);
+    }
     if (stderr.includes('error when starting preview server')) {
       throw new Error(stderr);
     }

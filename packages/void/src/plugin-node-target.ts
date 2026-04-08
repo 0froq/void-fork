@@ -50,7 +50,9 @@ function honoMiddleware(
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
       const headers = new Headers();
       for (const [key, value] of Object.entries(req.headers)) {
-        if (value) headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+        if (value) {
+          headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+        }
       }
 
       const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
@@ -81,7 +83,9 @@ function honoMiddleware(
         const reader = response.body.getReader();
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            break;
+          }
           res.write(value);
         }
         res.end();
@@ -120,7 +124,9 @@ export function nodeTargetPlugin(target: NodeTarget): Plugin[] {
     },
 
     config(_, { command }) {
-      if (command !== 'build') return;
+      if (command !== 'build') {
+        return;
+      }
 
       const root = process.cwd();
       const voidDir = join(root, '.void');

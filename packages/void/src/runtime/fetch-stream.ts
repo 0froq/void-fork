@@ -71,7 +71,9 @@ export async function* fetchStream<
   });
 
   const body = response._data as ReadableStream<Uint8Array> | null;
-  if (!body) return;
+  if (!body) {
+    return;
+  }
 
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -80,7 +82,9 @@ export async function* fetchStream<
   try {
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        break;
+      }
 
       buffer += decoder.decode(value, { stream: true });
 
@@ -90,11 +94,15 @@ export async function* fetchStream<
 
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith(':')) continue;
+        if (!trimmed || trimmed.startsWith(':')) {
+          continue;
+        }
 
         if (trimmed.startsWith('data: ')) {
           const data = trimmed.slice(6);
-          if (data === '[DONE]') return;
+          if (data === '[DONE]') {
+            return;
+          }
 
           // Try to parse as Workers AI JSON response
           try {
@@ -104,7 +112,9 @@ export async function* fetchStream<
               continue;
             }
             // Parsed JSON with non-string response (e.g. null + usage metadata) — skip
-            if ('response' in parsed) continue;
+            if ('response' in parsed) {
+              continue;
+            }
           } catch {
             // Not JSON — yield as plain text
           }

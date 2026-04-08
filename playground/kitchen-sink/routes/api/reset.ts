@@ -45,7 +45,9 @@ export const POST = defineHandler(async (c) => {
   for (;;) {
     const result = await storage.list({ limit: 1000, cursor: r2Cursor });
     await Promise.all(result.objects.map((obj) => storage.delete(obj.key)));
-    if (!result.truncated) break;
+    if (!result.truncated) {
+      break;
+    }
     r2Cursor = result.cursor;
   }
 

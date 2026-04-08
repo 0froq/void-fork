@@ -42,7 +42,9 @@ export interface KVClient {
 }
 
 function parseValue<T>(raw: string | null): T | null {
-  if (raw === null) return null;
+  if (raw === null) {
+    return null;
+  }
   try {
     return JSON.parse(raw) as T;
   } catch {
@@ -51,7 +53,9 @@ function parseValue<T>(raw: string | null): T | null {
 }
 
 function serializeValue(value: unknown): string {
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') {
+    return value;
+  }
   return JSON.stringify(value);
 }
 
@@ -66,9 +70,15 @@ function createKVMap<T>(getNS: () => KVNamespace, prefix: string): KVMap<T> {
 
     async put(key, value, options) {
       const opts: KVNamespacePutOptions = {};
-      if (options?.ttl) opts.expirationTtl = options.ttl;
-      if (options?.expiration) opts.expiration = options.expiration;
-      if (options?.metadata) opts.metadata = options.metadata;
+      if (options?.ttl) {
+        opts.expirationTtl = options.ttl;
+      }
+      if (options?.expiration) {
+        opts.expiration = options.expiration;
+      }
+      if (options?.metadata) {
+        opts.metadata = options.metadata;
+      }
       await getNS().put(prefixed(key), serializeValue(value), opts);
     },
 
@@ -112,9 +122,15 @@ function createKVClient(getNS: () => KVNamespace): KVClient {
 
     async put(key, value, options) {
       const opts: KVNamespacePutOptions = {};
-      if (options?.ttl) opts.expirationTtl = options.ttl;
-      if (options?.expiration) opts.expiration = options.expiration;
-      if (options?.metadata) opts.metadata = options.metadata;
+      if (options?.ttl) {
+        opts.expirationTtl = options.ttl;
+      }
+      if (options?.expiration) {
+        opts.expiration = options.expiration;
+      }
+      if (options?.metadata) {
+        opts.metadata = options.metadata;
+      }
       await getNS().put(key, serializeValue(value), opts);
     },
 

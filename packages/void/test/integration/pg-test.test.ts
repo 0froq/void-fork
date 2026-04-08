@@ -76,15 +76,21 @@ describe('playground/pg-test', () => {
   }, 30_000);
 
   afterAll(async () => {
-    if (devChild) await killChild(devChild);
+    if (devChild) {
+      await killChild(devChild);
+    }
     if (pgServer) {
       pgServer.close();
       await once(pgServer, 'close');
     }
-    if (pglite) await pglite.close();
+    if (pglite) {
+      await pglite.close();
+    }
     try {
       unlinkSync(ENV_LOCAL_PATH);
-    } catch {}
+    } catch {
+      // Ignore missing cleanup files between test runs.
+    }
     if (stderr.includes('error when starting dev server')) {
       throw new Error(stderr);
     }

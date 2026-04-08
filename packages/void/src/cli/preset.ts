@@ -249,17 +249,27 @@ function getAllDeps(pkg: Record<string, unknown>): Record<string, string> {
 }
 
 function detectPackageManager(root: string): 'pnpm' | 'yarn' | 'bun' | 'npm' {
-  if (existsSync(join(root, 'pnpm-lock.yaml'))) return 'pnpm';
-  if (existsSync(join(root, 'yarn.lock'))) return 'yarn';
-  if (existsSync(join(root, 'bun.lock')) || existsSync(join(root, 'bun.lockb'))) return 'bun';
+  if (existsSync(join(root, 'pnpm-lock.yaml'))) {
+    return 'pnpm';
+  }
+  if (existsSync(join(root, 'yarn.lock'))) {
+    return 'yarn';
+  }
+  if (existsSync(join(root, 'bun.lock')) || existsSync(join(root, 'bun.lockb'))) {
+    return 'bun';
+  }
   return 'npm';
 }
 
 function resolveProjectScriptCommand(root: string, scriptName: string): string | null {
   const pkg = readPackageJson(root);
   const script = pkg?.scripts;
-  if (!script || typeof script !== 'object' || Array.isArray(script)) return null;
-  if (typeof (script as Record<string, unknown>)[scriptName] !== 'string') return null;
+  if (!script || typeof script !== 'object' || Array.isArray(script)) {
+    return null;
+  }
+  if (typeof (script as Record<string, unknown>)[scriptName] !== 'string') {
+    return null;
+  }
 
   switch (detectPackageManager(root)) {
     case 'pnpm':
@@ -293,11 +303,23 @@ function detectViteBinary(root: string): 'vite' | 'vp' {
  * Check whether the project has backend files that require a full worker deploy.
  */
 export function hasBackendFiles(root: string): boolean {
-  if (existsSync(join(root, 'routes'))) return true;
-  if (existsSync(join(root, 'pages'))) return true;
-  if (existsSync(join(root, 'middleware'))) return true;
-  if (existsSync(join(root, 'crons'))) return true;
-  if (existsSync(join(root, 'queues'))) return true;
-  if (hasSsrEntry(root)) return true;
+  if (existsSync(join(root, 'routes'))) {
+    return true;
+  }
+  if (existsSync(join(root, 'pages'))) {
+    return true;
+  }
+  if (existsSync(join(root, 'middleware'))) {
+    return true;
+  }
+  if (existsSync(join(root, 'crons'))) {
+    return true;
+  }
+  if (existsSync(join(root, 'queues'))) {
+    return true;
+  }
+  if (hasSsrEntry(root)) {
+    return true;
+  }
   return false;
 }

@@ -32,8 +32,12 @@ if (isWorkerd) {
 }
 
 function asEnv(value: unknown): RuntimeEnv | null {
-  if (typeof value !== 'object' || value === null) return null;
-  if ('then' in value && typeof (value as { then?: unknown }).then === 'function') return null;
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+  if ('then' in value && typeof (value as { then?: unknown }).then === 'function') {
+    return null;
+  }
   return value as RuntimeEnv;
 }
 

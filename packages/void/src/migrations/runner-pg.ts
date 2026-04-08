@@ -15,7 +15,9 @@ export async function applyPgMigrations(
   client: PgClient,
   migrations: { name: string; sql: string }[],
 ): Promise<string[]> {
-  if (migrations.length === 0) return [];
+  if (migrations.length === 0) {
+    return [];
+  }
 
   await client.query(
     `CREATE TABLE IF NOT EXISTS _void_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)`,
@@ -25,7 +27,9 @@ export async function applyPgMigrations(
   const appliedSet = new Set(existing.rows.map((r: any) => r.name));
 
   const pending = migrations.filter((m) => !appliedSet.has(m.name));
-  if (pending.length === 0) return [];
+  if (pending.length === 0) {
+    return [];
+  }
 
   for (const m of pending) {
     await client.query('BEGIN');
@@ -51,7 +55,9 @@ export async function applyPgMigrations(
  */
 export async function runPgMigrations(migrationsDir: string, url: string): Promise<string[]> {
   const allMigrations = collectMigrations(migrationsDir);
-  if (allMigrations.length === 0) return [];
+  if (allMigrations.length === 0) {
+    return [];
+  }
 
   const { Client } = await import('pg');
   const client = new Client({ connectionString: url });

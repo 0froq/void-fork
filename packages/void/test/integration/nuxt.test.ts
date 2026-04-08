@@ -78,7 +78,9 @@ describe('playground/nuxt dev', () => {
   }, 45_000);
 
   afterAll(async () => {
-    if (child) await killChild(child);
+    if (child) {
+      await killChild(child);
+    }
   });
 
   it('syncs wrangler.jsonc with bindings from void.json', () => {

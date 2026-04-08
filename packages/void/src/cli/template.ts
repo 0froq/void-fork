@@ -111,7 +111,9 @@ export interface PagesStarterTemplate {
 }
 
 function toPreviewPackageName(publicPackageName: string): string {
-  if (publicPackageName === 'void') return '@void-sdk/void';
+  if (publicPackageName === 'void') {
+    return '@void-sdk/void';
+  }
   if (publicPackageName.startsWith('@void/')) {
     return publicPackageName.replace(/^@void\//, '@void-sdk/');
   }

@@ -88,7 +88,9 @@ describe('worker fetch runtime behavior', () => {
 
     if (options?.query) {
       const qs = new URLSearchParams(options.query as Record<string, string>).toString();
-      if (qs) url += '?' + qs;
+      if (qs) {
+        url += '?' + qs;
+      }
     }
 
     const method = (options?.method as string) ?? 'GET';
@@ -99,11 +101,15 @@ describe('worker fetch runtime behavior', () => {
       const outerReq = store.request;
       if (!headers.has('cookie')) {
         const cookie = outerReq.headers.get('cookie');
-        if (cookie) headers.set('cookie', cookie);
+        if (cookie) {
+          headers.set('cookie', cookie);
+        }
       }
       if (!headers.has('authorization')) {
         const auth = outerReq.headers.get('authorization');
-        if (auth) headers.set('authorization', auth);
+        if (auth) {
+          headers.set('authorization', auth);
+        }
       }
     }
 
@@ -123,7 +129,9 @@ describe('worker fetch runtime behavior', () => {
     };
     const response = (await mockAppFetch(request, mockEnv, executionCtx)) as Response;
 
-    if (response.status === 204) return undefined;
+    if (response.status === 204) {
+      return undefined;
+    }
 
     const contentType = response.headers.get('content-type') ?? '';
     const data = contentType.includes('application/json')

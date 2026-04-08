@@ -18,7 +18,9 @@ import type { HeaderRule, RedirectRule } from './types';
  */
 export function parseHeadersFile(dir: string): HeaderRule[] | undefined {
   const filePath = join(dir, '_headers');
-  if (!existsSync(filePath)) return undefined;
+  if (!existsSync(filePath)) {
+    return undefined;
+  }
 
   const content = readFileSync(filePath, 'utf-8');
   const rules: HeaderRule[] = [];
@@ -27,19 +29,29 @@ export function parseHeadersFile(dir: string): HeaderRule[] | undefined {
   for (const line of content.split('\n')) {
     // Skip blank lines and comments
     const trimmed = line.trimEnd();
-    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    if (trimmed === '' || trimmed.startsWith('#')) {
+      continue;
+    }
 
     // Indented line = header within current block
     if (line[0] === ' ' || line[0] === '\t') {
-      if (!current) continue;
+      if (!current) {
+        continue;
+      }
       const stripped = trimmed.trimStart();
       // Skip unset directives (! Header-Name)
-      if (stripped.startsWith('!')) continue;
+      if (stripped.startsWith('!')) {
+        continue;
+      }
       const colonIdx = stripped.indexOf(':');
-      if (colonIdx === -1) continue;
+      if (colonIdx === -1) {
+        continue;
+      }
       const name = stripped.slice(0, colonIdx).trim();
       const value = stripped.slice(colonIdx + 1).trim();
-      if (name) current.headers.push([name, value]);
+      if (name) {
+        current.headers.push([name, value]);
+      }
     } else {
       // Non-indented line = path pattern (new block)
       if (current && current.headers.length > 0) {
@@ -54,7 +66,9 @@ export function parseHeadersFile(dir: string): HeaderRule[] | undefined {
     rules.push(current);
   }
 
-  if (rules.length === 0) return undefined;
+  if (rules.length === 0) {
+    return undefined;
+  }
 
   // Sort by pattern length ascending: shorter (less specific) first,
   // longer (more specific) last — last-match-wins = most-specific-wins
@@ -70,17 +84,23 @@ export function parseHeadersFile(dir: string): HeaderRule[] | undefined {
  */
 export function parseRedirectsFile(dir: string): RedirectRule[] | undefined {
   const filePath = join(dir, '_redirects');
-  if (!existsSync(filePath)) return undefined;
+  if (!existsSync(filePath)) {
+    return undefined;
+  }
 
   const content = readFileSync(filePath, 'utf-8');
   const rules: RedirectRule[] = [];
 
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
 
     const parts = trimmed.split(/\s+/);
-    if (parts.length < 2) continue;
+    if (parts.length < 2) {
+      continue;
+    }
 
     const [source, destination, statusStr] = parts;
     const status = statusStr ? parseInt(statusStr, 10) : 302;

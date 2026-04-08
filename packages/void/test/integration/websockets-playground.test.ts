@@ -89,7 +89,9 @@ describe('playground/websockets', () => {
   }, 30_000);
 
   afterAll(async () => {
-    if (child) await killChild(child);
+    if (child) {
+      await killChild(child);
+    }
     await browser?.close();
     if (stderr.includes('error when starting dev server')) {
       throw new Error(stderr);

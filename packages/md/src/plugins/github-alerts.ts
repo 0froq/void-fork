@@ -44,14 +44,20 @@ export function gitHubAlertsPlugin(md: MarkdownExit, options?: GitHubAlertsOptio
         ) {
           endIndex++;
         }
-        if (endIndex === tokens.length) continue;
+        if (endIndex === tokens.length) {
+          continue;
+        }
         const close = tokens[endIndex];
         const firstContent = tokens
           .slice(startIndex, endIndex + 1)
           .find((token: any) => token.type === 'inline');
-        if (!firstContent) continue;
+        if (!firstContent) {
+          continue;
+        }
         const match = firstContent.content.match(markerRE);
-        if (!match) continue;
+        if (!match) {
+          continue;
+        }
         const type = match[1].toLowerCase();
         const title = match[2].trim() || titleMark[type] || capitalize(type);
         firstContent.content = firstContent.content.slice(match[0].length).trimStart();

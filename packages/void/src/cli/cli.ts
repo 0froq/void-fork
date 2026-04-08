@@ -101,15 +101,25 @@ function printHelp() {
 
 function buildArgs(result: SubcommandResult, trailingArgs: string[]): string[] {
   const out = [result.subcommand];
-  if (result.arg) out.push(result.arg);
-  if (result.extraArgs) out.push(...result.extraArgs);
+  if (result.arg) {
+    out.push(result.arg);
+  }
+  if (result.extraArgs) {
+    out.push(...result.extraArgs);
+  }
   if (result.flags) {
     for (const [flag, value] of Object.entries(result.flags)) {
       out.push(flag);
-      if (typeof value === 'string') out.push(value);
+      if (typeof value === 'string') {
+        out.push(value);
+      }
     }
   }
-  for (const a of trailingArgs) if (a.startsWith('-')) out.push(a);
+  for (const a of trailingArgs) {
+    if (a.startsWith('-')) {
+      out.push(a);
+    }
+  }
   return out;
 }
 
@@ -125,7 +135,9 @@ async function runSubcommandGroup<T>(
     if ((!sub || sub.startsWith('-')) && process.stdin.isTTY) {
       const { promptSubcommand } = await import('./subcommand-prompt');
       const result = await promptSubcommand(command, subcommands);
-      if (!result) process.exit(0);
+      if (!result) {
+        process.exit(0);
+      }
       const parsed = parse(buildArgs(result, args.slice(1)));
       await run(root, parsed);
     } else {
@@ -271,7 +283,9 @@ if (command === 'staging') {
 
     const { promptSubcommand } = await import('./subcommand-prompt');
     const result = await promptSubcommand('', topLevelCommands);
-    if (!result) process.exit(0);
+    if (!result) {
+      process.exit(0);
+    }
 
     const cmd = result.subcommand;
     const root = process.cwd();

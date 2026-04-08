@@ -21,9 +21,13 @@ export function resolveSpecifier(
 ): string | null {
   const base = normalizePath(resolve(importerDir, specifier));
   for (const ext of extensions) {
-    if (existsSync(base + ext)) return base + ext;
+    if (existsSync(base + ext)) {
+      return base + ext;
+    }
   }
-  if (existsSync(base)) return base;
+  if (existsSync(base)) {
+    return base;
+  }
   return null;
 }
 
@@ -44,17 +48,27 @@ export function needsIslandClientBundle(
   const styleRe = checkStyleBlocks ? /<style\b/ : null;
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
-      if (!entry.isFile()) continue;
+      if (!entry.isFile()) {
+        continue;
+      }
       const name = entry.name;
       if (islandFilePattern.test(name) || name.startsWith('layout.') || name.startsWith('_')) {
         const content = readFileSync(resolve(entry.parentPath!, name), 'utf-8');
-        if (importAttrRe.test(content)) return true;
-        if (styleRe && styleRe.test(content)) return true;
-        if (cssImportRe.test(content)) return true;
+        if (importAttrRe.test(content)) {
+          return true;
+        }
+        if (styleRe && styleRe.test(content)) {
+          return true;
+        }
+        if (cssImportRe.test(content)) {
+          return true;
+        }
       }
       if (name.endsWith('.md')) {
         const content = readFileSync(resolve(entry.parentPath!, name), 'utf-8');
-        if (mdScriptRe.test(content)) return true;
+        if (mdScriptRe.test(content)) {
+          return true;
+        }
       }
     }
   } catch {
@@ -113,15 +127,21 @@ export function rebuildIslandCssMap(
 ): void {
   islandCssMap.clear();
   for (const page of pageScan.pages) {
-    if (!page.island) continue;
+    if (!page.island) {
+      continue;
+    }
     const cssPaths: string[] = [];
     const layoutChain = resolveEffectiveLayoutChain(page, pageScan.layouts, pageScan.namedLayouts);
     for (const layout of layoutChain) {
       const layoutPath = resolve(pagesDir, layout.filePath);
-      if (fileHasCssFn(layoutPath)) cssPaths.push(layoutPath);
+      if (fileHasCssFn(layoutPath)) {
+        cssPaths.push(layoutPath);
+      }
     }
     const pagePath = resolve(pagesDir, page.componentPath);
-    if (fileHasCssFn(pagePath)) cssPaths.push(pagePath);
+    if (fileHasCssFn(pagePath)) {
+      cssPaths.push(pagePath);
+    }
     if (cssPaths.length > 0) {
       islandCssMap.set(page.componentId, cssPaths);
     }
@@ -142,7 +162,9 @@ export function computePagesNeedingClientJS(
 
   const layoutDirsWithIslands = new Set<string>();
   for (const layout of pageScan.layouts) {
-    if (!layout.island) continue;
+    if (!layout.island) {
+      continue;
+    }
     const filePath = resolve(pagesDir, layout.filePath);
     const code = readFileSync(filePath, 'utf-8');
     importAttrRe.lastIndex = 0;
@@ -153,7 +175,9 @@ export function computePagesNeedingClientJS(
 
   const result = new Set<string>();
   for (const page of pageScan.pages) {
-    if (!page.island) continue;
+    if (!page.island) {
+      continue;
+    }
 
     if (mdScriptIds.has(page.componentId)) {
       result.add(page.componentId);
@@ -192,22 +216,34 @@ export function configureIslandCssServer(
 ): void {
   server.watcher.on('change', (path) => {
     const normalizedPath = normalizePath(path);
-    if (!islandCssFiles.has(normalizedPath)) return;
+    if (!islandCssFiles.has(normalizedPath)) {
+      return;
+    }
     rebuildCssMap();
     for (const env of Object.values(server.environments)) {
       const mod = env.moduleGraph.getModuleById('\0' + ISLANDS_RENDERER_ID);
-      if (mod) env.moduleGraph.invalidateModule(mod);
+      if (mod) {
+        env.moduleGraph.invalidateModule(mod);
+      }
     }
     const cssMod = server.environments.client?.moduleGraph.getModuleById(normalizedPath + '.css');
-    if (cssMod) server.environments.client.moduleGraph.invalidateModule(cssMod);
+    if (cssMod) {
+      server.environments.client.moduleGraph.invalidateModule(cssMod);
+    }
   });
 
   server.middlewares.use(async (req, res, next) => {
-    if (!req.url) return next();
+    if (!req.url) {
+      return next();
+    }
     const url = req.url.split('?')[0];
-    if (!url.endsWith('.css')) return next();
+    if (!url.endsWith('.css')) {
+      return next();
+    }
     const srcPath = normalizePath(resolve(viteRoot, url.slice(1, -4)));
-    if (!islandCssFiles.has(srcPath)) return next();
+    if (!islandCssFiles.has(srcPath)) {
+      return next();
+    }
     try {
       const result = await server.environments.client.transformRequest(url);
       if (result) {

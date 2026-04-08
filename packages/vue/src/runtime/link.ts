@@ -33,19 +33,31 @@ export const Link: Component = defineComponent({
     const elRef = ref<HTMLElement | null>(null);
 
     function doPrefetch() {
-      if (!router?.prefetch) return;
+      if (!router?.prefetch) {
+        return;
+      }
       const current = window.location.pathname + window.location.search;
-      if (props.href === current) return;
+      if (props.href === current) {
+        return;
+      }
       const options: any = {};
-      if (props.cacheFor !== undefined) options.cacheFor = props.cacheFor;
-      if (props.method) options.method = props.method;
+      if (props.cacheFor !== undefined) {
+        options.cacheFor = props.cacheFor;
+      }
+      if (props.method) {
+        options.method = props.method;
+      }
       router.prefetch(props.href, options);
     }
 
     function onClick(e: MouseEvent) {
-      if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) {
+        return;
+      }
       const url = new URL(props.href, window.location.origin);
-      if (url.origin !== window.location.origin) return;
+      if (url.origin !== window.location.origin) {
+        return;
+      }
 
       e.preventDefault();
       router.visit(props.href, {
@@ -57,9 +69,15 @@ export const Link: Component = defineComponent({
     }
 
     function getStrategies(): PrefetchStrategy[] {
-      if (props.prefetch === false) return [];
-      if (props.prefetch === true) return ['hover'];
-      if (typeof props.prefetch === 'string') return [props.prefetch];
+      if (props.prefetch === false) {
+        return [];
+      }
+      if (props.prefetch === true) {
+        return ['hover'];
+      }
+      if (typeof props.prefetch === 'string') {
+        return [props.prefetch];
+      }
       return props.prefetch;
     }
 
@@ -102,7 +120,9 @@ export const Link: Component = defineComponent({
     });
 
     onUnmounted(() => {
-      if (hoverTimer) clearTimeout(hoverTimer);
+      if (hoverTimer) {
+        clearTimeout(hoverTimer);
+      }
       if (observer) {
         observer.disconnect();
         observer = null;

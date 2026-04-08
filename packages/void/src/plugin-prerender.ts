@@ -17,8 +17,12 @@ export function prerenderPlugin(root: string, config: VoidConfig): Plugin {
     apply: 'build',
 
     async closeBundle() {
-      if (config.output !== 'static') return;
-      if (this.environment?.name !== 'client') return;
+      if (config.output !== 'static') {
+        return;
+      }
+      if (this.environment?.name !== 'client') {
+        return;
+      }
       setShowTimestamp(false);
 
       // Prerender only applies to void apps (not meta-frameworks), so no preset needed

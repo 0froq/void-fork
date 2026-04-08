@@ -85,7 +85,9 @@ export function useForm(
     processing = true;
     wasSuccessful = false;
     recentlySuccessful = false;
-    if (successTimeout) clearTimeout(successTimeout);
+    if (successTimeout) {
+      clearTimeout(successTimeout);
+    }
     clearErrors();
 
     try {

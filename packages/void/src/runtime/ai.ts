@@ -23,10 +23,11 @@ function isThirdPartyModel(model: string): boolean {
 function resolveProviderKey(model: string, runtimeEnv: RuntimeEnv): string {
   const provider = model.split('/')[0];
   const envVar = PROVIDER_KEY_MAP[provider];
-  if (!envVar)
+  if (!envVar) {
     throw new Error(
       `Unknown AI provider: "${provider}". Supported: ${Object.keys(PROVIDER_KEY_MAP).join(', ')}`,
     );
+  }
   const key = runtimeEnv[envVar];
   if (typeof key !== 'string' || key.length === 0) {
     throw new Error(
@@ -38,7 +39,9 @@ function resolveProviderKey(model: string, runtimeEnv: RuntimeEnv): string {
 
 function getProxyUrl(runtimeEnv: RuntimeEnv): string {
   const custom = runtimeEnv.__VOID_PROXY_URL;
-  if (typeof custom === 'string' && custom.length > 0) return custom + '/ai';
+  if (typeof custom === 'string' && custom.length > 0) {
+    return custom + '/ai';
+  }
   return runtimeEnv.__VOID_STAGING ? STAGING_PROXY_URL : PROXY_URL;
 }
 
@@ -47,7 +50,9 @@ function resolveBackend(): AiBackend {
 
   // Priority 1: Service binding (production via Void)
   const proxy = runtimeEnv.__VOID_PROXY as Fetcher | undefined;
-  if (proxy) return makeServiceBindingBackend(proxy, runtimeEnv);
+  if (proxy) {
+    return makeServiceBindingBackend(proxy, runtimeEnv);
+  }
 
   // Priority 2: HTTPS to our proxy (local dev with Void auth)
   const token = runtimeEnv.__VOID_TOKEN;
@@ -99,12 +104,16 @@ function makeServiceBindingBackend(proxy: Fetcher, runtimeEnv: RuntimeEnv): AiBa
       if (isThirdPartyModel(model as string)) {
         const providerKey = resolveProviderKey(model as string, runtimeEnv);
         const res = await proxyFetch('gateway', { model, inputs, providerKey, projectId, aiToken });
-        if ((inputs as any)?.stream) return res.body;
+        if ((inputs as any)?.stream) {
+          return res.body;
+        }
         return res.json();
       }
 
       const res = await proxyFetch('run', { model, inputs, options, projectId, aiToken });
-      if ((inputs as any)?.stream) return res.body;
+      if ((inputs as any)?.stream) {
+        return res.body;
+      }
       return res.json();
     },
     async models(params) {
@@ -144,12 +153,16 @@ function makeHttpBackend(token: string, projectId: string, runtimeEnv: RuntimeEn
       if (isThirdPartyModel(model as string)) {
         const providerKey = resolveProviderKey(model as string, runtimeEnv);
         const res = await proxyFetch('gateway', { model, inputs, providerKey });
-        if ((inputs as any)?.stream) return res.body;
+        if ((inputs as any)?.stream) {
+          return res.body;
+        }
         return res.json();
       }
 
       const res = await proxyFetch('run', { model, inputs, options });
-      if ((inputs as any)?.stream) return res.body;
+      if ((inputs as any)?.stream) {
+        return res.body;
+      }
       return res.json();
     },
     async models(params) {
@@ -215,9 +228,15 @@ export const ai: VoidAi = new Proxy({} as VoidAi, {
         });
       };
     }
-    if (prop === 'run') return backend().run;
-    if (prop === 'models') return backend().models;
-    if (prop === 'toMarkdown') return backend().toMarkdown;
+    if (prop === 'run') {
+      return backend().run;
+    }
+    if (prop === 'models') {
+      return backend().models;
+    }
+    if (prop === 'toMarkdown') {
+      return backend().toMarkdown;
+    }
     return undefined;
   },
 });

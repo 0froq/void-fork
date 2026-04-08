@@ -88,8 +88,12 @@ export class ProxyD1PreparedStatement {
       method: 'first',
     });
     const row = (await res.json()) as Record<string, unknown> | null;
-    if (row === null) return null;
-    if (col) return row[col] as T;
+    if (row === null) {
+      return null;
+    }
+    if (col) {
+      return row[col] as T;
+    }
     return row as T;
   }
 

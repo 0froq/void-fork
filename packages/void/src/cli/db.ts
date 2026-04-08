@@ -15,14 +15,20 @@ const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '.
 
 function readEnvLocal(root: string): Record<string, string> {
   const envPath = join(root, '.env.local');
-  if (!existsSync(envPath)) return {};
+  if (!existsSync(envPath)) {
+    return {};
+  }
   const content = readFileSync(envPath, 'utf-8');
   const vars: Record<string, string> = {};
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
     const eqIndex = trimmed.indexOf('=');
-    if (eqIndex === -1) continue;
+    if (eqIndex === -1) {
+      continue;
+    }
     const key = trimmed.slice(0, eqIndex).trim();
     let value = trimmed.slice(eqIndex + 1).trim();
     if (
@@ -64,7 +70,9 @@ function validatePendingMigrations(
   appliedNames: Set<string>,
 ): void {
   const pending = migrations.filter((migration) => !appliedNames.has(migration.name));
-  if (pending.length === 0) return;
+  if (pending.length === 0) {
+    return;
+  }
   validateMigrations(pending);
 }
 
@@ -383,7 +391,9 @@ function printTable(rows: Record<string, unknown>[]): void {
     let max = col.length;
     for (const row of rows) {
       const len = String(row[col] ?? 'NULL').length;
-      if (len > max) max = len;
+      if (len > max) {
+        max = len;
+      }
     }
     return max;
   });
@@ -540,8 +550,12 @@ async function runExport(
           );
           const colDefs = cols.rows.map((c: any) => {
             let def = `  "${c.column_name}" ${c.data_type}`;
-            if (c.is_nullable === 'NO') def += ' NOT NULL';
-            if (c.column_default) def += ` DEFAULT ${c.column_default}`;
+            if (c.is_nullable === 'NO') {
+              def += ' NOT NULL';
+            }
+            if (c.column_default) {
+              def += ` DEFAULT ${c.column_default}`;
+            }
             return def;
           });
           parts.push(`CREATE TABLE "${table}" (\n${colDefs.join(',\n')}\n);`);
@@ -553,8 +567,12 @@ async function runExport(
             const cols = Object.keys(row);
             const vals = cols.map((c) => {
               const v = row[c];
-              if (v === null) return 'NULL';
-              if (typeof v === 'number') return String(v);
+              if (v === null) {
+                return 'NULL';
+              }
+              if (typeof v === 'number') {
+                return String(v);
+              }
               return `'${String(v).replace(/'/g, "''")}'`;
             });
             parts.push(`INSERT INTO "${table}" (${cols.join(', ')}) VALUES (${vals.join(', ')});`);
@@ -621,8 +639,12 @@ async function runExport(
           const cols = Object.keys(row);
           const vals = cols.map((c) => {
             const v = row[c];
-            if (v === null) return 'NULL';
-            if (typeof v === 'number') return String(v);
+            if (v === null) {
+              return 'NULL';
+            }
+            if (typeof v === 'number') {
+              return String(v);
+            }
             return `'${String(v).replace(/'/g, "''")}'`;
           });
           parts.push(`INSERT INTO "${table}" (${cols.join(', ')}) VALUES (${vals.join(', ')});`);

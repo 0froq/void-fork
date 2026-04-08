@@ -26,7 +26,9 @@ export class ProxyKVNamespace {
       // but application/json for null. Check content-type to detect null responses.
       if (ct.includes('application/json')) {
         const data = await res.json();
-        if (data === null) return null;
+        if (data === null) {
+          return null;
+        }
         // Non-null JSON response for binary type — shouldn't happen, but handle gracefully
         const encoded = new TextEncoder().encode(JSON.stringify(data));
         return type === 'arrayBuffer'
@@ -38,7 +40,9 @@ export class ProxyKVNamespace {
               },
             });
       }
-      if (type === 'arrayBuffer') return res.arrayBuffer();
+      if (type === 'arrayBuffer') {
+        return res.arrayBuffer();
+      }
       return res.body;
     }
 
@@ -68,7 +72,9 @@ export class ProxyKVNamespace {
       // Base64-encode binary data for JSON transport
       const bytes = new Uint8Array(value);
       let binary = '';
-      for (const byte of bytes) binary += String.fromCharCode(byte);
+      for (const byte of bytes) {
+        binary += String.fromCharCode(byte);
+      }
       serializedValue = btoa(binary);
       isBase64 = true;
     } else {
@@ -77,7 +83,9 @@ export class ProxyKVNamespace {
       const chunks: Uint8Array[] = [];
       while (true) {
         const { done, value: chunk } = await reader.read();
-        if (done) break;
+        if (done) {
+          break;
+        }
         chunks.push(chunk);
       }
       const total = chunks.reduce((sum, c) => sum + c.length, 0);
@@ -88,7 +96,9 @@ export class ProxyKVNamespace {
         offset += chunk.length;
       }
       let binary = '';
-      for (const byte of merged) binary += String.fromCharCode(byte);
+      for (const byte of merged) {
+        binary += String.fromCharCode(byte);
+      }
       serializedValue = btoa(binary);
       isBase64 = true;
     }
@@ -99,9 +109,15 @@ export class ProxyKVNamespace {
       value: serializedValue,
       ...(isBase64 && { base64: true }),
     };
-    if (options?.expiration) body.expiration = options.expiration;
-    if (options?.expirationTtl) body.expiration_ttl = options.expirationTtl;
-    if (options?.metadata) body.metadata = options.metadata;
+    if (options?.expiration) {
+      body.expiration = options.expiration;
+    }
+    if (options?.expirationTtl) {
+      body.expiration_ttl = options.expirationTtl;
+    }
+    if (options?.metadata) {
+      body.metadata = options.metadata;
+    }
     await this.client.fetch('/kv/put', body);
   }
 

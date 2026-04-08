@@ -33,9 +33,13 @@ interface JsonRpcRequest {
 function findPackageRoot(from: string): string {
   let dir = from;
   while (true) {
-    if (existsSync(join(dir, 'package.json'))) return dir;
+    if (existsSync(join(dir, 'package.json'))) {
+      return dir;
+    }
     const parent = dirname(dir);
-    if (parent === dir) break;
+    if (parent === dir) {
+      break;
+    }
     dir = parent;
   }
   throw new Error('Could not find package.json from: ' + from);
@@ -62,7 +66,9 @@ function resolveDocsDir(): string {
 function findMdFiles(dir: string, prefix = ''): string[] {
   const results: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+    if (entry.name === 'node_modules' || entry.name.startsWith('.')) {
+      continue;
+    }
     const rel = prefix ? prefix + '/' + entry.name : entry.name;
     if (entry.isDirectory()) {
       results.push(...findMdFiles(join(dir, entry.name), rel));
@@ -102,7 +108,9 @@ export function searchDocs(pages: DocPage[], query: string): SearchResult[] {
     .split(/\s+/)
     .filter((t) => t.length > 0);
 
-  if (terms.length === 0) return [];
+  if (terms.length === 0) {
+    return [];
+  }
 
   const scored: SearchResult[] = [];
 
@@ -124,12 +132,16 @@ export function searchDocs(pages: DocPage[], query: string): SearchResult[] {
       idx = 0;
       while ((idx = contentLower.indexOf(term, idx)) !== -1) {
         score += 1;
-        if (firstMatchIndex === -1) firstMatchIndex = idx;
+        if (firstMatchIndex === -1) {
+          firstMatchIndex = idx;
+        }
         idx += term.length;
       }
     }
 
-    if (score === 0) continue;
+    if (score === 0) {
+      continue;
+    }
 
     // Extract snippet around first match
     let snippet: string;
@@ -161,7 +173,9 @@ function createQuerySdk(token: string) {
   const sdk: Record<string, (...args: any[]) => unknown> = {};
   const proto = Object.getPrototypeOf(client) as Record<string, unknown>;
   for (const key of Object.getOwnPropertyNames(proto)) {
-    if (key === 'constructor') continue;
+    if (key === 'constructor') {
+      continue;
+    }
     const val = proto[key];
     if (typeof val === 'function') {
       sdk[key] = val.bind(client);

@@ -38,6 +38,8 @@ export async function runProjectsCommand(): Promise<void> {
   );
   console.log(prefix);
   console.log(header);
-  for (const line of lines) console.log(line);
+  for (const line of lines) {
+    console.log(line);
+  }
   outro(`${projects.length} project(s)`);
 }

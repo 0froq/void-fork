@@ -6,15 +6,23 @@ import { voidLog, voidError } from './log';
 
 function readDatabaseUrl(root: string): string | undefined {
   const envPath = join(root, '.env.local');
-  if (!existsSync(envPath)) return undefined;
+  if (!existsSync(envPath)) {
+    return undefined;
+  }
   const content = readFileSync(envPath, 'utf-8');
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
     const eqIndex = trimmed.indexOf('=');
-    if (eqIndex === -1) continue;
+    if (eqIndex === -1) {
+      continue;
+    }
     const key = trimmed.slice(0, eqIndex).trim();
-    if (key !== 'DATABASE_URL') continue;
+    if (key !== 'DATABASE_URL') {
+      continue;
+    }
     let value = trimmed.slice(eqIndex + 1).trim();
     if (
       (value.startsWith('"') && value.endsWith('"')) ||
@@ -46,7 +54,9 @@ export function migrationPlugin(
     async configureServer(server) {
       const migrationsDir = join(root, 'db', 'migrations');
       const hasSqlMigrations = existsSync(migrationsDir);
-      if (!hasSqlMigrations && !auth?.enabled) return;
+      if (!hasSqlMigrations && !auth?.enabled) {
+        return;
+      }
 
       try {
         if (hasSqlMigrations && dialect === 'postgresql') {

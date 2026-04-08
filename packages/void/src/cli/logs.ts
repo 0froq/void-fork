@@ -45,11 +45,17 @@ export async function runLogsCommand(
     entries = entries.filter((entry) => {
       for (const l of entry.logs) {
         const text = l.message.map(String).join(' ');
-        if (text.toLowerCase().includes(lower)) return true;
+        if (text.toLowerCase().includes(lower)) {
+          return true;
+        }
       }
       for (const ex of entry.exceptions) {
-        if (ex.name.toLowerCase().includes(lower)) return true;
-        if (ex.message.toLowerCase().includes(lower)) return true;
+        if (ex.name.toLowerCase().includes(lower)) {
+          return true;
+        }
+        if (ex.message.toLowerCase().includes(lower)) {
+          return true;
+        }
       }
       return false;
     });

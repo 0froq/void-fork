@@ -49,12 +49,16 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
 
   /** Rebuild islandCssMap from current file contents (re-runs fileHasCssImports). */
   function rebuildIslandCssMap(): void {
-    if (!pageScan) return;
+    if (!pageScan) {
+      return;
+    }
     rebuildIslandCssMapShared(pageScan, pagesDir, islandCssMap, fileHasCssImports);
   }
 
   function computePagesNeedingClientJS(): Set<string> {
-    if (!pageScan) return new Set();
+    if (!pageScan) {
+      return new Set();
+    }
     return computePagesNeedingClientJSShared(pageScan, pagesDir, resolvedConfig);
   }
 
@@ -94,7 +98,9 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
             })),
           ];
           for (const entry of filesToScan) {
-            if (!entry.island) continue;
+            if (!entry.island) {
+              continue;
+            }
             const filePath = resolve(pagesDir, entry.filePath);
             const code = readFileSync(filePath, 'utf-8');
             const importerDir = dirname(filePath);
@@ -117,7 +123,9 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
 
           // Collect page and layout files needing CSS for island pages
           for (const page of pageScan.pages) {
-            if (!page.island) continue;
+            if (!page.island) {
+              continue;
+            }
             if (/\.(tsx|jsx)$/.test(page.componentPath)) {
               islandCssFiles.add(normalizePath(resolve(pagesDir, page.componentPath)));
             }
@@ -153,10 +161,14 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
           // Return absolute path so CSS @import resolution uses the correct directory.
           if (source.endsWith('.css')) {
             const srcPath = normalizePath(source.slice(0, -4));
-            if (islandCssFiles.has(srcPath)) return srcPath + '.css';
+            if (islandCssFiles.has(srcPath)) {
+              return srcPath + '.css';
+            }
             if (srcPath.startsWith('/')) {
               const absPath = normalizePath(resolve(viteRoot, srcPath.slice(1)));
-              if (islandCssFiles.has(absPath)) return absPath + '.css';
+              if (islandCssFiles.has(absPath)) {
+                return absPath + '.css';
+              }
             }
           }
         },
@@ -188,13 +200,17 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
             );
           }
           if (id === '\0' + ISLANDS_CLIENT_ENTRY_ID) {
-            if (!pageScan) return '';
+            if (!pageScan) {
+              return '';
+            }
             return generateIslandClientEntry(islandManifest, islandCssFiles, isDev);
           }
           // Virtual wrapper component — generates a .tsx wrapper
           if (id.startsWith(WRAPPER_PREFIX)) {
             const meta = wrapperMeta.get(id);
-            if (meta) return generateWrapperComponent(meta);
+            if (meta) {
+              return generateWrapperComponent(meta);
+            }
           }
           // Virtual island CSS module — resolveId returns absolute path
           if (id.endsWith('.css') && !id.startsWith('\0')) {
@@ -264,7 +280,9 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
       },
 
       config(_, env) {
-        if (!existsSync(pagesDir)) return;
+        if (!existsSync(pagesDir)) {
+          return;
+        }
         // Only add the islands client entry when content needs it
         if (
           env.command !== 'serve' &&

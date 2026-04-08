@@ -15,7 +15,9 @@ interface Header {
 }
 
 function renderHeaders(headers: Header[], listTag: string): string {
-  if (headers.length === 0) return '';
+  if (headers.length === 0) {
+    return '';
+  }
 
   let result = `<${listTag}>`;
   for (const h of headers) {
@@ -44,8 +46,12 @@ export function tocPlugin(md: MarkdownExit, options?: TocOptions): void {
       const max = state.eMarks[startLine];
       const content = state.src.slice(pos, max).trim();
 
-      if (!pattern.test(content)) return false;
-      if (silent) return true;
+      if (!pattern.test(content)) {
+        return false;
+      }
+      if (silent) {
+        return true;
+      }
 
       state.line = startLine + 1;
       const openToken = state.push('toc_open', containerTag, 1);

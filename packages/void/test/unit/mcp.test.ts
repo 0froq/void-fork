@@ -6,7 +6,9 @@ import { handleRequest, type McpContext } from '../../src/cli/mcp';
 function findMdFiles(dir: string, prefix = ''): string[] {
   const results: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+    if (entry.name === 'node_modules' || entry.name.startsWith('.')) {
+      continue;
+    }
     const rel = prefix ? prefix + '/' + entry.name : entry.name;
     if (entry.isDirectory()) {
       results.push(...findMdFiles(join(dir, entry.name), rel));

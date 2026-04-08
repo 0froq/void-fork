@@ -36,7 +36,9 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
     const [imports] = parse(code);
     for (const imp of imports) {
       const source = imp.n;
-      if (!source) continue;
+      if (!source) {
+        continue;
+      }
 
       switch (source) {
         case 'void/db':
@@ -69,12 +71,24 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
     }
   } catch {
     // es-module-lexer can't parse JSX/TSX — fall back to regex for void/* imports
-    if (/\bfrom\s+["']void\/db["']/.test(code)) result.needsD1 = true;
-    if (/\bfrom\s+["']void\/kv["']/.test(code)) result.needsKV = true;
-    if (/\bfrom\s+["']void\/storage["']/.test(code)) result.needsR2 = true;
-    if (/\bfrom\s+["']void\/auth["']/.test(code)) result.needsAuth = true;
-    if (/\bfrom\s+["']void\/queue["']/.test(code)) result.needsQueues = true;
-    if (/\bfrom\s+["']void\/ai["']/.test(code)) result.needsAI = true;
+    if (/\bfrom\s+["']void\/db["']/.test(code)) {
+      result.needsD1 = true;
+    }
+    if (/\bfrom\s+["']void\/kv["']/.test(code)) {
+      result.needsKV = true;
+    }
+    if (/\bfrom\s+["']void\/storage["']/.test(code)) {
+      result.needsR2 = true;
+    }
+    if (/\bfrom\s+["']void\/auth["']/.test(code)) {
+      result.needsAuth = true;
+    }
+    if (/\bfrom\s+["']void\/queue["']/.test(code)) {
+      result.needsQueues = true;
+    }
+    if (/\bfrom\s+["']void\/ai["']/.test(code)) {
+      result.needsAI = true;
+    }
     if (/\bfrom\s+["']void\/client["']/.test(code) && /\bauth\b/.test(code)) {
       result.needsAuth = true;
     }
@@ -100,11 +114,17 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
 
   walk(parsed.program as any, {
     enter(node: any) {
-      if (node.type !== 'MemberExpression') return;
-      if (node.computed) return;
+      if (node.type !== 'MemberExpression') {
+        return;
+      }
+      if (node.computed) {
+        return;
+      }
 
       const property = node.property;
-      if (property?.type !== 'Identifier') return;
+      if (property?.type !== 'Identifier') {
+        return;
+      }
 
       // Check if the object is *.env (i.e., a MemberExpression with .env)
       const obj = node.object;
@@ -113,7 +133,9 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
         obj.property?.type === 'Identifier' &&
         obj.property.name === 'env';
       const isDirectEnv = obj?.type === 'Identifier' && obj.name === 'env';
-      if (!isViaContextEnv && !isDirectEnv) return;
+      if (!isViaContextEnv && !isDirectEnv) {
+        return;
+      }
 
       switch (property.name) {
         case 'DB':

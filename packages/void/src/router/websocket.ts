@@ -51,24 +51,38 @@ export function deriveWebSocketClassName(filePath: string): string {
 }
 
 function getPropertyName(node: any): string | null {
-  if (!node) return null;
-  if (node.type === 'Identifier') return node.name;
-  if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+  if (!node) {
+    return null;
+  }
+  if (node.type === 'Identifier') {
+    return node.name;
+  }
+  if (node.type === 'Literal' && typeof node.value === 'string') {
+    return node.value;
+  }
   return null;
 }
 
 function extractDefinition(call: any): WebSocketSourceInfo | null {
-  if (!call || call.type !== 'CallExpression') return null;
-  if (call.callee?.type !== 'Identifier') return null;
+  if (!call || call.type !== 'CallExpression') {
+    return null;
+  }
+  if (call.callee?.type !== 'Identifier') {
+    return null;
+  }
 
   const calleeName = call.callee.name;
-  if (calleeName !== 'defineRoom' && calleeName !== 'defineWebSocket') return null;
+  if (calleeName !== 'defineRoom' && calleeName !== 'defineWebSocket') {
+    return null;
+  }
 
   let hasAuthGate = false;
   const options = call.arguments?.[0];
   if (options?.type === 'ObjectExpression') {
     for (const property of options.properties ?? []) {
-      if (property.type !== 'Property') continue;
+      if (property.type !== 'Property') {
+        continue;
+      }
       if (getPropertyName(property.key) === 'onBeforeConnect') {
         hasAuthGate = true;
         break;
@@ -105,7 +119,9 @@ export function detectWebSocketDefinition(absPath: string): WebSocketSourceInfo 
   }
 
   for (const node of parsed.program.body as any[]) {
-    if (node.type !== 'ExportDefaultDeclaration') continue;
+    if (node.type !== 'ExportDefaultDeclaration') {
+      continue;
+    }
     const declaration = node.declaration;
     if (declaration?.type === 'Identifier') {
       return extractDefinition(variableInitializers.get(declaration.name));
@@ -136,7 +152,9 @@ function parseWebSocketFiles(root: string, files: string[]): WebSocketRouteDefin
     .filter((f) => !f.split('/').some((segment) => segment.startsWith('_')))
     .map((filePath) => buildWebSocketRoute(root, filePath))
     .sort((a, b) => {
-      if (a.catchAll !== b.catchAll) return a.catchAll ? 1 : -1;
+      if (a.catchAll !== b.catchAll) {
+        return a.catchAll ? 1 : -1;
+      }
       return a.pattern.localeCompare(b.pattern);
     });
 }

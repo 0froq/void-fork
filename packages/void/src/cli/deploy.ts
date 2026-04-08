@@ -265,7 +265,9 @@ export function resolveStaticBuildCommand(
   buildOverride?: string,
   hasExplicitDir = false,
 ): string | null {
-  if (hasExplicitDir) return null;
+  if (hasExplicitDir) {
+    return null;
+  }
   return buildOverride ?? preset.buildCommand;
 }
 
@@ -362,9 +364,13 @@ async function runStaticDeploy(
     headerRules,
     redirectRules,
   );
-  if (neededSet) formData.append('assetManifest', JSON.stringify(assetManifest));
+  if (neededSet) {
+    formData.append('assetManifest', JSON.stringify(assetManifest));
+  }
   formData.append('source', getTokenSource());
-  if (commit) formData.append('commit', commit);
+  if (commit) {
+    formData.append('commit', commit);
+  }
 
   const result = await streamDeploy(client, config.projectId, formData, s);
 
@@ -582,9 +588,13 @@ async function runFrameworkDeploy(
     redirectRules,
     dialect,
   });
-  if (neededSet) formData.append('assetManifest', JSON.stringify(assetManifest));
+  if (neededSet) {
+    formData.append('assetManifest', JSON.stringify(assetManifest));
+  }
   formData.append('source', getTokenSource());
-  if (commit) formData.append('commit', commit);
+  if (commit) {
+    formData.append('commit', commit);
+  }
 
   const result = await streamDeploy(client, config.projectId, formData, s);
 
@@ -659,7 +669,9 @@ async function runFullDeploy(
     for (const entry of Object.values(manifest)) {
       if (entry.file?.includes('/')) {
         const dir = entry.file.slice(0, entry.file.indexOf('/'));
-        if (dir !== 'assets') assetsPrefix = dir;
+        if (dir !== 'assets') {
+          assetsPrefix = dir;
+        }
         break;
       }
     }
@@ -891,9 +903,13 @@ async function runFullDeploy(
     dialect,
     webSockets,
   );
-  if (neededSet) formData.append('assetManifest', JSON.stringify(assetManifest));
+  if (neededSet) {
+    formData.append('assetManifest', JSON.stringify(assetManifest));
+  }
   formData.append('source', getTokenSource());
-  if (commit) formData.append('commit', commit);
+  if (commit) {
+    formData.append('commit', commit);
+  }
 
   const result = await streamDeploy(client, config.projectId, formData, s);
 
@@ -954,7 +970,9 @@ function getGitCommit(root: string): string | null {
     execSync('git rev-parse --is-inside-work-tree', { cwd: root, stdio: 'ignore' });
     // Check if working tree is clean
     const status = execSync('git status --porcelain', { cwd: root, encoding: 'utf-8' }).trim();
-    if (status !== '') return null;
+    if (status !== '') {
+      return null;
+    }
     // Get current commit hash
     return execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf-8' }).trim();
   } catch {
@@ -1169,13 +1187,19 @@ function loadDeployEnv(root: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const file of files) {
     const filePath = join(root, file);
-    if (!existsSync(filePath)) continue;
+    if (!existsSync(filePath)) {
+      continue;
+    }
     const content = readFileSync(filePath, 'utf-8');
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
+      if (!trimmed || trimmed.startsWith('#')) {
+        continue;
+      }
       const eqIndex = trimmed.indexOf('=');
-      if (eqIndex === -1) continue;
+      if (eqIndex === -1) {
+        continue;
+      }
       const key = trimmed.slice(0, eqIndex).trim();
       let value = trimmed.slice(eqIndex + 1).trim();
       // Strip surrounding quotes
@@ -1248,7 +1272,9 @@ export function resolveWorkerDirName(
 
   // Non-framework: probe for known output subdirectories
   for (const name of ['ssr', 'rsc', 'server']) {
-    if (existsSync(join(distDir, name))) return name;
+    if (existsSync(join(distDir, name))) {
+      return name;
+    }
   }
   throw new Error('Worker output not found: expected dist/ssr/ or dist/rsc/');
 }

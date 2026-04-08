@@ -88,7 +88,9 @@ function resolveSecret(request: Request, env: VoidAuthEnv): string {
     typeof env.BETTER_AUTH_SECRET === 'string' && env.BETTER_AUTH_SECRET.length > 0
       ? env.BETTER_AUTH_SECRET
       : undefined;
-  if (explicit) return explicit;
+  if (explicit) {
+    return explicit;
+  }
 
   const url = new URL(request.url);
   if (isLocalHost(url.hostname)) {
@@ -124,8 +126,12 @@ function resolveSocialProviderCredentials(
   const envNames = getVoidAuthProviderEnvNames(provider);
   const clientIdKeys = [envNames.clientId];
   const clientSecretKeys = [envNames.clientSecret];
-  if (envNames.legacyClientId) clientIdKeys.push(envNames.legacyClientId);
-  if (envNames.legacyClientSecret) clientSecretKeys.push(envNames.legacyClientSecret);
+  if (envNames.legacyClientId) {
+    clientIdKeys.push(envNames.legacyClientId);
+  }
+  if (envNames.legacyClientSecret) {
+    clientSecretKeys.push(envNames.legacyClientSecret);
+  }
   const clientId = readEnvString(env, ...clientIdKeys);
   const clientSecret = readEnvString(env, ...clientSecretKeys);
 
@@ -142,12 +148,16 @@ function resolveSocialProviders(
   env: VoidAuthEnv,
   configuredProviders: readonly VoidAuthProvider[] | null,
 ): BetterAuthOptions['socialProviders'] | undefined {
-  if (!configuredProviders) return undefined;
+  if (!configuredProviders) {
+    return undefined;
+  }
 
   const providers: Record<string, { clientId: string; clientSecret: string }> = {};
 
   for (const provider of configuredProviders) {
-    if (!isVoidSocialAuthProvider(provider)) continue;
+    if (!isVoidSocialAuthProvider(provider)) {
+      continue;
+    }
     providers[provider] = resolveSocialProviderCredentials(env, provider);
   }
 
@@ -155,7 +165,9 @@ function resolveSocialProviders(
 }
 
 function appendAuthHeaders(target: Headers, source?: Headers): void {
-  if (!source) return;
+  if (!source) {
+    return;
+  }
 
   source.forEach((value, key) => {
     if (key.toLowerCase() === 'set-cookie') {
@@ -173,7 +185,9 @@ function resolveUserConfig(
   env: VoidAuthEnv,
   dialect: VoidAuthDialect,
 ): BetterAuthOptions {
-  if (!userConfig) return defaults;
+  if (!userConfig) {
+    return defaults;
+  }
 
   if (typeof userConfig === 'function') {
     return userConfig({ defaults, request, env, dialect });

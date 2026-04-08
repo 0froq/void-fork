@@ -22,10 +22,16 @@ interface PagesPluginOptions {
 function hasNonIslandPages(dir: string): boolean {
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
-      if (!entry.isFile()) continue;
+      if (!entry.isFile()) {
+        continue;
+      }
       const name = entry.name;
-      if (name.startsWith('_') || name.startsWith('layout.')) continue;
-      if (/\.(tsx|jsx)$/.test(name) && !name.includes('.island.')) return true;
+      if (name.startsWith('_') || name.startsWith('layout.')) {
+        continue;
+      }
+      if (/\.(tsx|jsx)$/.test(name) && !name.includes('.island.')) {
+        return true;
+      }
     }
   } catch {
     // ignore
@@ -59,12 +65,15 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       filter: { id: /^\0virtual:void-pages-(renderer|client)$/ },
       handler(id) {
         if (id === '\0' + RENDERER_ID) {
-          if (!pageScan)
+          if (!pageScan) {
             return "export function renderPage() { throw new Error('No pages found'); }";
+          }
           return generateRendererModule(pageScan, pagesDir, isDev);
         }
         if (id === '\0' + CLIENT_ENTRY_ID) {
-          if (!pageScan) return '';
+          if (!pageScan) {
+            return '';
+          }
           return generateClientEntry(
             pageScan,
             pagesDir,
@@ -76,7 +85,9 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
     },
 
     config(_, env) {
-      if (!existsSync(pagesDir)) return;
+      if (!existsSync(pagesDir)) {
+        return;
+      }
 
       // In dev mode, exclude @void/react from dep optimization so the
       // virtual module and user components share the same React context objects.
@@ -98,7 +109,9 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       }
 
       // Skip the pages-client bundle when all pages are island pages
-      if (!hasNonIslandPages(pagesDir)) return;
+      if (!hasNonIslandPages(pagesDir)) {
+        return;
+      }
 
       return {
         build: {

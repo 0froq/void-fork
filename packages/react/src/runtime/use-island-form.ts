@@ -45,7 +45,9 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     } else {
       setDataState((prev) => {
         const next = { ...prev };
-        for (const field of fields) next[field] = defaultsRef.current[field] as T[typeof field];
+        for (const field of fields) {
+          next[field] = defaultsRef.current[field] as T[typeof field];
+        }
         return next;
       });
     }
@@ -57,7 +59,9 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     } else {
       setErrors((prev) => {
         const next = { ...prev };
-        for (const f of fields) delete next[f];
+        for (const f of fields) {
+          delete next[f];
+        }
         return next;
       });
     }
@@ -68,7 +72,9 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
       setProcessing(true);
       setWasSuccessful(false);
       setRecentlySuccessful(false);
-      if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
       setErrors({});
 
       try {
@@ -91,7 +97,9 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
           window.location.reload();
         } else if (response.status === 422) {
           const body = (await response.json()) as { errors?: Record<string, string> };
-          if (body?.errors) setErrors(body.errors);
+          if (body?.errors) {
+            setErrors(body.errors);
+          }
         }
       } catch {
         // Request failed

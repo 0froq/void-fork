@@ -62,7 +62,9 @@ export async function scanRoutes(
     })
     // Sort: static routes before dynamic, catch-all last
     .sort((a, b) => {
-      if (a.catchAll !== b.catchAll) return a.catchAll ? 1 : -1;
+      if (a.catchAll !== b.catchAll) {
+        return a.catchAll ? 1 : -1;
+      }
       return a.pattern.localeCompare(b.pattern);
     });
 

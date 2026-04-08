@@ -103,7 +103,9 @@ export function buildWebSocketInstanceId(
   route: Pick<WebSocketRouteMeta, 'params'>,
   params: Record<string, string>,
 ): string {
-  if (route.params.length === 0) return 'default';
+  if (route.params.length === 0) {
+    return 'default';
+  }
   return route.params.map((name) => `${name}=${params[name] ?? ''}`).join('&');
 }
 
@@ -129,8 +131,12 @@ async function serializeServerEvent(schema: StandardSchemaV1, event: unknown): P
 }
 
 function parseIncomingMessage(message: string | ArrayBuffer | ArrayBufferView): string {
-  if (typeof message === 'string') return message;
-  if (message instanceof ArrayBuffer) return new TextDecoder().decode(message);
+  if (typeof message === 'string') {
+    return message;
+  }
+  if (message instanceof ArrayBuffer) {
+    return new TextDecoder().decode(message);
+  }
   return new TextDecoder().decode(
     message.buffer.slice(message.byteOffset, message.byteOffset + message.byteLength),
   );
@@ -202,7 +208,9 @@ function createRoomController<ServerEvent>(
       const payload = await serializeServerEvent(serverSchema, event);
       for (const socket of state.getWebSockets()) {
         const stored = getStoredConnection(socket);
-        if (excludeIds.includes(stored.id)) continue;
+        if (excludeIds.includes(stored.id)) {
+          continue;
+        }
         socket.send(payload);
       }
     },
@@ -312,7 +320,9 @@ export function createWebSocketDurableObject(
           const decision = await withAuthState(authState, () =>
             (definition as RoomDefinition).onBeforeConnect?.(ctx),
           );
-          if (decision instanceof Response) return decision;
+          if (decision instanceof Response) {
+            return decision;
+          }
         } else {
           const ctx = createSocketContext<any>(
             this.state,
@@ -325,7 +335,9 @@ export function createWebSocketDurableObject(
           const decision = await withAuthState(authState, () =>
             (definition as SocketDefinition).onBeforeConnect?.(ctx),
           );
-          if (decision instanceof Response) return decision;
+          if (decision instanceof Response) {
+            return decision;
+          }
         }
 
         this.state.acceptWebSocket(server);
@@ -506,7 +518,9 @@ export async function handleWebSocketUpgrade(
 
   for (const route of routes) {
     const params = getRouteMatch(request, route);
-    if (!params) continue;
+    if (!params) {
+      continue;
+    }
     return getStub(env, route, params).fetch(request);
   }
 

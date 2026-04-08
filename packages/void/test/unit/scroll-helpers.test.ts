@@ -35,10 +35,15 @@ describe('scroll restoration helpers', () => {
       scrollPosition?: { x: number; y: number } | null;
       hash?: string;
     }): { action: 'none' | 'restore' | 'hash' | 'top'; x?: number; y?: number; hash?: string } {
-      if (opts.preserveScroll) return { action: 'none' };
-      if (opts.scrollPosition)
+      if (opts.preserveScroll) {
+        return { action: 'none' };
+      }
+      if (opts.scrollPosition) {
         return { action: 'restore', x: opts.scrollPosition.x, y: opts.scrollPosition.y };
-      if (opts.hash) return { action: 'hash', hash: opts.hash };
+      }
+      if (opts.hash) {
+        return { action: 'hash', hash: opts.hash };
+      }
       return { action: 'top' };
     }
 

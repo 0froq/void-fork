@@ -178,7 +178,9 @@ export namespace defineHandler {
     return <R>(handler: (c: CloudContext, input: HandlerInput<V>) => R): TypedHandler<V, R> => {
       return (async (c: CloudContext) => {
         const result = await runValidation(validators, c);
-        if (!result.ok) return result.response;
+        if (!result.ok) {
+          return result.response;
+        }
         return convertReturnValue(await handler(c, result.input));
       }) as TypedHandler<V, R>;
     };

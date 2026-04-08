@@ -121,21 +121,27 @@ export function createBindingHandler(env: Record<string, unknown>): Hono {
     }
     if (type === 'arrayBuffer') {
       const val = await kv.get(body.key, 'arrayBuffer');
-      if (val === null) return c.json(null);
+      if (val === null) {
+        return c.json(null);
+      }
       return new Response(val, {
         headers: { 'content-type': 'application/octet-stream' },
       });
     }
     if (type === 'stream') {
       const val = await kv.get(body.key, 'stream');
-      if (val === null) return c.json(null);
+      if (val === null) {
+        return c.json(null);
+      }
       return new Response(val, {
         headers: { 'content-type': 'application/octet-stream' },
       });
     }
     // Default: text
     const val = await kv.get(body.key, 'text');
-    if (val === null) return c.json(null);
+    if (val === null) {
+      return c.json(null);
+    }
     return c.json(val);
   });
 
@@ -159,14 +165,20 @@ export function createBindingHandler(env: Record<string, unknown>): Hono {
     }
 
     const opts: KVNamespacePutOptions = {};
-    if (body.expiration) opts.expiration = body.expiration;
-    if (body.expiration_ttl) opts.expirationTtl = body.expiration_ttl;
+    if (body.expiration) {
+      opts.expiration = body.expiration;
+    }
+    if (body.expiration_ttl) {
+      opts.expirationTtl = body.expiration_ttl;
+    }
 
     let value: string | ArrayBuffer;
     if (body.base64 && typeof body.value === 'string') {
       const binary = atob(body.value);
       const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
       value = bytes.buffer as ArrayBuffer;
     } else {
       value = typeof body.value === 'string' ? body.value : JSON.stringify(body.value);
@@ -210,9 +222,15 @@ export function createBindingHandler(env: Record<string, unknown>): Hono {
     }
 
     const opts: KVNamespaceListOptions = {};
-    if (body.prefix) opts.prefix = body.prefix;
-    if (body.limit) opts.limit = body.limit;
-    if (body.cursor) opts.cursor = body.cursor;
+    if (body.prefix) {
+      opts.prefix = body.prefix;
+    }
+    if (body.limit) {
+      opts.limit = body.limit;
+    }
+    if (body.cursor) {
+      opts.cursor = body.cursor;
+    }
 
     const result = await kv.list(opts);
     return c.json({
@@ -237,12 +255,18 @@ export function createBindingHandler(env: Record<string, unknown>): Hono {
     }
 
     const obj = await bucket.get(body.key);
-    if (!obj) return c.json(null);
+    if (!obj) {
+      return c.json(null);
+    }
 
     const headers = new Headers();
     headers.set('content-type', obj.httpMetadata?.contentType ?? 'application/octet-stream');
-    if (obj.size !== undefined) headers.set('content-length', String(obj.size));
-    if (obj.httpEtag) headers.set('etag', obj.httpEtag);
+    if (obj.size !== undefined) {
+      headers.set('content-length', String(obj.size));
+    }
+    if (obj.httpEtag) {
+      headers.set('etag', obj.httpEtag);
+    }
 
     return new Response(obj.body, { headers });
   });
@@ -320,10 +344,18 @@ export function createBindingHandler(env: Record<string, unknown>): Hono {
     }
 
     const opts: R2ListOptions = {};
-    if (body.prefix) opts.prefix = body.prefix;
-    if (body.limit) opts.limit = body.limit;
-    if (body.cursor) opts.cursor = body.cursor;
-    if (body.delimiter) opts.delimiter = body.delimiter;
+    if (body.prefix) {
+      opts.prefix = body.prefix;
+    }
+    if (body.limit) {
+      opts.limit = body.limit;
+    }
+    if (body.cursor) {
+      opts.cursor = body.cursor;
+    }
+    if (body.delimiter) {
+      opts.delimiter = body.delimiter;
+    }
 
     const result = await bucket.list(opts);
     return c.json({
@@ -350,7 +382,9 @@ export function createBindingHandler(env: Record<string, unknown>): Hono {
     }
 
     const obj = await bucket.head(body.key);
-    if (!obj) return c.json(null);
+    if (!obj) {
+      return c.json(null);
+    }
 
     return c.json({
       key: body.key,
