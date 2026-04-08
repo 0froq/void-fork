@@ -29,14 +29,21 @@ describe("rewrite-package-manifest", () => {
   it("rewrites void optional framework peers to public names", () => {
     const voidManifest = readPackageJson("packages/void/package.json");
     const rewritten = rewriteManifestForPublish(voidManifest);
+    const previewFrameworkPeers = Object.keys(voidManifest.peerDependencies).filter((name) =>
+      name.startsWith("@void-sdk/"),
+    );
 
-    expect(rewritten.peerDependencies["@void/react"]).toBe("^0.2.3");
-    expect(rewritten.peerDependencies["@void/vue"]).toBe("^0.2.3");
-    expect(rewritten.peerDependencies["@void/svelte"]).toBe("^0.2.3");
-    expect(rewritten.peerDependencies["@void/solid"]).toBe("^0.2.3");
-    expect(rewritten.peerDependencies["@void/md"]).toBe("^0.2.3");
-    expect(rewritten.peerDependenciesMeta["@void/react"]).toEqual({ optional: true });
-    expect(Object.keys(rewritten.peerDependencies)).not.toContain("@void-sdk/react");
-    expect(Object.keys(rewritten.peerDependenciesMeta)).not.toContain("@void-sdk/react");
+    for (const previewName of previewFrameworkPeers) {
+      const packageDir = previewName.replace(/^@void-sdk\//, "");
+      const frameworkManifest = readPackageJson(`packages/${packageDir}/package.json`);
+      const publicName = toPublicPackageName(previewName);
+
+      expect(rewritten.peerDependencies[publicName]).toBe(`^${frameworkManifest.version}`);
+      expect(rewritten.peerDependenciesMeta[publicName]).toEqual(
+        voidManifest.peerDependenciesMeta[previewName],
+      );
+      expect(rewritten.peerDependencies[previewName]).toBeUndefined();
+      expect(rewritten.peerDependenciesMeta[previewName]).toBeUndefined();
+    }
   });
 });
