@@ -1,10 +1,10 @@
-import { cancel, confirm, isCancel, log } from "@clack/prompts";
-import { PlatformClient } from "./client";
-import { getToken, isStagingMode } from "./auth";
-import { promptForLoginToken } from "./login";
-import { promptProjectSelection, promptProjectSlug } from "./prompt";
-import { inferDefaultSlug } from "./resolve-project";
-import { readProjectConfig, writeProjectConfig, type ProjectConfig } from "./project";
+import { cancel, confirm, isCancel, log } from '@clack/prompts';
+import { getToken, isStagingMode } from './auth';
+import { PlatformClient } from './client';
+import { promptForLoginToken } from './login';
+import { readProjectConfig, writeProjectConfig, type ProjectConfig } from './project';
+import { promptProjectSelection, promptProjectSlug } from './prompt';
+import { inferDefaultSlug } from './resolve-project';
 
 async function ensureToken(): Promise<string> {
   const existing = getToken();
@@ -13,7 +13,7 @@ async function ensureToken(): Promise<string> {
   }
 
   const token = await promptForLoginToken();
-  log.success(isStagingMode() ? "Staging token saved." : "Token saved.");
+  log.success(isStagingMode() ? 'Staging token saved.' : 'Token saved.');
   return token;
 }
 
@@ -40,11 +40,11 @@ export async function maybeSetupDeployProject(root: string): Promise<ProjectConf
   const existingToken = getToken();
   const shouldSetup = await confirm({
     message: existingToken
-      ? "Link your Void project now?"
-      : "Set up your Void project now? (log in + link project)",
+      ? 'Link your Void project now?'
+      : 'Set up your Void project now? (log in + link project)',
   });
   if (isCancel(shouldSetup)) {
-    cancel("Setup cancelled.");
+    cancel('Setup cancelled.');
     process.exit(0);
   }
   if (!shouldSetup) {
@@ -60,8 +60,8 @@ export async function maybeSetupDeployProject(root: string): Promise<ProjectConf
     return createProject(root, client, slug);
   }
 
-  const result = await promptProjectSelection(projects, "Select a project to link:");
-  if (result.action === "select") {
+  const result = await promptProjectSelection(projects, 'Select a project to link:');
+  if (result.action === 'select') {
     const config = { projectId: result.project.id, slug: result.project.slug };
     writeProjectConfig(root, config);
     log.success(`Linked project: ${config.slug}`);

@@ -16,20 +16,20 @@ In Void's default routing mode, route handlers and middleware receive a Hono `Co
 
 ```ts
 // routes/api/users.ts
-import { defineHandler } from "void";
+import { defineHandler } from 'void';
 
 export const GET = defineHandler(async (c) => {
-  const { results } = await c.env.DB.prepare("SELECT * FROM users").all();
+  const { results } = await c.env.DB.prepare('SELECT * FROM users').all();
   return c.json(results);
 });
 ```
 
 ```ts
 // routes/api/cache.ts
-import { defineHandler } from "void";
+import { defineHandler } from 'void';
 
 export const GET = defineHandler(async (c) => {
-  const value = await c.env.KV.get("key");
+  const value = await c.env.KV.get('key');
   return c.json({ value });
 });
 ```
@@ -45,25 +45,25 @@ Some frameworks, like Nuxt and SvelteKit, do not run in workerd during dev and t
 :::
 
 ```ts
-import { env } from "cloudflare:workers";
+import { env } from 'cloudflare:workers';
 
-const result = await env.DB.prepare("SELECT * FROM users").all();
+const result = await env.DB.prepare('SELECT * FROM users').all();
 ```
 
 This also works in server functions:
 
 ```tsx
 // src/routes/users.tsx (TanStack Start)
-import { createFileRoute } from "@tanstack/react-router";
-import { createServerFn } from "@tanstack/react-start";
-import { env } from "cloudflare:workers";
+import { createFileRoute } from '@tanstack/react-router';
+import { createServerFn } from '@tanstack/react-start';
+import { env } from 'cloudflare:workers';
 
 const getUsers = createServerFn().handler(async () => {
-  const { results } = await env.DB.prepare("SELECT * FROM users").all();
+  const { results } = await env.DB.prepare('SELECT * FROM users').all();
   return results;
 });
 
-export const Route = createFileRoute("/users")({
+export const Route = createFileRoute('/users')({
   loader: () => getUsers(),
   component: UsersPage,
 });

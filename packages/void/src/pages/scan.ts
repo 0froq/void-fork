@@ -1,17 +1,17 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join, dirname, basename, extname } from "node:path";
-import { glob } from "tinyglobby";
-import { parseRouteFilename } from "../router/parse-filename";
-import { resolveNamedLayout } from "./layout-resolution";
+import { existsSync, readFileSync } from 'node:fs';
+import { join, dirname, basename, extname } from 'node:path';
+import { glob } from 'tinyglobby';
+import { parseRouteFilename } from '../router/parse-filename';
+import { resolveNamedLayout } from './layout-resolution';
 import type {
   PageDefinition,
   LayoutDefinition,
   NamedLayoutDefinition,
   PageScanResult,
-} from "./types";
+} from './types';
 
-const COMPONENT_EXTENSIONS = ["vue", "tsx", "jsx", "svelte", "md"];
-const SERVER_EXTENSIONS = ["ts", "tsx", "js", "mjs", "mts"];
+const COMPONENT_EXTENSIONS = ['vue', 'tsx', 'jsx', 'svelte', 'md'];
+const SERVER_EXTENSIONS = ['ts', 'tsx', 'js', 'mjs', 'mts'];
 const PAGES_EXPORT_RE = /export\s+(?:const|function|async\s+function)\s+(loader|actions?)\b/g;
 const REVALIDATE_RE = /export\s+const\s+revalidate\s*=\s*(\d+)\s*;/;
 const PRERENDER_RE = /export\s+const\s+prerender\s*=\s*true\s*;/;
@@ -23,12 +23,12 @@ export const MAX_REVALIDATE = 31536000; // 1 year in seconds
 
 export async function scanPages(
   root: string,
-  options?: { output?: "server" | "static" },
+  options?: { output?: 'server' | 'static' },
 ): Promise<PageScanResult> {
-  const pagesDir = join(root, "pages");
+  const pagesDir = join(root, 'pages');
   if (!existsSync(pagesDir)) return { pages: [], layouts: [], namedLayouts: [] };
 
-  const pattern = `**/*.{${COMPONENT_EXTENSIONS.join(",")}}`;
+  const pattern = `**/*.{${COMPONENT_EXTENSIONS.join(',')}}`;
   const files = await glob(pattern, { cwd: pagesDir, absolute: false });
 
   const pages: PageDefinition[] = [];
@@ -36,9 +36,9 @@ export async function scanPages(
   const namedLayouts: NamedLayoutDefinition[] = [];
 
   for (const file of files) {
-    const segments = file.split("/");
+    const segments = file.split('/');
     // Skip files starting with _ in any segment (except _layouts/)
-    if (segments.some((s) => s.startsWith("_") && s !== "_layouts")) continue;
+    if (segments.some((s) => s.startsWith('_') && s !== '_layouts')) continue;
 
     const ext = extname(file);
     let base = basename(file, ext);
@@ -46,24 +46,24 @@ export async function scanPages(
     // Detect island suffix (.island.tsx, .island.vue, etc.)
     let island: boolean | undefined;
     let hasIslandSuffix = false;
-    if (base.endsWith(".island")) {
+    if (base.endsWith('.island')) {
       island = true;
       hasIslandSuffix = true;
-      base = base.slice(0, -".island".length);
+      base = base.slice(0, -'.island'.length);
     }
     // .md files are implicitly island (static HTML, zero client JS)
-    if (ext === ".md") {
+    if (ext === '.md') {
       island = true;
     }
 
     // Named layout files: _layouts/name.vue, dir/_layouts/name.vue
-    const layoutsDirIdx = segments.indexOf("_layouts");
+    const layoutsDirIdx = segments.indexOf('_layouts');
     if (layoutsDirIdx !== -1) {
       // Only files directly inside _layouts/ (not nested deeper)
       if (layoutsDirIdx === segments.length - 2) {
         namedLayouts.push({
           name: base,
-          directory: segments.slice(0, layoutsDirIdx).join("/") || "",
+          directory: segments.slice(0, layoutsDirIdx).join('/') || '',
           filePath: file,
           island,
         });
@@ -72,10 +72,10 @@ export async function scanPages(
     }
 
     // Layout files
-    if (base === "layout") {
+    if (base === 'layout') {
       const dir = dirname(file);
       layouts.push({
-        directory: dir === "." ? "" : dir,
+        directory: dir === '.' ? '' : dir,
         filePath: file,
         island,
       });
@@ -87,15 +87,15 @@ export async function scanPages(
     // extension to .ts so the parser handles it correctly.
     // Strip .island suffix before parsing so route patterns are clean.
     const parseName = hasIslandSuffix
-      ? file.replace(`.island${ext}`, ".ts")
-      : file.replace(ext, ".ts");
+      ? file.replace(`.island${ext}`, '.ts')
+      : file.replace(ext, '.ts');
     const route = parseRouteFilename(parseName);
     const componentId =
       file
-        .replace(ext, "")
-        .replace(/\.island$/, "")
-        .replace(/\/index$/, "")
-        .replace(/^index$/, "") || "index";
+        .replace(ext, '')
+        .replace(/\.island$/, '')
+        .replace(/\/index$/, '')
+        .replace(/^index$/, '') || 'index';
 
     // Check for companion .server.ts — server files never have .island suffix
     let serverPath: string | null = null;
@@ -104,12 +104,12 @@ export async function scanPages(
     let prerender: boolean | undefined;
     let prerenderExplicitlyFalse = false;
     let hasGetPrerenderPaths: boolean | undefined;
-    const serverBase = hasIslandSuffix ? file.replace(`.island${ext}`, "") : file.replace(ext, "");
+    const serverBase = hasIslandSuffix ? file.replace(`.island${ext}`, '') : file.replace(ext, '');
     for (const serverExt of SERVER_EXTENSIONS) {
       const candidate = `${serverBase}.server.${serverExt}`;
       if (existsSync(join(pagesDir, candidate))) {
         serverPath = candidate;
-        const content = readFileSync(join(pagesDir, candidate), "utf-8");
+        const content = readFileSync(join(pagesDir, candidate), 'utf-8');
         for (const m of content.matchAll(PAGES_EXPORT_RE)) {
           methods.push(m[1]);
         }
@@ -130,7 +130,7 @@ export async function scanPages(
       }
     }
 
-    const isStaticOutput = options?.output === "static";
+    const isStaticOutput = options?.output === 'static';
     if (isStaticOutput) {
       // Static output: default prerender=true for all pages unless explicitly false.
       // Dynamic pages without getPrerenderPaths stay false (can't prerender without known paths).
@@ -144,7 +144,7 @@ export async function scanPages(
       // Auto-static: island page with no loader and no params → prerender
       if (
         island &&
-        !methods.includes("loader") &&
+        !methods.includes('loader') &&
         route.params.length === 0 &&
         !route.catchAll &&
         !prerenderExplicitlyFalse
@@ -161,12 +161,12 @@ export async function scanPages(
     // Extract frontmatter metadata and layout from .md files, or layout from component files
     let metadata: { title?: string; description?: string } | undefined;
     let layout: string | false | undefined;
-    if (ext === ".md") {
-      const mdContent = readFileSync(join(pagesDir, file), "utf-8");
+    if (ext === '.md') {
+      const mdContent = readFileSync(join(pagesDir, file), 'utf-8');
       metadata = extractFrontmatterMeta(mdContent);
       layout = extractFrontmatterLayout(mdContent);
     } else {
-      const componentContent = readFileSync(join(pagesDir, file), "utf-8");
+      const componentContent = readFileSync(join(pagesDir, file), 'utf-8');
       const layoutStringMatch = componentContent.match(LAYOUT_STRING_RE);
       if (layoutStringMatch) {
         layout = layoutStringMatch[1];
@@ -195,8 +195,8 @@ export async function scanPages(
   // Sort: static before dynamic, catch-all last
   pages.sort((a, b) => {
     if (a.catchAll !== b.catchAll) return a.catchAll ? 1 : -1;
-    const aDynamic = a.pattern.includes(":");
-    const bDynamic = b.pattern.includes(":");
+    const aDynamic = a.pattern.includes(':');
+    const bDynamic = b.pattern.includes(':');
     if (aDynamic !== bDynamic) return aDynamic ? 1 : -1;
     return a.pattern.localeCompare(b.pattern);
   });
@@ -205,10 +205,10 @@ export async function scanPages(
   for (const page of pages) {
     if (page.island) continue;
     const dir = dirname(page.componentPath);
-    const segments = dir === "." ? [] : dir.split("/");
-    let current = "";
+    const segments = dir === '.' ? [] : dir.split('/');
+    let current = '';
     // Check root layout
-    if (layouts.some((l) => l.directory === "" && l.island)) {
+    if (layouts.some((l) => l.directory === '' && l.island)) {
       throw new Error(
         `[void] Regular page "${page.componentPath}" is under an island layout — use .island suffix`,
       );
@@ -227,10 +227,10 @@ export async function scanPages(
   // Validate named layout references
   for (const page of pages) {
     if (page.layout === undefined || page.layout === false) continue;
-    const isExclusive = page.layout.startsWith("!");
+    const isExclusive = page.layout.startsWith('!');
     const name = isExclusive ? page.layout.slice(1) : page.layout;
     // Skip relative path layouts
-    if (name.startsWith(".") || name.startsWith("/")) continue;
+    if (name.startsWith('.') || name.startsWith('/')) continue;
     if (!resolveNamedLayout(name, page.componentId, namedLayouts)) {
       throw new Error(
         `[void] Page "${page.componentPath}" specifies layout "${page.layout}" but no _layouts/${name}.vue was found in any ancestor directory.`,
@@ -251,11 +251,11 @@ function extractFrontmatterMeta(
   const title = yaml
     .match(/^title:\s*(.+)$/m)?.[1]
     ?.trim()
-    .replace(/^["']|["']$/g, "");
+    .replace(/^["']|["']$/g, '');
   const description = yaml
     .match(/^description:\s*(.+)$/m)?.[1]
     ?.trim()
-    .replace(/^["']|["']$/g, "");
+    .replace(/^["']|["']$/g, '');
   if (!title && !description) return undefined;
   return { title, description };
 }
@@ -267,9 +267,9 @@ function extractFrontmatterLayout(source: string): string | false | undefined {
   const value = match[1]
     .match(/^layout:\s*(.+)$/m)?.[1]
     ?.trim()
-    .replace(/^["']|["']$/g, "");
+    .replace(/^["']|["']$/g, '');
   if (!value) return undefined;
-  if (value === "false") return false;
+  if (value === 'false') return false;
   return value;
 }
 
@@ -277,4 +277,4 @@ export {
   resolveLayoutChain,
   resolveNamedLayout,
   resolveEffectiveLayoutChain,
-} from "./layout-resolution";
+} from './layout-resolution';

@@ -1,6 +1,6 @@
-import { parse } from "es-module-lexer/js";
-import { parseSync } from "vite";
-import { walk } from "estree-walker";
+import { parse } from 'es-module-lexer/js';
+import { walk } from 'estree-walker';
+import { parseSync } from 'vite';
 
 export interface InferredBindings {
   needsD1: boolean;
@@ -39,25 +39,25 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
       if (!source) continue;
 
       switch (source) {
-        case "void/db":
+        case 'void/db':
           result.needsD1 = true;
           break;
-        case "void/kv":
+        case 'void/kv':
           result.needsKV = true;
           break;
-        case "void/storage":
+        case 'void/storage':
           result.needsR2 = true;
           break;
-        case "void/auth":
+        case 'void/auth':
           result.needsAuth = true;
           break;
-        case "void/queue":
+        case 'void/queue':
           result.needsQueues = true;
           break;
-        case "void/ai":
+        case 'void/ai':
           result.needsAI = true;
           break;
-        case "void/client": {
+        case 'void/client': {
           // Check if the `auth` specifier is imported (not just `fetch`)
           const stmt = code.slice(imp.ss, imp.se + 1);
           if (/\bauth\b/.test(stmt)) {
@@ -100,36 +100,36 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
 
   walk(parsed.program as any, {
     enter(node: any) {
-      if (node.type !== "MemberExpression") return;
+      if (node.type !== 'MemberExpression') return;
       if (node.computed) return;
 
       const property = node.property;
-      if (property?.type !== "Identifier") return;
+      if (property?.type !== 'Identifier') return;
 
       // Check if the object is *.env (i.e., a MemberExpression with .env)
       const obj = node.object;
       const isViaContextEnv =
-        obj?.type === "MemberExpression" &&
-        obj.property?.type === "Identifier" &&
-        obj.property.name === "env";
-      const isDirectEnv = obj?.type === "Identifier" && obj.name === "env";
+        obj?.type === 'MemberExpression' &&
+        obj.property?.type === 'Identifier' &&
+        obj.property.name === 'env';
+      const isDirectEnv = obj?.type === 'Identifier' && obj.name === 'env';
       if (!isViaContextEnv && !isDirectEnv) return;
 
       switch (property.name) {
-        case "DB":
+        case 'DB':
           result.needsD1 = true;
           break;
-        case "KV":
+        case 'KV':
           result.needsKV = true;
           break;
-        case "STORAGE":
+        case 'STORAGE':
           result.needsR2 = true;
           break;
-        case "AI":
+        case 'AI':
           result.needsAI = true;
           break;
         default:
-          if (property.name.startsWith("QUEUE_")) {
+          if (property.name.startsWith('QUEUE_')) {
             result.needsQueues = true;
           }
           break;

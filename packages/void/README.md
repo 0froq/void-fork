@@ -45,8 +45,8 @@ Then run `npx void init`. The full interactive flow can scaffold a starter, conf
 
 ```ts
 // vite.config.ts
-import { defineConfig } from "vite";
-import { voidPlugin } from "void";
+import { defineConfig } from 'vite';
+import { voidPlugin } from 'void';
 
 export default defineConfig({
   plugins: [voidPlugin()],

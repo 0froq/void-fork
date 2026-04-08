@@ -1,8 +1,8 @@
-import type { HeaderRule, RedirectRule } from "../cli/types";
-import type { VoidAuthProvider } from "../auth/providers";
-import type { ScanResult } from "./scan";
-import { resolveLayoutIds } from "../pages/layout-resolution";
-import { INTERNAL_BINDING_PREFIXES } from "../runtime/env-raw";
+import type { VoidAuthProvider } from '../auth/providers';
+import type { HeaderRule, RedirectRule } from '../cli/types';
+import { resolveLayoutIds } from '../pages/layout-resolution';
+import { INTERNAL_BINDING_PREFIXES } from '../runtime/env-raw';
+import type { ScanResult } from './scan';
 
 /**
  * Script tag injected into dev HTML to load the binding-hint virtual module.
@@ -22,7 +22,7 @@ function pushDefaultErrorPageHelpers(lines: string[]): void {
     `  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");`,
   );
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
   lines.push(`function __voidShouldServeHtmlErrorPage(request) {`);
   lines.push(`  if (request.method !== "GET" && request.method !== "HEAD") return false;`);
   lines.push(`  const url = new URL(request.url);`);
@@ -35,7 +35,7 @@ function pushDefaultErrorPageHelpers(lines: string[]): void {
   lines.push(`  const accept = request.headers.get("accept");`);
   lines.push(`  return !accept || accept.includes("text/html") || accept.includes("*/*");`);
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
   lines.push(`function __voidRenderErrorPage(status, title) {`);
   lines.push(`  const heading = status + ": " + title;`);
   lines.push(`  const prefix = status + ": ";`);
@@ -95,7 +95,7 @@ function pushDefaultErrorPageHelpers(lines: string[]): void {
   lines.push(`  </body>`);
   lines.push(`</html>\`;`);
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
   lines.push(`function __voidCreateErrorResponse(request, status, title) {`);
   lines.push(`  if (!__voidShouldServeHtmlErrorPage(request)) {`);
   lines.push(`    return new Response(title, { status });`);
@@ -107,7 +107,7 @@ function pushDefaultErrorPageHelpers(lines: string[]): void {
   lines.push(`    headers: { "content-type": "text/html; charset=utf-8" },`);
   lines.push(`  });`);
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
 }
 
 export interface AuthCompileOptions {
@@ -115,7 +115,7 @@ export interface AuthCompileOptions {
   authConfigPath: string | null;
   authDatabasePath: string | null;
   authSchemaPath: string | null;
-  dialect: "sqlite" | "postgresql";
+  dialect: 'sqlite' | 'postgresql';
   providers: readonly VoidAuthProvider[] | null;
 }
 
@@ -139,7 +139,7 @@ export interface CompileOptions {
   /** Bundled migration SQL entries */
   migrations?: { name: string; sql: string }[];
   /** Migration dialect (sqlite or postgresql) */
-  migrationDialect?: "sqlite" | "postgresql";
+  migrationDialect?: 'sqlite' | 'postgresql';
   /** Header rules from routing.headers config (node targets only) */
   headerRules?: HeaderRule[];
   /** Redirect rules from routing.redirects config (node targets only) */
@@ -173,7 +173,7 @@ export interface PagesCompileOptions {
   /** Virtual module ID for the md plugin's client entry (script execution) */
   mdClientEntryId?: string;
   /** Head config from void.json */
-  headConfig?: import("../pages/head").HeadConfig;
+  headConfig?: import('../pages/head').HeadConfig;
 }
 
 /**
@@ -206,12 +206,12 @@ export function compileRouteTable(
   }
 
   if (auth) {
-    const authImports = ["runVoidAuthMiddleware", "handleVoidAuthRequest", "runVoidAuthMigrations"];
+    const authImports = ['runVoidAuthMiddleware', 'handleVoidAuthRequest', 'runVoidAuthMigrations'];
     if (webSockets.length > 0) {
-      authImports.push("resolveVoidAuthState as __resolveVoidAuthStateRuntime");
+      authImports.push('resolveVoidAuthState as __resolveVoidAuthStateRuntime');
     }
     lines.push(
-      `import { ${authImports.join(", ")} } from ${JSON.stringify(auth.authRuntimePath)};`,
+      `import { ${authImports.join(', ')} } from ${JSON.stringify(auth.authRuntimePath)};`,
     );
     if (auth.authDatabasePath) {
       lines.push(`import { __voidAuthDatabase } from ${JSON.stringify(auth.authDatabasePath)};`);
@@ -230,7 +230,7 @@ export function compileRouteTable(
       `import { createWebSocketDurableObject as __createWebSocketDurableObject, handleWebSocketUpgrade as __handleWebSocketUpgrade, forwardWebSocketRequest as __forwardWebSocketRequest } from ${JSON.stringify(options.webSocketRuntimePath)};`,
     );
   }
-  lines.push("");
+  lines.push('');
 
   // Generate eager imports for middleware
   for (let i = 0; i < scan.middleware.length; i++) {
@@ -241,35 +241,35 @@ export function compileRouteTable(
     const route = webSockets[i];
     lines.push(`import websocket${i} from ${JSON.stringify(`${routesDir}/${route.filePath}`)};`);
   }
-  lines.push("");
+  lines.push('');
 
   if (auth) {
     lines.push(
-      `const __voidAuthOptions = { dialect: ${JSON.stringify(auth.dialect)}, providers: ${JSON.stringify(auth.providers)}, userConfig: ${auth.authConfigPath ? "__voidAuthConfig" : "undefined"} };`,
+      `const __voidAuthOptions = { dialect: ${JSON.stringify(auth.dialect)}, providers: ${JSON.stringify(auth.providers)}, userConfig: ${auth.authConfigPath ? '__voidAuthConfig' : 'undefined'} };`,
     );
     if (webSockets.length > 0) {
       lines.push(
-        `const __resolveVoidAuthState = (request, env, runtime) => __resolveVoidAuthStateRuntime(request, env, runtime${auth.authDatabasePath ? ", __voidAuthDatabase" : ""});`,
+        `const __resolveVoidAuthState = (request, env, runtime) => __resolveVoidAuthStateRuntime(request, env, runtime${auth.authDatabasePath ? ', __voidAuthDatabase' : ''});`,
       );
     }
-    lines.push("");
+    lines.push('');
   }
 
   lines.push(`const app = new Hono();`);
   lines.push(`export const requestContext = new AsyncLocalStorage();`);
-  lines.push("");
+  lines.push('');
 
   // Request context middleware — threads outer request into ALS for isomorphic fetch
-  lines.push("app.use(async (c, next) => {");
+  lines.push('app.use(async (c, next) => {');
   if (options.nodeTarget) {
-    lines.push("  await requestContext.run({ request: c.req.raw }, next);");
+    lines.push('  await requestContext.run({ request: c.req.raw }, next);');
   } else {
     lines.push(
-      "  await requestContext.run({ request: c.req.raw, executionCtx: c.executionCtx }, next);",
+      '  await requestContext.run({ request: c.req.raw, executionCtx: c.executionCtx }, next);',
     );
   }
-  lines.push("});");
-  lines.push("");
+  lines.push('});');
+  lines.push('');
 
   // Edge routing middleware (node targets only — on CF these are handled by the dispatch worker)
   if (options.nodeTarget && options.redirectRules?.length) {
@@ -280,12 +280,12 @@ export function compileRouteTable(
   }
 
   if (auth) {
-    lines.push("app.use(async (c, next) => {");
+    lines.push('app.use(async (c, next) => {');
     lines.push(
-      `  return runVoidAuthMiddleware(c, next, __voidAuthOptions${auth.authDatabasePath ? ", __voidAuthDatabase" : ""});`,
+      `  return runVoidAuthMiddleware(c, next, __voidAuthOptions${auth.authDatabasePath ? ', __voidAuthDatabase' : ''});`,
     );
-    lines.push("});");
-    lines.push("");
+    lines.push('});');
+    lines.push('');
   }
 
   // Register user middleware
@@ -293,30 +293,30 @@ export function compileRouteTable(
     lines.push(`app.use(middleware${i});`);
   }
   if (scan.middleware.length > 0) {
-    lines.push("");
+    lines.push('');
   }
 
   if (auth) {
     lines.push('app.all("/api/auth", async (c) => {');
     lines.push(
-      `  return handleVoidAuthRequest(c, __voidAuthOptions${auth.authDatabasePath ? ", __voidAuthDatabase" : ""});`,
+      `  return handleVoidAuthRequest(c, __voidAuthOptions${auth.authDatabasePath ? ', __voidAuthDatabase' : ''});`,
     );
-    lines.push("});");
-    lines.push("");
+    lines.push('});');
+    lines.push('');
     lines.push('app.all("/api/auth/*", async (c) => {');
     lines.push(
-      `  return handleVoidAuthRequest(c, __voidAuthOptions${auth.authDatabasePath ? ", __voidAuthDatabase" : ""});`,
+      `  return handleVoidAuthRequest(c, __voidAuthOptions${auth.authDatabasePath ? ', __voidAuthDatabase' : ''});`,
     );
-    lines.push("});");
-    lines.push("");
+    lines.push('});');
+    lines.push('');
   }
 
   // Register routes with lazy-loaded handlers (shared loader per file)
   const seenFiles = new Set<string>();
   for (const route of scan.routes) {
     const filePath = `${routesDir}/${route.filePath}`;
-    const varName = `_mod_${route.filePath.replace(/[^a-zA-Z0-9]/g, "_")}`;
-    const loaderName = `_load_${route.filePath.replace(/[^a-zA-Z0-9]/g, "_")}`;
+    const varName = `_mod_${route.filePath.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    const loaderName = `_load_${route.filePath.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
     if (!seenFiles.has(route.filePath)) {
       seenFiles.add(route.filePath);
@@ -343,7 +343,7 @@ export function compileRouteTable(
       }
     }
   }
-  lines.push("");
+  lines.push('');
 
   if (webSockets.length > 0) {
     for (let i = 0; i < webSockets.length; i++) {
@@ -356,10 +356,10 @@ export function compileRouteTable(
             className: route.className,
             bindingName: route.bindingName,
           },
-        )}, ${auth ? "__voidAuthOptions" : "undefined"}, ${auth ? "__resolveVoidAuthState" : "undefined"});`,
+        )}, ${auth ? '__voidAuthOptions' : 'undefined'}, ${auth ? '__resolveVoidAuthState' : 'undefined'});`,
       );
     }
-    lines.push("");
+    lines.push('');
     lines.push(
       `const __voidWebSocketRoutes = ${JSON.stringify(
         webSockets.map((route) => ({
@@ -370,22 +370,22 @@ export function compileRouteTable(
         })),
       )};`,
     );
-    lines.push("export async function __voidHandleWebSocket(request, env) {");
-    lines.push("  return __handleWebSocketUpgrade(request, env, __voidWebSocketRoutes);");
-    lines.push("}");
-    lines.push("");
+    lines.push('export async function __voidHandleWebSocket(request, env) {');
+    lines.push('  return __handleWebSocketUpgrade(request, env, __voidWebSocketRoutes);');
+    lines.push('}');
+    lines.push('');
     for (let i = 0; i < webSockets.length; i++) {
       const route = webSockets[i];
       lines.push(`app.all(${JSON.stringify(route.pattern)}, async (c) => {`);
       lines.push(
         `  return __forwardWebSocketRequest(c.req.raw, c.env, __voidWebSocketRoutes[${i}]);`,
       );
-      lines.push("});");
+      lines.push('});');
     }
-    lines.push("");
+    lines.push('');
   } else {
-    lines.push("export async function __voidHandleWebSocket() { return null; }");
-    lines.push("");
+    lines.push('export async function __voidHandleWebSocket() { return null; }');
+    lines.push('');
   }
 
   // Pages mode — generate page route handlers
@@ -400,11 +400,11 @@ export function compileRouteTable(
     lines.push(`const SSR_CLIENT_ENTRY_ID = ${JSON.stringify(ssr.clientEntryRelativePath)};`);
     lines.push(`const SSR_CLIENT_ENTRY_URL = ${JSON.stringify(clientEntryUrl)};`);
     lines.push(`let cachedSsrManifest = null;`);
-    lines.push("");
+    lines.push('');
     lines.push(`function escapeHtml(value) {`);
     lines.push(`  return String(value).replace(/"/g, "&quot;");`);
     lines.push(`}`);
-    lines.push("");
+    lines.push('');
     lines.push(`function getDevClientTags() {`);
     lines.push(`  const preloadTags = [\`<script type="module" src="/@vite/client"></script>\`];`);
     lines.push(`  preloadTags.push(\`${BINDING_HINT_SCRIPT}\`);`);
@@ -422,7 +422,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
     );
     lines.push(`  return { css: "", preloads: preloadTags.join("\\n"), body: bodyTag };`);
     lines.push(`}`);
-    lines.push("");
+    lines.push('');
     lines.push(`function collectManifestFiles(manifest, entryId) {`);
     lines.push(`  const seen = new Set();`);
     lines.push(`  const toVisit = [entryId];`);
@@ -436,7 +436,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`  }`);
     lines.push(`  return Array.from(seen);`);
     lines.push(`}`);
-    lines.push("");
+    lines.push('');
     lines.push(`async function loadSsrManifest(request, env) {`);
     lines.push(`  if (cachedSsrManifest) return cachedSsrManifest;`);
     lines.push(
@@ -453,7 +453,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`  cachedSsrManifest = await response.json();`);
     lines.push(`  return cachedSsrManifest;`);
     lines.push(`}`);
-    lines.push("");
+    lines.push('');
     lines.push(`async function getClientAssetTags(request, env) {`);
     lines.push(`  const manifest = await loadSsrManifest(request, env);`);
     lines.push(`  if (!manifest || typeof manifest !== "object") {`);
@@ -494,7 +494,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
       `  return { css: cssTags.join("\\n"), preloads: preloadTags.join("\\n"), body: bodyTag };`,
     );
     lines.push(`}`);
-    lines.push("");
+    lines.push('');
     lines.push(`function shouldHandleSsrRequest(c) {`);
     lines.push(`  const path = c.req.path;`);
     lines.push(`  if (path === "/api" || path.startsWith("/api/")) return false;`);
@@ -505,7 +505,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
     );
     lines.push(`  return true;`);
     lines.push(`}`);
-    lines.push("");
+    lines.push('');
     lines.push(`async function fetchFromAssets(c) {`);
     lines.push(`  const assets = c.env?.ASSETS;`);
     lines.push(`  if (!assets || typeof assets.fetch !== "function") {`);
@@ -516,7 +516,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
       `  return response.status === 404 ? new Response("Not Found", { status: 404 }) : response;`,
     );
     lines.push(`}`);
-    lines.push("");
+    lines.push('');
     lines.push(`async function renderSsrResponse(c, mod) {`);
     lines.push(`  const render = typeof mod.render === "function" ? mod.render : mod.default;`);
     lines.push(`  if (typeof render !== "function") {`);
@@ -527,7 +527,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`  const assetTags = await getClientAssetTags(c.req.raw, c.env);`);
     lines.push(`  return render(c, assetTags);`);
     lines.push(`}`);
-    lines.push("");
+    lines.push('');
     lines.push(`app.notFound(async (c) => {`);
     lines.push(`  if (!shouldHandleSsrRequest(c)) {`);
     lines.push(`    return fetchFromAssets(c);`);
@@ -535,7 +535,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`  const mod = await import(${JSON.stringify(ssr.serverEntryPath)});`);
     lines.push(`  return renderSsrResponse(c, mod);`);
     lines.push(`});`);
-    lines.push("");
+    lines.push('');
   }
 
   if (scan.jobs.length > 0) {
@@ -543,9 +543,9 @@ window.__vite_plugin_react_preamble_installed__ = true;
       const job = scan.jobs[i];
       lines.push(`const job${i}Crons = ${JSON.stringify(job.crons)};`);
     }
-    lines.push("");
-    lines.push("export async function scheduled(controller, env, ctx) {");
-    lines.push("  switch (controller.cron) {");
+    lines.push('');
+    lines.push('export async function scheduled(controller, env, ctx) {');
+    lines.push('  switch (controller.cron) {');
     for (let i = 0; i < scan.jobs.length; i++) {
       const job = scan.jobs[i];
       const filePath = JSON.stringify(`${jobsDir}/${job.filePath}`);
@@ -558,51 +558,51 @@ window.__vite_plugin_react_preamble_installed__ = true;
       }
       lines.push(`      const mod = await import(${filePath});`);
       lines.push("      if (typeof mod.default === 'function') {");
-      lines.push("        await mod.default(controller, env, ctx);");
-      lines.push("      }");
-      lines.push("      return;");
-      lines.push("    }");
+      lines.push('        await mod.default(controller, env, ctx);');
+      lines.push('      }');
+      lines.push('      return;');
+      lines.push('    }');
     }
-    lines.push("    default:");
-    lines.push("      return;");
-    lines.push("  }");
-    lines.push("}");
-    lines.push("");
+    lines.push('    default:');
+    lines.push('      return;');
+    lines.push('  }');
+    lines.push('}');
+    lines.push('');
   } else {
-    lines.push("export async function scheduled() {}");
-    lines.push("");
+    lines.push('export async function scheduled() {}');
+    lines.push('');
   }
 
   if (scan.jobs.length > 0) {
     lines.push('app.post("/__scheduled", async (c) => {');
     lines.push('  const __token = c.req.header("x-void-internal");');
-    lines.push("  const __expected = __getRawEnv()?.__VOID_PROXY_TOKEN;");
-    lines.push("  if (!(__expected ? __token === __expected : __token === __VOID_BUILD_KEY)) {");
+    lines.push('  const __expected = __getRawEnv()?.__VOID_PROXY_TOKEN;');
+    lines.push('  if (!(__expected ? __token === __expected : __token === __VOID_BUILD_KEY)) {');
     lines.push('    return c.json({ error: "unauthorized" }, 401);');
-    lines.push("  }");
-    lines.push("  const { cron, scheduledTime } = await c.req.json();");
-    lines.push("  const controller = { cron, scheduledTime, noRetry() {} };");
-    lines.push("  await scheduled(controller, c.env, c.executionCtx);");
-    lines.push("  return c.json({ ok: true });");
-    lines.push("});");
-    lines.push("");
+    lines.push('  }');
+    lines.push('  const { cron, scheduledTime } = await c.req.json();');
+    lines.push('  const controller = { cron, scheduledTime, noRetry() {} };');
+    lines.push('  await scheduled(controller, c.env, c.executionCtx);');
+    lines.push('  return c.json({ ok: true });');
+    lines.push('});');
+    lines.push('');
   }
 
   if (scan.queues.length > 0) {
     for (let i = 0; i < scan.queues.length; i++) {
       lines.push(`const queue${i}Name = ${JSON.stringify(scan.queues[i].name)};`);
     }
-    lines.push("");
+    lines.push('');
     // Queue dispatch as a standalone function — called directly by native queue handler
     // and via the authenticated HTTP route. No global mutable state needed.
-    lines.push("export async function __processQueue(payload, env) {");
-    lines.push("  const queueSuffix = payload.queue;");
-    lines.push("  const __decisions = new Map();");
-    lines.push("  function __wrapMsg(m) {");
-    lines.push("    let decided = false;");
-    lines.push("    return {");
+    lines.push('export async function __processQueue(payload, env) {');
+    lines.push('  const queueSuffix = payload.queue;');
+    lines.push('  const __decisions = new Map();');
+    lines.push('  function __wrapMsg(m) {');
+    lines.push('    let decided = false;');
+    lines.push('    return {');
     lines.push(
-      "      id: m.id, timestamp: new Date(m.timestamp), body: m.body, attempts: m.attempts,",
+      '      id: m.id, timestamp: new Date(m.timestamp), body: m.body, attempts: m.attempts,',
     );
     lines.push(
       '      ack() { if (!decided) { decided = true; __decisions.set(m.id, { action: "ack" }); } },',
@@ -610,20 +610,20 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(
       '      retry(opts) { if (!decided) { decided = true; __decisions.set(m.id, { action: "retry", ...(opts?.delaySeconds != null ? { delaySeconds: opts.delaySeconds } : {}) }); } },',
     );
-    lines.push("    };");
-    lines.push("  }");
-    lines.push("  const __msgs = payload.messages.map(__wrapMsg);");
-    lines.push("  const batch = {");
-    lines.push("    queue: queueSuffix,");
-    lines.push("    messages: __msgs,");
-    lines.push("    ackAll() { for (const m of __msgs) m.ack(); },");
-    lines.push("    retryAll(opts) { for (const m of __msgs) m.retry(opts); },");
-    lines.push("  };");
-    lines.push("  let __ok = true;");
-    lines.push("  try {");
+    lines.push('    };');
+    lines.push('  }');
+    lines.push('  const __msgs = payload.messages.map(__wrapMsg);');
+    lines.push('  const batch = {');
+    lines.push('    queue: queueSuffix,');
+    lines.push('    messages: __msgs,');
+    lines.push('    ackAll() { for (const m of __msgs) m.ack(); },');
+    lines.push('    retryAll(opts) { for (const m of __msgs) m.retry(opts); },');
+    lines.push('  };');
+    lines.push('  let __ok = true;');
+    lines.push('  try {');
     for (let i = 0; i < scan.queues.length; i++) {
       const q = scan.queues[i];
-      const cond = i === 0 ? "if" : "} else if";
+      const cond = i === 0 ? 'if' : '} else if';
       lines.push(
         `    ${cond} (queueSuffix === queue${i}Name || queueSuffix.endsWith("-" + queue${i}Name)) {`,
       );
@@ -632,26 +632,26 @@ window.__vite_plugin_react_preamble_installed__ = true;
       );
       lines.push("      if (typeof mod.default === 'function') await mod.default(batch, env);");
     }
-    lines.push("    }");
-    lines.push("  } catch { __ok = false; }");
+    lines.push('    }');
+    lines.push('  } catch { __ok = false; }');
     lines.push(
-      "  return { ok: __ok, ...(__decisions.size > 0 ? { decisions: Object.fromEntries(__decisions) } : {}) };",
+      '  return { ok: __ok, ...(__decisions.size > 0 ? { decisions: Object.fromEntries(__decisions) } : {}) };',
     );
-    lines.push("}");
-    lines.push("");
+    lines.push('}');
+    lines.push('');
 
     // HTTP route — unconditionally requires token (same as /__scheduled)
     lines.push('app.post("/__queue", async (c) => {');
     lines.push('  const __token = c.req.header("x-void-internal");');
-    lines.push("  const __expected = __getRawEnv()?.__VOID_PROXY_TOKEN;");
-    lines.push("  if (!(__expected ? __token === __expected : __token === __VOID_BUILD_KEY)) {");
+    lines.push('  const __expected = __getRawEnv()?.__VOID_PROXY_TOKEN;');
+    lines.push('  if (!(__expected ? __token === __expected : __token === __VOID_BUILD_KEY)) {');
     lines.push('    return c.json({ error: "unauthorized" }, 401);');
-    lines.push("  }");
-    lines.push("  const payload = await c.req.json();");
-    lines.push("  const result = await __processQueue(payload, c.env);");
-    lines.push("  return c.json(result);");
-    lines.push("});");
-    lines.push("");
+    lines.push('  }');
+    lines.push('  const payload = await c.req.json();');
+    lines.push('  const result = await __processQueue(payload, c.env);');
+    lines.push('  return c.json(result);');
+    lines.push('});');
+    lines.push('');
   }
 
   // /__void/migrate handler — runs bundled DB + auth migrations in-worker
@@ -661,26 +661,26 @@ window.__vite_plugin_react_preamble_installed__ = true;
     );
     lines.push(`const __migrations = ${JSON.stringify(options.migrations)};`);
     lines.push(
-      `const __migrationDialect = ${JSON.stringify(options.migrationDialect ?? "sqlite")};`,
+      `const __migrationDialect = ${JSON.stringify(options.migrationDialect ?? 'sqlite')};`,
     );
     lines.push('app.post("/__void/migrate", async (c) => {');
-    lines.push("  const __voidMigrationHandler = __createMigrationHandler(");
-    lines.push("    __getRawEnv(),");
-    lines.push("    __migrations,");
-    lines.push("    __migrationDialect,");
+    lines.push('  const __voidMigrationHandler = __createMigrationHandler(');
+    lines.push('    __getRawEnv(),');
+    lines.push('    __migrations,');
+    lines.push('    __migrationDialect,');
     if (auth) {
       lines.push(
         `    () => runVoidAuthMigrations(new Request(c.req.url), __getRawEnv(), __voidAuthOptions${
-          auth.authSchemaPath ? ", __voidAuthMigrationSchema" : ""
+          auth.authSchemaPath ? ', __voidAuthMigrationSchema' : ''
         }),`,
       );
     } else {
-      lines.push("    undefined,");
+      lines.push('    undefined,');
     }
-    lines.push("  );");
-    lines.push("  return __voidMigrationHandler(c.req.raw);");
-    lines.push("});");
-    lines.push("");
+    lines.push('  );');
+    lines.push('  return __voidMigrationHandler(c.req.raw);');
+    lines.push('});');
+    lines.push('');
   }
 
   // /__void/* handler — native binding access via WfP dispatch (always injected for CF targets)
@@ -688,31 +688,31 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(
       `import { createBindingHandler as __createBindingHandler } from ${JSON.stringify(options.bindingHandlerPath)};`,
     );
-    lines.push("let __voidBindingApp;");
+    lines.push('let __voidBindingApp;');
     lines.push('app.all("/__void/*", async (c) => {');
     lines.push(
-      "  if (!__voidBindingApp) __voidBindingApp = __createBindingHandler(__getRawEnv());",
+      '  if (!__voidBindingApp) __voidBindingApp = __createBindingHandler(__getRawEnv());',
     );
-    lines.push("  const url = new URL(c.req.url);");
-    lines.push("  url.pathname = url.pathname.slice(7);");
-    lines.push("  return __voidBindingApp.fetch(new Request(url.toString(), c.req.raw));");
-    lines.push("});");
-    lines.push("");
+    lines.push('  const url = new URL(c.req.url);');
+    lines.push('  url.pathname = url.pathname.slice(7);');
+    lines.push('  return __voidBindingApp.fetch(new Request(url.toString(), c.req.raw));');
+    lines.push('});');
+    lines.push('');
   }
 
   // Request-scoped raw env — safe for concurrent requests (uses ALS, not a module global).
   // The worker entry wraps each request in __withRawEnv(env, fn). Internal route handlers
   // read it via __getRawEnv() which returns the per-request value from AsyncLocalStorage.
-  lines.push("const __rawEnvStore = new AsyncLocalStorage();");
-  lines.push("export function __withRawEnv(env, fn) { return __rawEnvStore.run(env, fn); }");
-  lines.push("function __getRawEnv() { return __rawEnvStore.getStore(); }");
+  lines.push('const __rawEnvStore = new AsyncLocalStorage();');
+  lines.push('export function __withRawEnv(env, fn) { return __rawEnvStore.run(env, fn); }');
+  lines.push('function __getRawEnv() { return __rawEnvStore.getStore(); }');
   // Build-time key for internal route auth when __VOID_PROXY_TOKEN is absent.
   // Embedded in the compiled route table — only same-build callers know it.
   lines.push(`export const __VOID_BUILD_KEY = ${JSON.stringify(crypto.randomUUID())};`);
-  lines.push("");
+  lines.push('');
   lines.push(`export default app;`);
 
-  return lines.join("\n");
+  return lines.join('\n');
 }
 
 function compilePrerenderCollector(
@@ -737,7 +737,7 @@ function compilePrerenderCollector(
   lines.push(`  }`);
   lines.push(`  return path;`);
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
 
   lines.push(`export async function __voidCollectPrerenderPaths(request, env, ctx) {`);
   lines.push(`  return withRuntimeEnv(env, async () => {`);
@@ -753,7 +753,7 @@ function compilePrerenderCollector(
   }
 
   for (const page of dynamicPages) {
-    const loaderName = `_pload_${page.componentId.replace(/[^a-zA-Z0-9]/g, "_")}`;
+    const loaderName = `_pload_${page.componentId.replace(/[^a-zA-Z0-9]/g, '_')}`;
     lines.push(`      {`);
     lines.push(`        const mod = await ${loaderName}();`);
     lines.push(`        if (typeof mod.getPrerenderPaths === "function") {`);
@@ -791,7 +791,7 @@ function compilePrerenderCollector(
   lines.push(`    });`);
   lines.push(`  });`);
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
 }
 
 function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompileOptions): void {
@@ -809,23 +809,23 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   if (hasIslandPages) {
     lines.push(`import { renderIslandPage } from "virtual:void-islands-renderer";`);
   }
-  lines.push("");
+  lines.push('');
 
   // Emit head config constant from void.json
   lines.push(`const __voidHeadConfig = ${JSON.stringify(pages.headConfig ?? null)};`);
-  lines.push("");
+  lines.push('');
   pushDefaultErrorPageHelpers(lines);
 
   // Asset tags — reuse the SSR asset tags pattern with the pages client entry
   const clientEntryId = pages.clientEntryId;
   lines.push(`const PAGES_CLIENT_ENTRY_ID = ${JSON.stringify(clientEntryId)};`);
-  lines.push(`const PAGES_CLIENT_ENTRY_URL = ${JSON.stringify("/@id/__x00__" + clientEntryId)};`);
+  lines.push(`const PAGES_CLIENT_ENTRY_URL = ${JSON.stringify('/@id/__x00__' + clientEntryId)};`);
   lines.push(`let cachedPagesManifest = null;`);
-  lines.push("");
+  lines.push('');
   lines.push(`function escapeHtmlAttr(value) {`);
   lines.push(`  return String(value).replace(/"/g, "&quot;");`);
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
   lines.push(`function getPagesDevClientTags() {`);
   lines.push(
     `  const preloads = \`<script type="module" src="/@vite/client"></script>\\n${BINDING_HINT_SCRIPT}\`;`,
@@ -835,7 +835,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   );
   lines.push(`  return { css: "", preloads, body: bodyTag };`);
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
   lines.push(`function collectPagesManifestFiles(manifest, entryId) {`);
   lines.push(`  const seen = new Set();`);
   lines.push(`  const toVisit = [entryId];`);
@@ -849,7 +849,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`  }`);
   lines.push(`  return Array.from(seen);`);
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
   // Build manifest-key mapping for each page and its layout chain
   // so CSS collection can be scoped to the active route only
   const relPagesDir = pages.pagesDirRelative;
@@ -860,7 +860,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     for (const layoutId of layoutIds) {
       // Map layout IDs back to file paths
       const layout = scan.pages.layouts.find(
-        (l) => (l.directory ? `${l.directory}/layout` : "layout") === layoutId,
+        (l) => (l.directory ? `${l.directory}/layout` : 'layout') === layoutId,
       );
       if (layout) {
         keys.push(`${relPagesDir}/${layout.filePath}`);
@@ -877,7 +877,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     pageCssKeys[page.componentId] = keys;
   }
   lines.push(`const PAGE_CSS_KEYS = ${JSON.stringify(pageCssKeys)};`);
-  lines.push("");
+  lines.push('');
 
   lines.push(`function collectRouteCss(manifest, entryId, pageKeys) {`);
   lines.push(`  const cssFiles = new Set();`);
@@ -914,7 +914,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`  }`);
   lines.push(`  return cssFiles;`);
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
   lines.push(`async function loadPagesManifest(request, env) {`);
   lines.push(`  if (cachedPagesManifest) return cachedPagesManifest;`);
   lines.push(
@@ -931,7 +931,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`  cachedPagesManifest = await response.json();`);
   lines.push(`  return cachedPagesManifest;`);
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
   lines.push(`async function getPagesAssetTags(request, env, componentId) {`);
   lines.push(`  const manifest = await loadPagesManifest(request, env);`);
   lines.push(`  if (!manifest || typeof manifest !== "object") {`);
@@ -970,22 +970,22 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     `  return { css: cssTags.join("\\n"), preloads: preloadTags.join("\\n"), body: bodyTag };`,
   );
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
 
   // Island asset tags — same pattern but using the islands client entry
   if (hasIslandPages && pages.islandClientEntryId) {
     const islandEntryId = pages.islandClientEntryId;
     lines.push(`const ISLANDS_CLIENT_ENTRY_ID = ${JSON.stringify(islandEntryId)};`);
     lines.push(
-      `const ISLANDS_CLIENT_ENTRY_URL = ${JSON.stringify("/@id/__x00__" + islandEntryId)};`,
+      `const ISLANDS_CLIENT_ENTRY_URL = ${JSON.stringify('/@id/__x00__' + islandEntryId)};`,
     );
     if (pages.mdClientEntryId) {
       lines.push(`const MD_CLIENT_ENTRY_ID = ${JSON.stringify(pages.mdClientEntryId)};`);
       lines.push(
-        `const MD_CLIENT_ENTRY_URL = ${JSON.stringify("/@id/__x00__" + pages.mdClientEntryId)};`,
+        `const MD_CLIENT_ENTRY_URL = ${JSON.stringify('/@id/__x00__' + pages.mdClientEntryId)};`,
       );
     }
-    lines.push("");
+    lines.push('');
     lines.push(`function getIslandsDevClientTags() {`);
     lines.push(
       `  const preloads = \`<script type="module" src="/@vite/client"></script>\\n${BINDING_HINT_SCRIPT}\`;`,
@@ -1000,7 +1000,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     }
     lines.push(`  return { css: "", preloads, body: bodyTag };`);
     lines.push(`}`);
-    lines.push("");
+    lines.push('');
     lines.push(`async function getIslandsAssetTags(request, env, componentId) {`);
     lines.push(`  const manifest = await loadPagesManifest(request, env);`);
     lines.push(`  if (!manifest || typeof manifest !== "object") {`);
@@ -1069,13 +1069,13 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
       `  return { css: cssTags.join("\\n"), preloads: preloadTags.join("\\n"), body: bodyTag };`,
     );
     lines.push(`}`);
-    lines.push("");
+    lines.push('');
   }
 
   // Generate lazy loaders and route registrations for each page
   const seenServerFiles = new Set<string>();
   for (const page of scan.pages.pages) {
-    const safeId = page.componentId.replace(/[^a-zA-Z0-9]/g, "_");
+    const safeId = page.componentId.replace(/[^a-zA-Z0-9]/g, '_');
 
     // Determine server module path
     let serverImportPath: string | null = null;
@@ -1103,7 +1103,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
       const headObj: Record<string, unknown> = {};
       if (page.metadata.title) headObj.title = page.metadata.title;
       if (page.metadata.description) {
-        headObj.meta = [{ name: "description", content: page.metadata.description }];
+        headObj.meta = [{ name: 'description', content: page.metadata.description }];
       }
       const headVarName = `__mdHead_${safeId}`;
       lines.push(`const ${headVarName} = () => (${JSON.stringify(headObj)});`);
@@ -1111,10 +1111,10 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     }
 
     // Choose renderer and asset tags based on island flag
-    const renderer = page.island ? "renderIslandPage" : "renderPage";
+    const renderer = page.island ? 'renderIslandPage' : 'renderPage';
     const assetTags =
-      page.island && pages.islandClientEntryId ? "getIslandsAssetTags" : "getPagesAssetTags";
-    const islandFlag = page.island ? ", true" : "";
+      page.island && pages.islandClientEntryId ? 'getIslandsAssetTags' : 'getPagesAssetTags';
+    const islandFlag = page.island ? ', true' : '';
 
     // Loader (always registered — pages always handle GET)
     lines.push(`app.get(${JSON.stringify(page.pattern)}, async (c) => {`);
@@ -1125,7 +1125,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
         `  return handlePageGet(mod.loader, mod.head, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}, __voidHeadConfig${islandFlag});`,
       );
     } else {
-      const headArg = mdHeadRef ?? "undefined";
+      const headArg = mdHeadRef ?? 'undefined';
       lines.push(
         `  return handlePageGet(undefined, ${headArg}, c, ${JSON.stringify(page.componentId)}, ${renderer}, ${assetTags}, __voidHeadConfig${islandFlag});`,
       );
@@ -1133,14 +1133,14 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
     lines.push(`});`);
 
     // Action (POST, PUT, PATCH, DELETE all route to action)
-    if (page.methods.includes("action") || page.methods.includes("actions")) {
+    if (page.methods.includes('action') || page.methods.includes('actions')) {
       const loaderName = `_pload_${safeId}`;
       lines.push(
         `app.on(["POST", "PUT", "PATCH", "DELETE"], ${JSON.stringify(page.pattern)}, async (c) => {`,
       );
       lines.push(`  const mod = await ${loaderName}();`);
 
-      if (page.methods.includes("actions")) {
+      if (page.methods.includes('actions')) {
         // Named actions — resolve from query string
         lines.push(`  const actionName = new URL(c.req.url).searchParams.keys().next().value;`);
         lines.push(
@@ -1160,7 +1160,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
       lines.push(`});`);
     }
   }
-  lines.push("");
+  lines.push('');
 
   // Asset fallback — delegates to env.ASSETS binding (static files from dist/client)
   lines.push(`async function fetchPagesAsset(c) {`);
@@ -1173,7 +1173,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`  }`);
   lines.push(`  return assets.fetch(c.req.raw);`);
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
 
   // Custom error page helper — serves {status}.html from static assets (e.g. 404.html, 500.html)
   lines.push(`async function serveCustomErrorPage(c, status, fallbackText) {`);
@@ -1191,7 +1191,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`  } catch {}`);
   lines.push(`  return __voidCreateErrorResponse(c.req.raw, status, fallbackText);`);
   lines.push(`}`);
-  lines.push("");
+  lines.push('');
 
   // Global error handler — preserve HTTPException responses (e.g. 401 from requireAuth),
   // serve custom 500.html for unexpected errors
@@ -1200,7 +1200,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`  console.error(err);`);
   lines.push(`  return serveCustomErrorPage(c, 500, "Internal Server Error");`);
   lines.push(`});`);
-  lines.push("");
+  lines.push('');
 
   // Page fallback — for unmatched non-API paths, try static assets first,
   // then attempt to render the index page as an SPA fallback.
@@ -1247,7 +1247,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`    return serveCustomErrorPage(c, 404, "Not Found");`);
   lines.push(`  }`);
   lines.push(`});`);
-  lines.push("");
+  lines.push('');
 }
 
 /**
@@ -1268,25 +1268,25 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
 export function compileWorkerEntry(
   hasQueues = false,
   remote?: { remotePath: string; envPath: string },
-  assetsDir = "assets",
+  assetsDir = 'assets',
   webSocketClasses: string[] = [],
-  runtimeEnvPath = "void/_env",
+  runtimeEnvPath = 'void/_env',
 ): string {
   const remotePath = remote?.remotePath;
   const runtimeEnvImport = `import { withRuntimeEnv } from ${JSON.stringify(runtimeEnvPath)};\n`;
   const remoteImport = remote
     ? `import { createRemoteEnv } from ${JSON.stringify(remote.remotePath)};\n`
-    : "";
+    : '';
 
   // Filter internal platform bindings so user code cannot access them via c.env.
   // The original env is preserved for framework internals (withRuntimeEnv, etc.).
   // Prefixes derived from INTERNAL_BINDING_PREFIXES (shared with env.ts).
   const prefixCheck = INTERNAL_BINDING_PREFIXES.map(
     (p) => `prop.startsWith(${JSON.stringify(p)})`,
-  ).join(" || ");
+  ).join(' || ');
   const prefixCheckNeg = INTERNAL_BINDING_PREFIXES.map(
     (p) => `!key.startsWith(${JSON.stringify(p)})`,
-  ).join(" && ");
+  ).join(' && ');
   const filterBindingsHelper = `
 function __filterInternalBindings(env) {
   return new Proxy(env, {
@@ -1321,7 +1321,7 @@ async function serveWithAssets(request, env, response) {
   const asset = await env.ASSETS.fetch(new Request(request.url, { method: request.method, headers: request.headers }));
   if (asset.status === 404) return response;
   const res = new Response(asset.body, asset);
-  if (new URL(request.url).pathname.startsWith(${JSON.stringify("/" + assetsDir + "/")})) {
+  if (new URL(request.url).pathname.startsWith(${JSON.stringify('/' + assetsDir + '/')})) {
     res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
   } else {
     res.headers.set("Cache-Control", "public, s-maxage=60, max-age=0, must-revalidate");
@@ -1383,11 +1383,11 @@ async function serveWithAssets(request, env, response) {
 }`;
 
   if (hasQueues) {
-    return `import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket, __withRawEnv, __processQueue${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(", ")}` : ""} } from 'virtual:void-routes';
+    return `import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket, __withRawEnv, __processQueue${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''} } from 'virtual:void-routes';
 ${runtimeEnvImport}${remoteImport}${filterBindingsHelper}${assetHelper}
 ${internalRouteHelper}
 ${scheduledHandler}
-async function queue(batch, env, ctx) {${remotePath ? `\n  if (env.__VOID_REMOTE === "1") env = createRemoteEnv(env);` : ""}
+async function queue(batch, env, ctx) {${remotePath ? `\n  if (env.__VOID_REMOTE === "1") env = createRemoteEnv(env);` : ''}
   const userEnv = __filterInternalBindings(env);
   const messages = [...batch.messages].map(m => ({
     id: m.id, timestamp: m.timestamp.toISOString(),
@@ -1408,14 +1408,14 @@ async function queue(batch, env, ctx) {${remotePath ? `\n  if (env.__VOID_REMOTE
   if (!__qr.ok) throw new Error("Queue handler failed");
 }
 
-${webSocketClasses.map((name) => `export { ${name} };`).join("\n")}
+${webSocketClasses.map((name) => `export { ${name} };`).join('\n')}
 export default { fetch: ${fetchHandler}, scheduled: handleScheduled, queue };`;
   }
-  return `import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket, __withRawEnv${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(", ")}` : ""} } from 'virtual:void-routes';
+  return `import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket, __withRawEnv${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''} } from 'virtual:void-routes';
 ${runtimeEnvImport}${remoteImport}${filterBindingsHelper}${assetHelper}
 ${internalRouteHelper}
 ${scheduledHandler}
-${webSocketClasses.map((name) => `export { ${name} };`).join("\n")}
+${webSocketClasses.map((name) => `export { ${name} };`).join('\n')}
 export default { fetch: ${fetchHandler}, scheduled: handleScheduled };`;
 }
 
@@ -1423,11 +1423,11 @@ export default { fetch: ${fetchHandler}, scheduled: handleScheduled };`;
  * Generate the app module — exports the Hono app with static asset serving.
  * This is the entry imported by `vite preview` and can be used programmatically.
  */
-export function compileNodeApp(target: "node" | "bun" | "deno", honoPath: string): string {
+export function compileNodeApp(target: 'node' | 'bun' | 'deno', honoPath: string): string {
   const staticImport =
-    target === "bun"
+    target === 'bun'
       ? `import { serveStatic } from "hono/bun";`
-      : target === "deno"
+      : target === 'deno'
         ? `import { serveStatic } from "hono/deno";`
         : `import { serveStatic } from "@hono/node-server/serve-static";`;
 
@@ -1454,8 +1454,8 @@ export default app;`;
  * Generate the server entry — imports the app and starts an HTTP server.
  * This is what users run with `node dist/ssr/index.js`.
  */
-export function compileNodeServer(target: "node" | "bun" | "deno"): string {
-  if (target === "bun") {
+export function compileNodeServer(target: 'node' | 'bun' | 'deno'): string {
+  if (target === 'bun') {
     return `import app from "./app.js";
 
 const port = Number(process.env.PORT || 3000);
@@ -1463,7 +1463,7 @@ Bun.serve({ fetch: app.fetch, port });
 console.log("Listening on http://localhost:" + port);`;
   }
 
-  if (target === "deno") {
+  if (target === 'deno') {
     return `import app from "./app.js";
 
 const port = Number(Deno.env.get("PORT") || 3000);
@@ -1568,13 +1568,13 @@ export async function fetch(path, options) {
  * Mirrors the dispatch worker's `matchPattern()` from `packages/dispatch/src/headers.ts`.
  */
 function emitMatchPattern(lines: string[]): void {
-  lines.push("function __matchPattern(pattern, pathname) {");
+  lines.push('function __matchPattern(pattern, pathname) {');
   lines.push(
     '  const escaped = pattern.replace(/[.+?^${}()|[\\]\\\\]/g, "\\\\$&").replaceAll("*", ".*");',
   );
-  lines.push("  return new RegExp(`^${escaped}$`).test(pathname);");
-  lines.push("}");
-  lines.push("");
+  lines.push('  return new RegExp(`^${escaped}$`).test(pathname);');
+  lines.push('}');
+  lines.push('');
 }
 
 /**
@@ -1583,26 +1583,26 @@ function emitMatchPattern(lines: string[]): void {
  */
 function compileRedirectMiddleware(lines: string[], rules: RedirectRule[]): void {
   emitMatchPattern(lines);
-  lines.push("// Redirect rules (applied before route handlers)");
+  lines.push('// Redirect rules (applied before route handlers)');
   lines.push(`const __redirectRules = ${JSON.stringify(rules)};`);
   lines.push('app.use("*", async (c, next) => {');
-  lines.push("  const pathname = new URL(c.req.url).pathname;");
-  lines.push("  let matched;");
-  lines.push("  for (const rule of __redirectRules) {");
-  lines.push("    if (__matchPattern(rule.source, pathname)) matched = rule;");
-  lines.push("  }");
-  lines.push("  if (matched) {");
-  lines.push("    let dest = matched.destination;");
+  lines.push('  const pathname = new URL(c.req.url).pathname;');
+  lines.push('  let matched;');
+  lines.push('  for (const rule of __redirectRules) {');
+  lines.push('    if (__matchPattern(rule.source, pathname)) matched = rule;');
+  lines.push('  }');
+  lines.push('  if (matched) {');
+  lines.push('    let dest = matched.destination;');
   lines.push('    if (dest.includes(":splat") && matched.source.includes("*")) {');
   lines.push('      const prefix = matched.source.split("*")[0];');
-  lines.push("      const splat = pathname.slice(prefix.length);");
+  lines.push('      const splat = pathname.slice(prefix.length);');
   lines.push('      dest = dest.replace(":splat", splat);');
-  lines.push("    }");
-  lines.push("    return c.redirect(dest, matched.status);");
-  lines.push("  }");
-  lines.push("  return next();");
-  lines.push("});");
-  lines.push("");
+  lines.push('    }');
+  lines.push('    return c.redirect(dest, matched.status);');
+  lines.push('  }');
+  lines.push('  return next();');
+  lines.push('});');
+  lines.push('');
 }
 
 /**
@@ -1611,23 +1611,23 @@ function compileRedirectMiddleware(lines: string[], rules: RedirectRule[]): void
  */
 function compileHeaderMiddleware(lines: string[], rules: HeaderRule[]): void {
   // matchPattern may already be emitted by redirect middleware
-  if (!lines.some((l) => l.includes("function __matchPattern"))) {
+  if (!lines.some((l) => l.includes('function __matchPattern'))) {
     emitMatchPattern(lines);
   }
-  lines.push("// Header rules (applied to responses)");
+  lines.push('// Header rules (applied to responses)');
   lines.push(`const __headerRules = ${JSON.stringify(rules)};`);
   lines.push('app.use("*", async (c, next) => {');
-  lines.push("  await next();");
-  lines.push("  const pathname = new URL(c.req.url).pathname;");
-  lines.push("  const matched = [];");
-  lines.push("  for (const rule of __headerRules) {");
-  lines.push("    if (__matchPattern(rule.pattern, pathname)) matched.push(...rule.headers);");
-  lines.push("  }");
-  lines.push("  for (const [name, value] of matched) {");
-  lines.push("    c.res.headers.set(name, value);");
-  lines.push("  }");
-  lines.push("});");
-  lines.push("");
+  lines.push('  await next();');
+  lines.push('  const pathname = new URL(c.req.url).pathname;');
+  lines.push('  const matched = [];');
+  lines.push('  for (const rule of __headerRules) {');
+  lines.push('    if (__matchPattern(rule.pattern, pathname)) matched.push(...rule.headers);');
+  lines.push('  }');
+  lines.push('  for (const [name, value] of matched) {');
+  lines.push('    c.res.headers.set(name, value);');
+  lines.push('  }');
+  lines.push('});');
+  lines.push('');
 }
 
 export function compileWorkerClient(authClientPath: string): string {

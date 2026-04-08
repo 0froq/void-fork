@@ -1,8 +1,8 @@
-import { useContext, splitProps, createMemo, onMount, onCleanup } from "solid-js";
-import type { JSX } from "solid-js";
-import { RouterContext } from "./context";
+import { useContext, splitProps, createMemo, onMount, onCleanup } from 'solid-js';
+import type { JSX } from 'solid-js';
+import { RouterContext } from './context';
 
-type PrefetchStrategy = "hover" | "click" | "mount" | "visible";
+type PrefetchStrategy = 'hover' | 'click' | 'mount' | 'visible';
 
 type CommonProps = {
   href: string;
@@ -20,22 +20,22 @@ export type LinkProps = CommonProps &
 
 export function Link(props: LinkProps): JSX.Element {
   const [local, rest] = splitProps(props, [
-    "href",
-    "method",
-    "data",
-    "preserveScroll",
-    "viewTransition",
-    "prefetch",
-    "cacheFor",
-    "children",
+    'href',
+    'method',
+    'data',
+    'preserveScroll',
+    'viewTransition',
+    'prefetch',
+    'cacheFor',
+    'children',
   ]);
   const router = useContext(RouterContext);
 
   function getStrategies(): PrefetchStrategy[] {
     const p = local.prefetch;
     if (p === false || p === undefined) return [];
-    if (p === true) return ["hover"];
-    if (typeof p === "string") return [p];
+    if (p === true) return ['hover'];
+    if (typeof p === 'string') return [p];
     return p;
   }
 
@@ -84,10 +84,10 @@ export function Link(props: LinkProps): JSX.Element {
 
   onMount(() => {
     const strategies = getStrategies();
-    if (strategies.includes("mount")) {
+    if (strategies.includes('mount')) {
       doPrefetch();
     }
-    if (strategies.includes("visible") && el) {
+    if (strategies.includes('visible') && el) {
       observer = new IntersectionObserver(
         (entries) => {
           if (entries.some((e) => e.isIntersecting)) {
@@ -96,7 +96,7 @@ export function Link(props: LinkProps): JSX.Element {
             observer = null;
           }
         },
-        { rootMargin: "0px" },
+        { rootMargin: '0px' },
       );
       observer.observe(el);
     }
@@ -110,7 +110,7 @@ export function Link(props: LinkProps): JSX.Element {
     }
   });
 
-  const isGet = createMemo(() => (local.method || "GET").toUpperCase() === "GET");
+  const isGet = createMemo(() => (local.method || 'GET').toUpperCase() === 'GET');
   const strategies = createMemo(() => getStrategies());
 
   return (
@@ -122,10 +122,10 @@ export function Link(props: LinkProps): JSX.Element {
           }}
           href={local.href}
           onClick={onClick}
-          onMouseEnter={strategies().includes("hover") ? onMouseEnter : undefined}
-          onMouseLeave={strategies().includes("hover") ? onMouseLeave : undefined}
-          onFocus={strategies().includes("hover") ? doPrefetch : undefined}
-          onMouseDown={strategies().includes("click") ? onMouseDown : undefined}
+          onMouseEnter={strategies().includes('hover') ? onMouseEnter : undefined}
+          onMouseLeave={strategies().includes('hover') ? onMouseLeave : undefined}
+          onFocus={strategies().includes('hover') ? doPrefetch : undefined}
+          onMouseDown={strategies().includes('click') ? onMouseDown : undefined}
           {...rest}
         >
           {local.children}
@@ -137,10 +137,10 @@ export function Link(props: LinkProps): JSX.Element {
           }}
           type="button"
           onClick={onClick}
-          onMouseEnter={strategies().includes("hover") ? onMouseEnter : undefined}
-          onMouseLeave={strategies().includes("hover") ? onMouseLeave : undefined}
-          onFocus={strategies().includes("hover") ? doPrefetch : undefined}
-          onMouseDown={strategies().includes("click") ? onMouseDown : undefined}
+          onMouseEnter={strategies().includes('hover') ? onMouseEnter : undefined}
+          onMouseLeave={strategies().includes('hover') ? onMouseLeave : undefined}
+          onFocus={strategies().includes('hover') ? doPrefetch : undefined}
+          onMouseDown={strategies().includes('click') ? onMouseDown : undefined}
           {...(rest as any)}
         >
           {local.children}

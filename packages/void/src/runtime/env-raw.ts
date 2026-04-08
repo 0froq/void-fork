@@ -5,12 +5,12 @@
  * via "void/..." subpaths. Only framework modules using relative imports
  * (isr.ts, ai.ts, env.ts) can access it.
  */
-import { AsyncLocalStorage } from "node:async_hooks";
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 export type RuntimeEnv = Record<string, unknown>;
 
 /** Prefixes for platform-internal bindings that must be hidden from user code. */
-export const INTERNAL_BINDING_PREFIXES = ["__VOID_", "__PROJECT_"] as const;
+export const INTERNAL_BINDING_PREFIXES = ['__VOID_', '__PROJECT_'] as const;
 
 export const envContext: AsyncLocalStorage<RuntimeEnv> = new AsyncLocalStorage<RuntimeEnv>();
 
@@ -21,10 +21,10 @@ let cloudflareEnv: RuntimeEnv | undefined;
 // we know we're in workerd — avoids silent .catch() on Node/Bun/Deno.
 // Built-in module imports resolve before the runtime dispatches its first request,
 // so cloudflareEnv is guaranteed to be set by the time any handler runs.
-const isWorkerd = typeof navigator !== "undefined" && navigator.userAgent === "Cloudflare-Workers";
+const isWorkerd = typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers';
 
 if (isWorkerd) {
-  import("cloudflare:workers")
+  import('cloudflare:workers')
     .then((mod) => {
       cloudflareEnv = asEnv((mod as { env?: unknown }).env) ?? undefined;
     })
@@ -32,8 +32,8 @@ if (isWorkerd) {
 }
 
 function asEnv(value: unknown): RuntimeEnv | null {
-  if (typeof value !== "object" || value === null) return null;
-  if ("then" in value && typeof (value as { then?: unknown }).then === "function") return null;
+  if (typeof value !== 'object' || value === null) return null;
+  if ('then' in value && typeof (value as { then?: unknown }).then === 'function') return null;
   return value as RuntimeEnv;
 }
 
@@ -49,7 +49,7 @@ export function getRawRuntimeEnv(): RuntimeEnv {
     cloudflareEnv ??
     (() => {
       throw new Error(
-        "Cloudflare env is unavailable. Use void runtime bindings inside Nuxt/SvelteKit server request handlers or Worker handlers.",
+        'Cloudflare env is unavailable. Use void runtime bindings inside Nuxt/SvelteKit server request handlers or Worker handlers.',
       );
     })()
   );

@@ -19,14 +19,14 @@ export interface MigrationResponse {
 export function createMigrationHandler(
   env: Record<string, unknown>,
   migrations: MigrationEntry[] | undefined,
-  _dialect: "sqlite" | "postgresql",
+  _dialect: 'sqlite' | 'postgresql',
   runAuthMigrations?: () => Promise<void>,
 ) {
   return async (request: Request): Promise<Response> => {
-    const token = request.headers.get("x-void-internal");
+    const token = request.headers.get('x-void-internal');
     if (!token || token !== (env as Record<string, string>).__VOID_PROXY_TOKEN) {
       return Response.json(
-        { ok: false, error: "unauthorized", migrations: [] } satisfies MigrationResponse,
+        { ok: false, error: 'unauthorized', migrations: [] } satisfies MigrationResponse,
         {
           status: 401,
         },
@@ -37,7 +37,7 @@ export function createMigrationHandler(
       const db = (env as Record<string, D1Database>).DB;
       if (!db) {
         return Response.json(
-          { ok: false, error: "no D1 binding found", migrations: [] } satisfies MigrationResponse,
+          { ok: false, error: 'no D1 binding found', migrations: [] } satisfies MigrationResponse,
           { status: 500 },
         );
       }
@@ -72,7 +72,7 @@ async function runD1Migrations(
     )
     .run();
 
-  const { results } = await db.prepare("SELECT name FROM _void_migrations").all();
+  const { results } = await db.prepare('SELECT name FROM _void_migrations').all();
   const applied = new Set((results ?? []).map((r) => r.name as string));
 
   const migrationResults: MigrationResult[] = [];
@@ -86,12 +86,12 @@ async function runD1Migrations(
     const start = Date.now();
     try {
       const statements = m.sql
-        .split(";")
+        .split(';')
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
       await db.batch(statements.map((s) => db.prepare(s)));
       await db
-        .prepare("INSERT INTO _void_migrations (name, applied_at) VALUES (?, ?)")
+        .prepare('INSERT INTO _void_migrations (name, applied_at) VALUES (?, ?)')
         .bind(m.name, new Date().toISOString())
         .run();
       migrationResults.push({ name: m.name, applied: true, durationMs: Date.now() - start });

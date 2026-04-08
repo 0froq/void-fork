@@ -1,29 +1,29 @@
-import { normalizePath, type Plugin, type ResolvedConfig, type ViteDevServer } from "vite";
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
-import { glob } from "tinyglobby";
-import type { CompileOptions } from "./compile";
-import { emitReactComponent, emitReactComponentWithIslands } from "./emit-react";
-import { emitSolidComponent, emitSolidComponentWithIslands } from "./emit-solid";
-import { emitSvelteComponent, emitSvelteComponentWithIslands } from "./emit-svelte";
-import { emitVueComponent, emitVueComponentWithIslands } from "./emit-vue";
-import { extractScript } from "./extract-script";
-import { extractMetadata } from "./metadata";
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
+import { glob } from 'tinyglobby';
+import { normalizePath, type Plugin, type ResolvedConfig, type ViteDevServer } from 'vite';
+import type { CompileOptions } from './compile';
+import { emitReactComponent, emitReactComponentWithIslands } from './emit-react';
+import { emitSolidComponent, emitSolidComponentWithIslands } from './emit-solid';
+import { emitSvelteComponent, emitSvelteComponentWithIslands } from './emit-svelte';
+import { emitVueComponent, emitVueComponentWithIslands } from './emit-vue';
+import { extractScript } from './extract-script';
+import { extractMetadata } from './metadata';
 
-const MD_CLIENT_ENTRY_ID = "virtual:void-md-client";
+const MD_CLIENT_ENTRY_ID = 'virtual:void-md-client';
 
-type FrameworkAdapter = "vue" | "react" | "svelte" | "solid";
+type FrameworkAdapter = 'vue' | 'react' | 'svelte' | 'solid';
 
 const ADAPTER_PLUGIN_NAMES: Record<string, FrameworkAdapter> = {
-  "void-vue:pages": "vue",
-  "void-react:pages": "react",
-  "void-svelte:pages": "svelte",
-  "void-solid:pages": "solid",
+  'void-vue:pages': 'vue',
+  'void-react:pages': 'react',
+  'void-svelte:pages': 'svelte',
+  'void-solid:pages': 'solid',
 };
 
-const SVELTE_VIRTUAL_PREFIX = "/@void-md-svelte/";
-const SOLID_VIRTUAL_PREFIX = "/@void-md-solid/";
+const SVELTE_VIRTUAL_PREFIX = '/@void-md-svelte/';
+const SOLID_VIRTUAL_PREFIX = '/@void-md-solid/';
 
 export interface MdPage {
   path: string;
@@ -33,15 +33,15 @@ export interface MdPage {
 }
 
 export interface MarkdownOptions {
-  shiki?: CompileOptions["shiki"];
+  shiki?: CompileOptions['shiki'];
 }
 
 function hasMdFilesWithScript(dir: string): boolean {
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
-      if (entry.isFile() && entry.name.endsWith(".md")) {
+      if (entry.isFile() && entry.name.endsWith('.md')) {
         const fullPath = join(entry.parentPath, entry.name);
-        const content = readFileSync(fullPath, "utf-8");
+        const content = readFileSync(fullPath, 'utf-8');
         if (/^<script\b/m.test(content)) return true;
       }
     }
@@ -65,7 +65,7 @@ function hasIslandFiles(dir: string): boolean {
 export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
   let adapter: FrameworkAdapter | null = null;
   let mdPages: MdPage[] = [];
-  let root = "";
+  let root = '';
   const svelteModules = new Map<string, string>();
   const solidModules = new Map<string, string>();
   const clientScripts = new Map<string, string>();
@@ -76,40 +76,40 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
     source: string,
     extension: string,
   ): string {
-    const encoded = Buffer.from(importerId).toString("base64url");
-    const hash = createHash("sha1").update(source).digest("hex").slice(0, 8);
+    const encoded = Buffer.from(importerId).toString('base64url');
+    const hash = createHash('sha1').update(source).digest('hex').slice(0, 8);
     return `${prefix}${encoded}.${hash}.${extension}`;
   }
 
   async function scanMdPages(): Promise<MdPage[]> {
-    const pagesDir = join(root, "pages");
+    const pagesDir = join(root, 'pages');
     if (!existsSync(pagesDir)) return [];
 
-    const mdFiles = await glob("**/*.md", { cwd: pagesDir });
+    const mdFiles = await glob('**/*.md', { cwd: pagesDir });
     const pages = await Promise.all(
       mdFiles.map(async (file) => {
-        const content = readFileSync(join(pagesDir, file), "utf-8");
+        const content = readFileSync(join(pagesDir, file), 'utf-8');
         const { body, clientCode } = extractScript(content);
         const result = extractMetadata(body);
 
         const componentId =
           file
-            .replace(/\.md$/, "")
-            .replace(/\/index$/, "")
-            .replace(/^index$/, "") || "index";
+            .replace(/\.md$/, '')
+            .replace(/\/index$/, '')
+            .replace(/^index$/, '') || 'index';
 
         if (clientCode) {
           clientScripts.set(componentId, clientCode);
         }
 
         const routePath =
-          "/" +
+          '/' +
           file
-            .replace(/\.md$/, "")
-            .replace(/\/index$/, "")
-            .replace(/^index$/, "");
+            .replace(/\.md$/, '')
+            .replace(/\/index$/, '')
+            .replace(/^index$/, '');
         return {
-          path: routePath || "/",
+          path: routePath || '/',
           title: result.title,
           frontmatter: result.frontmatter,
           headings: result.headings,
@@ -121,8 +121,8 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
 
   return [
     {
-      name: "void-md",
-      enforce: "pre",
+      name: 'void-md',
+      enforce: 'pre',
 
       api: {
         clientEntryId: MD_CLIENT_ENTRY_ID,
@@ -135,9 +135,9 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
       },
 
       config(config, env) {
-        if (env.command === "serve") return;
+        if (env.command === 'serve') return;
         const configRoot = config.root || process.cwd();
-        const pagesDir = join(configRoot, "pages");
+        const pagesDir = join(configRoot, 'pages');
         if (!existsSync(pagesDir)) return;
         if (hasMdFilesWithScript(pagesDir) && hasIslandFiles(pagesDir)) {
           return {
@@ -145,7 +145,7 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
               client: {
                 build: {
                   rollupOptions: {
-                    input: { "md-client": MD_CLIENT_ENTRY_ID },
+                    input: { 'md-client': MD_CLIENT_ENTRY_ID },
                   },
                 },
               },
@@ -165,7 +165,7 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
         }
         if (!adapter) {
           throw new Error(
-            "[void-md] No framework adapter detected. Install @void/vue, @void/react, @void/svelte, or @void/solid.",
+            '[void-md] No framework adapter detected. Install @void/vue, @void/react, @void/svelte, or @void/solid.',
           );
         }
       },
@@ -179,22 +179,22 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
 
       configureServer(server: ViteDevServer) {
         const handleMdChange = async (file: string) => {
-          if (!file.endsWith(".md") || !file.includes("/pages/")) return;
+          if (!file.endsWith('.md') || !file.includes('/pages/')) return;
           mdPages = await scanMdPages();
-          const mod = server.moduleGraph.getModuleById("\0void-md-pages");
+          const mod = server.moduleGraph.getModuleById('\0void-md-pages');
           if (mod) server.moduleGraph.invalidateModule(mod);
           for (const [compId] of clientScripts) {
             const scriptMod = server.moduleGraph.getModuleById(
-              "\0virtual:void-md-script:" + compId,
+              '\0virtual:void-md-script:' + compId,
             );
             if (scriptMod) server.moduleGraph.invalidateModule(scriptMod);
           }
-          const clientMod = server.moduleGraph.getModuleById("\0" + MD_CLIENT_ENTRY_ID);
+          const clientMod = server.moduleGraph.getModuleById('\0' + MD_CLIENT_ENTRY_ID);
           if (clientMod) server.moduleGraph.invalidateModule(clientMod);
         };
-        server.watcher.on("change", handleMdChange);
-        server.watcher.on("add", handleMdChange);
-        server.watcher.on("unlink", handleMdChange);
+        server.watcher.on('change', handleMdChange);
+        server.watcher.on('add', handleMdChange);
+        server.watcher.on('unlink', handleMdChange);
       },
 
       resolveId: {
@@ -203,16 +203,16 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
         },
         handler(source: string) {
           if (source === MD_CLIENT_ENTRY_ID) {
-            return "\0" + MD_CLIENT_ENTRY_ID;
+            return '\0' + MD_CLIENT_ENTRY_ID;
           }
-          if (source.startsWith("virtual:void-md-script:")) {
-            return "\0" + source;
+          if (source.startsWith('virtual:void-md-script:')) {
+            return '\0' + source;
           }
-          if (source === "@void/md") {
-            return "\0void-md-runtime";
+          if (source === '@void/md') {
+            return '\0void-md-runtime';
           }
-          if (source === "@void/md/pages") {
-            return "\0void-md-pages";
+          if (source === '@void/md/pages') {
+            return '\0void-md-pages';
           }
           if (source.startsWith(SVELTE_VIRTUAL_PREFIX) || source.startsWith(SOLID_VIRTUAL_PREFIX)) {
             return source;
@@ -226,11 +226,11 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
           id: /^(\0void-md|\/@void-md-(svelte|solid)\/|\0virtual:void-md-(script:|client))/,
         },
         handler(id: string) {
-          if (id === "\0" + MD_CLIENT_ENTRY_ID) {
+          if (id === '\0' + MD_CLIENT_ENTRY_ID) {
             return generateMdClientEntry(clientScripts);
           }
-          if (id.startsWith("\0virtual:void-md-script:")) {
-            const componentId = id.slice("\0virtual:void-md-script:".length);
+          if (id.startsWith('\0virtual:void-md-script:')) {
+            const componentId = id.slice('\0virtual:void-md-script:'.length);
             const code = clientScripts.get(componentId);
             if (code) return code;
             throw new Error(`[void-md] Missing client script for: ${componentId}`);
@@ -247,21 +247,21 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
             throw new Error(`[void-md] Missing Solid markdown module: ${id}`);
           }
 
-          if (id === "\0void-md-runtime") {
-            if (adapter === "vue") {
+          if (id === '\0void-md-runtime') {
+            if (adapter === 'vue') {
               return `
 import { inject } from "vue";
 export function useFrontmatter() { return inject("__void_frontmatter", {}); }
 `;
             }
-            if (adapter === "react") {
+            if (adapter === 'react') {
               return `
 import { createContext, useContext } from "react";
 export const FrontmatterContext = createContext({});
 export function useFrontmatter() { return useContext(FrontmatterContext) ?? {}; }
 `;
             }
-            if (adapter === "svelte") {
+            if (adapter === 'svelte') {
               return `
 import { getContext, setContext } from "svelte";
 const FRONTMATTER_KEY = "__void_frontmatter";
@@ -269,16 +269,16 @@ export function setFrontmatter(frontmatter) { setContext(FRONTMATTER_KEY, frontm
 export function useFrontmatter() { return getContext(FRONTMATTER_KEY) ?? {}; }
 `;
             }
-            if (adapter === "solid") {
+            if (adapter === 'solid') {
               return `
 import { createContext, useContext } from "solid-js";
 export const FrontmatterContext = createContext({});
 export function useFrontmatter() { return useContext(FrontmatterContext) ?? {}; }
 `;
             }
-            throw new Error("[void-md] Adapter not initialized");
+            throw new Error('[void-md] Adapter not initialized');
           }
-          if (id === "\0void-md-pages") {
+          if (id === '\0void-md-pages') {
             return `export default ${JSON.stringify(mdPages)};`;
           }
         },
@@ -289,21 +289,21 @@ export function useFrontmatter() { return useContext(FrontmatterContext) ?? {}; 
         async handler(code: string, _id: string) {
           const { body, islandImports, clientCode } = extractScript(code);
 
-          const pagesPrefix = join(root, "pages") + "/";
+          const pagesPrefix = join(root, 'pages') + '/';
           if (_id.startsWith(pagesPrefix) && clientCode) {
-            const rel = _id.slice(pagesPrefix.length).replace(/\.md$/, "");
-            const componentId = rel.replace(/\/index$/, "").replace(/^index$/, "") || "index";
+            const rel = _id.slice(pagesPrefix.length).replace(/\.md$/, '');
+            const componentId = rel.replace(/\/index$/, '').replace(/^index$/, '') || 'index';
             clientScripts.set(componentId, clientCode);
           }
           for (const imp of islandImports) {
             const absPath = resolve(dirname(_id), imp.specifier);
-            imp.islandId = normalizePath(relative(root, absPath)).replace(/\.[^.]+$/, "");
+            imp.islandId = normalizePath(relative(root, absPath)).replace(/\.[^.]+$/, '');
           }
 
-          const { compile } = await import("./compile");
+          const { compile } = await import('./compile');
           const result = await compile(body, { shiki: options?.shiki });
 
-          if (adapter === "vue") {
+          if (adapter === 'vue') {
             if (islandImports.length > 0) {
               return {
                 code: emitVueComponentWithIslands(result, islandImports),
@@ -313,7 +313,7 @@ export function useFrontmatter() { return useContext(FrontmatterContext) ?? {}; 
             return { code: emitVueComponent(result), map: null };
           }
 
-          if (adapter === "react") {
+          if (adapter === 'react') {
             if (islandImports.length > 0) {
               return {
                 code: emitReactComponentWithIslands(result, islandImports),
@@ -323,8 +323,8 @@ export function useFrontmatter() { return useContext(FrontmatterContext) ?? {}; 
             return { code: emitReactComponent(result), map: null };
           }
 
-          if (adapter === "svelte") {
-            const virtualId = createVirtualModuleId(SVELTE_VIRTUAL_PREFIX, _id, code, "svelte");
+          if (adapter === 'svelte') {
+            const virtualId = createVirtualModuleId(SVELTE_VIRTUAL_PREFIX, _id, code, 'svelte');
             svelteModules.set(
               virtualId,
               islandImports.length > 0
@@ -337,8 +337,8 @@ export function useFrontmatter() { return useContext(FrontmatterContext) ?? {}; 
             };
           }
 
-          if (adapter === "solid") {
-            const virtualId = createVirtualModuleId(SOLID_VIRTUAL_PREFIX, _id, code, "tsx");
+          if (adapter === 'solid') {
+            const virtualId = createVirtualModuleId(SOLID_VIRTUAL_PREFIX, _id, code, 'tsx');
             solidModules.set(
               virtualId,
               islandImports.length > 0
@@ -359,19 +359,19 @@ export function useFrontmatter() { return useContext(FrontmatterContext) ?? {}; 
 }
 
 function generateMdClientEntry(scripts: Map<string, string>): string {
-  if (scripts.size === 0) return "";
+  if (scripts.size === 0) return '';
   const lines: string[] = [];
-  lines.push("const mdScripts = {");
+  lines.push('const mdScripts = {');
   for (const id of scripts.keys()) {
     lines.push(
-      `  ${JSON.stringify(id)}: () => import(${JSON.stringify("virtual:void-md-script:" + id)}),`,
+      `  ${JSON.stringify(id)}: () => import(${JSON.stringify('virtual:void-md-script:' + id)}),`,
     );
   }
-  lines.push("};");
+  lines.push('};');
   lines.push(`const mdScriptId = document.getElementById("app")?.getAttribute("data-md-script");`);
   lines.push(`if (mdScriptId && mdScripts[mdScriptId]) mdScripts[mdScriptId]();`);
-  return lines.join("\n");
+  return lines.join('\n');
 }
 
-export type { CompileOptions, CompileResult } from "./compile";
-export type { IslandImport, ScriptExtraction } from "./extract-script";
+export type { CompileOptions, CompileResult } from './compile';
+export type { IslandImport, ScriptExtraction } from './extract-script';

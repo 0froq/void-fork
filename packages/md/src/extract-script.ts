@@ -36,7 +36,7 @@ export function extractScript(source: string): ScriptExtraction {
     });
   }
 
-  const stripped = script.replace(ISLAND_IMPORT_LINE_RE, "").trim();
+  const stripped = script.replace(ISLAND_IMPORT_LINE_RE, '').trim();
   const clientCode = stripped || null;
 
   return { script, body, islandImports, clientCode };

@@ -20,7 +20,7 @@ function parseUnit(value: string): number {
 }
 
 export function parseCacheFor(value: CacheForInput): CacheForResult {
-  if (typeof value === "number") {
+  if (typeof value === 'number') {
     return { stale: value, expires: value };
   }
   if (Array.isArray(value)) {
@@ -43,15 +43,15 @@ export interface CacheEntry {
 export class PrefetchCache {
   private entries = new Map<string, CacheEntry>();
 
-  private key(url: string, method = "GET"): string {
+  private key(url: string, method = 'GET'): string {
     return `${method}:${url}`;
   }
 
-  has(url: string, method = "GET"): boolean {
+  has(url: string, method = 'GET'): boolean {
     return this.get(url, method) !== null;
   }
 
-  get(url: string, method = "GET"): CacheEntry | null {
+  get(url: string, method = 'GET'): CacheEntry | null {
     const entry = this.entries.get(this.key(url, method));
     if (!entry) return null;
     if (Date.now() >= entry.expiresAt && !entry.singleUse) {
@@ -95,7 +95,7 @@ export class PrefetchCache {
   }
 
   /** Mark entry as consumed — removes it if singleUse. */
-  consume(url: string, method = "GET"): void {
+  consume(url: string, method = 'GET'): void {
     const entry = this.entries.get(this.key(url, method));
     if (entry?.singleUse) {
       if (entry.timer) clearTimeout(entry.timer);
@@ -103,7 +103,7 @@ export class PrefetchCache {
     }
   }
 
-  flush(url: string, method = "GET"): void {
+  flush(url: string, method = 'GET'): void {
     const k = this.key(url, method);
     const entry = this.entries.get(k);
     if (entry?.timer) clearTimeout(entry.timer);

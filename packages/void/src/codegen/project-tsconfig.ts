@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * Ensure .void/tsconfig.json exists so the user's root tsconfig can
@@ -18,14 +18,14 @@ export function ensureProjectTsconfig(
   hasSchema?: boolean,
   options: { redirectDbModule?: boolean } = {},
 ): void {
-  const outDir = join(root, ".void");
+  const outDir = join(root, '.void');
   mkdirSync(outDir, { recursive: true });
-  const includeRoutes = hasRouteTypes ?? existsSync(join(root, "routes"));
-  const includeQueues = existsSync(join(root, "queues"));
+  const includeRoutes = hasRouteTypes ?? existsSync(join(root, 'routes'));
+  const includeQueues = existsSync(join(root, 'queues'));
   const files = [
-    ...(includeRoutes ? ["routes.d.ts"] : []),
-    ...(hasDb ? ["db.d.ts"] : []),
-    ...(includeQueues ? ["queues.d.ts"] : []),
+    ...(includeRoutes ? ['routes.d.ts'] : []),
+    ...(hasDb ? ['db.d.ts'] : []),
+    ...(includeQueues ? ['queues.d.ts'] : []),
   ];
 
   const tsconfig: Record<string, unknown> = { files };
@@ -38,17 +38,17 @@ export function ensureProjectTsconfig(
       // schema-aware types instead of the generic base module.
       // (moduleResolution: "bundler" ignores ambient `declare module`
       // when the module resolves to a real file — paths is the fix.)
-      paths["void/db"] = ["./db.d.ts"];
+      paths['void/db'] = ['./db.d.ts'];
     }
 
     if (hasSchema) {
       // Determine whether schema is a file or directory
       const isDir =
-        existsSync(join(root, "db", "schema")) && !existsSync(join(root, "db", "schema.ts"));
+        existsSync(join(root, 'db', 'schema')) && !existsSync(join(root, 'db', 'schema.ts'));
 
       // Paths are relative to .void/ (where this tsconfig lives), so use ../
-      paths["@schema"] = [isDir ? "../db/schema/index.ts" : "../db/schema.ts"];
-      paths["@schema/*"] = ["../db/schema/*"];
+      paths['@schema'] = [isDir ? '../db/schema/index.ts' : '../db/schema.ts'];
+      paths['@schema/*'] = ['../db/schema/*'];
     }
 
     tsconfig.compilerOptions = { paths };
@@ -62,7 +62,7 @@ export function ensureProjectTsconfig(
 
     // moduleResolution: "bundler" prefers the resolved package file for
     // void/routes, so point it at the generated declaration module directly.
-    paths["void/routes"] = ["./routes.d.ts"];
+    paths['void/routes'] = ['./routes.d.ts'];
   }
 
   if (includeQueues) {
@@ -74,8 +74,8 @@ export function ensureProjectTsconfig(
     // Same issue as void/routes: with moduleResolution "bundler", TypeScript
     // prefers the package export file unless we point it at the generated
     // project-local declaration module.
-    paths["void/queues"] = ["./queues.d.ts"];
+    paths['void/queues'] = ['./queues.d.ts'];
   }
 
-  writeFileSync(join(outDir, "tsconfig.json"), JSON.stringify(tsconfig, null, 2) + "\n");
+  writeFileSync(join(outDir, 'tsconfig.json'), JSON.stringify(tsconfig, null, 2) + '\n');
 }

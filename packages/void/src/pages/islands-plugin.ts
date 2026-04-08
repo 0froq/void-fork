@@ -1,11 +1,11 @@
-import { normalizePath, type ViteDevServer } from "vite";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { resolveEffectiveLayoutChain } from "./scan";
-import type { PageScanResult } from "./types";
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { normalizePath, type ViteDevServer } from 'vite';
+import { resolveEffectiveLayoutChain } from './scan';
+import type { PageScanResult } from './types';
 
-export const ISLANDS_RENDERER_ID = "virtual:void-islands-renderer";
-export const ISLANDS_CLIENT_ENTRY_ID = "virtual:void-islands-client";
+export const ISLANDS_RENDERER_ID = 'virtual:void-islands-renderer';
+export const ISLANDS_CLIENT_ENTRY_ID = 'virtual:void-islands-client';
 
 export interface IslandEntry {
   componentPath: string;
@@ -46,14 +46,14 @@ export function needsIslandClientBundle(
     for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
       if (!entry.isFile()) continue;
       const name = entry.name;
-      if (islandFilePattern.test(name) || name.startsWith("layout.") || name.startsWith("_")) {
-        const content = readFileSync(resolve(entry.parentPath!, name), "utf-8");
+      if (islandFilePattern.test(name) || name.startsWith('layout.') || name.startsWith('_')) {
+        const content = readFileSync(resolve(entry.parentPath!, name), 'utf-8');
         if (importAttrRe.test(content)) return true;
         if (styleRe && styleRe.test(content)) return true;
         if (cssImportRe.test(content)) return true;
       }
-      if (name.endsWith(".md")) {
-        const content = readFileSync(resolve(entry.parentPath!, name), "utf-8");
+      if (name.endsWith('.md')) {
+        const content = readFileSync(resolve(entry.parentPath!, name), 'utf-8');
         if (mdScriptRe.test(content)) return true;
       }
     }
@@ -66,7 +66,7 @@ export function needsIslandClientBundle(
 /** Check if a file has CSS import statements (JS-style imports). */
 export function fileHasCssImports(filePath: string): boolean {
   try {
-    const code = readFileSync(filePath, "utf-8");
+    const code = readFileSync(filePath, 'utf-8');
     return /import\b[^"']*["'][^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)["']/.test(
       code,
     );
@@ -84,16 +84,16 @@ export function rewriteCssImportForVirtualModule(
   specifier: string,
   sourceFilePath: string,
 ): string {
-  if (specifier.startsWith(".")) {
+  if (specifier.startsWith('.')) {
     const absPath = normalizePath(resolve(dirname(sourceFilePath), specifier));
     return `import ${JSON.stringify(absPath)};`;
   }
-  return matchedLine.trim() + ";";
+  return matchedLine.trim() + ';';
 }
 
 /** Extract CSS import statements from a file and return them as @import rules. */
 export function extractCssImports(filePath: string): string {
-  const code = readFileSync(filePath, "utf-8");
+  const code = readFileSync(filePath, 'utf-8');
   const re =
     /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
   const imports: string[] = [];
@@ -101,7 +101,7 @@ export function extractCssImports(filePath: string): string {
   while ((match = re.exec(code)) !== null) {
     imports.push(`@import ${JSON.stringify(match[1])};`);
   }
-  return imports.join("\n");
+  return imports.join('\n');
 }
 
 /** Rebuild islandCssMap from current file contents. */
@@ -134,7 +134,7 @@ export function computePagesNeedingClientJS(
   pagesDir: string,
   resolvedConfig: any,
 ): Set<string> {
-  const mdPlugin = resolvedConfig?.plugins?.find((p: any) => p.name === "void-md");
+  const mdPlugin = resolvedConfig?.plugins?.find((p: any) => p.name === 'void-md');
   const mdScriptIds: Set<string> = new Set(mdPlugin?.api?.getClientScripts?.()?.keys() ?? []);
 
   const importAttrRe =
@@ -144,7 +144,7 @@ export function computePagesNeedingClientJS(
   for (const layout of pageScan.layouts) {
     if (!layout.island) continue;
     const filePath = resolve(pagesDir, layout.filePath);
-    const code = readFileSync(filePath, "utf-8");
+    const code = readFileSync(filePath, 'utf-8');
     importAttrRe.lastIndex = 0;
     if (importAttrRe.test(code)) {
       layoutDirsWithIslands.add(layout.directory);
@@ -161,7 +161,7 @@ export function computePagesNeedingClientJS(
     }
 
     const filePath = resolve(pagesDir, page.componentPath);
-    const code = readFileSync(filePath, "utf-8");
+    const code = readFileSync(filePath, 'utf-8');
     importAttrRe.lastIndex = 0;
     if (importAttrRe.test(code)) {
       result.add(page.componentId);
@@ -190,22 +190,22 @@ export function configureIslandCssServer(
   viteRoot: string,
   rebuildCssMap: () => void,
 ): void {
-  server.watcher.on("change", (path) => {
+  server.watcher.on('change', (path) => {
     const normalizedPath = normalizePath(path);
     if (!islandCssFiles.has(normalizedPath)) return;
     rebuildCssMap();
     for (const env of Object.values(server.environments)) {
-      const mod = env.moduleGraph.getModuleById("\0" + ISLANDS_RENDERER_ID);
+      const mod = env.moduleGraph.getModuleById('\0' + ISLANDS_RENDERER_ID);
       if (mod) env.moduleGraph.invalidateModule(mod);
     }
-    const cssMod = server.environments.client?.moduleGraph.getModuleById(normalizedPath + ".css");
+    const cssMod = server.environments.client?.moduleGraph.getModuleById(normalizedPath + '.css');
     if (cssMod) server.environments.client.moduleGraph.invalidateModule(cssMod);
   });
 
   server.middlewares.use(async (req, res, next) => {
     if (!req.url) return next();
-    const url = req.url.split("?")[0];
-    if (!url.endsWith(".css")) return next();
+    const url = req.url.split('?')[0];
+    if (!url.endsWith('.css')) return next();
     const srcPath = normalizePath(resolve(viteRoot, url.slice(1, -4)));
     if (!islandCssFiles.has(srcPath)) return next();
     try {
@@ -215,7 +215,7 @@ export function configureIslandCssServer(
           result.code.match(/\b__vite__css\s*=\s*("(?:[^"\\]|\\.)*")/) ||
           result.code.match(/export\s+default\s+("(?:[^"\\]|\\.)*")/);
         if (m) {
-          res.setHeader("Content-Type", "text/css");
+          res.setHeader('Content-Type', 'text/css');
           res.statusCode = 200;
           res.end(JSON.parse(m[1]));
           return;

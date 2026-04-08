@@ -1,15 +1,15 @@
-import { existsSync, readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
-import { join } from "node:path";
-import type { VoidAuthConfig } from "../runtime/auth";
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import type { VoidAuthConfig } from '../runtime/auth';
 
 const AUTH_CONFIG_CANDIDATES = [
-  "auth.ts",
-  "auth.mts",
-  "auth.js",
-  "auth.mjs",
-  "auth.cts",
-  "auth.cjs",
+  'auth.ts',
+  'auth.mts',
+  'auth.js',
+  'auth.mjs',
+  'auth.cts',
+  'auth.cjs',
 ];
 
 function isVoidAuthConfigSource(code: string): boolean {
@@ -20,7 +20,7 @@ export function findVoidAuthConfig(root: string): string | null {
   for (const file of AUTH_CONFIG_CANDIDATES) {
     const absPath = join(root, file);
     if (!existsSync(absPath)) continue;
-    const code = readFileSync(absPath, "utf-8");
+    const code = readFileSync(absPath, 'utf-8');
     if (isVoidAuthConfigSource(code)) return absPath;
   }
   return null;

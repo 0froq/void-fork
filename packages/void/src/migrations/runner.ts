@@ -1,7 +1,7 @@
-import { createHash, createHmac } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { collectMigrations } from "./collect";
+import { createHash, createHmac } from 'node:crypto';
+import { existsSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { collectMigrations } from './collect';
 
 export interface AppliedMigration {
   name: string;
@@ -10,12 +10,12 @@ export interface AppliedMigration {
 
 function toBetterSqlite3Error(error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);
-  if (!message.includes("Could not locate the bindings file")) {
+  if (!message.includes('Could not locate the bindings file')) {
     return error instanceof Error ? error : new Error(message);
   }
 
   return new Error(
-    "better-sqlite3 is installed but its native binding was not built. " +
+    'better-sqlite3 is installed but its native binding was not built. ' +
       "Add it to your 'onlyBuiltDependencies' and run `pnpm rebuild better-sqlite3`. See https://pnpm.io/settings#onlybuiltdependencies",
   );
 }
@@ -25,7 +25,7 @@ export async function openSqliteDatabase(
   options?: Record<string, unknown>,
 ): Promise<any> {
   try {
-    const Database = (await import("better-sqlite3")).default;
+    const Database = (await import('better-sqlite3')).default;
     return new Database(dbPath, options);
   } catch (error) {
     throw toBetterSqlite3Error(error);
@@ -51,7 +51,7 @@ export async function getAppliedMigrations(dbPath: string): Promise<AppliedMigra
     if (!table) return [];
 
     return db
-      .prepare("SELECT name, applied_at FROM _migrations ORDER BY name")
+      .prepare('SELECT name, applied_at FROM _migrations ORDER BY name')
       .all() as AppliedMigration[];
   } finally {
     db.close();
@@ -64,21 +64,21 @@ export async function getAppliedMigrations(dbPath: string): Promise<AppliedMigra
  * to store local D1 data.
  */
 export function getMiniflareDatabasePath(persistRoot: string, databaseId: string): string {
-  const uniqueKey = "miniflare-D1DatabaseObject";
+  const uniqueKey = 'miniflare-D1DatabaseObject';
 
   // Step 1: SHA-256 of the unique key
-  const key = createHash("sha256").update(uniqueKey).digest();
+  const key = createHash('sha256').update(uniqueKey).digest();
 
   // Step 2: HMAC-SHA-256 of database_id, take first 16 bytes
-  const nameHmac = createHmac("sha256", key).update(databaseId).digest().subarray(0, 16);
+  const nameHmac = createHmac('sha256', key).update(databaseId).digest().subarray(0, 16);
 
   // Step 3: HMAC-SHA-256 of nameHmac, take first 16 bytes
-  const hmac = createHmac("sha256", key).update(nameHmac).digest().subarray(0, 16);
+  const hmac = createHmac('sha256', key).update(nameHmac).digest().subarray(0, 16);
 
   // Step 4: Concatenate to get the filename hash
-  const hash = Buffer.concat([nameHmac, hmac]).toString("hex");
+  const hash = Buffer.concat([nameHmac, hmac]).toString('hex');
 
-  return join(persistRoot, "v3", "d1", uniqueKey, `${hash}.sqlite`);
+  return join(persistRoot, 'v3', 'd1', uniqueKey, `${hash}.sqlite`);
 }
 
 /**
@@ -107,7 +107,7 @@ export async function runMigrations(migrationsDir: string, dbPath: string): Prom
     `);
 
     const applied = new Set(
-      (db.prepare("SELECT name FROM _migrations").all() as { name: string }[]).map((r) => r.name),
+      (db.prepare('SELECT name FROM _migrations').all() as { name: string }[]).map((r) => r.name),
     );
 
     const pending = allMigrations.filter((m) => !applied.has(m.name));
@@ -115,12 +115,12 @@ export async function runMigrations(migrationsDir: string, dbPath: string): Prom
       return [];
     }
 
-    const insertStmt = db.prepare("INSERT INTO _migrations (name) VALUES (?)");
+    const insertStmt = db.prepare('INSERT INTO _migrations (name) VALUES (?)');
 
     for (const migration of pending) {
       // Split into individual statements — D1/better-sqlite3 can choke on multi-statement exec
       const statements = migration.sql
-        .split(";")
+        .split(';')
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
 

@@ -1,25 +1,25 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import type { Props } from "./ai.server";
+import { ref } from 'vue';
+import type { Props } from './ai.server';
 
 const props = defineProps<Props>();
 
 const selectedModel = ref(props.models[0].value);
-const prompt = ref("");
-const response = ref("");
+const prompt = ref('');
+const response = ref('');
 const loading = ref(false);
-const error = ref("");
+const error = ref('');
 
 async function submit() {
   if (!prompt.value.trim()) return;
   loading.value = true;
-  response.value = "";
-  error.value = "";
+  response.value = '';
+  error.value = '';
 
   try {
-    const res = await fetch("/api/ai", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const res = await fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: prompt.value, model: selectedModel.value }),
     });
 
@@ -38,15 +38,15 @@ async function submit() {
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
       // Parse SSE lines
-      for (const line of chunk.split("\n")) {
-        if (line.startsWith("data: ")) {
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('data: ')) {
           const data = line.slice(6);
-          if (data === "[DONE]") continue;
+          if (data === '[DONE]') continue;
           try {
             const parsed = JSON.parse(data);
             // Workers AI format: { response: "..." }
             // OpenAI-compatible format: { choices: [{ delta: { content: "..." } }] }
-            const token = parsed.response ?? parsed.choices?.[0]?.delta?.content ?? "";
+            const token = parsed.response ?? parsed.choices?.[0]?.delta?.content ?? '';
             response.value += token;
           } catch {
             // skip unparseable chunks
@@ -84,7 +84,7 @@ async function submit() {
         ></textarea>
       </div>
       <button type="submit" :disabled="loading" style="margin-top: 5px">
-        {{ loading ? "Generating..." : "Send" }}
+        {{ loading ? 'Generating...' : 'Send' }}
       </button>
     </form>
 
@@ -92,7 +92,7 @@ async function submit() {
 
     <h2>Response</h2>
     <pre style="white-space: pre-wrap; background: #f5f5f5; padding: 10px; min-height: 60px">{{
-      response || "(waiting for prompt...)"
+      response || '(waiting for prompt...)'
     }}</pre>
   </div>
 </template>

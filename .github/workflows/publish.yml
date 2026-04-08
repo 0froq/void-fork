@@ -3,7 +3,7 @@ name: Publish
 on:
   push:
     tags:
-      - "v*"
+      - 'v*'
 
 env:
   PUBLISH_TARGET: github-packages

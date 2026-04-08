@@ -1,9 +1,11 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { extname, join, relative } from "node:path";
-import { hash as blake3hash } from "blake3-jit";
-import ignore from "ignore";
-import type { InferredBindings } from "../inference/walk";
-import type { MigrationFile } from "../migrations/validate";
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { extname, join, relative } from 'node:path';
+import { hash as blake3hash } from 'blake3-jit';
+import ignore from 'ignore';
+import type { InferredBindings } from '../inference/walk';
+import type { MigrationFile } from '../migrations/validate';
+import type { WebSocketRouteDefinition } from '../router/websocket';
+import { toSlash } from '../shared/utils';
 import type {
   AssetConfig,
   DeployManifest,
@@ -12,9 +14,7 @@ import type {
   RedirectRule,
   ScheduleMeta,
   WebSocketManifestMeta,
-} from "./types";
-import type { WebSocketRouteDefinition } from "../router/websocket";
-import { toSlash } from "../shared/utils";
+} from './types';
 
 const textEncoder = new TextEncoder();
 
@@ -24,10 +24,10 @@ const textEncoder = new TextEncoder();
  * Must match the API's computeAssetHash algorithm exactly.
  */
 export function computeAssetHash(content: Buffer, filePath: string): string {
-  const base64 = content.toString("base64");
+  const base64 = content.toString('base64');
   const ext = extname(filePath).substring(1);
   const input = textEncoder.encode(base64 + ext);
-  return Buffer.from(blake3hash(input)).toString("hex").slice(0, 32);
+  return Buffer.from(blake3hash(input)).toString('hex').slice(0, 32);
 }
 
 /**
@@ -39,18 +39,18 @@ function createAssetsIgnoreFunction(dir: string): {
   isIgnored: (relativePath: string) => boolean;
   assetsIgnoreFilePresent: boolean;
 } {
-  const patterns = ["/.assetsignore", "/_redirects", "/_headers"];
-  const assetsIgnorePath = join(dir, ".assetsignore");
+  const patterns = ['/.assetsignore', '/_redirects', '/_headers'];
+  const assetsIgnorePath = join(dir, '.assetsignore');
   let assetsIgnoreFilePresent = false;
   if (existsSync(assetsIgnorePath)) {
     assetsIgnoreFilePresent = true;
-    const content = readFileSync(assetsIgnorePath, "utf-8");
-    patterns.push(...content.split("\n"));
+    const content = readFileSync(assetsIgnorePath, 'utf-8');
+    patterns.push(...content.split('\n'));
   }
   const ig = ignore().add(patterns);
   // ignore library expects relative paths without leading /
   const isIgnored = (relativePath: string) => {
-    const normalized = relativePath.startsWith("/") ? relativePath.slice(1) : relativePath;
+    const normalized = relativePath.startsWith('/') ? relativePath.slice(1) : relativePath;
     return ig.test(normalized).ignored;
   };
   return { isIgnored, assetsIgnoreFilePresent };
@@ -64,9 +64,9 @@ function createAssetsIgnoreFunction(dir: string): {
  */
 function checkWorkerJsAsset(relativePath: string, assetsIgnoreFilePresent: boolean): void {
   if (assetsIgnoreFilePresent) return;
-  const name = relativePath.startsWith("/") ? relativePath.slice(1) : relativePath;
-  if (name === "_worker.js" || name.startsWith("_worker.js/")) {
-    const type = name === "_worker.js" ? "file" : "directory";
+  const name = relativePath.startsWith('/') ? relativePath.slice(1) : relativePath;
+  if (name === '_worker.js' || name.startsWith('_worker.js/')) {
+    const type = name === '_worker.js' ? 'file' : 'directory';
     throw new Error(
       `Uploading _worker.js ${type} as an asset. ` +
         `This could expose private server-side code to the public Internet. ` +
@@ -96,7 +96,7 @@ export function collectAndHashAssets(dir: string): {
     const { isIgnored, assetsIgnoreFilePresent } = createAssetsIgnoreFunction(dir);
     const files = collectFiles(dir);
     for (const filePath of files) {
-      const relativePath = "/" + toSlash(relative(dir, filePath));
+      const relativePath = '/' + toSlash(relative(dir, filePath));
       if (isIgnored(relativePath)) continue;
       checkWorkerJsAsset(relativePath, assetsIgnoreFilePresent);
       const content = readFileSync(filePath);
@@ -109,7 +109,7 @@ export function collectAndHashAssets(dir: string): {
   } catch (err) {
     // Only swallow directory-not-found errors; re-throw everything else
     // (e.g. _worker.js safety guard)
-    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
       // Directory doesn't exist — no assets
     } else {
       throw err;
@@ -130,7 +130,7 @@ export function appendAssets(
 ): void {
   for (const [path, content] of assetFiles) {
     if (neededPaths && !neededPaths.has(path)) continue;
-    const key = path.startsWith("/") ? path.slice(1) : path;
+    const key = path.startsWith('/') ? path.slice(1) : path;
     formData.append(`asset:${key}`, new Blob([new Uint8Array(content)]), key);
   }
 }
@@ -189,7 +189,7 @@ export function packageBuild(
   hashedAssetsPrefix?: string,
   headerRules?: HeaderRule[],
   redirectRules?: RedirectRule[],
-  dialect?: "sqlite" | "postgresql",
+  dialect?: 'sqlite' | 'postgresql',
   webSockets?: WebSocketRouteDefinition[],
 ): FormData {
   const formData = new FormData();
@@ -199,20 +199,20 @@ export function packageBuild(
   if (bindings.needsAuth) manifest.auth = true;
   const hasMigrations = migrations && migrations.length > 0;
   if (bindings.needsD1 || bindings.needsAuth || hasMigrations) {
-    if (dialect === "postgresql") {
-      manifest.bindings.hyperdrive = ["HYPERDRIVE"];
+    if (dialect === 'postgresql') {
+      manifest.bindings.hyperdrive = ['HYPERDRIVE'];
     } else {
-      manifest.bindings.d1 = [options?.bindingNames?.d1 ?? "DB"];
+      manifest.bindings.d1 = [options?.bindingNames?.d1 ?? 'DB'];
     }
   }
-  if (bindings.needsKV) manifest.bindings.kv = [options?.bindingNames?.kv ?? "KV"];
-  if (bindings.needsR2) manifest.bindings.r2 = [options?.bindingNames?.r2 ?? "STORAGE"];
+  if (bindings.needsKV) manifest.bindings.kv = [options?.bindingNames?.kv ?? 'KV'];
+  if (bindings.needsR2) manifest.bindings.r2 = [options?.bindingNames?.r2 ?? 'STORAGE'];
   if (bindings.needsAI) manifest.bindings.ai = true;
 
   // Add migration metadata to manifest + SQL content as FormData entries
   if (migrations && migrations.length > 0) {
     manifest.migrations = {
-      dialect: dialect ?? "sqlite",
+      dialect: dialect ?? 'sqlite',
       pending: migrations.length,
     };
     for (const m of migrations) {
@@ -236,7 +236,7 @@ export function packageBuild(
     manifest.framework = framework;
   }
 
-  manifest.type = framework ? "framework" : "void";
+  manifest.type = framework ? 'framework' : 'void';
 
   if (revalidate != null && revalidate !== 0) {
     manifest.revalidate = revalidate;
@@ -281,7 +281,7 @@ export function packageBuild(
     manifest.websocket = websocketManifest;
   }
 
-  formData.append("manifest", JSON.stringify(manifest));
+  formData.append('manifest', JSON.stringify(manifest));
 
   // Add worker files
   const workerDir = join(distDir, workerDirName);
@@ -294,27 +294,27 @@ export function packageBuild(
   }
 
   // Add client assets
-  const clientDir = join(distDir, "client");
+  const clientDir = join(distDir, 'client');
   try {
     const { isIgnored, assetsIgnoreFilePresent } = createAssetsIgnoreFunction(clientDir);
     const clientFiles = collectFiles(clientDir);
     for (const filePath of clientFiles) {
       const relativePath = toSlash(relative(clientDir, filePath));
-      if (isIgnored("/" + relativePath)) continue;
+      if (isIgnored('/' + relativePath)) continue;
       checkWorkerJsAsset(relativePath, assetsIgnoreFilePresent);
-      if (neededAssets && !neededAssets.has("/" + relativePath)) continue;
+      if (neededAssets && !neededAssets.has('/' + relativePath)) continue;
       const content = readFileSync(filePath);
       formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
     }
   } catch (err) {
-    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
       // No client directory — API-only project
     } else {
       throw err;
     }
   }
 
-  if (neededAssets) formData.append("preflight", "true");
+  if (neededAssets) formData.append('preflight', 'true');
 
   return formData;
 }
@@ -324,7 +324,7 @@ export function packageBuild(
  */
 export function packageStaticBuild(
   outputDir: string,
-  appType: "spa" | "static",
+  appType: 'spa' | 'static',
   neededAssets?: Set<string> | null,
   hashedAssetsPrefix?: string,
   headerRules?: HeaderRule[],
@@ -337,7 +337,7 @@ export function packageStaticBuild(
     bindings: {},
     type: appType,
     assetConfig: {
-      not_found_handling: appType === "spa" ? "single-page-application" : "404-page",
+      not_found_handling: appType === 'spa' ? 'single-page-application' : '404-page',
     },
   };
 
@@ -353,20 +353,20 @@ export function packageStaticBuild(
     manifest.redirectRules = redirectRules;
   }
 
-  formData.append("manifest", JSON.stringify(manifest));
+  formData.append('manifest', JSON.stringify(manifest));
 
   const { isIgnored, assetsIgnoreFilePresent } = createAssetsIgnoreFunction(outputDir);
   const files = collectFiles(outputDir);
   for (const filePath of files) {
     const relativePath = toSlash(relative(outputDir, filePath));
-    if (isIgnored("/" + relativePath)) continue;
+    if (isIgnored('/' + relativePath)) continue;
     checkWorkerJsAsset(relativePath, assetsIgnoreFilePresent);
-    if (neededAssets && !neededAssets.has("/" + relativePath)) continue;
+    if (neededAssets && !neededAssets.has('/' + relativePath)) continue;
     const content = readFileSync(filePath);
     formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
   }
 
-  if (neededAssets) formData.append("preflight", "true");
+  if (neededAssets) formData.append('preflight', 'true');
 
   return formData;
 }
@@ -397,7 +397,7 @@ export function packageFrameworkBuild(opts: {
   hashedAssetsPrefix?: string;
   headerRules?: HeaderRule[];
   redirectRules?: RedirectRule[];
-  dialect?: "sqlite" | "postgresql";
+  dialect?: 'sqlite' | 'postgresql';
   webSockets?: WebSocketRouteDefinition[];
 }): FormData {
   const formData = new FormData();
@@ -407,19 +407,19 @@ export function packageFrameworkBuild(opts: {
   const manifest: DeployManifest = { version: 3, bindings: {} };
   const hasMigrations = opts.migrations && opts.migrations.length > 0;
   if (opts.bindings.needsD1 || opts.bindings.needsAuth || hasMigrations) {
-    if (opts.dialect === "postgresql") {
-      manifest.bindings.hyperdrive = ["HYPERDRIVE"];
+    if (opts.dialect === 'postgresql') {
+      manifest.bindings.hyperdrive = ['HYPERDRIVE'];
     } else {
-      manifest.bindings.d1 = [po?.bindingNames?.d1 ?? "DB"];
+      manifest.bindings.d1 = [po?.bindingNames?.d1 ?? 'DB'];
     }
   }
-  if (opts.bindings.needsKV) manifest.bindings.kv = [po?.bindingNames?.kv ?? "KV"];
-  if (opts.bindings.needsR2) manifest.bindings.r2 = [po?.bindingNames?.r2 ?? "STORAGE"];
+  if (opts.bindings.needsKV) manifest.bindings.kv = [po?.bindingNames?.kv ?? 'KV'];
+  if (opts.bindings.needsR2) manifest.bindings.r2 = [po?.bindingNames?.r2 ?? 'STORAGE'];
   if (opts.bindings.needsAI) manifest.bindings.ai = true;
 
   if (opts.migrations && opts.migrations.length > 0) {
     manifest.migrations = {
-      dialect: opts.dialect ?? "sqlite",
+      dialect: opts.dialect ?? 'sqlite',
       pending: opts.migrations.length,
     };
     for (const m of opts.migrations) {
@@ -436,7 +436,7 @@ export function packageFrameworkBuild(opts: {
 
   manifest.ssr = true;
   manifest.framework = opts.frameworkName;
-  manifest.type = "framework";
+  manifest.type = 'framework';
   manifest.workerMain = po?.workerMain ?? opts.workerMain;
   if (po?.compatibilityDate) manifest.compatibilityDate = po.compatibilityDate;
   if (po?.compatibilityFlags && po.compatibilityFlags.length > 0) {
@@ -460,13 +460,13 @@ export function packageFrameworkBuild(opts: {
     manifest.websocket = websocketManifest;
   }
 
-  formData.append("manifest", JSON.stringify(manifest));
+  formData.append('manifest', JSON.stringify(manifest));
 
   // Collect worker files and asset files, handling directory overlap
-  const workerDirNorm = opts.workerDir.replace(/\\/g, "/");
-  const assetsDirNorm = opts.assetsDir.replace(/\\/g, "/");
+  const workerDirNorm = opts.workerDir.replace(/\\/g, '/');
+  const assetsDirNorm = opts.assetsDir.replace(/\\/g, '/');
   const isOverlap =
-    workerDirNorm.startsWith(assetsDirNorm + "/") || workerDirNorm === assetsDirNorm;
+    workerDirNorm.startsWith(assetsDirNorm + '/') || workerDirNorm === assetsDirNorm;
 
   // Worker files
   const workerFiles = collectFiles(opts.workerDir);
@@ -483,23 +483,23 @@ export function packageFrameworkBuild(opts: {
     const assetFiles = collectFiles(opts.assetsDir);
     for (const filePath of assetFiles) {
       // Skip worker files when workerDir overlaps with assetsDir
-      if (isOverlap && filePath.replace(/\\/g, "/").startsWith(workerDirNorm)) continue;
+      if (isOverlap && filePath.replace(/\\/g, '/').startsWith(workerDirNorm)) continue;
       const relativePath = toSlash(relative(opts.assetsDir, filePath));
-      if (isIgnored("/" + relativePath)) continue;
+      if (isIgnored('/' + relativePath)) continue;
       checkWorkerJsAsset(relativePath, assetsIgnoreFilePresent);
-      if (opts.neededAssets && !opts.neededAssets.has("/" + relativePath)) continue;
+      if (opts.neededAssets && !opts.neededAssets.has('/' + relativePath)) continue;
       const content = readFileSync(filePath);
       formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
     }
   } catch (err) {
-    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
       // No assets directory
     } else {
       throw err;
     }
   }
 
-  if (opts.neededAssets) formData.append("preflight", "true");
+  if (opts.neededAssets) formData.append('preflight', 'true');
 
   return formData;
 }
@@ -509,11 +509,11 @@ export function packageFrameworkBuild(opts: {
  * Skips build metadata and files with extensions CF Workers can't handle as modules.
  */
 function isWorkerModule(relativePath: string): boolean {
-  const norm = relativePath.replace(/\\/g, "/");
+  const norm = relativePath.replace(/\\/g, '/');
   // Skip build metadata at any depth
-  if (norm.includes("/.vite/") || norm.startsWith(".vite/")) return false;
+  if (norm.includes('/.vite/') || norm.startsWith('.vite/')) return false;
   // Skip wrangler config
-  if (norm === "wrangler.json" || norm === "wrangler.jsonc") return false;
+  if (norm === 'wrangler.json' || norm === 'wrangler.jsonc') return false;
   // Only include CF-compatible module extensions
   return /\.(js|mjs|cjs|wasm|map|txt)$/.test(norm);
 }

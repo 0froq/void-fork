@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build"
+    "build": "vite build",
+    "dev": "vite dev"
   },
   "dependencies": {
     "@tanstack/react-router": "^1.168.4",

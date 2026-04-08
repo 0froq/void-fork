@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runDeploy } from "../../src/cli/deploy";
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { runDeploy } from '../../src/cli/deploy';
 
 const mockError = vi.fn();
 const mockInfo = vi.fn();
@@ -14,7 +14,7 @@ const mockPromptForLoginToken = vi.fn();
 
 const originalIsTTY = process.stdin.isTTY;
 
-vi.mock("@clack/prompts", () => ({
+vi.mock('@clack/prompts', () => ({
   intro: vi.fn(),
   outro: vi.fn(),
   note: vi.fn(),
@@ -30,12 +30,12 @@ vi.mock("@clack/prompts", () => ({
   },
 }));
 
-vi.mock("../../src/cli/auth", () => ({
+vi.mock('../../src/cli/auth', () => ({
   getToken: (...args: unknown[]) => mockGetToken(...args),
   getTokenSource: (...args: unknown[]) => mockGetTokenSource(...args),
 }));
 
-vi.mock("../../src/cli/client", () => ({
+vi.mock('../../src/cli/client', () => ({
   PlatformClient: class {
     listProjects(...args: unknown[]) {
       return mockListProjects(...args);
@@ -44,7 +44,7 @@ vi.mock("../../src/cli/client", () => ({
   isExpiredTokenError: (...args: unknown[]) => mockIsExpiredTokenError(...args),
 }));
 
-vi.mock("../../src/cli/login", () => ({
+vi.mock('../../src/cli/login', () => ({
   promptForLoginToken: (...args: unknown[]) => mockPromptForLoginToken(...args),
 }));
 
@@ -60,47 +60,47 @@ beforeEach(() => {
   mockIsExpiredTokenError.mockReset();
   mockPromptForLoginToken.mockReset();
 
-  mockGetToken.mockReturnValue("token");
-  mockGetTokenSource.mockReturnValue("manual");
-  mockListProjects.mockRejectedValue(new Error("expired-token"));
+  mockGetToken.mockReturnValue('token');
+  mockGetTokenSource.mockReturnValue('manual');
+  mockListProjects.mockRejectedValue(new Error('expired-token'));
   mockIsExpiredTokenError.mockImplementation((error: unknown) => {
-    return error instanceof Error && error.message === "expired-token";
+    return error instanceof Error && error.message === 'expired-token';
   });
-  mockPromptForLoginToken.mockResolvedValue("fresh-token");
-  Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+  mockPromptForLoginToken.mockResolvedValue('fresh-token');
+  Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
 });
 
-describe("runDeploy auth failures", () => {
-  it("shows a re-login instruction for expired local auth tokens in non-interactive mode", async () => {
-    await expect(runDeploy(process.cwd(), { projectSlug: "my-app" })).rejects.toThrow(
-      "Auth token expired. Run `void auth login` and try again.",
+describe('runDeploy auth failures', () => {
+  it('shows a re-login instruction for expired local auth tokens in non-interactive mode', async () => {
+    await expect(runDeploy(process.cwd(), { projectSlug: 'my-app' })).rejects.toThrow(
+      'Auth token expired. Run `void auth login` and try again.',
     );
   });
 
-  it("reauthenticates and retries once for expired local auth tokens in interactive mode", async () => {
-    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+  it('reauthenticates and retries once for expired local auth tokens in interactive mode', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
     mockListProjects
-      .mockRejectedValueOnce(new Error("expired-token"))
-      .mockRejectedValueOnce(new Error("second failure"));
+      .mockRejectedValueOnce(new Error('expired-token'))
+      .mockRejectedValueOnce(new Error('second failure'));
 
-    await expect(runDeploy(process.cwd(), { projectSlug: "my-app" })).rejects.toThrow(
-      "second failure",
+    await expect(runDeploy(process.cwd(), { projectSlug: 'my-app' })).rejects.toThrow(
+      'second failure',
     );
 
     expect(mockPromptForLoginToken).toHaveBeenCalledTimes(1);
-    expect(mockWarn).toHaveBeenCalledWith("Auth token expired. Re-authenticating...");
-    expect(mockSuccess).toHaveBeenCalledWith("Re-authenticated. Retrying deploy...");
+    expect(mockWarn).toHaveBeenCalledWith('Auth token expired. Re-authenticating...');
+    expect(mockSuccess).toHaveBeenCalledWith('Re-authenticated. Retrying deploy...');
   });
 
-  it("shows a VOID_TOKEN instruction for expired CI tokens", async () => {
-    mockGetTokenSource.mockReturnValue("ci");
+  it('shows a VOID_TOKEN instruction for expired CI tokens', async () => {
+    mockGetTokenSource.mockReturnValue('ci');
 
-    await expect(runDeploy(process.cwd(), { projectSlug: "my-app" })).rejects.toThrow(
-      "`VOID_TOKEN` is invalid or expired. Generate a new token and try again.",
+    await expect(runDeploy(process.cwd(), { projectSlug: 'my-app' })).rejects.toThrow(
+      '`VOID_TOKEN` is invalid or expired. Generate a new token and try again.',
     );
   });
 });
 
 afterEach(() => {
-  Object.defineProperty(process.stdin, "isTTY", { value: originalIsTTY, configurable: true });
+  Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
 });

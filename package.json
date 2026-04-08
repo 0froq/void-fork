@@ -2,10 +2,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "pnpm --filter=./packages/** --parallel build",
     "build:all": "pnpm build && pnpm --filter=./playground/** --parallel build",
     "build:core": "pnpm --filter ./packages/void build",
     "build:docs": "pnpm --filter ./docs build",
-    "build": "pnpm --filter=./packages/** --parallel build",
     "check": "pnpm -r --parallel typecheck",
     "deploy:docs": "pnpm --filter ./docs run deploy --project void-docs",
     "deploy:staging:docs": "pnpm --filter ./docs run deploy --project void-docs-staging",
@@ -13,12 +13,12 @@
     "fmt": "oxfmt --write .",
     "lint": "oxlint",
     "prepare": "husky",
+    "test": "vitest --run",
     "test:integration": "vitest --run --project core-markdown",
     "test:metaframeworks": "vitest --run --project metaframeworks",
     "test:pages:react-vue": "vitest --run --project pages-react-vue",
     "test:pages:svelte-solid": "vitest --run --project pages-svelte-solid",
-    "test:unit": "vitest --run --project unit",
-    "test": "vitest --run"
+    "test:unit": "vitest --run --project unit"
   },
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",

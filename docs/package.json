@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vitepress dev",
     "build": "vitepress build",
-    "preview": "vitepress preview",
-    "deploy": "void deploy"
+    "deploy": "void deploy",
+    "dev": "vitepress dev",
+    "preview": "vitepress preview"
   },
   "devDependencies": {
     "@iconify/vue": "5.0.0",

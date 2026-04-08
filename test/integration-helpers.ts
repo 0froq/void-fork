@@ -1,6 +1,6 @@
-import { createServer, type Server } from "node:net";
-import { once } from "node:events";
-import { execSync, type spawn } from "node:child_process";
+import { execSync, type spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { createServer, type Server } from 'node:net';
 
 /**
  * Ports held by getPort() until waitForServer() releases them.
@@ -18,9 +18,9 @@ const heldServers = new Map<number, Server>();
  */
 export async function getPort(): Promise<number> {
   const server = createServer();
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const { port } = server.address() as import("node:net").AddressInfo;
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const { port } = server.address() as import('node:net').AddressInfo;
   server.unref(); // don't block process exit if beforeAll throws before waitForServer
   heldServers.set(port, server);
   return port;
@@ -37,7 +37,7 @@ export async function waitForServer(
   const held = heldServers.get(urlPort);
   if (held) {
     held.close();
-    await once(held, "close");
+    await once(held, 'close');
     heldServers.delete(urlPort);
   }
 
@@ -63,21 +63,21 @@ export async function waitForServer(
 
 export async function killChild(child: ReturnType<typeof spawn>): Promise<void> {
   if (child.exitCode === null && child.signalCode === null) {
-    if (process.platform === "win32" && child.pid) {
+    if (process.platform === 'win32' && child.pid) {
       // On Windows, SIGTERM doesn't propagate to child processes.
       // Use taskkill /T to kill the entire process tree (e.g. workerd.exe).
       // See: https://github.com/voidzero-dev/void/actions/runs/23939152784/job/69826006981?pr=63
       try {
-        execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: "ignore" });
+        execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: 'ignore' });
       } catch {
         // Process may have already exited
       }
     } else {
-      child.kill("SIGTERM");
+      child.kill('SIGTERM');
     }
-    await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+    await Promise.race([once(child, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
     if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
+      child.kill('SIGKILL');
     }
   }
 }

@@ -1,5 +1,5 @@
-import { useContext, useEffect, useRef } from "react";
-import { RouterContext } from "./context";
+import { useContext, useEffect, useRef } from 'react';
+import { RouterContext } from './context';
 
 export function useNavigation(onStart?: () => void, onEnd?: () => void): void {
   const router = useContext(RouterContext);

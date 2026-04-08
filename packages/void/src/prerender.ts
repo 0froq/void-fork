@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -6,16 +6,16 @@ import {
   readdirSync,
   unlinkSync,
   writeFileSync,
-} from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join, relative } from "node:path";
-import { pathToFileURL } from "node:url";
-import { loadEnv } from "vite";
-import { voidLog, voidWarn } from "./log";
+} from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join, relative } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { loadEnv } from 'vite';
+import { voidLog, voidWarn } from './log';
 
-const PRERENDER_PATHS_ENDPOINT = "/__void/prerender-paths";
+const PRERENDER_PATHS_ENDPOINT = '/__void/prerender-paths';
 
-type PrerenderWorkerModuleType = "ESModule" | "CommonJS" | "CompiledWasm" | "Text" | "Data";
+type PrerenderWorkerModuleType = 'ESModule' | 'CommonJS' | 'CompiledWasm' | 'Text' | 'Data';
 
 export interface PrerenderWorkerModule {
   path: string;
@@ -33,7 +33,7 @@ export interface PrerenderRunResult extends PrerenderResult {
 }
 
 function outputFileForPath(path: string): string {
-  return path === "/" ? "index.html" : `${path.slice(1)}.html`;
+  return path === '/' ? 'index.html' : `${path.slice(1)}.html`;
 }
 
 async function readPrerenderPathsResponse(response: Response): Promise<string[]> {
@@ -42,8 +42,8 @@ async function readPrerenderPathsResponse(response: Response): Promise<string[]>
   }
 
   const payload = (await response.json()) as { paths?: unknown };
-  if (!Array.isArray(payload.paths) || !payload.paths.every((path) => typeof path === "string")) {
-    throw new Error("Failed to collect prerender paths: invalid response payload");
+  if (!Array.isArray(payload.paths) || !payload.paths.every((path) => typeof path === 'string')) {
+    throw new Error('Failed to collect prerender paths: invalid response payload');
   }
 
   return payload.paths;
@@ -84,32 +84,32 @@ async function renderPrerenderPaths(
 }
 
 function normalizeWorkerModulePath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/^\.\//, "");
+  return path.replace(/\\/g, '/').replace(/^\.\//, '');
 }
 
 function resolveWorkerModuleType(relativePath: string): PrerenderWorkerModuleType | null {
   const normalized = normalizeWorkerModulePath(relativePath);
 
-  if (normalized.includes("/.vite/") || normalized.startsWith(".vite/")) {
+  if (normalized.includes('/.vite/') || normalized.startsWith('.vite/')) {
     return null;
   }
-  if (normalized === "wrangler.json" || normalized === "wrangler.jsonc") {
+  if (normalized === 'wrangler.json' || normalized === 'wrangler.jsonc') {
     return null;
   }
-  if (normalized.endsWith(".mjs") || normalized.endsWith(".js")) {
-    return "ESModule";
+  if (normalized.endsWith('.mjs') || normalized.endsWith('.js')) {
+    return 'ESModule';
   }
-  if (normalized.endsWith(".cjs")) {
-    return "CommonJS";
+  if (normalized.endsWith('.cjs')) {
+    return 'CommonJS';
   }
-  if (normalized.endsWith(".wasm")) {
-    return "CompiledWasm";
+  if (normalized.endsWith('.wasm')) {
+    return 'CompiledWasm';
   }
-  if (normalized.endsWith(".txt")) {
-    return "Text";
+  if (normalized.endsWith('.txt')) {
+    return 'Text';
   }
-  if (normalized.endsWith(".bin")) {
-    return "Data";
+  if (normalized.endsWith('.bin')) {
+    return 'Data';
   }
 
   return null;
@@ -146,8 +146,8 @@ export function collectPrerenderWorkerModules(
     if (!type) return [];
 
     const file = readFileSync(filePath);
-    const contents: PrerenderWorkerModule["contents"] =
-      type === "CompiledWasm" || type === "Data" ? new Uint8Array(file) : file.toString("utf-8");
+    const contents: PrerenderWorkerModule['contents'] =
+      type === 'CompiledWasm' || type === 'Data' ? new Uint8Array(file) : file.toString('utf-8');
 
     return [{ path: filePath, relativePath, type, contents }];
   });
@@ -173,18 +173,18 @@ async function createCloudflarePrerenderRunner(options: {
 }) {
   const { root, workerDir, persistDir, clientDir } = options;
 
-  const wranglerPath = join(workerDir, "wrangler.json");
+  const wranglerPath = join(workerDir, 'wrangler.json');
   if (!existsSync(wranglerPath)) {
     throw new Error(`[void] wrangler.json not found in ${workerDir}`);
   }
-  const wranglerConfig = JSON.parse(readFileSync(wranglerPath, "utf-8"));
-  const workerMain = wranglerConfig.main ?? "index.js";
+  const wranglerConfig = JSON.parse(readFileSync(wranglerPath, 'utf-8'));
+  const workerMain = wranglerConfig.main ?? 'index.js';
 
-  const env = loadEnv("production", root, "");
+  const env = loadEnv('production', root, '');
 
-  const wranglerUrl = import.meta.resolve("wrangler/package.json");
+  const wranglerUrl = import.meta.resolve('wrangler/package.json');
   const require = createRequire(wranglerUrl);
-  const miniflarePath = require.resolve("miniflare");
+  const miniflarePath = require.resolve('miniflare');
   const { Miniflare } = (await import(pathToFileURL(miniflarePath).href)) as {
     Miniflare: new (options: Record<string, unknown>) => {
       dispatchFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
@@ -195,21 +195,21 @@ async function createCloudflarePrerenderRunner(options: {
   const mfOptions: Record<string, unknown> = {
     modules: collectPrerenderWorkerModules(workerDir, workerMain),
     modulesRoot: workerDir,
-    compatibilityDate: wranglerConfig.compatibility_date ?? "2024-01-01",
+    compatibilityDate: wranglerConfig.compatibility_date ?? '2024-01-01',
     compatibilityFlags: wranglerConfig.compatibility_flags ?? [],
     bindings: { ...wranglerConfig.vars, ...env },
   };
 
   if (clientDir) {
     mfOptions.serviceBindings = {
-      [wranglerConfig.assets?.binding ?? "ASSETS"](request: Request) {
+      [wranglerConfig.assets?.binding ?? 'ASSETS'](request: Request) {
         const url = new URL(request.url);
         const filePath = join(clientDir, url.pathname);
         try {
           const content = readFileSync(filePath);
           return new Response(content);
         } catch {
-          return new Response("Not Found", { status: 404 });
+          return new Response('Not Found', { status: 404 });
         }
       },
     };
@@ -252,10 +252,10 @@ async function createCloudflarePrerenderRunner(options: {
   return {
     async collectPaths(): Promise<string[]> {
       const headers: Record<string, string> = {};
-      if (proxyToken) headers["x-void-internal"] = proxyToken;
+      if (proxyToken) headers['x-void-internal'] = proxyToken;
       return readPrerenderPathsResponse(
         await mf.dispatchFetch(`http://localhost${PRERENDER_PATHS_ENDPOINT}`, {
-          method: "POST",
+          method: 'POST',
           headers,
         }),
       );
@@ -309,12 +309,12 @@ export async function prerenderPages(options: {
 }
 
 type NodeRunnerConfig =
-  | { mode: "collect"; ssrDir: string; clientDir?: string }
-  | { mode: "collect-and-render"; ssrDir: string; clientDir: string };
+  | { mode: 'collect'; ssrDir: string; clientDir?: string }
+  | { mode: 'collect-and-render'; ssrDir: string; clientDir: string };
 
 async function runNodePrerenderRunner<T>(root: string, config: NodeRunnerConfig): Promise<T> {
-  const env = loadEnv("production", root, "");
-  const runnerPath = join(root, ".void", "prerender-runner.mjs");
+  const env = loadEnv('production', root, '');
+  const runnerPath = join(root, '.void', 'prerender-runner.mjs');
   mkdirSync(dirname(runnerPath), { recursive: true });
   writeFileSync(
     runnerPath,
@@ -425,7 +425,7 @@ export async function collectPrerenderPathsNode(options: {
   clientDir?: string;
 }): Promise<string[]> {
   const result = await runNodePrerenderRunner<{ paths: string[] }>(options.root, {
-    mode: "collect",
+    mode: 'collect',
     ssrDir: options.ssrDir,
     clientDir: options.clientDir,
   });
@@ -445,7 +445,7 @@ export async function prerenderPagesNode(options: {
   clientDir: string;
 }): Promise<PrerenderRunResult> {
   const result = await runNodePrerenderRunner<PrerenderRunResult>(options.root, {
-    mode: "collect-and-render",
+    mode: 'collect-and-render',
     ssrDir: options.ssrDir,
     clientDir: options.clientDir,
   });

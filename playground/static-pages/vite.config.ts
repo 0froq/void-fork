@@ -1,13 +1,13 @@
-import { defineConfig, type Plugin } from "vite";
-import { voidPlugin } from "void";
-import { voidVue } from "@void/vue/plugin";
+import { voidVue } from '@void/vue/plugin';
+import { defineConfig, type Plugin } from 'vite';
+import { voidPlugin } from 'void';
 
 function virtualTagsPlugin(): Plugin {
-  const VIRTUAL_ID = "virtual:tags";
-  const RESOLVED_ID = "\0virtual:tags";
+  const VIRTUAL_ID = 'virtual:tags';
+  const RESOLVED_ID = '\0virtual:tags';
 
   return {
-    name: "virtual-tags",
+    name: 'virtual-tags',
     resolveId(id) {
       if (id === VIRTUAL_ID) return RESOLVED_ID;
     },

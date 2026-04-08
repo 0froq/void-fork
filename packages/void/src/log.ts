@@ -1,9 +1,9 @@
-const tag = "\x1b[1m\x1b[35m[void]\x1b[39m\x1b[22m";
+const tag = '\x1b[1m\x1b[35m[void]\x1b[39m\x1b[22m';
 
 const timeFormat = new Intl.DateTimeFormat(undefined, {
-  hour: "numeric",
-  minute: "numeric",
-  second: "numeric",
+  hour: 'numeric',
+  minute: 'numeric',
+  second: 'numeric',
 });
 
 let showTimestamp = true;

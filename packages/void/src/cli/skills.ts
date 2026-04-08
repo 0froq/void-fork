@@ -5,10 +5,10 @@ import {
   readdirSync,
   readlinkSync,
   symlinkSync,
-} from "node:fs";
-import { join, relative } from "node:path";
-import { log } from "@clack/prompts";
-import { detectAgents, getPackageDir, type AgentConfig } from "./agents";
+} from 'node:fs';
+import { join, relative } from 'node:path';
+import { log } from '@clack/prompts';
+import { detectAgents, getPackageDir, type AgentConfig } from './agents';
 
 interface SkillInfo {
   dirName: string;
@@ -22,9 +22,9 @@ function parseSkills(skillsDir: string): SkillInfo[] {
   const skills: SkillInfo[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const skillMd = join(skillsDir, entry.name, "SKILL.md");
+    const skillMd = join(skillsDir, entry.name, 'SKILL.md');
     if (!existsSync(skillMd)) continue;
-    const content = readFileSync(skillMd, "utf-8");
+    const content = readFileSync(skillMd, 'utf-8');
     const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
     if (!frontmatter) continue;
     const nameMatch = frontmatter[1].match(/^name:\s*(.+)$/m);
@@ -32,7 +32,7 @@ function parseSkills(skillsDir: string): SkillInfo[] {
     skills.push({
       dirName: entry.name,
       name: nameMatch ? nameMatch[1].trim() : entry.name,
-      description: descMatch ? descMatch[1].trim() : "",
+      description: descMatch ? descMatch[1].trim() : '',
     });
   }
   return skills;
@@ -80,7 +80,7 @@ function linkSkills(
  */
 export function linkSkillsForAgents(root: string): number {
   const packageDir = getPackageDir();
-  const skillsDir = join(packageDir, "skills");
+  const skillsDir = join(packageDir, 'skills');
   const skills = parseSkills(skillsDir);
   if (skills.length === 0) return 0;
 
@@ -97,7 +97,7 @@ export function linkSkillsForAgents(root: string): number {
 
 export function linkSkillsForSpecificAgents(root: string, agents: AgentConfig[]): number {
   const packageDir = getPackageDir();
-  const skillsDir = join(packageDir, "skills");
+  const skillsDir = join(packageDir, 'skills');
   const skills = parseSkills(skillsDir);
   if (skills.length === 0) return 0;
 

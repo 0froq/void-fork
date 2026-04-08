@@ -1,4 +1,4 @@
-import pc from "picocolors";
+import pc from 'picocolors';
 
 export { pc };
 
@@ -19,7 +19,7 @@ export function dim(text: string): string {
 }
 
 export function tablePrefix(): string {
-  return `${pc.gray("│")}  `;
+  return `${pc.gray('│')}  `;
 }
 
 export function helpLine(command: string, description: string): string {

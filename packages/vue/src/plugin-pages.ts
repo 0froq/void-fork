@@ -1,12 +1,12 @@
-import type { Plugin } from "vite";
-import { existsSync, readdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { scanPages } from "void/pages";
-import type { PageScanResult } from "void/pages";
-import { generateComponentManifest } from "./pages-manifest";
+import { existsSync, readdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import type { Plugin } from 'vite';
+import { scanPages } from 'void/pages';
+import type { PageScanResult } from 'void/pages';
+import { generateComponentManifest } from './pages-manifest';
 
-const RENDERER_ID = "virtual:void-pages-renderer";
-const CLIENT_ENTRY_ID = "virtual:void-pages-client";
+const RENDERER_ID = 'virtual:void-pages-renderer';
+const CLIENT_ENTRY_ID = 'virtual:void-pages-client';
 
 interface PrefetchConfig {
   hoverDelay?: number;
@@ -19,11 +19,11 @@ interface PagesPluginOptions {
 }
 
 function isVuePageFile(id: string, pagesDir: string): boolean {
-  if (!id.startsWith(pagesDir + "/")) return false;
+  if (!id.startsWith(pagesDir + '/')) return false;
   const rel = id.slice(pagesDir.length + 1);
-  if (rel.split("/").some((s) => s.startsWith("_"))) return false;
-  const basename = rel.slice(rel.lastIndexOf("/") + 1);
-  return basename !== "layout.vue" && !basename.endsWith(".island.vue");
+  if (rel.split('/').some((s) => s.startsWith('_'))) return false;
+  const basename = rel.slice(rel.lastIndexOf('/') + 1);
+  return basename !== 'layout.vue' && !basename.endsWith('.island.vue');
 }
 
 function stripDefinePropsTypeArgument(code: string): string | null {
@@ -38,9 +38,9 @@ function stripDefinePropsTypeArgument(code: string): string | null {
   let newlineCount = 0;
   for (let i = start; i < code.length; i++) {
     const ch = code[i];
-    if (ch === "\n") newlineCount++;
-    else if (ch === "<") depth++;
-    else if (ch === ">") {
+    if (ch === '\n') newlineCount++;
+    else if (ch === '<') depth++;
+    else if (ch === '>') {
       depth--;
       if (depth === 0) {
         end = i;
@@ -50,7 +50,7 @@ function stripDefinePropsTypeArgument(code: string): string | null {
   }
   if (end === -1) return null;
 
-  return code.slice(0, start) + "\n".repeat(newlineCount) + code.slice(end + 1);
+  return code.slice(0, start) + '\n'.repeat(newlineCount) + code.slice(end + 1);
 }
 
 /** Check if the pages directory has any non-island Vue page files. */
@@ -59,8 +59,8 @@ function hasNonIslandPages(dir: string): boolean {
     for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
       if (!entry.isFile()) continue;
       const name = entry.name;
-      if (name.startsWith("_") || name.startsWith("layout.")) continue;
-      if (name.endsWith(".vue") && !name.includes(".island.")) return true;
+      if (name.startsWith('_') || name.startsWith('layout.')) continue;
+      if (name.endsWith('.vue') && !name.includes('.island.')) return true;
     }
   } catch {
     // ignore
@@ -74,8 +74,8 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
 
   return [
     {
-      name: "void-vue:pages-transform",
-      enforce: "pre",
+      name: 'void-vue:pages-transform',
+      enforce: 'pre',
 
       transform: {
         filter: { id: /\.vue$/ },
@@ -83,12 +83,12 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
           if (!isVuePageFile(id, pagesDir)) return;
           const transformed = stripDefinePropsTypeArgument(code);
           if (!transformed) return;
-          return { code: transformed, map: { mappings: "" } };
+          return { code: transformed, map: { mappings: '' } };
         },
       },
 
       handleHotUpdate: {
-        order: "pre",
+        order: 'pre',
         handler(ctx) {
           if (!isVuePageFile(ctx.file, pagesDir)) return;
 
@@ -102,7 +102,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       },
     },
     {
-      name: "void-vue:pages",
+      name: 'void-vue:pages',
 
       async buildStart() {
         if (existsSync(pagesDir)) {
@@ -113,7 +113,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       resolveId: {
         filter: { id: /^virtual:void-pages-(renderer|client)$/ },
         handler(id) {
-          return "\0" + id;
+          return '\0' + id;
         },
       },
 
@@ -121,13 +121,13 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
         // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
         filter: { id: /^\0virtual:void-pages-(renderer|client)$/ },
         handler(id) {
-          if (id === "\0" + RENDERER_ID) {
+          if (id === '\0' + RENDERER_ID) {
             if (!pageScan)
               return "export function renderPage() { throw new Error('No pages found'); }";
             return generateRendererModule(pageScan, pagesDir);
           }
-          if (id === "\0" + CLIENT_ENTRY_ID) {
-            if (!pageScan) return "";
+          if (id === '\0' + CLIENT_ENTRY_ID) {
+            if (!pageScan) return '';
             return generateClientEntry(
               pageScan,
               pagesDir,
@@ -141,13 +141,13 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       config(_, env) {
         if (!existsSync(pagesDir)) return;
 
-        if (env.command === "serve") {
+        if (env.command === 'serve') {
           return {
             optimizeDeps: {
               // Pre-include Vue so it's not discovered late via dynamic
               // imports during SPA navigation, avoiding a full-page reload
               // from Vite's dep optimizer.
-              include: ["vue"],
+              include: ['vue'],
             },
           };
         }
@@ -161,7 +161,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
               build: {
                 manifest: true,
                 rollupOptions: {
-                  input: { "pages-client": CLIENT_ENTRY_ID },
+                  input: { 'pages-client': CLIENT_ENTRY_ID },
                 },
               },
             },
@@ -285,7 +285,7 @@ const { router, initialPageData, initialComponent, initialLayouts, start } =
     components, layoutTree, routeMeta, matchRoute,
     viewTransitions: ${!!viewTransitions},
     prefetchHoverDelay: ${prefetch?.hoverDelay ?? 75},
-    prefetchDefaultCacheFor: parseCacheFor(${JSON.stringify(prefetch?.cacheFor ?? "30s")}),
+    prefetchDefaultCacheFor: parseCacheFor(${JSON.stringify(prefetch?.cacheFor ?? '30s')}),
   });
 
 setActionRouter(router);

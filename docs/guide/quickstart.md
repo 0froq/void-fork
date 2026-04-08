@@ -145,8 +145,8 @@ bun add -D void@npm:@void-sdk/void
 Enable the plugin in `vite.config.ts`
 
 ```ts
-import { defineConfig } from "vite";
-import { voidPlugin } from "void";
+import { defineConfig } from 'vite';
+import { voidPlugin } from 'void';
 
 export default defineConfig({
   plugins: [voidPlugin()],
@@ -182,10 +182,10 @@ bunx void init
 Your starter already includes `routes/api/hello.ts` with a named `GET` export:
 
 ```ts
-import { defineHandler } from "void";
+import { defineHandler } from 'void';
 
 export const GET = defineHandler(() => {
-  return { message: "Hello from Void" };
+  return { message: 'Hello from Void' };
 });
 ```
 

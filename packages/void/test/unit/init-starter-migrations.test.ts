@@ -6,15 +6,15 @@ import {
   rmSync,
   symlinkSync,
   writeFileSync,
-} from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { hasDeploySchemaDrift } from "../../src/cli/deploy";
-import { generateStarterMigration } from "../../src/cli/init";
-import { createPagesStarterTemplate, type ScaffoldStarterMode } from "../../src/cli/template";
+} from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { hasDeploySchemaDrift } from '../../src/cli/deploy';
+import { generateStarterMigration } from '../../src/cli/init';
+import { createPagesStarterTemplate, type ScaffoldStarterMode } from '../../src/cli/template';
 
-vi.mock("@clack/prompts", () => ({
+vi.mock('@clack/prompts', () => ({
   intro: vi.fn(),
   outro: vi.fn(),
   note: vi.fn(),
@@ -27,7 +27,7 @@ vi.mock("@clack/prompts", () => ({
   log: { success: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn(), step: vi.fn() },
 }));
 
-const packageRoot = fileURLToPath(new URL("../..", import.meta.url));
+const packageRoot = fileURLToPath(new URL('../..', import.meta.url));
 const tempDirs: string[] = [];
 
 afterEach(() => {
@@ -36,59 +36,59 @@ afterEach(() => {
   }
 });
 
-describe("starter migration generation", () => {
-  it("creates a sqlite starter migration that deploy sees as drift-free", () => {
-    const root = createStarterApp("sqlite");
+describe('starter migration generation', () => {
+  it('creates a sqlite starter migration that deploy sees as drift-free', () => {
+    const root = createStarterApp('sqlite');
 
-    generateStarterMigration(root, "sqlite");
+    generateStarterMigration(root, 'sqlite');
 
     expect(readSqlMigrations(root)).toHaveLength(1);
-    expect(existsSync(join(root, "db", "migrations", "meta", "_journal.json"))).toBe(true);
-    expect(hasDeploySchemaDrift(root, "sqlite")).toBe(false);
+    expect(existsSync(join(root, 'db', 'migrations', 'meta', '_journal.json'))).toBe(true);
+    expect(hasDeploySchemaDrift(root, 'sqlite')).toBe(false);
   });
 
-  it("creates a postgresql starter migration that deploy sees as drift-free", () => {
-    const root = createStarterApp("postgresql");
+  it('creates a postgresql starter migration that deploy sees as drift-free', () => {
+    const root = createStarterApp('postgresql');
 
-    generateStarterMigration(root, "postgresql");
+    generateStarterMigration(root, 'postgresql');
 
     expect(readSqlMigrations(root)).toHaveLength(1);
-    expect(existsSync(join(root, "db", "migrations", "meta", "_journal.json"))).toBe(true);
-    expect(hasDeploySchemaDrift(root, "postgresql")).toBe(false);
+    expect(existsSync(join(root, 'db', 'migrations', 'meta', '_journal.json'))).toBe(true);
+    expect(hasDeploySchemaDrift(root, 'postgresql')).toBe(false);
   });
 });
 
-function createStarterApp(starterMode: Exclude<ScaffoldStarterMode, "static">): string {
-  const root = mkdtempSync(join(packageRoot, ".tmp-init-starter-"));
+function createStarterApp(starterMode: Exclude<ScaffoldStarterMode, 'static'>): string {
+  const root = mkdtempSync(join(packageRoot, '.tmp-init-starter-'));
   tempDirs.push(root);
 
   const template = createPagesStarterTemplate({
-    framework: "react",
+    framework: 'react',
     starterMode,
-    voidPackageSpec: "workspace:*",
-    adapterPackageSpec: "workspace:*",
+    voidPackageSpec: 'workspace:*',
+    adapterPackageSpec: 'workspace:*',
   });
 
   for (const [filePath, content] of Object.entries(template.files)) {
     const fullPath = join(root, filePath);
-    mkdirSync(fullPath.slice(0, fullPath.lastIndexOf("/")), { recursive: true });
+    mkdirSync(fullPath.slice(0, fullPath.lastIndexOf('/')), { recursive: true });
     writeFileSync(fullPath, content);
   }
 
-  const nodeModulesDir = join(root, "node_modules");
+  const nodeModulesDir = join(root, 'node_modules');
   mkdirSync(nodeModulesDir, { recursive: true });
-  symlinkSync(packageRoot, join(nodeModulesDir, "void"), "dir");
+  symlinkSync(packageRoot, join(nodeModulesDir, 'void'), 'dir');
 
   return root;
 }
 
 function readSqlMigrations(root: string): string[] {
-  const migrationsDir = join(root, "db", "migrations");
+  const migrationsDir = join(root, 'db', 'migrations');
   if (!existsSync(migrationsDir)) {
     return [];
   }
 
   return readdirSync(migrationsDir)
-    .filter((entry) => entry.endsWith(".sql"))
+    .filter((entry) => entry.endsWith('.sql'))
     .sort();
 }

@@ -1,32 +1,32 @@
 export const SCAFFOLD_GITIGNORE_LINES = [
-  "node_modules",
-  "dist",
-  ".void",
-  ".wrangler",
-  "*.tsbuildinfo",
-  ".DS_Store",
+  'node_modules',
+  'dist',
+  '.void',
+  '.wrangler',
+  '*.tsbuildinfo',
+  '.DS_Store',
 ] as const;
 
-export type ScaffoldFramework = "react" | "vue" | "svelte" | "solid";
-export type ScaffoldStarterMode = "sqlite" | "postgresql" | "static";
+export type ScaffoldFramework = 'react' | 'vue' | 'svelte' | 'solid';
+export type ScaffoldStarterMode = 'sqlite' | 'postgresql' | 'static';
 
 export const SCAFFOLD_BASE_DEPENDENCIES = {
-  hono: "^4.11.9",
+  hono: '^4.11.9',
 } as const;
 
 export const SCAFFOLD_BASE_DEV_DEPENDENCIES = {
-  vite: "^8.0.0-beta.14",
-  typescript: "^5.9.3",
+  vite: '^8.0.0-beta.14',
+  typescript: '^5.9.3',
 } as const;
 
 export const SCAFFOLD_FRAMEWORK_OPTIONS = [
-  { value: "react", label: "React", hint: "TSX Pages starter with the React adapter." },
-  { value: "vue", label: "Vue", hint: "Vue SFC Pages starter with the Vue adapter." },
-  { value: "svelte", label: "Svelte", hint: "Svelte 5 Pages starter with the Svelte adapter." },
+  { value: 'react', label: 'React', hint: 'TSX Pages starter with the React adapter.' },
+  { value: 'vue', label: 'Vue', hint: 'Vue SFC Pages starter with the Vue adapter.' },
+  { value: 'svelte', label: 'Svelte', hint: 'Svelte 5 Pages starter with the Svelte adapter.' },
   {
-    value: "solid",
-    label: "Solid",
-    hint: "Fine-grained TSX Pages starter with the Solid adapter.",
+    value: 'solid',
+    label: 'Solid',
+    hint: 'Fine-grained TSX Pages starter with the Solid adapter.',
   },
 ] as const;
 
@@ -43,62 +43,62 @@ interface ScaffoldFrameworkConfig {
 
 export const SCAFFOLD_FRAMEWORKS: Record<ScaffoldFramework, ScaffoldFrameworkConfig> = {
   react: {
-    label: "React",
-    adapterPackage: "@void/react",
-    adapterImport: "voidReact",
-    adapterPlugin: "@void/react/plugin",
-    pageExtension: "tsx",
+    label: 'React',
+    adapterPackage: '@void/react',
+    adapterImport: 'voidReact',
+    adapterPlugin: '@void/react/plugin',
+    pageExtension: 'tsx',
     dependencies: {
-      react: "^19.2.4",
-      "react-dom": "^19.2.4",
+      react: '^19.2.4',
+      'react-dom': '^19.2.4',
     },
     devDependencies: {
-      "@types/react": "^19.2.14",
-      "@types/react-dom": "^19.2.3",
+      '@types/react': '^19.2.14',
+      '@types/react-dom': '^19.2.3',
     },
     tsconfigCompilerOptions: {
-      jsx: "react-jsx",
+      jsx: 'react-jsx',
     },
   },
   vue: {
-    label: "Vue",
-    adapterPackage: "@void/vue",
-    adapterImport: "voidVue",
-    adapterPlugin: "@void/vue/plugin",
-    pageExtension: "vue",
+    label: 'Vue',
+    adapterPackage: '@void/vue',
+    adapterImport: 'voidVue',
+    adapterPlugin: '@void/vue/plugin',
+    pageExtension: 'vue',
     dependencies: {
-      vue: "^3.5.30",
+      vue: '^3.5.30',
     },
     devDependencies: {},
     tsconfigCompilerOptions: {
-      jsx: "preserve",
+      jsx: 'preserve',
     },
   },
   svelte: {
-    label: "Svelte",
-    adapterPackage: "@void/svelte",
-    adapterImport: "voidSvelte",
-    adapterPlugin: "@void/svelte/plugin",
-    pageExtension: "svelte",
+    label: 'Svelte',
+    adapterPackage: '@void/svelte',
+    adapterImport: 'voidSvelte',
+    adapterPlugin: '@void/svelte/plugin',
+    pageExtension: 'svelte',
     dependencies: {
-      svelte: "^5.53.9",
+      svelte: '^5.53.9',
     },
     devDependencies: {},
     tsconfigCompilerOptions: {},
   },
   solid: {
-    label: "Solid",
-    adapterPackage: "@void/solid",
-    adapterImport: "voidSolid",
-    adapterPlugin: "@void/solid/plugin",
-    pageExtension: "tsx",
+    label: 'Solid',
+    adapterPackage: '@void/solid',
+    adapterImport: 'voidSolid',
+    adapterPlugin: '@void/solid/plugin',
+    pageExtension: 'tsx',
     dependencies: {
-      "solid-js": "^1.9.11",
+      'solid-js': '^1.9.11',
     },
     devDependencies: {},
     tsconfigCompilerOptions: {
-      jsx: "preserve",
-      jsxImportSource: "solid-js",
+      jsx: 'preserve',
+      jsxImportSource: 'solid-js',
     },
   },
 };
@@ -111,9 +111,9 @@ export interface PagesStarterTemplate {
 }
 
 function toPreviewPackageName(publicPackageName: string): string {
-  if (publicPackageName === "void") return "@void-sdk/void";
-  if (publicPackageName.startsWith("@void/")) {
-    return publicPackageName.replace(/^@void\//, "@void-sdk/");
+  if (publicPackageName === 'void') return '@void-sdk/void';
+  if (publicPackageName.startsWith('@void/')) {
+    return publicPackageName.replace(/^@void\//, '@void-sdk/');
   }
   return publicPackageName;
 }
@@ -147,22 +147,22 @@ export function createPagesStarterTemplate(options: {
   const { framework, starterMode, voidPackageSpec, adapterPackageSpec } = options;
   const config = SCAFFOLD_FRAMEWORKS[framework];
   const files: Record<string, string> = {
-    "vite.config.ts": getViteConfig(config),
+    'vite.config.ts': getViteConfig(config),
     [`pages/index.${config.pageExtension}`]: getIndexPage(framework, starterMode),
   };
 
-  if (starterMode !== "static") {
-    files["pages/index.server.ts"] = getIndexServer();
-    files["routes/api/hello.ts"] = getHelloRoute(config.label, starterMode);
-    files["db/schema.ts"] = getSchemaFile(starterMode);
-    files["db/seed.sql"] = getSeedFile();
+  if (starterMode !== 'static') {
+    files['pages/index.server.ts'] = getIndexServer();
+    files['routes/api/hello.ts'] = getHelloRoute(config.label, starterMode);
+    files['db/schema.ts'] = getSchemaFile(starterMode);
+    files['db/seed.sql'] = getSeedFile();
   }
 
   return {
     scripts: {
-      dev: "vite",
-      build: "vite build",
-      preview: "vite preview",
+      dev: 'vite',
+      build: 'vite build',
+      preview: 'vite preview',
     },
     dependencies: {
       ...SCAFFOLD_BASE_DEPENDENCIES,
@@ -205,9 +205,9 @@ export const loader = defineHandler(async () => {
 
 function getHelloRoute(
   frameworkLabel: string,
-  starterMode: Exclude<ScaffoldStarterMode, "static">,
+  starterMode: Exclude<ScaffoldStarterMode, 'static'>,
 ): string {
-  const databaseLabel = starterMode === "postgresql" ? "PostgreSQL" : "D1";
+  const databaseLabel = starterMode === 'postgresql' ? 'PostgreSQL' : 'D1';
   return `import { defineHandler } from "void";
 
 export const GET = defineHandler(() => {
@@ -220,8 +220,8 @@ export const GET = defineHandler(() => {
 `;
 }
 
-function getSchemaFile(starterMode: Exclude<ScaffoldStarterMode, "static">): string {
-  if (starterMode === "postgresql") {
+function getSchemaFile(starterMode: Exclude<ScaffoldStarterMode, 'static'>): string {
+  if (starterMode === 'postgresql') {
     return `import { pgTable, serial, text, timestamp } from "void/schema-pg";
 
 export const messages = pgTable("messages", {
@@ -250,9 +250,9 @@ INSERT INTO messages (text) VALUES ('Hello from Void');
 }
 
 function getIndexPage(framework: ScaffoldFramework, starterMode: ScaffoldStarterMode): string {
-  if (starterMode === "static") {
+  if (starterMode === 'static') {
     switch (framework) {
-      case "react":
+      case 'react':
         return `export default function HomePage() {
   return (
     <main>
@@ -266,7 +266,7 @@ function getIndexPage(framework: ScaffoldFramework, starterMode: ScaffoldStarter
   );
 }
 `;
-      case "vue":
+      case 'vue':
         return `<template>
   <main>
     <h1>Welcome to Void</h1>
@@ -278,7 +278,7 @@ function getIndexPage(framework: ScaffoldFramework, starterMode: ScaffoldStarter
   </main>
 </template>
 `;
-      case "svelte":
+      case 'svelte':
         return `<main>
   <h1>Welcome to Void</h1>
   <p>This starter is running in Pages mode with no database or server code yet.</p>
@@ -288,7 +288,7 @@ function getIndexPage(framework: ScaffoldFramework, starterMode: ScaffoldStarter
   </p>
 </main>
 `;
-      case "solid":
+      case 'solid':
         return `export default function HomePage() {
   return (
     <main>
@@ -306,7 +306,7 @@ function getIndexPage(framework: ScaffoldFramework, starterMode: ScaffoldStarter
   }
 
   switch (framework) {
-    case "react":
+    case 'react':
       return `import type { Props } from "./index.server";
 
 export default function HomePage({ messages }: Props) {
@@ -340,7 +340,7 @@ export default function HomePage({ messages }: Props) {
   );
 }
 `;
-    case "vue":
+    case 'vue':
       return `<script setup lang="ts">
 import type { Props } from "./index.server";
 
@@ -371,7 +371,7 @@ defineProps<Props>();
   </main>
 </template>
 `;
-    case "svelte":
+    case 'svelte':
       return `<script lang="ts">
   import type { Props } from "./index.server";
 
@@ -405,7 +405,7 @@ defineProps<Props>();
   {/if}
 </main>
 `;
-    case "solid":
+    case 'solid':
       return `import type { Props } from "./index.server";
 
 export default function HomePage(props: Props) {

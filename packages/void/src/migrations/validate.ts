@@ -14,7 +14,7 @@ const DESTRUCTIVE_PATTERNS = [
   /\bALTER\s+TABLE\s+\S+\s+RENAME\b/i,
 ];
 
-const PRAGMA_COMMENT = "-- void:allow-destructive";
+const PRAGMA_COMMENT = '-- void:allow-destructive';
 
 /**
  * Check if a SQL migration contains destructive operations.
@@ -42,7 +42,7 @@ export function validateMigrations(files: { name: string; sql: string }[]): Migr
   if (errors.length > 0) {
     throw new Error(
       `Destructive migrations detected without pragma:\n` +
-        errors.map((f) => `  - ${f}`).join("\n") +
+        errors.map((f) => `  - ${f}`).join('\n') +
         `\n\nAdd "${PRAGMA_COMMENT}" to each file to allow the migration locally and on deploy.`,
     );
   }

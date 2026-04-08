@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo } from 'react';
 
 export interface IslandFormReturn<T extends Record<string, unknown>> {
   data: T;
@@ -74,7 +74,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
       try {
         const response = await fetch(url, {
           method,
-          headers: { "Content-Type": "application/json" },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
         });
 
@@ -112,9 +112,9 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     recentlySuccessful,
     reset,
     clearErrors,
-    post: (url: string) => submit(url, "POST"),
-    put: (url: string) => submit(url, "PUT"),
-    patch: (url: string) => submit(url, "PATCH"),
-    delete: (url: string) => submit(url, "DELETE"),
+    post: (url: string) => submit(url, 'POST'),
+    put: (url: string) => submit(url, 'PUT'),
+    patch: (url: string) => submit(url, 'PATCH'),
+    delete: (url: string) => submit(url, 'DELETE'),
   };
 }

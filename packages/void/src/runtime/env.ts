@@ -11,7 +11,7 @@ import {
   getRawRuntimeEnv,
   INTERNAL_BINDING_PREFIXES,
   type RuntimeEnv,
-} from "./env-raw";
+} from './env-raw';
 
 export type { RuntimeEnv };
 
@@ -28,20 +28,20 @@ function isInternalBinding(name: string): boolean {
 function filterEnvProxy(env: RuntimeEnv): RuntimeEnv {
   return new Proxy(env, {
     get(target, prop, receiver) {
-      if (typeof prop === "string" && isInternalBinding(prop)) return undefined;
+      if (typeof prop === 'string' && isInternalBinding(prop)) return undefined;
       return Reflect.get(target, prop, receiver);
     },
     has(target, prop) {
-      if (typeof prop === "string" && isInternalBinding(prop)) return false;
+      if (typeof prop === 'string' && isInternalBinding(prop)) return false;
       return Reflect.has(target, prop);
     },
     ownKeys(target) {
       return Reflect.ownKeys(target).filter(
-        (key) => typeof key !== "string" || !isInternalBinding(key),
+        (key) => typeof key !== 'string' || !isInternalBinding(key),
       );
     },
     getOwnPropertyDescriptor(target, prop) {
-      if (typeof prop === "string" && isInternalBinding(prop)) return undefined;
+      if (typeof prop === 'string' && isInternalBinding(prop)) return undefined;
       return Reflect.getOwnPropertyDescriptor(target, prop);
     },
   });

@@ -1,26 +1,26 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, dirname, relative } from "node:path";
-import { intro, outro, log, select, isCancel, cancel } from "@clack/prompts";
-import type { GenArgs } from "./gen-args";
-import { ensureProjectTsconfig } from "../codegen/project-tsconfig";
-import { cliTitle } from "./output";
-import { readConfig, getDatabaseDialect } from "../config";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, dirname, relative } from 'node:path';
+import { intro, outro, log, select, isCancel, cancel } from '@clack/prompts';
+import { ensureProjectTsconfig } from '../codegen/project-tsconfig';
+import { readConfig, getDatabaseDialect } from '../config';
+import type { GenArgs } from './gen-args';
+import { cliTitle } from './output';
 
 export async function runGenCommand(root: string, args: GenArgs): Promise<void> {
   console.log();
-  intro(cliTitle("gen"));
+  intro(cliTitle('gen'));
 
-  if (args.subcommand === "model") {
+  if (args.subcommand === 'model') {
     await runModel(root, args.name, args.columns);
-  } else if (args.subcommand === "migration") {
+  } else if (args.subcommand === 'migration') {
     runMigration(root, args.name);
-  } else if (args.subcommand === "route") {
+  } else if (args.subcommand === 'route') {
     runRoute(root, args.path, args.methods);
-  } else if (args.subcommand === "middleware") {
+  } else if (args.subcommand === 'middleware') {
     runMiddleware(root, args.name);
-  } else if (args.subcommand === "cron") {
+  } else if (args.subcommand === 'cron') {
     runCron(root, args.name);
-  } else if (args.subcommand === "queue") {
+  } else if (args.subcommand === 'queue') {
     runQueue(root, args.name);
   } else {
     runSsr(root, args.framework);
@@ -44,9 +44,9 @@ function writeIfNotExists(filePath: string, content: string): boolean {
 
 function getNextMigrationNumber(migrationsDir: string): string {
   if (!existsSync(migrationsDir)) {
-    return "0000";
+    return '0000';
   }
-  const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql") && f !== "seed.sql");
+  const files = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql') && f !== 'seed.sql');
   let max = -1;
   for (const file of files) {
     const match = file.match(/^(\d+)/);
@@ -54,12 +54,12 @@ function getNextMigrationNumber(migrationsDir: string): string {
       max = Math.max(max, Number(match[1]));
     }
   }
-  return String(max + 1).padStart(4, "0");
+  return String(max + 1).padStart(4, '0');
 }
 
 function getNextMiddlewareNumber(middlewareDir: string): string {
   if (!existsSync(middlewareDir)) {
-    return "01";
+    return '01';
   }
   const files = readdirSync(middlewareDir);
   let max = 0;
@@ -69,7 +69,7 @@ function getNextMiddlewareNumber(middlewareDir: string): string {
       max = Math.max(max, Number(match[1]));
     }
   }
-  return String(max + 1).padStart(2, "0");
+  return String(max + 1).padStart(2, '0');
 }
 
 // ---------------------------------------------------------------------------
@@ -85,14 +85,14 @@ interface ColumnSpec {
 function drizzleColumnDef(col: ColumnSpec): string {
   const { name, type } = col;
   switch (type) {
-    case "string":
-    case "text":
+    case 'string':
+    case 'text':
       return `  ${name}: text("${name}").notNull(),`;
-    case "integer":
+    case 'integer':
       return `  ${name}: integer("${name}").notNull(),`;
-    case "boolean":
+    case 'boolean':
       return `  ${name}: integer("${name}", { mode: "boolean" }).notNull().default(false),`;
-    case "real":
+    case 'real':
       return `  ${name}: real("${name}").notNull(),`;
     default:
       return `  ${name}: text("${name}"),`;
@@ -100,24 +100,24 @@ function drizzleColumnDef(col: ColumnSpec): string {
 }
 
 function drizzleImportsForColumns(columns: ColumnSpec[]): string[] {
-  const types = new Set<string>(["text", "integer"]);
+  const types = new Set<string>(['text', 'integer']);
   for (const col of columns) {
     switch (col.type) {
-      case "string":
-      case "text":
-        types.add("text");
+      case 'string':
+      case 'text':
+        types.add('text');
         break;
-      case "integer":
-        types.add("integer");
+      case 'integer':
+        types.add('integer');
         break;
-      case "boolean":
-        types.add("integer");
+      case 'boolean':
+        types.add('integer');
         break;
-      case "real":
-        types.add("real");
+      case 'real':
+        types.add('real');
         break;
       default:
-        types.add("text");
+        types.add('text');
     }
   }
   return [...types].sort();
@@ -126,14 +126,14 @@ function drizzleImportsForColumns(columns: ColumnSpec[]): string[] {
 function drizzleColumnDefPg(col: ColumnSpec): string {
   const { name, type } = col;
   switch (type) {
-    case "string":
-    case "text":
+    case 'string':
+    case 'text':
       return `  ${name}: text("${name}").notNull(),`;
-    case "integer":
+    case 'integer':
       return `  ${name}: integer("${name}").notNull(),`;
-    case "boolean":
+    case 'boolean':
       return `  ${name}: boolean("${name}").notNull().default(false),`;
-    case "real":
+    case 'real':
       return `  ${name}: doublePrecision("${name}").notNull(),`;
     default:
       return `  ${name}: text("${name}"),`;
@@ -141,24 +141,24 @@ function drizzleColumnDefPg(col: ColumnSpec): string {
 }
 
 function drizzleImportsForColumnsPg(columns: ColumnSpec[]): string[] {
-  const types = new Set<string>(["text", "serial", "timestamp"]);
+  const types = new Set<string>(['text', 'serial', 'timestamp']);
   for (const col of columns) {
     switch (col.type) {
-      case "string":
-      case "text":
-        types.add("text");
+      case 'string':
+      case 'text':
+        types.add('text');
         break;
-      case "integer":
-        types.add("integer");
+      case 'integer':
+        types.add('integer');
         break;
-      case "boolean":
-        types.add("boolean");
+      case 'boolean':
+        types.add('boolean');
         break;
-      case "real":
-        types.add("doublePrecision");
+      case 'real':
+        types.add('doublePrecision');
         break;
       default:
-        types.add("text");
+        types.add('text');
     }
   }
   return [...types].sort();
@@ -168,18 +168,18 @@ function drizzleImportsForColumnsPg(columns: ColumnSpec[]): string[] {
 // Validator detection + templates
 // ---------------------------------------------------------------------------
 
-type Validator = "valibot" | "zod" | "arktype" | "none";
+type Validator = 'valibot' | 'zod' | 'arktype' | 'none';
 
 export function detectValidator(root: string): Validator | null {
-  const pkgPath = join(root, "package.json");
+  const pkgPath = join(root, 'package.json');
   if (!existsSync(pkgPath)) return null;
 
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
   const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
 
-  if ("valibot" in allDeps) return "valibot";
-  if ("zod" in allDeps) return "zod";
-  if ("arktype" in allDeps) return "arktype";
+  if ('valibot' in allDeps) return 'valibot';
+  if ('zod' in allDeps) return 'zod';
+  if ('arktype' in allDeps) return 'arktype';
   return null;
 }
 
@@ -191,21 +191,21 @@ async function resolveValidator(root: string): Promise<Validator> {
   }
 
   const choice = await select({
-    message: "No validation library detected. Which would you like to use?",
+    message: 'No validation library detected. Which would you like to use?',
     options: [
-      { value: "valibot", label: "Valibot" },
-      { value: "zod", label: "Zod" },
-      { value: "arktype", label: "ArkType" },
-      { value: "none", label: "No validation" },
+      { value: 'valibot', label: 'Valibot' },
+      { value: 'zod', label: 'Zod' },
+      { value: 'arktype', label: 'ArkType' },
+      { value: 'none', label: 'No validation' },
     ],
   });
 
   if (isCancel(choice)) {
-    cancel("Cancelled.");
+    cancel('Cancelled.');
     process.exit(0);
   }
 
-  if (choice !== "none") {
+  if (choice !== 'none') {
     log.warn(`Remember to install ${choice}: npm install ${choice}`);
   }
 
@@ -213,8 +213,8 @@ async function resolveValidator(root: string): Promise<Validator> {
 }
 
 function validatorTypeFor(validator: Validator, col: ColumnSpec): string {
-  if (validator === "valibot") return valibotType(col);
-  if (validator === "zod") return zodType(col);
+  if (validator === 'valibot') return valibotType(col);
+  if (validator === 'zod') return zodType(col);
   // arktype handled separately via string syntax
   return arktypeType(col);
 }
@@ -222,23 +222,23 @@ function validatorTypeFor(validator: Validator, col: ColumnSpec): string {
 function valibotType(col: ColumnSpec): string {
   let base: string;
   switch (col.type) {
-    case "string":
-    case "text":
-    case "datetime":
-      base = "v.string()";
+    case 'string':
+    case 'text':
+    case 'datetime':
+      base = 'v.string()';
       break;
-    case "integer":
-    case "real":
-      base = "v.number()";
+    case 'integer':
+    case 'real':
+      base = 'v.number()';
       break;
-    case "boolean":
-      base = "v.boolean()";
+    case 'boolean':
+      base = 'v.boolean()';
       break;
-    case "blob":
-      base = "v.instance(Blob)";
+    case 'blob':
+      base = 'v.instance(Blob)';
       break;
     default:
-      base = "v.string()";
+      base = 'v.string()';
   }
   return col.nullable ? `v.optional(${base})` : base;
 }
@@ -246,23 +246,23 @@ function valibotType(col: ColumnSpec): string {
 function zodType(col: ColumnSpec): string {
   let base: string;
   switch (col.type) {
-    case "string":
-    case "text":
-    case "datetime":
-      base = "z.string()";
+    case 'string':
+    case 'text':
+    case 'datetime':
+      base = 'z.string()';
       break;
-    case "integer":
-    case "real":
-      base = "z.number()";
+    case 'integer':
+    case 'real':
+      base = 'z.number()';
       break;
-    case "boolean":
-      base = "z.boolean()";
+    case 'boolean':
+      base = 'z.boolean()';
       break;
-    case "blob":
-      base = "z.instanceof(Blob)";
+    case 'blob':
+      base = 'z.instanceof(Blob)';
       break;
     default:
-      base = "z.string()";
+      base = 'z.string()';
   }
   return col.nullable ? `${base}.optional()` : base;
 }
@@ -270,60 +270,60 @@ function zodType(col: ColumnSpec): string {
 function arktypeType(col: ColumnSpec): string {
   let base: string;
   switch (col.type) {
-    case "string":
-    case "text":
-    case "datetime":
-      base = "string";
+    case 'string':
+    case 'text':
+    case 'datetime':
+      base = 'string';
       break;
-    case "integer":
-    case "real":
-      base = "number";
+    case 'integer':
+    case 'real':
+      base = 'number';
       break;
-    case "boolean":
-      base = "boolean";
+    case 'boolean':
+      base = 'boolean';
       break;
-    case "blob":
-      base = "instanceof Blob";
+    case 'blob':
+      base = 'instanceof Blob';
       break;
     default:
-      base = "string";
+      base = 'string';
   }
   return col.nullable ? `${base} | undefined` : base;
 }
 
 function getImportLine(validator: Validator): string | null {
   switch (validator) {
-    case "valibot":
+    case 'valibot':
       return 'import * as v from "valibot";';
-    case "zod":
+    case 'zod':
       return 'import { z } from "zod";';
-    case "arktype":
+    case 'arktype':
       return 'import { type } from "arktype";';
-    case "none":
+    case 'none':
       return null;
   }
 }
 
 function getBodySchema(validator: Validator, columns: ColumnSpec[]): string {
-  if (validator === "arktype") {
-    const fields = columns.map((c) => `    ${c.name}: "${arktypeType(c)}",`).join("\n");
+  if (validator === 'arktype') {
+    const fields = columns.map((c) => `    ${c.name}: "${arktypeType(c)}",`).join('\n');
     return `type({\n${fields}\n  })`;
   }
-  const fields = columns.map((c) => `    ${c.name}: ${validatorTypeFor(validator, c)},`).join("\n");
-  const prefix = validator === "valibot" ? "v" : "z";
+  const fields = columns.map((c) => `    ${c.name}: ${validatorTypeFor(validator, c)},`).join('\n');
+  const prefix = validator === 'valibot' ? 'v' : 'z';
   return `${prefix}.object({\n${fields}\n  })`;
 }
 
 function getParamsSchema(validator: Validator): string {
   switch (validator) {
-    case "valibot":
-      return "v.object({ id: v.string() })";
-    case "zod":
-      return "z.object({ id: z.string() })";
-    case "arktype":
+    case 'valibot':
+      return 'v.object({ id: v.string() })';
+    case 'zod':
+      return 'z.object({ id: z.string() })';
+    case 'arktype':
       return 'type({ id: "string" })';
-    case "none":
-      return "";
+    case 'none':
+      return '';
   }
 }
 
@@ -340,11 +340,11 @@ function generateIndexRoute(name: string, columns: ColumnSpec[], validator: Vali
     `import { ${name} } from "@schema";`,
   ]
     .filter(Boolean)
-    .join("\n");
+    .join('\n');
 
-  const insertFields = columns.map((c) => `${c.name}: body.${c.name}`).join(", ");
+  const insertFields = columns.map((c) => `${c.name}: body.${c.name}`).join(', ');
 
-  if (columns.length === 0 || validator === "none") {
+  if (columns.length === 0 || validator === 'none') {
     if (columns.length > 0) {
       return `import { defineHandler } from "void";
 import { db } from "void/db";
@@ -394,7 +394,7 @@ export const POST = defineHandler.withValidator({
 }
 
 function generateIdRoute(name: string, validator: Validator): string {
-  if (validator === "none") {
+  if (validator === 'none') {
     return `import { defineHandler } from "void";
 import { db, eq } from "void/db";
 import { ${name} } from "@schema";
@@ -441,13 +441,13 @@ async function runModel(root: string, name: string, columns: ColumnSpec[]): Prom
 
   const dialect = getDatabaseDialect(readConfig(root));
 
-  const schemaDir = join(root, "db", "schema");
-  const barrelPath = join(root, "db", "schema.ts");
+  const schemaDir = join(root, 'db', 'schema');
+  const barrelPath = join(root, 'db', 'schema.ts');
   const modelPath = join(schemaDir, `${name}.ts`);
 
   // 1. Generate Drizzle table definition
   let content: string;
-  if (dialect === "postgresql") {
+  if (dialect === 'postgresql') {
     const colDefs = columns.map((col) => drizzleColumnDefPg(col));
     const columnImports = drizzleImportsForColumnsPg(columns);
     const allCols = [
@@ -458,32 +458,32 @@ async function runModel(root: string, name: string, columns: ColumnSpec[]): Prom
     ];
 
     content = [
-      `import { pgTable, ${columnImports.join(", ")} } from "void/schema-pg";`,
-      "",
+      `import { pgTable, ${columnImports.join(', ')} } from "void/schema-pg";`,
+      '',
       `export const ${name} = pgTable("${name}", {`,
       ...allCols,
-      "});",
-      "",
-    ].join("\n");
+      '});',
+      '',
+    ].join('\n');
   } else {
     const colDefs = columns.map((col) => drizzleColumnDef(col));
     const columnImports = drizzleImportsForColumns(columns);
     const allCols = [
       `  id: integer("id").primaryKey({ autoIncrement: true }),`,
       ...colDefs,
-      "  createdAt: text(\"created_at\").notNull().default(sql`(datetime('now'))`),",
-      "  updatedAt: text(\"updated_at\").notNull().default(sql`(datetime('now'))`),",
+      '  createdAt: text("created_at").notNull().default(sql`(datetime(\'now\'))`),',
+      '  updatedAt: text("updated_at").notNull().default(sql`(datetime(\'now\'))`),',
     ];
 
     content = [
-      `import { sqliteTable, ${columnImports.join(", ")} } from "void/schema-d1";`,
+      `import { sqliteTable, ${columnImports.join(', ')} } from "void/schema-d1";`,
       `import { sql } from "void/db";`,
-      "",
+      '',
       `export const ${name} = sqliteTable("${name}", {`,
       ...allCols,
-      "});",
-      "",
-    ].join("\n");
+      '});',
+      '',
+    ].join('\n');
   }
 
   // Write the model file
@@ -493,12 +493,12 @@ async function runModel(root: string, name: string, columns: ColumnSpec[]): Prom
   // 2. Update or create barrel export
   const exportLine = `export * from "./schema/${name}";`;
   if (existsSync(barrelPath)) {
-    const existing = readFileSync(barrelPath, "utf-8");
+    const existing = readFileSync(barrelPath, 'utf-8');
     if (!existing.includes(exportLine)) {
-      writeFileSync(barrelPath, existing.trimEnd() + "\n" + exportLine + "\n");
+      writeFileSync(barrelPath, existing.trimEnd() + '\n' + exportLine + '\n');
     }
   } else {
-    writeFileSync(barrelPath, exportLine + "\n");
+    writeFileSync(barrelPath, exportLine + '\n');
   }
 
   // 3. Regenerate .void/tsconfig.json and db.d.ts
@@ -508,29 +508,29 @@ async function runModel(root: string, name: string, columns: ColumnSpec[]): Prom
   log.success(`Updated ${relative(root, barrelPath)}`);
 
   // 4. Routes: routes/api/<name>/index.ts
-  const routeIndexPath = join(root, "routes", "api", name, "index.ts");
+  const routeIndexPath = join(root, 'routes', 'api', name, 'index.ts');
   writeIfNotExists(routeIndexPath, generateIndexRoute(name, columns, validator));
 
   // 5. Route: routes/api/<name>/[id].ts
-  const routeIdPath = join(root, "routes", "api", name, "[id].ts");
+  const routeIdPath = join(root, 'routes', 'api', name, '[id].ts');
   writeIfNotExists(routeIdPath, generateIdRoute(name, validator));
 
-  outro("Model scaffolding complete. Run `void db push` to apply.");
+  outro('Model scaffolding complete. Run `void db push` to apply.');
 }
 
 function runMigration(root: string, name: string): void {
-  const migrationsDir = join(root, "db", "migrations");
+  const migrationsDir = join(root, 'db', 'migrations');
   mkdirSync(migrationsDir, { recursive: true });
 
   const num = getNextMigrationNumber(migrationsDir);
   const filePath = join(migrationsDir, `${num}_${name}.sql`);
   writeIfNotExists(filePath, `-- ${name}\n`);
 
-  outro("Migration created.");
+  outro('Migration created.');
 }
 
 function runRoute(root: string, routePath: string, methods: string[]): void {
-  const filePath = join(root, "routes", routePath + ".ts");
+  const filePath = join(root, 'routes', routePath + '.ts');
   const exports = methods
     .map((m) => {
       const upper = m.toUpperCase();
@@ -538,7 +538,7 @@ function runRoute(root: string, routePath: string, methods: string[]): void {
   return { message: "${upper} ${routePath}" };
 });`;
     })
-    .join("\n\n");
+    .join('\n\n');
 
   const content = `import { defineHandler } from "void";
 
@@ -546,11 +546,11 @@ ${exports}
 `;
   writeIfNotExists(filePath, content);
 
-  outro("Route created.");
+  outro('Route created.');
 }
 
 function runMiddleware(root: string, name: string): void {
-  const middlewareDir = join(root, "middleware");
+  const middlewareDir = join(root, 'middleware');
   mkdirSync(middlewareDir, { recursive: true });
 
   const num = getNextMiddlewareNumber(middlewareDir);
@@ -564,11 +564,11 @@ export default defineMiddleware(async (c, next) => {
 `;
   writeIfNotExists(filePath, content);
 
-  outro("Middleware created.");
+  outro('Middleware created.');
 }
 
 function runCron(root: string, name: string): void {
-  const filePath = join(root, "crons", name + ".ts");
+  const filePath = join(root, 'crons', name + '.ts');
   const content = `import { defineScheduled } from "void";
 
 export const cron = "* * * * *";
@@ -579,11 +579,11 @@ export default defineScheduled(async (controller, env) => {
 `;
   writeIfNotExists(filePath, content);
 
-  outro("Cron job created.");
+  outro('Cron job created.');
 }
 
 function runQueue(root: string, name: string): void {
-  const filePath = join(root, "queues", name + ".ts");
+  const filePath = join(root, 'queues', name + '.ts');
   const content = `import { defineQueue } from "void";
 
 interface Message {}
@@ -599,46 +599,46 @@ export default defineQueue<Message>(async (batch, env) => {
 `;
   writeIfNotExists(filePath, content);
 
-  outro("Queue consumer created.");
+  outro('Queue consumer created.');
 }
 
-function runSsr(root: string, framework?: "react" | "vue" | "svelte" | "solid"): void {
+function runSsr(root: string, framework?: 'react' | 'vue' | 'svelte' | 'solid'): void {
   if (!framework) {
     framework = detectFramework(root);
   }
 
-  if (framework === "react") {
+  if (framework === 'react') {
     writeReactSsr(root);
-  } else if (framework === "vue") {
+  } else if (framework === 'vue') {
     writeVueSsr(root);
-  } else if (framework === "svelte") {
+  } else if (framework === 'svelte') {
     writeSvelteSsr(root);
   } else {
     writeSolidSsr(root);
   }
 
-  outro("SSR scaffolding complete.");
+  outro('SSR scaffolding complete.');
 }
 
-function detectFramework(root: string): "react" | "vue" | "svelte" | "solid" {
-  const pkgPath = join(root, "package.json");
+function detectFramework(root: string): 'react' | 'vue' | 'svelte' | 'solid' {
+  const pkgPath = join(root, 'package.json');
   if (!existsSync(pkgPath)) {
     log.error(
-      "No package.json found. Use --react, --vue, --svelte, or --solid to specify a framework.",
+      'No package.json found. Use --react, --vue, --svelte, or --solid to specify a framework.',
     );
     process.exit(1);
   }
 
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
   const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
 
-  if ("react" in allDeps) return "react";
-  if ("vue" in allDeps) return "vue";
-  if ("svelte" in allDeps) return "svelte";
-  if ("solid-js" in allDeps) return "solid";
+  if ('react' in allDeps) return 'react';
+  if ('vue' in allDeps) return 'vue';
+  if ('svelte' in allDeps) return 'svelte';
+  if ('solid-js' in allDeps) return 'solid';
 
   log.error(
-    "Could not detect framework from package.json. Use --react, --vue, --svelte, or --solid.",
+    'Could not detect framework from package.json. Use --react, --vue, --svelte, or --solid.',
   );
   process.exit(1);
 }
@@ -649,7 +649,7 @@ function detectFramework(root: string): "react" | "vue" | "svelte" | "solid" {
 
 function writeReactSsr(root: string): void {
   writeIfNotExists(
-    join(root, "src/main.ssr.tsx"),
+    join(root, 'src/main.ssr.tsx'),
     `import { renderToString } from "react-dom/server";
 import { defineRender } from "void";
 import App from "./App";
@@ -678,7 +678,7 @@ export default defineRender(async (c, assetTags) => {
   );
 
   writeIfNotExists(
-    join(root, "src/main.client.tsx"),
+    join(root, 'src/main.client.tsx'),
     `import { hydrateRoot } from "react-dom/client";
 import App from "./App";
 
@@ -687,7 +687,7 @@ hydrateRoot(document.getElementById("root")!, <App />);
   );
 
   writeIfNotExists(
-    join(root, "src/App.tsx"),
+    join(root, 'src/App.tsx'),
     `import { useState } from "react";
 
 export default function App() {
@@ -708,7 +708,7 @@ export default function App() {
 
 function writeVueSsr(root: string): void {
   writeIfNotExists(
-    join(root, "src/main.ssr.ts"),
+    join(root, 'src/main.ssr.ts'),
     `import { createSSRApp } from "vue";
 import { renderToString } from "vue/server-renderer";
 import { defineRender } from "void";
@@ -739,7 +739,7 @@ export default defineRender(async (c, assetTags) => {
   );
 
   writeIfNotExists(
-    join(root, "src/main.client.ts"),
+    join(root, 'src/main.client.ts'),
     `import { createSSRApp } from "vue";
 import App from "./App.vue";
 
@@ -749,7 +749,7 @@ app.mount("#app");
   );
 
   writeIfNotExists(
-    join(root, "src/App.vue"),
+    join(root, 'src/App.vue'),
     `<script setup lang="ts">
 import { ref } from "vue";
 
@@ -768,7 +768,7 @@ const count = ref(0);
 
 function writeSvelteSsr(root: string): void {
   writeIfNotExists(
-    join(root, "src/main.ssr.ts"),
+    join(root, 'src/main.ssr.ts'),
     `import { render } from "svelte/server";
 import { defineRender } from "void";
 import App from "./App.svelte";
@@ -797,7 +797,7 @@ export default defineRender(async (c, assetTags) => {
   );
 
   writeIfNotExists(
-    join(root, "src/main.client.ts"),
+    join(root, 'src/main.client.ts'),
     `import { hydrate } from "svelte";
 import App from "./App.svelte";
 
@@ -806,7 +806,7 @@ hydrate(App, { target: document.getElementById("app")! });
   );
 
   writeIfNotExists(
-    join(root, "src/App.svelte"),
+    join(root, 'src/App.svelte'),
     `<script>
   let count = $state(0);
 </script>
@@ -821,7 +821,7 @@ hydrate(App, { target: document.getElementById("app")! });
 
 function writeSolidSsr(root: string): void {
   writeIfNotExists(
-    join(root, "src/main.ssr.tsx"),
+    join(root, 'src/main.ssr.tsx'),
     `import { renderToString } from "solid-js/web";
 import { defineRender } from "void";
 import App from "./App";
@@ -850,7 +850,7 @@ export default defineRender(async (c, assetTags) => {
   );
 
   writeIfNotExists(
-    join(root, "src/main.client.tsx"),
+    join(root, 'src/main.client.tsx'),
     `import { hydrate } from "solid-js/web";
 import App from "./App";
 
@@ -859,7 +859,7 @@ hydrate(() => <App />, document.getElementById("app")!);
   );
 
   writeIfNotExists(
-    join(root, "src/App.tsx"),
+    join(root, 'src/App.tsx'),
     `import { createSignal } from "solid-js";
 
 export default function App() {

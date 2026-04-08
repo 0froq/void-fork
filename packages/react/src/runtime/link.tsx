@@ -1,8 +1,8 @@
-import { useContext, useRef, useEffect, type JSX } from "react";
-import type { MouseEvent, AnchorHTMLAttributes, ButtonHTMLAttributes } from "react";
-import { RouterContext } from "./context";
+import { useContext, useRef, useEffect, type JSX } from 'react';
+import type { MouseEvent, AnchorHTMLAttributes, ButtonHTMLAttributes } from 'react';
+import { RouterContext } from './context';
 
-type PrefetchStrategy = "hover" | "click" | "mount" | "visible";
+type PrefetchStrategy = 'hover' | 'click' | 'mount' | 'visible';
 
 type CommonProps = {
   href: string;
@@ -20,7 +20,7 @@ export type LinkProps = CommonProps &
 
 export function Link({
   href,
-  method = "GET",
+  method = 'GET',
   data,
   preserveScroll = false,
   viewTransition,
@@ -35,8 +35,8 @@ export function Link({
 
   function getStrategies(): PrefetchStrategy[] {
     if (prefetchProp === false) return [];
-    if (prefetchProp === true) return ["hover"];
-    if (typeof prefetchProp === "string") return [prefetchProp];
+    if (prefetchProp === true) return ['hover'];
+    if (typeof prefetchProp === 'string') return [prefetchProp];
     return prefetchProp;
   }
 
@@ -65,7 +65,7 @@ export function Link({
   }
 
   const strategies = getStrategies();
-  const strategiesKey = strategies.join("|");
+  const strategiesKey = strategies.join('|');
 
   function onMouseEnter() {
     if (hoverTimerRef.current) {
@@ -88,12 +88,12 @@ export function Link({
   useEffect(() => {
     if (strategies.length === 0) return;
 
-    if (strategies.includes("mount")) {
+    if (strategies.includes('mount')) {
       doPrefetch();
     }
 
     let observer: IntersectionObserver | null = null;
-    if (strategies.includes("visible") && elRef.current) {
+    if (strategies.includes('visible') && elRef.current) {
       observer = new IntersectionObserver(
         (entries) => {
           if (entries.some((e) => e.isIntersecting)) {
@@ -102,7 +102,7 @@ export function Link({
             observer = null;
           }
         },
-        { rootMargin: "0px" },
+        { rootMargin: '0px' },
       );
       observer.observe(elRef.current);
     }
@@ -117,17 +117,17 @@ export function Link({
       }
     };
   }, [cacheFor, href, method, router, strategiesKey]);
-  const isGet = method.toUpperCase() === "GET";
+  const isGet = method.toUpperCase() === 'GET';
 
   const eventHandlers: Record<string, any> = { onClick };
 
-  if (strategies.includes("hover")) {
+  if (strategies.includes('hover')) {
     eventHandlers.onMouseEnter = onMouseEnter;
     eventHandlers.onMouseLeave = onMouseLeave;
     eventHandlers.onFocus = doPrefetch;
   }
 
-  if (strategies.includes("click")) {
+  if (strategies.includes('click')) {
     eventHandlers.onMouseDown = onMouseDown;
   }
 

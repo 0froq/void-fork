@@ -1,6 +1,6 @@
-import type MarkdownExit from "markdown-exit";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import type MarkdownExit from 'markdown-exit';
 
 const rawPathRegexp =
   /^(.+?(?:(?:\.([a-z0-9]+))?))(?:(#[\w-]+))?(?: ?(?:\{(\d+(?:[,-]\d+)*)? ?(\S+)? ?(\S+)?}))? ?(?:\[(.+)\])?$/;
@@ -17,28 +17,28 @@ interface SnippetToken {
 
 function rawPathToToken(rawPath: string): SnippetToken {
   const [
-    filepath = "",
-    extension = "",
-    region = "",
-    lines = "",
-    lang = "",
-    attrs = "",
-    rawTitle = "",
+    filepath = '',
+    extension = '',
+    region = '',
+    lines = '',
+    lang = '',
+    attrs = '',
+    rawTitle = '',
   ] = (rawPathRegexp.exec(rawPath) || []).slice(1);
-  const title = rawTitle || filepath.split("/").pop() || "";
+  const title = rawTitle || filepath.split('/').pop() || '';
   return { filepath, extension, region, lines, lang, attrs, title };
 }
 
 function dedent(text: string): string {
-  const lines = text.split("\n");
+  const lines = text.split('\n');
   const minIndent = lines.reduce((acc, line) => {
     for (let i = 0; i < line.length; i++) {
-      if (line[i] !== " " && line[i] !== "\t") return Math.min(i, acc);
+      if (line[i] !== ' ' && line[i] !== '\t') return Math.min(i, acc);
     }
     return acc;
   }, Infinity);
   if (minIndent < Infinity) {
-    return lines.map((x) => x.slice(minIndent)).join("\n");
+    return lines.map((x) => x.slice(minIndent)).join('\n');
   }
   return text;
 }
@@ -81,7 +81,7 @@ function findRegion(
  * Ported from VitePress.
  */
 export function snippetPlugin(md: MarkdownExit, srcDir?: string): void {
-  const CH = "<".charCodeAt(0);
+  const CH = '<'.charCodeAt(0);
 
   const parser = (state: any, startLine: number, _endLine: number, silent: boolean): boolean => {
     const pos = state.bMarks[startLine] + state.tShift[startLine];
@@ -103,15 +103,15 @@ export function snippetPlugin(md: MarkdownExit, srcDir?: string): void {
     const { filepath, extension, region, lines, lang, attrs, title } = rawPathToToken(rawPath);
 
     state.line = startLine + 1;
-    const token = state.push("fence", "code", 0);
-    token.info = `${lang || extension}${lines ? `{${lines}}` : ""}${title ? `[${title}]` : ""} ${attrs ?? ""}`;
+    const token = state.push('fence', 'code', 0);
+    token.info = `${lang || extension}${lines ? `{${lines}}` : ''}${title ? `[${title}]` : ''} ${attrs ?? ''}`;
 
     const resolvedPath = resolve(
       dirname(state.env?.realPath ?? state.env?.path ?? process.cwd()),
       filepath,
     );
     token.src = [resolvedPath, region.slice(1)];
-    token.markup = "```";
+    token.markup = '```';
     token.map = [startLine, startLine + 1];
     return true;
   };
@@ -125,20 +125,20 @@ export function snippetPlugin(md: MarkdownExit, srcDir?: string): void {
 
     if (!existsSync(src) || !statSync(src).isFile()) {
       token.content = `Code snippet path not found: ${src}`;
-      token.info = "";
+      token.info = '';
       return (fence as Function)(...args);
     }
 
-    let content = readFileSync(src, "utf8").replace(/\r\n/g, "\n");
+    let content = readFileSync(src, 'utf8').replace(/\r\n/g, '\n');
     if (regionName) {
-      const lines = content.split("\n");
+      const lines = content.split('\n');
       const region = findRegion(lines, regionName);
       if (region) {
         content = dedent(
           lines
             .slice(region.start, region.end)
             .filter((l) => !(region.re.start.test(l) || region.re.end.test(l)))
-            .join("\n"),
+            .join('\n'),
         );
       }
     }
@@ -146,5 +146,5 @@ export function snippetPlugin(md: MarkdownExit, srcDir?: string): void {
     return (fence as Function)(...args);
   };
 
-  md.block.ruler.before("fence", "snippet", parser);
+  md.block.ruler.before('fence', 'snippet', parser);
 }

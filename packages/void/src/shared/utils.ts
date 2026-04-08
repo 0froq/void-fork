@@ -1,9 +1,9 @@
-import { posix } from "node:path";
+import { posix } from 'node:path';
 
-export const isWindows: boolean = typeof process !== "undefined" && process.platform === "win32";
+export const isWindows: boolean = typeof process !== 'undefined' && process.platform === 'win32';
 
 export function slash(p: string): string {
-  return p.replace(/\\/g, "/");
+  return p.replace(/\\/g, '/');
 }
 
 export function toSlash(p: string): string {

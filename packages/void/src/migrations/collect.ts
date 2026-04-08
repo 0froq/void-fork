@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * Collect all .sql migration files from the migrations directory,
@@ -11,10 +11,10 @@ export function collectMigrations(migrationsDir: string): { name: string; sql: s
   }
 
   return readdirSync(migrationsDir)
-    .filter((f) => f.endsWith(".sql") && f !== "seed.sql")
+    .filter((f) => f.endsWith('.sql') && f !== 'seed.sql')
     .sort()
     .map((name) => ({
       name,
-      sql: readFileSync(join(migrationsDir, name), "utf-8"),
+      sql: readFileSync(join(migrationsDir, name), 'utf-8'),
     }));
 }

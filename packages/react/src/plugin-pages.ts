@@ -1,12 +1,12 @@
-import type { Plugin } from "vite";
-import { existsSync, readdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { scanPages } from "void/pages";
-import type { PageScanResult } from "void/pages";
-import { generateComponentManifest } from "./pages-manifest";
+import { existsSync, readdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import type { Plugin } from 'vite';
+import { scanPages } from 'void/pages';
+import type { PageScanResult } from 'void/pages';
+import { generateComponentManifest } from './pages-manifest';
 
-const RENDERER_ID = "virtual:void-pages-renderer";
-const CLIENT_ENTRY_ID = "virtual:void-pages-client";
+const RENDERER_ID = 'virtual:void-pages-renderer';
+const CLIENT_ENTRY_ID = 'virtual:void-pages-client';
 
 interface PrefetchConfig {
   hoverDelay?: number;
@@ -24,8 +24,8 @@ function hasNonIslandPages(dir: string): boolean {
     for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
       if (!entry.isFile()) continue;
       const name = entry.name;
-      if (name.startsWith("_") || name.startsWith("layout.")) continue;
-      if (/\.(tsx|jsx)$/.test(name) && !name.includes(".island.")) return true;
+      if (name.startsWith('_') || name.startsWith('layout.')) continue;
+      if (/\.(tsx|jsx)$/.test(name) && !name.includes('.island.')) return true;
     }
   } catch {
     // ignore
@@ -39,7 +39,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
   const root = dirname(pagesDir);
 
   return {
-    name: "void-react:pages",
+    name: 'void-react:pages',
 
     async buildStart() {
       if (existsSync(pagesDir)) {
@@ -50,7 +50,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
     resolveId: {
       filter: { id: /^virtual:void-pages-(renderer|client)$/ },
       handler(id) {
-        return "\0" + id;
+        return '\0' + id;
       },
     },
 
@@ -58,13 +58,13 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
       filter: { id: /^\0virtual:void-pages-(renderer|client)$/ },
       handler(id) {
-        if (id === "\0" + RENDERER_ID) {
+        if (id === '\0' + RENDERER_ID) {
           if (!pageScan)
             return "export function renderPage() { throw new Error('No pages found'); }";
           return generateRendererModule(pageScan, pagesDir, isDev);
         }
-        if (id === "\0" + CLIENT_ENTRY_ID) {
-          if (!pageScan) return "";
+        if (id === '\0' + CLIENT_ENTRY_ID) {
+          if (!pageScan) return '';
           return generateClientEntry(
             pageScan,
             pagesDir,
@@ -82,17 +82,17 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       // virtual module and user components share the same React context objects.
       // Without this, Vite pre-bundles @void/react, creating separate
       // context instances that break useContext (React contexts use object identity).
-      if (env.command === "serve") {
+      if (env.command === 'serve') {
         isDev = true;
         return {
           optimizeDeps: {
             // Exclude @void/react so the virtual module and user
             // components share the same React context objects (identity).
-            exclude: ["@void/react"],
+            exclude: ['@void/react'],
             // Pre-include React entries that are discovered late via dynamic
             // imports during SPA navigation, avoiding a full-page reload
             // from Vite's dep optimizer.
-            include: ["react/jsx-runtime", "react/jsx-dev-runtime", "react-dom/client"],
+            include: ['react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom/client'],
           },
         };
       }
@@ -104,7 +104,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
         build: {
           manifest: true,
           rollupOptions: {
-            input: { "pages-client": CLIENT_ENTRY_ID },
+            input: { 'pages-client': CLIENT_ENTRY_ID },
           },
         },
       };
@@ -126,7 +126,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string, isDev: b
   window.$RefreshSig$ = () => (type) => type
   window.__vite_plugin_react_preamble_installed__ = true
 </script>`
-    : "";
+    : '';
 
   return `
 import React from "react";
@@ -254,7 +254,7 @@ const { router, initialPageData, initialComponent, initialLayouts, start } =
     components, layoutTree, routeMeta, matchRoute,
     viewTransitions: ${!!viewTransitions},
     prefetchHoverDelay: ${prefetch?.hoverDelay ?? 75},
-    prefetchDefaultCacheFor: parseCacheFor(${JSON.stringify(prefetch?.cacheFor ?? "30s")}),
+    prefetchDefaultCacheFor: parseCacheFor(${JSON.stringify(prefetch?.cacheFor ?? '30s')}),
   });
 
 setActionRouter(router);

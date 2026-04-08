@@ -48,7 +48,7 @@ export function useIslandForm(defaults: Record<string, unknown>): any {
     try {
       const response = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
 
@@ -97,9 +97,9 @@ export function useIslandForm(defaults: Record<string, unknown>): any {
     },
     reset,
     clearErrors,
-    post: (url: string) => submit(url, "POST"),
-    put: (url: string) => submit(url, "PUT"),
-    patch: (url: string) => submit(url, "PATCH"),
-    delete: (url: string) => submit(url, "DELETE"),
+    post: (url: string) => submit(url, 'POST'),
+    put: (url: string) => submit(url, 'PUT'),
+    patch: (url: string) => submit(url, 'PATCH'),
+    delete: (url: string) => submit(url, 'DELETE'),
   };
 }

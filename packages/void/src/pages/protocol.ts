@@ -1,21 +1,21 @@
-import { ValidationError } from "./validation-error";
-import { DEFERRED, separateDeferred, type ResolvedDeferredGroup } from "./defer";
-import { resolveHead, type HeadDescriptor, type HeadConfig } from "./head";
-import { isConvertedResponse } from "../runtime/response";
+import { isConvertedResponse } from '../runtime/response';
+import { DEFERRED, separateDeferred, type ResolvedDeferredGroup } from './defer';
+import { resolveHead, type HeadDescriptor, type HeadConfig } from './head';
+import { ValidationError } from './validation-error';
 
 export { ValidationError };
 
-const POWERED_BY = { "X-Powered-By": "Void" } as const;
+const POWERED_BY = { 'X-Powered-By': 'Void' } as const;
 
 /** Escape characters that are unsafe inside inline <script> tags to prevent XSS. */
 export function safeJsonStringify(value: unknown): string {
-  const json = JSON.stringify(value) ?? "null";
+  const json = JSON.stringify(value) ?? 'null';
   return json
-    .replaceAll("<", "\\u003c")
-    .replaceAll(">", "\\u003e")
-    .replaceAll("&", "\\u0026")
-    .replaceAll("\u2028", "\\u2028")
-    .replaceAll("\u2029", "\\u2029");
+    .replaceAll('<', '\\u003c')
+    .replaceAll('>', '\\u003e')
+    .replaceAll('&', '\\u0026')
+    .replaceAll('\u2028', '\\u2028')
+    .replaceAll('\u2029', '\\u2029');
 }
 
 export interface PageObject {
@@ -30,20 +30,20 @@ export interface PageObject {
 }
 
 function isPagesRequest(c: any): boolean {
-  return c.req.header("x-voidpages") === "true";
+  return c.req.header('x-voidpages') === 'true';
 }
 
 function pageJsonResponse(pageObj: PageObject): Response {
   return Response.json(pageObj, {
-    headers: { "X-VoidPages": "true", Vary: "X-VoidPages", ...POWERED_BY },
+    headers: { 'X-VoidPages': 'true', Vary: 'X-VoidPages', ...POWERED_BY },
   });
 }
 
 /** Extract props from a handler result, handling Response wrapping from withValidator */
 async function extractProps(result: unknown): Promise<Record<string, unknown>> {
   if (result instanceof Response) {
-    const ct = result.headers.get("content-type") || "";
-    if (ct.includes("application/json")) {
+    const ct = result.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
       return (await result.json()) as Record<string, unknown>;
     }
     return {};
@@ -58,8 +58,8 @@ export function flattenValidationErrors(body: any): Record<string, string> {
     for (const slotIssue of body.issues) {
       for (const issue of slotIssue.issues) {
         // path is a dot-joined string from flattenIssues (e.g. "name", "address.city")
-        const key = typeof issue.path === "string" ? issue.path : slotIssue.slot;
-        if (typeof key === "string") errors[key] = issue.message;
+        const key = typeof issue.path === 'string' ? issue.path : slotIssue.slot;
+        if (typeof key === 'string') errors[key] = issue.message;
       }
     }
   }
@@ -70,7 +70,7 @@ export function flattenValidationErrors(body: any): Record<string, string> {
 function stripDeferred(props: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(props)) {
-    if (value && typeof value === "object" && DEFERRED in value) {
+    if (value && typeof value === 'object' && DEFERRED in value) {
       result[key] = null;
     } else {
       result[key] = value;
@@ -111,7 +111,7 @@ function streamDeferredResponse(
   }
 
   return new Response(readable, {
-    headers: { "content-type": contentType, ...POWERED_BY },
+    headers: { 'content-type': contentType, ...POWERED_BY },
   });
 }
 
@@ -133,7 +133,7 @@ export async function handlePageGet(
   configHead?: HeadConfig,
   island?: boolean,
 ): Promise<Response> {
-  const shared = c.get("shared") || {};
+  const shared = c.get('shared') || {};
 
   // Run loader and check for redirect/error responses before extracting props
   let props: Record<string, unknown> = {};
@@ -148,15 +148,15 @@ export async function handlePageGet(
     // non-JSON 200s (file downloads, streams). JSON 200s are still extracted
     // as props for backward compat with loaders using c.json().
     if (result instanceof Response && !isConvertedResponse(result)) {
-      const ct = result.headers.get("content-type") || "";
-      if (result.status >= 300 || !ct.includes("application/json")) return result;
+      const ct = result.headers.get('content-type') || '';
+      if (result.status >= 300 || !ct.includes('application/json')) return result;
     }
     props = await extractProps(result);
   }
 
   // Resolve head metadata
   const pageHead = headFn ? headFn(c, props) : undefined;
-  const middlewareHead = c.get("headDefaults") as HeadDescriptor | undefined;
+  const middlewareHead = c.get('headDefaults') as HeadDescriptor | undefined;
   const head = resolveHead(configHead, middlewareHead, pageHead);
 
   // Separate immediate props from deferred sentinels
@@ -189,7 +189,7 @@ export async function handlePageGet(
   // Island pages always render HTML — no Inertia JSON navigation
   if (!island && isPagesRequest(c)) {
     // Prefetch requests: resolve all deferred props inline (plain JSON, no streaming)
-    const isPrefetch = c.req.header("purpose") === "prefetch";
+    const isPrefetch = c.req.header('purpose') === 'prefetch';
     if (isPrefetch && hasDeferred) {
       const resolvedProps: Record<string, unknown> = { ...immediateProps };
       await Promise.all(
@@ -223,12 +223,12 @@ export async function handlePageGet(
     }
     // Stream NDJSON: first line is PageObject, subsequent lines are deferred groups
     return streamDeferredResponse(
-      JSON.stringify(pageObj) + "\n",
+      JSON.stringify(pageObj) + '\n',
       deferredMap,
       c,
-      "application/x-ndjson",
-      (group, data) => JSON.stringify({ __deferred: group, data }) + "\n",
-      (group, error) => JSON.stringify({ __deferred: group, error }) + "\n",
+      'application/x-ndjson',
+      (group, data) => JSON.stringify({ __deferred: group, data }) + '\n',
+      (group, error) => JSON.stringify({ __deferred: group, error }) + '\n',
     );
   }
 
@@ -238,7 +238,7 @@ export async function handlePageGet(
   if (!hasDeferred) {
     return new Response(html, {
       headers: {
-        "content-type": "text/html; charset=utf-8",
+        'content-type': 'text/html; charset=utf-8',
         ...POWERED_BY,
       },
     });
@@ -249,7 +249,7 @@ export async function handlePageGet(
     html,
     deferredMap,
     c,
-    "text/html; charset=utf-8",
+    'text/html; charset=utf-8',
     (group, data) =>
       `\n<script>window.__resolveDeferred?window.__resolveDeferred(${safeJsonStringify(group)},${safeJsonStringify(data)}):(window.__deferredQueue??=[]).push([${safeJsonStringify(group)},${safeJsonStringify(data)}])</script>`,
     (group, error) =>
@@ -276,8 +276,8 @@ export async function handlePageMutation(
   configHead?: HeadConfig,
   island?: boolean,
 ): Promise<Response> {
-  const shared = c.get("shared") || {};
-  const middlewareHead = c.get("headDefaults") as HeadDescriptor | undefined;
+  const shared = c.get('shared') || {};
+  const middlewareHead = c.get('headDefaults') as HeadDescriptor | undefined;
 
   function buildMutationPageObj(
     props: Record<string, unknown>,
@@ -309,7 +309,7 @@ export async function handlePageMutation(
       if (isPagesRequest(c)) return pageJsonResponse(pageObj);
       const assetTags = await getAssetTags(c.req.raw, c.env, componentId);
       return new Response(await renderFn(pageObj, assetTags), {
-        headers: { "content-type": "text/html; charset=utf-8", ...POWERED_BY },
+        headers: { 'content-type': 'text/html; charset=utf-8', ...POWERED_BY },
       });
     }
     throw e;
@@ -333,7 +333,7 @@ export async function handlePageMutation(
       if (isPagesRequest(c)) return pageJsonResponse(pageObj);
       const assetTags = await getAssetTags(c.req.raw, c.env, componentId);
       return new Response(await renderFn(pageObj, assetTags), {
-        headers: { "content-type": "text/html; charset=utf-8", ...POWERED_BY },
+        headers: { 'content-type': 'text/html; charset=utf-8', ...POWERED_BY },
       });
     }
     // 204 (void from withValidator) — fall through to re-run GET
@@ -350,6 +350,6 @@ export async function handlePageMutation(
   if (isPagesRequest(c)) return pageJsonResponse(pageObj);
   const assetTags = await getAssetTags(c.req.raw, c.env, componentId);
   return new Response(await renderFn(pageObj, assetTags), {
-    headers: { "content-type": "text/html; charset=utf-8", ...POWERED_BY },
+    headers: { 'content-type': 'text/html; charset=utf-8', ...POWERED_BY },
   });
 }

@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "remote": "VOID_REMOTE=1 vite",
     "build": "vite build",
+    "dev": "vite",
     "preview": "vite preview",
+    "remote": "VOID_REMOTE=1 vite",
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {

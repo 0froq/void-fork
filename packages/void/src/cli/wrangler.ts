@@ -1,15 +1,15 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { parse, type ParseError } from "jsonc-parser";
-import type { InferredBindings } from "../inference/walk";
-import type { VoidConfig } from "../config";
-import type { WebSocketRouteDefinition } from "../router/websocket";
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse, type ParseError } from 'jsonc-parser';
+import type { VoidConfig } from '../config';
+import type { InferredBindings } from '../inference/walk';
+import type { WebSocketRouteDefinition } from '../router/websocket';
 
 /** Known-good default compatibility date — bumped when we test against newer runtime versions. */
-export const DEFAULT_COMPAT_DATE = "2026-02-12";
+export const DEFAULT_COMPAT_DATE = '2026-02-12';
 
 const COMPAT_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const NODEJS_ALS_FLAG = "nodejs_als";
+const NODEJS_ALS_FLAG = 'nodejs_als';
 
 /** Subset of wrangler config fields we extract. */
 export interface WranglerCompat {
@@ -34,9 +34,9 @@ export function readWranglerCompat(
 ): WranglerCompat {
   // 1. Read wrangler.jsonc / wrangler.json from project root
   let raw: string | undefined;
-  for (const name of ["wrangler.jsonc", "wrangler.json"]) {
+  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
     try {
-      raw = readFileSync(join(root, name), "utf-8");
+      raw = readFileSync(join(root, name), 'utf-8');
       break;
     } catch {
       // try next
@@ -47,7 +47,7 @@ export function readWranglerCompat(
   let wranglerFlags: string[] | undefined;
   if (raw) {
     const parsed = parseJsonc(raw);
-    if (typeof parsed.compatibility_date === "string") {
+    if (typeof parsed.compatibility_date === 'string') {
       if (!COMPAT_DATE_RE.test(parsed.compatibility_date)) {
         throw new Error(
           `"compatibility_date" in wrangler config must be YYYY-MM-DD format, got "${parsed.compatibility_date}"`,
@@ -57,7 +57,7 @@ export function readWranglerCompat(
     }
     if (
       Array.isArray(parsed.compatibility_flags) &&
-      parsed.compatibility_flags.every((f: unknown) => typeof f === "string")
+      parsed.compatibility_flags.every((f: unknown) => typeof f === 'string')
     ) {
       wranglerFlags = parsed.compatibility_flags;
     }
@@ -68,14 +68,14 @@ export function readWranglerCompat(
   let buildFlags: string[] | undefined;
   if (buildOutputDir) {
     try {
-      const buildRaw = readFileSync(join(buildOutputDir, "wrangler.json"), "utf-8");
+      const buildRaw = readFileSync(join(buildOutputDir, 'wrangler.json'), 'utf-8');
       const buildParsed = JSON.parse(buildRaw);
-      if (typeof buildParsed.compatibility_date === "string") {
+      if (typeof buildParsed.compatibility_date === 'string') {
         buildDate = buildParsed.compatibility_date;
       }
       if (
         Array.isArray(buildParsed.compatibility_flags) &&
-        buildParsed.compatibility_flags.every((f: unknown) => typeof f === "string")
+        buildParsed.compatibility_flags.every((f: unknown) => typeof f === 'string')
       ) {
         buildFlags = buildParsed.compatibility_flags;
       }
@@ -118,12 +118,12 @@ export function syncWranglerBindings(
   let configPath: string | undefined;
   let parsed: Record<string, unknown> | undefined;
   let created = false;
-  for (const name of ["wrangler.jsonc", "wrangler.json"]) {
+  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
     const p = join(root, name);
     if (existsSync(p)) {
       configPath = p;
       try {
-        parsed = parseJsonc(readFileSync(p, "utf-8"));
+        parsed = parseJsonc(readFileSync(p, 'utf-8'));
       } catch {
         // Can't read, skip
       }
@@ -132,7 +132,7 @@ export function syncWranglerBindings(
   }
 
   if (!configPath || !parsed) {
-    configPath = join(root, "wrangler.jsonc");
+    configPath = join(root, 'wrangler.jsonc');
     parsed = {};
     created = true;
   }
@@ -140,34 +140,34 @@ export function syncWranglerBindings(
   let modified = false;
 
   // D1
-  const d1Name = options?.bindingNames?.d1 ?? "DB";
+  const d1Name = options?.bindingNames?.d1 ?? 'DB';
   if (bindings.needsD1) {
     const existing = (parsed.d1_databases as { binding: string }[] | undefined) ?? [];
     if (!existing.some((b) => b.binding === d1Name)) {
       parsed.d1_databases = [
         ...existing,
-        { binding: d1Name, database_name: "default", database_id: "local" },
+        { binding: d1Name, database_name: 'default', database_id: 'local' },
       ];
       modified = true;
     }
   }
 
   // KV
-  const kvName = options?.bindingNames?.kv ?? "KV";
+  const kvName = options?.bindingNames?.kv ?? 'KV';
   if (bindings.needsKV) {
     const existing = (parsed.kv_namespaces as { binding: string }[] | undefined) ?? [];
     if (!existing.some((b) => b.binding === kvName)) {
-      parsed.kv_namespaces = [...existing, { binding: kvName, id: "local" }];
+      parsed.kv_namespaces = [...existing, { binding: kvName, id: 'local' }];
       modified = true;
     }
   }
 
   // R2
-  const r2Name = options?.bindingNames?.r2 ?? "STORAGE";
+  const r2Name = options?.bindingNames?.r2 ?? 'STORAGE';
   if (bindings.needsR2) {
     const existing = (parsed.r2_buckets as { binding: string }[] | undefined) ?? [];
     if (!existing.some((b) => b.binding === r2Name)) {
-      parsed.r2_buckets = [...existing, { binding: r2Name, bucket_name: "default" }];
+      parsed.r2_buckets = [...existing, { binding: r2Name, bucket_name: 'default' }];
       modified = true;
     }
   }
@@ -187,7 +187,7 @@ export function syncWranglerBindings(
     if (!Array.isArray(parsed.migrations)) {
       parsed.migrations = [
         {
-          tag: "void-ws-v1",
+          tag: 'void-ws-v1',
           new_classes: options.websockets.map((route) => route.className),
         },
       ];
@@ -196,7 +196,7 @@ export function syncWranglerBindings(
   }
 
   if (created || modified) {
-    writeFileSync(configPath, JSON.stringify(parsed, null, 2) + "\n");
+    writeFileSync(configPath, JSON.stringify(parsed, null, 2) + '\n');
   }
 
   return created || modified;
@@ -210,12 +210,12 @@ export function ensureWranglerNodejsAlsFlag(root: string): boolean {
   // Find the wrangler config file
   let configPath: string | undefined;
   let parsed: Record<string, unknown> | undefined;
-  for (const name of ["wrangler.jsonc", "wrangler.json"]) {
+  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
     const p = join(root, name);
     if (existsSync(p)) {
       configPath = p;
       try {
-        parsed = parseJsonc(readFileSync(p, "utf-8"));
+        parsed = parseJsonc(readFileSync(p, 'utf-8'));
       } catch {
         // Can't read, skip
       }
@@ -224,7 +224,7 @@ export function ensureWranglerNodejsAlsFlag(root: string): boolean {
   }
 
   if (!configPath || !parsed) {
-    configPath = join(root, "wrangler.jsonc");
+    configPath = join(root, 'wrangler.jsonc');
     parsed = {};
   }
 
@@ -236,7 +236,7 @@ export function ensureWranglerNodejsAlsFlag(root: string): boolean {
   }
 
   parsed.compatibility_flags = [...compatibilityFlags, NODEJS_ALS_FLAG];
-  writeFileSync(configPath, JSON.stringify(parsed, null, 2) + "\n");
+  writeFileSync(configPath, JSON.stringify(parsed, null, 2) + '\n');
   return true;
 }
 
@@ -244,7 +244,7 @@ function parseJsonc(text: string): Record<string, unknown> {
   const errors: ParseError[] = [];
   const result = parse(text, errors);
   if (errors.length > 0) {
-    throw new SyntaxError("Failed to parse JSONC");
+    throw new SyntaxError('Failed to parse JSONC');
   }
   return result;
 }

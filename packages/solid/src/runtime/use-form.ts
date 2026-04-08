@@ -1,7 +1,7 @@
-import { createSignal, createMemo, useContext } from "solid-js";
-import { createStore, reconcile } from "solid-js/store";
-import { RouterContext, ErrorsContext } from "./context";
-import type { ActionUrl, ResolveActionBody, ActionFormOptions } from "void/routes";
+import { createSignal, createMemo, useContext } from 'solid-js';
+import { createStore, reconcile } from 'solid-js/store';
+import type { ActionUrl, ResolveActionBody, ActionFormOptions } from 'void/routes';
+import { RouterContext, ErrorsContext } from './context';
 
 // Typed overload — full inference from PageActionMap (requires codegen)
 export function useForm<U extends ActionUrl & string>(
@@ -35,8 +35,8 @@ export function useForm(
   let resolvedUrl = url;
 
   // Strip ?action query before param resolution, then re-append
-  let actionQuery = "";
-  const qIdx = resolvedUrl.indexOf("?");
+  let actionQuery = '';
+  const qIdx = resolvedUrl.indexOf('?');
   if (qIdx !== -1) {
     actionQuery = resolvedUrl.slice(qIdx);
     resolvedUrl = resolvedUrl.slice(0, qIdx);
@@ -64,7 +64,7 @@ export function useForm(
     // globalErrors is a signal accessor (function) on the client, or a plain
     // object on the server. Handle both cases.
     if (!globalErrors) return {};
-    if (typeof globalErrors === "function") return globalErrors();
+    if (typeof globalErrors === 'function') return globalErrors();
     return globalErrors as unknown as Record<string, string>;
   });
   const [processing, setProcessing] = createSignal(false);
@@ -162,9 +162,9 @@ export function useForm(
     },
     reset,
     clearErrors,
-    post: (opts?: any) => submit("POST", opts),
-    put: (opts?: any) => submit("PUT", opts),
-    patch: (opts?: any) => submit("PATCH", opts),
-    delete: (opts?: any) => submit("DELETE", opts),
+    post: (opts?: any) => submit('POST', opts),
+    put: (opts?: any) => submit('PUT', opts),
+    patch: (opts?: any) => submit('PATCH', opts),
+    delete: (opts?: any) => submit('DELETE', opts),
   };
 }

@@ -1,8 +1,8 @@
 /// <reference lib="dom" />
 
-import { PrefetchCache, parseCacheFor } from "./prefetch";
-import type { CacheForResult, CacheForInput } from "./prefetch";
-import { initClientHead, applyClientHead } from "./head-client";
+import { initClientHead, applyClientHead } from './head-client';
+import { PrefetchCache, parseCacheFor } from './prefetch';
+import type { CacheForResult, CacheForInput } from './prefetch';
 
 // --- Types ---
 
@@ -55,22 +55,22 @@ export interface PageRouterConfig {
   prefetchDefaultCacheFor: CacheForResult;
 }
 
-const PAGE_DATA_SCRIPT_ID = "__VOID_PAGE_DATA__";
+const PAGE_DATA_SCRIPT_ID = '__VOID_PAGE_DATA__';
 
 // --- Form utilities ---
 
 export function isFile(value: unknown): boolean {
   return (
-    (typeof File !== "undefined" && value instanceof File) ||
+    (typeof File !== 'undefined' && value instanceof File) ||
     value instanceof Blob ||
-    (typeof FileList !== "undefined" && value instanceof FileList && value.length > 0)
+    (typeof FileList !== 'undefined' && value instanceof FileList && value.length > 0)
   );
 }
 
 export function hasFiles(data: unknown): boolean {
   return (
     isFile(data) ||
-    (typeof data === "object" && data !== null && Object.values(data).some(hasFiles))
+    (typeof data === 'object' && data !== null && Object.values(data).some(hasFiles))
   );
 }
 
@@ -82,19 +82,19 @@ export function objectToFormData(
   form = form || new FormData();
   for (const key in source) {
     if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
-    const composed = parentKey ? parentKey + "[" + key + "]" : key;
+    const composed = parentKey ? parentKey + '[' + key + ']' : key;
     const value = source[key] as any;
     if (value instanceof File) form.append(composed, value, value.name);
     else if (value instanceof Blob) form.append(composed, value);
-    else if (typeof FileList !== "undefined" && value instanceof FileList) {
-      for (let i = 0; i < value.length; i++) form.append(composed + "[]", value[i], value[i].name);
+    else if (typeof FileList !== 'undefined' && value instanceof FileList) {
+      for (let i = 0; i < value.length; i++) form.append(composed + '[]', value[i], value[i].name);
     } else if (Array.isArray(value)) {
       for (let i = 0; i < value.length; i++) objectToFormData({ [i]: value[i] }, form, composed);
     } else if (value instanceof Date) form.append(composed, value.toISOString());
-    else if (typeof value === "boolean") form.append(composed, value ? "1" : "0");
-    else if (typeof value === "string") form.append(composed, value);
-    else if (typeof value === "number") form.append(composed, String(value));
-    else if (value === null || value === undefined) form.append(composed, "");
+    else if (typeof value === 'boolean') form.append(composed, value ? '1' : '0');
+    else if (typeof value === 'string') form.append(composed, value);
+    else if (typeof value === 'number') form.append(composed, String(value));
+    else if (value === null || value === undefined) form.append(composed, '');
     else objectToFormData(value, form, composed);
   }
   return form;
@@ -104,7 +104,7 @@ export function objectToFormData(
 
 export const ssrProxy: VoidRouter = new Proxy({} as VoidRouter, {
   get(_target, prop) {
-    if (typeof prop === "symbol") return undefined;
+    if (typeof prop === 'symbol') return undefined;
     return () => {
       throw new Error(`router.${prop}() is not available during SSR`);
     };
@@ -139,17 +139,17 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
       return JSON.parse(scriptEl.textContent);
     }
 
-    const legacyData = appEl.getAttribute("data-page");
+    const legacyData = appEl.getAttribute('data-page');
     if (legacyData) {
       return JSON.parse(legacyData);
     }
 
-    throw new Error("Missing initial page payload");
+    throw new Error('Missing initial page payload');
   }
 
   async function resolveComponent(id: string) {
     const loader = components[id];
-    if (!loader) throw new Error("Unknown page component: " + id);
+    if (!loader) throw new Error('Unknown page component: ' + id);
     return (await loader()).default;
   }
 
@@ -177,7 +177,7 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
 
   function handleDeferredMessage(group: string, data: unknown, error: unknown): void {
     if (data !== undefined) {
-      if (typeof data === "object" && data !== null && !Array.isArray(data)) {
+      if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
         let resolvedAny = false;
         for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
           if (activeKeyRefs[key]) {
@@ -200,7 +200,7 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
         }
       }
     } else if (error !== undefined) {
-      const errStr = typeof error === "string" ? error : String(error);
+      const errStr = typeof error === 'string' ? error : String(error);
       for (const [key, ref] of Object.entries(activeKeyRefs)) {
         if (adapter.isLoading(ref)) {
           const updated = adapter.rejectDeferred(ref, errStr);
@@ -239,23 +239,23 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
       for (const l of _navListeners) l.onStart?.();
       try {
         // Extract hash before fetching (hash is not sent to server)
-        const hashIndex = url.indexOf("#");
-        const hash = hashIndex !== -1 ? url.slice(hashIndex) : "";
+        const hashIndex = url.indexOf('#');
+        const hash = hashIndex !== -1 ? url.slice(hashIndex) : '';
         const fetchUrl = hashIndex !== -1 ? url.slice(0, hashIndex) : url;
 
         // Same-page hash navigation — skip server fetch, just scroll
         const currentPath = window.location.pathname + window.location.search;
         const effectiveFetchUrl = fetchUrl || currentPath;
-        const method = (options.method || "GET").toUpperCase();
+        const method = (options.method || 'GET').toUpperCase();
         if (
           effectiveFetchUrl === currentPath &&
           hash &&
-          method === "GET" &&
+          method === 'GET' &&
           !options.data &&
           !options.preserveState
         ) {
-          history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, "");
-          history.pushState({}, "", effectiveFetchUrl + hash);
+          history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, '');
+          history.pushState({}, '', effectiveFetchUrl + hash);
           const el = document.getElementById(hash.slice(1));
           if (el) el.scrollIntoView();
           else window.scrollTo(0, 0);
@@ -265,27 +265,27 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
         _abortController?.abort();
         _abortController = new AbortController();
 
-        if (method !== "GET") {
+        if (method !== 'GET') {
           _prefetchCache.flushAll();
         }
 
         const headers: Record<string, string> = {
-          "X-VoidPages": "true",
-          Accept: "application/json",
+          'X-VoidPages': 'true',
+          Accept: 'application/json',
         };
         const fetchOptions: any = { method, headers, signal: _abortController.signal };
 
-        if (options.data && method !== "GET") {
+        if (options.data && method !== 'GET') {
           if (hasFiles(options.data)) {
             fetchOptions.body = objectToFormData(options.data as Record<string, unknown>);
           } else {
-            headers["Content-Type"] = "application/json";
+            headers['Content-Type'] = 'application/json';
             fetchOptions.body = JSON.stringify(options.data);
           }
         }
 
         let pageData: any;
-        const cacheEntry = method === "GET" ? _prefetchCache.get(fetchUrl, method) : null;
+        const cacheEntry = method === 'GET' ? _prefetchCache.get(fetchUrl, method) : null;
 
         if (cacheEntry) {
           pageData = await cacheEntry.response;
@@ -305,12 +305,12 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
           // If stale, fire background refetch to refresh cache
           if (!_prefetchCache.isFresh(cacheEntry)) {
             const bgHeaders = {
-              "X-VoidPages": "true",
-              Accept: "application/json",
-              Purpose: "prefetch",
+              'X-VoidPages': 'true',
+              Accept: 'application/json',
+              Purpose: 'prefetch',
             };
             const bgFetch = fetch(fetchUrl, { method, headers: bgHeaders }).then((r) => {
-              if (!r.headers.get("X-VoidPages")) return null;
+              if (!r.headers.get('X-VoidPages')) return null;
               return r.json();
             });
             _prefetchCache.set(fetchUrl, method, bgFetch, PREFETCH_DEFAULT_CACHE_FOR);
@@ -322,23 +322,23 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
             return router.visit(response.url);
           }
 
-          if (!response.headers.get("X-VoidPages")) {
+          if (!response.headers.get('X-VoidPages')) {
             window.location.href = url;
             return;
           }
 
-          const contentType = response.headers.get("content-type") || "";
+          const contentType = response.headers.get('content-type') || '';
 
-          if (contentType.includes("application/x-ndjson")) {
+          if (contentType.includes('application/x-ndjson')) {
             const reader = response.body!.getReader();
             const decoder = new TextDecoder();
-            let buffer = "";
+            let buffer = '';
             let firstLine = true;
             const signal = _abortController.signal;
 
             const processLines = () => {
               let newlineIdx;
-              while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+              while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
                 const line = buffer.slice(0, newlineIdx);
                 buffer = buffer.slice(newlineIdx + 1);
                 if (!line) continue;
@@ -376,12 +376,12 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
                 }
                 if (buffer.trim()) processLines();
               } catch (e: any) {
-                if (e.name !== "AbortError") {
+                if (e.name !== 'AbortError') {
                   for (const [key, ref] of Object.entries(activeKeyRefs)) {
                     if (adapter.isLoading(ref)) {
                       const updated = adapter.rejectDeferred(
                         ref,
-                        "Stream closed before resolution",
+                        'Stream closed before resolution',
                       );
                       activeKeyRefs[key] = updated;
                       currentPropsObj[key] = updated;
@@ -397,7 +397,7 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
         }
 
         // Preserve stale deferred values after mutations (non-GET can't stream)
-        if (method !== "GET") {
+        if (method !== 'GET') {
           for (const key of Object.keys(activeKeyRefs)) {
             if (pageData.props[key] === null && currentPropsObj[key] !== undefined) {
               pageData.props[key] = currentPropsObj[key];
@@ -415,8 +415,8 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
         applyClientHead(pageData.head);
 
         if (!options.preserveState) {
-          history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, "");
-          history.pushState({}, "", pageData.url + hash);
+          history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, '');
+          history.pushState({}, '', pageData.url + hash);
         }
 
         // Scroll logic — runs after DOM update
@@ -456,10 +456,10 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
 
       if (routeMeta[id]?.island) {
         if (!document.querySelector('link[rel="prefetch"][href="' + url + '"]')) {
-          const link = document.createElement("link");
-          link.rel = "prefetch";
+          const link = document.createElement('link');
+          link.rel = 'prefetch';
           link.href = url;
-          link.as = "document";
+          link.as = 'document';
           document.head.appendChild(link);
         }
         return;
@@ -472,25 +472,25 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
       }
 
       // Strip hash — it's client-only, and cache keys must match visit()
-      const hashIdx = url.indexOf("#");
+      const hashIdx = url.indexOf('#');
       const prefetchUrl = hashIdx !== -1 ? url.slice(0, hashIdx) : url;
 
-      const method = (options.method || "GET").toUpperCase();
+      const method = (options.method || 'GET').toUpperCase();
       if (_prefetchCache.has(prefetchUrl, method)) return;
       const ttl = options.cacheFor ? parseCacheFor(options.cacheFor) : PREFETCH_DEFAULT_CACHE_FOR;
       const headers = {
-        "X-VoidPages": "true",
-        Accept: "application/json",
-        Purpose: "prefetch",
+        'X-VoidPages': 'true',
+        Accept: 'application/json',
+        Purpose: 'prefetch',
       };
       const fetchPromise = fetch(prefetchUrl, { method, headers }).then((r) => {
-        if (!r.headers.get("X-VoidPages")) return null;
+        if (!r.headers.get('X-VoidPages')) return null;
         return r.json();
       });
       _prefetchCache.set(prefetchUrl, method, fetchPromise, ttl);
     },
 
-    flush(url, method = "GET") {
+    flush(url, method = 'GET') {
       _prefetchCache.flush(url, method);
     },
 
@@ -506,22 +506,22 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
     },
 
     post(url, data, options = {}) {
-      return router.visit(url, { ...options, method: "POST", data });
+      return router.visit(url, { ...options, method: 'POST', data });
     },
     put(url, data, options = {}) {
-      return router.visit(url, { ...options, method: "PUT", data });
+      return router.visit(url, { ...options, method: 'PUT', data });
     },
     patch(url, data, options = {}) {
-      return router.visit(url, { ...options, method: "PATCH", data });
+      return router.visit(url, { ...options, method: 'PATCH', data });
     },
     delete(url, options = {}) {
-      return router.visit(url, { ...options, method: "DELETE" });
+      return router.visit(url, { ...options, method: 'DELETE' });
     },
   };
 
   // --- Initialization ---
 
-  const appEl = document.getElementById("app")!;
+  const appEl = document.getElementById('app')!;
   const initialPageData = readInitialPageData(appEl);
 
   const [initialComponent, initialLayouts] = await Promise.all([
@@ -533,8 +533,8 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
   currentPropsObj = initialPageData.props;
 
   function start(): void {
-    history.scrollRestoration = "manual";
-    history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, "");
+    history.scrollRestoration = 'manual';
+    history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, '');
 
     initClientHead(initialPageData.head);
 
@@ -547,7 +547,7 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
       delete (window as any).__deferredQueue;
     }
 
-    window.addEventListener("popstate", (e) => {
+    window.addEventListener('popstate', (e) => {
       const saved = e.state;
       router.visit(window.location.pathname + window.location.search + window.location.hash, {
         preserveState: true,
@@ -570,9 +570,9 @@ export function scheduleHydration(
 ): void {
   const hydrate = () => loader().then((mod) => hydrateFn(el, mod, props));
 
-  if (strategy === "load") {
+  if (strategy === 'load') {
     hydrate();
-  } else if (strategy === "visible") {
+  } else if (strategy === 'visible') {
     const observer = new IntersectionObserver((entries) => {
       if (entries[0].isIntersecting) {
         observer.disconnect();
@@ -580,19 +580,19 @@ export function scheduleHydration(
       }
     });
     observer.observe(el);
-  } else if (strategy === "idle") {
+  } else if (strategy === 'idle') {
     const schedule = (window as any).requestIdleCallback || ((cb: () => void) => setTimeout(cb, 1));
     schedule(() => hydrate());
-  } else if (strategy.startsWith("media:")) {
+  } else if (strategy.startsWith('media:')) {
     const query = strategy.slice(6);
     const mql = matchMedia(query);
     const check = () => {
       if (mql.matches) {
-        mql.removeEventListener("change", check);
+        mql.removeEventListener('change', check);
         hydrate();
       }
     };
-    mql.addEventListener("change", check);
+    mql.addEventListener('change', check);
     check();
   }
 }
@@ -601,10 +601,10 @@ export function initIslands(
   islands: Record<string, () => Promise<unknown>>,
   hydrateFn: (el: Element, mod: unknown, props: Record<string, unknown>) => void | Promise<void>,
 ): void {
-  document.querySelectorAll("[data-island]").forEach((el) => {
-    const id = el.getAttribute("data-island")!;
-    const props = JSON.parse(el.getAttribute("data-props") || "{}");
-    const strategy = el.getAttribute("data-hydrate") || "load";
+  document.querySelectorAll('[data-island]').forEach((el) => {
+    const id = el.getAttribute('data-island')!;
+    const props = JSON.parse(el.getAttribute('data-props') || '{}');
+    const strategy = el.getAttribute('data-hydrate') || 'load';
     const loader = islands[id];
     if (loader) scheduleHydration(el, loader, props, strategy, hydrateFn);
   });
