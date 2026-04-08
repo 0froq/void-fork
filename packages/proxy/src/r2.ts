@@ -21,7 +21,9 @@ r2.post('/get', async (c) => {
 
   // Try WfP dispatch first
   const dispatchRes = await dispatchToWorker(c.env, projectId, '/r2/get', body);
-  if (dispatchRes) return dispatchRes;
+  if (dispatchRes) {
+    return dispatchRes;
+  }
 
   // Fallback: CF REST API
   let bucket: string;
@@ -70,7 +72,9 @@ r2.post('/put', async (c) => {
 
   // Try WfP dispatch first
   const dispatchRes = await dispatchToWorker(c.env, projectId, '/r2/put', body);
-  if (dispatchRes) return dispatchRes;
+  if (dispatchRes) {
+    return dispatchRes;
+  }
 
   // Fallback: CF REST API
   let bucket: string;
@@ -120,7 +124,9 @@ r2.post('/delete', async (c) => {
 
   // Try WfP dispatch first
   const dispatchRes = await dispatchToWorker(c.env, projectId, '/r2/delete', body);
-  if (dispatchRes) return dispatchRes;
+  if (dispatchRes) {
+    return dispatchRes;
+  }
 
   // Fallback: CF REST API
   let bucket: string;
@@ -156,7 +162,9 @@ r2.post('/list', async (c) => {
 
   // Try WfP dispatch first
   const dispatchRes = await dispatchToWorker(c.env, projectId, '/r2/list', body);
-  if (dispatchRes) return dispatchRes;
+  if (dispatchRes) {
+    return dispatchRes;
+  }
 
   // Fallback: CF REST API
   let bucket: string;
@@ -167,10 +175,18 @@ r2.post('/list', async (c) => {
   }
 
   const params = new URLSearchParams();
-  if (body.prefix) params.set('prefix', body.prefix as string);
-  if (body.limit) params.set('per_page', String(body.limit));
-  if (body.cursor) params.set('cursor', body.cursor as string);
-  if (body.delimiter) params.set('delimiter', body.delimiter as string);
+  if (body.prefix) {
+    params.set('prefix', body.prefix as string);
+  }
+  if (body.limit) {
+    params.set('per_page', String(body.limit));
+  }
+  if (body.cursor) {
+    params.set('cursor', body.cursor as string);
+  }
+  if (body.delimiter) {
+    params.set('delimiter', body.delimiter as string);
+  }
   const qs = params.toString() ? `?${params.toString()}` : '';
 
   const cfRes = await fetch(
@@ -208,7 +224,9 @@ r2.post('/head', async (c) => {
 
   // Try WfP dispatch first
   const dispatchRes = await dispatchToWorker(c.env, projectId, '/r2/head', body);
-  if (dispatchRes) return dispatchRes;
+  if (dispatchRes) {
+    return dispatchRes;
+  }
 
   // Fallback: CF REST API
   let bucket: string;

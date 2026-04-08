@@ -18,7 +18,9 @@ async function resolveWorkerName(
   projectId: string,
 ): Promise<string | null> {
   const cached = workerNameCache.get(projectId);
-  if (cached) return cached;
+  if (cached) {
+    return cached;
+  }
 
   const token = await hmacSign(projectId, jwtSecret);
   const res = await api.fetch(`https://api/internal/resolve-worker/${projectId}`, {
@@ -29,7 +31,9 @@ async function resolveWorkerName(
     },
   });
 
-  if (!res.ok) return null;
+  if (!res.ok) {
+    return null;
+  }
 
   const data = await res.json<{ workerName: string }>();
   workerNameCache.set(projectId, data.workerName);
@@ -51,7 +55,9 @@ export async function dispatchToWorker(
 ): Promise<Response | null> {
   try {
     const workerName = await resolveWorkerName(env.API, env.JWT_SECRET, projectId);
-    if (!workerName) return null;
+    if (!workerName) {
+      return null;
+    }
 
     const proxyToken = await hmacSign(projectId, env.JWT_SECRET);
     const worker = env.DISPATCH.get(workerName);
@@ -65,7 +71,9 @@ export async function dispatchToWorker(
     });
 
     // 404 means old deploy without /__void handler → fall back
-    if (res.status === 404) return null;
+    if (res.status === 404) {
+      return null;
+    }
 
     return res;
   } catch {
@@ -81,7 +89,9 @@ let cachedSignKey: CryptoKey | undefined;
 let cachedKeySecret: string | undefined;
 
 async function getSignKey(secret: string): Promise<CryptoKey> {
-  if (cachedSignKey && cachedKeySecret === secret) return cachedSignKey;
+  if (cachedSignKey && cachedKeySecret === secret) {
+    return cachedSignKey;
+  }
   cachedSignKey = await crypto.subtle.importKey(
     'raw',
     encoder.encode(secret),

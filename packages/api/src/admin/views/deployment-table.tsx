@@ -5,10 +5,18 @@ export function displayStatus(
   d: Deployment,
   activeDeploymentId: string | null | undefined,
 ): string {
-  if (d.status === 'failed') return 'failed';
-  if (d.status !== 'live') return d.status;
-  if (d.id === activeDeploymentId) return 'live';
-  if (d.retained) return 'retained';
+  if (d.status === 'failed') {
+    return 'failed';
+  }
+  if (d.status !== 'live') {
+    return d.status;
+  }
+  if (d.id === activeDeploymentId) {
+    return 'live';
+  }
+  if (d.retained) {
+    return 'retained';
+  }
   return 'evicted';
 }
 

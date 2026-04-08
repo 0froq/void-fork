@@ -60,7 +60,9 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
   private state: CounterState | null = null;
 
   private async getState(): Promise<CounterState> {
-    if (this.state) return this.state;
+    if (this.state) {
+      return this.state;
+    }
     const stored = await this.ctx.storage.get<CounterState>('state');
     this.state = stored ?? defaultState();
     return this.state;
@@ -217,11 +219,15 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     const limits = getPlanLimits(state.plan);
 
     // Skip if plan has unlimited AI
-    if (limits.aiNeuronsPerMonth === 0) return;
+    if (limits.aiNeuronsPerMonth === 0) {
+      return;
+    }
 
     // Skip if no projects
     const projectIds = Object.keys(state.projectSlugs);
-    if (projectIds.length === 0) return;
+    if (projectIds.length === 0) {
+      return;
+    }
 
     // Query AI Gateway for each project's neuron usage
     const since = new Date(state.billingPeriodStart);
@@ -268,9 +274,13 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
   ): Promise<void> {
     for (const slug of Object.values(projectSlugs)) {
       const raw = await this.env.ROUTING.get(slug);
-      if (!raw) continue;
+      if (!raw) {
+        continue;
+      }
       const entry = JSON.parse(raw) as Record<string, unknown>;
-      if (entry.suspended) continue; // already suspended
+      if (entry.suspended) {
+        continue;
+      } // already suspended
       entry.suspended = reason;
       await this.env.ROUTING.put(slug, JSON.stringify(entry));
     }
@@ -282,9 +292,13 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
   ): Promise<void> {
     for (const slug of Object.values(projectSlugs)) {
       const raw = await this.env.ROUTING.get(slug);
-      if (!raw) continue;
+      if (!raw) {
+        continue;
+      }
       const entry = JSON.parse(raw) as Record<string, unknown>;
-      if (entry.suspended !== reason) continue; // only remove matching reason
+      if (entry.suspended !== reason) {
+        continue;
+      } // only remove matching reason
       delete entry.suspended;
       await this.env.ROUTING.put(slug, JSON.stringify(entry));
     }

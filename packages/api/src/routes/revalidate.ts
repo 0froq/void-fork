@@ -76,7 +76,9 @@ async function purgeEdgeCache(
   slug: string,
   pathnames: string[],
 ): Promise<void> {
-  if (pathnames.length === 0) return;
+  if (pathnames.length === 0) {
+    return;
+  }
 
   try {
     const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;

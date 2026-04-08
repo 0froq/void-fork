@@ -31,7 +31,9 @@ function req(path: string, cookie?: string, init?: RequestInit): Response | Prom
   const headers: Record<string, string> = {
     ...(init?.headers as Record<string, string>),
   };
-  if (cookie) headers.Cookie = `admin_token=${cookie}`;
+  if (cookie) {
+    headers.Cookie = `admin_token=${cookie}`;
+  }
   return app.fetch(
     new Request(`http://localhost${path}`, { ...init, headers, redirect: 'manual' }),
     env,

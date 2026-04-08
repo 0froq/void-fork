@@ -17,7 +17,9 @@ d1.post('/query', async (c) => {
 
   // Try WfP dispatch first (native bindings, ~1-5ms)
   const dispatchRes = await dispatchToWorker(c.env, projectId, '/d1/query', body);
-  if (dispatchRes) return dispatchRes;
+  if (dispatchRes) {
+    return dispatchRes;
+  }
 
   // Fallback: CF REST API (for old deploys without /__void handler)
   let dbId: string;
@@ -75,7 +77,9 @@ d1.post('/batch', async (c) => {
 
   // Try WfP dispatch first (native db.batch() with transactional guarantees)
   const dispatchRes = await dispatchToWorker(c.env, projectId, '/d1/batch', body);
-  if (dispatchRes) return dispatchRes;
+  if (dispatchRes) {
+    return dispatchRes;
+  }
 
   // Fallback: CF REST API (sequential, no transaction)
   let dbId: string;

@@ -80,7 +80,9 @@ export async function getD1DatabaseByName(
     `${CF_API_BASE}/${accountId}/d1/database?name=${encodeURIComponent(name)}`,
     apiToken,
   );
-  if (result.length === 0) throw new Error(`D1 database not found: ${name}`);
+  if (result.length === 0) {
+    throw new Error(`D1 database not found: ${name}`);
+  }
   return result[0];
 }
 
@@ -93,7 +95,9 @@ export async function getKVNamespaceByTitle(
     `${CF_API_BASE}/${accountId}/storage/kv/namespaces?title=${encodeURIComponent(title)}`,
     apiToken,
   );
-  if (result.length === 0) throw new Error(`KV namespace not found: ${title}`);
+  if (result.length === 0) {
+    throw new Error(`KV namespace not found: ${title}`);
+  }
   return result[0];
 }
 
@@ -106,7 +110,9 @@ export async function getQueueByName(
     `${CF_API_BASE}/${accountId}/queues?name=${encodeURIComponent(name)}`,
     apiToken,
   );
-  if (result.length === 0) throw new Error(`Queue not found: ${name}`);
+  if (result.length === 0) {
+    throw new Error(`Queue not found: ${name}`);
+  }
   return result[0];
 }
 
@@ -337,7 +343,9 @@ export async function getHyperdriveByName(
     apiToken,
   );
   const match = result.find((h) => h.name === name);
-  if (!match) throw new Error(`Hyperdrive config not found: ${name}`);
+  if (!match) {
+    throw new Error(`Hyperdrive config not found: ${name}`);
+  }
   return match;
 }
 

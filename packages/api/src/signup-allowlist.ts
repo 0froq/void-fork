@@ -25,14 +25,18 @@ export function isSignupAllowed(
   email: string | null,
   entries: AllowlistEntry[],
 ): boolean {
-  if (entries.length === 0) return false;
+  if (entries.length === 0) {
+    return false;
+  }
 
   return entries.some((entry) => {
     if (entry.type === 'github') {
       return provider === 'github' && entry.pattern.toLowerCase() === login.toLowerCase();
     }
     // email entry — matches any provider if they have a matching email
-    if (!email) return false;
+    if (!email) {
+      return false;
+    }
     if (entry.pattern.startsWith('*@')) {
       const domain = entry.pattern.slice(1).toLowerCase();
       return email.toLowerCase().endsWith(domain);

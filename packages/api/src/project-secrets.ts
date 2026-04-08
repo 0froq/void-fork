@@ -243,7 +243,9 @@ export async function deleteWorkerSecret(
     },
   });
 
-  if (cfRes.status === 404) return;
+  if (cfRes.status === 404) {
+    return;
+  }
   if (!cfRes.ok) {
     const details = await cfRes.text();
     throw new Error(`failed to delete worker secret ${name}: ${details}`);

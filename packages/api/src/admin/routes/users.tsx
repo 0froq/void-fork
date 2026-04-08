@@ -119,7 +119,9 @@ app.post('/:id/suspend', async (c) => {
   const projects = await getProjectsByUserId(c.get('db'), user.id);
   for (const project of projects) {
     const routingRaw = await c.env.ROUTING.get(project.slug);
-    if (!routingRaw) continue;
+    if (!routingRaw) {
+      continue;
+    }
     const routing = JSON.parse(routingRaw);
     routing.suspended = reason;
     await c.env.ROUTING.put(project.slug, JSON.stringify(routing));
@@ -140,7 +142,9 @@ app.post('/:id/unsuspend', async (c) => {
   const projects = await getProjectsByUserId(c.get('db'), user.id);
   for (const project of projects) {
     const routingRaw = await c.env.ROUTING.get(project.slug);
-    if (!routingRaw) continue;
+    if (!routingRaw) {
+      continue;
+    }
     const routing = JSON.parse(routingRaw);
     delete routing.suspended;
     await c.env.ROUTING.put(project.slug, JSON.stringify(routing));

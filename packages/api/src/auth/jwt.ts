@@ -94,20 +94,28 @@ export async function verifyJwt(
   expectedAud?: string,
 ): Promise<JwtPayload | null> {
   const parts = token.split('.');
-  if (parts.length !== 3) return null;
+  if (parts.length !== 3) {
+    return null;
+  }
 
   const [header, body, signature] = parts;
 
   try {
     const valid = await hmacVerify(`${header}.${body}`, signature, secret);
-    if (!valid) return null;
+    if (!valid) {
+      return null;
+    }
 
     const payload = JSON.parse(decoder.decode(base64urlDecode(body))) as JwtPayload;
 
     const now = Math.floor(Date.now() / 1000);
-    if (payload.exp <= now) return null;
+    if (payload.exp <= now) {
+      return null;
+    }
 
-    if (expectedAud && payload.aud !== expectedAud) return null;
+    if (expectedAud && payload.aud !== expectedAud) {
+      return null;
+    }
 
     return payload;
   } catch {

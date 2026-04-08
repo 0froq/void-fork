@@ -8,7 +8,9 @@ import type { User } from './types';
  * (local dev) and "staging" are treated as non-production.
  */
 export function isDevBypass(env: { DEV_AUTH_BYPASS?: string; PLATFORM_ENV?: string }): boolean {
-  if (!env.DEV_AUTH_BYPASS) return false;
+  if (!env.DEV_AUTH_BYPASS) {
+    return false;
+  }
   const pe = env.PLATFORM_ENV;
   return pe === undefined || pe === '' || pe === 'staging';
 }

@@ -101,13 +101,17 @@ export function isWithinLimit(limit: number, current: number): boolean {
  */
 export function getCurrentBillingPeriodStart(billingCycleStart: string | null | undefined): Date {
   // Handle missing or invalid billing_cycle_start (e.g. legacy rows before column existed)
-  if (!billingCycleStart) return new Date();
+  if (!billingCycleStart) {
+    return new Date();
+  }
   // Normalize timestamp format (also handles legacy rows with space separator, no Z)
   const normalized = billingCycleStart.includes('T')
     ? billingCycleStart
     : billingCycleStart.replace(' ', 'T') + 'Z';
   const signup = new Date(normalized);
-  if (isNaN(signup.getTime())) return new Date();
+  if (isNaN(signup.getTime())) {
+    return new Date();
+  }
   const anchorDay = signup.getUTCDate();
   const now = new Date();
   const year = now.getUTCFullYear();

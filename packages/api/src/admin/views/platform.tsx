@@ -259,9 +259,15 @@ document.getElementById('rollback-all-form').addEventListener('submit', function
                 const failed = entry.events.filter((e) => e.status === 'failed').length;
                 const skipped = entry.events.filter((e) => e.status === 'skipped').length;
                 const statusParts: string[] = [];
-                if (succeeded > 0) statusParts.push(`${succeeded} success`);
-                if (failed > 0) statusParts.push(`${failed} failed`);
-                if (skipped > 0) statusParts.push(`${skipped} skipped`);
+                if (succeeded > 0) {
+                  statusParts.push(`${succeeded} success`);
+                }
+                if (failed > 0) {
+                  statusParts.push(`${failed} failed`);
+                }
+                if (skipped > 0) {
+                  statusParts.push(`${skipped} skipped`);
+                }
                 const allSuccess = succeeded === entry.events.length;
                 const statusColor = failed > 0 ? '#dc2626' : allSuccess ? '#16a34a' : '#d97706';
 

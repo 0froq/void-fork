@@ -38,8 +38,11 @@ function collapseEvents(events: PlatformEvent[]): ActivityEntry[] {
   for (const event of events) {
     if (event.batch_id) {
       const list = batchMap.get(event.batch_id);
-      if (list) list.push(event);
-      else batchMap.set(event.batch_id, [event]);
+      if (list) {
+        list.push(event);
+      } else {
+        batchMap.set(event.batch_id, [event]);
+      }
     }
   }
 
@@ -77,9 +80,12 @@ async function fetchWorkerDetail(
     deploymentsResult.status === 'fulfilled' ? deploymentsResult.value.deployments[0] : undefined;
 
   const errors: string[] = [];
-  if (versionsResult.status === 'rejected') errors.push(toErrorMessage(versionsResult.reason));
-  if (deploymentsResult.status === 'rejected')
+  if (versionsResult.status === 'rejected') {
+    errors.push(toErrorMessage(versionsResult.reason));
+  }
+  if (deploymentsResult.status === 'rejected') {
     errors.push(toErrorMessage(deploymentsResult.reason));
+  }
 
   return { versions, deployment, error: errors.length > 0 ? errors.join('; ') : undefined };
 }
@@ -115,7 +121,9 @@ app.get('/', async (c) => {
   ]);
 
   const workers = cfResults.map((r, i) => {
-    if (r.status === 'fulfilled') return r.value;
+    if (r.status === 'fulfilled') {
+      return r.value;
+    }
     const worker = PLATFORM_WORKERS[i];
     const errorMsg = toErrorMessage(r.reason);
     console.error(`Failed to fetch deployments for ${getScriptName(worker, env)}: ${errorMsg}`);
@@ -225,7 +233,9 @@ app.get('/events/:batchId', async (c) => {
   const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
 
   const events = await getPlatformEventsByBatchId(db, batchId);
-  if (events.length === 0) return c.html('<h1>Batch not found</h1>', 404);
+  if (events.length === 0) {
+    return c.html('<h1>Batch not found</h1>', 404);
+  }
 
   const env = events[0].environment;
 
@@ -244,7 +254,9 @@ app.get('/events/:batchId', async (c) => {
 app.get('/:name', async (c) => {
   const env = parseEnv(c.env.PLATFORM_ENV);
   const worker = getWorkerByName(c.req.param('name'));
-  if (!worker) return c.html('<h1>Worker not found</h1>', 404);
+  if (!worker) {
+    return c.html('<h1>Worker not found</h1>', 404);
+  }
 
   const scriptName = getScriptName(worker, env);
   const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
@@ -272,11 +284,15 @@ app.get('/:name', async (c) => {
 app.post('/:name/rollback', async (c) => {
   const env = parseEnv(c.env.PLATFORM_ENV);
   const worker = getWorkerByName(c.req.param('name'));
-  if (!worker) return c.html('<h1>Worker not found</h1>', 404);
+  if (!worker) {
+    return c.html('<h1>Worker not found</h1>', 404);
+  }
 
   const body = await c.req.parseBody();
   const versionId = body.version_id as string;
-  if (!versionId) return c.html('<h1>Missing version_id</h1>', 400);
+  if (!versionId) {
+    return c.html('<h1>Missing version_id</h1>', 400);
+  }
 
   const accountId = c.env.CF_ACCOUNT_ID;
   const apiToken = c.env.CF_API_TOKEN;

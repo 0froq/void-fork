@@ -64,7 +64,9 @@ async function populateJsonEdgeCache(
   const pageData = fromHeader
     ? normalizePageDataForJsonCache(fromHeader)
     : extractPageDataFromHtml(await response.clone().text());
-  if (!pageData) return;
+  if (!pageData) {
+    return;
+  }
   await cache.put(cacheKey, jsonCacheResponse(pageData, ttl, state));
 }
 
@@ -138,7 +140,9 @@ export default {
     // Redirect rules — short-circuit before any worker invocation
     if (routing.redirectRules?.length) {
       const redirect = applyRedirectRules(pathname, routing.redirectRules);
-      if (redirect) return meter(redirect);
+      if (redirect) {
+        return meter(redirect);
+      }
     }
 
     // Edge-cache hashed static assets (immutable, content-addressed URLs)
@@ -463,8 +467,11 @@ export default {
 
       if (!result.decisions) {
         // No decisions = legacy protocol, batch fallback
-        if (result.ok !== false) batch.ackAll();
-        else batch.retryAll();
+        if (result.ok !== false) {
+          batch.ackAll();
+        } else {
+          batch.retryAll();
+        }
         return;
       }
 
@@ -472,16 +479,22 @@ export default {
       const msgMap = new Map(batch.messages.map((m) => [m.id, m]));
       for (const [id, decision] of Object.entries(result.decisions)) {
         const cfMsg = msgMap.get(id);
-        if (!cfMsg) continue;
-        if (decision.action === 'ack') cfMsg.ack();
-        else if (decision.action === 'retry')
+        if (!cfMsg) {
+          continue;
+        }
+        if (decision.action === 'ack') {
+          cfMsg.ack();
+        } else if (decision.action === 'retry') {
           cfMsg.retry(
             decision.delaySeconds != null ? { delaySeconds: decision.delaySeconds } : undefined,
           );
+        }
       }
 
       // Undecided messages: if handler failed, retry all (individual decisions survive per CF)
-      if (result.ok === false) batch.retryAll();
+      if (result.ok === false) {
+        batch.retryAll();
+      }
       // If ok=true, undecided messages get implicit ack (CF default on successful consumer return)
     } catch {
       batch.retryAll();
@@ -512,14 +525,18 @@ async function fetchStaticAsset(
     const obj = scopedKey
       ? ((await env.STATIC_ASSETS_R2.get(scopedKey)) ?? (await env.STATIC_ASSETS_R2.get(legacyKey)))
       : await env.STATIC_ASSETS_R2.get(legacyKey);
-    if (!obj) return null;
+    if (!obj) {
+      return null;
+    }
     const ct = obj.httpMetadata?.contentType ?? getContentType(path);
     const headers: HeadersInit = {
       ETag: obj.httpEtag,
       ...(obj.size ? { 'Content-Length': String(obj.size) } : {}),
     };
     // "application/null" is a sentinel meaning "no Content-Type header" (matches Wrangler)
-    if (ct && ct !== 'application/null') (headers as Record<string, string>)['Content-Type'] = ct;
+    if (ct && ct !== 'application/null') {
+      (headers as Record<string, string>)['Content-Type'] = ct;
+    }
     return new Response(obj.body, { headers });
   }
 
@@ -545,7 +562,9 @@ async function fetchStaticAsset(
     type: 'arrayBuffer',
     cacheTtl: 86400,
   });
-  if (!value) return null;
+  if (!value) {
+    return null;
+  }
   const contentType = metadata?.ct ?? getContentType(path);
   const headers: HeadersInit = {
     'Content-Length': String((value as ArrayBuffer).byteLength),
@@ -625,6 +644,8 @@ function hasExtension(pathname: string): boolean {
 
 function hasCacheOptOut(response: Response): boolean {
   const cc = response.headers.get('Cache-Control');
-  if (!cc) return false;
+  if (!cc) {
+    return false;
+  }
   return /\b(private|no-store|no-cache)\b/.test(cc);
 }

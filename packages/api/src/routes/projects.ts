@@ -543,12 +543,16 @@ const app = new Hono<ApiEnv>()
 
 function parseDuration(input: string): number | null {
   const match = input.match(/^(\d+)(m|h|d)$/);
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
   const value = parseInt(match[1], 10);
   const unit = match[2];
   const multipliers: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
   const ms = value * multipliers[unit];
-  if (ms > 7 * 86_400_000) return null; // cap at 7d
+  if (ms > 7 * 86_400_000) {
+    return null;
+  } // cap at 7d
   return ms;
 }
 

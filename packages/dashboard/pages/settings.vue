@@ -4,10 +4,18 @@ import type { Props } from './settings.server';
 const { user } = defineProps<Props>();
 
 function formatLimit(n: number): string {
-  if (n === 0) return 'Unlimited';
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(0)} GB`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(0)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+  if (n === 0) {
+    return 'Unlimited';
+  }
+  if (n >= 1_000_000_000) {
+    return `${(n / 1_000_000_000).toFixed(0)} GB`;
+  }
+  if (n >= 1_000_000) {
+    return `${(n / 1_000_000).toFixed(0)}M`;
+  }
+  if (n >= 1_000) {
+    return `${(n / 1_000).toFixed(0)}K`;
+  }
   return n.toString();
 }
 </script>

@@ -20,7 +20,9 @@ export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
   private state: ErrorAlertState | null = null;
 
   private async getState(): Promise<ErrorAlertState> {
-    if (this.state) return this.state;
+    if (this.state) {
+      return this.state;
+    }
     const stored = await this.ctx.storage.get<ErrorAlertState>('state');
     this.state = stored ?? {
       count: 0,

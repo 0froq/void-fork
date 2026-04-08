@@ -114,11 +114,15 @@ function discoverRoutes(): Route[] {
 
   const routesDir = join(platformSrc, 'routes');
   for (const entry of readdirSync(routesDir)) {
-    if (!entry.endsWith('.ts')) continue;
+    if (!entry.endsWith('.ts')) {
+      continue;
+    }
     const fileKey = entry.replace(/\.ts$/, '');
 
     const bases = mounts.get(fileKey);
-    if (!bases) continue;
+    if (!bases) {
+      continue;
+    }
 
     const subRoutes = parseRouteFile(join(routesDir, entry));
     for (const base of bases) {
@@ -133,7 +137,9 @@ function discoverRoutes(): Route[] {
   const seen = new Set<string>();
   return routes.filter((r) => {
     const key = `${r.method} ${r.path}`;
-    if (seen.has(key)) return false;
+    if (seen.has(key)) {
+      return false;
+    }
     seen.add(key);
     return true;
   });
@@ -245,7 +251,9 @@ async function run() {
     `\n${bold('Summary:')} ${green(`${passed} passed`)}  ${failed ? red(`${failed} failed`) : dim('0 failed')}  ${dim(`(${skipped} routes skipped)`)}\n`,
   );
 
-  if (failed > 0) process.exit(1);
+  if (failed > 0) {
+    process.exit(1);
+  }
 }
 
 void run();

@@ -202,7 +202,9 @@ async function lookupCfResource(
 }
 
 function isAlreadyExistsError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
+  if (!(err instanceof Error)) {
+    return false;
+  }
   const msg = err.message.toLowerCase();
   return msg.includes('already exists') || msg.includes('already been created');
 }

@@ -34,7 +34,9 @@ interface UploadSessionResponse {
 }
 
 function tryParseJson<T>(text: string): T | null {
-  if (!text.trim()) return null;
+  if (!text.trim()) {
+    return null;
+  }
   try {
     return JSON.parse(text) as T;
   } catch {
@@ -152,7 +154,9 @@ export async function uploadAssetBuckets(
   function releaseSlot(): void {
     activeCount--;
     const next = waiters.shift();
-    if (next) next();
+    if (next) {
+      next();
+    }
   }
 
   async function uploadBucket(bucket: string[], bucketIndex: number): Promise<void> {
@@ -170,7 +174,9 @@ export async function uploadAssetBuckets(
 
     while (true) {
       // Short-circuit: another bucket already got the JWT — upload is complete
-      if (completionJwt) return;
+      if (completionJwt) {
+        return;
+      }
 
       await acquireSlot();
       try {
@@ -201,12 +207,18 @@ export async function uploadAssetBuckets(
         }
 
         const result = await postAssetUpload(accountId, jwt, formData);
-        if (result) completionJwt = result;
+        if (result) {
+          completionJwt = result;
+        }
         return;
       } catch (err) {
-        if (err instanceof AssetHashMissError) throw err; // non-retriable
+        if (err instanceof AssetHashMissError) {
+          throw err;
+        } // non-retriable
         lastErr = err;
-        if (attempts >= MAX_UPLOAD_RETRIES) break;
+        if (attempts >= MAX_UPLOAD_RETRIES) {
+          break;
+        }
       } finally {
         releaseSlot();
       }
@@ -222,7 +234,9 @@ export async function uploadAssetBuckets(
       if (lastErr instanceof AssetUploadError && lastErr.status === 524) {
         // Gateway error — throttle concurrency + additional backoff
         concurrency = 1;
-        while (waiters.length > 0) waiters.shift()!();
+        while (waiters.length > 0) {
+          waiters.shift()!();
+        }
 
         await new Promise((r) => setTimeout(r, Math.pow(2, bucketGatewayErrors) * gatewayDelayMs));
         bucketGatewayErrors++;
@@ -250,7 +264,9 @@ export async function uploadAssetBuckets(
 
   const tasks: Promise<void>[] = [];
   for (let i = 0; i < buckets.length; i++) {
-    if (buckets[i].length === 0) continue;
+    if (buckets[i].length === 0) {
+      continue;
+    }
     const bucketIndex = i;
     tasks.push(uploadBucket(buckets[bucketIndex], bucketIndex));
   }
@@ -258,7 +274,9 @@ export async function uploadAssetBuckets(
   // completion JWT was already received (CF confirmed all hashes are present).
   const results = await Promise.allSettled(tasks);
 
-  if (completionJwt) return completionJwt;
+  if (completionJwt) {
+    return completionJwt;
+  }
 
   // No JWT — find the first bucket error to surface, or throw a generic message
   const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
@@ -454,7 +472,9 @@ export async function deleteUnreferencedAssets(
   projectId: string,
 ): Promise<void> {
   const toDelete = evictedHashes.filter((h) => !retainedHashes.has(h));
-  if (toDelete.length === 0) return;
+  if (toDelete.length === 0) {
+    return;
+  }
 
   for (const hash of toDelete) {
     await kv.delete(`assets/${projectId}/${hash}`);

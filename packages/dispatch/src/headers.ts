@@ -50,7 +50,9 @@ export function applyHeaderRules(
   pathname: string,
   rules?: HeaderRule[],
 ): Response {
-  if (!rules || rules.length === 0) return response;
+  if (!rules || rules.length === 0) {
+    return response;
+  }
 
   const matched: [string, string][] = [];
   for (const rule of rules) {
@@ -59,7 +61,9 @@ export function applyHeaderRules(
     }
   }
 
-  if (matched.length === 0) return response;
+  if (matched.length === 0) {
+    return response;
+  }
 
   // Clone response to modify headers
   const newResponse = new Response(response.body, response);

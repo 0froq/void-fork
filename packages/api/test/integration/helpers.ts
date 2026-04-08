@@ -74,9 +74,15 @@ function createMockDoNamespace(): DurableObjectNamespace {
     get: (_id: unknown) => ({
       fetch: async (req: Request) => {
         const url = new URL(req.url);
-        if (url.pathname === '/rollover') return Response.json({ rolled: false });
-        if (url.pathname === '/init') return Response.json({ ok: true });
-        if (url.pathname === '/state') return Response.json({});
+        if (url.pathname === '/rollover') {
+          return Response.json({ rolled: false });
+        }
+        if (url.pathname === '/init') {
+          return Response.json({ ok: true });
+        }
+        if (url.pathname === '/state') {
+          return Response.json({});
+        }
         return Response.json({ totalRequests: 0, suspended: false });
       },
     }),
@@ -104,7 +110,9 @@ class MemoryKVNamespace {
     type?: 'text' | 'json' | 'arrayBuffer' | 'stream',
   ): Promise<string | ArrayBuffer | ReadableStream | unknown | null> {
     const entry = this.store.get(key);
-    if (!entry) return null;
+    if (!entry) {
+      return null;
+    }
 
     if (type === 'arrayBuffer') {
       return entry.value instanceof ArrayBuffer

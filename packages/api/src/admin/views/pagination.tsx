@@ -7,7 +7,9 @@ export function Pagination({
   totalPages: number;
   baseUrl: string;
 }) {
-  if (totalPages <= 1) return <></>;
+  if (totalPages <= 1) {
+    return <></>;
+  }
   return (
     <p style="margin-top: 10px">
       {page > 1 ? <a href={`${baseUrl}?page=${page - 1}`}>Previous</a> : <>Previous</>}

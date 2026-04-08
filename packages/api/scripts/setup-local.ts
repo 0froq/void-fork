@@ -63,8 +63,12 @@ function escapeSqlLiteral(value: string): string {
 
 function validateEmail(value: string): string | undefined {
   const trimmed = value.trim();
-  if (trimmed === '') return 'Email is required.';
-  if (!trimmed.includes('@')) return 'Enter an email address.';
+  if (trimmed === '') {
+    return 'Email is required.';
+  }
+  if (!trimmed.includes('@')) {
+    return 'Enter an email address.';
+  }
   return undefined;
 }
 
@@ -111,9 +115,13 @@ function upsertDevVars(filePath: string, entries: Record<string, string>): void 
   for (let i = 0; i < nextLines.length; i++) {
     const line = nextLines[i];
     const match = /^([A-Z0-9_]+)=/.exec(line);
-    if (!match) continue;
+    if (!match) {
+      continue;
+    }
     const key = match[1];
-    if (!(key in entries)) continue;
+    if (!(key in entries)) {
+      continue;
+    }
     nextLines[i] = `${key}=${entries[key]}`;
     seen.add(key);
   }

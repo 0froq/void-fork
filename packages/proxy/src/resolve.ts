@@ -21,7 +21,9 @@ export async function resolveResource(
 ): Promise<string> {
   const cacheKey = `${projectId}:${type}:${bindingName}`;
   const cached = cache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    return cached;
+  }
 
   const token = await hmacSign(projectId, jwtSecret);
   const res = await api.fetch(`https://api/internal/resolve-resource/${projectId}`, {
@@ -76,7 +78,9 @@ let cachedSignKey: CryptoKey | undefined;
 let cachedKeySecret: string | undefined;
 
 async function getSignKey(secret: string): Promise<CryptoKey> {
-  if (cachedSignKey && cachedKeySecret === secret) return cachedSignKey;
+  if (cachedSignKey && cachedKeySecret === secret) {
+    return cachedSignKey;
+  }
   cachedSignKey = await crypto.subtle.importKey(
     'raw',
     encoder.encode(secret),

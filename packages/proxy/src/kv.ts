@@ -17,7 +17,9 @@ kv.post('/get', async (c) => {
 
   // Try WfP dispatch first
   const dispatchRes = await dispatchToWorker(c.env, projectId, '/kv/get', body);
-  if (dispatchRes) return dispatchRes;
+  if (dispatchRes) {
+    return dispatchRes;
+  }
 
   // Fallback: CF REST API
   let nsId: string;
@@ -68,7 +70,9 @@ kv.post('/put', async (c) => {
 
   // Try WfP dispatch first
   const dispatchRes = await dispatchToWorker(c.env, projectId, '/kv/put', body);
-  if (dispatchRes) return dispatchRes;
+  if (dispatchRes) {
+    return dispatchRes;
+  }
 
   // Fallback: CF REST API
   let nsId: string;
@@ -79,8 +83,12 @@ kv.post('/put', async (c) => {
   }
 
   const params = new URLSearchParams();
-  if (body.expiration) params.set('expiration', String(body.expiration));
-  if (body.expiration_ttl) params.set('expiration_ttl', String(body.expiration_ttl));
+  if (body.expiration) {
+    params.set('expiration', String(body.expiration));
+  }
+  if (body.expiration_ttl) {
+    params.set('expiration_ttl', String(body.expiration_ttl));
+  }
   const qs = params.toString() ? `?${params.toString()}` : '';
 
   let value: string | ArrayBuffer;
@@ -89,7 +97,9 @@ kv.post('/put', async (c) => {
     // Decode base64-encoded binary data from the client
     const binary = atob(body.value);
     const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
     value = bytes.buffer;
     contentType = 'application/octet-stream';
   } else {
@@ -125,7 +135,9 @@ kv.post('/delete', async (c) => {
 
   // Try WfP dispatch first
   const dispatchRes = await dispatchToWorker(c.env, projectId, '/kv/delete', body);
-  if (dispatchRes) return dispatchRes;
+  if (dispatchRes) {
+    return dispatchRes;
+  }
 
   // Fallback: CF REST API
   let nsId: string;
@@ -161,7 +173,9 @@ kv.post('/list', async (c) => {
 
   // Try WfP dispatch first
   const dispatchRes = await dispatchToWorker(c.env, projectId, '/kv/list', body);
-  if (dispatchRes) return dispatchRes;
+  if (dispatchRes) {
+    return dispatchRes;
+  }
 
   // Fallback: CF REST API
   let nsId: string;
@@ -172,9 +186,15 @@ kv.post('/list', async (c) => {
   }
 
   const params = new URLSearchParams();
-  if (body.prefix) params.set('prefix', body.prefix as string);
-  if (body.limit) params.set('limit', String(body.limit));
-  if (body.cursor) params.set('cursor', body.cursor as string);
+  if (body.prefix) {
+    params.set('prefix', body.prefix as string);
+  }
+  if (body.limit) {
+    params.set('limit', String(body.limit));
+  }
+  if (body.cursor) {
+    params.set('cursor', body.cursor as string);
+  }
   const qs = params.toString() ? `?${params.toString()}` : '';
 
   const cfRes = await fetch(

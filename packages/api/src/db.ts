@@ -315,7 +315,9 @@ export async function getLastLiveAssetManifest(
     .orderBy(desc(deployments.created_at))
     .limit(1);
 
-  if (!row?.asset_hashes) return null;
+  if (!row?.asset_hashes) {
+    return null;
+  }
   return JSON.parse(row.asset_hashes);
 }
 
@@ -801,7 +803,9 @@ export async function getUsersWithProjectsBatch(db: Db, limit: number, offset: n
     .limit(limit)
     .offset(offset);
 
-  if (userRows.length === 0) return [];
+  if (userRows.length === 0) {
+    return [];
+  }
 
   const userIds = userRows.map((u) => u.id);
   const projectRows = await db

@@ -21,7 +21,9 @@ class WorkerUnreachableError extends Error {}
  */
 export function cfCronToUnix(expr: string): string {
   const fields = expr.trim().split(/\s+/);
-  if (fields.length !== 5) return expr;
+  if (fields.length !== 5) {
+    return expr;
+  }
 
   fields[4] = fields[4]
     .split(',')
@@ -30,7 +32,9 @@ export function cfCronToUnix(expr: string): string {
       const [rangeOrValue, step] = part.split('/');
       const stepSuffix = step != null ? `/${step}` : '';
 
-      if (rangeOrValue === '*') return `*${stepSuffix}`;
+      if (rangeOrValue === '*') {
+        return `*${stepSuffix}`;
+      }
 
       // Handle range: "2-6" → "1-5"
       if (rangeOrValue.includes('-')) {
@@ -49,7 +53,9 @@ export function cfCronToUnix(expr: string): string {
 function shiftDow(value: string): string {
   // Preserve abbreviations (MON, FRI, etc.) and L/# suffixes
   const match = value.match(/^(\d+)(.*)/);
-  if (!match) return value; // abbreviation like MON, SUN
+  if (!match) {
+    return value;
+  } // abbreviation like MON, SUN
   const num = Math.max(0, parseInt(match[1], 10) - 1);
   return `${num}${match[2]}`;
 }
@@ -81,7 +87,9 @@ export function getNextFireTime(schedules: { cron: string }[], now: number): num
         tz: 'UTC',
       });
       const next = interval.next().toDate().getTime();
-      if (next < earliest) earliest = next;
+      if (next < earliest) {
+        earliest = next;
+      }
     } catch {
       // Skip invalid cron expressions
     }
@@ -95,7 +103,9 @@ export class CronScheduler extends DurableObject<ApiEnv['Bindings']> {
   private state: CronState | null = null;
 
   private async getState(): Promise<CronState | null> {
-    if (this.state) return this.state;
+    if (this.state) {
+      return this.state;
+    }
     const stored = await this.ctx.storage.get<CronState>('state');
     this.state = stored ?? null;
     return this.state;
@@ -149,7 +159,9 @@ export class CronScheduler extends DurableObject<ApiEnv['Bindings']> {
 
   async alarm(): Promise<void> {
     const state = await this.getState();
-    if (!state || state.schedules.length === 0) return;
+    if (!state || state.schedules.length === 0) {
+      return;
+    }
 
     // State created before the proxyToken fix lacks auth credentials.
     // Skip invocation to avoid sending unauthenticated requests — the next

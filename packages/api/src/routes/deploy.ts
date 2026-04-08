@@ -71,7 +71,9 @@ function sortUnique(values: string[] | undefined): string[] {
 }
 
 function parseManifest(raw: string | null | undefined): DeployManifest | null {
-  if (!raw) return null;
+  if (!raw) {
+    return null;
+  }
   try {
     return JSON.parse(raw) as DeployManifest;
   } catch {
@@ -101,13 +103,15 @@ export function buildWebSocketUploadMigrations(migrations: WebSocketMigrationMet
       }>;
     }
   | undefined {
-  if (!migrations || migrations.length === 0) return undefined;
+  if (!migrations || migrations.length === 0) {
+    return undefined;
+  }
 
   return {
     new_tag: migrations[migrations.length - 1].tag,
-    steps: migrations.map((migration) => ({
-      ...(migration.newClasses?.length ? { new_classes: migration.newClasses } : {}),
-    })),
+    steps: migrations.map((migration) =>
+      migration.newClasses?.length ? { new_classes: migration.newClasses } : {},
+    ),
   };
 }
 
@@ -118,7 +122,9 @@ export function buildWebSocketUploadBindings(
   name: string;
   class_name: string;
 }> {
-  if (!websocket) return [];
+  if (!websocket) {
+    return [];
+  }
 
   const bindings = new Map<string, string>();
 
@@ -177,8 +183,12 @@ export function enrichWebSocketManifest(
   // predate the migration system.
   const existingClasses = new Set(previousClasses);
   for (const m of previousMigrations) {
-    for (const name of m.newClasses ?? []) existingClasses.add(name);
-    for (const name of m.deletedClasses ?? []) existingClasses.delete(name);
+    for (const name of m.newClasses ?? []) {
+      existingClasses.add(name);
+    }
+    for (const name of m.deletedClasses ?? []) {
+      existingClasses.delete(name);
+    }
   }
   const newClasses = nextClasses.filter((name) => !existingClasses.has(name));
 
@@ -608,10 +618,18 @@ app.post('/:id/deploy', async (c) => {
         // Derive binding labels from the manifest upfront so we can show the
         // spinner BEFORE the (potentially slow) CF API provisioning calls.
         const bindingLabels: string[] = [];
-        for (const name of manifest.bindings.d1 ?? []) bindingLabels.push(`d1:${name}`);
-        for (const name of manifest.bindings.kv ?? []) bindingLabels.push(`kv:${name}`);
-        for (const name of manifest.bindings.r2 ?? []) bindingLabels.push(`r2:${name}`);
-        for (const q of manifest.queues ?? []) bindingLabels.push(`queue:${q.name}`);
+        for (const name of manifest.bindings.d1 ?? []) {
+          bindingLabels.push(`d1:${name}`);
+        }
+        for (const name of manifest.bindings.kv ?? []) {
+          bindingLabels.push(`kv:${name}`);
+        }
+        for (const name of manifest.bindings.r2 ?? []) {
+          bindingLabels.push(`r2:${name}`);
+        }
+        for (const q of manifest.queues ?? []) {
+          bindingLabels.push(`queue:${q.name}`);
+        }
         if (bindingLabels.length > 0) {
           emit({ event: 'provisioning', bindings: bindingLabels });
         }
@@ -998,7 +1016,9 @@ app.post('/:id/deploy', async (c) => {
 
           await uploadPool(manifest.prerender, 3, async (pathname) => {
             const ttl = resolvePathTtl(manifest.revalidate, pathname);
-            if (ttl <= 0) return;
+            if (ttl <= 0) {
+              return;
+            }
 
             try {
               // Invoke the user worker directly via dispatch namespace
@@ -1332,10 +1352,16 @@ function resolvePathTtl(
   revalidate: number | Record<string, number> | undefined,
   pathname: string,
 ): number {
-  if (revalidate == null) return 0;
-  if (typeof revalidate === 'number') return revalidate;
+  if (revalidate == null) {
+    return 0;
+  }
+  if (typeof revalidate === 'number') {
+    return revalidate;
+  }
   for (const [pattern, ttl] of Object.entries(revalidate)) {
-    if (matchPattern(pattern, pathname)) return ttl;
+    if (matchPattern(pattern, pathname)) {
+      return ttl;
+    }
   }
   return 0;
 }
@@ -1380,10 +1406,18 @@ function serializePrerenderHeaders(response: Response): Record<string, string> {
 }
 
 function moduleContentType(filename: string): string {
-  if (filename.endsWith('.wasm')) return 'application/wasm';
-  if (filename.endsWith('.map')) return 'application/source-map';
-  if (filename.endsWith('.json')) return 'application/json';
-  if (filename.endsWith('.txt')) return 'text/plain';
+  if (filename.endsWith('.wasm')) {
+    return 'application/wasm';
+  }
+  if (filename.endsWith('.map')) {
+    return 'application/source-map';
+  }
+  if (filename.endsWith('.json')) {
+    return 'application/json';
+  }
+  if (filename.endsWith('.txt')) {
+    return 'text/plain';
+  }
   return 'application/javascript+module';
 }
 

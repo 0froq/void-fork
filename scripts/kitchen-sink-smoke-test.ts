@@ -38,7 +38,9 @@ async function pollForText(p: Page, path: string, text: string, timeoutMs = 30_0
   while (Date.now() - start < timeoutMs) {
     await goto(p, path);
     const body = await p.textContent('body');
-    if (body?.includes(text)) return;
+    if (body?.includes(text)) {
+      return;
+    }
     await p.waitForTimeout(2_000);
   }
   throw new Error(`Timed out after ${timeoutMs}ms waiting for "${text}" on ${path}`);
@@ -62,9 +64,13 @@ async function waitForText(p: Page, text: string, timeoutMs = TIMEOUT) {
 async function deleteRowContaining(p: Page, needle: string) {
   await p.evaluate((n) => {
     const row = Array.from(document.querySelectorAll('tr')).find((r) => r.textContent?.includes(n));
-    if (!row) throw new Error(`Row containing "${n}" not found`);
+    if (!row) {
+      throw new Error(`Row containing "${n}" not found`);
+    }
     const btn = row.querySelector('button');
-    if (!btn) throw new Error(`No button in row containing "${n}"`);
+    if (!btn) {
+      throw new Error(`No button in row containing "${n}"`);
+    }
     btn.click();
   }, needle);
 }

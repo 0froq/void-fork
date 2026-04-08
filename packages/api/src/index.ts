@@ -119,7 +119,9 @@ async function scheduled(
   // Auto-fail deployments stuck in active states for more than 30 minutes
   await failStaleDeployments(db)
     .then((n) => {
-      if (n > 0) console.log(`[scheduled] auto-failed ${n} stale deployment(s)`);
+      if (n > 0) {
+        console.log(`[scheduled] auto-failed ${n} stale deployment(s)`);
+      }
     })
     .catch((err) => console.error('[scheduled] failed to clean up stale deployments:', err));
 
@@ -140,7 +142,9 @@ async function scheduled(
       console.error('[scheduled] failed to fetch user batch at offset', offset, err);
       break;
     }
-    if (batch.length === 0) break;
+    if (batch.length === 0) {
+      break;
+    }
 
     await Promise.allSettled(
       batch.map(({ user, projects }) => processUserRollover(env, db, user, projects)),
@@ -161,7 +165,9 @@ async function processUserRollover(
   try {
     for (const project of userProjects) {
       const raw = await env.ROUTING.get(project.slug);
-      if (!raw) continue;
+      if (!raw) {
+        continue;
+      }
       const routing = JSON.parse(raw);
       if (!routing.userId) {
         routing.userId = user.id;
@@ -176,11 +182,17 @@ async function processUserRollover(
       const domainMap = await getDomainsByProjectIds(db, projectIds);
       for (const projectId of projectIds) {
         const projectDomains = domainMap.get(projectId);
-        if (!projectDomains) continue;
+        if (!projectDomains) {
+          continue;
+        }
         for (const domain of projectDomains) {
-          if (domain.status !== 'active') continue;
+          if (domain.status !== 'active') {
+            continue;
+          }
           const raw = await env.ROUTING.get(`domain:${domain.hostname}`);
-          if (!raw) continue;
+          if (!raw) {
+            continue;
+          }
           const routing = JSON.parse(raw);
           if (!routing.userId) {
             routing.userId = user.id;
@@ -195,8 +207,12 @@ async function processUserRollover(
 
   const limits = getPlanLimits(user.plan);
   // Skip unlimited plans (no enforcement needed)
-  if (limits.requestsPerMonth === 0 && limits.aiNeuronsPerMonth === 0) return;
-  if (userProjects.length === 0) return;
+  if (limits.requestsPerMonth === 0 && limits.aiNeuronsPerMonth === 0) {
+    return;
+  }
+  if (userProjects.length === 0) {
+    return;
+  }
 
   const billingPeriodStart = getCurrentBillingPeriodStart(user.billing_cycle_start).toISOString();
   const projectSlugs: Record<string, string> = {};

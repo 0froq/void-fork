@@ -113,7 +113,9 @@ let cachedVerifyKey: CryptoKey | undefined;
 let cachedKeySecret: string | undefined;
 
 async function getVerifyKey(secret: string): Promise<CryptoKey> {
-  if (cachedVerifyKey && cachedKeySecret === secret) return cachedVerifyKey;
+  if (cachedVerifyKey && cachedKeySecret === secret) {
+    return cachedVerifyKey;
+  }
   cachedVerifyKey = await crypto.subtle.importKey(
     'raw',
     encoder.encode(secret),
@@ -145,7 +147,9 @@ function base64urlDecode(str: string): Uint8Array {
 
 async function verifyJwt(token: string, secret: string): Promise<JwtPayload | null> {
   const parts = token.split('.');
-  if (parts.length !== 3) return null;
+  if (parts.length !== 3) {
+    return null;
+  }
 
   const [header, body, signature] = parts;
 
@@ -158,14 +162,20 @@ async function verifyJwt(token: string, secret: string): Promise<JwtPayload | nu
       sigBytes.buffer as ArrayBuffer,
       encoder.encode(`${header}.${body}`),
     );
-    if (!valid) return null;
+    if (!valid) {
+      return null;
+    }
 
     const payload = JSON.parse(decoder.decode(base64urlDecode(body))) as JwtPayload;
 
     const now = Math.floor(Date.now() / 1000);
-    if (payload.exp <= now) return null;
+    if (payload.exp <= now) {
+      return null;
+    }
 
-    if (payload.aud !== 'api') return null;
+    if (payload.aud !== 'api') {
+      return null;
+    }
 
     return payload;
   } catch {

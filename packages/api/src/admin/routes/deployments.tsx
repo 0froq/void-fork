@@ -103,10 +103,18 @@ app.get('/:id', async (c) => {
             <td
               style={(() => {
                 const s = displayStatus(deployment, project?.active_deployment_id);
-                if (s === 'live') return 'color: #16a34a; font-weight: 600';
-                if (s === 'retained') return 'color: #16a34a';
-                if (s === 'evicted') return 'color: #888';
-                if (s === 'failed') return 'color: #dc2626';
+                if (s === 'live') {
+                  return 'color: #16a34a; font-weight: 600';
+                }
+                if (s === 'retained') {
+                  return 'color: #16a34a';
+                }
+                if (s === 'evicted') {
+                  return 'color: #888';
+                }
+                if (s === 'failed') {
+                  return 'color: #dc2626';
+                }
                 return undefined;
               })()}
             >

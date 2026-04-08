@@ -12,7 +12,9 @@ export async function retryWithBackoff<T>(
       await new Promise((r) => setTimeout(r, opts.delayMs * 2 ** (attempt - 1)));
     }
     const result = await fn(attempt);
-    if (result !== undefined) return result;
+    if (result !== undefined) {
+      return result;
+    }
   }
   throw new Error(opts.errorMessage);
 }

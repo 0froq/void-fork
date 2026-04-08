@@ -109,7 +109,9 @@ function createEnv(options: {
     ISR_CACHE: {
       getWithMetadata: async (key: string) => {
         const entry = kvStore.get(key);
-        if (!entry) return { value: null, metadata: null };
+        if (!entry) {
+          return { value: null, metadata: null };
+        }
         return { value: entry.value, metadata: entry.metadata };
       },
       put: async (key: string, value: ArrayBuffer, opts?: { metadata?: unknown }) => {
@@ -234,7 +236,9 @@ describe('custom domain routing', () => {
     const env = {
       ROUTING: {
         get: async (key: string) => {
-          if (key === 'domain:app.example.com') return JSON.stringify(routing);
+          if (key === 'domain:app.example.com') {
+            return JSON.stringify(routing);
+          }
           return null;
         },
       },

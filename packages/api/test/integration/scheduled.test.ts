@@ -134,10 +134,16 @@ describe('scheduled()', () => {
         fetch: async (req: Request) => {
           callCount++;
           // Fail on first rollover call (first user), succeed on rest
-          if (callCount === 1) throw new Error('DO failure');
+          if (callCount === 1) {
+            throw new Error('DO failure');
+          }
           const url = new URL(req.url);
-          if (url.pathname === '/rollover') return Response.json({ rolled: false });
-          if (url.pathname === '/init') return Response.json({ ok: true });
+          if (url.pathname === '/rollover') {
+            return Response.json({ rolled: false });
+          }
+          if (url.pathname === '/init') {
+            return Response.json({ ok: true });
+          }
           return Response.json({});
         },
       }),

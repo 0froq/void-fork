@@ -31,10 +31,14 @@ export default {
   async tail(events: TraceItem[], env: Env) {
     for (const event of events) {
       const scriptName = event.scriptName;
-      if (!scriptName) continue;
+      if (!scriptName) {
+        continue;
+      }
 
       const parsed = parseScriptName(scriptName);
-      if (!parsed) continue;
+      if (!parsed) {
+        continue;
+      }
 
       const fetchEvent = isFetchEvent(event.event) ? event.event : null;
 

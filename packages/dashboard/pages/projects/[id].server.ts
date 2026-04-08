@@ -22,12 +22,16 @@ export type Props = {
 
 export const loader = defineHandler<Props>(async (c) => {
   const id = c.req.param('id');
-  if (!id) return c.notFound();
+  if (!id) {
+    return c.notFound();
+  }
   const db = c.get('db');
 
   // Direct D1
   const project = await getProject(db, id);
-  if (!project || project.user_id !== c.get('userId')) return c.notFound();
+  if (!project || project.user_id !== c.get('userId')) {
+    return c.notFound();
+  }
 
   const [deployments, domains, resources] = await Promise.all([
     getProjectDeployments(db, project.id),
@@ -67,7 +71,9 @@ export const loader = defineHandler<Props>(async (c) => {
 
 export const action = defineHandler(async (c) => {
   const id = c.req.param('id');
-  if (!id) return c.notFound();
+  if (!id) {
+    return c.notFound();
+  }
   const form = await c.req.json<Record<string, string>>();
   const intent = form._intent;
 

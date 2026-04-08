@@ -74,14 +74,22 @@ function renderDefaultErrorPage(status: number, title: string): string {
 }
 
 export function shouldServeHtmlErrorPage(request: Request): boolean {
-  if (request.method !== 'GET' && request.method !== 'HEAD') return false;
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return false;
+  }
 
   const url = new URL(request.url);
-  if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return false;
-  if (/\/[^/]+\.[^/]+$/.test(url.pathname)) return false;
+  if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
+    return false;
+  }
+  if (/\/[^/]+\.[^/]+$/.test(url.pathname)) {
+    return false;
+  }
 
   const destination = request.headers.get('sec-fetch-dest');
-  if (destination && destination !== 'document' && destination !== 'empty') return false;
+  if (destination && destination !== 'document' && destination !== 'empty') {
+    return false;
+  }
 
   const accept = request.headers.get('accept');
   return !accept || accept.includes('text/html') || accept.includes('*/*');

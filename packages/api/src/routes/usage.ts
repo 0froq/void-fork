@@ -157,7 +157,9 @@ async function queryBatchProjectUsage(
   projectIds: string[],
   since: Date,
 ): Promise<Map<string, UsageEntry>> {
-  if (projectIds.length === 0) return new Map();
+  if (projectIds.length === 0) {
+    return new Map();
+  }
 
   const sinceStr = since.toISOString().replace('T', ' ').slice(0, 19);
   const inList = projectIds.map((id) => `'${id}'`).join(', ');
@@ -184,7 +186,9 @@ async function queryBatchProjectUsage(
     },
   );
 
-  if (!response.ok) return new Map();
+  if (!response.ok) {
+    return new Map();
+  }
 
   const json = (await response.json()) as { data: BatchAnalyticsRow[] };
   const result = new Map<string, UsageEntry>();

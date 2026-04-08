@@ -12,7 +12,9 @@ export interface RedirectRule {
  * Returns a redirect Response, or null if no rule matches.
  */
 export function applyRedirectRules(pathname: string, rules?: RedirectRule[]): Response | null {
-  if (!rules?.length) return null;
+  if (!rules?.length) {
+    return null;
+  }
 
   let matched: RedirectRule | undefined;
   for (const rule of rules) {
@@ -21,7 +23,9 @@ export function applyRedirectRules(pathname: string, rules?: RedirectRule[]): Re
     }
   }
 
-  if (!matched) return null;
+  if (!matched) {
+    return null;
+  }
 
   let dest = matched.destination;
   if (dest.includes(':splat') && matched.source.includes('*')) {

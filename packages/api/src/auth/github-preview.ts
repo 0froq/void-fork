@@ -26,7 +26,9 @@ export async function hasGitHubPreviewRepoAccess(
   username: string,
 ): Promise<boolean> {
   const login = username.trim();
-  if (!login) return false;
+  if (!login) {
+    return false;
+  }
 
   const collaboratorRes = await githubRequest(config.pat, getCollaboratorUrl(login));
   if (collaboratorRes.status === 204) {
@@ -47,7 +49,9 @@ export async function ensureGitHubPreviewRepoAccess(
   username: string,
 ): Promise<void> {
   const login = username.trim();
-  if (!login) return;
+  if (!login) {
+    return;
+  }
 
   const collaboratorUrl = getCollaboratorUrl(login);
   const collaboratorRes = await githubRequest(config.pat, collaboratorUrl);

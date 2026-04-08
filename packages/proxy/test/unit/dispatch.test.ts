@@ -52,7 +52,9 @@ function createMockDispatch(handler?: (url: string, init: RequestInit) => Promis
   return {
     get: vi.fn((_workerName: string) => ({
       fetch: vi.fn(async (url: string, init: RequestInit) => {
-        if (handler) return handler(url, init);
+        if (handler) {
+          return handler(url, init);
+        }
         // Default: 404 (old deploy without /__void handler)
         return new Response('Not Found', { status: 404 });
       }),

@@ -28,10 +28,14 @@ export async function processUsageEventBatch(
     [...grouped.entries()].map(async ([userId, userEvents]) => {
       // Look up user plan (skip DO call for unlimited plans)
       const user = await getUser(db, userId);
-      if (!user) return; // Unknown user, skip
+      if (!user) {
+        return;
+      } // Unknown user, skip
       const plan = user.plan ?? 'free';
       const limits = getPlanLimits(plan);
-      if (limits.requestsPerMonth === 0) return; // Unlimited plan, skip DO
+      if (limits.requestsPerMonth === 0) {
+        return;
+      } // Unlimited plan, skip DO
 
       // Forward to DO
       const doId = env.USAGE_COUNTER.idFromName(userId);

@@ -35,7 +35,9 @@ function createMockR2() {
     }),
     delete: vi.fn(async (keys: string | string[]) => {
       const arr = Array.isArray(keys) ? keys : [keys];
-      for (const k of arr) store.delete(k);
+      for (const k of arr) {
+        store.delete(k);
+      }
     }),
     get: vi.fn(async (key: string) =>
       store.has(key)

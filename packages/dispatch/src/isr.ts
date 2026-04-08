@@ -42,10 +42,14 @@ export function packIsrValue(headers: Record<string, string>, body: ArrayBuffer)
 export function unpackIsrValue(
   buffer: ArrayBuffer,
 ): { headers: Record<string, string>; body: ArrayBuffer } | null {
-  if (buffer.byteLength < 4) return null;
+  if (buffer.byteLength < 4) {
+    return null;
+  }
   const view = new DataView(buffer);
   const headerLen = view.getUint32(0, true);
-  if (buffer.byteLength < 4 + headerLen) return null;
+  if (buffer.byteLength < 4 + headerLen) {
+    return null;
+  }
   try {
     const headerBytes = new Uint8Array(buffer, 4, headerLen);
     const headers: Record<string, string> = JSON.parse(new TextDecoder().decode(headerBytes));
@@ -89,12 +93,18 @@ export async function readIsrCache(
     key,
     'arrayBuffer',
   );
-  if (!value || !metadata) return null;
+  if (!value || !metadata) {
+    return null;
+  }
 
   const unpacked = unpackIsrValue(value);
-  if (!unpacked) return null;
+  if (!unpacked) {
+    return null;
+  }
 
-  if (!metadata.c || !metadata.t) return null;
+  if (!metadata.c || !metadata.t) {
+    return null;
+  }
 
   return {
     body: new ReadableStream({
@@ -188,10 +198,14 @@ export function isrCacheResponse(entry: IsrCacheEntry, stale: boolean): Response
  */
 export function resolveRevalidateTtl(response: Response, defaultTtl: number): number {
   const header = response.headers.get('x-revalidate');
-  if (header === null) return defaultTtl;
+  if (header === null) {
+    return defaultTtl;
+  }
 
   const value = parseInt(header, 10);
-  if (isNaN(value) || value < 0) return defaultTtl;
+  if (isNaN(value) || value < 0) {
+    return defaultTtl;
+  }
   return value;
 }
 
@@ -212,10 +226,16 @@ export function resolvePathTtl(
   revalidate: number | Record<string, number> | undefined,
   pathname: string,
 ): number {
-  if (revalidate == null) return 0;
-  if (typeof revalidate === 'number') return revalidate;
+  if (revalidate == null) {
+    return 0;
+  }
+  if (typeof revalidate === 'number') {
+    return revalidate;
+  }
   for (const [pattern, ttl] of Object.entries(revalidate)) {
-    if (matchPattern(pattern, pathname)) return ttl;
+    if (matchPattern(pattern, pathname)) {
+      return ttl;
+    }
   }
   return 0;
 }
@@ -234,7 +254,9 @@ export function normalizePageDataForJsonCache(raw: string): string | null {
 
 export function extractPageDataFromHtml(html: string): string | null {
   const match = html.match(PAGE_DATA_SCRIPT_RE);
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
   return normalizePageDataForJsonCache(match[2]);
 }
 
