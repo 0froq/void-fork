@@ -10,6 +10,19 @@
     "node": true
   },
   "plugins": ["typescript", "import", "react", "unicorn", "vitest", "node"],
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.void/**",
+    "**/.vite-cloud/**",
+    "**/.wrangler/**",
+    "**/.tanstack/**",
+    "**/.vitepress/cache/**",
+    "**/*.tsbuildinfo",
+    ".pnpm-store/**",
+    "playground-local/**",
+    ".worktrees/**"
+  ],
   "overrides": [
     {
       "files": ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"],
