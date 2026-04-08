@@ -1,4 +1,4 @@
-import type { InferSelectModel } from "drizzle-orm";
+import type { InferSelectModel } from 'drizzle-orm';
 import type {
   users,
   oauthAccounts,
@@ -9,9 +9,9 @@ import type {
   domains,
   platformEvents,
   invitations,
-} from "./schema";
+} from './schema';
 
-export type InvitationStatus = "pending" | "accepted" | "revoked";
+export type InvitationStatus = 'pending' | 'accepted' | 'revoked';
 
 export type User = InferSelectModel<typeof users>;
 export type OAuthAccount = InferSelectModel<typeof oauthAccounts>;
@@ -45,8 +45,8 @@ export interface QueueMeta {
 export const SUPPORTED_MANIFEST_VERSIONS = [3];
 
 export interface AssetConfig {
-  not_found_handling?: "none" | "single-page-application" | "404-page";
-  html_handling?: "auto-trailing-slash" | "force-trailing-slash" | "drop-trailing-slash" | "none";
+  not_found_handling?: 'none' | 'single-page-application' | '404-page';
+  html_handling?: 'auto-trailing-slash' | 'force-trailing-slash' | 'drop-trailing-slash' | 'none';
 }
 
 export interface WebSocketRouteMeta {
@@ -54,7 +54,7 @@ export interface WebSocketRouteMeta {
   filePath: string;
   className: string;
   bindingName?: string;
-  mode: "room" | "socket";
+  mode: 'room' | 'socket';
   hasAuthGate: boolean;
 }
 
@@ -81,14 +81,14 @@ export interface DeployManifest {
     hyperdrive?: string[];
   };
   migrations?: {
-    dialect: "sqlite" | "postgresql";
+    dialect: 'sqlite' | 'postgresql';
     pending: number;
   };
   schedules?: ScheduleMeta[];
   queues?: QueueMeta[];
   ssr?: boolean;
   framework?: string;
-  type?: "void" | "spa" | "static" | "framework";
+  type?: 'void' | 'spa' | 'static' | 'framework';
   revalidate?: number | Record<string, number>;
   prerender?: string[];
   assetConfig?: AssetConfig;
@@ -103,20 +103,20 @@ export interface DeployManifest {
 }
 
 export type DeployEvent =
-  | { event: "start"; deploymentId: string }
-  | { event: "asset_upload"; total: number; new: number; cached: number }
-  | { event: "asset_upload_done" }
-  | { event: "provisioning"; bindings: string[] }
-  | { event: "provisioning_done" }
-  | { event: "migration_start"; pending: number }
-  | { event: "migration"; name: string; durationMs: number }
-  | { event: "worker_upload"; modules: number }
-  | { event: "worker_upload_done" }
-  | { event: "queue_setup"; queues: string[] }
-  | { event: "prerender"; pages: number }
-  | { event: "prerender_done" }
+  | { event: 'start'; deploymentId: string }
+  | { event: 'asset_upload'; total: number; new: number; cached: number }
+  | { event: 'asset_upload_done' }
+  | { event: 'provisioning'; bindings: string[] }
+  | { event: 'provisioning_done' }
+  | { event: 'migration_start'; pending: number }
+  | { event: 'migration'; name: string; durationMs: number }
+  | { event: 'worker_upload'; modules: number }
+  | { event: 'worker_upload_done' }
+  | { event: 'queue_setup'; queues: string[] }
+  | { event: 'prerender'; pages: number }
+  | { event: 'prerender_done' }
   | {
-      event: "done";
+      event: 'done';
       deployment: string;
       url: string;
       urls: string[];
@@ -124,4 +124,4 @@ export type DeployEvent =
       workers: number;
       migrations?: number;
     }
-  | { event: "error"; message: string; step: string };
+  | { event: 'error'; message: string; step: string };

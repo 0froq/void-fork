@@ -70,7 +70,7 @@ Next.js-compatible props:
 Vite plugin `void:image-imports` transforms static imports:
 
 ```ts
-import hero from "./hero.jpg";
+import hero from './hero.jpg';
 // → { src: "/assets/hero-abc123.jpg", width: 1920, height: 1080 }
 ```
 

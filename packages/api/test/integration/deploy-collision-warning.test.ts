@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
-import app from "../../src/index";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import app from '../../src/index';
 import {
   setupEnv,
   teardownEnv,
@@ -9,7 +9,7 @@ import {
   createTestProjectSecret,
   mockCfApi,
   type TestEnv,
-} from "./helpers";
+} from './helpers';
 
 let env: TestEnv;
 
@@ -31,30 +31,30 @@ afterEach(() => {
 
 function buildDeployForm(manifest: object): FormData {
   const form = new FormData();
-  form.append("manifest", JSON.stringify(manifest));
+  form.append('manifest', JSON.stringify(manifest));
   form.append(
-    "worker:index.js",
+    'worker:index.js',
     new Blob(["export default { fetch() { return new Response('ok'); } }"]),
   );
   return form;
 }
 
-describe("manifest var / secret collision warning", () => {
-  it("logs warning when manifest vars collide with project secrets", async () => {
+describe('manifest var / secret collision warning', () => {
+  it('logs warning when manifest vars collide with project secrets', async () => {
     const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, "collision-app");
-    await createTestProjectSecret(env.db, env, project.id, "API_KEY", "secret-value");
+    const project = await createTestProject(env.db, user.id, 'collision-app');
+    await createTestProjectSecret(env.db, env, project.id, 'API_KEY', 'secret-value');
     mockCfApi();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: "POST",
+        method: 'POST',
         headers: { Authorization: `Bearer ${user.jwt}` },
         body: buildDeployForm({
           version: 3,
           bindings: {},
-          vars: { API_KEY: "from-manifest" },
+          vars: { API_KEY: 'from-manifest' },
         }),
       }),
       env,
@@ -64,8 +64,8 @@ describe("manifest var / secret collision warning", () => {
     await res.text();
 
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("manifest vars collide with project secrets"),
+      expect.stringContaining('manifest vars collide with project secrets'),
     );
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("API_KEY"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('API_KEY'));
   });
 });

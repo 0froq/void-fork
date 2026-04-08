@@ -1,4 +1,4 @@
-import { SITE_DOMAIN } from "./constants";
+import { SITE_DOMAIN } from './constants';
 
 /**
  * Extract the project slug from a hostname.
@@ -19,7 +19,7 @@ export function extractSlug(hostname: string, baseHostname: string = SITE_DOMAIN
   const slug = hostname.slice(0, -suffix.length);
 
   // Must be non-empty and contain no dots (no nested subdomains)
-  if (!slug || slug.includes(".")) {
+  if (!slug || slug.includes('.')) {
     return null;
   }
 

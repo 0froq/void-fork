@@ -147,7 +147,7 @@ Query for preflight:
 ```ts
 // Get the most recent live deployment's asset manifest
 const lastDeploy = await db.query.deployments.findFirst({
-  where: and(eq(deployments.project_id, projectId), eq(deployments.status, "live")),
+  where: and(eq(deployments.project_id, projectId), eq(deployments.status, 'live')),
   orderBy: desc(deployments.deployed_at),
   columns: { asset_hashes: true },
 });
@@ -163,10 +163,10 @@ Port the `computeAssetHash` function to the CLI (it's the same algorithm — SHA
 
 ```ts
 // In package.ts — compute hash as files are collected
-import { createHash } from "node:crypto";
+import { createHash } from 'node:crypto';
 
 function computeAssetHash(content: Buffer): string {
-  const hash = createHash("sha256").update(content).digest("hex");
+  const hash = createHash('sha256').update(content).digest('hex');
   return hash.slice(0, 32);
 }
 ```
@@ -211,17 +211,17 @@ The `packageBuild` / `packageStaticBuild` / `packageFrameworkBuild` functions ch
 
 ```ts
 // deploy.ts — new flow
-s.start("Hashing assets...");
+s.start('Hashing assets...');
 const { assetManifest, assetFiles } = collectAndHashAssets(clientDir);
 
-s.message("Checking for changes...");
+s.message('Checking for changes...');
 const { needed, skipped } = await client.preflight(config.projectId, assetManifest);
 
 if (skipped > 0) {
   log.info(`Skipping ${skipped} unchanged asset(s)`);
 }
 
-s.message("Packaging...");
+s.message('Packaging...');
 const formData = buildDeployFormData({
   manifest,
   workerDir,
@@ -229,9 +229,9 @@ const formData = buildDeployFormData({
   neededAssets: new Set(needed), // only include these in FormData
   migrations,
 });
-formData.append("preflight", "true"); // signal to API
+formData.append('preflight', 'true'); // signal to API
 
-s.message("Deploying...");
+s.message('Deploying...');
 const result = await client.deploy(config.projectId, formData);
 ```
 

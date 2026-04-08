@@ -274,17 +274,17 @@ Use a local Postgres via Docker or a PlanetScale dev branch:
 
 ```ts
 // test/integration/helpers.ts
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { Client } from "pg";
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { Client } from 'pg';
 
 const client = new Client({
-  connectionString: process.env.TEST_DATABASE_URL ?? "postgres://localhost:5432/vite_cloud_test",
+  connectionString: process.env.TEST_DATABASE_URL ?? 'postgres://localhost:5432/vite_cloud_test',
 });
 await client.connect();
 
 const db = drizzle(client, { schema });
-await migrate(db, { migrationsFolder: "drizzle" });
+await migrate(db, { migrationsFolder: 'drizzle' });
 ```
 
 Add to CI:
@@ -306,8 +306,8 @@ services:
 [PGlite](https://github.com/electric-sql/pglite) runs Postgres in-process via WASM. No Docker needed. Drizzle supports it via `drizzle-orm/pglite`:
 
 ```ts
-import { PGlite } from "@electric-sql/pglite";
-import { drizzle } from "drizzle-orm/pglite";
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
 
 const client = new PGlite();
 const db = drizzle(client, { schema });

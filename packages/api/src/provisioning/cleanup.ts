@@ -1,6 +1,13 @@
-import type { ApiEnv } from "../env";
-import type { Context } from "hono";
-import { getAllProjectDeployments, getProjectResources, getDomainsByProjectId } from "../db";
+import type { Context } from 'hono';
+import { DEFAULT_DISPATCH_NAMESPACE } from '../constants';
+import { getAllProjectDeployments, getProjectResources, getDomainsByProjectId } from '../db';
+import type { ApiEnv } from '../env';
+import {
+  getLegacyProjectWorkerName,
+  getProjectDeploymentWorkerName,
+  getProjectQueueName,
+} from '../naming';
+import type { Project } from '../types';
 import {
   deleteD1Database,
   deleteKVNamespace,
@@ -8,14 +15,7 @@ import {
   deleteQueue,
   deleteCustomHostname,
   deleteHyperdrive,
-} from "./cloudflare-api";
-import { DEFAULT_DISPATCH_NAMESPACE } from "../constants";
-import {
-  getLegacyProjectWorkerName,
-  getProjectDeploymentWorkerName,
-  getProjectQueueName,
-} from "../naming";
-import type { Project } from "../types";
+} from './cloudflare-api';
 
 /**
  * Run best-effort Cloudflare resource cleanup for a project.
@@ -25,7 +25,7 @@ import type { Project } from "../types";
 export async function cleanupProjectResources(
   c: Context<ApiEnv>,
   projectId: string,
-  project: Pick<Project, "slug">,
+  project: Pick<Project, 'slug'>,
 ): Promise<string[]> {
   const warnings: string[] = [];
   const warn = (msg: string) => (err: unknown) => {
@@ -33,9 +33,9 @@ export async function cleanupProjectResources(
   };
 
   const [projectDeployments, resources, projectDomains] = await Promise.all([
-    getAllProjectDeployments(c.get("db"), projectId),
-    getProjectResources(c.get("db"), projectId),
-    getDomainsByProjectId(c.get("db"), projectId),
+    getAllProjectDeployments(c.get('db'), projectId),
+    getProjectResources(c.get('db'), projectId),
+    getDomainsByProjectId(c.get('db'), projectId),
   ]);
 
   const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
@@ -51,7 +51,7 @@ export async function cleanupProjectResources(
     Array.from(workerNames, (workerName) =>
       fetch(
         `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`,
-        { method: "DELETE", headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` } },
+        { method: 'DELETE', headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` } },
       )
         .then(async (cfRes) => {
           if (!cfRes.ok && cfRes.status !== 404) {
@@ -67,13 +67,13 @@ export async function cleanupProjectResources(
   // CF resource cleanup (D1, KV, R2, Queue — user-provisioned resources)
   for (const resource of resources) {
     const del =
-      resource.type === "d1"
+      resource.type === 'd1'
         ? deleteD1Database(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
-        : resource.type === "kv"
+        : resource.type === 'kv'
           ? deleteKVNamespace(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
-          : resource.type === "r2"
+          : resource.type === 'r2'
             ? deleteR2Bucket(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
-            : resource.type === "hyperdrive"
+            : resource.type === 'hyperdrive'
               ? deleteHyperdrive(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
               : deleteQueue(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id);
     cleanup.push(del.catch(warn(`Failed to delete ${resource.type} resource ${resource.cf_id}`)));
@@ -86,21 +86,21 @@ export async function cleanupProjectResources(
         if (raw && JSON.parse(raw).hasCrons) {
           const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
           await c.env.CRON_SCHEDULER.get(cronId).fetch(
-            new Request("https://do/clear", { method: "POST" }),
+            new Request('https://do/clear', { method: 'POST' }),
           );
         }
       })
-      .catch(warn("Failed to clear cron scheduler")),
+      .catch(warn('Failed to clear cron scheduler')),
   );
 
   // KV routing entry
-  cleanup.push(c.env.ROUTING.delete(project.slug).catch(warn("Failed to delete routing entry")));
+  cleanup.push(c.env.ROUTING.delete(project.slug).catch(warn('Failed to delete routing entry')));
 
   // Queue routing KV entries
-  for (const q of resources.filter((r) => r.type === "queue")) {
+  for (const q of resources.filter((r) => r.type === 'queue')) {
     cleanup.push(
       c.env.ROUTING.delete(`queue:${getProjectQueueName(projectId, q.binding_name)}`).catch(
-        warn("Failed to delete queue routing entry"),
+        warn('Failed to delete queue routing entry'),
       ),
     );
   }
@@ -114,7 +114,7 @@ export async function cleanupProjectResources(
     );
     cleanup.push(
       c.env.ROUTING.delete(`domain:${domain.hostname}`).catch(
-        warn("Failed to delete domain routing entry"),
+        warn('Failed to delete domain routing entry'),
       ),
     );
   }

@@ -19,9 +19,9 @@ The package is opt-in — users who don't install it pay nothing.
 
 ```ts
 // vite.config.ts
-import { voidPlugin } from "void";
-import { voidVue } from "@void/vue/plugin";
-import { voidMarkdown } from "@void/md/plugin";
+import { voidPlugin } from 'void';
+import { voidVue } from '@void/vue/plugin';
+import { voidMarkdown } from '@void/md/plugin';
 
 export default defineConfig({
   plugins: [voidPlugin(), voidVue(), voidMarkdown()],
@@ -77,7 +77,7 @@ And a playground that hydrates when idle:
 ### Frontmatter access
 
 ```ts
-import { useFrontmatter } from "@void/md";
+import { useFrontmatter } from '@void/md';
 
 const fm = useFrontmatter();
 // fm.title, fm.description, etc.
@@ -88,7 +88,7 @@ Returns the current page's parsed frontmatter object. Used by layout components 
 ### Pages virtual module
 
 ```ts
-import pages from "@void/md/pages";
+import pages from '@void/md/pages';
 // [{ path: "/docs/getting-started", title: "Getting Started", frontmatter: {...}, headings: [...] }, ...]
 ```
 
@@ -99,17 +99,17 @@ Generated at build time by scanning all `.md` pages. Provides path, title (from 
 ```vue
 <!-- pages/docs/layout.island.vue -->
 <script setup>
-import { useFrontmatter } from "@void/md";
-import pages from "@void/md/pages";
-import { useRouter } from "@void/vue";
+import { useFrontmatter } from '@void/md';
+import pages from '@void/md/pages';
+import { useRouter } from '@void/vue';
 
 const fm = useFrontmatter();
 const { path } = useRouter();
-const docPages = pages.filter((p) => p.path.startsWith("/docs/"));
+const docPages = pages.filter((p) => p.path.startsWith('/docs/'));
 </script>
 
 <style>
-@import "@void/md/theme.css";
+@import '@void/md/theme.css';
 </style>
 
 <template>
@@ -139,7 +139,7 @@ const docPages = pages.filter((p) => p.path.startsWith("/docs/"));
 The `.void-md` scoping class keeps styles from bleeding into non-markdown pages. Import the theme stylesheet:
 
 ```css
-@import "@void/md/theme.css";
+@import '@void/md/theme.css';
 ```
 
 The `.void-md` scoping class keeps styles from bleeding into non-markdown pages. The theme covers:

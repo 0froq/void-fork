@@ -1,7 +1,7 @@
-import { Layout } from "./layout";
-import { formatDateTime, STATUS_COLORS } from "./format";
-import type { PlatformEvent } from "../../types";
-import { PLATFORM_WORKERS, type PlatformEnv } from "../platform-workers";
+import type { PlatformEvent } from '../../types';
+import { PLATFORM_WORKERS, type PlatformEnv } from '../platform-workers';
+import { formatDateTime, STATUS_COLORS } from './format';
+import { Layout } from './layout';
 
 export function PlatformRollbackResultPage({
   events,
@@ -16,22 +16,22 @@ export function PlatformRollbackResultPage({
   username: string;
   tz?: string;
 }) {
-  const allSuccess = events.every((e) => e.status === "success");
-  const anyFailed = events.some((e) => e.status === "failed");
+  const allSuccess = events.every((e) => e.status === 'success');
+  const anyFailed = events.some((e) => e.status === 'failed');
 
   return (
     <Layout title="Rollback Results" username={username}>
       <p style="margin-bottom: 16px">
-        <a href={"/admin/platform"}>&larr; Back to Platform</a>
+        <a href={'/admin/platform'}>&larr; Back to Platform</a>
       </p>
 
       <h1>Batch Rollback Results</h1>
 
       <p style="margin-bottom: 8px; font-size: 0.85rem">
-        Batch ID:{" "}
+        Batch ID:{' '}
         <span class="copy-btn" data-copy={batchId} style="cursor: pointer">
           {batchId}
-        </span>{" "}
+        </span>{' '}
         | Environment: <strong>{env}</strong>
         {events[0] && <> | Admin: {events[0].admin_login}</>}
         {events[0] && <> | {formatDateTime(events[0].created_at, tz)}</>}
@@ -83,11 +83,11 @@ export function PlatformRollbackResultPage({
                   </span>
                 </td>
                 <td>
-                  <span style={`color: ${STATUS_COLORS[event.status] ?? "#000"}; font-weight: 600`}>
+                  <span style={`color: ${STATUS_COLORS[event.status] ?? '#000'}; font-weight: 600`}>
                     {event.status}
                   </span>
                 </td>
-                <td style="font-size: 0.75rem; color: #dc2626">{event.error_message ?? "—"}</td>
+                <td style="font-size: 0.75rem; color: #dc2626">{event.error_message ?? '—'}</td>
               </tr>
             ))}
         </tbody>

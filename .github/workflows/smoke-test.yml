@@ -2,7 +2,7 @@ name: Smoke Test
 
 on:
   schedule:
-    - cron: "0 0 * * *" # daily at 8am SGT (midnight UTC)
+    - cron: '0 0 * * *' # daily at 8am SGT (midnight UTC)
   workflow_dispatch:
   workflow_call:
     secrets:
@@ -45,7 +45,7 @@ jobs:
         run: npx void deploy --project kitchen-sink
         env:
           VOID_TOKEN: ${{ secrets.VOID_TOKEN_STAGING }}
-          STAGING: "1"
+          STAGING: '1'
 
       # Install Chromium for Playwright
       - run: npx playwright install chromium

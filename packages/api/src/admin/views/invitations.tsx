@@ -1,19 +1,19 @@
-import type { Invitation } from "../../types";
-import { Layout } from "./layout";
-import { Pagination } from "./pagination";
+import type { Invitation } from '../../types';
+import { Layout } from './layout';
+import { Pagination } from './pagination';
 
 type InvitationRow = Invitation & {
   invited_by_login: string | null;
   revoked_by_login: string | null;
 };
 
-function StatusBadge({ status }: { status: Invitation["status"] }) {
+function StatusBadge({ status }: { status: Invitation['status'] }) {
   const colors: Record<string, string> = {
-    pending: "orange",
-    accepted: "green",
-    revoked: "red",
+    pending: 'orange',
+    accepted: 'green',
+    revoked: 'red',
   };
-  return <strong style={`color: ${colors[status] ?? "inherit"}`}>{status}</strong>;
+  return <strong style={`color: ${colors[status] ?? 'inherit'}`}>{status}</strong>;
 }
 
 export function InvitationsPage({
@@ -66,15 +66,15 @@ export function InvitationsPage({
                 <StatusBadge status={inv.status} />
               </td>
               <td>{inv.invited_by_login ?? inv.invited_by}</td>
-              <td>{inv.created_at ? new Date(inv.created_at).toLocaleDateString() : "-"}</td>
-              <td>{inv.accepted_at ? new Date(inv.accepted_at).toLocaleDateString() : "-"}</td>
+              <td>{inv.created_at ? new Date(inv.created_at).toLocaleDateString() : '-'}</td>
+              <td>{inv.accepted_at ? new Date(inv.accepted_at).toLocaleDateString() : '-'}</td>
               <td>
                 {inv.revoked_at
-                  ? `${new Date(inv.revoked_at).toLocaleDateString()} by ${inv.revoked_by_login ?? inv.revoked_by ?? "?"}`
-                  : "-"}
+                  ? `${new Date(inv.revoked_at).toLocaleDateString()} by ${inv.revoked_by_login ?? inv.revoked_by ?? '?'}`
+                  : '-'}
               </td>
               <td>
-                {inv.status === "pending" && (
+                {inv.status === 'pending' && (
                   <form method="post" action="/admin/invitations/revoke" style="display:inline">
                     <input type="hidden" name="id" value={inv.id} />
                     <button type="submit" class="danger-sm">

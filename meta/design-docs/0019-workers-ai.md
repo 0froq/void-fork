@@ -20,20 +20,20 @@ The solution: user workers never receive the `AI` binding directly. All inferenc
 ### Server — `void/ai`
 
 ```ts
-import { ai } from "void/ai";
+import { ai } from 'void/ai';
 
 // Text generation
-const result = await ai.run("@cf/meta/llama-3.1-8b-instruct", {
-  messages: [{ role: "user", content: "Hello" }],
+const result = await ai.run('@cf/meta/llama-3.1-8b-instruct', {
+  messages: [{ role: 'user', content: 'Hello' }],
 });
 
 // Embeddings
-const embeddings = await ai.run("@cf/baai/bge-base-en-v1.5", {
-  text: ["search query"],
+const embeddings = await ai.run('@cf/baai/bge-base-en-v1.5', {
+  text: ['search query'],
 });
 
 // Document conversion
-const md = await ai.toMarkdown({ name: "doc.pdf", blob });
+const md = await ai.toMarkdown({ name: 'doc.pdf', blob });
 
 // List models
 const models = await ai.models();
@@ -64,8 +64,8 @@ With the helper:
 
 ```ts
 export const POST = defineHandler(async (c) => {
-  const { messages } = c.req.valid("json");
-  return ai.stream("@cf/meta/llama-3.1-8b-instruct", { messages });
+  const { messages } = c.req.valid('json');
+  return ai.stream('@cf/meta/llama-3.1-8b-instruct', { messages });
 });
 ```
 
@@ -91,11 +91,11 @@ Note: in production, `c.env.AI` is not the raw Cloudflare binding — it's the p
 General-purpose SSE stream consumer for the typed fetch client. Not AI-specific — works with any route that returns SSE.
 
 ```ts
-import { fetchStream } from "void/client";
+import { fetchStream } from 'void/client';
 
-const stream = fetchStream("/api/ai/chat", {
-  method: "POST",
-  body: { messages: [{ role: "user", content: "Hello" }] },
+const stream = fetchStream('/api/ai/chat', {
+  method: 'POST',
+  body: { messages: [{ role: 'user', content: 'Hello' }] },
 });
 
 for await (const chunk of stream) {
@@ -111,25 +111,25 @@ for await (const chunk of stream) {
 Server route (`routes/ai/chat.ts`):
 
 ```ts
-import { ai } from "void/ai";
-import { defineHandler } from "void";
-import * as v from "valibot";
+import { ai } from 'void/ai';
+import { defineHandler } from 'void';
+import * as v from 'valibot';
 
 export const POST = defineHandler
   .withValidator({
     body: v.object({
       messages: v.array(
         v.object({
-          role: v.picklist(["user", "assistant", "system"]),
+          role: v.picklist(['user', 'assistant', 'system']),
           content: v.string(),
         }),
       ),
     }),
   })
   .handler(async (c) => {
-    const { messages } = c.req.valid("json");
-    return ai.stream("@cf/meta/llama-3.1-8b-instruct", {
-      messages: [{ role: "system", content: "You are a helpful assistant." }, ...messages],
+    const { messages } = c.req.valid('json');
+    return ai.stream('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [{ role: 'system', content: 'You are a helpful assistant.' }, ...messages],
     });
   });
 ```
@@ -137,17 +137,17 @@ export const POST = defineHandler
 Client (`src/components/Chat.tsx`):
 
 ```tsx
-import { fetchStream } from "void/client";
-import { useState } from "react";
+import { fetchStream } from 'void/client';
+import { useState } from 'react';
 
 function Chat() {
-  const [output, setOutput] = useState("");
+  const [output, setOutput] = useState('');
 
   async function send(message: string) {
-    setOutput("");
-    const stream = fetchStream("/api/ai/chat", {
-      method: "POST",
-      body: { messages: [{ role: "user", content: message }] },
+    setOutput('');
+    const stream = fetchStream('/api/ai/chat', {
+      method: 'POST',
+      body: { messages: [{ role: 'user', content: message }] },
     });
     for await (const chunk of stream) {
       setOutput((prev) => prev + chunk);
@@ -291,17 +291,17 @@ The `void/ai` runtime module detects the environment and routes accordingly:
 ```ts
 function resolveBackend(): AiBackend {
   const proxy = (env as any).__AI_PROXY;
-  if (proxy) return { type: "service-binding", proxy };
+  if (proxy) return { type: 'service-binding', proxy };
 
   const directAi = (env as any).AI;
-  if (directAi) return { type: "direct", ai: directAi };
+  if (directAi) return { type: 'direct', ai: directAi };
 
   const token = (env as any).__VOID_TOKEN;
   const projectId = (env as any).__VOID_PROJECT_ID;
-  if (token) return { type: "http", token, projectId };
+  if (token) return { type: 'http', token, projectId };
 
   throw new Error(
-    "AI not available. Run `void auth login` and link a project with `void projects link`.",
+    'AI not available. Run `void auth login` and link a project with `void projects link`.',
   );
 }
 ```
@@ -377,13 +377,13 @@ When `manifest.bindings.ai` is true, the platform adds two bindings to the user 
 ```ts
 if (manifest.bindings.ai) {
   workerBindings.push({
-    type: "service",
-    name: "__AI_PROXY",
-    service: "void-ai-proxy",
+    type: 'service',
+    name: '__AI_PROXY',
+    service: 'void-ai-proxy',
   });
   workerBindings.push({
-    type: "plain_text",
-    name: "__PROJECT_ID",
+    type: 'plain_text',
+    name: '__PROJECT_ID',
     text: projectId,
   });
 }

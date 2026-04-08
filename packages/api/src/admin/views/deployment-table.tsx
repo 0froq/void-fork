@@ -1,27 +1,27 @@
-import type { Deployment } from "../../types";
-import { formatDateTime } from "./format";
+import type { Deployment } from '../../types';
+import { formatDateTime } from './format';
 
 export function displayStatus(
   d: Deployment,
   activeDeploymentId: string | null | undefined,
 ): string {
-  if (d.status === "failed") return "failed";
-  if (d.status !== "live") return d.status;
-  if (d.id === activeDeploymentId) return "live";
-  if (d.retained) return "retained";
-  return "evicted";
+  if (d.status === 'failed') return 'failed';
+  if (d.status !== 'live') return d.status;
+  if (d.id === activeDeploymentId) return 'live';
+  if (d.retained) return 'retained';
+  return 'evicted';
 }
 
 function statusColor(status: string): string | undefined {
   switch (status) {
-    case "live":
-      return "color: #16a34a; font-weight: 600";
-    case "retained":
-      return "color: #16a34a";
-    case "evicted":
-      return "color: #888";
-    case "failed":
-      return "color: #dc2626";
+    case 'live':
+      return 'color: #16a34a; font-weight: 600';
+    case 'retained':
+      return 'color: #16a34a';
+    case 'evicted':
+      return 'color: #888';
+    case 'failed':
+      return 'color: #dc2626';
     default:
       return undefined;
   }
@@ -75,13 +75,13 @@ export function DeploymentTable({
                   {d.project_slug ? (
                     <a href={`/admin/projects/${d.project_id}`}>{d.project_slug}</a>
                   ) : (
-                    "-"
+                    '-'
                   )}
                 </td>
               )}
               <td style={statusColor(status)}>{status}</td>
-              <td>{d.source ?? "-"}</td>
-              <td>{d.commit ? d.commit.slice(0, 7) : "-"}</td>
+              <td>{d.source ?? '-'}</td>
+              <td>{d.commit ? d.commit.slice(0, 7) : '-'}</td>
               <td>
                 {d.error_message ? (
                   <>
@@ -99,7 +99,7 @@ export function DeploymentTable({
                     </button>
                   </>
                 ) : (
-                  "-"
+                  '-'
                 )}
               </td>
               <td>{formatDateTime(d.created_at, tz)}</td>

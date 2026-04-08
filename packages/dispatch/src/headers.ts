@@ -14,7 +14,7 @@ export interface HeaderRule {
  * denylist can be removed entirely — browsers will reject cross-subdomain
  * cookies automatically. Until then, this is the primary defense.
  */
-const BLOCKED_HEADERS = new Set(["set-cookie"]);
+const BLOCKED_HEADERS = new Set(['set-cookie']);
 
 const MAX_CACHE = 256;
 const regexCache = new Map<string, RegExp>();
@@ -30,7 +30,7 @@ export function matchPattern(pattern: string, pathname: string): boolean {
     regexCache.delete(pattern);
     regexCache.set(pattern, regex);
   } else {
-    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*");
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*');
     regex = new RegExp(`^${escaped}$`);
     if (regexCache.size >= MAX_CACHE) {
       regexCache.delete(regexCache.keys().next().value!);

@@ -44,7 +44,7 @@ Pages select layouts by exporting a `layout` constant. This works across all fra
 
 ```vue
 <script setup>
-export const layout = "home";
+export const layout = 'home';
 </script>
 ```
 
@@ -127,7 +127,7 @@ pages/
 ```vue
 <!-- pages/dashboard/settings.vue -->
 <script setup>
-export const layout = "dashboard";
+export const layout = 'dashboard';
 </script>
 
 <template>
@@ -254,9 +254,9 @@ Named layout components are added to the `components` map:
 ```typescript
 const components = {
   // ... existing pages and layouts ...
-  "_layouts/home": () => import("./pages/_layouts/home.vue"),
-  "_layouts/post": () => import("./pages/_layouts/post.vue"),
-  "guide/_layouts/api": () => import("./pages/guide/_layouts/api.vue"),
+  '_layouts/home': () => import('./pages/_layouts/home.vue'),
+  '_layouts/post': () => import('./pages/_layouts/post.vue'),
+  'guide/_layouts/api': () => import('./pages/guide/_layouts/api.vue'),
 };
 ```
 
@@ -264,10 +264,10 @@ The `layoutTree` remains a static map, computed at scan time per page based on t
 
 ```typescript
 const layoutTree = {
-  index: ["_layouts/home"], // layout: !home
-  "guide/getting-started": ["layout", "guide/layout"], // no layout field
-  "guide/reference": ["layout", "guide/_layouts/api"], // layout: api
-  "blog/hello": ["layout", "_layouts/post"], // layout: post
+  index: ['_layouts/home'], // layout: !home
+  'guide/getting-started': ['layout', 'guide/layout'], // no layout field
+  'guide/reference': ['layout', 'guide/_layouts/api'], // layout: api
+  'blog/hello': ['layout', '_layouts/post'], // layout: post
 };
 ```
 

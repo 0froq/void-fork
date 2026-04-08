@@ -27,9 +27,9 @@ export const action = defineHandler(async (c) => {
     id?: number;
   }>();
 
-  if (body.intent === "create-user") {
+  if (body.intent === 'create-user') {
     /* ... */
-  } else if (body.intent === "delete-user") {
+  } else if (body.intent === 'delete-user') {
     /* ... */
   }
 });
@@ -45,10 +45,10 @@ Pages export an `actions` object (plural) instead of a single `action`:
 
 ```ts
 // pages/users/edit.server.ts
-import { defineHandler } from "void";
-import { db } from "void/db";
-import { users, updateUserSchema } from "@schema";
-import { z } from "zod";
+import { defineHandler } from 'void';
+import { db } from 'void/db';
+import { users, updateUserSchema } from '@schema';
+import { z } from 'zod';
 
 export const actions = {
   update: defineHandler.withValidator({
@@ -57,7 +57,7 @@ export const actions = {
     await db
       .update(users)
       .set(body)
-      .where(eq(users.id, c.req.param("id")));
+      .where(eq(users.id, c.req.param('id')));
   }),
 
   delete: defineHandler.withValidator({
@@ -88,18 +88,18 @@ Named actions (and single actions) are consumed through three primitives, each s
 
 ```ts
 // 1. useForm — form state, errors, dirty tracking + Inertia page update
-import { useForm } from "@void/vue";
-const form = useForm("/users/:id?update", { name: "", email: "" }, { params: { id } });
+import { useForm } from '@void/vue';
+const form = useForm('/users/:id?update', { name: '', email: '' }, { params: { id } });
 form.errors.email; // typed from updateUserSchema
 form.put();
 
 // 2. action() — one-shot programmatic call + Inertia page update
-import { action } from "@void/vue";
-await action("/users/:id?delete", { id: "42" });
+import { action } from '@void/vue';
+await action('/users/:id?delete', { id: '42' });
 
 // 3. fetch — raw HTTP, no Inertia, framework-agnostic
-import { fetch } from "void/client";
-await fetch("/users/:id?delete", { method: "POST", body: { id: "42" } });
+import { fetch } from 'void/client';
+await fetch('/users/:id?delete', { method: 'POST', body: { id: '42' } });
 ```
 
 | Primitive  | Inertia page update | Form state                 | Framework-specific |
@@ -123,9 +123,9 @@ The codegen does **not** parse source files for action keys. It references the `
 ```ts
 // Generated .void/routes.d.ts
 interface PageActionMap {
-  "/users/:id": {
+  '/users/:id': {
     body: ExtractInput<
-      (typeof import("./pages/users/[id].server"))["action"]["__validators"]
+      (typeof import('./pages/users/[id].server'))['action']['__validators']
     > extends { body: infer B }
       ? B
       : Record<string, unknown>;
@@ -138,8 +138,8 @@ interface PageActionMap {
 
 ```ts
 interface PageActionMap {
-  "/users/:id": {
-    actions: (typeof import("./pages/users/[id].server"))["actions"];
+  '/users/:id': {
+    actions: (typeof import('./pages/users/[id].server'))['actions'];
     params: { id: string };
   };
 }
@@ -152,10 +152,10 @@ type ParseAction<U> = U extends `${infer Base}?${infer Action}`
   ? { base: Base; action: Action }
   : { base: U; action: never };
 
-type FormBody<U> = ParseAction<U>["action"] extends never
-  ? PageActionMap[ParseAction<U>["base"]]["body"] // single action
+type FormBody<U> = ParseAction<U>['action'] extends never
+  ? PageActionMap[ParseAction<U>['base']]['body'] // single action
   : ExtractInput<
-        PageActionMap[ParseAction<U>["base"]]["actions"][ParseAction<U>["action"]]["__validators"]
+        PageActionMap[ParseAction<U>['base']]['actions'][ParseAction<U>['action']]['__validators']
       > extends { body: infer B }
     ? B
     : Record<string, unknown>; // named action
@@ -175,7 +175,7 @@ export async function action<U extends keyof PageActionMap & string>(
   options?: ActionOptions<U>,
 ): Promise<void> {
   const resolvedUrl = resolveParams(url, options?.params);
-  await router.visit(resolvedUrl, { method: "POST", data });
+  await router.visit(resolvedUrl, { method: 'POST', data });
 }
 ```
 

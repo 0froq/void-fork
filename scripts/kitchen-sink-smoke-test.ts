@@ -9,11 +9,11 @@
  *   SMOKE_URL=https://kitchen-sink.void.app node scripts/kitchen-sink-smoke-test.ts  # production
  */
 
-import { describe, it, before, after } from "node:test";
-import assert from "node:assert/strict";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import assert from 'node:assert/strict';
+import { describe, it, before, after } from 'node:test';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 
-const BASE = (process.env.SMOKE_URL || "https://kitchen-sink.staging.void.app").replace(/\/$/, "");
+const BASE = (process.env.SMOKE_URL || 'https://kitchen-sink.staging.void.app').replace(/\/$/, '');
 const TIMEOUT = 15_000;
 const uid = Date.now().toString(36);
 
@@ -28,7 +28,7 @@ async function waitForHydration(p: Page) {
 }
 
 async function goto(p: Page, path: string) {
-  await p.goto(`${BASE}${path}`, { waitUntil: "domcontentloaded" });
+  await p.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' });
   await waitForHydration(p);
 }
 
@@ -37,7 +37,7 @@ async function pollForText(p: Page, path: string, text: string, timeoutMs = 30_0
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     await goto(p, path);
-    const body = await p.textContent("body");
+    const body = await p.textContent('body');
     if (body?.includes(text)) return;
     await p.waitForTimeout(2_000);
   }
@@ -61,9 +61,9 @@ async function waitForText(p: Page, text: string, timeoutMs = TIMEOUT) {
 /** Click the Delete button in the table row containing `needle`. */
 async function deleteRowContaining(p: Page, needle: string) {
   await p.evaluate((n) => {
-    const row = Array.from(document.querySelectorAll("tr")).find((r) => r.textContent?.includes(n));
+    const row = Array.from(document.querySelectorAll('tr')).find((r) => r.textContent?.includes(n));
     if (!row) throw new Error(`Row containing "${n}" not found`);
-    const btn = row.querySelector("button");
+    const btn = row.querySelector('button');
     if (!btn) throw new Error(`No button in row containing "${n}"`);
     btn.click();
   }, needle);
@@ -78,7 +78,7 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
     browser = await chromium.launch();
 
     // Reset all app state for a clean slate
-    const res = await fetch(`${BASE}/api/reset`, { method: "POST" });
+    const res = await fetch(`${BASE}/api/reset`, { method: 'POST' });
     if (!res.ok) {
       console.warn(`  ⚠ Reset endpoint returned ${res.status} — tests may see stale data`);
     }
@@ -98,30 +98,30 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 1. Home SSR + asset caching
   // -----------------------------------------------------------------------
-  void it("1 — home SSR + asset caching", async () => {
+  void it('1 — home SSR + asset caching', async () => {
     const { ctx, page: p } = await freshPage();
     try {
-      await goto(p, "/");
+      await goto(p, '/');
 
-      const body = await p.textContent("body");
-      assert.ok(body?.includes("Kitchen Sink"), "page contains 'Kitchen Sink'");
-      assert.ok(body?.includes("Auth"), "page contains 'Auth'");
+      const body = await p.textContent('body');
+      assert.ok(body?.includes('Kitchen Sink'), "page contains 'Kitchen Sink'");
+      assert.ok(body?.includes('Auth'), "page contains 'Auth'");
 
       // Find a hashed asset URL in the HTML source (hashes are base64url-like, e.g. DOjtQvIZ)
       const html = await p.content();
       const assetMatch = html.match(/\/(assets\/[^"']+[-._][A-Za-z0-9_-]{6,}\.(js|css))/);
-      assert.ok(assetMatch, "found hashed asset URL in HTML");
+      assert.ok(assetMatch, 'found hashed asset URL in HTML');
 
       const assetUrl = `${BASE}/${assetMatch![1]}`;
 
       // Use in-browser fetch (not curl) — CF edge cache rules differ for browser vs non-browser
       const cacheControl = await p.evaluate(async (url) => {
-        const res = await fetch(url, { method: "HEAD" });
-        return res.headers.get("cache-control") || "";
+        const res = await fetch(url, { method: 'HEAD' });
+        return res.headers.get('cache-control') || '';
       }, assetUrl);
 
       assert.ok(
-        cacheControl.includes("immutable"),
+        cacheControl.includes('immutable'),
         `Cache-Control includes immutable (got: ${cacheControl})`,
       );
     } finally {
@@ -132,10 +132,10 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 2. SPA navigation (no full reload)
   // -----------------------------------------------------------------------
-  void it("2 — SPA navigation", async () => {
+  void it('2 — SPA navigation', async () => {
     const { ctx, page: p } = await freshPage();
     try {
-      await goto(p, "/");
+      await goto(p, '/');
 
       // Set a marker on window — survives SPA nav, lost on full reload
       await p.evaluate(() => {
@@ -144,21 +144,21 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
 
       // Click "DB" link
       await p.click('a[href="/db"]');
-      await p.waitForFunction(() => document.querySelector("h1")?.textContent?.includes("DB"), {
+      await p.waitForFunction(() => document.querySelector('h1')?.textContent?.includes('DB'), {
         timeout: TIMEOUT,
       });
-      assert.ok(p.url().endsWith("/db"), `URL is /db (got: ${p.url()})`);
+      assert.ok(p.url().endsWith('/db'), `URL is /db (got: ${p.url()})`);
 
       // Marker must still be present (no full reload)
       const marker = await p.evaluate(() => (window as any).__SPA_MARKER);
-      assert.strictEqual(marker, true, "SPA marker survived navigation");
+      assert.strictEqual(marker, true, 'SPA marker survived navigation');
 
       // Click "KV" link
       await p.click('a[href="/kv"]');
-      await p.waitForFunction(() => document.querySelector("h1")?.textContent?.includes("KV"), {
+      await p.waitForFunction(() => document.querySelector('h1')?.textContent?.includes('KV'), {
         timeout: TIMEOUT,
       });
-      assert.ok(p.url().endsWith("/kv"), `URL is /kv (got: ${p.url()})`);
+      assert.ok(p.url().endsWith('/kv'), `URL is /kv (got: ${p.url()})`);
     } finally {
       await ctx.close();
     }
@@ -167,25 +167,25 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 3. Layout persistence across navigation
   // -----------------------------------------------------------------------
-  void it("3 — layout persistence", async () => {
+  void it('3 — layout persistence', async () => {
     const { ctx, page: p } = await freshPage();
     try {
-      await goto(p, "/");
+      await goto(p, '/');
 
       // Stamp the nav element
       await p.evaluate(() => {
-        (document.querySelector("nav") as any).__stamp = 1;
+        (document.querySelector('nav') as any).__stamp = 1;
       });
 
       // Navigate to /env
       await p.click('a[href="/env"]');
-      await p.waitForFunction(() => document.querySelector("h1")?.textContent?.includes("Env"), {
+      await p.waitForFunction(() => document.querySelector('h1')?.textContent?.includes('Env'), {
         timeout: TIMEOUT,
       });
 
       // Nav stamp must survive (layout DOM not recreated)
-      const stamp = await p.evaluate(() => (document.querySelector("nav") as any).__stamp);
-      assert.strictEqual(stamp, 1, "nav stamp survived navigation");
+      const stamp = await p.evaluate(() => (document.querySelector('nav') as any).__stamp);
+      assert.strictEqual(stamp, 1, 'nav stamp survived navigation');
     } finally {
       await ctx.close();
     }
@@ -194,22 +194,22 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 4. DB — create and delete a note
   // -----------------------------------------------------------------------
-  void it("4 — DB CRUD", async () => {
+  void it('4 — DB CRUD', async () => {
     const { ctx, page: p } = await freshPage();
     try {
       const title = `smoke-${uid}`;
 
-      await goto(p, "/db");
+      await goto(p, '/db');
 
       // Fill form
       await p.fill('input[placeholder="Note title"]', title);
-      await p.fill('input[placeholder="Note body"]', "test body");
+      await p.fill('input[placeholder="Note body"]', 'test body');
       await p.click('button:has-text("Add Note")');
 
       // Wait for the note to appear
       await waitForText(p, title);
-      const body = await p.textContent("body");
-      assert.ok(body?.includes("test body"), "page contains note body");
+      const body = await p.textContent('body');
+      assert.ok(body?.includes('test body'), 'page contains note body');
 
       // Delete it
       try {
@@ -226,34 +226,34 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 5. KV — set and delete a key
   // -----------------------------------------------------------------------
-  void it("5 — KV set/lookup/delete", async () => {
+  void it('5 — KV set/lookup/delete', async () => {
     const { ctx, page: p } = await freshPage();
     try {
       const key = `smoke-kv-${uid}`;
 
-      await goto(p, "/kv");
+      await goto(p, '/kv');
 
       // Set key — wait for the POST response before navigating away,
       // otherwise the navigation cancels the in-flight form submission
       await p.fill('input[placeholder="my-key"]', key);
-      await p.fill('input[placeholder="my-value"]', "hello");
+      await p.fill('input[placeholder="my-value"]', 'hello');
       await Promise.all([
-        p.waitForResponse((r) => r.url().includes("/kv") && r.request().method() === "POST"),
+        p.waitForResponse((r) => r.url().includes('/kv') && r.request().method() === 'POST'),
         p.click('button:has-text("Set")'),
       ]);
 
       // Lookup the key we just set (kv.get is strongly consistent)
       await goto(p, `/kv?lookup=${encodeURIComponent(key)}`);
-      const body = await p.textContent("body");
-      assert.ok(body?.includes("hello"), "lookup shows value");
+      const body = await p.textContent('body');
+      assert.ok(body?.includes('hello'), 'lookup shows value');
 
       // Cleanup: delete via JSON POST (same as useForm.post())
       await p.evaluate(
         (k) =>
-          fetch("/kv", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ intent: "delete", key: k }),
+          fetch('/kv', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ intent: 'delete', key: k }),
           }),
         key,
       );
@@ -265,29 +265,29 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 6. Storage — upload and delete a file
   // -----------------------------------------------------------------------
-  void it("6 — Storage upload/delete", async () => {
+  void it('6 — Storage upload/delete', async () => {
     const { ctx, page: p } = await freshPage();
     try {
-      await goto(p, "/storage");
+      await goto(p, '/storage');
 
       // Use fileChooser API to upload a file
       const [fileChooser] = await Promise.all([
-        p.waitForEvent("filechooser"),
+        p.waitForEvent('filechooser'),
         p.click('input[type="file"]'),
       ]);
       await fileChooser.setFiles({
-        name: "smoke-test.txt",
-        mimeType: "text/plain",
-        buffer: Buffer.from("hello world"),
+        name: 'smoke-test.txt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from('hello world'),
       });
 
       await p.click('button:has-text("Upload")');
-      await waitForText(p, "smoke-test.txt");
+      await waitForText(p, 'smoke-test.txt');
 
       // Delete
       try {
-        await deleteRowContaining(p, "smoke-test.txt");
-        await waitForTextGone(p, "smoke-test.txt");
+        await deleteRowContaining(p, 'smoke-test.txt');
+        await waitForTextGone(p, 'smoke-test.txt');
       } catch {
         // Cleanup on best-effort basis
       }
@@ -299,14 +299,14 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 7. Env — displays bindings
   // -----------------------------------------------------------------------
-  void it("7 — Env bindings", async () => {
+  void it('7 — Env bindings', async () => {
     const { ctx, page: p } = await freshPage();
     try {
-      await goto(p, "/env");
+      await goto(p, '/env');
 
-      const body = await p.textContent("body");
-      assert.ok(body?.includes("DB"), "page lists DB binding");
-      assert.ok(body?.includes("KV"), "page lists KV binding");
+      const body = await p.textContent('body');
+      assert.ok(body?.includes('DB'), 'page lists DB binding');
+      assert.ok(body?.includes('KV'), 'page lists KV binding');
     } finally {
       await ctx.close();
     }
@@ -315,18 +315,18 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 8. Queues — send message and see consumer result
   // -----------------------------------------------------------------------
-  void it("8 — Queues", async () => {
+  void it('8 — Queues', async () => {
     const { ctx, page: p } = await freshPage();
     try {
       const key = `smoke-q-${uid}`;
 
-      await goto(p, "/queues");
+      await goto(p, '/queues');
 
       // Send message — wait for the POST response to confirm the queue write completed
       await p.fill('input[placeholder="my-key"]', key);
-      await p.fill('input[placeholder="my-value"]', "queued");
+      await p.fill('input[placeholder="my-value"]', 'queued');
       await Promise.all([
-        p.waitForResponse((r) => r.url().includes("/queues") && r.request().method() === "POST"),
+        p.waitForResponse((r) => r.url().includes('/queues') && r.request().method() === 'POST'),
         p.click('button:has-text("Send to Queue")'),
       ]);
 
@@ -334,7 +334,7 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
       // infrastructure, not our code. Soft-pass on timeout (like cron test)
       // since we've already verified the queue binding and send work.
       try {
-        await pollForText(p, "/queues", key, 60_000);
+        await pollForText(p, '/queues', key, 60_000);
 
         // Cleanup
         try {
@@ -356,16 +356,16 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 9. Auth — register, login, protected route, logout
   // -----------------------------------------------------------------------
-  void it("9 — Auth flow", async () => {
+  void it('9 — Auth flow', async () => {
     const { ctx, page: p } = await freshPage();
     try {
       const email = `smoke-${uid}@example.com`;
-      const password = "s3cureP@ss!";
+      const password = 's3cureP@ss!';
 
-      await goto(p, "/auth");
+      await goto(p, '/auth');
 
-      const body = await p.textContent("body");
-      assert.ok(body?.includes("Not logged in"), "shows 'Not logged in'");
+      const body = await p.textContent('body');
+      assert.ok(body?.includes('Not logged in'), "shows 'Not logged in'");
 
       // Switch to Register tab
       await p.click('button:has-text("Register")');
@@ -374,27 +374,27 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
       // Fill registration form
       await p.fill('input[placeholder="Email"]', email);
       await p.fill('input[placeholder="Password"]', password);
-      await p.fill('input[placeholder="Name"]', "Smoke User");
+      await p.fill('input[placeholder="Name"]', 'Smoke User');
       // Click the Register submit button (inside the register section)
       await p.click('section:has(h2:has-text("Email Register")) button[type="submit"]');
 
       // Wait for logged-in state
-      await waitForTextGone(p, "Not logged in");
-      const afterReg = await p.textContent("body");
-      assert.ok(afterReg?.includes(email), "shows email after registration");
+      await waitForTextGone(p, 'Not logged in');
+      const afterReg = await p.textContent('body');
+      assert.ok(afterReg?.includes(email), 'shows email after registration');
 
       // Test protected route
       await p.click('button:has-text("GET /api/profile")');
-      await p.waitForFunction(() => document.querySelector("pre")?.textContent?.includes("user"), {
+      await p.waitForFunction(() => document.querySelector('pre')?.textContent?.includes('user'), {
         timeout: TIMEOUT,
       });
-      const pre = await p.textContent("pre");
-      assert.ok(pre?.includes("user"), "profile response contains 'user'");
-      assert.ok(pre?.includes(email), "profile response contains email");
+      const pre = await p.textContent('pre');
+      assert.ok(pre?.includes('user'), "profile response contains 'user'");
+      assert.ok(pre?.includes(email), 'profile response contains email');
 
       // Logout
       await p.click('button:has-text("Logout")');
-      await waitForText(p, "Not logged in");
+      await waitForText(p, 'Not logged in');
 
       // Re-login
       await p.click('button:has-text("Login")');
@@ -408,9 +408,9 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
       await p.fill('input[placeholder="Password"]', password);
       await p.click('section:has(h2:has-text("Email Login")) button[type="submit"]');
 
-      await waitForTextGone(p, "Not logged in");
-      const afterLogin = await p.textContent("body");
-      assert.ok(afterLogin?.includes(email), "shows email after re-login");
+      await waitForTextGone(p, 'Not logged in');
+      const afterLogin = await p.textContent('body');
+      assert.ok(afterLogin?.includes(email), 'shows email after re-login');
     } finally {
       await ctx.close();
     }
@@ -419,27 +419,27 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 10. Cron — heartbeat is running
   // -----------------------------------------------------------------------
-  void it("10 — Cron heartbeat", async () => {
+  void it('10 — Cron heartbeat', async () => {
     const { ctx, page: p } = await freshPage();
     try {
-      await goto(p, "/cron");
+      await goto(p, '/cron');
 
-      const body = await p.textContent("body");
+      const body = await p.textContent('body');
 
-      if (body?.includes("No heartbeat recorded yet")) {
-        console.log("  ⚠ Cron heartbeat not recorded yet (warning, not a failure)");
+      if (body?.includes('No heartbeat recorded yet')) {
+        console.log('  ⚠ Cron heartbeat not recorded yet (warning, not a failure)');
         return; // soft pass
       }
 
       // Find the heartbeat timestamp (code element after "Last Heartbeat" heading)
       const timestamp = await p.evaluate(() => {
-        const h2 = Array.from(document.querySelectorAll("h2")).find(
-          (h) => h.textContent === "Last Heartbeat",
+        const h2 = Array.from(document.querySelectorAll('h2')).find(
+          (h) => h.textContent === 'Last Heartbeat',
         );
         const nextP = h2?.nextElementSibling;
-        return nextP?.querySelector("code")?.textContent || null;
+        return nextP?.querySelector('code')?.textContent || null;
       });
-      assert.ok(timestamp, "heartbeat timestamp found");
+      assert.ok(timestamp, 'heartbeat timestamp found');
 
       const date = new Date(timestamp!);
       assert.ok(!isNaN(date.getTime()), `timestamp is a valid date (got: ${timestamp})`);
@@ -454,13 +454,13 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
   // -----------------------------------------------------------------------
   // 11. ISR Revalidation
   // -----------------------------------------------------------------------
-  void it("11 — ISR revalidation", async () => {
+  void it('11 — ISR revalidation', async () => {
     const { ctx, page: p } = await freshPage();
     try {
-      await goto(p, "/revalidate");
+      await goto(p, '/revalidate');
 
       // Note the initial "Rendered at" timestamp
-      const renderedAt = await p.textContent("p:has(code) code");
+      const renderedAt = await p.textContent('p:has(code) code');
       assert.ok(renderedAt, "initial 'Rendered at' timestamp found");
 
       // Click "Revalidate /revalidate"
@@ -469,8 +469,8 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
       // Wait for button to return to non-disabled state
       await p.waitForFunction(
         () => {
-          const btn = Array.from(document.querySelectorAll("button")).find((b) =>
-            b.textContent?.includes("Revalidate /revalidate"),
+          const btn = Array.from(document.querySelectorAll('button')).find((b) =>
+            b.textContent?.includes('Revalidate /revalidate'),
           );
           return btn && !btn.disabled;
         },
@@ -478,18 +478,18 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
       );
 
       // Reload and check "Last revalidation" is no longer "never"
-      await goto(p, "/revalidate");
-      const body = await p.textContent("body");
+      await goto(p, '/revalidate');
+      const body = await p.textContent('body');
       assert.ok(
-        !body?.includes("never") || body?.includes("Last revalidation"),
+        !body?.includes('never') || body?.includes('Last revalidation'),
         "last revalidation is no longer 'never'",
       );
 
       // More precise: check the last revalidation code element
       const lastReval = await p.evaluate(() => {
-        const ps = Array.from(document.querySelectorAll("p"));
-        const revalP = ps.find((p) => p.textContent?.includes("Last revalidation"));
-        const code = revalP?.querySelector("code");
+        const ps = Array.from(document.querySelectorAll('p'));
+        const revalP = ps.find((p) => p.textContent?.includes('Last revalidation'));
+        const code = revalP?.querySelector('code');
         return code?.textContent || null;
       });
       assert.ok(lastReval, `last revalidation has a timestamp (got: ${lastReval})`);

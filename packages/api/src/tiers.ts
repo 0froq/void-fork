@@ -1,4 +1,4 @@
-export type PlanId = "free" | "solo" | "pro" | "sponsored" | "custom";
+export type PlanId = 'free' | 'solo' | 'pro' | 'sponsored' | 'custom';
 
 export interface PlanLimits {
   /** Max requests per month (0 = unlimited) */
@@ -103,9 +103,9 @@ export function getCurrentBillingPeriodStart(billingCycleStart: string | null | 
   // Handle missing or invalid billing_cycle_start (e.g. legacy rows before column existed)
   if (!billingCycleStart) return new Date();
   // Normalize timestamp format (also handles legacy rows with space separator, no Z)
-  const normalized = billingCycleStart.includes("T")
+  const normalized = billingCycleStart.includes('T')
     ? billingCycleStart
-    : billingCycleStart.replace(" ", "T") + "Z";
+    : billingCycleStart.replace(' ', 'T') + 'Z';
   const signup = new Date(normalized);
   if (isNaN(signup.getTime())) return new Date();
   const anchorDay = signup.getUTCDate();

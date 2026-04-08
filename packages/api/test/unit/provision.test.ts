@@ -1,21 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { provisionBindings } from "../../src/provisioning/provision";
-import type { Db } from "../../src/db";
-import type { DeployManifest, Resource } from "../../src/types";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Db } from '../../src/db';
+import { provisionBindings } from '../../src/provisioning/provision';
+import type { DeployManifest, Resource } from '../../src/types';
 
 // Mock the CF API module
-vi.mock("../../src/provisioning/cloudflare-api", () => ({
-  createD1Database: vi.fn().mockResolvedValue({ uuid: "d1-uuid-123", name: "test-DB" }),
-  createKVNamespace: vi.fn().mockResolvedValue({ id: "kv-id-456", title: "test-KV" }),
-  createR2Bucket: vi.fn().mockResolvedValue({ name: "test-STORAGE" }),
-  createQueue: vi.fn().mockResolvedValue({ queue_id: "queue-id-789", queue_name: "test-queue" }),
-  getD1DatabaseByName: vi.fn().mockResolvedValue({ uuid: "d1-looked-up", name: "test-DB" }),
-  getKVNamespaceByTitle: vi.fn().mockResolvedValue({ id: "kv-looked-up", title: "test-KV" }),
-  getQueueByName: vi.fn().mockResolvedValue({ queue_id: "queue-looked-up", queue_name: "test-q" }),
+vi.mock('../../src/provisioning/cloudflare-api', () => ({
+  createD1Database: vi.fn().mockResolvedValue({ uuid: 'd1-uuid-123', name: 'test-DB' }),
+  createKVNamespace: vi.fn().mockResolvedValue({ id: 'kv-id-456', title: 'test-KV' }),
+  createR2Bucket: vi.fn().mockResolvedValue({ name: 'test-STORAGE' }),
+  createQueue: vi.fn().mockResolvedValue({ queue_id: 'queue-id-789', queue_name: 'test-queue' }),
+  getD1DatabaseByName: vi.fn().mockResolvedValue({ uuid: 'd1-looked-up', name: 'test-DB' }),
+  getKVNamespaceByTitle: vi.fn().mockResolvedValue({ id: 'kv-looked-up', title: 'test-KV' }),
+  getQueueByName: vi.fn().mockResolvedValue({ queue_id: 'queue-looked-up', queue_name: 'test-q' }),
 }));
 
 // Mock db module
-vi.mock("../../src/db", () => ({
+vi.mock('../../src/db', () => ({
   getProjectResources: vi.fn().mockResolvedValue([]),
   createResource: vi
     .fn()
@@ -32,6 +32,7 @@ vi.mock("../../src/db", () => ({
     ),
 }));
 
+import { getProjectResources, createResource } from '../../src/db';
 import {
   createD1Database,
   createKVNamespace,
@@ -40,13 +41,12 @@ import {
   getD1DatabaseByName,
   getKVNamespaceByTitle,
   getQueueByName,
-} from "../../src/provisioning/cloudflare-api";
-import { getProjectResources, createResource } from "../../src/db";
+} from '../../src/provisioning/cloudflare-api';
 
-const ACCOUNT_ID = "test-account";
-const API_TOKEN = "test-token";
-const PROJECT_ID = "proj_abc123";
-const JWT_SECRET = "test-jwt-secret";
+const ACCOUNT_ID = 'test-account';
+const API_TOKEN = 'test-token';
+const PROJECT_ID = 'proj_abc123';
+const JWT_SECRET = 'test-jwt-secret';
 const mockDb = {} as Db;
 
 beforeEach(() => {
@@ -54,9 +54,9 @@ beforeEach(() => {
   vi.mocked(getProjectResources).mockResolvedValue([]);
 });
 
-describe("provisionBindings", () => {
-  it("provisions D1 when manifest requires it and no resource exists", async () => {
-    const manifest: DeployManifest = { version: 1, bindings: { d1: ["DB"] } };
+describe('provisionBindings', () => {
+  it('provisions D1 when manifest requires it and no resource exists', async () => {
+    const manifest: DeployManifest = { version: 1, bindings: { d1: ['DB'] } };
 
     const bindings = await provisionBindings(
       mockDb,
@@ -65,18 +65,18 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
-      "void-proxy",
+      'void-proxy',
     );
 
-    expect(createD1Database).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-db");
-    expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, "d1", "d1-uuid-123", "DB");
-    expect(bindings[0]).toEqual({ type: "d1", name: "DB", id: "d1-uuid-123" });
+    expect(createD1Database).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, 'proj-abc123-db');
+    expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, 'd1', 'd1-uuid-123', 'DB');
+    expect(bindings[0]).toEqual({ type: 'd1', name: 'DB', id: 'd1-uuid-123' });
     // + 3 always-injected proxy bindings
     expect(bindings).toHaveLength(4);
   });
 
-  it("provisions KV when manifest requires it", async () => {
-    const manifest: DeployManifest = { version: 1, bindings: { kv: ["KV"] } };
+  it('provisions KV when manifest requires it', async () => {
+    const manifest: DeployManifest = { version: 1, bindings: { kv: ['KV'] } };
 
     const bindings = await provisionBindings(
       mockDb,
@@ -85,17 +85,17 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
-      "void-proxy",
+      'void-proxy',
     );
 
-    expect(createKVNamespace).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-kv");
-    expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, "kv", "kv-id-456", "KV");
-    expect(bindings[0]).toEqual({ type: "kv_namespace", name: "KV", namespace_id: "kv-id-456" });
+    expect(createKVNamespace).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, 'proj-abc123-kv');
+    expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, 'kv', 'kv-id-456', 'KV');
+    expect(bindings[0]).toEqual({ type: 'kv_namespace', name: 'KV', namespace_id: 'kv-id-456' });
     expect(bindings).toHaveLength(4);
   });
 
-  it("provisions R2 when manifest requires it", async () => {
-    const manifest: DeployManifest = { version: 1, bindings: { r2: ["STORAGE"] } };
+  it('provisions R2 when manifest requires it', async () => {
+    const manifest: DeployManifest = { version: 1, bindings: { r2: ['STORAGE'] } };
 
     const bindings = await provisionBindings(
       mockDb,
@@ -104,30 +104,30 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
-      "void-proxy",
+      'void-proxy',
     );
 
-    expect(createR2Bucket).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-storage");
+    expect(createR2Bucket).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, 'proj-abc123-storage');
     expect(createResource).toHaveBeenCalledWith(
       mockDb,
       PROJECT_ID,
-      "r2",
-      "test-STORAGE",
-      "STORAGE",
+      'r2',
+      'test-STORAGE',
+      'STORAGE',
     );
     expect(bindings[0]).toEqual({
-      type: "r2_bucket",
-      name: "STORAGE",
-      bucket_name: "test-STORAGE",
+      type: 'r2_bucket',
+      name: 'STORAGE',
+      bucket_name: 'test-STORAGE',
     });
     expect(bindings).toHaveLength(4);
   });
 
-  it("provisions queue and stores queue_id (UUID) as cf_id", async () => {
+  it('provisions queue and stores queue_id (UUID) as cf_id', async () => {
     const manifest: DeployManifest = {
       version: 3,
       bindings: {},
-      queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
+      queues: [{ name: 'emails', bindingName: 'QUEUE_EMAILS' }],
     };
 
     const bindings = await provisionBindings(
@@ -137,40 +137,40 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
-      "void-proxy",
+      'void-proxy',
     );
 
-    expect(createQueue).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-emails");
+    expect(createQueue).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, 'proj-abc123-emails');
     expect(createResource).toHaveBeenCalledWith(
       mockDb,
       PROJECT_ID,
-      "queue",
-      "queue-id-789",
-      "emails",
+      'queue',
+      'queue-id-789',
+      'emails',
     );
     expect(bindings[0]).toEqual({
-      type: "queue",
-      name: "QUEUE_EMAILS",
-      queue_name: "proj-abc123-emails",
-      queue_id: "queue-id-789",
+      type: 'queue',
+      name: 'QUEUE_EMAILS',
+      queue_name: 'proj-abc123-emails',
+      queue_id: 'queue-id-789',
     });
     expect(bindings).toHaveLength(4);
   });
 
-  it("skips provisioning when resources already exist", async () => {
+  it('skips provisioning when resources already exist', async () => {
     const existingResources: Resource[] = [
       {
-        id: "res_existing",
+        id: 'res_existing',
         project_id: PROJECT_ID,
-        type: "d1",
-        cf_id: "existing-d1-id",
-        binding_name: "DB",
+        type: 'd1',
+        cf_id: 'existing-d1-id',
+        binding_name: 'DB',
         created_at: new Date().toISOString(),
       },
     ];
     vi.mocked(getProjectResources).mockResolvedValue(existingResources);
 
-    const manifest: DeployManifest = { version: 1, bindings: { d1: ["DB"] } };
+    const manifest: DeployManifest = { version: 1, bindings: { d1: ['DB'] } };
     const bindings = await provisionBindings(
       mockDb,
       ACCOUNT_ID,
@@ -178,19 +178,19 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
-      "void-proxy",
+      'void-proxy',
     );
 
     expect(createD1Database).not.toHaveBeenCalled();
     expect(createResource).not.toHaveBeenCalled();
-    expect(bindings[0]).toEqual({ type: "d1", name: "DB", id: "existing-d1-id" });
+    expect(bindings[0]).toEqual({ type: 'd1', name: 'DB', id: 'existing-d1-id' });
     expect(bindings).toHaveLength(4);
   });
 
-  it("handles multiple bindings in one deploy", async () => {
+  it('handles multiple bindings in one deploy', async () => {
     const manifest: DeployManifest = {
       version: 1,
-      bindings: { d1: ["DB"], kv: ["KV"], r2: ["STORAGE"] },
+      bindings: { d1: ['DB'], kv: ['KV'], r2: ['STORAGE'] },
     };
 
     const bindings = await provisionBindings(
@@ -200,7 +200,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
-      "void-proxy",
+      'void-proxy',
     );
 
     expect(createD1Database).toHaveBeenCalledOnce();
@@ -208,16 +208,16 @@ describe("provisionBindings", () => {
     expect(createR2Bucket).toHaveBeenCalledOnce();
     // 3 provisioned + 3 always-injected proxy bindings
     expect(bindings).toHaveLength(6);
-    expect(bindings[0]).toEqual({ type: "d1", name: "DB", id: "d1-uuid-123" });
-    expect(bindings[1]).toEqual({ type: "kv_namespace", name: "KV", namespace_id: "kv-id-456" });
+    expect(bindings[0]).toEqual({ type: 'd1', name: 'DB', id: 'd1-uuid-123' });
+    expect(bindings[1]).toEqual({ type: 'kv_namespace', name: 'KV', namespace_id: 'kv-id-456' });
     expect(bindings[2]).toEqual({
-      type: "r2_bucket",
-      name: "STORAGE",
-      bucket_name: "test-STORAGE",
+      type: 'r2_bucket',
+      name: 'STORAGE',
+      bucket_name: 'test-STORAGE',
     });
   });
 
-  it("handles empty manifest (only proxy bindings injected)", async () => {
+  it('handles empty manifest (only proxy bindings injected)', async () => {
     const manifest: DeployManifest = { version: 1, bindings: {} };
 
     const bindings = await provisionBindings(
@@ -227,7 +227,7 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
-      "void-proxy",
+      'void-proxy',
     );
 
     expect(createD1Database).not.toHaveBeenCalled();
@@ -236,10 +236,10 @@ describe("provisionBindings", () => {
     expect(createResource).not.toHaveBeenCalled();
     // Proxy bindings are always injected
     expect(bindings).toHaveLength(3);
-    expect(bindings[0]).toEqual({ type: "service", name: "__VOID_PROXY", service: "void-proxy" });
+    expect(bindings[0]).toEqual({ type: 'service', name: '__VOID_PROXY', service: 'void-proxy' });
   });
 
-  it("always injects proxy bindings with signed token", async () => {
+  it('always injects proxy bindings with signed token', async () => {
     const manifest: DeployManifest = { version: 1, bindings: {} };
 
     const bindings = await provisionBindings(
@@ -249,21 +249,21 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
-      "void-proxy",
+      'void-proxy',
     );
 
     expect(bindings).toHaveLength(3);
-    expect(bindings[0]).toEqual({ type: "service", name: "__VOID_PROXY", service: "void-proxy" });
-    expect(bindings[1]).toEqual({ type: "plain_text", name: "__PROJECT_ID", text: PROJECT_ID });
-    expect(bindings[2].type).toBe("plain_text");
-    expect(bindings[2].name).toBe("__VOID_PROXY_TOKEN");
+    expect(bindings[0]).toEqual({ type: 'service', name: '__VOID_PROXY', service: 'void-proxy' });
+    expect(bindings[1]).toEqual({ type: 'plain_text', name: '__PROJECT_ID', text: PROJECT_ID });
+    expect(bindings[2].type).toBe('plain_text');
+    expect(bindings[2].name).toBe('__VOID_PROXY_TOKEN');
     // Token should be a non-empty string (HMAC signature)
-    expect(typeof bindings[2].text).toBe("string");
+    expect(typeof bindings[2].text).toBe('string');
     expect(bindings[2].text!.length).toBeGreaterThan(0);
   });
 
-  it("injects proxy bindings alongside other provisioned bindings", async () => {
-    const manifest: DeployManifest = { version: 1, bindings: { d1: ["DB"], ai: true } };
+  it('injects proxy bindings alongside other provisioned bindings', async () => {
+    const manifest: DeployManifest = { version: 1, bindings: { d1: ['DB'], ai: true } };
 
     const bindings = await provisionBindings(
       mockDb,
@@ -272,25 +272,25 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
-      "void-proxy",
+      'void-proxy',
     );
 
     // D1 + 3 proxy bindings
     expect(bindings).toHaveLength(4);
-    expect(bindings[0]).toEqual({ type: "d1", name: "DB", id: "d1-uuid-123" });
-    expect(bindings[1]).toEqual({ type: "service", name: "__VOID_PROXY", service: "void-proxy" });
-    expect(bindings[2]).toEqual({ type: "plain_text", name: "__PROJECT_ID", text: PROJECT_ID });
-    expect(bindings[3].name).toBe("__VOID_PROXY_TOKEN");
+    expect(bindings[0]).toEqual({ type: 'd1', name: 'DB', id: 'd1-uuid-123' });
+    expect(bindings[1]).toEqual({ type: 'service', name: '__VOID_PROXY', service: 'void-proxy' });
+    expect(bindings[2]).toEqual({ type: 'plain_text', name: '__PROJECT_ID', text: PROJECT_ID });
+    expect(bindings[3].name).toBe('__VOID_PROXY_TOKEN');
   });
 
-  it("provisions only missing resources when some already exist", async () => {
+  it('provisions only missing resources when some already exist', async () => {
     const existingResources: Resource[] = [
       {
-        id: "res_existing",
+        id: 'res_existing',
         project_id: PROJECT_ID,
-        type: "d1",
-        cf_id: "existing-d1-id",
-        binding_name: "DB",
+        type: 'd1',
+        cf_id: 'existing-d1-id',
+        binding_name: 'DB',
         created_at: new Date().toISOString(),
       },
     ];
@@ -298,7 +298,7 @@ describe("provisionBindings", () => {
 
     const manifest: DeployManifest = {
       version: 1,
-      bindings: { d1: ["DB"], kv: ["KV"] },
+      bindings: { d1: ['DB'], kv: ['KV'] },
     };
 
     const bindings = await provisionBindings(
@@ -308,25 +308,25 @@ describe("provisionBindings", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
-      "void-proxy",
+      'void-proxy',
     );
 
     expect(createD1Database).not.toHaveBeenCalled();
     expect(createKVNamespace).toHaveBeenCalledOnce();
     // 2 provisioned + 3 always-injected proxy bindings
     expect(bindings).toHaveLength(5);
-    expect(bindings[0]).toEqual({ type: "d1", name: "DB", id: "existing-d1-id" });
-    expect(bindings[1]).toEqual({ type: "kv_namespace", name: "KV", namespace_id: "kv-id-456" });
+    expect(bindings[0]).toEqual({ type: 'd1', name: 'DB', id: 'existing-d1-id' });
+    expect(bindings[1]).toEqual({ type: 'kv_namespace', name: 'KV', namespace_id: 'kv-id-456' });
   });
 });
 
-describe("ensureResource — already exists fallback", () => {
+describe('ensureResource — already exists fallback', () => {
   it("falls back to lookup when D1 create returns 'already exists'", async () => {
     vi.mocked(createD1Database).mockRejectedValueOnce(
-      new Error("Cloudflare API error: A database with that name already exists"),
+      new Error('Cloudflare API error: A database with that name already exists'),
     );
 
-    const manifest: DeployManifest = { version: 1, bindings: { d1: ["DB"] } };
+    const manifest: DeployManifest = { version: 1, bindings: { d1: ['DB'] } };
     const bindings = await provisionBindings(
       mockDb,
       ACCOUNT_ID,
@@ -334,21 +334,21 @@ describe("ensureResource — already exists fallback", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
-      "void-proxy",
+      'void-proxy',
     );
 
     expect(createD1Database).toHaveBeenCalledOnce();
-    expect(getD1DatabaseByName).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-db");
-    expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, "d1", "d1-looked-up", "DB");
-    expect(bindings[0]).toEqual({ type: "d1", name: "DB", id: "d1-looked-up" });
+    expect(getD1DatabaseByName).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, 'proj-abc123-db');
+    expect(createResource).toHaveBeenCalledWith(mockDb, PROJECT_ID, 'd1', 'd1-looked-up', 'DB');
+    expect(bindings[0]).toEqual({ type: 'd1', name: 'DB', id: 'd1-looked-up' });
   });
 
   it("falls back to lookup when KV create returns 'already exists'", async () => {
     vi.mocked(createKVNamespace).mockRejectedValueOnce(
-      new Error("Cloudflare API error: A namespace with that title already exists"),
+      new Error('Cloudflare API error: A namespace with that title already exists'),
     );
 
-    const manifest: DeployManifest = { version: 1, bindings: { kv: ["KV"] } };
+    const manifest: DeployManifest = { version: 1, bindings: { kv: ['KV'] } };
     const bindings = await provisionBindings(
       mockDb,
       ACCOUNT_ID,
@@ -356,23 +356,23 @@ describe("ensureResource — already exists fallback", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
-      "void-proxy",
+      'void-proxy',
     );
 
     expect(createKVNamespace).toHaveBeenCalledOnce();
-    expect(getKVNamespaceByTitle).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-kv");
-    expect(bindings[0]).toEqual({ type: "kv_namespace", name: "KV", namespace_id: "kv-looked-up" });
+    expect(getKVNamespaceByTitle).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, 'proj-abc123-kv');
+    expect(bindings[0]).toEqual({ type: 'kv_namespace', name: 'KV', namespace_id: 'kv-looked-up' });
   });
 
   it("falls back to lookup when queue create returns 'already exists'", async () => {
     vi.mocked(createQueue).mockRejectedValueOnce(
-      new Error("Cloudflare API error: A queue with that name already exists"),
+      new Error('Cloudflare API error: A queue with that name already exists'),
     );
 
     const manifest: DeployManifest = {
       version: 3,
       bindings: {},
-      queues: [{ name: "emails", bindingName: "QUEUE_EMAILS" }],
+      queues: [{ name: 'emails', bindingName: 'QUEUE_EMAILS' }],
     };
     const bindings = await provisionBindings(
       mockDb,
@@ -381,25 +381,25 @@ describe("ensureResource — already exists fallback", () => {
       PROJECT_ID,
       manifest,
       JWT_SECRET,
-      "void-proxy",
+      'void-proxy',
     );
 
     expect(createQueue).toHaveBeenCalledOnce();
-    expect(getQueueByName).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, "proj-abc123-emails");
+    expect(getQueueByName).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, 'proj-abc123-emails');
     expect(bindings[0]).toEqual({
-      type: "queue",
-      name: "QUEUE_EMAILS",
-      queue_name: "proj-abc123-emails",
-      queue_id: "queue-looked-up",
+      type: 'queue',
+      name: 'QUEUE_EMAILS',
+      queue_name: 'proj-abc123-emails',
+      queue_id: 'queue-looked-up',
     });
   });
 
   it("propagates non-'already exists' errors", async () => {
     vi.mocked(createD1Database).mockRejectedValueOnce(
-      new Error("Cloudflare API error: rate limit exceeded"),
+      new Error('Cloudflare API error: rate limit exceeded'),
     );
 
-    const manifest: DeployManifest = { version: 1, bindings: { d1: ["DB"] } };
+    const manifest: DeployManifest = { version: 1, bindings: { d1: ['DB'] } };
     await expect(
       provisionBindings(
         mockDb,
@@ -408,9 +408,9 @@ describe("ensureResource — already exists fallback", () => {
         PROJECT_ID,
         manifest,
         JWT_SECRET,
-        "void-proxy",
+        'void-proxy',
       ),
-    ).rejects.toThrow("rate limit exceeded");
+    ).rejects.toThrow('rate limit exceeded');
 
     expect(getD1DatabaseByName).not.toHaveBeenCalled();
   });

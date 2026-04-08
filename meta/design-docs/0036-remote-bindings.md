@@ -196,10 +196,10 @@ When remote mode is active, the plugin injects env vars instead of (or in additi
 
 ```ts
 // In mergeBindings(), when remote mode is active
-vars.__VOID_PROXY_URL = "https://proxy.void.cloud";
+vars.__VOID_PROXY_URL = 'https://proxy.void.cloud';
 vars.__VOID_TOKEN = credentials.token;
 vars.__VOID_PROJECT_ID = credentials.projectId;
-vars.__VOID_REMOTE = "true";
+vars.__VOID_REMOTE = 'true';
 ```
 
 Local Miniflare bindings are still created (workerd needs them to start), but they are overridden at runtime by the proxy-backed implementations.

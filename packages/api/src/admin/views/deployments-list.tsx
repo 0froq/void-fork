@@ -1,7 +1,7 @@
-import type { Deployment } from "../../types";
-import { DeploymentTable } from "./deployment-table";
-import { Layout } from "./layout";
-import { Pagination } from "./pagination";
+import type { Deployment } from '../../types';
+import { DeploymentTable } from './deployment-table';
+import { Layout } from './layout';
+import { Pagination } from './pagination';
 
 export function DeploymentsListPage({
   deployments,
@@ -26,13 +26,13 @@ export function DeploymentsListPage({
           type="text"
           name="search"
           placeholder="Search deployments..."
-          value={search ?? ""}
+          value={search ?? ''}
           id="search-input"
-        />{" "}
+        />{' '}
         <button type="submit">Search</button>
         {search && (
           <>
-            {" "}
+            {' '}
             | <a href="/admin/deployments">Clear</a>
           </>
         )}

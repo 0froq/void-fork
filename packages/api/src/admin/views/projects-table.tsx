@@ -1,4 +1,4 @@
-import type { Project } from "../../types";
+import type { Project } from '../../types';
 
 export type ProjectRow = Project & {
   owner_login: string | null;
@@ -43,7 +43,7 @@ export function ProjectsTable({
                 </a>
               </td>
               <td>
-                {p.owner_login ? <a href={`/admin/users/${p.user_id}`}>{p.owner_login}</a> : "-"}
+                {p.owner_login ? <a href={`/admin/users/${p.user_id}`}>{p.owner_login}</a> : '-'}
               </td>
               <td>{p.type}</td>
               <td>{new Date(p.created_at).toLocaleDateString()}</td>
@@ -51,7 +51,7 @@ export function ProjectsTable({
                 {p.last_deploy ? (
                   <>
                     <span
-                      style={`display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:10px;vertical-align:middle;background:${p.last_deploy_status === "failed" ? "#dc2626" : "#16a34a"}`}
+                      style={`display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:10px;vertical-align:middle;background:${p.last_deploy_status === 'failed' ? '#dc2626' : '#16a34a'}`}
                     />
                     {p.last_deploy_id ? (
                       <a href={`/admin/deployments/${p.last_deploy_id}`}>
@@ -62,7 +62,7 @@ export function ProjectsTable({
                     )}
                   </>
                 ) : (
-                  "-"
+                  '-'
                 )}
               </td>
             </tr>

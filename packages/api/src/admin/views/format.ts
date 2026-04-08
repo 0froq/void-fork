@@ -1,13 +1,13 @@
 export function formatDateTime(iso: string, tz?: string): string {
-  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
+  const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
   if (isNaN(d.getTime())) return iso;
-  const formatted = d.toLocaleString("en-US", {
-    timeZone: tz || "UTC",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
+  const formatted = d.toLocaleString('en-US', {
+    timeZone: tz || 'UTC',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
   });
   const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
   let ago: string;
@@ -19,26 +19,26 @@ export function formatDateTime(iso: string, tz?: string): string {
 }
 
 export function formatBytes(n: number): string {
-  if (n === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
+  if (n === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(n) / Math.log(1024));
   const value = n / Math.pow(1024, i);
   return `${value % 1 === 0 ? value : value.toFixed(1)} ${units[i]}`;
 }
 
 export function formatNumber(n: number): string {
-  return n.toLocaleString("en-US");
+  return n.toLocaleString('en-US');
 }
 
 export function formatLimit(value: number, unit?: string): string {
-  if (value === 0) return "Unlimited";
-  if (unit === "bytes") return formatBytes(value);
+  if (value === 0) return 'Unlimited';
+  if (unit === 'bytes') return formatBytes(value);
   return formatNumber(value);
 }
 
 export const STATUS_COLORS: Record<string, string> = {
-  success: "#16a34a",
-  failed: "#dc2626",
-  pending: "#d97706",
-  skipped: "#6b7280",
+  success: '#16a34a',
+  failed: '#dc2626',
+  pending: '#d97706',
+  skipped: '#6b7280',
 };

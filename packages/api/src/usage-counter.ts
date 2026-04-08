@@ -1,9 +1,9 @@
-import { DurableObject } from "cloudflare:workers";
-import { getPlanLimits, isWithinLimit } from "./tiers";
-import { createDb, suspendUser } from "./db";
-import { queryProjectAiUsage } from "./routes/usage";
-import type { ApiEnv } from "./env";
-import { REASON_REQUESTS_EXCEEDED } from "./suspension";
+import { DurableObject } from 'cloudflare:workers';
+import { createDb, suspendUser } from './db';
+import type { ApiEnv } from './env';
+import { queryProjectAiUsage } from './routes/usage';
+import { REASON_REQUESTS_EXCEEDED } from './suspension';
+import { getPlanLimits, isWithinLimit } from './tiers';
 
 // --- Exported types ---
 
@@ -46,7 +46,7 @@ function defaultState(): CounterState {
   return {
     totalRequests: 0,
     totalNeurons: 0,
-    plan: "free",
+    plan: 'free',
     billingPeriodStart: new Date().toISOString(),
     requestsSuspended: false,
     aiSuspended: false,
@@ -56,39 +56,39 @@ function defaultState(): CounterState {
 
 // --- UsageCounter Durable Object ---
 
-export class UsageCounter extends DurableObject<ApiEnv["Bindings"]> {
+export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
   private state: CounterState | null = null;
 
   private async getState(): Promise<CounterState> {
     if (this.state) return this.state;
-    const stored = await this.ctx.storage.get<CounterState>("state");
+    const stored = await this.ctx.storage.get<CounterState>('state');
     this.state = stored ?? defaultState();
     return this.state;
   }
 
   private async saveState(state: CounterState): Promise<void> {
     this.state = state;
-    await this.ctx.storage.put("state", state);
+    await this.ctx.storage.put('state', state);
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    if (request.method === "POST" && path === "/record") {
+    if (request.method === 'POST' && path === '/record') {
       return this.handleRecord(request);
     }
-    if (request.method === "POST" && path === "/rollover") {
+    if (request.method === 'POST' && path === '/rollover') {
       return this.handleRollover(request);
     }
-    if (request.method === "POST" && path === "/init") {
+    if (request.method === 'POST' && path === '/init') {
       return this.handleInit(request);
     }
-    if (request.method === "GET" && path === "/state") {
+    if (request.method === 'GET' && path === '/state') {
       return this.handleGetState();
     }
 
-    return new Response("not found", { status: 404 });
+    return new Response('not found', { status: 404 });
   }
 
   private async handleRecord(request: Request): Promise<Response> {
@@ -197,7 +197,7 @@ export class UsageCounter extends DurableObject<ApiEnv["Bindings"]> {
     }
     if (state.aiSuspended) {
       for (const projectId of Object.keys(state.projectSlugs)) {
-        await this.env.ROUTING.put(`ai-block:${projectId}`, "1");
+        await this.env.ROUTING.put(`ai-block:${projectId}`, '1');
       }
     }
 
@@ -244,7 +244,7 @@ export class UsageCounter extends DurableObject<ApiEnv["Bindings"]> {
       state.aiSuspended = true;
       // Write ai-block KV keys for each project
       for (const projectId of projectIds) {
-        await this.env.ROUTING.put(`ai-block:${projectId}`, "1");
+        await this.env.ROUTING.put(`ai-block:${projectId}`, '1');
       }
     } else if (!exceedsAi && state.aiSuspended) {
       state.aiSuspended = false;

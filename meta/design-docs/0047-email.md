@@ -29,20 +29,20 @@ After designing the full feature (proxy-based send + inbound webhook routing + C
 **Sending:**
 
 ```ts
-import { sendEmail } from "void/email";
+import { sendEmail } from 'void/email';
 
 await sendEmail({
-  from: "Acme <noreply@myapp.com>",
-  to: ["user@example.com"],
-  subject: "Welcome!",
-  html: "<h1>Welcome to Acme</h1>",
+  from: 'Acme <noreply@myapp.com>',
+  to: ['user@example.com'],
+  subject: 'Welcome!',
+  html: '<h1>Welcome to Acme</h1>',
 });
 ```
 
 **Receiving** (handler at `routes/_email.ts`):
 
 ```ts
-import { onEmail } from "void/email";
+import { onEmail } from 'void/email';
 
 export default onEmail(async (message) => {
   // message.from, message.to, message.subject, message.html, message.text, message.attachments

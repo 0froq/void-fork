@@ -1,25 +1,25 @@
-import { Hono } from "hono";
-import type { ApiEnv } from "../../env";
-import {
-  listWorkerVersions,
-  listWorkerDeployments,
-  createWorkerDeployment,
-  type WorkerVersion,
-  type WorkerDeployment,
-} from "../../provisioning/workers-versions";
-import { PLATFORM_WORKERS, getScriptName, getWorkerByName, parseEnv } from "../platform-workers";
+import { Hono } from 'hono';
 import {
   createPlatformEvent,
   updatePlatformEventStatus,
   skipPendingBatchEvents,
   getPlatformEventsByBatchId,
   getRecentPlatformEvents,
-} from "../../db";
-import { generateId } from "../../id";
-import type { PlatformEvent } from "../../types";
-import { PlatformPage } from "../views/platform";
-import { PlatformWorkerDetailPage } from "../views/platform-worker-detail";
-import { PlatformRollbackResultPage } from "../views/platform-rollback-result";
+} from '../../db';
+import type { ApiEnv } from '../../env';
+import { generateId } from '../../id';
+import {
+  listWorkerVersions,
+  listWorkerDeployments,
+  createWorkerDeployment,
+  type WorkerVersion,
+  type WorkerDeployment,
+} from '../../provisioning/workers-versions';
+import type { PlatformEvent } from '../../types';
+import { PLATFORM_WORKERS, getScriptName, getWorkerByName, parseEnv } from '../platform-workers';
+import { PlatformPage } from '../views/platform';
+import { PlatformRollbackResultPage } from '../views/platform-rollback-result';
+import { PlatformWorkerDetailPage } from '../views/platform-worker-detail';
 
 const app = new Hono<ApiEnv>();
 
@@ -30,8 +30,8 @@ function toErrorMessage(err: unknown): string {
 }
 
 export type ActivityEntry =
-  | { kind: "single"; event: PlatformEvent }
-  | { kind: "batch"; batchId: string; events: PlatformEvent[] };
+  | { kind: 'single'; event: PlatformEvent }
+  | { kind: 'batch'; batchId: string; events: PlatformEvent[] };
 
 function collapseEvents(events: PlatformEvent[]): ActivityEntry[] {
   const batchMap = new Map<string, PlatformEvent[]>();
@@ -48,11 +48,11 @@ function collapseEvents(events: PlatformEvent[]): ActivityEntry[] {
 
   for (const event of events) {
     if (!event.batch_id) {
-      entries.push({ kind: "single", event });
+      entries.push({ kind: 'single', event });
     } else if (!seenBatches.has(event.batch_id)) {
       seenBatches.add(event.batch_id);
       entries.push({
-        kind: "batch",
+        kind: 'batch',
         batchId: event.batch_id,
         events: batchMap.get(event.batch_id)!,
       });
@@ -72,27 +72,27 @@ async function fetchWorkerDetail(
     listWorkerDeployments(accountId, apiToken, scriptName),
   ]);
 
-  const versions = versionsResult.status === "fulfilled" ? versionsResult.value.items : [];
+  const versions = versionsResult.status === 'fulfilled' ? versionsResult.value.items : [];
   const deployment =
-    deploymentsResult.status === "fulfilled" ? deploymentsResult.value.deployments[0] : undefined;
+    deploymentsResult.status === 'fulfilled' ? deploymentsResult.value.deployments[0] : undefined;
 
   const errors: string[] = [];
-  if (versionsResult.status === "rejected") errors.push(toErrorMessage(versionsResult.reason));
-  if (deploymentsResult.status === "rejected")
+  if (versionsResult.status === 'rejected') errors.push(toErrorMessage(versionsResult.reason));
+  if (deploymentsResult.status === 'rejected')
     errors.push(toErrorMessage(deploymentsResult.reason));
 
-  return { versions, deployment, error: errors.length > 0 ? errors.join("; ") : undefined };
+  return { versions, deployment, error: errors.length > 0 ? errors.join('; ') : undefined };
 }
 
 // GET / — overview of all platform workers
-app.get("/", async (c) => {
+app.get('/', async (c) => {
   const env = parseEnv(c.env.PLATFORM_ENV);
   const accountId = c.env.CF_ACCOUNT_ID;
   const apiToken = c.env.CF_API_TOKEN;
-  const db = c.get("db");
+  const db = c.get('db');
   const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
 
-  const page = Math.max(1, parseInt(c.req.query("page") ?? "1") || 1);
+  const page = Math.max(1, parseInt(c.req.query('page') ?? '1') || 1);
 
   const [cfResults, rawEvents] = await Promise.all([
     Promise.allSettled(
@@ -115,7 +115,7 @@ app.get("/", async (c) => {
   ]);
 
   const workers = cfResults.map((r, i) => {
-    if (r.status === "fulfilled") return r.value;
+    if (r.status === 'fulfilled') return r.value;
     const worker = PLATFORM_WORKERS[i];
     const errorMsg = toErrorMessage(r.reason);
     console.error(`Failed to fetch deployments for ${getScriptName(worker, env)}: ${errorMsg}`);
@@ -130,7 +130,7 @@ app.get("/", async (c) => {
     <PlatformPage
       workers={workers}
       env={env}
-      username={c.get("user").login}
+      username={c.get('user').login}
       tz={tz}
       entries={entries}
       page={page}
@@ -140,15 +140,15 @@ app.get("/", async (c) => {
 });
 
 // POST /rollback-all — orchestrated rollback of all platform workers
-app.post("/rollback-all", async (c) => {
+app.post('/rollback-all', async (c) => {
   const env = parseEnv(c.env.PLATFORM_ENV);
   const accountId = c.env.CF_ACCOUNT_ID;
   const apiToken = c.env.CF_API_TOKEN;
-  const db = c.get("db");
+  const db = c.get('db');
   const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
 
   const body = await c.req.parseBody();
-  const batchId = generateId("batch");
+  const batchId = generateId('batch');
 
   // Rollback order: reverse deploy order (dispatch → dashboard → api → tail → proxy)
   const rollbackOrder = [...PLATFORM_WORKERS].sort((a, b) => b.deployOrder - a.deployOrder);
@@ -163,7 +163,7 @@ app.post("/rollback-all", async (c) => {
   const missing = workerTargets.filter((t) => !t.versionId);
   if (missing.length > 0) {
     return c.html(
-      `<h1>Missing version IDs for: ${missing.map((m) => m.worker.name).join(", ")}</h1>`,
+      `<h1>Missing version IDs for: ${missing.map((m) => m.worker.name).join(', ')}</h1>`,
       400,
     );
   }
@@ -172,17 +172,17 @@ app.post("/rollback-all", async (c) => {
   const eventRows = await Promise.all(
     workerTargets.map((t) =>
       createPlatformEvent(db, {
-        id: generateId("pevt"),
+        id: generateId('pevt'),
         batch_id: batchId,
-        action: "rollback_all",
+        action: 'rollback_all',
         worker_name: t.worker.name,
         environment: env,
         version_id: t.versionId!,
         script_name: t.scriptName,
-        status: "pending",
+        status: 'pending',
         error_message: null,
-        admin_user_id: c.get("user").id,
-        admin_login: c.get("user").login,
+        admin_user_id: c.get('user').id,
+        admin_login: c.get('user').login,
       }),
     ),
   );
@@ -194,11 +194,11 @@ app.post("/rollback-all", async (c) => {
 
     try {
       await createWorkerDeployment(accountId, apiToken, target.scriptName, target.versionId!);
-      await updatePlatformEventStatus(db, event.id, "success");
+      await updatePlatformEventStatus(db, event.id, 'success');
     } catch (err) {
       const errorMessage = toErrorMessage(err);
       console.error(`Batch rollback failed for ${target.scriptName} to ${target.versionId}:`, err);
-      await updatePlatformEventStatus(db, event.id, "failed", errorMessage);
+      await updatePlatformEventStatus(db, event.id, 'failed', errorMessage);
       // Mark all remaining pending events as skipped in one query
       await skipPendingBatchEvents(db, batchId);
       break;
@@ -212,20 +212,20 @@ app.post("/rollback-all", async (c) => {
       events={finalEvents}
       batchId={batchId}
       env={env}
-      username={c.get("user").login}
+      username={c.get('user').login}
       tz={tz}
     />,
   );
 });
 
 // GET /events/:batchId — view past batch rollback results
-app.get("/events/:batchId", async (c) => {
-  const batchId = c.req.param("batchId");
-  const db = c.get("db");
+app.get('/events/:batchId', async (c) => {
+  const batchId = c.req.param('batchId');
+  const db = c.get('db');
   const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
 
   const events = await getPlatformEventsByBatchId(db, batchId);
-  if (events.length === 0) return c.html("<h1>Batch not found</h1>", 404);
+  if (events.length === 0) return c.html('<h1>Batch not found</h1>', 404);
 
   const env = events[0].environment;
 
@@ -234,17 +234,17 @@ app.get("/events/:batchId", async (c) => {
       events={events}
       batchId={batchId}
       env={env}
-      username={c.get("user").login}
+      username={c.get('user').login}
       tz={tz}
     />,
   );
 });
 
 // GET /:name — version history for a single worker
-app.get("/:name", async (c) => {
+app.get('/:name', async (c) => {
   const env = parseEnv(c.env.PLATFORM_ENV);
-  const worker = getWorkerByName(c.req.param("name"));
-  if (!worker) return c.html("<h1>Worker not found</h1>", 404);
+  const worker = getWorkerByName(c.req.param('name'));
+  if (!worker) return c.html('<h1>Worker not found</h1>', 404);
 
   const scriptName = getScriptName(worker, env);
   const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
@@ -262,53 +262,53 @@ app.get("/:name", async (c) => {
       versions={versions}
       deployment={deployment}
       error={error}
-      username={c.get("user").login}
+      username={c.get('user').login}
       tz={tz}
     />,
   );
 });
 
 // POST /:name/rollback — deploy a previous version at 100%
-app.post("/:name/rollback", async (c) => {
+app.post('/:name/rollback', async (c) => {
   const env = parseEnv(c.env.PLATFORM_ENV);
-  const worker = getWorkerByName(c.req.param("name"));
-  if (!worker) return c.html("<h1>Worker not found</h1>", 404);
+  const worker = getWorkerByName(c.req.param('name'));
+  if (!worker) return c.html('<h1>Worker not found</h1>', 404);
 
   const body = await c.req.parseBody();
   const versionId = body.version_id as string;
-  if (!versionId) return c.html("<h1>Missing version_id</h1>", 400);
+  if (!versionId) return c.html('<h1>Missing version_id</h1>', 400);
 
   const accountId = c.env.CF_ACCOUNT_ID;
   const apiToken = c.env.CF_API_TOKEN;
   const scriptName = getScriptName(worker, env);
-  const db = c.get("db");
+  const db = c.get('db');
 
-  let status: "success" | "failed" = "success";
+  let status: 'success' | 'failed' = 'success';
   let errorMessage: string | null = null;
 
   try {
     await createWorkerDeployment(accountId, apiToken, scriptName, versionId);
   } catch (err) {
-    status = "failed";
+    status = 'failed';
     errorMessage = toErrorMessage(err);
     console.error(`Rollback failed for ${scriptName} to version ${versionId}:`, err);
   }
 
   await createPlatformEvent(db, {
-    id: generateId("pevt"),
+    id: generateId('pevt'),
     batch_id: null,
-    action: "rollback",
+    action: 'rollback',
     worker_name: worker.name,
     environment: env,
     version_id: versionId,
     script_name: scriptName,
     status,
     error_message: errorMessage,
-    admin_user_id: c.get("user").id,
-    admin_login: c.get("user").login,
+    admin_user_id: c.get('user').id,
+    admin_login: c.get('user').login,
   });
 
-  if (status === "failed") {
+  if (status === 'failed') {
     const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
     const { versions, deployment } = await fetchWorkerDetail(accountId, apiToken, scriptName);
 
@@ -320,7 +320,7 @@ app.post("/:name/rollback", async (c) => {
         versions={versions}
         deployment={deployment}
         error={`Rollback failed: ${errorMessage}`}
-        username={c.get("user").login}
+        username={c.get('user').login}
         tz={tz}
       />,
       500,

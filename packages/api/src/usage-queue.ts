@@ -1,7 +1,7 @@
-import type { ApiEnv } from "./env";
-import { createDb, getUser } from "./db";
-import { getPlanLimits } from "./tiers";
-import type { UsageEvent } from "./usage-counter";
+import { createDb, getUser } from './db';
+import type { ApiEnv } from './env';
+import { getPlanLimits } from './tiers';
+import type { UsageEvent } from './usage-counter';
 
 export function groupEventsByUser(events: UsageEvent[]): Map<string, UsageEvent[]> {
   const grouped = new Map<string, UsageEvent[]>();
@@ -18,7 +18,7 @@ export function groupEventsByUser(events: UsageEvent[]): Map<string, UsageEvent[
 
 export async function processUsageEventBatch(
   batch: MessageBatch<unknown>,
-  env: ApiEnv["Bindings"],
+  env: ApiEnv['Bindings'],
 ): Promise<void> {
   const events = batch.messages.map((m) => m.body as UsageEvent);
   const grouped = groupEventsByUser(events);
@@ -29,7 +29,7 @@ export async function processUsageEventBatch(
       // Look up user plan (skip DO call for unlimited plans)
       const user = await getUser(db, userId);
       if (!user) return; // Unknown user, skip
-      const plan = user.plan ?? "free";
+      const plan = user.plan ?? 'free';
       const limits = getPlanLimits(plan);
       if (limits.requestsPerMonth === 0) return; // Unlimited plan, skip DO
 
@@ -37,9 +37,9 @@ export async function processUsageEventBatch(
       const doId = env.USAGE_COUNTER.idFromName(userId);
       const stub = env.USAGE_COUNTER.get(doId);
       const res = await stub.fetch(
-        new Request("https://do/record", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        new Request('https://do/record', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ events: userEvents, plan, userId }),
         }),
       );
@@ -52,7 +52,7 @@ export async function processUsageEventBatch(
 
   // If any UsageCounter DO calls failed, retry the whole batch
   // Route 5xx events only on the ack path to avoid double-counting on redelivery
-  const failures = results.filter((r) => r.status === "rejected");
+  const failures = results.filter((r) => r.status === 'rejected');
   if (failures.length > 0) {
     batch.retryAll();
   } else {
@@ -78,9 +78,9 @@ export async function processUsageEventBatch(
           const doId = env.ERROR_ALERT_MONITOR.idFromName(projectId);
           const stub = env.ERROR_ALERT_MONITOR.get(doId);
           const res = await stub.fetch(
-            new Request("https://do/record", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
+            new Request('https://do/record', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ projectId, count, userId, slug }),
             }),
           );

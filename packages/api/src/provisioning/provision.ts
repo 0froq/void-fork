@@ -1,7 +1,9 @@
-import type { DeployManifest, Resource } from "../types";
-import { getProjectResources, createResource, type Db } from "../db";
-import { resources as resourcesTable } from "../schema";
-import { eq } from "drizzle-orm";
+import { eq } from 'drizzle-orm';
+import { hmacSignState } from '../auth/hmac';
+import { getProjectResources, createResource, type Db } from '../db';
+import { getProjectQueueName } from '../naming';
+import { resources as resourcesTable } from '../schema';
+import type { DeployManifest, Resource } from '../types';
 import {
   createD1Database,
   createKVNamespace,
@@ -10,12 +12,10 @@ import {
   getD1DatabaseByName,
   getKVNamespaceByTitle,
   getQueueByName,
-} from "./cloudflare-api";
-import { hmacSignState } from "../auth/hmac";
-import { getProjectQueueName } from "../naming";
+} from './cloudflare-api';
 
 export interface WorkerBinding {
-  type: "d1" | "kv_namespace" | "r2_bucket" | "queue" | "service" | "plain_text" | "hyperdrive";
+  type: 'd1' | 'kv_namespace' | 'r2_bucket' | 'queue' | 'service' | 'plain_text' | 'hyperdrive';
   name: string;
   id?: string;
   namespace_id?: string;
@@ -42,24 +42,24 @@ export async function provisionBindings(
 
   for (const name of manifest.bindings.d1 ?? []) {
     tasks.push(
-      ensureResource(db, accountId, apiToken, projectId, "d1", name, existing).then(
-        (r): WorkerBinding => ({ type: "d1", name, id: r.cf_id }),
+      ensureResource(db, accountId, apiToken, projectId, 'd1', name, existing).then(
+        (r): WorkerBinding => ({ type: 'd1', name, id: r.cf_id }),
       ),
     );
   }
 
   for (const name of manifest.bindings.kv ?? []) {
     tasks.push(
-      ensureResource(db, accountId, apiToken, projectId, "kv", name, existing).then(
-        (r): WorkerBinding => ({ type: "kv_namespace", name, namespace_id: r.cf_id }),
+      ensureResource(db, accountId, apiToken, projectId, 'kv', name, existing).then(
+        (r): WorkerBinding => ({ type: 'kv_namespace', name, namespace_id: r.cf_id }),
       ),
     );
   }
 
   for (const name of manifest.bindings.r2 ?? []) {
     tasks.push(
-      ensureResource(db, accountId, apiToken, projectId, "r2", name, existing).then(
-        (r): WorkerBinding => ({ type: "r2_bucket", name, bucket_name: r.cf_id }),
+      ensureResource(db, accountId, apiToken, projectId, 'r2', name, existing).then(
+        (r): WorkerBinding => ({ type: 'r2_bucket', name, bucket_name: r.cf_id }),
       ),
     );
   }
@@ -67,9 +67,9 @@ export async function provisionBindings(
   for (const q of manifest.queues ?? []) {
     const queueName = getProjectQueueName(projectId, q.name);
     tasks.push(
-      ensureResource(db, accountId, apiToken, projectId, "queue", q.name, existing).then(
+      ensureResource(db, accountId, apiToken, projectId, 'queue', q.name, existing).then(
         (r): WorkerBinding => ({
-          type: "queue",
+          type: 'queue',
           name: q.bindingName,
           queue_name: queueName,
           queue_id: r.cf_id,
@@ -79,13 +79,13 @@ export async function provisionBindings(
   }
 
   for (const name of manifest.bindings.hyperdrive ?? []) {
-    const found = existing.find((r) => r.type === "hyperdrive" && r.binding_name === name);
+    const found = existing.find((r) => r.type === 'hyperdrive' && r.binding_name === name);
     if (!found) {
       throw new Error(
         `Hyperdrive not provisioned for binding "${name}". Run \`void db set-url\` first.`,
       );
     }
-    tasks.push(Promise.resolve({ type: "hyperdrive" as const, name, id: found.cf_id }));
+    tasks.push(Promise.resolve({ type: 'hyperdrive' as const, name, id: found.cf_id }));
   }
 
   const bindings = await Promise.all(tasks);
@@ -93,9 +93,9 @@ export async function provisionBindings(
   // Always inject proxy bindings — used by AI, revalidation, and future platform features.
   // The AI-specific usage limit check stays in the proxy (/ai/* middleware).
   const proxyToken = await hmacSignState(projectId, jwtSecret);
-  bindings.push({ type: "service", name: "__VOID_PROXY", service: aiProxyService });
-  bindings.push({ type: "plain_text", name: "__PROJECT_ID", text: projectId });
-  bindings.push({ type: "plain_text", name: "__VOID_PROXY_TOKEN", text: proxyToken });
+  bindings.push({ type: 'service', name: '__VOID_PROXY', service: aiProxyService });
+  bindings.push({ type: 'plain_text', name: '__PROJECT_ID', text: projectId });
+  bindings.push({ type: 'plain_text', name: '__VOID_PROXY_TOKEN', text: proxyToken });
 
   return bindings;
 }
@@ -107,17 +107,17 @@ async function ensureResource(
   accountId: string,
   apiToken: string,
   projectId: string,
-  type: Resource["type"],
+  type: Resource['type'],
   bindingName: string,
   existing: Resource[],
 ): Promise<Resource> {
   // Normalize: R2 bucket names only allow lowercase alphanumeric + hyphens
-  const resourceName = `${projectId}-${bindingName}`.toLowerCase().replaceAll("_", "-");
+  const resourceName = `${projectId}-${bindingName}`.toLowerCase().replaceAll('_', '-');
 
   const found = existing.find((r) => r.type === type && r.binding_name === bindingName);
   if (found) {
     // Fix legacy queue resources that stored queue_name instead of queue_id (UUID)
-    if (type === "queue" && !UUID_RE.test(found.cf_id)) {
+    if (type === 'queue' && !UUID_RE.test(found.cf_id)) {
       const queueInfo = await getQueueByName(accountId, apiToken, resourceName);
       await db
         .update(resourcesTable)
@@ -143,60 +143,60 @@ async function ensureResource(
 }
 
 async function createCfResource(
-  type: Resource["type"],
+  type: Resource['type'],
   accountId: string,
   apiToken: string,
   resourceName: string,
 ): Promise<string> {
   switch (type) {
-    case "d1": {
+    case 'd1': {
       const result = await createD1Database(accountId, apiToken, resourceName);
       return result.uuid;
     }
-    case "kv": {
+    case 'kv': {
       const result = await createKVNamespace(accountId, apiToken, resourceName);
       return result.id;
     }
-    case "r2": {
+    case 'r2': {
       const result = await createR2Bucket(accountId, apiToken, resourceName);
       return result.name;
     }
-    case "queue": {
+    case 'queue': {
       const result = await createQueue(accountId, apiToken, resourceName);
       return result.queue_id;
     }
-    case "hyperdrive":
+    case 'hyperdrive':
       throw new Error(
-        "Hyperdrive resources are provisioned via the database endpoint, not ensureResource",
+        'Hyperdrive resources are provisioned via the database endpoint, not ensureResource',
       );
   }
 }
 
 async function lookupCfResource(
-  type: Resource["type"],
+  type: Resource['type'],
   accountId: string,
   apiToken: string,
   resourceName: string,
 ): Promise<string> {
   switch (type) {
-    case "d1": {
+    case 'd1': {
       const result = await getD1DatabaseByName(accountId, apiToken, resourceName);
       return result.uuid;
     }
-    case "kv": {
+    case 'kv': {
       const result = await getKVNamespaceByTitle(accountId, apiToken, resourceName);
       return result.id;
     }
-    case "r2":
+    case 'r2':
       // R2 bucket name IS the cf_id — no lookup API needed
       return resourceName;
-    case "queue": {
+    case 'queue': {
       const result = await getQueueByName(accountId, apiToken, resourceName);
       return result.queue_id;
     }
-    case "hyperdrive":
+    case 'hyperdrive':
       throw new Error(
-        "Hyperdrive resources are provisioned via the database endpoint, not ensureResource",
+        'Hyperdrive resources are provisioned via the database endpoint, not ensureResource',
       );
   }
 }
@@ -204,5 +204,5 @@ async function lookupCfResource(
 function isAlreadyExistsError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message.toLowerCase();
-  return msg.includes("already exists") || msg.includes("already been created");
+  return msg.includes('already exists') || msg.includes('already been created');
 }

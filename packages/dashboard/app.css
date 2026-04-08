@@ -1,6 +1,6 @@
-@import "tailwindcss";
-@import "@voidcloud/ui/theme.css";
-@import "@voidcloud/ui/base.css";
+@import 'tailwindcss';
+@import '@voidcloud/ui/theme.css';
+@import '@voidcloud/ui/base.css';
 
 /* Navigation progress bar */
 .nav-progress {

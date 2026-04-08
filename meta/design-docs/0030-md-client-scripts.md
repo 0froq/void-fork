@@ -58,12 +58,12 @@ The islands plugin's `generateIslandClientEntry()` is extended to include md cli
 
 ```js
 // Existing: hydrate [data-island] elements
-document.querySelectorAll("[data-island]").forEach(/* ... */);
+document.querySelectorAll('[data-island]').forEach(/* ... */);
 
 // New: md client scripts (code-split via dynamic import)
-const mdScriptId = document.getElementById("app")?.getAttribute("data-md-script");
+const mdScriptId = document.getElementById('app')?.getAttribute('data-md-script');
 const mdScripts = {
-  "pages/my-post": () => import("virtual:void-md-script:pages/my-post"),
+  'pages/my-post': () => import('virtual:void-md-script:pages/my-post'),
 };
 if (mdScriptId && mdScripts[mdScriptId]) mdScripts[mdScriptId]();
 ```

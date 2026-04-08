@@ -67,16 +67,16 @@ The codegen emits `typeof import("../../routes/api/users").GET` references. Type
 
 ```typescript
 export {};
-declare module "void/routes" {
+declare module 'void/routes' {
   interface RouteMap {
-    "/api/users": {
+    '/api/users': {
       GET: {
         input: {};
-        output: Serialize<Awaited<ReturnType<typeof import("../../routes/api/users").GET>>>;
+        output: Serialize<Awaited<ReturnType<typeof import('../../routes/api/users').GET>>>;
       };
       POST: {
-        input: ExtractInput<(typeof import("../../routes/api/users").POST)["__validators"]>;
-        output: Serialize<Awaited<ReturnType<typeof import("../../routes/api/users").POST>>>;
+        input: ExtractInput<(typeof import('../../routes/api/users').POST)['__validators']>;
+        output: Serialize<Awaited<ReturnType<typeof import('../../routes/api/users').POST>>>;
       };
     };
   }
@@ -94,15 +94,15 @@ Uses Standard Schema's `~standard.validate()` method. On failure, returns 400 wi
 ### Typed `fetch` client (`void/client`)
 
 ```typescript
-import { fetch } from "void/client";
+import { fetch } from 'void/client';
 
-const users = await fetch("/api/users"); // typed output
-await fetch("/api/users", {
-  method: "POST",
-  body: { name: "Alice", email: "a@b.com" }, // typed input
+const users = await fetch('/api/users'); // typed output
+await fetch('/api/users', {
+  method: 'POST',
+  body: { name: 'Alice', email: 'a@b.com' }, // typed input
 });
-const user = await fetch("/api/users/:id", {
-  params: { id: "123" }, // path interpolation
+const user = await fetch('/api/users/:id', {
+  params: { id: '123' }, // path interpolation
 });
 ```
 

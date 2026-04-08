@@ -48,8 +48,8 @@ Generate a migration that does a SQLite table rebuild (CREATE new → INSERT SEL
 Introduce a Drizzle instance factory:
 
 ```ts
-import { drizzle } from "drizzle-orm/d1";
-import * as schema from "./schema";
+import { drizzle } from 'drizzle-orm/d1';
+import * as schema from './schema';
 
 export function createDb(d1: D1Database) {
   return drizzle(d1, { schema });
@@ -71,8 +71,8 @@ Middleware creates Drizzle instance per request, stores in context:
 
 ```ts
 // env.ts Variables adds: db: Db
-app.use("*", async (c, next) => {
-  c.set("db", createDb(c.env.DB));
+app.use('*', async (c, next) => {
+  c.set('db', createDb(c.env.DB));
   await next();
 });
 ```

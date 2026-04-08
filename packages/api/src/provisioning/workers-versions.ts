@@ -1,4 +1,4 @@
-import { cfFetch, CF_API_BASE } from "./cloudflare-api";
+import { cfFetch, CF_API_BASE } from './cloudflare-api';
 
 export interface WorkerVersion {
   id: string;
@@ -53,9 +53,9 @@ export async function createWorkerDeployment(
     `${CF_API_BASE}/${accountId}/workers/scripts/${scriptName}/deployments`,
     apiToken,
     {
-      method: "POST",
+      method: 'POST',
       body: JSON.stringify({
-        strategy: "percentage",
+        strategy: 'percentage',
         versions: [{ version_id: versionId, percentage: 100 }],
       }),
     },

@@ -1,11 +1,14 @@
-import { PGlite } from "@electric-sql/pglite";
-import { eq, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/pglite";
-import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
-import pg from "pg";
-import { vi } from "vitest";
-import type { Db } from "../../src/db";
-import * as schema from "../../src/schema";
+import { PGlite } from '@electric-sql/pglite';
+import { eq, sql } from 'drizzle-orm';
+import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
+import { drizzle } from 'drizzle-orm/pglite';
+import pg from 'pg';
+import { vi } from 'vitest';
+import { signJwt } from '../../src/auth/jwt';
+import type { Db } from '../../src/db';
+import { generateId } from '../../src/id';
+import { encryptProjectSecret } from '../../src/project-secrets';
+import * as schema from '../../src/schema';
 import {
   users,
   oauthAccounts,
@@ -16,22 +19,19 @@ import {
   domains,
   invitations,
   oauthNonces,
-} from "../../src/schema";
-import { signJwt } from "../../src/auth/jwt";
-import { generateId } from "../../src/id";
-import { encryptProjectSecret } from "../../src/project-secrets";
-import type { PlanId } from "../../src/tiers";
-import { loadPGliteTemplateBundle } from "./db-template";
-import { setTestDb, clearTestDb } from "./setup";
+} from '../../src/schema';
+import type { PlanId } from '../../src/tiers';
+import { loadPGliteTemplateBundle } from './db-template';
+import { setTestDb, clearTestDb } from './setup';
 
-export const JWT_SECRET = "test-jwt-secret";
-export const CF_API_TOKEN = "test-cf-token";
-export const CF_ACCOUNT_ID = "test-account-id";
-export const CF_ZONE_ID = "test-zone-id";
-export const PROJECT_SECRET_ACTIVE_KEY_VERSION = "1";
+export const JWT_SECRET = 'test-jwt-secret';
+export const CF_API_TOKEN = 'test-cf-token';
+export const CF_ACCOUNT_ID = 'test-account-id';
+export const CF_ZONE_ID = 'test-zone-id';
+export const PROJECT_SECRET_ACTIVE_KEY_VERSION = '1';
 export const PROJECT_SECRET_KEYS_JSON = JSON.stringify({
-  [PROJECT_SECRET_ACTIVE_KEY_VERSION]: Buffer.from("0123456789abcdef0123456789abcdef").toString(
-    "base64",
+  [PROJECT_SECRET_ACTIVE_KEY_VERSION]: Buffer.from('0123456789abcdef0123456789abcdef').toString(
+    'base64',
   ),
 });
 
@@ -74,9 +74,9 @@ function createMockDoNamespace(): DurableObjectNamespace {
     get: (_id: unknown) => ({
       fetch: async (req: Request) => {
         const url = new URL(req.url);
-        if (url.pathname === "/rollover") return Response.json({ rolled: false });
-        if (url.pathname === "/init") return Response.json({ ok: true });
-        if (url.pathname === "/state") return Response.json({});
+        if (url.pathname === '/rollover') return Response.json({ rolled: false });
+        if (url.pathname === '/init') return Response.json({ ok: true });
+        if (url.pathname === '/state') return Response.json({});
         return Response.json({ totalRequests: 0, suspended: false });
       },
     }),
@@ -101,28 +101,28 @@ class MemoryKVNamespace {
 
   async get(
     key: string,
-    type?: "text" | "json" | "arrayBuffer" | "stream",
+    type?: 'text' | 'json' | 'arrayBuffer' | 'stream',
   ): Promise<string | ArrayBuffer | ReadableStream | unknown | null> {
     const entry = this.store.get(key);
     if (!entry) return null;
 
-    if (type === "arrayBuffer") {
+    if (type === 'arrayBuffer') {
       return entry.value instanceof ArrayBuffer
         ? entry.value.slice(0)
         : toArrayBuffer(new TextEncoder().encode(entry.value));
     }
 
     const text =
-      typeof entry.value === "string"
+      typeof entry.value === 'string'
         ? entry.value
         : new TextDecoder().decode(new Uint8Array(entry.value));
 
-    if (type === "json") {
+    if (type === 'json') {
       return JSON.parse(text);
     }
 
-    if (type === "stream") {
-      return new Blob([typeof entry.value === "string" ? entry.value : entry.value]).stream();
+    if (type === 'stream') {
+      return new Blob([typeof entry.value === 'string' ? entry.value : entry.value]).stream();
     }
 
     return text;
@@ -130,7 +130,7 @@ class MemoryKVNamespace {
 
   async getWithMetadata<T>(
     key: string,
-    type?: "text" | "json" | "arrayBuffer" | "stream",
+    type?: 'text' | 'json' | 'arrayBuffer' | 'stream',
   ): Promise<{
     value: string | ArrayBuffer | ReadableStream | unknown | null;
     metadata: T | null;
@@ -147,7 +147,7 @@ class MemoryKVNamespace {
     value: string | ArrayBuffer | ArrayBufferView,
     options?: { metadata?: unknown },
   ): Promise<void> {
-    const normalized = typeof value === "string" ? value : toArrayBuffer(value);
+    const normalized = typeof value === 'string' ? value : toArrayBuffer(value);
 
     this.store.set(key, {
       value: normalized,
@@ -163,7 +163,7 @@ class MemoryKVNamespace {
     prefix?: string;
     cursor?: string;
   }): Promise<{ keys: { name: string }[]; list_complete: boolean; cursor: string }> {
-    const prefix = options?.prefix ?? "";
+    const prefix = options?.prefix ?? '';
     const offset = options?.cursor ? Number(options.cursor) : 0;
     const keys = Array.from(this.store.keys())
       .filter((key) => key.startsWith(prefix))
@@ -174,7 +174,7 @@ class MemoryKVNamespace {
     return {
       keys,
       list_complete: true,
-      cursor: "",
+      cursor: '',
     };
   }
 }
@@ -188,7 +188,7 @@ class MemoryR2Bucket {
     options?: { httpMetadata?: unknown },
   ): Promise<void> {
     const body =
-      typeof value === "string"
+      typeof value === 'string'
         ? toArrayBuffer(new TextEncoder().encode(value))
         : toArrayBuffer(value);
     this.store.set(key, { body, httpMetadata: options?.httpMetadata });
@@ -229,7 +229,7 @@ export async function setupEnv(): Promise<TestEnv> {
 
   return {
     db,
-    HYPERDRIVE: { connectionString: "test://mock" },
+    HYPERDRIVE: { connectionString: 'test://mock' },
     ISR_CACHE: isrCache as unknown as KVNamespace,
     ROUTING: kv as unknown as KVNamespace,
     STATIC_ASSETS: staticAssets as unknown as KVNamespace,
@@ -241,10 +241,10 @@ export async function setupEnv(): Promise<TestEnv> {
     JWT_SECRET,
     PROJECT_SECRET_KEYS_JSON,
     PROJECT_SECRET_ACTIVE_KEY_VERSION,
-    GITHUB_CLIENT_ID: "test-github-client-id",
-    GITHUB_CLIENT_SECRET: "test-github-client-secret",
-    GOOGLE_CLIENT_ID: "test-google-client-id",
-    GOOGLE_CLIENT_SECRET: "test-google-client-secret",
+    GITHUB_CLIENT_ID: 'test-github-client-id',
+    GITHUB_CLIENT_SECRET: 'test-github-client-secret',
+    GOOGLE_CLIENT_ID: 'test-google-client-id',
+    GOOGLE_CLIENT_SECRET: 'test-google-client-secret',
     USAGE_COUNTER: createMockDoNamespace(),
     CRON_SCHEDULER: createMockDoNamespace(),
     ERROR_ALERT_MONITOR: createMockDoNamespace(),
@@ -283,11 +283,11 @@ let userCounter = 0;
 
 export async function createTestUser(
   db: Db,
-  login = "testuser",
-  provider = "github",
+  login = 'testuser',
+  provider = 'github',
   providerId?: string,
-  plan: PlanId = "free",
-  role: "user" | "admin" = "user",
+  plan: PlanId = 'free',
+  role: 'user' | 'admin' = 'user',
 ): Promise<{ id: string; login: string; jwt: string; adminJwt: string }> {
   const id = `user_test${++userCounter}`;
   const pid = providerId ?? String(10000 + userCounter);
@@ -301,13 +301,13 @@ export async function createTestUser(
     role,
   });
   await db.insert(oauthAccounts).values({
-    id: generateId("oa"),
+    id: generateId('oa'),
     user_id: id,
     provider,
     provider_id: pid,
   });
-  const jwt = await signJwt({ sub: id, login, aud: "api" }, JWT_SECRET);
-  const adminJwt = await signJwt({ sub: id, login, aud: "admin" }, JWT_SECRET);
+  const jwt = await signJwt({ sub: id, login, aud: 'api' }, JWT_SECRET);
+  const adminJwt = await signJwt({ sub: id, login, aud: 'admin' }, JWT_SECRET);
   return { id, login, jwt, adminJwt };
 }
 
@@ -330,7 +330,7 @@ let deploymentCounter = 0;
 export async function createTestDeployment(
   db: Db,
   projectId: string,
-  status: "pending" | "live" | "failed" = "live",
+  status: 'pending' | 'live' | 'failed' = 'live',
   source?: string,
   errorMessage?: string,
 ): Promise<{ id: string }> {
@@ -343,7 +343,7 @@ export async function createTestDeployment(
     source: source ?? null,
     error_message: errorMessage ?? null,
   });
-  if (status === "live") {
+  if (status === 'live') {
     await db.update(projects).set({ active_deployment_id: id }).where(eq(projects.id, projectId));
   }
   return { id };
@@ -351,7 +351,7 @@ export async function createTestDeployment(
 
 export async function createTestProjectSecret(
   db: Db,
-  env: Pick<TestEnv, "PROJECT_SECRET_KEYS_JSON" | "PROJECT_SECRET_ACTIVE_KEY_VERSION">,
+  env: Pick<TestEnv, 'PROJECT_SECRET_KEYS_JSON' | 'PROJECT_SECRET_ACTIVE_KEY_VERSION'>,
   projectId: string,
   name: string,
   value: string,
@@ -361,7 +361,7 @@ export async function createTestProjectSecret(
   await db
     .insert(projectSecrets)
     .values({
-      id: generateId("psc"),
+      id: generateId('psc'),
       project_id: projectId,
       name,
       ciphertext: encrypted.ciphertext,
@@ -417,53 +417,53 @@ export interface CfApiMocks {
 }
 
 const defaultMocks: CfApiMocks = {
-  createD1: () => cfSuccess({ uuid: "d1-test-uuid", name: "test-db" }),
-  createKV: () => cfSuccess({ id: "kv-test-id", title: "test-kv" }),
-  createR2: () => cfSuccess({ name: "test-bucket" }),
+  createD1: () => cfSuccess({ uuid: 'd1-test-uuid', name: 'test-db' }),
+  createKV: () => cfSuccess({ id: 'kv-test-id', title: 'test-kv' }),
+  createR2: () => cfSuccess({ name: 'test-bucket' }),
   createQueue: () =>
-    cfSuccess({ queue_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", queue_name: "test-queue" }),
+    cfSuccess({ queue_id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', queue_name: 'test-queue' }),
   addQueueConsumer: () => cfSuccess({}),
   deleteD1: () => cfSuccess(null),
   deleteKV: () => cfSuccess(null),
   deleteR2: () => cfSuccess(null),
   deleteQueue: () => cfSuccess(null),
-  deleteWorker: () => new Response("ok", { status: 200 }),
+  deleteWorker: () => new Response('ok', { status: 200 }),
   queryD1: () => cfSuccess([{ results: [] }]),
-  uploadWorker: () => new Response("ok", { status: 200 }),
+  uploadWorker: () => new Response('ok', { status: 200 }),
   assetUploadSession: async (_url: string, init?: RequestInit) => {
     // Extract real hashes from the manifest in the request body so the mock
     // bucket matches what collectAssets actually computed (BLAKE3 hashes).
     try {
-      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
       if (body?.manifest) {
         const hashes = [...new Set(Object.values(body.manifest).map((e: any) => e.hash))];
-        return cfSuccess({ jwt: "test-asset-jwt", buckets: [hashes] });
+        return cfSuccess({ jwt: 'test-asset-jwt', buckets: [hashes] });
       }
     } catch {
       // fall through to default
     }
-    return cfSuccess({ jwt: "test-asset-jwt", buckets: [["hash1"]] });
+    return cfSuccess({ jwt: 'test-asset-jwt', buckets: [['hash1']] });
   },
-  assetUpload: () => cfSuccess({ jwt: "test-completion-jwt" }),
+  assetUpload: () => cfSuccess({ jwt: 'test-completion-jwt' }),
   listWorkerSecrets: () => cfSuccess([]),
   setWorkerSecret: () => cfSuccess({}),
   deleteWorkerSecret: () => cfSuccess({}),
   createCustomHostname: () =>
     cfSuccess({
-      id: "ch-test-id",
-      hostname: "test.example.com",
-      status: "pending",
-      ssl: { status: "pending" },
+      id: 'ch-test-id',
+      hostname: 'test.example.com',
+      status: 'pending',
+      ssl: { status: 'pending' },
     }),
   getCustomHostname: () =>
     cfSuccess({
-      id: "ch-test-id",
-      hostname: "test.example.com",
-      status: "pending",
-      ssl: { status: "pending" },
+      id: 'ch-test-id',
+      hostname: 'test.example.com',
+      status: 'pending',
+      ssl: { status: 'pending' },
     }),
   deleteCustomHostname: () => cfSuccess(null),
-  purgeCache: () => cfSuccess({ id: "purge-test-id" }),
+  purgeCache: () => cfSuccess({ id: 'purge-test-id' }),
   analyticsQuery: () => Response.json({ data: [{ requests: 0, bandwidth_bytes: 0 }] }),
 };
 
@@ -472,88 +472,88 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
 
   const fn = vi.fn(async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url =
-      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    const method = init?.method ?? "GET";
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const method = init?.method ?? 'GET';
 
     // Order matters: more specific patterns first
-    if (method === "POST" && url.includes("/purge_cache")) {
+    if (method === 'POST' && url.includes('/purge_cache')) {
       return mocks.purgeCache(url, init);
     }
-    if (method === "POST" && url.includes("/custom_hostnames")) {
+    if (method === 'POST' && url.includes('/custom_hostnames')) {
       return mocks.createCustomHostname(url, init);
     }
-    if (method === "GET" && url.includes("/custom_hostnames/")) {
+    if (method === 'GET' && url.includes('/custom_hostnames/')) {
       return mocks.getCustomHostname(url, init);
     }
-    if (method === "DELETE" && url.includes("/custom_hostnames/")) {
+    if (method === 'DELETE' && url.includes('/custom_hostnames/')) {
       return mocks.deleteCustomHostname(url, init);
     }
-    if (method === "POST" && url.includes("/analytics_engine/sql")) {
+    if (method === 'POST' && url.includes('/analytics_engine/sql')) {
       return mocks.analyticsQuery(url, init);
     }
-    if (method === "POST" && url.includes("/assets-upload-session")) {
+    if (method === 'POST' && url.includes('/assets-upload-session')) {
       return mocks.assetUploadSession(url, init);
     }
-    if (method === "POST" && url.includes("/workers/assets/upload")) {
+    if (method === 'POST' && url.includes('/workers/assets/upload')) {
       return mocks.assetUpload(url, init);
     }
-    if (method === "GET" && url.includes("/workers/dispatch/") && url.includes("/secrets")) {
+    if (method === 'GET' && url.includes('/workers/dispatch/') && url.includes('/secrets')) {
       return mocks.listWorkerSecrets(url, init);
     }
-    if (method === "PUT" && url.includes("/workers/dispatch/") && url.includes("/secrets")) {
+    if (method === 'PUT' && url.includes('/workers/dispatch/') && url.includes('/secrets')) {
       return mocks.setWorkerSecret(url, init);
     }
-    if (method === "DELETE" && url.includes("/workers/dispatch/") && url.includes("/secrets/")) {
+    if (method === 'DELETE' && url.includes('/workers/dispatch/') && url.includes('/secrets/')) {
       return mocks.deleteWorkerSecret(url, init);
     }
-    if (method === "DELETE" && url.includes("/workers/dispatch/")) {
+    if (method === 'DELETE' && url.includes('/workers/dispatch/')) {
       return mocks.deleteWorker(url, init);
     }
-    if (method === "PUT" && url.includes("/workers/dispatch/")) {
+    if (method === 'PUT' && url.includes('/workers/dispatch/')) {
       return mocks.uploadWorker(url, init);
     }
-    if (method === "DELETE" && url.includes("/d1/database/")) {
+    if (method === 'DELETE' && url.includes('/d1/database/')) {
       return mocks.deleteD1(url, init);
     }
-    if (method === "DELETE" && url.includes("/storage/kv/namespaces/")) {
+    if (method === 'DELETE' && url.includes('/storage/kv/namespaces/')) {
       return mocks.deleteKV(url, init);
     }
-    if (method === "DELETE" && url.includes("/r2/buckets/")) {
+    if (method === 'DELETE' && url.includes('/r2/buckets/')) {
       return mocks.deleteR2(url, init);
     }
-    if (method === "POST" && url.includes("/d1/database/") && url.includes("/query")) {
+    if (method === 'POST' && url.includes('/d1/database/') && url.includes('/query')) {
       return mocks.queryD1(url, init);
     }
-    if (method === "POST" && url.includes("/d1/database")) {
+    if (method === 'POST' && url.includes('/d1/database')) {
       return mocks.createD1(url, init);
     }
-    if (method === "POST" && url.includes("/storage/kv/namespaces")) {
+    if (method === 'POST' && url.includes('/storage/kv/namespaces')) {
       return mocks.createKV(url, init);
     }
-    if (method === "POST" && url.includes("/r2/buckets")) {
+    if (method === 'POST' && url.includes('/r2/buckets')) {
       return mocks.createR2(url, init);
     }
-    if (method === "POST" && url.includes("/queues/") && url.includes("/consumers")) {
+    if (method === 'POST' && url.includes('/queues/') && url.includes('/consumers')) {
       return mocks.addQueueConsumer(url, init);
     }
-    if (method === "POST" && url.includes("/queues")) {
+    if (method === 'POST' && url.includes('/queues')) {
       return mocks.createQueue(url, init);
     }
-    if (method === "DELETE" && url.includes("/queues/")) {
+    if (method === 'DELETE' && url.includes('/queues/')) {
       return mocks.deleteQueue(url, init);
     }
 
     throw new Error(`Unmocked fetch: ${method} ${url}`);
   });
 
-  vi.stubGlobal("fetch", fn);
+  vi.stubGlobal('fetch', fn);
   return fn;
 }
 
 export async function readAllEvents(res: Response): Promise<unknown[]> {
   const text = await res.text();
   return text
-    .split("\n")
+    .split('\n')
     .filter((line) => line.trim())
     .map((line) => JSON.parse(line));
 }

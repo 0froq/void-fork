@@ -14,7 +14,7 @@ export function getGitHubAuthorizeUrl(
     client_id: clientId,
     redirect_uri: redirectUri,
     state,
-    scope: "read:user user:email",
+    scope: 'read:user user:email',
   });
   return `https://github.com/login/oauth/authorize?${params}`;
 }
@@ -24,11 +24,11 @@ export async function exchangeCodeForToken(
   clientSecret: string,
   code: string,
 ): Promise<string> {
-  const res = await fetch("https://github.com/login/oauth/access_token", {
-    method: "POST",
+  const res = await fetch('https://github.com/login/oauth/access_token', {
+    method: 'POST',
     headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
     },
     body: JSON.stringify({
       client_id: clientId,
@@ -43,7 +43,7 @@ export async function exchangeCodeForToken(
 
   const data = (await res.json()) as { access_token?: string; error?: string };
   if (data.error || !data.access_token) {
-    throw new Error(`GitHub token exchange error: ${data.error ?? "no access_token"}`);
+    throw new Error(`GitHub token exchange error: ${data.error ?? 'no access_token'}`);
   }
 
   return data.access_token;
@@ -51,18 +51,18 @@ export async function exchangeCodeForToken(
 
 export async function getGitHubUser(accessToken: string): Promise<GitHubUser> {
   const [userRes, emailsRes] = await Promise.all([
-    fetch("https://api.github.com/user", {
+    fetch('https://api.github.com/user', {
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        Accept: "application/vnd.github+json",
-        "User-Agent": "void-api",
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'void-api',
       },
     }),
-    fetch("https://api.github.com/user/emails", {
+    fetch('https://api.github.com/user/emails', {
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        Accept: "application/vnd.github+json",
-        "User-Agent": "void-api",
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'void-api',
       },
     }),
   ]);

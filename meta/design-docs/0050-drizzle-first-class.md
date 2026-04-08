@@ -30,17 +30,17 @@ No extra install needed — `drizzle-orm` and `drizzle-kit` ship as direct depen
 
 ```ts
 // db/schema.ts
-import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sql } from 'drizzle-orm';
+import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 
-export const users = sqliteTable("users", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  createdAt: text("created_at")
+export const users = sqliteTable('users', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  createdAt: text('created_at')
     .notNull()
     .default(sql`(datetime('now'))`),
-  updatedAt: text("updated_at")
+  updatedAt: text('updated_at')
     .notNull()
     .default(sql`(datetime('now'))`),
 });
@@ -49,9 +49,9 @@ export const users = sqliteTable("users", {
 ### Use It
 
 ```ts
-import { db } from "void/db";
-import { users } from "@schema";
-import { eq } from "drizzle-orm";
+import { db } from 'void/db';
+import { users } from '@schema';
+import { eq } from 'drizzle-orm';
 
 // List
 const allUsers = await db.select().from(users).all();
@@ -60,7 +60,7 @@ const allUsers = await db.select().from(users).all();
 const user = await db.select().from(users).where(eq(users.id, 1)).get();
 
 // Insert
-await db.insert(users).values({ name: "Alice", email: "alice@example.com" });
+await db.insert(users).values({ name: 'Alice', email: 'alice@example.com' });
 
 // Relational queries (schema auto-loaded)
 const usersWithPosts = await db.query.users.findMany({
@@ -88,7 +88,7 @@ The `void/db` export path is preserved but now exports a Drizzle instance:
 
 ```ts
 // void/db (framework runtime)
-import { drizzle } from "drizzle-orm/d1";
+import { drizzle } from 'drizzle-orm/d1';
 
 // Auto-wired Drizzle instance with user's schema
 export const db: DrizzleD1Database<UserSchema>;
@@ -141,8 +141,8 @@ resolve: {
 Both patterns work:
 
 ```ts
-import { users } from "@schema"; // db/schema.ts barrel
-import { users } from "@schema/users"; // db/schema/users.ts direct
+import { users } from '@schema'; // db/schema.ts barrel
+import { users } from '@schema/users'; // db/schema/users.ts direct
 ```
 
 ### CLI Commands
@@ -167,15 +167,15 @@ import { users } from "@schema/users"; // db/schema/users.ts direct
 
 ```ts
 // db/schema/post.ts
-import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sql } from 'drizzle-orm';
+import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 
-export const posts = sqliteTable("posts", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  createdAt: text("created_at")
+export const posts = sqliteTable('posts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  createdAt: text('created_at')
     .notNull()
     .default(sql`(datetime('now'))`),
-  updatedAt: text("updated_at")
+  updatedAt: text('updated_at')
     .notNull()
     .default(sql`(datetime('now'))`),
 });
@@ -184,7 +184,7 @@ export const posts = sqliteTable("posts", {
 If `db/schema.ts` exists as a barrel file, auto-appends:
 
 ```ts
-export * from "./schema/post";
+export * from './schema/post';
 ```
 
 If `db/schema.ts` doesn't exist yet, creates it with the barrel export.

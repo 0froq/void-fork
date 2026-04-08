@@ -1,6 +1,6 @@
-import { DurableObject } from "cloudflare:workers";
-import { CronExpressionParser } from "cron-parser";
-import type { ApiEnv } from "./env";
+import { DurableObject } from 'cloudflare:workers';
+import { CronExpressionParser } from 'cron-parser';
+import type { ApiEnv } from './env';
 
 interface CronState {
   workerName: string;
@@ -24,26 +24,26 @@ export function cfCronToUnix(expr: string): string {
   if (fields.length !== 5) return expr;
 
   fields[4] = fields[4]
-    .split(",")
+    .split(',')
     .map((part) => {
       // Handle range with optional step: "2-6/2" → "1-5/2"
-      const [rangeOrValue, step] = part.split("/");
-      const stepSuffix = step != null ? `/${step}` : "";
+      const [rangeOrValue, step] = part.split('/');
+      const stepSuffix = step != null ? `/${step}` : '';
 
-      if (rangeOrValue === "*") return `*${stepSuffix}`;
+      if (rangeOrValue === '*') return `*${stepSuffix}`;
 
       // Handle range: "2-6" → "1-5"
-      if (rangeOrValue.includes("-")) {
-        const [start, end] = rangeOrValue.split("-").map((v) => shiftDow(v));
+      if (rangeOrValue.includes('-')) {
+        const [start, end] = rangeOrValue.split('-').map((v) => shiftDow(v));
         return `${start}-${end}${stepSuffix}`;
       }
 
       // Single value (may have L/# suffix)
       return `${shiftDow(rangeOrValue)}${stepSuffix}`;
     })
-    .join(",");
+    .join(',');
 
-  return fields.join(" ");
+  return fields.join(' ');
 }
 
 function shiftDow(value: string): string {
@@ -61,7 +61,7 @@ export function cronMatchesMinute(cronExpr: string, now: number): boolean {
     // Cron resolution is per-minute so this is safe.
     const interval = CronExpressionParser.parse(cfCronToUnix(cronExpr), {
       currentDate: new Date(now + 1),
-      tz: "UTC",
+      tz: 'UTC',
     });
     const prev = interval.prev().toDate().getTime();
     const nowMinute = Math.floor(now / 60000) * 60000;
@@ -78,7 +78,7 @@ export function getNextFireTime(schedules: { cron: string }[], now: number): num
     try {
       const interval = CronExpressionParser.parse(cfCronToUnix(s.cron), {
         currentDate: new Date(now),
-        tz: "UTC",
+        tz: 'UTC',
       });
       const next = interval.next().toDate().getTime();
       if (next < earliest) earliest = next;
@@ -91,42 +91,42 @@ export function getNextFireTime(schedules: { cron: string }[], now: number): num
 
 const MAX_CONSECUTIVE_FAILURES = 5;
 
-export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
+export class CronScheduler extends DurableObject<ApiEnv['Bindings']> {
   private state: CronState | null = null;
 
   private async getState(): Promise<CronState | null> {
     if (this.state) return this.state;
-    const stored = await this.ctx.storage.get<CronState>("state");
+    const stored = await this.ctx.storage.get<CronState>('state');
     this.state = stored ?? null;
     return this.state;
   }
 
   private async saveState(state: CronState): Promise<void> {
     this.state = state;
-    await this.ctx.storage.put("state", state);
+    await this.ctx.storage.put('state', state);
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    if (request.method === "POST" && path === "/sync") {
+    if (request.method === 'POST' && path === '/sync') {
       return this.handleSync(request);
     }
-    if (request.method === "POST" && path === "/clear") {
+    if (request.method === 'POST' && path === '/clear') {
       return this.handleClear();
     }
-    if (request.method === "GET" && path === "/status") {
+    if (request.method === 'GET' && path === '/status') {
       return this.handleStatus();
     }
 
-    return new Response("not found", { status: 404 });
+    return new Response('not found', { status: 404 });
   }
 
   private async handleSync(request: Request): Promise<Response> {
     const body = await request.json<CronState>();
     await this.saveState(body);
-    await this.ctx.storage.put("failures", 0);
+    await this.ctx.storage.put('failures', 0);
     await this.scheduleNextAlarm();
     return Response.json({ ok: true });
   }
@@ -141,7 +141,7 @@ export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
   private async handleStatus(): Promise<Response> {
     const state = await this.getState();
     const alarm = await this.ctx.storage.getAlarm();
-    const failures = (await this.ctx.storage.get<number>("failures")) ?? 0;
+    const failures = (await this.ctx.storage.get<number>('failures')) ?? 0;
     // Omit proxyToken from status response to avoid leaking secrets
     const { proxyToken: _, ...safeState } = state ?? {};
     return Response.json({ state: state ? safeState : null, nextAlarm: alarm, failures });
@@ -174,7 +174,7 @@ export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
     );
 
     for (let i = 0; i < results.length; i++) {
-      if (results[i].status === "rejected") {
+      if (results[i].status === 'rejected') {
         console.error(
           `cron ${matching[i].name} (${matching[i].cron}) failed for ${state.workerName}:`,
           (results[i] as PromiseRejectedResult).reason,
@@ -185,11 +185,11 @@ export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
     // Only count toward circuit breaker when the worker itself is unreachable
     // (deleted/evicted), not when the handler returns an application-level error.
     const allUnreachable = results.every(
-      (r) => r.status === "rejected" && r.reason instanceof WorkerUnreachableError,
+      (r) => r.status === 'rejected' && r.reason instanceof WorkerUnreachableError,
     );
     if (allUnreachable) {
-      const failures = ((await this.ctx.storage.get<number>("failures")) ?? 0) + 1;
-      await this.ctx.storage.put("failures", failures);
+      const failures = ((await this.ctx.storage.get<number>('failures')) ?? 0) + 1;
+      await this.ctx.storage.put('failures', failures);
       if (failures >= MAX_CONSECUTIVE_FAILURES) {
         console.error(
           `CronScheduler: ${failures} consecutive failures for ${state.workerName}, auto-clearing`,
@@ -198,7 +198,7 @@ export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
         return;
       }
     } else {
-      await this.ctx.storage.put("failures", 0);
+      await this.ctx.storage.put('failures', 0);
     }
 
     await this.scheduleNextAlarm();
@@ -213,13 +213,13 @@ export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
     let res: Response;
     try {
       const worker = this.env.DISPATCH.get(workerName);
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (proxyToken) {
-        headers["x-void-internal"] = proxyToken;
+        headers['x-void-internal'] = proxyToken;
       }
       res = await worker.fetch(
-        new Request("https://internal/__scheduled", {
-          method: "POST",
+        new Request('https://internal/__scheduled', {
+          method: 'POST',
           headers,
           body: JSON.stringify({ cron, scheduledTime }),
         }),
@@ -229,7 +229,7 @@ export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
       // Only classify as unreachable when the worker script is definitively gone.
       // Other thrown errors (CPU limit, transient infra, compilation) mean the
       // worker exists or the failure is transient — don't count toward circuit breaker.
-      if (msg.includes("Worker not found")) {
+      if (msg.includes('Worker not found')) {
         throw new WorkerUnreachableError(msg);
       }
       throw new Error(msg);

@@ -1,4 +1,4 @@
-import { matchPattern } from "./headers";
+import { matchPattern } from './headers';
 
 export interface RedirectRule {
   source: string;
@@ -24,10 +24,10 @@ export function applyRedirectRules(pathname: string, rules?: RedirectRule[]): Re
   if (!matched) return null;
 
   let dest = matched.destination;
-  if (dest.includes(":splat") && matched.source.includes("*")) {
-    const prefix = matched.source.split("*")[0];
+  if (dest.includes(':splat') && matched.source.includes('*')) {
+    const prefix = matched.source.split('*')[0];
     const splat = pathname.slice(prefix.length);
-    dest = dest.replace(":splat", splat);
+    dest = dest.replace(':splat', splat);
   }
 
   return new Response(null, {

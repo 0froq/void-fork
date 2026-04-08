@@ -1,5 +1,5 @@
-export const CF_API_BASE = "https://api.cloudflare.com/client/v4/accounts";
-const CF_ZONE_API_BASE = "https://api.cloudflare.com/client/v4/zones";
+export const CF_API_BASE = 'https://api.cloudflare.com/client/v4/accounts';
+const CF_ZONE_API_BASE = 'https://api.cloudflare.com/client/v4/zones';
 
 interface CfApiResult<T> {
   success: boolean;
@@ -12,13 +12,13 @@ export async function cfFetch<T>(url: string, apiToken: string, init?: RequestIn
     ...init,
     headers: {
       Authorization: `Bearer ${apiToken}`,
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
       ...init?.headers,
     },
   });
   const json = (await response.json()) as CfApiResult<T>;
   if (!json.success) {
-    const msg = json.errors.map((e) => e.message).join(", ");
+    const msg = json.errors.map((e) => e.message).join(', ');
     throw new Error(`Cloudflare API error: ${msg}`);
   }
   return json.result;
@@ -35,7 +35,7 @@ export async function createD1Database(
   name: string,
 ): Promise<D1DatabaseInfo> {
   return cfFetch<D1DatabaseInfo>(`${CF_API_BASE}/${accountId}/d1/database`, apiToken, {
-    method: "POST",
+    method: 'POST',
     body: JSON.stringify({ name }),
   });
 }
@@ -51,7 +51,7 @@ export async function createKVNamespace(
   title: string,
 ): Promise<KVNamespaceInfo> {
   return cfFetch<KVNamespaceInfo>(`${CF_API_BASE}/${accountId}/storage/kv/namespaces`, apiToken, {
-    method: "POST",
+    method: 'POST',
     body: JSON.stringify({ title }),
   });
 }
@@ -66,7 +66,7 @@ export async function createR2Bucket(
   name: string,
 ): Promise<R2BucketInfo> {
   return cfFetch<R2BucketInfo>(`${CF_API_BASE}/${accountId}/r2/buckets`, apiToken, {
-    method: "POST",
+    method: 'POST',
     body: JSON.stringify({ name }),
   });
 }
@@ -116,7 +116,7 @@ export async function deleteD1Database(
   databaseId: string,
 ): Promise<void> {
   await cfFetch(`${CF_API_BASE}/${accountId}/d1/database/${databaseId}`, apiToken, {
-    method: "DELETE",
+    method: 'DELETE',
   });
 }
 
@@ -126,7 +126,7 @@ export async function deleteKVNamespace(
   namespaceId: string,
 ): Promise<void> {
   await cfFetch(`${CF_API_BASE}/${accountId}/storage/kv/namespaces/${namespaceId}`, apiToken, {
-    method: "DELETE",
+    method: 'DELETE',
   });
 }
 
@@ -136,7 +136,7 @@ export async function deleteR2Bucket(
   bucketName: string,
 ): Promise<void> {
   await cfFetch(`${CF_API_BASE}/${accountId}/r2/buckets/${bucketName}`, apiToken, {
-    method: "DELETE",
+    method: 'DELETE',
   });
 }
 
@@ -153,7 +153,7 @@ export async function createQueue(
   name: string,
 ): Promise<QueueInfo> {
   return cfFetch<QueueInfo>(`${CF_API_BASE}/${accountId}/queues`, apiToken, {
-    method: "POST",
+    method: 'POST',
     body: JSON.stringify({ queue_name: name }),
   });
 }
@@ -187,22 +187,22 @@ export async function addQueueConsumer(
   const consumersUrl = `${CF_API_BASE}/${accountId}/queues/${queueId}/consumers`;
   const consumerBody = {
     script_name: scriptName,
-    type: "worker",
+    type: 'worker',
     ...(settings && { settings }),
   };
 
   // Fast path: try to create the consumer directly
   try {
     await cfFetch(consumersUrl, apiToken, {
-      method: "POST",
+      method: 'POST',
       body: JSON.stringify(consumerBody),
     });
     return;
   } catch (err) {
     if (
       !(err instanceof Error) ||
-      (!err.message.toLowerCase().includes("already exists") &&
-        !err.message.toLowerCase().includes("already has a consumer"))
+      (!err.message.toLowerCase().includes('already exists') &&
+        !err.message.toLowerCase().includes('already has a consumer'))
     ) {
       throw err;
     }
@@ -224,7 +224,7 @@ export async function addQueueConsumer(
 
   if (settings) {
     await cfFetch(`${consumersUrl}/${ours.consumer_id}`, apiToken, {
-      method: "PUT",
+      method: 'PUT',
       body: JSON.stringify(consumerBody),
     });
   }
@@ -236,7 +236,7 @@ export async function deleteQueue(
   queueId: string,
 ): Promise<void> {
   await cfFetch(`${CF_API_BASE}/${accountId}/queues/${queueId}`, apiToken, {
-    method: "DELETE",
+    method: 'DELETE',
   });
 }
 
@@ -256,8 +256,8 @@ export async function createCustomHostname(
   hostname: string,
 ): Promise<CustomHostnameInfo> {
   return cfFetch<CustomHostnameInfo>(`${CF_ZONE_API_BASE}/${zoneId}/custom_hostnames`, apiToken, {
-    method: "POST",
-    body: JSON.stringify({ hostname, ssl: { method: "http", type: "dv" } }),
+    method: 'POST',
+    body: JSON.stringify({ hostname, ssl: { method: 'http', type: 'dv' } }),
   });
 }
 
@@ -278,7 +278,7 @@ export async function deleteCustomHostname(
   hostnameId: string,
 ): Promise<void> {
   await cfFetch(`${CF_ZONE_API_BASE}/${zoneId}/custom_hostnames/${hostnameId}`, apiToken, {
-    method: "DELETE",
+    method: 'DELETE',
   });
 }
 
@@ -296,7 +296,7 @@ export async function createHyperdrive(
   connectionString: string,
 ): Promise<HyperdriveInfo> {
   return cfFetch<HyperdriveInfo>(`${CF_API_BASE}/${accountId}/hyperdrive/configs`, apiToken, {
-    method: "POST",
+    method: 'POST',
     body: JSON.stringify({ name, origin: { connection_string: connectionString } }),
   });
 }
@@ -311,7 +311,7 @@ export async function updateHyperdrive(
     `${CF_API_BASE}/${accountId}/hyperdrive/configs/${hyperdriveId}`,
     apiToken,
     {
-      method: "PUT",
+      method: 'PUT',
       body: JSON.stringify({ origin: { connection_string: connectionString } }),
     },
   );
@@ -323,7 +323,7 @@ export async function deleteHyperdrive(
   hyperdriveId: string,
 ): Promise<void> {
   await cfFetch(`${CF_API_BASE}/${accountId}/hyperdrive/configs/${hyperdriveId}`, apiToken, {
-    method: "DELETE",
+    method: 'DELETE',
   });
 }
 
@@ -352,7 +352,7 @@ export async function purgeZoneCache(
   for (let i = 0; i < files.length; i += 100) {
     const batch = files.slice(i, i + 100);
     await cfFetch(`${CF_ZONE_API_BASE}/${zoneId}/purge_cache`, apiToken, {
-      method: "POST",
+      method: 'POST',
       body: JSON.stringify({ files: batch }),
     });
   }

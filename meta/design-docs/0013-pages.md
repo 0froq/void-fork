@@ -65,12 +65,12 @@ When pages mode is active, the adapter auto-generates the SSR entry and client h
 ```vue
 <!-- pages/users/index.vue -->
 <script server lang="ts">
-import { defineHandler } from "void";
-import { db } from "void/db";
+import { defineHandler } from 'void';
+import { db } from 'void/db';
 
 // loader provides props for this page
 export const loader = defineHandler(async (c) => {
-  const users = await db.list("users");
+  const users = await db.list('users');
   return { users };
 });
 
@@ -79,13 +79,13 @@ export const action = defineHandler.withValidator({ body: createUserSchema })(as
   c,
   { body },
 ) => {
-  await db.insert("users", body);
+  await db.insert('users', body);
   // implicit: re-runs loader, page re-renders with updated user list
 });
 </script>
 
 <script setup lang="ts">
-import { useForm, useShared, Link } from "@void/vue";
+import { useForm, useShared, Link } from '@void/vue';
 
 interface User {
   id: number;
@@ -96,9 +96,9 @@ defineProps<{ users: User[] }>();
 
 const { auth, flash } = useShared();
 
-const form = useForm({ name: "", email: "" });
+const form = useForm({ name: '', email: '' });
 function submit() {
-  form.post("/users");
+  form.post('/users');
 }
 </script>
 
@@ -149,7 +149,7 @@ export interface Props {
   users: User[];
 }
 export const loader = defineHandler<Props>(async (c) => {
-  return { users: await db.list("users") };
+  return { users: await db.list('users') };
 });
 </script>
 
@@ -170,7 +170,7 @@ export interface Props {
   users: User[];
 }
 export const loader = defineHandler<Props>(async (c) => {
-  return { users: await db.list("users") };
+  return { users: await db.list('users') };
 });
 ```
 
@@ -188,7 +188,7 @@ Handlers often need to return `Response` as an escape hatch (e.g. `c.notFound()`
 
 ```ts
 export const loader = defineHandler<Props>((c) => {
-  const user = findUser(c.req.param("id"));
+  const user = findUser(c.req.param('id'));
   if (!user) return c.notFound(); // Response — allowed, stripped from Props
   return { user }; // Props — this is what __output carries
 });
@@ -217,15 +217,15 @@ pages/
 
 ```ts
 // pages/users/index.server.ts
-import { defineHandler } from "void";
-import { db } from "void/db";
+import { defineHandler } from 'void';
+import { db } from 'void/db';
 
 export const loader = defineHandler(async (c) => {
-  return { users: await db.list("users") };
+  return { users: await db.list('users') };
 });
 
 export const action = defineHandler(async (c) => {
-  await db.insert("users", await c.req.json());
+  await db.insert('users', await c.req.json());
 });
 ```
 
@@ -242,11 +242,11 @@ pages/
 
 ```tsx
 // pages/users/index.tsx
-import { useForm, useShared, Link } from "@void/react";
+import { useForm, useShared, Link } from '@void/react';
 
 export default function UsersPage({ users }: { users: User[] }) {
   const { auth } = useShared();
-  const form = useForm({ name: "", email: "" });
+  const form = useForm({ name: '', email: '' });
 
   return (
     <div>
@@ -260,10 +260,10 @@ export default function UsersPage({ users }: { users: User[] }) {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          form.post("/users");
+          form.post('/users');
         }}
       >
-        <input value={form.name} onChange={(e) => form.setData("name", e.target.value)} />
+        <input value={form.name} onChange={(e) => form.setData('name', e.target.value)} />
         {form.errors.name && <span>{form.errors.name}</span>}
         <button disabled={form.processing}>Create</button>
       </form>
@@ -292,7 +292,7 @@ pages/
 ```vue
 <!-- pages/layout.vue -->
 <script setup>
-import { useShared, Link } from "@void/vue";
+import { useShared, Link } from '@void/vue';
 const { auth } = useShared();
 </script>
 
@@ -321,11 +321,11 @@ Middleware injects shared data available on every page via `c.set('shared', {...
 
 ```ts
 // middleware/01.auth.ts
-import { defineMiddleware } from "void";
+import { defineMiddleware } from 'void';
 
 export default defineMiddleware(async (c, next) => {
   const user = await getSessionUser(c);
-  c.set("shared", {
+  c.set('shared', {
     auth: { user },
     flash: getFlash(c),
   });
@@ -337,7 +337,7 @@ Client-side access via `useShared()`:
 
 ```vue
 <script setup>
-import { useShared } from "@void/vue";
+import { useShared } from '@void/vue';
 const { auth, flash } = useShared();
 </script>
 ```
@@ -416,7 +416,7 @@ The Vue adapter's Vite plugin must extract `<script server>` **before** the fram
 
 ```ts
 // @void/vue/plugin internals
-import vue from "@vitejs/plugin-vue";
+import vue from '@vitejs/plugin-vue';
 
 export function voidVue(options?) {
   return [
@@ -433,7 +433,7 @@ React has no SFC custom blocks, so no `scriptServerPlugin` is needed. Only compa
 
 ```ts
 // @void/react/plugin internals
-import react from "@vitejs/plugin-react";
+import react from '@vitejs/plugin-react';
 
 export function voidReact(options?) {
   return [
@@ -447,9 +447,9 @@ export function voidReact(options?) {
 
 ```ts
 // vite.config.ts
-import { defineConfig } from "vite";
-import { voidPlugin } from "void";
-import { voidVue } from "@void/vue/plugin";
+import { defineConfig } from 'vite';
+import { voidPlugin } from 'void';
+import { voidVue } from '@void/vue/plugin';
 
 export default defineConfig({
   plugins: [voidPlugin(), ...voidVue()],
@@ -633,14 +633,14 @@ For debugging client-side issues during development, [vite-console-forward-plugi
 For systematic client-side debugging (hydration crashes, stale props, navigation bugs), use Playwright in headless mode:
 
 ```js
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
 
-page.on("console", (msg) => console.log(`[${msg.type()}] ${msg.text()}`));
-page.on("pageerror", (err) => console.log(`[ERROR] ${err.message}`));
+page.on('console', (msg) => console.log(`[${msg.type()}] ${msg.text()}`));
+page.on('pageerror', (err) => console.log(`[ERROR] ${err.message}`));
 
-await page.goto("http://localhost:5173/");
+await page.goto('http://localhost:5173/');
 await page.click('a[href="/users"]');
 // Check URL, content, and console for warnings
 ```

@@ -1,8 +1,8 @@
-import type { User, Project } from "../../types";
-import type { PlanId } from "../../tiers";
-import { PLAN_LIMITS, getPlanLimits } from "../../tiers";
-import { Layout } from "./layout";
-import { formatLimit, formatNumber, formatBytes } from "./format";
+import type { PlanId } from '../../tiers';
+import { PLAN_LIMITS, getPlanLimits } from '../../tiers';
+import type { User, Project } from '../../types';
+import { formatLimit, formatNumber, formatBytes } from './format';
+import { Layout } from './layout';
 
 interface ProjectUsage {
   projectId: string;
@@ -48,7 +48,7 @@ export function UserDetailPage({
           </tr>
           <tr>
             <th>Email</th>
-            <td>{user.email ?? "-"}</td>
+            <td>{user.email ?? '-'}</td>
           </tr>
           <tr>
             <th>Role</th>
@@ -56,7 +56,7 @@ export function UserDetailPage({
           </tr>
           <tr>
             <th>Status</th>
-            <td>{user.suspended_reason ? `suspended: ${user.suspended_reason}` : "active"}</td>
+            <td>{user.suspended_reason ? `suspended: ${user.suspended_reason}` : 'active'}</td>
           </tr>
           <tr>
             <th>Created</th>
@@ -73,7 +73,7 @@ export function UserDetailPage({
               {p}
             </option>
           ))}
-        </select>{" "}
+        </select>{' '}
         <button type="submit">Update</button>
       </form>
       <table>
@@ -104,15 +104,15 @@ export function UserDetailPage({
           </tr>
           <tr>
             <td>D1 storage</td>
-            <td>{formatLimit(limits.d1StorageBytes, "bytes")}</td>
+            <td>{formatLimit(limits.d1StorageBytes, 'bytes')}</td>
           </tr>
           <tr>
             <td>R2 storage</td>
-            <td>{formatLimit(limits.r2StorageBytes, "bytes")}</td>
+            <td>{formatLimit(limits.r2StorageBytes, 'bytes')}</td>
           </tr>
           <tr>
             <td>KV storage</td>
-            <td>{formatLimit(limits.kvStorageBytes, "bytes")}</td>
+            <td>{formatLimit(limits.kvStorageBytes, 'bytes')}</td>
           </tr>
         </tbody>
       </table>
@@ -158,7 +158,7 @@ export function UserDetailPage({
         </form>
       ) : (
         <form method="post" action={`/admin/users/${user.id}/suspend`}>
-          <input type="text" name="reason" placeholder="Reason..." value="admin_suspended" />{" "}
+          <input type="text" name="reason" placeholder="Reason..." value="admin_suspended" />{' '}
           <button type="submit" class="danger">
             Suspend
           </button>

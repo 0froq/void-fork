@@ -1,4 +1,4 @@
-import type { Env } from "./types";
+import type { Env } from './types';
 
 // In-memory cache: worker names are stable (only change on slug rename, which is rare).
 const workerNameCache = new Map<string, string>();
@@ -22,10 +22,10 @@ async function resolveWorkerName(
 
   const token = await hmacSign(projectId, jwtSecret);
   const res = await api.fetch(`https://api/internal/resolve-worker/${projectId}`, {
-    method: "POST",
+    method: 'POST',
     headers: {
-      "content-type": "application/json",
-      "x-void-internal": token,
+      'content-type': 'application/json',
+      'x-void-internal': token,
     },
   });
 
@@ -56,10 +56,10 @@ export async function dispatchToWorker(
     const proxyToken = await hmacSign(projectId, env.JWT_SECRET);
     const worker = env.DISPATCH.get(workerName);
     const res = await worker.fetch(`https://worker/__void${path}`, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "content-type": "application/json",
-        "x-void-internal": proxyToken,
+        'content-type': 'application/json',
+        'x-void-internal': proxyToken,
       },
       body: JSON.stringify(body),
     });
@@ -83,11 +83,11 @@ let cachedKeySecret: string | undefined;
 async function getSignKey(secret: string): Promise<CryptoKey> {
   if (cachedSignKey && cachedKeySecret === secret) return cachedSignKey;
   cachedSignKey = await crypto.subtle.importKey(
-    "raw",
+    'raw',
     encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
+    { name: 'HMAC', hash: 'SHA-256' },
     false,
-    ["sign"],
+    ['sign'],
   );
   cachedKeySecret = secret;
   return cachedSignKey;
@@ -95,7 +95,7 @@ async function getSignKey(secret: string): Promise<CryptoKey> {
 
 async function hmacSign(data: string, secret: string): Promise<string> {
   const key = await getSignKey(secret);
-  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(data));
+  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
   const binary = String.fromCharCode(...new Uint8Array(sig));
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }

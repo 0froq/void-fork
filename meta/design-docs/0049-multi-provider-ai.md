@@ -80,28 +80,28 @@ Consistent metering in dev. Users who want zero-latency direct calls can always 
 ### Basic Usage
 
 ```ts
-import { ai } from "void/ai";
+import { ai } from 'void/ai';
 
 // Workers AI (existing, unchanged)
-const result = await ai.run("@cf/meta/llama-3.1-8b-instruct", {
-  prompt: "Hello",
+const result = await ai.run('@cf/meta/llama-3.1-8b-instruct', {
+  prompt: 'Hello',
 });
 
 // OpenAI
-const result = await ai.run("openai/gpt-4o", {
-  messages: [{ role: "user", content: "Hello" }],
+const result = await ai.run('openai/gpt-4o', {
+  messages: [{ role: 'user', content: 'Hello' }],
   temperature: 0.7,
 });
 
 // Anthropic
-const result = await ai.run("anthropic/claude-sonnet-4-20250514", {
-  messages: [{ role: "user", content: "Hello" }],
+const result = await ai.run('anthropic/claude-sonnet-4-20250514', {
+  messages: [{ role: 'user', content: 'Hello' }],
   max_tokens: 1024,
 });
 
 // Streaming
-const stream = ai.stream("openai/gpt-4o", {
-  messages: [{ role: "user", content: "Hello" }],
+const stream = ai.stream('openai/gpt-4o', {
+  messages: [{ role: 'user', content: 'Hello' }],
 });
 for await (const chunk of stream) {
   console.log(chunk.choices[0].delta.content);
@@ -174,7 +174,7 @@ interface ChatCompletionInputs {
 }
 
 interface ChatMessage {
-  role: "system" | "user" | "assistant";
+  role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
@@ -200,9 +200,9 @@ interface ChatCompletionChunk {
 ```ts
 // packages/proxy/src/ai.ts
 
-ai.post("/chat", async (c) => {
-  const body = c.get("body");
-  const projectId = c.get("projectId");
+ai.post('/chat', async (c) => {
+  const body = c.get('body');
+  const projectId = c.get('projectId');
 
   const gatewayUrl = `https://gateway.ai.cloudflare.com/v1/${c.env.CF_ACCOUNT_ID}/void/compat/chat/completions`;
 
@@ -219,12 +219,12 @@ ai.post("/chat", async (c) => {
   if (isStream) payload.stream = true;
 
   const response = await fetch(gatewayUrl, {
-    method: "POST",
+    method: 'POST',
     headers: {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
       Authorization: `Bearer ${body.providerKey}`,
-      "cf-aig-authorization": `Bearer ${c.env.CF_AIG_TOKEN}`,
-      "cf-aig-metadata-projectId": projectId,
+      'cf-aig-authorization': `Bearer ${c.env.CF_AIG_TOKEN}`,
+      'cf-aig-metadata-projectId': projectId,
     },
     body: JSON.stringify(payload),
   });
@@ -237,9 +237,9 @@ ai.post("/chat", async (c) => {
   if (isStream && response.body) {
     return new Response(response.body, {
       headers: {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-        "Access-Control-Allow-Origin": "*",
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        'Access-Control-Allow-Origin': '*',
       },
     });
   }

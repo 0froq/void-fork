@@ -1,6 +1,6 @@
-import type { User } from "../../types";
-import { Layout } from "./layout";
-import { Pagination } from "./pagination";
+import type { User } from '../../types';
+import { Layout } from './layout';
+import { Pagination } from './pagination';
 
 export function UsersListPage({
   users,
@@ -19,11 +19,11 @@ export function UsersListPage({
     <Layout title="Users" username={username}>
       <h1>Users</h1>
       <form method="get" action="/admin/users" style="margin-bottom: 10px">
-        <input type="text" name="search" placeholder="Search users..." value={search ?? ""} />{" "}
+        <input type="text" name="search" placeholder="Search users..." value={search ?? ''} />{' '}
         <button type="submit">Search</button>
         {search && (
           <>
-            {" "}
+            {' '}
             | <a href="/admin/users">Clear</a>
           </>
         )}
@@ -48,10 +48,10 @@ export function UsersListPage({
                 <a href={`/admin/users/${user.id}`}>{user.login}</a>
               </td>
               <td>{user.provider}</td>
-              <td>{user.email ?? "-"}</td>
+              <td>{user.email ?? '-'}</td>
               <td>{user.plan}</td>
               <td>{user.role}</td>
-              <td>{user.suspended_reason ? "suspended" : "active"}</td>
+              <td>{user.suspended_reason ? 'suspended' : 'active'}</td>
               <td>{new Date(user.created_at).toLocaleDateString()}</td>
               <td>
                 <form

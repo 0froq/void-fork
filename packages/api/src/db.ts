@@ -11,10 +11,11 @@ import {
   or,
   sql,
   getTableColumns,
-} from "drizzle-orm";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { alias } from "drizzle-orm/pg-core";
-import * as schema from "./schema";
+} from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { alias } from 'drizzle-orm/pg-core';
+import { generateId } from './id';
+import * as schema from './schema';
 import {
   users,
   oauthAccounts,
@@ -27,9 +28,8 @@ import {
   invitations,
   oauthNonces,
   authCodes,
-} from "./schema";
-import { generateId } from "./id";
-import type { PlanId } from "./tiers";
+} from './schema';
+import type { PlanId } from './tiers';
 import type {
   Deployment,
   Domain,
@@ -40,7 +40,7 @@ import type {
   Project,
   Resource,
   User,
-} from "./types";
+} from './types';
 
 export function createDb(connectionString: string) {
   return drizzle(connectionString, { schema });
@@ -56,7 +56,7 @@ export async function createUser(
   login: string,
   email: string | null,
 ): Promise<User> {
-  const id = generateId("user");
+  const id = generateId('user');
   const [row] = await db
     .insert(users)
     .values({ id, provider, provider_id: providerId, login, email })
@@ -122,7 +122,7 @@ export async function createOAuthAccount(
   provider: string,
   providerId: string,
 ): Promise<OAuthAccount> {
-  const id = generateId("oa");
+  const id = generateId('oa');
   const [row] = await db
     .insert(oauthAccounts)
     .values({ id, user_id: userId, provider, provider_id: providerId })
@@ -146,7 +146,7 @@ export async function countUserDeploymentsToday(db: Db, userId: string): Promise
 // --- Projects ---
 
 export async function createProject(db: Db, userId: string, slug: string): Promise<Project> {
-  const id = generateId("proj");
+  const id = generateId('proj');
   const [row] = await db.insert(projects).values({ id, user_id: userId, slug }).returning();
   return row;
 }
@@ -169,7 +169,7 @@ export async function getProjectsByUserId(db: Db, userId: string): Promise<Proje
     .orderBy(desc(projects.created_at));
 }
 
-export async function updateProjectType(db: Db, id: string, type: Project["type"]): Promise<void> {
+export async function updateProjectType(db: Db, id: string, type: Project['type']): Promise<void> {
   await db.update(projects).set({ type }).where(eq(projects.id, id));
 }
 
@@ -190,7 +190,7 @@ export async function createDeployment(
   source?: string | null,
   commit?: string | null,
 ): Promise<Deployment> {
-  const id = generateId("dpl");
+  const id = generateId('dpl');
   const [row] = await db
     .insert(deployments)
     .values({
@@ -207,7 +207,7 @@ export async function createDeployment(
 export async function updateDeploymentStatus(
   db: Db,
   id: string,
-  status: Deployment["status"],
+  status: Deployment['status'],
   errorMessage?: string,
 ): Promise<void> {
   await db
@@ -216,7 +216,7 @@ export async function updateDeploymentStatus(
       status,
       updated_at: sql`now()`,
       deployed_at:
-        status === "live"
+        status === 'live'
           ? sql`COALESCE(${deployments.deployed_at}, now())`
           : sql`${deployments.deployed_at}`,
       error_message: sql`COALESCE(${errorMessage ?? null}, ${deployments.error_message})`,
@@ -277,13 +277,13 @@ export async function failStaleDeployments(db: Db): Promise<number> {
   const result = await db
     .update(deployments)
     .set({
-      status: "failed",
+      status: 'failed',
       updated_at: sql`now()`,
       error_message: sql`COALESCE(${deployments.error_message}, 'timed out')`,
     })
     .where(
       and(
-        notInArray(deployments.status, ["live", "failed"]),
+        notInArray(deployments.status, ['live', 'failed']),
         sql`${deployments.updated_at} < now() - interval '30 minutes'`,
       ),
     );
@@ -297,7 +297,7 @@ export async function getActiveDeployment(db: Db, projectId: string): Promise<De
     .where(
       and(
         eq(deployments.project_id, projectId),
-        notInArray(deployments.status, ["live", "failed"]),
+        notInArray(deployments.status, ['live', 'failed']),
       ),
     )
     .limit(1);
@@ -311,7 +311,7 @@ export async function getLastLiveAssetManifest(
   const [row] = await db
     .select({ asset_hashes: deployments.asset_hashes })
     .from(deployments)
-    .where(and(eq(deployments.project_id, projectId), eq(deployments.status, "live")))
+    .where(and(eq(deployments.project_id, projectId), eq(deployments.status, 'live')))
     .orderBy(desc(deployments.created_at))
     .limit(1);
 
@@ -421,7 +421,7 @@ export async function upsertProjectSecret(
   const [row] = await db
     .insert(projectSecrets)
     .values({
-      id: generateId("psc"),
+      id: generateId('psc'),
       project_id: projectId,
       name,
       ciphertext,
@@ -454,11 +454,11 @@ export async function deleteProjectSecret(db: Db, projectId: string, name: strin
 export async function createResource(
   db: Db,
   projectId: string,
-  type: Resource["type"],
+  type: Resource['type'],
   cfId: string,
   bindingName: string,
 ): Promise<Resource> {
-  const id = generateId("res");
+  const id = generateId('res');
   const [row] = await db
     .insert(resources)
     .values({ id, project_id: projectId, type, cf_id: cfId, binding_name: bindingName })
@@ -473,7 +473,7 @@ export async function getProjectResources(db: Db, projectId: string): Promise<Re
 export async function getResourceByBinding(
   db: Db,
   projectId: string,
-  type: "d1" | "kv" | "r2" | "queue",
+  type: 'd1' | 'kv' | 'r2' | 'queue',
   bindingName: string,
 ): Promise<{ cf_id: string } | undefined> {
   return db
@@ -497,7 +497,7 @@ export async function createDomain(
   hostname: string,
   cfHostnameId: string,
 ): Promise<Domain> {
-  const id = generateId("dom");
+  const id = generateId('dom');
   const [row] = await db
     .insert(domains)
     .values({ id, project_id: projectId, hostname, cf_hostname_id: cfHostnameId })
@@ -545,7 +545,7 @@ export async function getDomain(db: Db, id: string): Promise<Domain | null> {
 export async function updateDomainStatus(
   db: Db,
   id: string,
-  status: Domain["status"],
+  status: Domain['status'],
 ): Promise<void> {
   await db.update(domains).set({ status }).where(eq(domains.id, id));
 }
@@ -633,7 +633,7 @@ export async function unsuspendUser(db: Db, id: string): Promise<void> {
   await db.update(users).set({ suspended_reason: null }).where(eq(users.id, id));
 }
 
-export async function updateUserRole(db: Db, id: string, role: "user" | "admin"): Promise<void> {
+export async function updateUserRole(db: Db, id: string, role: 'user' | 'admin'): Promise<void> {
   await db.update(users).set({ role }).where(eq(users.id, id));
 }
 
@@ -660,19 +660,19 @@ export async function searchProjects(
   const lastDeploy = db
     .select({
       project_id: deployments.project_id,
-      last_deploy: sql<string>`max(${deployments.created_at})`.as("last_deploy"),
+      last_deploy: sql<string>`max(${deployments.created_at})`.as('last_deploy'),
       last_deploy_id:
         sql<string>`(SELECT id FROM deployments d2 WHERE d2.project_id = ${deployments.project_id} ORDER BY d2.created_at DESC LIMIT 1)`.as(
-          "last_deploy_id",
+          'last_deploy_id',
         ),
       last_deploy_status:
         sql<string>`(SELECT status FROM deployments d3 WHERE d3.project_id = ${deployments.project_id} ORDER BY d3.created_at DESC LIMIT 1)`.as(
-          "last_deploy_status",
+          'last_deploy_status',
         ),
     })
     .from(deployments)
     .groupBy(deployments.project_id)
-    .as("last_deploy_sq");
+    .as('last_deploy_sq');
 
   return db
     .select({
@@ -733,19 +733,19 @@ export async function getAllProjectsWithOwner(
   const lastDeploy = db
     .select({
       project_id: deployments.project_id,
-      last_deploy: sql<string>`max(${deployments.created_at})`.as("last_deploy"),
+      last_deploy: sql<string>`max(${deployments.created_at})`.as('last_deploy'),
       last_deploy_id:
         sql<string>`(SELECT id FROM deployments d2 WHERE d2.project_id = ${deployments.project_id} ORDER BY d2.created_at DESC LIMIT 1)`.as(
-          "last_deploy_id",
+          'last_deploy_id',
         ),
       last_deploy_status:
         sql<string>`(SELECT status FROM deployments d3 WHERE d3.project_id = ${deployments.project_id} ORDER BY d3.created_at DESC LIMIT 1)`.as(
-          "last_deploy_status",
+          'last_deploy_status',
         ),
     })
     .from(deployments)
     .groupBy(deployments.project_id)
-    .as("last_deploy_sq");
+    .as('last_deploy_sq');
 
   return db
     .select({
@@ -769,7 +769,7 @@ export async function getFirstAdmin(db: Db) {
   const [row] = await db
     .select({ id: users.id, login: users.login })
     .from(users)
-    .where(eq(users.role, "admin"))
+    .where(eq(users.role, 'admin'))
     .limit(1);
   return row ?? null;
 }
@@ -833,7 +833,7 @@ export async function unsuspendUserIfReason(db: Db, id: string, reason: string):
 
 export async function createPlatformEvent(
   db: Db,
-  event: Omit<PlatformEvent, "created_at">,
+  event: Omit<PlatformEvent, 'created_at'>,
 ): Promise<PlatformEvent> {
   const [row] = await db.insert(platformEvents).values(event).returning();
   return row;
@@ -842,7 +842,7 @@ export async function createPlatformEvent(
 export async function updatePlatformEventStatus(
   db: Db,
   id: string,
-  status: PlatformEvent["status"],
+  status: PlatformEvent['status'],
   errorMessage?: string,
 ): Promise<void> {
   await db
@@ -854,8 +854,8 @@ export async function updatePlatformEventStatus(
 export async function skipPendingBatchEvents(db: Db, batchId: string): Promise<void> {
   await db
     .update(platformEvents)
-    .set({ status: "skipped" })
-    .where(and(eq(platformEvents.batch_id, batchId), eq(platformEvents.status, "pending")));
+    .set({ status: 'skipped' })
+    .where(and(eq(platformEvents.batch_id, batchId), eq(platformEvents.status, 'pending')));
 }
 
 export async function getPlatformEventsByBatchId(
@@ -871,7 +871,7 @@ export async function getPlatformEventsByBatchId(
 
 export async function getRecentPlatformEvents(
   db: Db,
-  environment: PlatformEvent["environment"],
+  environment: PlatformEvent['environment'],
   limit = 20,
 ): Promise<PlatformEvent[]> {
   return db
@@ -889,7 +889,7 @@ export async function createInvitation(
   email: string,
   invitedBy: string,
 ): Promise<Invitation> {
-  const id = generateId("inv");
+  const id = generateId('inv');
   const [row] = await db
     .insert(invitations)
     .values({ id, email: email.toLowerCase(), invited_by: invitedBy })
@@ -900,8 +900,8 @@ export async function createInvitation(
 export async function revokeInvitation(db: Db, id: string, revokedBy: string): Promise<boolean> {
   const rows = await db
     .update(invitations)
-    .set({ status: "revoked", revoked_at: sql`now()`, revoked_by: revokedBy })
-    .where(and(eq(invitations.id, id), eq(invitations.status, "pending")))
+    .set({ status: 'revoked', revoked_at: sql`now()`, revoked_by: revokedBy })
+    .where(and(eq(invitations.id, id), eq(invitations.status, 'pending')))
     .returning({ id: invitations.id });
   return rows.length > 0;
 }
@@ -913,8 +913,8 @@ export async function acceptInvitationByEmail(
 ): Promise<void> {
   await db
     .update(invitations)
-    .set({ status: "accepted", accepted_by: userId, accepted_at: sql`now()` })
-    .where(and(eq(invitations.email, email.toLowerCase()), eq(invitations.status, "pending")));
+    .set({ status: 'accepted', accepted_by: userId, accepted_at: sql`now()` })
+    .where(and(eq(invitations.email, email.toLowerCase()), eq(invitations.status, 'pending')));
 }
 
 export async function getAllInvitations(
@@ -922,8 +922,8 @@ export async function getAllInvitations(
   limit: number,
   offset: number,
 ): Promise<(Invitation & { invited_by_login: string | null; revoked_by_login: string | null })[]> {
-  const invitedByUser = alias(users, "invited_by_user");
-  const revokedByUser = alias(users, "revoked_by_user");
+  const invitedByUser = alias(users, 'invited_by_user');
+  const revokedByUser = alias(users, 'revoked_by_user');
   return db
     .select({
       ...getTableColumns(invitations),
@@ -955,7 +955,7 @@ export async function getPendingInvitationByEmail(
   const [row] = await db
     .select()
     .from(invitations)
-    .where(and(eq(invitations.email, email.toLowerCase()), eq(invitations.status, "pending")))
+    .where(and(eq(invitations.email, email.toLowerCase()), eq(invitations.status, 'pending')))
     .limit(1);
   return row ?? null;
 }

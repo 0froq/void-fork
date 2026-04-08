@@ -1,7 +1,7 @@
-import { Layout } from "./layout";
-import { formatDateTime } from "./format";
-import type { PlatformWorker, PlatformEnv } from "../platform-workers";
-import type { WorkerVersion, WorkerDeployment } from "../../provisioning/workers-versions";
+import type { WorkerVersion, WorkerDeployment } from '../../provisioning/workers-versions';
+import type { PlatformWorker, PlatformEnv } from '../platform-workers';
+import { formatDateTime } from './format';
+import { Layout } from './layout';
 
 export function PlatformWorkerDetailPage({
   worker,
@@ -27,7 +27,7 @@ export function PlatformWorkerDetailPage({
   return (
     <Layout title={`${worker.name} — Platform`} username={username}>
       <p style="margin-bottom: 16px">
-        <a href={"/admin/platform"}>&larr; Back to Platform</a>
+        <a href={'/admin/platform'}>&larr; Back to Platform</a>
       </p>
 
       <h1>{worker.name}</h1>
@@ -49,13 +49,13 @@ export function PlatformWorkerDetailPage({
           {worker.dependsOn.length > 0 && (
             <tr>
               <td style="font-weight: 600; padding-right: 24px">Depends on</td>
-              <td>{worker.dependsOn.join(", ")}</td>
+              <td>{worker.dependsOn.join(', ')}</td>
             </tr>
           )}
           {worker.dependedBy.length > 0 && (
             <tr>
               <td style="font-weight: 600; padding-right: 24px">Depended by</td>
-              <td>{worker.dependedBy.join(", ")}</td>
+              <td>{worker.dependedBy.join(', ')}</td>
             </tr>
           )}
         </tbody>
@@ -95,7 +95,7 @@ export function PlatformWorkerDetailPage({
             {versions.map((v) => {
               const isActive = v.id === activeVersionId;
               return (
-                <tr key={v.id} style={isActive ? "background: #dcfce7" : undefined}>
+                <tr key={v.id} style={isActive ? 'background: #dcfce7' : undefined}>
                   <td>
                     <span class="copy-btn" data-copy={v.id} style="cursor: pointer">
                       {v.id.slice(0, 12)}...
@@ -113,7 +113,7 @@ export function PlatformWorkerDetailPage({
                   </td>
                   <td>
                     {isActive ? (
-                      "—"
+                      '—'
                     ) : (
                       <form
                         method="post"

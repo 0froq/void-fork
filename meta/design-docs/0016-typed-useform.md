@@ -15,22 +15,22 @@ Extend `routes.d.ts` generation to include a `PageActionMap` interface alongside
 ```typescript
 // .void/routes.d.ts (generated)
 export {};
-declare module "void/routes" {
+declare module 'void/routes' {
   // Existing — API routes
   interface RouteMap {
-    "/api/users": { GET: { input: {}; output: User[] } };
+    '/api/users': { GET: { input: {}; output: User[] } };
   }
 
   // New — page actions
   interface PageActionMap {
-    "/users": {
+    '/users': {
       body: { name: string; email: string }; // from withValidator({ body: schema })
     };
-    "/users/:id": {
+    '/users/:id': {
       body: { name: string };
       params: { id: string };
     };
-    "/settings": {
+    '/settings': {
       body: Record<string, unknown>; // action exists but no validator
     };
   }
@@ -53,7 +53,7 @@ Two overloads — typed (URL-first) and untyped (backward compatible):
 // Typed: bound to a specific page route
 function useForm<U extends keyof PageActionMap>(
   url: U,
-  defaults: PageActionMap[U]["body"],
+  defaults: PageActionMap[U]['body'],
   options?: { params: PageActionMap[U] extends { params: infer P } ? P : never },
 ): TypedForm<PageActionMap[U]>;
 
@@ -65,18 +65,18 @@ function useForm<T extends Record<string, unknown>>(defaults: T): Form<T>;
 
 ```typescript
 // Static route — full typing
-const form = useForm("/users", { name: "", email: "" });
+const form = useForm('/users', { name: '', email: '' });
 form.post(); // posts to "/users"
 form.errors.name; // string | undefined
 form.errors.foo; // TS error
 
 // Dynamic route — params resolve at runtime
-const form = useForm("/users/:id", { name: "" }, { params: { id: String(props.user.id) } });
+const form = useForm('/users/:id', { name: '' }, { params: { id: String(props.user.id) } });
 form.post(); // posts to "/users/123"
 
 // Untyped — backward compatible
-const form = useForm({ name: "", email: "" });
-form.post("/users"); // explicit URL, no type narrowing
+const form = useForm({ name: '', email: '' });
+form.post('/users'); // explicit URL, no type narrowing
 ```
 
 ### Typed Form Return Type
@@ -112,7 +112,7 @@ For pages without validators (`body: Record<string, unknown>`), errors falls bac
 For routes with dynamic segments, params are passed as a third argument and resolved at runtime by replacing `:segment` placeholders:
 
 ```typescript
-useForm("/users/:id", defaults, { params: { id: "123" } });
+useForm('/users/:id', defaults, { params: { id: '123' } });
 // Runtime: posts to "/users/123"
 ```
 

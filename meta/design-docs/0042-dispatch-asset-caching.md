@@ -97,19 +97,19 @@ interface RoutingEntry {
 Before routing to the user worker, check if the request is a GET for a hashed asset:
 
 ```typescript
-if (request.method === "GET" && routing.hashedAssetsPrefix) {
-  const prefix = "/" + routing.hashedAssetsPrefix + "/";
+if (request.method === 'GET' && routing.hashedAssetsPrefix) {
+  const prefix = '/' + routing.hashedAssetsPrefix + '/';
   if (pathname.startsWith(prefix)) {
     // Normalize cache key: strip query strings — hashed filenames are content-addressed
     const cacheUrl = new URL(request.url);
-    cacheUrl.search = "";
+    cacheUrl.search = '';
     const cacheKey = new Request(cacheUrl.toString());
 
     const cache = caches.default;
     const cached = await cache.match(cacheKey);
     // Only serve from cache if it's our entry (has immutable header).
     // Workers Assets may have pre-existing entries with short-lived cache headers.
-    if (cached?.headers.get("Cache-Control")?.includes("immutable")) {
+    if (cached?.headers.get('Cache-Control')?.includes('immutable')) {
       return meter(cached);
     }
     // Cache miss — invoke worker, cache immutable response
@@ -118,14 +118,14 @@ if (request.method === "GET" && routing.hashedAssetsPrefix) {
       const response = await worker.fetch(request);
       if (response.ok) {
         const res = new Response(response.body, response);
-        res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+        res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
         ctx.waitUntil(cache.put(cacheKey, res.clone()));
         return meter(res);
       }
       return meter(response);
     } catch (err) {
-      if (err instanceof Error && err.message.includes("Worker exceeded")) {
-        return meter(Response.json({ error: "CPU limit exceeded" }, { status: 429 }));
+      if (err instanceof Error && err.message.includes('Worker exceeded')) {
+        return meter(Response.json({ error: 'CPU limit exceeded' }, { status: 429 }));
       }
       throw err;
     }
@@ -143,10 +143,10 @@ async function serveWithAssets(request, env, response) {
   const asset = await env.ASSETS.fetch(request);
   if (asset.status === 404) return response;
   const res = new Response(asset.body, asset);
-  if (new URL(request.url).pathname.startsWith("/{assetsDir}/")) {
-    res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  if (new URL(request.url).pathname.startsWith('/{assetsDir}/')) {
+    res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
   } else {
-    res.headers.set("Cache-Control", "public, s-maxage=60, max-age=0, must-revalidate");
+    res.headers.set('Cache-Control', 'public, s-maxage=60, max-age=0, must-revalidate');
   }
   return res;
 }

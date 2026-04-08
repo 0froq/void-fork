@@ -54,17 +54,17 @@ The generated Pages Router entry is a minimal worker fetch handler:
 
 ```ts
 // @ts-expect-error — virtual module resolved by vinext at build time
-import { renderPage, handleApiRoute } from "virtual:vinext-server-entry";
+import { renderPage, handleApiRoute } from 'virtual:vinext-server-entry';
 
 export default {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const pathname = url.pathname;
-    if (pathname.replaceAll("\\", "/").startsWith("//")) {
-      return new Response("404 Not Found", { status: 404 });
+    if (pathname.replaceAll('\\', '/').startsWith('//')) {
+      return new Response('404 Not Found', { status: 404 });
     }
     const urlWithQuery = pathname + url.search;
-    if (pathname.startsWith("/api/") || pathname === "/api") {
+    if (pathname.startsWith('/api/') || pathname === '/api') {
       return await handleApiRoute(request, urlWithQuery);
     }
     return await renderPage(request, urlWithQuery, null);
@@ -79,7 +79,7 @@ export default {
 Expand the `Framework` type to include vinext:
 
 ```ts
-export type Framework = "tanstack-start" | "react-router" | "vinext";
+export type Framework = 'tanstack-start' | 'react-router' | 'vinext';
 ```
 
 `FRAMEWORK_ENTRIES` becomes conditional for vinext (router-dependent), so the entry lookup is moved into a function rather than a static record.

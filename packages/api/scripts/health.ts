@@ -9,13 +9,13 @@
  *   node scripts/health.ts --staging  # staging
  */
 
-import { readFileSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { homedir } from "node:os";
+import { readFileSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const isStaging = process.argv.includes("--staging");
+const isStaging = process.argv.includes('--staging');
 
 interface Config {
   token?: string;
@@ -25,7 +25,7 @@ interface Config {
 
 function readConfig(): Config {
   try {
-    return JSON.parse(readFileSync(join(homedir(), ".void", "config.json"), "utf-8"));
+    return JSON.parse(readFileSync(join(homedir(), '.void', 'config.json'), 'utf-8'));
   } catch {
     return {};
   }
@@ -33,11 +33,11 @@ function readConfig(): Config {
 
 const config = readConfig();
 const token = isStaging ? config.stagingToken : config.token;
-const baseUrl = isStaging ? "https://api.staging.void.cloud" : "https://api.void.cloud";
+const baseUrl = isStaging ? 'https://api.staging.void.cloud' : 'https://api.void.cloud';
 
 if (!token) {
-  console.error(`No ${isStaging ? "stagingToken" : "token"} found in ~/.void/config.json`);
-  console.error("Run `void login` first.");
+  console.error(`No ${isStaging ? 'stagingToken' : 'token'} found in ~/.void/config.json`);
+  console.error('Run `void login` first.');
   process.exit(1);
 }
 
@@ -48,7 +48,7 @@ interface Route {
   path: string;
 }
 
-const platformSrc = resolve(import.meta.dirname, "..", "src");
+const platformSrc = resolve(import.meta.dirname, '..', 'src');
 
 /**
  * Parse index.ts to find:
@@ -57,7 +57,7 @@ const platformSrc = resolve(import.meta.dirname, "..", "src");
  *  - import importedName from "./routes/file" → file map
  */
 function parseIndex(): { mounts: Map<string, string[]>; inlineRoutes: Route[] } {
-  const src = readFileSync(join(platformSrc, "index.ts"), "utf-8");
+  const src = readFileSync(join(platformSrc, 'index.ts'), 'utf-8');
 
   // Build import-name → file map
   // Default: `import foo from "./routes/bar"`
@@ -67,7 +67,7 @@ function parseIndex(): { mounts: Map<string, string[]>; inlineRoutes: Route[] } 
     importMap.set(m[1], m[2]);
   }
   for (const m of src.matchAll(/import\s+\{([^}]+)\}\s+from\s+["']\.\/routes\/([^"']+)["']/g)) {
-    const names = m[1].split(",").map((n) => n.trim());
+    const names = m[1].split(',').map((n) => n.trim());
     for (const name of names) {
       importMap.set(name, m[2]);
     }
@@ -100,7 +100,7 @@ function parseIndex(): { mounts: Map<string, string[]>; inlineRoutes: Route[] } 
  * Scan a route file for `app.get("/path", ...)` etc.
  */
 function parseRouteFile(filePath: string): { method: string; subPath: string }[] {
-  const src = readFileSync(filePath, "utf-8");
+  const src = readFileSync(filePath, 'utf-8');
   const routes: { method: string; subPath: string }[] = [];
   for (const m of src.matchAll(/\.(get|post|put|delete|patch)\(["'](\/[^"']*)["']/g)) {
     routes.push({ method: m[1].toUpperCase(), subPath: m[2] });
@@ -112,10 +112,10 @@ function discoverRoutes(): Route[] {
   const { mounts, inlineRoutes } = parseIndex();
   const routes: Route[] = [...inlineRoutes];
 
-  const routesDir = join(platformSrc, "routes");
+  const routesDir = join(platformSrc, 'routes');
   for (const entry of readdirSync(routesDir)) {
-    if (!entry.endsWith(".ts")) continue;
-    const fileKey = entry.replace(/\.ts$/, "");
+    if (!entry.endsWith('.ts')) continue;
+    const fileKey = entry.replace(/\.ts$/, '');
 
     const bases = mounts.get(fileKey);
     if (!bases) continue;
@@ -123,7 +123,7 @@ function discoverRoutes(): Route[] {
     const subRoutes = parseRouteFile(join(routesDir, entry));
     for (const base of bases) {
       for (const { method, subPath } of subRoutes) {
-        const fullPath = subPath === "/" ? base : base + subPath;
+        const fullPath = subPath === '/' ? base : base + subPath;
         routes.push({ method, path: fullPath });
       }
     }
@@ -153,7 +153,7 @@ async function probe(method: string, url: string): Promise<{ status: number; ms:
   const res = await fetch(url, {
     method,
     headers: { Authorization: `Bearer ${token}` },
-    redirect: "manual",
+    redirect: 'manual',
   });
   // Drain body
   await res.text();
@@ -164,7 +164,7 @@ async function run() {
   const routes = discoverRoutes();
 
   console.log(
-    bold(`\nHealth check: ${isStaging ? yellow("STAGING") : "PRODUCTION"} (${baseUrl})\n`),
+    bold(`\nHealth check: ${isStaging ? yellow('STAGING') : 'PRODUCTION'} (${baseUrl})\n`),
   );
 
   // 1. Bootstrap: get a project ID from GET /projects
@@ -190,59 +190,59 @@ async function run() {
 
   for (const route of routes) {
     // Skip admin routes (different auth mechanism)
-    if (route.path.startsWith("/admin")) {
+    if (route.path.startsWith('/admin')) {
       skipped++;
       continue;
     }
 
     // Skip auth routes (OAuth flow, not API)
-    if (route.path.startsWith("/auth")) {
+    if (route.path.startsWith('/auth')) {
       skipped++;
       continue;
     }
 
     // Skip mutating methods — too dangerous to probe
-    if (route.method !== "GET") {
+    if (route.method !== 'GET') {
       skipped++;
       continue;
     }
 
     // Resolve :id param
     let resolvedPath = route.path;
-    if (resolvedPath.includes(":id")) {
+    if (resolvedPath.includes(':id')) {
       if (!projectId) {
         skipped++;
         continue;
       }
-      resolvedPath = resolvedPath.replace(":id", projectId);
+      resolvedPath = resolvedPath.replace(':id', projectId);
     }
 
     // Skip routes with remaining unresolved params (e.g. :domainId)
-    if (resolvedPath.includes(":")) {
+    if (resolvedPath.includes(':')) {
       skipped++;
       continue;
     }
 
     const label = `GET    ${route.path}`;
     try {
-      const { status, ms } = await probe("GET", `${baseUrl}${resolvedPath}`);
+      const { status, ms } = await probe('GET', `${baseUrl}${resolvedPath}`);
       if (status >= 200 && status < 500) {
-        console.log(`  ${green("OK")}    ${label}  ${dim(`${status} ${ms}ms`)}`);
+        console.log(`  ${green('OK')}    ${label}  ${dim(`${status} ${ms}ms`)}`);
         passed++;
       } else {
-        console.log(`  ${red("FAIL")}  ${label}  ${red(String(status))} ${dim(`${ms}ms`)}`);
+        console.log(`  ${red('FAIL')}  ${label}  ${red(String(status))} ${dim(`${ms}ms`)}`);
         failed++;
       }
     } catch (err) {
       console.log(
-        `  ${red("FAIL")}  ${label}  ${red(err instanceof Error ? err.message : String(err))}`,
+        `  ${red('FAIL')}  ${label}  ${red(err instanceof Error ? err.message : String(err))}`,
       );
       failed++;
     }
   }
 
   console.log(
-    `\n${bold("Summary:")} ${green(`${passed} passed`)}  ${failed ? red(`${failed} failed`) : dim("0 failed")}  ${dim(`(${skipped} routes skipped)`)}\n`,
+    `\n${bold('Summary:')} ${green(`${passed} passed`)}  ${failed ? red(`${failed} failed`) : dim('0 failed')}  ${dim(`(${skipped} routes skipped)`)}\n`,
   );
 
   if (failed > 0) process.exit(1);

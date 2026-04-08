@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { Link, useRouter } from "@void/vue";
-import type { Props } from "./[id].server";
-import { ref } from "vue";
+import { Link, useRouter } from '@void/vue';
+import { ref } from 'vue';
+import type { Props } from './[id].server';
 
 const { project, deployments, usage, domains, secrets, resources, siteDomain } =
   defineProps<Props>();
@@ -14,12 +14,12 @@ function toggleDeploy(id: string) {
 }
 
 const statusColor: Record<string, string> = {
-  live: "text-status-live",
-  pending: "text-status-pending",
-  uploading: "text-status-pending",
-  migrating: "text-status-pending",
-  prerendering: "text-status-pending",
-  failed: "text-status-failed",
+  live: 'text-status-live',
+  pending: 'text-status-pending',
+  uploading: 'text-status-pending',
+  migrating: 'text-status-pending',
+  prerendering: 'text-status-pending',
+  failed: 'text-status-failed',
 };
 
 function formatNumber(n: number): string {
@@ -50,40 +50,40 @@ const liveUrl = project.custom_domain
   : `https://${project.slug}.${siteDomain}`;
 
 // Domain form
-const newDomain = ref("");
+const newDomain = ref('');
 
 function addDomain() {
   router.post(`/projects/${project.id}`, {
-    _intent: "add-domain",
+    _intent: 'add-domain',
     hostname: newDomain.value,
   });
-  newDomain.value = "";
+  newDomain.value = '';
 }
 
 function removeDomain(domainId: string) {
   router.post(`/projects/${project.id}`, {
-    _intent: "remove-domain",
+    _intent: 'remove-domain',
     domainId,
   });
 }
 
 // Secret form
-const newSecretName = ref("");
-const newSecretValue = ref("");
+const newSecretName = ref('');
+const newSecretValue = ref('');
 
 function addSecret() {
   router.post(`/projects/${project.id}`, {
-    _intent: "add-secret",
+    _intent: 'add-secret',
     name: newSecretName.value,
     value: newSecretValue.value,
   });
-  newSecretName.value = "";
-  newSecretValue.value = "";
+  newSecretName.value = '';
+  newSecretValue.value = '';
 }
 
 function removeSecret(name: string) {
   router.post(`/projects/${project.id}`, {
-    _intent: "remove-secret",
+    _intent: 'remove-secret',
     name,
   });
 }

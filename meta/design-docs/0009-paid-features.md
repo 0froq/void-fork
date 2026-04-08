@@ -78,7 +78,7 @@ Expose `env.AI` to user workers with a monthly inference quota.
 Declarative rate limits defined in route files:
 
 ```ts
-export const rateLimit = { window: "1m", max: 100 };
+export const rateLimit = { window: '1m', max: 100 };
 ```
 
 - **Why it converts:** Every API needs rate limiting. Making it declarative and zero-config is uniquely possible because we control build + dispatch.

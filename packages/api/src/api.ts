@@ -2,20 +2,20 @@
 // This file must NOT import admin routes (.tsx) — the dashboard's tsconfig
 // doesn't support Hono JSX.
 
-import { Hono } from "hono";
-import type { ApiEnv } from "./env";
-import me from "./routes/me";
-import projects from "./routes/projects";
-import secrets from "./routes/secrets";
-import domains from "./routes/domains";
-import { projectUsage, accountUsage } from "./routes/usage";
+import { Hono } from 'hono';
+import type { ApiEnv } from './env';
+import domains from './routes/domains';
+import me from './routes/me';
+import projects from './routes/projects';
+import secrets from './routes/secrets';
+import { projectUsage, accountUsage } from './routes/usage';
 
 const api = new Hono<ApiEnv>()
-  .route("/me", me)
-  .route("/projects", projects)
-  .route("/projects", secrets)
-  .route("/projects", domains)
-  .route("/projects", projectUsage)
-  .route("/usage", accountUsage);
+  .route('/me', me)
+  .route('/projects', projects)
+  .route('/projects', secrets)
+  .route('/projects', domains)
+  .route('/projects', projectUsage)
+  .route('/usage', accountUsage);
 
 export type ApiRoutes = typeof api;

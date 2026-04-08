@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { recordRequest } from "../../src/metering";
-import type { Env } from "../../src/env";
+import { describe, it, expect } from 'vitest';
+import type { Env } from '../../src/env';
+import { recordRequest } from '../../src/metering';
 
 function createMockEnv(): { env: Env; writes: unknown[] } {
   const writes: unknown[] = [];
@@ -12,18 +12,18 @@ function createMockEnv(): { env: Env; writes: unknown[] } {
   return { env, writes };
 }
 
-describe("recordRequest", () => {
-  it("writes data point with correct shape", () => {
+describe('recordRequest', () => {
+  it('writes data point with correct shape', () => {
     const { env, writes } = createMockEnv();
 
     recordRequest(env, {
-      projectId: "proj_abc",
-      type: "api",
-      method: "POST",
+      projectId: 'proj_abc',
+      type: 'api',
+      method: 'POST',
       status: 200,
       responseBytes: 1234,
       durationMs: 42,
-      slug: "my-app",
+      slug: 'my-app',
     });
 
     expect(writes).toHaveLength(1);
@@ -33,56 +33,56 @@ describe("recordRequest", () => {
       doubles: number[];
     };
 
-    expect(dp.indexes).toEqual(["proj_abc"]);
-    expect(dp.blobs).toEqual(["proj_abc", "api", "POST", "200", "my-app"]);
+    expect(dp.indexes).toEqual(['proj_abc']);
+    expect(dp.blobs).toEqual(['proj_abc', 'api', 'POST', '200', 'my-app']);
     expect(dp.doubles).toEqual([1, 1234, 42]);
   });
 
-  it("sets index to projectId for sampling", () => {
+  it('sets index to projectId for sampling', () => {
     const { env, writes } = createMockEnv();
 
     recordRequest(env, {
-      projectId: "proj_xyz",
-      type: "static",
-      method: "GET",
+      projectId: 'proj_xyz',
+      type: 'static',
+      method: 'GET',
       status: 304,
       responseBytes: 0,
       durationMs: 5,
-      slug: "other-app",
+      slug: 'other-app',
     });
 
     const dp = writes[0] as { indexes: string[] };
-    expect(dp.indexes[0]).toBe("proj_xyz");
+    expect(dp.indexes[0]).toBe('proj_xyz');
   });
 
-  it("converts status to string in blobs", () => {
+  it('converts status to string in blobs', () => {
     const { env, writes } = createMockEnv();
 
     recordRequest(env, {
-      projectId: "proj_1",
-      type: "ssr",
-      method: "GET",
+      projectId: 'proj_1',
+      type: 'ssr',
+      method: 'GET',
       status: 500,
       responseBytes: 100,
       durationMs: 200,
-      slug: "ssr-app",
+      slug: 'ssr-app',
     });
 
     const dp = writes[0] as { blobs: string[] };
-    expect(dp.blobs[3]).toBe("500");
+    expect(dp.blobs[3]).toBe('500');
   });
 
-  it("always sets double1 to 1 for counting", () => {
+  it('always sets double1 to 1 for counting', () => {
     const { env, writes } = createMockEnv();
 
     recordRequest(env, {
-      projectId: "proj_1",
-      type: "isr",
-      method: "GET",
+      projectId: 'proj_1',
+      type: 'isr',
+      method: 'GET',
       status: 200,
       responseBytes: 5000,
       durationMs: 100,
-      slug: "isr-app",
+      slug: 'isr-app',
     });
 
     const dp = writes[0] as { doubles: number[] };
@@ -91,24 +91,24 @@ describe("recordRequest", () => {
     expect(dp.doubles[2]).toBe(100);
   });
 
-  it("handles all supported request types", () => {
+  it('handles all supported request types', () => {
     const { env, writes } = createMockEnv();
-    const types = ["api", "static", "ssr", "isr", "websocket"] as const;
+    const types = ['api', 'static', 'ssr', 'isr', 'websocket'] as const;
 
     for (const type of types) {
       recordRequest(env, {
-        projectId: "proj_1",
+        projectId: 'proj_1',
         type,
-        method: "GET",
+        method: 'GET',
         status: 200,
         responseBytes: 0,
         durationMs: 0,
-        slug: "test",
+        slug: 'test',
       });
     }
 
     expect(writes).toHaveLength(5);
     const recordedTypes = (writes as { blobs: string[] }[]).map((w) => w.blobs[1]);
-    expect(recordedTypes).toEqual(["api", "static", "ssr", "isr", "websocket"]);
+    expect(recordedTypes).toEqual(['api', 'static', 'ssr', 'isr', 'websocket']);
   });
 });

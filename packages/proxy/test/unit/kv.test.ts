@@ -1,29 +1,29 @@
-import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
-import worker from "../../src/index";
-import { clearWorkerNameCache } from "../../src/dispatch";
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
+import { clearWorkerNameCache } from '../../src/dispatch';
+import worker from '../../src/index';
 
-const JWT_SECRET = "test-secret-key";
+const JWT_SECRET = 'test-secret-key';
 
 // --- HMAC helper ---
 
 function base64urlEncode(data: Uint8Array): string {
-  let binary = "";
+  let binary = '';
   for (const byte of data) {
     binary += String.fromCharCode(byte);
   }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 async function signAiToken(projectId: string, secret: string): Promise<string> {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
-    "raw",
+    'raw',
     encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
+    { name: 'HMAC', hash: 'SHA-256' },
     false,
-    ["sign"],
+    ['sign'],
   );
-  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(projectId)));
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(projectId)));
   return base64urlEncode(sig);
 }
 
@@ -33,10 +33,10 @@ function createMockApi(resources: Record<string, string> = {}) {
   return {
     fetch: vi.fn(async (url: string, init?: RequestInit) => {
       const path = new URL(url).pathname;
-      if (path.includes("/internal/resolve-worker/")) {
-        return Response.json({ error: "not found" }, { status: 404 });
+      if (path.includes('/internal/resolve-worker/')) {
+        return Response.json({ error: 'not found' }, { status: 404 });
       }
-      const projectId = path.split("/").pop()!;
+      const projectId = path.split('/').pop()!;
       const body = JSON.parse(init?.body as string);
       const key = `${projectId}:${body.type}:${body.binding}`;
       const cfId = resources[key];
@@ -51,7 +51,7 @@ function createMockApi(resources: Record<string, string> = {}) {
 function createMockDispatch() {
   return {
     get: vi.fn(() => {
-      throw new Error("worker not found");
+      throw new Error('worker not found');
     }),
   };
 }
@@ -62,28 +62,28 @@ function createEnv(apiResources: Record<string, string> = {}) {
     JWT_SECRET,
     ROUTING: { get: vi.fn(async () => null), put: vi.fn(), delete: vi.fn() },
     API: createMockApi(apiResources),
-    CF_ACCOUNT_ID: "test-account",
-    CF_API_TOKEN: "test-token",
+    CF_ACCOUNT_ID: 'test-account',
+    CF_API_TOKEN: 'test-token',
     DISPATCH: createMockDispatch(),
   };
 }
 
 function post(path: string, body: unknown): Request {
   return new Request(`https://proxy.void.cloud${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
 }
 
 // --- Tests ---
 
-describe("KV proxy endpoints", () => {
+describe('KV proxy endpoints', () => {
   let token: string;
   const originalFetch = globalThis.fetch;
 
   beforeAll(async () => {
-    token = await signAiToken("proj_1", JWT_SECRET);
+    token = await signAiToken('proj_1', JWT_SECRET);
   });
 
   afterEach(() => {
@@ -92,43 +92,43 @@ describe("KV proxy endpoints", () => {
     vi.restoreAllMocks();
   });
 
-  describe("POST /kv/get", () => {
-    it("returns text value", async () => {
-      globalThis.fetch = vi.fn(async () => new Response("hello world")) as any;
+  describe('POST /kv/get', () => {
+    it('returns text value', async () => {
+      globalThis.fetch = vi.fn(async () => new Response('hello world')) as any;
 
-      const env = createEnv({ "proj_1:kv:CACHE": "kv-ns-123" });
+      const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(
-        post("/kv/get", {
-          binding: "CACHE",
-          key: "greeting",
-          type: "text",
-          projectId: "proj_1",
+        post('/kv/get', {
+          binding: 'CACHE',
+          key: 'greeting',
+          type: 'text',
+          projectId: 'proj_1',
           aiToken: token,
         }),
         env,
       );
 
       expect(res.status).toBe(200);
-      expect(await res.json()).toBe("hello world");
+      expect(await res.json()).toBe('hello world');
 
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        "https://api.cloudflare.com/client/v4/accounts/test-account/storage/kv/namespaces/kv-ns-123/values/greeting",
+        'https://api.cloudflare.com/client/v4/accounts/test-account/storage/kv/namespaces/kv-ns-123/values/greeting',
         expect.objectContaining({
-          headers: { Authorization: "Bearer test-token" },
+          headers: { Authorization: 'Bearer test-token' },
         }),
       );
     });
 
-    it("returns JSON value", async () => {
+    it('returns JSON value', async () => {
       globalThis.fetch = vi.fn(async () => Response.json({ count: 42 })) as any;
 
-      const env = createEnv({ "proj_1:kv:CACHE": "kv-ns-123" });
+      const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(
-        post("/kv/get", {
-          binding: "CACHE",
-          key: "data",
-          type: "json",
-          projectId: "proj_1",
+        post('/kv/get', {
+          binding: 'CACHE',
+          key: 'data',
+          type: 'json',
+          projectId: 'proj_1',
           aiToken: token,
         }),
         env,
@@ -138,16 +138,16 @@ describe("KV proxy endpoints", () => {
       expect(await res.json()).toEqual({ count: 42 });
     });
 
-    it("returns null for missing key (404)", async () => {
-      globalThis.fetch = vi.fn(async () => new Response("Not Found", { status: 404 })) as any;
+    it('returns null for missing key (404)', async () => {
+      globalThis.fetch = vi.fn(async () => new Response('Not Found', { status: 404 })) as any;
 
-      const env = createEnv({ "proj_1:kv:CACHE": "kv-ns-123" });
+      const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(
-        post("/kv/get", {
-          binding: "CACHE",
-          key: "missing",
-          type: "text",
-          projectId: "proj_1",
+        post('/kv/get', {
+          binding: 'CACHE',
+          key: 'missing',
+          type: 'text',
+          projectId: 'proj_1',
           aiToken: token,
         }),
         env,
@@ -157,34 +157,34 @@ describe("KV proxy endpoints", () => {
       expect(await res.json()).toBeNull();
     });
 
-    it("URL-encodes the key", async () => {
-      globalThis.fetch = vi.fn(async () => new Response("val")) as any;
+    it('URL-encodes the key', async () => {
+      globalThis.fetch = vi.fn(async () => new Response('val')) as any;
 
-      const env = createEnv({ "proj_1:kv:CACHE": "kv-ns-123" });
+      const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       await worker.fetch(
-        post("/kv/get", {
-          binding: "CACHE",
-          key: "user:1:profile",
-          type: "text",
-          projectId: "proj_1",
+        post('/kv/get', {
+          binding: 'CACHE',
+          key: 'user:1:profile',
+          type: 'text',
+          projectId: 'proj_1',
           aiToken: token,
         }),
         env,
       );
 
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("/values/user%3A1%3Aprofile"),
+        expect.stringContaining('/values/user%3A1%3Aprofile'),
         expect.any(Object),
       );
     });
 
-    it("returns 404 for unknown binding", async () => {
+    it('returns 404 for unknown binding', async () => {
       const env = createEnv({});
       const res = await worker.fetch(
-        post("/kv/get", {
-          binding: "MISSING",
-          key: "k",
-          projectId: "proj_1",
+        post('/kv/get', {
+          binding: 'MISSING',
+          key: 'k',
+          projectId: 'proj_1',
           aiToken: token,
         }),
         env,
@@ -193,10 +193,10 @@ describe("KV proxy endpoints", () => {
       expect(res.status).toBe(404);
     });
 
-    it("returns 400 when key is missing", async () => {
+    it('returns 400 when key is missing', async () => {
       const env = createEnv({});
       const res = await worker.fetch(
-        post("/kv/get", { binding: "CACHE", projectId: "proj_1", aiToken: token }),
+        post('/kv/get', { binding: 'CACHE', projectId: 'proj_1', aiToken: token }),
         env,
       );
 
@@ -204,17 +204,17 @@ describe("KV proxy endpoints", () => {
     });
   });
 
-  describe("POST /kv/put", () => {
-    it("writes value to CF KV API", async () => {
+  describe('POST /kv/put', () => {
+    it('writes value to CF KV API', async () => {
       globalThis.fetch = vi.fn(async () => Response.json({ success: true })) as any;
 
-      const env = createEnv({ "proj_1:kv:CACHE": "kv-ns-123" });
+      const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(
-        post("/kv/put", {
-          binding: "CACHE",
-          key: "greeting",
-          value: "hello",
-          projectId: "proj_1",
+        post('/kv/put', {
+          binding: 'CACHE',
+          key: 'greeting',
+          value: 'hello',
+          projectId: 'proj_1',
           aiToken: token,
         }),
         env,
@@ -224,43 +224,43 @@ describe("KV proxy endpoints", () => {
       expect(await res.json()).toEqual({ success: true });
 
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        "https://api.cloudflare.com/client/v4/accounts/test-account/storage/kv/namespaces/kv-ns-123/values/greeting",
-        expect.objectContaining({ method: "PUT", body: "hello" }),
+        'https://api.cloudflare.com/client/v4/accounts/test-account/storage/kv/namespaces/kv-ns-123/values/greeting',
+        expect.objectContaining({ method: 'PUT', body: 'hello' }),
       );
     });
 
-    it("includes expiration query params", async () => {
+    it('includes expiration query params', async () => {
       globalThis.fetch = vi.fn(async () => Response.json({ success: true })) as any;
 
-      const env = createEnv({ "proj_1:kv:CACHE": "kv-ns-123" });
+      const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       await worker.fetch(
-        post("/kv/put", {
-          binding: "CACHE",
-          key: "temp",
-          value: "x",
+        post('/kv/put', {
+          binding: 'CACHE',
+          key: 'temp',
+          value: 'x',
           expiration_ttl: 300,
-          projectId: "proj_1",
+          projectId: 'proj_1',
           aiToken: token,
         }),
         env,
       );
 
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("?expiration_ttl=300"),
+        expect.stringContaining('?expiration_ttl=300'),
         expect.any(Object),
       );
     });
 
-    it("serializes non-string values as JSON", async () => {
+    it('serializes non-string values as JSON', async () => {
       globalThis.fetch = vi.fn(async () => Response.json({ success: true })) as any;
 
-      const env = createEnv({ "proj_1:kv:CACHE": "kv-ns-123" });
+      const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       await worker.fetch(
-        post("/kv/put", {
-          binding: "CACHE",
-          key: "data",
+        post('/kv/put', {
+          binding: 'CACHE',
+          key: 'data',
           value: { count: 1 },
-          projectId: "proj_1",
+          projectId: 'proj_1',
           aiToken: token,
         }),
         env,
@@ -272,14 +272,14 @@ describe("KV proxy endpoints", () => {
       );
     });
 
-    it("returns 404 for unknown binding", async () => {
+    it('returns 404 for unknown binding', async () => {
       const env = createEnv({});
       const res = await worker.fetch(
-        post("/kv/put", {
-          binding: "MISSING",
-          key: "k",
-          value: "v",
-          projectId: "proj_1",
+        post('/kv/put', {
+          binding: 'MISSING',
+          key: 'k',
+          value: 'v',
+          projectId: 'proj_1',
           aiToken: token,
         }),
         env,
@@ -289,16 +289,16 @@ describe("KV proxy endpoints", () => {
     });
   });
 
-  describe("POST /kv/delete", () => {
-    it("deletes key via CF KV API", async () => {
+  describe('POST /kv/delete', () => {
+    it('deletes key via CF KV API', async () => {
       globalThis.fetch = vi.fn(async () => Response.json({ success: true })) as any;
 
-      const env = createEnv({ "proj_1:kv:CACHE": "kv-ns-123" });
+      const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(
-        post("/kv/delete", {
-          binding: "CACHE",
-          key: "greeting",
-          projectId: "proj_1",
+        post('/kv/delete', {
+          binding: 'CACHE',
+          key: 'greeting',
+          projectId: 'proj_1',
           aiToken: token,
         }),
         env,
@@ -308,15 +308,15 @@ describe("KV proxy endpoints", () => {
       expect(await res.json()).toEqual({ success: true });
 
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        "https://api.cloudflare.com/client/v4/accounts/test-account/storage/kv/namespaces/kv-ns-123/values/greeting",
-        expect.objectContaining({ method: "DELETE" }),
+        'https://api.cloudflare.com/client/v4/accounts/test-account/storage/kv/namespaces/kv-ns-123/values/greeting',
+        expect.objectContaining({ method: 'DELETE' }),
       );
     });
 
-    it("returns 400 when key is missing", async () => {
+    it('returns 400 when key is missing', async () => {
       const env = createEnv({});
       const res = await worker.fetch(
-        post("/kv/delete", { binding: "CACHE", projectId: "proj_1", aiToken: token }),
+        post('/kv/delete', { binding: 'CACHE', projectId: 'proj_1', aiToken: token }),
         env,
       );
 
@@ -324,21 +324,21 @@ describe("KV proxy endpoints", () => {
     });
   });
 
-  describe("POST /kv/list", () => {
-    it("lists keys via CF KV API", async () => {
+  describe('POST /kv/list', () => {
+    it('lists keys via CF KV API', async () => {
       globalThis.fetch = vi.fn(async () =>
         Response.json({
           success: true,
-          result: [{ name: "key1" }, { name: "key2" }],
+          result: [{ name: 'key1' }, { name: 'key2' }],
           result_info: {},
         }),
       ) as any;
 
-      const env = createEnv({ "proj_1:kv:CACHE": "kv-ns-123" });
+      const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(
-        post("/kv/list", {
-          binding: "CACHE",
-          projectId: "proj_1",
+        post('/kv/list', {
+          binding: 'CACHE',
+          projectId: 'proj_1',
           aiToken: token,
         }),
         env,
@@ -346,23 +346,23 @@ describe("KV proxy endpoints", () => {
 
       expect(res.status).toBe(200);
       const data = (await res.json()) as { keys: { name: string }[]; list_complete: boolean };
-      expect(data.keys).toEqual([{ name: "key1" }, { name: "key2" }]);
+      expect(data.keys).toEqual([{ name: 'key1' }, { name: 'key2' }]);
       expect(data.list_complete).toBe(true);
     });
 
-    it("passes prefix, limit, and cursor params", async () => {
+    it('passes prefix, limit, and cursor params', async () => {
       globalThis.fetch = vi.fn(async () =>
-        Response.json({ success: true, result: [], result_info: { cursor: "next-cursor" } }),
+        Response.json({ success: true, result: [], result_info: { cursor: 'next-cursor' } }),
       ) as any;
 
-      const env = createEnv({ "proj_1:kv:CACHE": "kv-ns-123" });
+      const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(
-        post("/kv/list", {
-          binding: "CACHE",
-          prefix: "user:",
+        post('/kv/list', {
+          binding: 'CACHE',
+          prefix: 'user:',
           limit: 10,
-          cursor: "prev-cursor",
-          projectId: "proj_1",
+          cursor: 'prev-cursor',
+          projectId: 'proj_1',
           aiToken: token,
         }),
         env,
@@ -371,7 +371,7 @@ describe("KV proxy endpoints", () => {
       expect(res.status).toBe(200);
       const data = (await res.json()) as { list_complete: boolean; cursor: string };
       expect(data.list_complete).toBe(false);
-      expect(data.cursor).toBe("next-cursor");
+      expect(data.cursor).toBe('next-cursor');
 
       expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringMatching(/prefix=user%3A.*limit=10.*cursor=prev-cursor/),
@@ -379,22 +379,22 @@ describe("KV proxy endpoints", () => {
       );
     });
 
-    it("returns 400 when binding is missing", async () => {
+    it('returns 400 when binding is missing', async () => {
       const env = createEnv({});
       const res = await worker.fetch(
-        post("/kv/list", { projectId: "proj_1", aiToken: token }),
+        post('/kv/list', { projectId: 'proj_1', aiToken: token }),
         env,
       );
 
       expect(res.status).toBe(400);
     });
 
-    it("returns 404 for unknown binding", async () => {
+    it('returns 404 for unknown binding', async () => {
       const env = createEnv({});
       const res = await worker.fetch(
-        post("/kv/list", {
-          binding: "MISSING",
-          projectId: "proj_1",
+        post('/kv/list', {
+          binding: 'MISSING',
+          projectId: 'proj_1',
           aiToken: token,
         }),
         env,

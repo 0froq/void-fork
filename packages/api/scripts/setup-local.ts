@@ -1,31 +1,31 @@
-import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import * as p from "@clack/prompts";
+import { execSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import * as p from '@clack/prompts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const platformDir = resolve(__dirname, "..");
-const seedSql = resolve(__dirname, "seed.sql");
-const drizzleDir = resolve(__dirname, "../drizzle");
-const localDbUrl = "postgresql://void_dev:void_dev@localhost:5432/void_api_dev";
+const platformDir = resolve(__dirname, '..');
+const seedSql = resolve(__dirname, 'seed.sql');
+const drizzleDir = resolve(__dirname, '../drizzle');
+const localDbUrl = 'postgresql://void_dev:void_dev@localhost:5432/void_api_dev';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const force = process.argv.includes("--force");
-const adminEmailArgIndex = process.argv.indexOf("--admin-email");
+const force = process.argv.includes('--force');
+const adminEmailArgIndex = process.argv.indexOf('--admin-email');
 const adminEmailArg =
   adminEmailArgIndex === -1 ? undefined : process.argv[adminEmailArgIndex + 1]?.trim();
 
 function run(cmd: string, cwd: string, input?: string): string {
-  return execSync(cmd, { cwd, stdio: "pipe", input }).toString();
+  return execSync(cmd, { cwd, stdio: 'pipe', input }).toString();
 }
 
 function pgReady(): boolean {
   try {
-    run("pg_isready", platformDir);
+    run('pg_isready', platformDir);
     return true;
   } catch {
     return false;
@@ -38,7 +38,7 @@ function adminUserExists(): boolean {
       `psql "${localDbUrl}" -tAc "SELECT id FROM users WHERE id = 'user_admin'" 2>/dev/null`,
       platformDir,
     );
-    return out.trim() === "user_admin";
+    return out.trim() === 'user_admin';
   } catch {
     return false;
   }
@@ -51,7 +51,7 @@ function getAdminEmail(): string | null {
       platformDir,
     );
     const value = out.trim();
-    return value === "" ? null : value;
+    return value === '' ? null : value;
   } catch {
     return null;
   }
@@ -63,13 +63,13 @@ function escapeSqlLiteral(value: string): string {
 
 function validateEmail(value: string): string | undefined {
   const trimmed = value.trim();
-  if (trimmed === "") return "Email is required.";
-  if (!trimmed.includes("@")) return "Enter an email address.";
+  if (trimmed === '') return 'Email is required.';
+  if (!trimmed.includes('@')) return 'Enter an email address.';
   return undefined;
 }
 
 async function resolveAdminEmail(): Promise<string> {
-  const existingEmail = getAdminEmail() ?? "admin@localhost";
+  const existingEmail = getAdminEmail() ?? 'admin@localhost';
 
   if (adminEmailArg !== undefined) {
     const error = validateEmail(adminEmailArg);
@@ -81,14 +81,14 @@ async function resolveAdminEmail(): Promise<string> {
   }
 
   const answer = await p.text({
-    message: "Local admin email",
-    placeholder: "you@example.com",
+    message: 'Local admin email',
+    placeholder: 'you@example.com',
     defaultValue: existingEmail,
     validate: validateEmail,
   });
 
   if (p.isCancel(answer)) {
-    p.cancel("Aborting.");
+    p.cancel('Aborting.');
     process.exit(0);
   }
 
@@ -104,7 +104,7 @@ function upsertLocalAdmin(email: string): void {
 }
 
 function upsertDevVars(filePath: string, entries: Record<string, string>): void {
-  const lines = existsSync(filePath) ? readFileSync(filePath, "utf8").split("\n") : [];
+  const lines = existsSync(filePath) ? readFileSync(filePath, 'utf8').split('\n') : [];
   const nextLines = [...lines];
   const seen = new Set<string>();
 
@@ -124,20 +124,20 @@ function upsertDevVars(filePath: string, entries: Record<string, string>): void 
     }
   }
 
-  const normalized = nextLines.filter((line, index, arr) => index < arr.length - 1 || line !== "");
-  writeFileSync(filePath, normalized.join("\n") + "\n");
+  const normalized = nextLines.filter((line, index, arr) => index < arr.length - 1 || line !== '');
+  writeFileSync(filePath, normalized.join('\n') + '\n');
 }
 
 function ensureLocalDevVars(): void {
   const localDevVars = {
-    DEV_AUTH_BYPASS: "true",
-    PLATFORM_ENV: "staging",
-    JWT_SECRET: "dev",
+    DEV_AUTH_BYPASS: 'true',
+    PLATFORM_ENV: 'staging',
+    JWT_SECRET: 'dev',
     CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: localDbUrl,
   };
-  const devVarsDirs = [platformDir, resolve(platformDir, "../dashboard")];
+  const devVarsDirs = [platformDir, resolve(platformDir, '../dashboard')];
   for (const dir of devVarsDirs) {
-    const devVarsPath = resolve(dir, ".dev.vars");
+    const devVarsPath = resolve(dir, '.dev.vars');
     const existed = existsSync(devVarsPath);
     upsertDevVars(devVarsPath, localDevVars);
     if (existed) {
@@ -151,11 +151,11 @@ function ensureLocalDevVars(): void {
 function showNextSteps(): void {
   p.note(
     [
-      "Run:",
-      "  1. pnpm -C packages/api exec wrangler dev --local --host localhost --port 8787",
-      "  2. Open http://localhost:8787/admin/",
-    ].join("\n"),
-    "Next steps",
+      'Run:',
+      '  1. pnpm -C packages/api exec wrangler dev --local --host localhost --port 8787',
+      '  2. Open http://localhost:8787/admin/',
+    ].join('\n'),
+    'Next steps',
   );
 }
 
@@ -164,14 +164,14 @@ function showNextSteps(): void {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  p.intro("Platform local dev setup");
+  p.intro('Platform local dev setup');
 
   if (!pgReady()) {
-    p.log.error("PostgreSQL is not running. Start it first:");
-    p.log.info("  brew services start postgresql@17   # macOS (Homebrew)");
-    p.log.info("  sudo systemctl start postgresql     # Linux");
-    p.log.info("  docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:17");
-    p.outro("Aborting.");
+    p.log.error('PostgreSQL is not running. Start it first:');
+    p.log.info('  brew services start postgresql@17   # macOS (Homebrew)');
+    p.log.info('  sudo systemctl start postgresql     # Linux');
+    p.log.info('  docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:17');
+    p.outro('Aborting.');
     return;
   }
 
@@ -181,16 +181,16 @@ async function main(): Promise<void> {
   if (!force && adminUserExists()) {
     upsertLocalAdmin(adminEmail);
     p.log.success(`Configured local admin user: ${adminEmail}`);
-    p.log.info("Local dev already set up (admin user exists). Use --force to re-setup.");
+    p.log.info('Local dev already set up (admin user exists). Use --force to re-setup.');
     showNextSteps();
-    p.outro("Nothing to do.");
+    p.outro('Nothing to do.');
     return;
   }
 
   const s = p.spinner();
 
   // 1. Create void_dev role and database (idempotent)
-  s.start("Creating local database void_api_dev");
+  s.start('Creating local database void_api_dev');
   try {
     run(
       `psql -d postgres -c "CREATE ROLE void_dev WITH LOGIN PASSWORD 'void_dev'" 2>/dev/null`,
@@ -200,7 +200,7 @@ async function main(): Promise<void> {
     // Role already exists — fine
   }
   try {
-    run("createdb -O void_dev void_api_dev 2>/dev/null", platformDir);
+    run('createdb -O void_dev void_api_dev 2>/dev/null', platformDir);
   } catch {
     // Already exists — fine
   }
@@ -216,17 +216,17 @@ async function main(): Promise<void> {
   } catch {
     // Fine
   }
-  s.stop("Database void_api_dev ready");
+  s.stop('Database void_api_dev ready');
 
   // 2. Apply Drizzle migrations
-  s.start("Applying migrations");
-  const journalPath = resolve(drizzleDir, "meta/_journal.json");
-  const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+  s.start('Applying migrations');
+  const journalPath = resolve(drizzleDir, 'meta/_journal.json');
+  const journal = JSON.parse(readFileSync(journalPath, 'utf8'));
   for (const entry of journal.entries) {
     const sqlFile = resolve(drizzleDir, `${entry.tag}.sql`);
-    const sql = readFileSync(sqlFile, "utf8");
+    const sql = readFileSync(sqlFile, 'utf8');
     const statements = sql
-      .split("--> statement-breakpoint")
+      .split('--> statement-breakpoint')
       .map((stmt: string) => stmt.trim())
       .filter(Boolean);
     for (const stmt of statements) {
@@ -241,24 +241,24 @@ async function main(): Promise<void> {
     `psql "${localDbUrl}" -c "GRANT USAGE, CREATE ON SCHEMA public TO void_dev; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO void_dev; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO void_dev; GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO void_dev; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO void_dev; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO void_dev; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON FUNCTIONS TO void_dev;"`,
     platformDir,
   );
-  s.stop("Applied migrations");
+  s.stop('Applied migrations');
 
   // 3. Seed shared data
-  s.start("Seeding fake data");
+  s.start('Seeding fake data');
   run(`psql "${localDbUrl}" -f "${seedSql}"`, platformDir);
-  s.stop("Seeded 5 users, 6 projects, 13 deployments, 7 resources");
+  s.stop('Seeded 5 users, 6 projects, 13 deployments, 7 resources');
 
   // 4. Add local admin user
-  s.start("Creating local admin user");
+  s.start('Creating local admin user');
   upsertLocalAdmin(adminEmail);
-  s.stop("Created local admin user");
+  s.stop('Created local admin user');
 
   p.log.success(`Configured local admin user: ${adminEmail}`);
 
   // 5. Next steps
   showNextSteps();
 
-  p.outro("Done!");
+  p.outro('Done!');
 }
 
 void main();

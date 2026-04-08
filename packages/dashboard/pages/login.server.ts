@@ -1,5 +1,5 @@
-import { defineHandler } from "void";
-import { setCookie } from "hono/cookie";
+import { setCookie } from 'hono/cookie';
+import { defineHandler } from 'void';
 
 export interface Props {
   githubUrl: string;
@@ -7,12 +7,12 @@ export interface Props {
 }
 
 export const loader = defineHandler<Props>((c) => {
-  const platformUrl = (c.env as Record<string, string>).API_URL ?? "https://api.void.cloud";
+  const platformUrl = (c.env as Record<string, string>).API_URL ?? 'https://api.void.cloud';
 
   // Derive origin from Host header — c.req.url can be localhost in prod
   // due to Workers Assets internal dispatch
-  const host = c.req.header("host")!;
-  const protocol = host.startsWith("localhost") ? "http" : "https";
+  const host = c.req.header('host')!;
+  const protocol = host.startsWith('localhost') ? 'http' : 'https';
   const callbackUrl = `${protocol}://${host}/auth/callback`;
 
   // Bind the OAuth callback to this browser session to prevent login CSRF.
@@ -20,11 +20,11 @@ export const loader = defineHandler<Props>((c) => {
   // verifies the cookie value matches the URL param — an attacker's crafted
   // callback URL won't match the victim's cookie.
   const nonce = crypto.randomUUID();
-  setCookie(c, "void_auth_nonce", nonce, {
+  setCookie(c, 'void_auth_nonce', nonce, {
     httpOnly: true,
-    secure: protocol === "https",
-    sameSite: "Lax",
-    path: "/auth",
+    secure: protocol === 'https',
+    sameSite: 'Lax',
+    path: '/auth',
     maxAge: 300,
   });
 

@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
-import app from "../../src/index";
-import type { Env } from "../../src/env";
+import { describe, expect, it, vi } from 'vitest';
+import type { Env } from '../../src/env';
+import app from '../../src/index';
 
-vi.stubGlobal("caches", {
+vi.stubGlobal('caches', {
   default: {
     match: async () => undefined,
     put: async () => {},
@@ -15,10 +15,10 @@ function createCtx(): ExecutionContext {
 }
 
 function createEnv(): Env {
-  const workerFetch = vi.fn(async () => new Response("worker"));
+  const workerFetch = vi.fn(async () => new Response('worker'));
   return {
     ROUTING: {
-      get: async () => JSON.stringify({ workerName: "user-app", projectId: "proj_1" }),
+      get: async () => JSON.stringify({ workerName: 'user-app', projectId: 'proj_1' }),
     },
     DISPATCH: {
       get: vi.fn(() => ({ fetch: workerFetch })),
@@ -34,54 +34,54 @@ function createEnv(): Env {
   } as unknown as Env;
 }
 
-describe("internal route blocking", () => {
-  it("blocks GET /__scheduled with 404", async () => {
+describe('internal route blocking', () => {
+  it('blocks GET /__scheduled with 404', async () => {
     const response = await app.fetch(
-      new Request("https://my-app.void.app/__scheduled"),
+      new Request('https://my-app.void.app/__scheduled'),
       createEnv(),
       createCtx(),
     );
     expect(response.status).toBe(404);
-    expect(response.headers.get("content-type")).toContain("text/html");
-    expect(await response.text()).toContain("404: Not Found");
+    expect(response.headers.get('content-type')).toContain('text/html');
+    expect(await response.text()).toContain('404: Not Found');
   });
 
-  it("blocks POST /__scheduled with 404", async () => {
+  it('blocks POST /__scheduled with 404', async () => {
     const response = await app.fetch(
-      new Request("https://my-app.void.app/__scheduled", { method: "POST" }),
-      createEnv(),
-      createCtx(),
-    );
-    expect(response.status).toBe(404);
-  });
-
-  it("blocks POST /__queue with 404", async () => {
-    const response = await app.fetch(
-      new Request("https://my-app.void.app/__queue", { method: "POST" }),
+      new Request('https://my-app.void.app/__scheduled', { method: 'POST' }),
       createEnv(),
       createCtx(),
     );
     expect(response.status).toBe(404);
   });
 
-  it("blocks POST /__void/migrate with 404", async () => {
+  it('blocks POST /__queue with 404', async () => {
     const response = await app.fetch(
-      new Request("https://my-app.void.app/__void/migrate", { method: "POST" }),
+      new Request('https://my-app.void.app/__queue', { method: 'POST' }),
       createEnv(),
       createCtx(),
     );
     expect(response.status).toBe(404);
   });
 
-  it("does not block normal paths", async () => {
+  it('blocks POST /__void/migrate with 404', async () => {
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/__void/migrate', { method: 'POST' }),
+      createEnv(),
+      createCtx(),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('does not block normal paths', async () => {
     const env = createEnv();
     const response = await app.fetch(
-      new Request("https://my-app.void.app/normal-path"),
+      new Request('https://my-app.void.app/normal-path'),
       env,
       createCtx(),
     );
     // Should proceed past the internal route check — the response comes from the worker mock
     expect(response.status).not.toBe(404);
-    expect(await response.text()).toContain("worker");
+    expect(await response.text()).toContain('worker');
   });
 });

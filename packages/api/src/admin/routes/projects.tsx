@@ -1,5 +1,5 @@
-import { Hono } from "hono";
-import type { ApiEnv } from "../../env";
+import { Hono } from 'hono';
+import { SITE_DOMAIN } from '../../constants';
 import {
   getAllProjectsWithOwner,
   countProjects,
@@ -10,36 +10,36 @@ import {
   getUser,
   getDomainsByProjectId,
   deleteProjectCascade,
-} from "../../db";
-import { cleanupProjectResources } from "../../provisioning/cleanup";
-import { ProjectsListPage } from "../views/projects-list";
-import { DeploymentTable } from "../views/deployment-table";
-import { Layout } from "../views/layout";
-import { SITE_DOMAIN } from "../../constants";
+} from '../../db';
+import type { ApiEnv } from '../../env';
+import { cleanupProjectResources } from '../../provisioning/cleanup';
+import { DeploymentTable } from '../views/deployment-table';
+import { Layout } from '../views/layout';
+import { ProjectsListPage } from '../views/projects-list';
 
 const PAGE_SIZE = 20;
 const app = new Hono<ApiEnv>();
 
 // GET /projects
-app.get("/", async (c) => {
-  const search = c.req.query("search");
+app.get('/', async (c) => {
+  const search = c.req.query('search');
   const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
   if (search) {
-    const projects = await searchProjects(c.get("db"), search);
+    const projects = await searchProjects(c.get('db'), search);
     return c.html(
       <ProjectsListPage
         projects={projects}
         search={search}
         siteDomain={siteDomain}
-        username={c.get("user").login}
+        username={c.get('user').login}
       />,
     );
   }
-  const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10) || 1);
+  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
   const [projects, total] = await Promise.all([
-    getAllProjectsWithOwner(c.get("db"), PAGE_SIZE, offset),
-    countProjects(c.get("db")),
+    getAllProjectsWithOwner(c.get('db'), PAGE_SIZE, offset),
+    countProjects(c.get('db')),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   return c.html(
@@ -48,22 +48,22 @@ app.get("/", async (c) => {
       page={page}
       totalPages={totalPages}
       siteDomain={siteDomain}
-      username={c.get("user").login}
+      username={c.get('user').login}
     />,
   );
 });
 
 // GET /projects/:id
-app.get("/:id", async (c) => {
-  const project = await getProject(c.get("db"), c.req.param("id"));
+app.get('/:id', async (c) => {
+  const project = await getProject(c.get('db'), c.req.param('id'));
   if (!project) {
-    return c.html("<h1>Project not found</h1>", 404);
+    return c.html('<h1>Project not found</h1>', 404);
   }
   const [deployments, resources, owner, domains] = await Promise.all([
-    getProjectDeployments(c.get("db"), project.id, 10),
-    getProjectResources(c.get("db"), project.id),
-    getUser(c.get("db"), project.user_id),
-    getDomainsByProjectId(c.get("db"), project.id),
+    getProjectDeployments(c.get('db'), project.id, 10),
+    getProjectResources(c.get('db'), project.id),
+    getUser(c.get('db'), project.user_id),
+    getDomainsByProjectId(c.get('db'), project.id),
   ]);
 
   const cfAccountId = c.env.CF_ACCOUNT_ID;
@@ -72,7 +72,7 @@ app.get("/:id", async (c) => {
   const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
 
   return c.html(
-    <Layout title={project.slug} username={c.get("user").login}>
+    <Layout title={project.slug} username={c.get('user').login}>
       <h1>{project.slug}</h1>
 
       <table>
@@ -101,8 +101,8 @@ app.get("/:id", async (c) => {
                   <span key={d.id}>
                     <a href={`https://${d.hostname}`} target="_blank" rel="noopener noreferrer">
                       {d.hostname}
-                    </a>{" "}
-                    ({d.status}){" "}
+                    </a>{' '}
+                    ({d.status}){' '}
                   </span>
                 ))
               ) : (
@@ -143,12 +143,12 @@ app.get("/:id", async (c) => {
                 <td>{r.type}</td>
                 <td>{r.binding_name}</td>
                 <td>
-                  {cfAccountId && (r.type === "d1" || r.type === "kv" || r.type === "r2") ? (
+                  {cfAccountId && (r.type === 'd1' || r.type === 'kv' || r.type === 'r2') ? (
                     <a
                       href={
-                        r.type === "d1"
+                        r.type === 'd1'
                           ? `https://dash.cloudflare.com/${cfAccountId}/workers/d1/databases/${r.cf_id}/metrics`
-                          : r.type === "kv"
+                          : r.type === 'kv'
                             ? `https://dash.cloudflare.com/${cfAccountId}/workers/kv/namespaces/${r.cf_id}/metrics`
                             : `https://dash.cloudflare.com/${cfAccountId}/r2/default/buckets/${r.cf_id}`
                       }
@@ -194,14 +194,14 @@ app.get("/:id", async (c) => {
 });
 
 // POST /projects/:id/delete
-app.post("/:id/delete", async (c) => {
-  const project = await getProject(c.get("db"), c.req.param("id"));
+app.post('/:id/delete', async (c) => {
+  const project = await getProject(c.get('db'), c.req.param('id'));
   if (!project) {
-    return c.html("<h1>Project not found</h1>", 404);
+    return c.html('<h1>Project not found</h1>', 404);
   }
   await cleanupProjectResources(c, project.id, project);
-  await deleteProjectCascade(c.get("db"), project.id);
-  return c.redirect("/admin/projects");
+  await deleteProjectCascade(c.get('db'), project.id);
+  return c.redirect('/admin/projects');
 });
 
 export default app;

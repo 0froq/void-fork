@@ -1,10 +1,7 @@
-import type { Env } from "./env";
-import { applyHeaderRules, type HeaderRule } from "./headers";
-import { applyRedirectRules, type RedirectRule } from "./redirects";
-import { extractSlug } from "./hostname";
-import { resolveStaticPath, getContentType } from "./static";
-import type { AssetConfig } from "./static";
-import { createErrorResponse } from "./error-page";
+import type { Env } from './env';
+import { createErrorResponse } from './error-page';
+import { applyHeaderRules, type HeaderRule } from './headers';
+import { extractSlug } from './hostname';
 import {
   readIsrCache,
   writeIsrCache,
@@ -18,8 +15,11 @@ import {
   shouldBypassIsr,
   extractPageDataFromHtml,
   normalizePageDataForJsonCache,
-} from "./isr";
-import { recordRequest, sendUsageEvent, type RequestType } from "./metering";
+} from './isr';
+import { recordRequest, sendUsageEvent, type RequestType } from './metering';
+import { applyRedirectRules, type RedirectRule } from './redirects';
+import { resolveStaticPath, getContentType } from './static';
+import type { AssetConfig } from './static';
 
 interface RoutingEntry {
   workerName: string;
@@ -43,12 +43,12 @@ interface QueueRoutingEntry {
   queueName: string;
 }
 
-function jsonCacheResponse(pageData: string, ttl: number, state: "HIT" | "MISS"): Response {
+function jsonCacheResponse(pageData: string, ttl: number, state: 'HIT' | 'MISS'): Response {
   return new Response(pageData, {
     headers: {
-      "content-type": "application/json",
-      "Cache-Control": `public, s-maxage=${ttl}, max-age=0, must-revalidate`,
-      "x-isr-cache": state,
+      'content-type': 'application/json',
+      'Cache-Control': `public, s-maxage=${ttl}, max-age=0, must-revalidate`,
+      'x-isr-cache': state,
     },
   });
 }
@@ -58,9 +58,9 @@ async function populateJsonEdgeCache(
   cacheKey: Request,
   response: Response,
   ttl: number,
-  state: "HIT" | "MISS",
+  state: 'HIT' | 'MISS',
 ): Promise<void> {
-  const fromHeader = response.headers.get("x-void-page-data");
+  const fromHeader = response.headers.get('x-void-page-data');
   const pageData = fromHeader
     ? normalizePageDataForJsonCache(fromHeader)
     : extractPageDataFromHtml(await response.clone().text());
@@ -74,12 +74,12 @@ export default {
     const url = new URL(request.url);
 
     // Block internal framework routes from external HTTP access
-    if (url.pathname.startsWith("/__")) {
-      return createErrorResponse(request, 404, "Not Found");
+    if (url.pathname.startsWith('/__')) {
+      return createErrorResponse(request, 404, 'Not Found');
     }
 
     // Health check short-circuit — bypass KV lookup entirely
-    if (url.pathname === "/health" && request.headers.get("X-Health-Check") === "void-admin") {
+    if (url.pathname === '/health' && request.headers.get('X-Health-Check') === 'void-admin') {
       return Response.json({ ok: true });
     }
 
@@ -88,8 +88,8 @@ export default {
 
     const routingRaw = await env.ROUTING.get(routingKey, { cacheTtl: 60 });
     if (!routingRaw) {
-      return createErrorResponse(request, 404, "Not Found", {
-        "Cache-Control": "public, max-age=30",
+      return createErrorResponse(request, 404, 'Not Found', {
+        'Cache-Control': 'public, max-age=30',
       });
     }
 
@@ -98,17 +98,17 @@ export default {
     // Check if project is suspended
     if (routing.suspended) {
       return Response.json(
-        { error: "usage limit exceeded", reason: routing.suspended },
-        { status: 429, headers: { "Cache-Control": "public, s-maxage=30, max-age=0" } },
+        { error: 'usage limit exceeded', reason: routing.suspended },
+        { status: 429, headers: { 'Cache-Control': 'public, s-maxage=30, max-age=0' } },
       );
     }
 
     const pathname = url.pathname;
     let requestType: RequestType =
-      request.headers.get("upgrade")?.toLowerCase() === "websocket" ? "websocket" : "static";
+      request.headers.get('upgrade')?.toLowerCase() === 'websocket' ? 'websocket' : 'static';
 
     const meter = (response: Response) => {
-      const responseBytes = Number(response.headers.get("content-length") ?? 0);
+      const responseBytes = Number(response.headers.get('content-length') ?? 0);
       recordRequest(env, {
         projectId: routing.projectId,
         type: requestType,
@@ -131,7 +131,7 @@ export default {
         );
       }
       const res = new Response(response.body, response);
-      res.headers.set("X-Hosted-By", "void.cloud");
+      res.headers.set('X-Hosted-By', 'void.cloud');
       return res;
     };
 
@@ -142,17 +142,17 @@ export default {
     }
 
     // Edge-cache hashed static assets (immutable, content-addressed URLs)
-    if (request.method === "GET" && routing.hashedAssetsPrefix) {
-      const prefix = "/" + routing.hashedAssetsPrefix + "/";
+    if (request.method === 'GET' && routing.hashedAssetsPrefix) {
+      const prefix = '/' + routing.hashedAssetsPrefix + '/';
       if (pathname.startsWith(prefix)) {
         // Normalize cache key: strip query strings — hashed filenames are content-addressed
         const cacheUrl = new URL(request.url);
-        cacheUrl.search = "";
+        cacheUrl.search = '';
         const cacheKey = new Request(cacheUrl.toString());
 
         const cache = caches.default;
         const cached = await cache.match(cacheKey);
-        if (cached?.headers.get("Cache-Control")?.includes("immutable")) {
+        if (cached?.headers.get('Cache-Control')?.includes('immutable')) {
           return meter(cached);
         }
         // Cache miss — fetch from KV/R2 for static deployments, or invoke worker
@@ -164,11 +164,11 @@ export default {
           const hash = assetManifest[pathname];
           const response = hash
             ? ((await fetchStaticAsset(env, hash, pathname, routing.projectId)) ??
-              createErrorResponse(request, 404, "Not Found"))
-            : createErrorResponse(request, 404, "Not Found");
+              createErrorResponse(request, 404, 'Not Found'))
+            : createErrorResponse(request, 404, 'Not Found');
           if (response.ok) {
             const res = new Response(response.body, response);
-            res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+            res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
             ctx.waitUntil(cache.put(cacheKey, res.clone()));
             return meter(res);
           }
@@ -179,14 +179,14 @@ export default {
           const response = await worker.fetch(request);
           if (response.ok) {
             const res = new Response(response.body, response);
-            res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+            res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
             ctx.waitUntil(cache.put(cacheKey, res.clone()));
             return meter(res);
           }
           return meter(response);
         } catch (err) {
-          if (err instanceof Error && err.message.includes("Worker exceeded")) {
-            return meter(Response.json({ error: "CPU limit exceeded" }, { status: 429 }));
+          if (err instanceof Error && err.message.includes('Worker exceeded')) {
+            return meter(Response.json({ error: 'CPU limit exceeded' }, { status: 429 }));
           }
           throw err;
         }
@@ -198,8 +198,8 @@ export default {
     // Pages protocol (X-VoidPages) uses a separate JSON edge cache; HTML uses R2+edge.
     if (routing.ssr && routing.revalidate) {
       const isrTtl = resolvePathTtl(routing.revalidate, pathname);
-      if (isrTtl > 0 && request.method === "GET" && !shouldBypassIsr(request)) {
-        const isPagesRequest = request.headers.has("X-VoidPages");
+      if (isrTtl > 0 && request.method === 'GET' && !shouldBypassIsr(request)) {
+        const isPagesRequest = request.headers.has('X-VoidPages');
         const cache = caches.default;
 
         // Pages protocol: check JSON edge cache, fall through on miss
@@ -207,7 +207,7 @@ export default {
           const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname);
           const jsonCached = await cache.match(jsonCacheKey);
           if (jsonCached) {
-            requestType = "isr";
+            requestType = 'isr';
             return meter(jsonCached);
           }
           // Miss — fall through to general dispatch (worker returns JSON for X-VoidPages)
@@ -219,7 +219,7 @@ export default {
           // L1: Edge cache (per-colo)
           const edgeCached = await cache.match(cacheKey);
           if (edgeCached) {
-            requestType = "isr";
+            requestType = 'isr';
             return meter(edgeCached);
           }
 
@@ -240,25 +240,25 @@ export default {
                 ),
               );
             }
-            requestType = "isr";
+            requestType = 'isr';
             const response = isrCacheResponse(cached, stale);
             ctx.waitUntil(cache.put(cacheKey, response.clone()));
             return meter(response);
           }
 
           // Cache miss: render via worker, cache in background
-          requestType = "isr";
+          requestType = 'isr';
           const worker = getWorker(env, routing);
           const workerResponse = await worker.fetch(request);
           const ttl = resolveRevalidateTtl(workerResponse, isrTtl);
           if (ttl > 0 && workerResponse.ok) {
             ctx.waitUntil(writeIsrCache(env, routing.projectId, pathname, workerResponse, ttl));
-            ctx.waitUntil(populateJsonEdgeCache(cache, jsonCacheKey, workerResponse, ttl, "MISS"));
+            ctx.waitUntil(populateJsonEdgeCache(cache, jsonCacheKey, workerResponse, ttl, 'MISS'));
             const headers = new Headers(workerResponse.headers);
-            headers.set("Cache-Control", `public, s-maxage=${ttl}, max-age=0, must-revalidate`);
-            headers.set("x-isr-cache", "MISS");
-            headers.delete("x-void-page-data");
-            headers.delete("set-cookie");
+            headers.set('Cache-Control', `public, s-maxage=${ttl}, max-age=0, must-revalidate`);
+            headers.set('x-isr-cache', 'MISS');
+            headers.delete('x-void-page-data');
+            headers.delete('set-cookie');
             const response = new Response(workerResponse.body, {
               status: workerResponse.status,
               headers,
@@ -273,9 +273,9 @@ export default {
 
     // Edge-cache non-hashed static assets using deploy-versioned cache keys
     const isStaticCandidate =
-      request.method === "GET" &&
+      request.method === 'GET' &&
       routing.version &&
-      !(pathname.startsWith("/api/") || pathname === "/api") &&
+      !(pathname.startsWith('/api/') || pathname === '/api') &&
       (hasExtension(pathname) || !routing.ssr);
 
     let staticCacheKey: Request | undefined;
@@ -285,7 +285,7 @@ export default {
       staticCacheKey = new Request(cacheUrl.toString());
       const cached = await caches.default.match(staticCacheKey);
       if (cached) {
-        requestType = "static";
+        requestType = 'static';
         return meter(cached);
       }
     }
@@ -296,14 +296,14 @@ export default {
         cacheTtl: 86400,
       });
       if (!manifestRaw) {
-        return meter(new Response("Deployment manifest not found", { status: 502 }));
+        return meter(new Response('Deployment manifest not found', { status: 502 }));
       }
       const assetManifest: Record<string, string> = JSON.parse(manifestRaw);
       const assetConfig: AssetConfig = routing.assetConfig ?? {};
 
       const resolved = resolveStaticPath(pathname, assetManifest, assetConfig);
       if (!resolved) {
-        return meter(createErrorResponse(request, 404, "Not Found"));
+        return meter(createErrorResponse(request, 404, 'Not Found'));
       }
 
       if (resolved.redirect) {
@@ -322,7 +322,7 @@ export default {
         routing.projectId,
       );
       if (!assetResponse) {
-        return meter(createErrorResponse(request, 404, "Not Found"));
+        return meter(createErrorResponse(request, 404, 'Not Found'));
       }
 
       const status = resolved.notFound ? 404 : 200;
@@ -335,14 +335,14 @@ export default {
       // Populate edge cache (same pattern as existing deploy-versioned static cache)
       const edgeCacheKey =
         staticCacheKey ??
-        (request.method === "GET"
+        (request.method === 'GET'
           ? new Request(`${url.origin}${pathname}?_v=${routing.staticDeploymentId}`)
           : undefined);
       if (edgeCacheKey && status === 200) {
         const cached = new Response(finalRes.clone().body, finalRes);
         cached.headers.set(
-          "Cache-Control",
-          "public, s-maxage=31536000, max-age=0, must-revalidate",
+          'Cache-Control',
+          'public, s-maxage=31536000, max-age=0, must-revalidate',
         );
         ctx.waitUntil(caches.default.put(edgeCacheKey, cached.clone()));
       }
@@ -356,8 +356,8 @@ export default {
       let dispatchReq = request;
       if (request.bodyUsed) {
         const headers = new Headers(request.headers);
-        headers.delete("content-length");
-        headers.delete("transfer-encoding");
+        headers.delete('content-length');
+        headers.delete('transfer-encoding');
         dispatchReq = new Request(request.url, { method: request.method, headers });
       }
       const response = await worker.fetch(dispatchReq);
@@ -365,53 +365,53 @@ export default {
       // Cache static asset at edge if eligible
       if (staticCacheKey && response.ok && !hasCacheOptOut(response)) {
         const res = new Response(response.body, response);
-        res.headers.delete("x-void-page-data");
+        res.headers.delete('x-void-page-data');
         const finalRes = applyHeaderRules(res, pathname, routing.headerRules);
         finalRes.headers.set(
-          "Cache-Control",
-          "public, s-maxage=31536000, max-age=0, must-revalidate",
+          'Cache-Control',
+          'public, s-maxage=31536000, max-age=0, must-revalidate',
         );
         ctx.waitUntil(caches.default.put(staticCacheKey, finalRes.clone()));
         return meter(finalRes);
       }
 
       // Classify for metering
-      if (pathname.startsWith("/api/") || pathname === "/api") {
-        requestType = "api";
+      if (pathname.startsWith('/api/') || pathname === '/api') {
+        requestType = 'api';
       } else if (routing.ssr && !hasExtension(pathname)) {
-        requestType = "ssr";
+        requestType = 'ssr';
       }
 
       // Write ISR cache on miss — skip pages protocol responses (JSON, not HTML)
       // Guard: only cache GET requests without credentials, and respect worker x-revalidate
       if (
         routing.revalidate &&
-        !request.headers.has("X-VoidPages") &&
-        request.method === "GET" &&
+        !request.headers.has('X-VoidPages') &&
+        request.method === 'GET' &&
         !shouldBypassIsr(request)
       ) {
         const configTtl = resolvePathTtl(routing.revalidate, pathname);
         // Config TTL is the gatekeeper — worker x-revalidate can reduce but not enable ISR
         const isrTtl = configTtl > 0 ? resolveRevalidateTtl(response, configTtl) : 0;
-        if (isrTtl > 0 && response.ok && requestType === "ssr") {
+        if (isrTtl > 0 && response.ok && requestType === 'ssr') {
           ctx.waitUntil(writeIsrCache(env, routing.projectId, pathname, response, isrTtl));
           const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname);
           ctx.waitUntil(
-            populateJsonEdgeCache(caches.default, jsonCacheKey, response, isrTtl, "MISS"),
+            populateJsonEdgeCache(caches.default, jsonCacheKey, response, isrTtl, 'MISS'),
           );
         }
       }
 
       // Strip internal header before returning to client
-      if (response.headers.has("x-void-page-data")) {
+      if (response.headers.has('x-void-page-data')) {
         const stripped = new Response(response.body, response);
-        stripped.headers.delete("x-void-page-data");
+        stripped.headers.delete('x-void-page-data');
         return meter(applyHeaderRules(stripped, pathname, routing.headerRules));
       }
       return meter(applyHeaderRules(response, pathname, routing.headerRules));
     } catch (err) {
-      if (err instanceof Error && err.message.includes("Worker exceeded")) {
-        return meter(Response.json({ error: "CPU limit exceeded" }, { status: 429 }));
+      if (err instanceof Error && err.message.includes('Worker exceeded')) {
+        return meter(Response.json({ error: 'CPU limit exceeded' }, { status: 429 }));
       }
       throw err;
     }
@@ -437,9 +437,9 @@ export default {
     const worker = env.DISPATCH.get(workerName);
     try {
       const res = await worker.fetch(
-        new Request("https://internal/__queue", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        new Request('https://internal/__queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ queue: queueName, messages }),
         }),
       );
@@ -473,8 +473,8 @@ export default {
       for (const [id, decision] of Object.entries(result.decisions)) {
         const cfMsg = msgMap.get(id);
         if (!cfMsg) continue;
-        if (decision.action === "ack") cfMsg.ack();
-        else if (decision.action === "retry")
+        if (decision.action === 'ack') cfMsg.ack();
+        else if (decision.action === 'retry')
           cfMsg.retry(
             decision.delaySeconds != null ? { delaySeconds: decision.delaySeconds } : undefined,
           );
@@ -502,7 +502,7 @@ async function fetchStaticAsset(
   path: string,
   projectId?: string,
 ): Promise<Response | null> {
-  const isLarge = hash.startsWith("!");
+  const isLarge = hash.startsWith('!');
   const cleanHash = isLarge ? hash.slice(1) : hash;
   const scopedKey = projectId ? `assets/${projectId}/${cleanHash}` : null;
   const legacyKey = `assets/${cleanHash}`;
@@ -516,43 +516,43 @@ async function fetchStaticAsset(
     const ct = obj.httpMetadata?.contentType ?? getContentType(path);
     const headers: HeadersInit = {
       ETag: obj.httpEtag,
-      ...(obj.size ? { "Content-Length": String(obj.size) } : {}),
+      ...(obj.size ? { 'Content-Length': String(obj.size) } : {}),
     };
     // "application/null" is a sentinel meaning "no Content-Type header" (matches Wrangler)
-    if (ct && ct !== "application/null") (headers as Record<string, string>)["Content-Type"] = ct;
+    if (ct && ct !== 'application/null') (headers as Record<string, string>)['Content-Type'] = ct;
     return new Response(obj.body, { headers });
   }
 
   // Try scoped key first, then legacy
   if (scopedKey) {
     const scoped = await env.STATIC_ASSETS.getWithMetadata<{ ct: string }>(scopedKey, {
-      type: "arrayBuffer",
+      type: 'arrayBuffer',
       cacheTtl: 86400,
     });
     if (scoped.value) {
       const contentType = scoped.metadata?.ct ?? getContentType(path);
       const headers: HeadersInit = {
-        "Content-Length": String((scoped.value as ArrayBuffer).byteLength),
+        'Content-Length': String((scoped.value as ArrayBuffer).byteLength),
       };
-      if (contentType && contentType !== "application/null") {
-        (headers as Record<string, string>)["Content-Type"] = contentType;
+      if (contentType && contentType !== 'application/null') {
+        (headers as Record<string, string>)['Content-Type'] = contentType;
       }
       return new Response(scoped.value, { headers });
     }
   }
 
   const { value, metadata } = await env.STATIC_ASSETS.getWithMetadata<{ ct: string }>(legacyKey, {
-    type: "arrayBuffer",
+    type: 'arrayBuffer',
     cacheTtl: 86400,
   });
   if (!value) return null;
   const contentType = metadata?.ct ?? getContentType(path);
   const headers: HeadersInit = {
-    "Content-Length": String((value as ArrayBuffer).byteLength),
+    'Content-Length': String((value as ArrayBuffer).byteLength),
   };
   // "application/null" is a sentinel meaning "no Content-Type header" (matches Wrangler)
-  if (contentType && contentType !== "application/null") {
-    (headers as Record<string, string>)["Content-Type"] = contentType;
+  if (contentType && contentType !== 'application/null') {
+    (headers as Record<string, string>)['Content-Type'] = contentType;
   }
   return new Response(value, { headers });
 }
@@ -584,7 +584,7 @@ async function revalidateInBackground(
     const worker = getWorker(env, routing);
     // Strip X-VoidPages so the worker always returns HTML
     const cleanHeaders = new Headers(request.headers);
-    cleanHeaders.delete("X-VoidPages");
+    cleanHeaders.delete('X-VoidPages');
     const cleanRequest = new Request(request.url, {
       method: request.method,
       headers: cleanHeaders,
@@ -596,10 +596,10 @@ async function revalidateInBackground(
       await writeIsrCache(env, routing.projectId, pathname, response, ttl);
       // Update HTML edge cache with fresh response
       const headers = new Headers(response.headers);
-      headers.set("x-isr-cache", "HIT");
-      headers.set("Cache-Control", `public, s-maxage=${ttl}, max-age=0, must-revalidate`);
-      headers.delete("set-cookie");
-      headers.delete("x-void-page-data");
+      headers.set('x-isr-cache', 'HIT');
+      headers.set('Cache-Control', `public, s-maxage=${ttl}, max-age=0, must-revalidate`);
+      headers.delete('set-cookie');
+      headers.delete('x-void-page-data');
       await cache.put(
         cacheKey,
         new Response(response.clone().body, {
@@ -607,7 +607,7 @@ async function revalidateInBackground(
           headers,
         }),
       );
-      await populateJsonEdgeCache(cache, jsonCacheKey, response, ttl, "HIT");
+      await populateJsonEdgeCache(cache, jsonCacheKey, response, ttl, 'HIT');
     } else if (ttl === 0) {
       // Worker permanently opted out — remove stale R2 + edge entries + JSON edge
       await deleteIsrCache(env, routing.projectId, pathname);
@@ -615,16 +615,16 @@ async function revalidateInBackground(
       await cache.delete(jsonCacheKey);
     }
   } catch (err) {
-    console.error("ISR revalidation failed:", err);
+    console.error('ISR revalidation failed:', err);
   }
 }
 
 function hasExtension(pathname: string): boolean {
-  return pathname.slice(pathname.lastIndexOf("/") + 1).includes(".");
+  return pathname.slice(pathname.lastIndexOf('/') + 1).includes('.');
 }
 
 function hasCacheOptOut(response: Response): boolean {
-  const cc = response.headers.get("Cache-Control");
+  const cc = response.headers.get('Cache-Control');
   if (!cc) return false;
   return /\b(private|no-store|no-cache)\b/.test(cc);
 }

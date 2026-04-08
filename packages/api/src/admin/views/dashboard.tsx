@@ -1,8 +1,8 @@
-import type { Deployment } from "../../types";
-import type { ProjectRow } from "./projects-table";
-import { ProjectsTable } from "./projects-table";
-import { DeploymentTable } from "./deployment-table";
-import { Layout } from "./layout";
+import type { Deployment } from '../../types';
+import { DeploymentTable } from './deployment-table';
+import { Layout } from './layout';
+import type { ProjectRow } from './projects-table';
+import { ProjectsTable } from './projects-table';
 
 interface DashboardProps {
   stats: {

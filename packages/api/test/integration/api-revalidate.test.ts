@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
-import app from "../../src/index";
-import { domains } from "../../src/schema";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import app from '../../src/index';
+import { domains } from '../../src/schema';
 import {
   setupEnv,
   teardownEnv,
@@ -9,7 +9,7 @@ import {
   createTestProject,
   mockCfApi,
   type TestEnv,
-} from "./helpers";
+} from './helpers';
 
 let env: TestEnv;
 
@@ -29,12 +29,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("POST /projects/:id/revalidate", () => {
-  it("returns 401 without auth", async () => {
+describe('POST /projects/:id/revalidate', () => {
+  it('returns 401 without auth', async () => {
     const res = await app.fetch(
-      new Request("http://localhost/projects/proj_fake/revalidate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      new Request('http://localhost/projects/proj_fake/revalidate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ all: true }),
       }),
       env,
@@ -42,15 +42,15 @@ describe("POST /projects/:id/revalidate", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 404 for nonexistent project", async () => {
+  it('returns 404 for nonexistent project', async () => {
     const user = await createTestUser(env.db);
 
     const res = await app.fetch(
-      new Request("http://localhost/projects/proj_nonexistent/revalidate", {
-        method: "POST",
+      new Request('http://localhost/projects/proj_nonexistent/revalidate', {
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${user.jwt}`,
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({ all: true }),
       }),
@@ -59,17 +59,17 @@ describe("POST /projects/:id/revalidate", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 for non-owner", async () => {
-    const owner = await createTestUser(env.db, "owner");
-    const other = await createTestUser(env.db, "other");
+  it('returns 403 for non-owner', async () => {
+    const owner = await createTestUser(env.db, 'owner');
+    const other = await createTestUser(env.db, 'other');
     const project = await createTestProject(env.db, owner.id);
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
-        method: "POST",
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${other.jwt}`,
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({ all: true }),
       }),
@@ -78,16 +78,16 @@ describe("POST /projects/:id/revalidate", () => {
     expect(res.status).toBe(403);
   });
 
-  it("returns 400 without paths or all", async () => {
+  it('returns 400 without paths or all', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
-        method: "POST",
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${user.jwt}`,
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({}),
       }),
@@ -96,24 +96,24 @@ describe("POST /projects/:id/revalidate", () => {
     expect(res.status).toBe(400);
   });
 
-  it("purges specific paths from KV and edge cache", async () => {
+  it('purges specific paths from KV and edge cache', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
     const fetchMock = mockCfApi();
 
     // Seed ISR cache entries
-    await env.ISR_CACHE.put(`${project.id}/isr/__index__`, "home");
-    await env.ISR_CACHE.put(`${project.id}/isr/about`, "about");
-    await env.ISR_CACHE.put(`${project.id}/isr/blog/hello`, "blog post");
+    await env.ISR_CACHE.put(`${project.id}/isr/__index__`, 'home');
+    await env.ISR_CACHE.put(`${project.id}/isr/about`, 'about');
+    await env.ISR_CACHE.put(`${project.id}/isr/blog/hello`, 'blog post');
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
-        method: "POST",
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${user.jwt}`,
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ paths: ["/", "/about"] }),
+        body: JSON.stringify({ paths: ['/', '/about'] }),
       }),
       env,
     );
@@ -134,8 +134,8 @@ describe("POST /projects/:id/revalidate", () => {
     // Verify edge cache purge was called with correct URLs
     const purgeCalls = fetchMock.mock.calls.filter(
       (call: unknown[]) =>
-        (call[1] as RequestInit | undefined)?.method === "POST" &&
-        (call[0] as string).includes("/purge_cache"),
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
     );
     expect(purgeCalls.length).toBe(1);
     const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as string[];
@@ -146,21 +146,21 @@ describe("POST /projects/:id/revalidate", () => {
     expect(purgedFiles).toHaveLength(4);
   });
 
-  it("purges all ISR entries with all: true", async () => {
+  it('purges all ISR entries with all: true', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
     const fetchMock = mockCfApi();
 
     // Seed ISR cache entries
-    await env.ISR_CACHE.put(`${project.id}/isr/__index__`, "home");
-    await env.ISR_CACHE.put(`${project.id}/isr/about`, "about");
+    await env.ISR_CACHE.put(`${project.id}/isr/__index__`, 'home');
+    await env.ISR_CACHE.put(`${project.id}/isr/about`, 'about');
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
-        method: "POST",
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${user.jwt}`,
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({ all: true }),
       }),
@@ -180,8 +180,8 @@ describe("POST /projects/:id/revalidate", () => {
     // Verify edge cache purge with correct pathnames derived from KV keys
     const purgeCalls = fetchMock.mock.calls.filter(
       (call: unknown[]) =>
-        (call[1] as RequestInit | undefined)?.method === "POST" &&
-        (call[0] as string).includes("/purge_cache"),
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
     );
     expect(purgeCalls.length).toBe(1);
     const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as string[];
@@ -191,30 +191,30 @@ describe("POST /projects/:id/revalidate", () => {
     expect(purgedFiles).toContain(`https://${project.slug}.void.app/about?__void=json`);
   });
 
-  it("includes custom domain URLs in edge cache purge", async () => {
+  it('includes custom domain URLs in edge cache purge', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
     const fetchMock = mockCfApi();
 
     // Add a custom domain
     await env.db.insert(domains).values({
-      id: "dom_test1",
+      id: 'dom_test1',
       project_id: project.id,
-      hostname: "example.com",
-      cf_hostname_id: "ch-test-id",
-      status: "active",
+      hostname: 'example.com',
+      cf_hostname_id: 'ch-test-id',
+      status: 'active',
     });
 
-    await env.ISR_CACHE.put(`${project.id}/isr/about`, "about");
+    await env.ISR_CACHE.put(`${project.id}/isr/about`, 'about');
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
-        method: "POST",
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${user.jwt}`,
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ paths: ["/about"] }),
+        body: JSON.stringify({ paths: ['/about'] }),
       }),
       env,
     );
@@ -223,20 +223,20 @@ describe("POST /projects/:id/revalidate", () => {
 
     const purgeCalls = fetchMock.mock.calls.filter(
       (call: unknown[]) =>
-        (call[1] as RequestInit | undefined)?.method === "POST" &&
-        (call[0] as string).includes("/purge_cache"),
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
     );
     expect(purgeCalls.length).toBe(1);
     const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as string[];
     // slug domain + custom domain, HTML + JSON each = 4 URLs
     expect(purgedFiles).toContain(`https://${project.slug}.void.app/about`);
     expect(purgedFiles).toContain(`https://${project.slug}.void.app/about?__void=json`);
-    expect(purgedFiles).toContain("https://example.com/about");
-    expect(purgedFiles).toContain("https://example.com/about?__void=json");
+    expect(purgedFiles).toContain('https://example.com/about');
+    expect(purgedFiles).toContain('https://example.com/about?__void=json');
     expect(purgedFiles).toHaveLength(4);
   });
 
-  it("batches purge requests for >100 URLs", async () => {
+  it('batches purge requests for >100 URLs', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
     const fetchMock = mockCfApi();
@@ -251,10 +251,10 @@ describe("POST /projects/:id/revalidate", () => {
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
-        method: "POST",
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${user.jwt}`,
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({ paths }),
       }),
@@ -265,8 +265,8 @@ describe("POST /projects/:id/revalidate", () => {
 
     const purgeCalls = fetchMock.mock.calls.filter(
       (call: unknown[]) =>
-        (call[1] as RequestInit | undefined)?.method === "POST" &&
-        (call[0] as string).includes("/purge_cache"),
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
     );
     // 51 paths × 2 variants = 102 URLs → 2 batches (100 + 2)
     expect(purgeCalls.length).toBe(2);
@@ -277,24 +277,24 @@ describe("POST /projects/:id/revalidate", () => {
     expect(batch2).toHaveLength(2);
   });
 
-  it("succeeds even if edge cache purge fails", async () => {
+  it('succeeds even if edge cache purge fails', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
     mockCfApi({
       purgeCache: () =>
-        Response.json({ success: false, errors: [{ code: 1000, message: "fail" }] }),
+        Response.json({ success: false, errors: [{ code: 1000, message: 'fail' }] }),
     });
 
-    await env.ISR_CACHE.put(`${project.id}/isr/about`, "about");
+    await env.ISR_CACHE.put(`${project.id}/isr/about`, 'about');
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
-        method: "POST",
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${user.jwt}`,
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ paths: ["/about"] }),
+        body: JSON.stringify({ paths: ['/about'] }),
       }),
       env,
     );

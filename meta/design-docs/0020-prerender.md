@@ -40,7 +40,7 @@ This also restructures `void.json` to group caching concerns under a `cache` key
 export const prerender = true;
 
 export function loader(c) {
-  return c.render({ title: "About Us" });
+  return c.render({ title: 'About Us' });
 }
 ```
 
@@ -53,7 +53,7 @@ Static pages (no route params) with `export const prerender = true` are automati
 export const prerender = true;
 
 export async function getPrerenderPaths() {
-  const posts = await fetch("https://cms.example.com/posts").then((r) => r.json());
+  const posts = await fetch('https://cms.example.com/posts').then((r) => r.json());
   return posts.map((p) => ({ slug: p.slug }));
 }
 
@@ -73,8 +73,8 @@ Dynamic pages export `getPrerenderPaths()` which returns an array of param objec
 export const prerender = true;
 
 export async function getPrerenderPaths() {
-  const pages = await fetch("https://cms.example.com/pages").then((r) => r.json());
-  return ["/", "/about", ...pages.map((p) => `/${p.slug}`)];
+  const pages = await fetch('https://cms.example.com/pages').then((r) => r.json());
+  return ['/', '/about', ...pages.map((p) => `/${p.slug}`)];
 }
 
 export default defineRender(async (c, assetTags) => {

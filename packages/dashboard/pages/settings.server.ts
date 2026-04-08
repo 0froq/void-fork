@@ -1,6 +1,6 @@
-import { defineHandler } from "void";
-import { getUser } from "@voidcloud/api/db";
-import { getPlanLimits, type PlanLimits } from "@voidcloud/api/tiers";
+import { getUser } from '@voidcloud/api/db';
+import { getPlanLimits, type PlanLimits } from '@voidcloud/api/tiers';
+import { defineHandler } from 'void';
 
 export type Props = {
   user: {
@@ -15,8 +15,8 @@ export type Props = {
 };
 
 export const loader = defineHandler<Props>(async (c) => {
-  const user = await getUser(c.get("db"), c.get("userId"));
-  if (!user) return c.redirect("/login");
+  const user = await getUser(c.get('db'), c.get('userId'));
+  if (!user) return c.redirect('/login');
   const limits = getPlanLimits(user.plan);
   return {
     user: {

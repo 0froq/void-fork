@@ -65,7 +65,7 @@ Where `Strategy = 'hover' | 'click' | 'mount' | 'visible'`.
 voidVue({
   prefetch: {
     hoverDelay: 75, // ms before hover triggers prefetch
-    cacheFor: "30s", // default TTL for all prefetched links
+    cacheFor: '30s', // default TTL for all prefetched links
   },
 });
 ```
@@ -75,8 +75,8 @@ voidVue({
 ```ts
 const router = useRouter();
 
-router.prefetch("/projects"); // prefetch a URL manually
-router.flush("/projects"); // flush single cache entry
+router.prefetch('/projects'); // prefetch a URL manually
+router.flush('/projects'); // flush single cache entry
 router.flushAll(); // flush entire prefetch cache
 ```
 
@@ -153,8 +153,8 @@ The client manifest (`pages-manifest.ts`) currently emits `components` and `layo
 ```js
 const routeMeta = {
   index: { island: true },
-  "blog/[slug]": { island: true },
-  "projects/[id]": {},
+  'blog/[slug]': { island: true },
+  'projects/[id]': {},
 };
 ```
 
@@ -176,10 +176,10 @@ The client needs to resolve a URL like `/projects/123` to a `componentId` like `
 
 ```js
 const routes = [
-  { pattern: /^\/$/, id: "index" },
-  { pattern: /^\/projects$/, id: "projects/index" },
-  { pattern: /^\/projects\/([^/]+)$/, id: "projects/[id]" },
-  { pattern: /^\/blog\/([^/]+)$/, id: "blog/[slug]" },
+  { pattern: /^\/$/, id: 'index' },
+  { pattern: /^\/projects$/, id: 'projects/index' },
+  { pattern: /^\/projects\/([^/]+)$/, id: 'projects/[id]' },
+  { pattern: /^\/blog\/([^/]+)$/, id: 'blog/[slug]' },
 ];
 
 function matchRoute(url) {

@@ -122,12 +122,12 @@ New generated file:
 It looks conceptually like this:
 
 ```ts
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { db } from "void/db";
-import { schema } from "./better-auth-schema";
+import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { db } from 'void/db';
+import { schema } from './better-auth-schema';
 
 export const __voidAuthDatabase = drizzleAdapter(db, {
-  provider: "pg" | "sqlite",
+  provider: 'pg' | 'sqlite',
   schema,
 });
 ```
@@ -174,7 +174,7 @@ This means request-time auth uses the shared adapter instead of falling back to 
 `better-auth-shared.ts` now stashes the middleware-created Better Auth instance on the Hono context:
 
 ```ts
-c.set("__voidAuth", auth);
+c.set('__voidAuth', auth);
 ```
 
 Then `/api/auth/*` handling does:

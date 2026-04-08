@@ -13,11 +13,11 @@ const decoder = new TextDecoder();
 
 function base64url(buffer: ArrayBuffer): string {
   const binary = String.fromCharCode(...new Uint8Array(buffer));
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function base64urlDecode(str: string): Uint8Array {
-  const padded = str.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = str.replace(/-/g, '+').replace(/_/g, '/');
   const binary = atob(padded);
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
@@ -30,11 +30,11 @@ async function getSignKey(secret: string): Promise<CryptoKey> {
   let key = signKeyCache.get(secret);
   if (!key) {
     key = await crypto.subtle.importKey(
-      "raw",
+      'raw',
       encoder.encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
+      { name: 'HMAC', hash: 'SHA-256' },
       false,
-      ["sign"],
+      ['sign'],
     );
     signKeyCache.set(secret, key);
   }
@@ -45,11 +45,11 @@ async function getVerifyKey(secret: string): Promise<CryptoKey> {
   let key = verifyKeyCache.get(secret);
   if (!key) {
     key = await crypto.subtle.importKey(
-      "raw",
+      'raw',
       encoder.encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
+      { name: 'HMAC', hash: 'SHA-256' },
       false,
-      ["verify"],
+      ['verify'],
     );
     verifyKeyCache.set(secret, key);
   }
@@ -58,18 +58,18 @@ async function getVerifyKey(secret: string): Promise<CryptoKey> {
 
 async function hmacSign(data: string, secret: string): Promise<string> {
   const key = await getSignKey(secret);
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(data));
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
   return base64url(signature);
 }
 
 async function hmacVerify(data: string, signature: string, secret: string): Promise<boolean> {
   const key = await getVerifyKey(secret);
   const sigBytes = base64urlDecode(signature);
-  return crypto.subtle.verify("HMAC", key, sigBytes.buffer as ArrayBuffer, encoder.encode(data));
+  return crypto.subtle.verify('HMAC', key, sigBytes.buffer as ArrayBuffer, encoder.encode(data));
 }
 
 export async function signJwt(
-  payload: Omit<JwtPayload, "iat" | "exp">,
+  payload: Omit<JwtPayload, 'iat' | 'exp'>,
   secret: string,
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
@@ -80,7 +80,7 @@ export async function signJwt(
   };
 
   const header = base64url(
-    encoder.encode(JSON.stringify({ alg: "HS256", typ: "JWT" })).buffer as ArrayBuffer,
+    encoder.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).buffer as ArrayBuffer,
   );
   const body = base64url(encoder.encode(JSON.stringify(fullPayload)).buffer as ArrayBuffer);
   const signature = await hmacSign(`${header}.${body}`, secret);
@@ -93,7 +93,7 @@ export async function verifyJwt(
   secret: string,
   expectedAud?: string,
 ): Promise<JwtPayload | null> {
-  const parts = token.split(".");
+  const parts = token.split('.');
   if (parts.length !== 3) return null;
 
   const [header, body, signature] = parts;

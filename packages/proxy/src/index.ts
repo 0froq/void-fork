@@ -1,27 +1,27 @@
-import { Hono } from "hono";
-import { cors } from "hono/cors";
-import type { JwtPayload, ProxyEnv } from "./types";
-import { ai } from "./ai";
-import { d1 } from "./d1";
-import { kv } from "./kv";
-import { r2 } from "./r2";
-import { revalidate } from "./revalidate";
-import { verifyProjectOwner } from "./resolve";
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import { ai } from './ai';
+import { d1 } from './d1';
+import { kv } from './kv';
+import { r2 } from './r2';
+import { verifyProjectOwner } from './resolve';
+import { revalidate } from './revalidate';
+import type { JwtPayload, ProxyEnv } from './types';
 
 const app = new Hono<ProxyEnv>();
 
 // CORS
 app.use(
-  "/*",
+  '/*',
   cors({
-    origin: "*",
-    allowMethods: ["POST", "OPTIONS"],
-    allowHeaders: ["content-type", "authorization"],
+    origin: '*',
+    allowMethods: ['POST', 'OPTIONS'],
+    allowHeaders: ['content-type', 'authorization'],
   }),
 );
 
 // Health check
-app.get("/health", (c) =>
+app.get('/health', (c) =>
   c.json({
     ok: true,
     bindings: {
@@ -34,33 +34,33 @@ app.get("/health", (c) =>
 );
 
 // Reject non-POST for all other routes
-app.all("/*", async (c, next) => {
-  if (c.req.method !== "POST") {
-    return c.json({ error: "method not allowed" }, 405);
+app.all('/*', async (c, next) => {
+  if (c.req.method !== 'POST') {
+    return c.json({ error: 'method not allowed' }, 405);
   }
   await next();
 });
 
 // Auth middleware — parses body, authenticates, sets projectId
-app.post("/*", async (c, next) => {
+app.post('/*', async (c, next) => {
   let body: Record<string, any>;
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: "invalid JSON body" }, 400);
+    return c.json({ error: 'invalid JSON body' }, 400);
   }
-  c.set("body", body);
+  c.set('body', body);
 
-  const authHeader = c.req.header("authorization");
-  if (authHeader?.startsWith("Bearer ")) {
+  const authHeader = c.req.header('authorization');
+  if (authHeader?.startsWith('Bearer ')) {
     // HTTPS path (local dev) — validate JWT
     const token = authHeader.slice(7);
     const payload = await verifyJwt(token, c.env.JWT_SECRET);
     if (!payload) {
-      return c.json({ error: "invalid or expired token" }, 401);
+      return c.json({ error: 'invalid or expired token' }, 401);
     }
     if (!body.projectId) {
-      return c.json({ error: "projectId required" }, 400);
+      return c.json({ error: 'projectId required' }, 400);
     }
     // Verify the authenticated user owns this project
     const owns = await verifyProjectOwner(
@@ -70,37 +70,37 @@ app.post("/*", async (c, next) => {
       payload.sub,
     );
     if (!owns) {
-      return c.json({ error: "forbidden" }, 403);
+      return c.json({ error: 'forbidden' }, 403);
     }
-    c.set("projectId", body.projectId as string);
+    c.set('projectId', body.projectId as string);
   } else {
     // Service binding path (production) — verify HMAC-signed project token
     if (!body.projectId || !body.aiToken) {
-      return c.json({ error: "projectId and aiToken required" }, 400);
+      return c.json({ error: 'projectId and aiToken required' }, 400);
     }
     if (!(await verifyHmac(body.projectId as string, body.aiToken as string, c.env.JWT_SECRET))) {
-      return c.json({ error: "invalid project token" }, 403);
+      return c.json({ error: 'invalid project token' }, 403);
     }
-    c.set("projectId", body.projectId as string);
+    c.set('projectId', body.projectId as string);
   }
 
   await next();
 });
 
 // AI usage limit check — only applies to AI routes
-app.post("/ai/*", async (c, next) => {
-  if (await c.env.ROUTING.get(`ai-block:${c.get("projectId")}`, { cacheTtl: 60 })) {
-    return c.json({ error: "AI usage limit exceeded" }, 429);
+app.post('/ai/*', async (c, next) => {
+  if (await c.env.ROUTING.get(`ai-block:${c.get('projectId')}`, { cacheTtl: 60 })) {
+    return c.json({ error: 'AI usage limit exceeded' }, 429);
   }
   await next();
 });
 
 // Route groups
-app.route("/ai", ai);
-app.route("/d1", d1);
-app.route("/kv", kv);
-app.route("/r2", r2);
-app.route("/revalidate", revalidate);
+app.route('/ai', ai);
+app.route('/d1', d1);
+app.route('/kv', kv);
+app.route('/r2', r2);
+app.route('/revalidate', revalidate);
 
 export default app;
 
@@ -115,11 +115,11 @@ let cachedKeySecret: string | undefined;
 async function getVerifyKey(secret: string): Promise<CryptoKey> {
   if (cachedVerifyKey && cachedKeySecret === secret) return cachedVerifyKey;
   cachedVerifyKey = await crypto.subtle.importKey(
-    "raw",
+    'raw',
     encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
+    { name: 'HMAC', hash: 'SHA-256' },
     false,
-    ["verify"],
+    ['verify'],
   );
   cachedKeySecret = secret;
   return cachedVerifyKey;
@@ -129,7 +129,7 @@ async function verifyHmac(data: string, signature: string, secret: string): Prom
   try {
     const key = await getVerifyKey(secret);
     const sigBytes = base64urlDecode(signature);
-    return crypto.subtle.verify("HMAC", key, sigBytes.buffer as ArrayBuffer, encoder.encode(data));
+    return crypto.subtle.verify('HMAC', key, sigBytes.buffer as ArrayBuffer, encoder.encode(data));
   } catch {
     return false;
   }
@@ -138,13 +138,13 @@ async function verifyHmac(data: string, signature: string, secret: string): Prom
 // --- JWT verification ---
 
 function base64urlDecode(str: string): Uint8Array {
-  const padded = str.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = str.replace(/-/g, '+').replace(/_/g, '/');
   const binary = atob(padded);
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
 async function verifyJwt(token: string, secret: string): Promise<JwtPayload | null> {
-  const parts = token.split(".");
+  const parts = token.split('.');
   if (parts.length !== 3) return null;
 
   const [header, body, signature] = parts;
@@ -153,7 +153,7 @@ async function verifyJwt(token: string, secret: string): Promise<JwtPayload | nu
     const key = await getVerifyKey(secret);
     const sigBytes = base64urlDecode(signature);
     const valid = await crypto.subtle.verify(
-      "HMAC",
+      'HMAC',
       key,
       sigBytes.buffer as ArrayBuffer,
       encoder.encode(`${header}.${body}`),
@@ -165,7 +165,7 @@ async function verifyJwt(token: string, secret: string): Promise<JwtPayload | nu
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp <= now) return null;
 
-    if (payload.aud !== "api") return null;
+    if (payload.aud !== 'api') return null;
 
     return payload;
   } catch {

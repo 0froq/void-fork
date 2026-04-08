@@ -97,23 +97,23 @@ Generates a target-specific entry file with the appropriate `serve()` call:
 
 ```js
 // target: "node"
-import { serve } from "@hono/node-server";
-import { serveStatic } from "@hono/node-server/serve-static";
-import app from "virtual:void-routes";
-app.use("/assets/*", serveStatic({ root: "./client" }));
+import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
+import app from 'virtual:void-routes';
+app.use('/assets/*', serveStatic({ root: './client' }));
 serve({ fetch: app.fetch, port: process.env.PORT || 3000 });
 
 // target: "bun"
-import { serveStatic } from "hono/bun";
-import app from "virtual:void-routes";
-app.use("/assets/*", serveStatic({ root: "./client" }));
+import { serveStatic } from 'hono/bun';
+import app from 'virtual:void-routes';
+app.use('/assets/*', serveStatic({ root: './client' }));
 Bun.serve({ fetch: app.fetch, port: process.env.PORT || 3000 });
 
 // target: "deno"
-import { serveStatic } from "hono/deno";
-import app from "virtual:void-routes";
-app.use("/assets/*", serveStatic({ root: "./client" }));
-Deno.serve({ port: Number(Deno.env.get("PORT") || 3000) }, app.fetch);
+import { serveStatic } from 'hono/deno';
+import app from 'virtual:void-routes';
+app.use('/assets/*', serveStatic({ root: './client' }));
+Deno.serve({ port: Number(Deno.env.get('PORT') || 3000) }, app.fetch);
 ```
 
 Adds `compileNodeEntry(target)` as a sibling to the existing `compileWorkerEntry()`.

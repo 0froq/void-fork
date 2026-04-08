@@ -1,7 +1,7 @@
-import { Hono } from "hono";
-import type { ApiEnv } from "../env";
-import { getProject } from "../db";
-import { hmacVerifyState } from "../auth/hmac";
+import { Hono } from 'hono';
+import { hmacVerifyState } from '../auth/hmac';
+import { getProject } from '../db';
+import type { ApiEnv } from '../env';
 
 const app = new Hono<ApiEnv>();
 
@@ -13,20 +13,20 @@ const app = new Hono<ApiEnv>();
  * POST /internal/resolve-worker/:projectId
  * Returns: { "workerName": "user-<slug>" } or 404
  */
-app.post("/:projectId", async (c) => {
-  const projectId = c.req.param("projectId");
+app.post('/:projectId', async (c) => {
+  const projectId = c.req.param('projectId');
 
-  const token = c.req.header("x-void-internal");
+  const token = c.req.header('x-void-internal');
   if (!token) {
-    return c.json({ error: "missing internal auth" }, 401);
+    return c.json({ error: 'missing internal auth' }, 401);
   }
   if (!(await hmacVerifyState(projectId, token, c.env.JWT_SECRET))) {
-    return c.json({ error: "invalid internal auth" }, 403);
+    return c.json({ error: 'invalid internal auth' }, 403);
   }
 
-  const project = await getProject(c.get("db"), projectId);
+  const project = await getProject(c.get('db'), projectId);
   if (!project) {
-    return c.json({ error: "project not found" }, 404);
+    return c.json({ error: 'project not found' }, 404);
   }
 
   return c.json({ workerName: `user-${project.slug}` });

@@ -7,5 +7,5 @@ export function getProjectDeploymentWorkerName(slug: string, deploymentId: strin
 }
 
 export function getProjectQueueName(projectId: string, queueName: string): string {
-  return `${projectId}-${queueName}`.toLowerCase().replaceAll("_", "-");
+  return `${projectId}-${queueName}`.toLowerCase().replaceAll('_', '-');
 }

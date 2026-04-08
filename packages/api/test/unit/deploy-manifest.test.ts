@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { SUPPORTED_MANIFEST_VERSIONS } from "../../src/types";
-import type { DeployManifest } from "../../src/types";
+import { describe, it, expect } from 'vitest';
+import { SUPPORTED_MANIFEST_VERSIONS } from '../../src/types';
+import type { DeployManifest } from '../../src/types';
 
-describe("DeployManifest contract", () => {
-  it("has a version field", () => {
+describe('DeployManifest contract', () => {
+  it('has a version field', () => {
     const manifest: DeployManifest = {
       version: 3,
       bindings: {},
@@ -11,61 +11,61 @@ describe("DeployManifest contract", () => {
     expect(manifest.version).toBe(3);
   });
 
-  it("supports version 3", () => {
+  it('supports version 3', () => {
     expect(SUPPORTED_MANIFEST_VERSIONS).toContain(3);
   });
 
-  it("accepts a full manifest shape", () => {
+  it('accepts a full manifest shape', () => {
     const manifest: DeployManifest = {
       version: 3,
       bindings: {
-        d1: ["DB"],
-        kv: ["KV"],
-        r2: ["STORAGE"],
+        d1: ['DB'],
+        kv: ['KV'],
+        r2: ['STORAGE'],
         ai: true,
       },
-      migrations: { dialect: "sqlite", pending: 1 },
-      schedules: [{ name: "cleanup", cron: "0 * * * *" }],
-      queues: [{ name: "emails", bindingName: "EMAIL_QUEUE" }],
+      migrations: { dialect: 'sqlite', pending: 1 },
+      schedules: [{ name: 'cleanup', cron: '0 * * * *' }],
+      queues: [{ name: 'emails', bindingName: 'EMAIL_QUEUE' }],
       ssr: true,
-      framework: "sveltekit",
+      framework: 'sveltekit',
       revalidate: 60,
-      prerender: ["/", "/about"],
+      prerender: ['/', '/about'],
       assetConfig: {
-        not_found_handling: "single-page-application",
-        html_handling: "auto-trailing-slash",
+        not_found_handling: 'single-page-application',
+        html_handling: 'auto-trailing-slash',
       },
-      vars: { NODE_ENV: "production" },
-      workerMain: "index.mjs",
-      compatibilityDate: "2026-02-24",
-      compatibilityFlags: ["nodejs_compat", "nodejs_als"],
+      vars: { NODE_ENV: 'production' },
+      workerMain: 'index.mjs',
+      compatibilityDate: '2026-02-24',
+      compatibilityFlags: ['nodejs_compat', 'nodejs_als'],
       websocket: {
         routes: [
           {
-            pattern: "/chat/:room",
-            filePath: "chat/[room].ws.ts",
-            className: "ChatRoom",
-            mode: "room",
+            pattern: '/chat/:room',
+            filePath: 'chat/[room].ws.ts',
+            className: 'ChatRoom',
+            mode: 'room',
             hasAuthGate: true,
           },
         ],
-        classes: ["ChatRoom"],
-        migrations: [{ tag: "ws-v1", newClasses: ["ChatRoom"] }],
+        classes: ['ChatRoom'],
+        migrations: [{ tag: 'ws-v1', newClasses: ['ChatRoom'] }],
       },
     };
 
     expect(manifest.version).toBe(3);
-    expect(manifest.bindings.d1).toEqual(["DB"]);
+    expect(manifest.bindings.d1).toEqual(['DB']);
     expect(manifest.migrations?.pending).toBe(1);
     expect(manifest.schedules).toHaveLength(1);
     expect(manifest.queues).toHaveLength(1);
-    expect(manifest.workerMain).toBe("index.mjs");
-    expect(manifest.compatibilityDate).toBe("2026-02-24");
-    expect(manifest.compatibilityFlags).toEqual(["nodejs_compat", "nodejs_als"]);
-    expect(manifest.websocket?.classes).toEqual(["ChatRoom"]);
+    expect(manifest.workerMain).toBe('index.mjs');
+    expect(manifest.compatibilityDate).toBe('2026-02-24');
+    expect(manifest.compatibilityFlags).toEqual(['nodejs_compat', 'nodejs_als']);
+    expect(manifest.websocket?.classes).toEqual(['ChatRoom']);
   });
 
-  it("rejects unknown manifest versions", () => {
+  it('rejects unknown manifest versions', () => {
     expect(SUPPORTED_MANIFEST_VERSIONS.includes(999)).toBe(false);
   });
 });

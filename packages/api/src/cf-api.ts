@@ -26,7 +26,7 @@ export async function deleteDispatchScript(
   const res = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${scriptName}`,
     {
-      method: "DELETE",
+      method: 'DELETE',
       headers: { Authorization: `Bearer ${apiToken}` },
     },
   );

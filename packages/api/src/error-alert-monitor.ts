@@ -1,8 +1,8 @@
-import { DurableObject } from "cloudflare:workers";
-import { createDb, getUser, getProject } from "./db";
-import { sendErrorAlertEmail } from "./email";
-import type { ApiEnv } from "./env";
-import { DEFAULT_DASHBOARD_URL } from "./constants";
+import { DurableObject } from 'cloudflare:workers';
+import { DEFAULT_DASHBOARD_URL } from './constants';
+import { createDb, getUser, getProject } from './db';
+import { sendErrorAlertEmail } from './email';
+import type { ApiEnv } from './env';
 
 const DEBOUNCE_MS = 120_000; // 2 minutes
 const COUNT_CAP = 100; // immediate fire
@@ -16,17 +16,17 @@ interface ErrorAlertState {
   lastAlertAt: number | null;
 }
 
-export class ErrorAlertMonitor extends DurableObject<ApiEnv["Bindings"]> {
+export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
   private state: ErrorAlertState | null = null;
 
   private async getState(): Promise<ErrorAlertState> {
     if (this.state) return this.state;
-    const stored = await this.ctx.storage.get<ErrorAlertState>("state");
+    const stored = await this.ctx.storage.get<ErrorAlertState>('state');
     this.state = stored ?? {
       count: 0,
-      projectId: "",
-      userId: "",
-      slug: "",
+      projectId: '',
+      userId: '',
+      slug: '',
       lastAlertAt: null,
     };
     return this.state;
@@ -34,15 +34,15 @@ export class ErrorAlertMonitor extends DurableObject<ApiEnv["Bindings"]> {
 
   private async saveState(state: ErrorAlertState): Promise<void> {
     this.state = state;
-    await this.ctx.storage.put("state", state);
+    await this.ctx.storage.put('state', state);
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    if (request.method === "POST" && url.pathname === "/record") {
+    if (request.method === 'POST' && url.pathname === '/record') {
       return this.handleRecord(request);
     }
-    return new Response("not found", { status: 404 });
+    return new Response('not found', { status: 404 });
   }
 
   private async handleRecord(request: Request): Promise<Response> {
@@ -119,7 +119,7 @@ export class ErrorAlertMonitor extends DurableObject<ApiEnv["Bindings"]> {
       await this.saveState(state);
     } catch (err) {
       // Transient failure — keep count and schedule retry
-      console.error("[error-alert-monitor] failed to send alert:", err);
+      console.error('[error-alert-monitor] failed to send alert:', err);
       await this.ctx.storage.setAlarm(Date.now() + DEBOUNCE_MS);
       await this.saveState(state);
     }

@@ -22,7 +22,7 @@ Astro v6 runs server code in workerd, so it does not need the Nuxt/SvelteKit run
 Detection via `package.json` dependencies:
 
 ```typescript
-type FrameworkClass = "a" | "b" | "c";
+type FrameworkClass = 'a' | 'b' | 'c';
 
 interface DetectedFramework {
   name: string;
@@ -30,11 +30,11 @@ interface DetectedFramework {
 }
 
 const FRAMEWORK_PACKAGES: Record<string, DetectedFramework> = {
-  "@tanstack/react-start": { name: "tanstack-start", class: "a" },
-  "@react-router/dev": { name: "react-router", class: "a" },
-  "@sveltejs/kit": { name: "sveltekit", class: "b" },
-  nuxt: { name: "nuxt", class: "c" },
-  astro: { name: "astro", class: "c" }, // currently detected for deploy preset only
+  '@tanstack/react-start': { name: 'tanstack-start', class: 'a' },
+  '@react-router/dev': { name: 'react-router', class: 'a' },
+  '@sveltejs/kit': { name: 'sveltekit', class: 'b' },
+  nuxt: { name: 'nuxt', class: 'c' },
+  astro: { name: 'astro', class: 'c' }, // currently detected for deploy preset only
 };
 ```
 
@@ -111,22 +111,22 @@ interface FrameworkPreset {
 
 const FRAMEWORK_PRESETS: Record<string, FrameworkPreset> = {
   sveltekit: {
-    buildCommand: "vite build",
-    workerDir: ".svelte-kit/cloudflare",
-    workerMain: "_worker.js",
-    assetsDir: ".svelte-kit/cloudflare",
+    buildCommand: 'vite build',
+    workerDir: '.svelte-kit/cloudflare',
+    workerMain: '_worker.js',
+    assetsDir: '.svelte-kit/cloudflare',
   },
   nuxt: {
-    buildCommand: "nuxt build",
-    workerDir: ".output/server",
-    workerMain: "index.mjs",
-    assetsDir: ".output/public",
+    buildCommand: 'nuxt build',
+    workerDir: '.output/server',
+    workerMain: 'index.mjs',
+    assetsDir: '.output/public',
   },
   astro: {
-    buildCommand: "astro build",
-    workerDir: "dist/_worker.js",
-    workerMain: "index.js",
-    assetsDir: "dist",
+    buildCommand: 'astro build',
+    workerDir: 'dist/_worker.js',
+    workerMain: 'index.js',
+    assetsDir: 'dist',
   },
 };
 ```
@@ -225,15 +225,15 @@ Generated when **any** of auth, queues, or crons are present. Bundled with Vite 
 
 ```javascript
 // generated void-wrapper.js (conceptual)
-import original from "./index.mjs";
-import { authContext, resolveSession, handleAuth } from "./void-auth.js";
-import { handleScheduled } from "./void-scheduled.js";
-import { handleQueue } from "./void-queue.js";
+import original from './index.mjs';
+import { authContext, resolveSession, handleAuth } from './void-auth.js';
+import { handleScheduled } from './void-scheduled.js';
+import { handleQueue } from './void-queue.js';
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/__auth/")) return handleAuth(request, env, ctx);
+    if (url.pathname.startsWith('/__auth/')) return handleAuth(request, env, ctx);
 
     const user = await resolveSession(request, env);
     return authContext.run({ user }, () => original.fetch(request, env, ctx));
@@ -283,7 +283,7 @@ Nuxt can add `voidPlugin()` in its Vite config:
 
 ```typescript
 // nuxt.config.ts
-import { voidPlugin } from "void";
+import { voidPlugin } from 'void';
 export default defineNuxtConfig({
   vite: { plugins: [voidPlugin()] },
 });

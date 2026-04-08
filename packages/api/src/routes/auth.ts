@@ -1,19 +1,19 @@
-import { Hono } from "hono";
-import { setCookie, getCookie, deleteCookie } from "hono/cookie";
-import type { ApiEnv } from "../env";
-import { getGitHubAuthorizeUrl, exchangeCodeForToken, getGitHubUser } from "../auth/github";
-import {
-  getGoogleAuthorizeUrl,
-  exchangeCodeForToken as exchangeGoogleCode,
-  getGoogleUser,
-} from "../auth/google";
-import { signJwt } from "../auth/jwt";
-import { hmacSignState, hmacVerifyState } from "../auth/hmac";
+import { Hono } from 'hono';
+import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
+import { getGitHubAuthorizeUrl, exchangeCodeForToken, getGitHubUser } from '../auth/github';
 import {
   ensureGitHubPreviewRepoAccess,
   getGitHubPreviewRepoConfig,
   hasGitHubPreviewRepoAccess,
-} from "../auth/github-preview";
+} from '../auth/github-preview';
+import {
+  getGoogleAuthorizeUrl,
+  exchangeCodeForToken as exchangeGoogleCode,
+  getGoogleUser,
+} from '../auth/google';
+import { hmacSignState, hmacVerifyState } from '../auth/hmac';
+import { signJwt } from '../auth/jwt';
+import { DEFAULT_DASHBOARD_URL } from '../constants';
 import {
   getUserByOAuthAccount,
   getUserByEmail,
@@ -25,12 +25,12 @@ import {
   consumeOAuthNonce,
   storeAuthCode,
   consumeAuthCode,
-} from "../db";
-import { isSignupAllowed, getAllowlist } from "../signup-allowlist";
-import { sendWelcomeEmail } from "../email";
-import { DEFAULT_DASHBOARD_URL } from "../constants";
+} from '../db';
+import { sendWelcomeEmail } from '../email';
+import type { ApiEnv } from '../env';
+import { isSignupAllowed, getAllowlist } from '../signup-allowlist';
 
-const DEFAULT_REDIRECT_URI = "https://api.void.cloud/auth/callback";
+const DEFAULT_REDIRECT_URI = 'https://api.void.cloud/auth/callback';
 
 const app = new Hono<ApiEnv>();
 
@@ -44,14 +44,14 @@ export function isAllowedRedirect(url: string, dashboardUrl?: string): boolean {
 
   // Localhost: allow any port, require exact hostname and http protocol
   if (
-    parsed.protocol === "http:" &&
-    (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")
+    parsed.protocol === 'http:' &&
+    (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')
   ) {
     return true;
   }
 
   // Dashboard: compare exact origin (protocol + hostname + port)
-  const origin = dashboardUrl ?? "https://dash.void.cloud";
+  const origin = dashboardUrl ?? 'https://dash.void.cloud';
   try {
     return parsed.origin === new URL(origin).origin;
   } catch {
@@ -60,19 +60,19 @@ export function isAllowedRedirect(url: string, dashboardUrl?: string): boolean {
 }
 
 // GET /auth/login?redirect=http://localhost:PORT/callback&provider=github|google
-app.get("/login", async (c) => {
-  const redirect = c.req.query("redirect");
+app.get('/login', async (c) => {
+  const redirect = c.req.query('redirect');
   if (!redirect) {
-    return c.json({ error: "redirect parameter is required" }, 400);
+    return c.json({ error: 'redirect parameter is required' }, 400);
   }
 
   if (!isAllowedRedirect(redirect, c.env.DASHBOARD_URL)) {
-    return c.json({ error: "redirect must be a localhost or dashboard URL" }, 400);
+    return c.json({ error: 'redirect must be a localhost or dashboard URL' }, 400);
   }
 
-  const provider = c.req.query("provider") ?? "github";
-  if (provider !== "github" && provider !== "google") {
-    return c.json({ error: "provider must be github or google" }, 400);
+  const provider = c.req.query('provider') ?? 'github';
+  if (provider !== 'github' && provider !== 'google') {
+    return c.json({ error: 'provider must be github or google' }, 400);
   }
 
   const nonce = crypto.randomUUID();
@@ -80,7 +80,7 @@ app.get("/login", async (c) => {
   // Store nonce in PostgreSQL so callback can validate it (prevents login CSRF / replay).
   // Not KV: login and callback can hit different CF colos, and KV's eventual consistency
   // would make the lookup flaky. PG also gives us atomic DELETE for true single-use.
-  const db = c.get("db");
+  const db = c.get('db');
   await storeOAuthNonce(db, nonce, 600);
 
   const stateData = JSON.stringify({ redirect, nonce, provider });
@@ -91,15 +91,15 @@ app.get("/login", async (c) => {
   const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
 
   // Bind nonce to this browser to prevent login CSRF / session swapping
-  setCookie(c, "oauth_nonce", nonce, {
+  setCookie(c, 'oauth_nonce', nonce, {
     httpOnly: true,
     secure: true,
-    sameSite: "Lax",
-    path: "/auth/callback",
+    sameSite: 'Lax',
+    path: '/auth/callback',
     maxAge: 600,
   });
 
-  if (provider === "google") {
+  if (provider === 'google') {
     const url = getGoogleAuthorizeUrl(c.env.GOOGLE_CLIENT_ID, redirectUri, state);
     return c.redirect(url);
   }
@@ -109,18 +109,18 @@ app.get("/login", async (c) => {
 });
 
 // GET /auth/callback?code=...&state=...
-app.get("/callback", async (c) => {
-  const code = c.req.query("code");
-  const state = c.req.query("state");
+app.get('/callback', async (c) => {
+  const code = c.req.query('code');
+  const state = c.req.query('state');
 
   if (!code || !state) {
-    return c.json({ error: "missing code or state" }, 400);
+    return c.json({ error: 'missing code or state' }, 400);
   }
 
   // Verify state HMAC
-  const dotIndex = state.lastIndexOf(".");
+  const dotIndex = state.lastIndexOf('.');
   if (dotIndex === -1) {
-    return c.json({ error: "invalid state" }, 400);
+    return c.json({ error: 'invalid state' }, 400);
   }
 
   const stateEncoded = state.slice(0, dotIndex);
@@ -128,7 +128,7 @@ app.get("/callback", async (c) => {
 
   const valid = await hmacVerifyState(stateEncoded, signature, c.env.JWT_SECRET);
   if (!valid) {
-    return c.json({ error: "invalid state signature" }, 400);
+    return c.json({ error: 'invalid state signature' }, 400);
   }
 
   const { redirect, nonce, provider } = JSON.parse(atob(stateEncoded)) as {
@@ -140,35 +140,35 @@ app.get("/callback", async (c) => {
   // Verify the nonce matches the cookie set during login redirect.
   // This binds the OAuth flow to the browser that initiated it,
   // preventing login CSRF / session swapping attacks.
-  const cookieNonce = getCookie(c, "oauth_nonce");
+  const cookieNonce = getCookie(c, 'oauth_nonce');
   if (!cookieNonce || cookieNonce !== nonce) {
-    return c.json({ error: "OAuth session mismatch" }, 400);
+    return c.json({ error: 'OAuth session mismatch' }, 400);
   }
 
   // Validate and consume nonce atomically (single-use, 10-minute TTL).
   // Uses PostgreSQL — not KV — for strong consistency across colos.
-  const db = c.get("db");
+  const db = c.get('db');
   const nonceValid = await consumeOAuthNonce(db, nonce);
   if (!nonceValid) {
-    return c.json({ error: "invalid or expired OAuth state" }, 400);
+    return c.json({ error: 'invalid or expired OAuth state' }, 400);
   }
 
   // Clear the cookie only after successful validation so stale callbacks
   // from duplicate tabs don't invalidate a legitimate in-progress login.
-  deleteCookie(c, "oauth_nonce", { path: "/auth/callback" });
+  deleteCookie(c, 'oauth_nonce', { path: '/auth/callback' });
 
   // Re-validate redirect after decoding
   if (!isAllowedRedirect(redirect, c.env.DASHBOARD_URL)) {
-    return c.json({ error: "invalid redirect" }, 400);
+    return c.json({ error: 'invalid redirect' }, 400);
   }
 
-  const resolvedProvider = provider ?? "github";
+  const resolvedProvider = provider ?? 'github';
   let providerId: string;
   let login: string;
   let email: string | null;
   let emailVerified: boolean;
 
-  if (resolvedProvider === "google") {
+  if (resolvedProvider === 'google') {
     const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
     const googleToken = await exchangeGoogleCode(
       c.env.GOOGLE_CLIENT_ID,
@@ -193,7 +193,7 @@ app.get("/callback", async (c) => {
     email = ghUser.email;
     emailVerified = ghUser.emailVerified;
   }
-  const previewRepo = resolvedProvider === "github" ? getGitHubPreviewRepoConfig(c.env) : null;
+  const previewRepo = resolvedProvider === 'github' ? getGitHubPreviewRepoConfig(c.env) : null;
 
   // Upsert user — check oauth_accounts first, then email, then create
   let user = await getUserByOAuthAccount(db, resolvedProvider, providerId);
@@ -220,10 +220,10 @@ app.get("/callback", async (c) => {
 
   if (!user) {
     // Check signup allowlist (new users only)
-    const enabled = await c.env.ROUTING.get("signup:enabled");
-    if (enabled === "true") {
+    const enabled = await c.env.ROUTING.get('signup:enabled');
+    if (enabled === 'true') {
       let allowedByRepoAccess = false;
-      if (resolvedProvider === "github" && previewRepo) {
+      if (resolvedProvider === 'github' && previewRepo) {
         try {
           allowedByRepoAccess = await hasGitHubPreviewRepoAccess(previewRepo, login);
         } catch (err) {
@@ -236,7 +236,7 @@ app.get("/callback", async (c) => {
         !allowedByRepoAccess &&
         !isSignupAllowed(resolvedProvider, login, emailVerified ? email : null, entries)
       ) {
-        return c.redirect("/signup-restricted");
+        return c.redirect('/signup-restricted');
       }
     }
     user = await db.transaction(async (tx) => {
@@ -268,7 +268,7 @@ app.get("/callback", async (c) => {
     }
   }
 
-  if (resolvedProvider === "github") {
+  if (resolvedProvider === 'github') {
     if (previewRepo) {
       c.executionCtx.waitUntil(
         ensureGitHubPreviewRepoAccess(previewRepo, login).catch((err) =>
@@ -279,36 +279,36 @@ app.get("/callback", async (c) => {
   }
 
   // Sign JWT
-  const jwt = await signJwt({ sub: user.id, login, aud: "api" }, c.env.JWT_SECRET);
+  const jwt = await signJwt({ sub: user.id, login, aud: 'api' }, c.env.JWT_SECRET);
 
   const redirectUrl = new URL(redirect);
 
-  if (redirectUrl.hostname === "localhost" || redirectUrl.hostname === "127.0.0.1") {
+  if (redirectUrl.hostname === 'localhost' || redirectUrl.hostname === '127.0.0.1') {
     // CLI / local dev: token in query param (localhost-only, safe)
-    redirectUrl.searchParams.set("token", jwt);
+    redirectUrl.searchParams.set('token', jwt);
   } else {
     // Dashboard: short-lived auth code exchanged server-side, so the JWT never appears in the URL.
     // Stored in PostgreSQL (not KV) for strong cross-colo consistency and atomic single-use
     // via DELETE … RETURNING — same rationale as the OAuth nonce flow.
     const authCode = crypto.randomUUID();
     await storeAuthCode(db, authCode, jwt, 60);
-    redirectUrl.searchParams.set("code", authCode);
+    redirectUrl.searchParams.set('code', authCode);
   }
 
   return c.redirect(redirectUrl.toString());
 });
 
 // POST /auth/exchange — single-use code → JWT (called by dashboard callback)
-app.post("/exchange", async (c) => {
+app.post('/exchange', async (c) => {
   const { code } = await c.req.json<{ code: string }>();
   if (!code) {
-    return c.json({ error: "missing code" }, 400);
+    return c.json({ error: 'missing code' }, 400);
   }
 
-  const db = c.get("db");
+  const db = c.get('db');
   const jwt = await consumeAuthCode(db, code);
   if (!jwt) {
-    return c.json({ error: "invalid or expired code" }, 400);
+    return c.json({ error: 'invalid or expired code' }, 400);
   }
 
   return c.json({ token: jwt });

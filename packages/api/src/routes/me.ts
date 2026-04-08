@@ -1,11 +1,11 @@
-import { Hono } from "hono";
-import type { ApiEnv } from "../env";
-import { getPlanLimits } from "../tiers";
+import { Hono } from 'hono';
+import type { ApiEnv } from '../env';
+import { getPlanLimits } from '../tiers';
 
 const app = new Hono<ApiEnv>()
 
-  .get("/", async (c) => {
-    const user = c.get("user");
+  .get('/', async (c) => {
+    const user = c.get('user');
     const limits = getPlanLimits(user.plan);
     return c.json({
       id: user.id,

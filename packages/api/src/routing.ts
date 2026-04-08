@@ -1,4 +1,4 @@
-import type { AssetConfig, DeployManifest } from "./types";
+import type { AssetConfig, DeployManifest } from './types';
 
 export function buildRoutingJson(opts: {
   workerName: string;

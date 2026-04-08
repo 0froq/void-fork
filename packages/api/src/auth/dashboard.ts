@@ -1,4 +1,4 @@
-import { verifyJwt } from "./jwt";
+import { verifyJwt } from './jwt';
 
 export interface DashboardSession {
   token: string;
@@ -16,7 +16,7 @@ export async function authenticateDashboardToken(
     return null;
   }
 
-  const payload = await verifyJwt(token, jwtSecret, "api");
+  const payload = await verifyJwt(token, jwtSecret, 'api');
   if (!payload?.sub || !payload.login) {
     return null;
   }

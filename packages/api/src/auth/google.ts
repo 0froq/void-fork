@@ -14,8 +14,8 @@ export function getGoogleAuthorizeUrl(
     client_id: clientId,
     redirect_uri: redirectUri,
     state,
-    scope: "openid email profile",
-    response_type: "code",
+    scope: 'openid email profile',
+    response_type: 'code',
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
@@ -26,17 +26,17 @@ export async function exchangeCodeForToken(
   code: string,
   redirectUri: string,
 ): Promise<string> {
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
     headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
+      'Content-Type': 'application/x-www-form-urlencoded',
     },
     body: new URLSearchParams({
       client_id: clientId,
       client_secret: clientSecret,
       code,
       redirect_uri: redirectUri,
-      grant_type: "authorization_code",
+      grant_type: 'authorization_code',
     }),
   });
 
@@ -46,14 +46,14 @@ export async function exchangeCodeForToken(
 
   const data = (await res.json()) as { access_token?: string; error?: string };
   if (data.error || !data.access_token) {
-    throw new Error(`Google token exchange error: ${data.error ?? "no access_token"}`);
+    throw new Error(`Google token exchange error: ${data.error ?? 'no access_token'}`);
   }
 
   return data.access_token;
 }
 
 export async function getGoogleUser(accessToken: string): Promise<GoogleUser> {
-  const res = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+  const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },

@@ -1,6 +1,16 @@
-import { Hono } from "hono";
-import type { ApiEnv } from "../env";
-import { SUPPORTED_MANIFEST_VERSIONS, type DeployManifest, type DeployEvent } from "../types";
+import { eq } from 'drizzle-orm';
+import { Hono } from 'hono';
+import {
+  collectAssets,
+  createAssetUploadSession,
+  uploadAssetBuckets,
+  buildAssetMetadata,
+  uploadStaticAssets,
+  deleteUnreferencedAssets,
+} from '../assets';
+import { deleteDispatchScript, retryWithBackoff } from '../cf-api';
+import { SITE_DOMAIN } from '../constants';
+import { DEFAULT_DASHBOARD_URL } from '../constants';
 import {
   getProject,
   getDeployment,
@@ -18,34 +28,24 @@ import {
   getRetainedDeploymentsExcluding,
   getProjectSecrets,
   upsertProjectSecret,
-} from "../db";
-import { eq } from "drizzle-orm";
-import { deployments } from "../schema";
-import { provisionBindings } from "../provisioning/provision";
-import { addQueueConsumer } from "../provisioning/cloudflare-api";
-import { deleteDispatchScript, retryWithBackoff } from "../cf-api";
-import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT } from "../tiers";
-import { SITE_DOMAIN } from "../constants";
-import { buildRoutingJson, buildStaticRoutingJson } from "../routing";
-import {
-  collectAssets,
-  createAssetUploadSession,
-  uploadAssetBuckets,
-  buildAssetMetadata,
-  uploadStaticAssets,
-  deleteUnreferencedAssets,
-} from "../assets";
-import type { WebSocketMigrationMeta } from "../types";
+} from '../db';
+import { sendDeployFailedEmail } from '../email';
+import type { ApiEnv } from '../env';
 import {
   BETTER_AUTH_SECRET_NAME,
   decryptProjectSecret,
   generateManagedAuthSecret,
   encryptProjectSecret,
-} from "../project-secrets";
-import { sendDeployFailedEmail } from "../email";
-import { DEFAULT_DASHBOARD_URL } from "../constants";
+} from '../project-secrets';
+import { addQueueConsumer } from '../provisioning/cloudflare-api';
+import { provisionBindings } from '../provisioning/provision';
+import { buildRoutingJson, buildStaticRoutingJson } from '../routing';
+import { deployments } from '../schema';
+import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT } from '../tiers';
+import { SUPPORTED_MANIFEST_VERSIONS, type DeployManifest, type DeployEvent } from '../types';
+import type { WebSocketMigrationMeta } from '../types';
 
-const DEFAULT_DISPATCH_NAMESPACE = "void-users";
+const DEFAULT_DISPATCH_NAMESPACE = 'void-users';
 const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
 /**
  * Detect the known CF WfP bug where APIs return plain text about asset state
@@ -54,7 +54,7 @@ const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
  * Valid JSON always starts with `{` or `[`, so `startsWith` avoids false positives.
  */
 function isCfAssetPlainText(text: string): boolean {
-  return text.trimStart().startsWith("Assets have");
+  return text.trimStart().startsWith('Assets have');
 }
 
 const CF_RETRY = { maxRetries: 3, delayMs: 1000 };
@@ -87,7 +87,7 @@ function sanitizeDeployErrorMessage(message: string): string {
     // so the full substring won't match — detect the truncated form too
     /Unexpected token.*"Assets hav/.test(trimmed)
   ) {
-    return "asset upload returned an unexpected Cloudflare response";
+    return 'asset upload returned an unexpected Cloudflare response';
   }
   return message;
 }
@@ -112,9 +112,9 @@ export function buildWebSocketUploadMigrations(migrations: WebSocketMigrationMet
 }
 
 export function buildWebSocketUploadBindings(
-  websocket: DeployManifest["websocket"] | undefined,
+  websocket: DeployManifest['websocket'] | undefined,
 ): Array<{
-  type: "durable_object_namespace";
+  type: 'durable_object_namespace';
   name: string;
   class_name: string;
 }> {
@@ -135,7 +135,7 @@ export function buildWebSocketUploadBindings(
   }
 
   return Array.from(bindings, ([name, class_name]) => ({
-    type: "durable_object_namespace",
+    type: 'durable_object_namespace',
     name,
     class_name,
   }));
@@ -220,48 +220,48 @@ export function enrichWebSocketManifest(
 }
 
 // Deploy to a project
-app.post("/:id/deploy", async (c) => {
-  const projectId = c.req.param("id");
-  const project = await getProject(c.get("db"), projectId);
+app.post('/:id/deploy', async (c) => {
+  const projectId = c.req.param('id');
+  const project = await getProject(c.get('db'), projectId);
   if (!project) {
-    return c.json({ error: "project not found" }, 404);
+    return c.json({ error: 'project not found' }, 404);
   }
 
-  if (project.user_id !== c.get("user").id) {
-    return c.json({ error: "forbidden" }, 403);
+  if (project.user_id !== c.get('user').id) {
+    return c.json({ error: 'forbidden' }, 403);
   }
 
   // Block deploys for suspended users
-  if (c.get("user").suspended_reason) {
-    return c.json({ error: "account suspended: " + c.get("user").suspended_reason }, 403);
+  if (c.get('user').suspended_reason) {
+    return c.json({ error: 'account suspended: ' + c.get('user').suspended_reason }, 403);
   }
 
   // Run independent pre-checks in parallel
   const [activeDeploy, currentLiveDeployment] = await Promise.all([
-    getActiveDeployment(c.get("db"), projectId),
+    getActiveDeployment(c.get('db'), projectId),
     project.active_deployment_id
-      ? getDeployment(c.get("db"), project.active_deployment_id)
+      ? getDeployment(c.get('db'), project.active_deployment_id)
       : Promise.resolve(null),
   ]);
-  const user = c.get("user");
+  const user = c.get('user');
 
   // Reject concurrent deploys to the same project
   if (activeDeploy) {
     // Normalize timestamp to ISO 8601 for safe Date parsing.
     // PostgreSQL returns ISO format; also handles legacy format (space separator, no Z).
-    const createdAt = activeDeploy.created_at.includes("T")
+    const createdAt = activeDeploy.created_at.includes('T')
       ? activeDeploy.created_at
-      : activeDeploy.created_at.replace(" ", "T") + "Z";
+      : activeDeploy.created_at.replace(' ', 'T') + 'Z';
     const ageMs = Date.now() - new Date(createdAt).getTime();
     if (ageMs < 10 * 60 * 1000) {
-      return c.json({ error: "deploy in progress", deployment: activeDeploy.id }, 409);
+      return c.json({ error: 'deploy in progress', deployment: activeDeploy.id }, 409);
     }
     // Stale — auto-fail and proceed
-    await updateDeploymentStatus(c.get("db"), activeDeploy.id, "failed", "timed out");
+    await updateDeploymentStatus(c.get('db'), activeDeploy.id, 'failed', 'timed out');
   }
 
   const formData = await c.req.formData();
-  const manifestRaw = formData.get("manifest") as string | null;
+  const manifestRaw = formData.get('manifest') as string | null;
   const incomingManifest: DeployManifest = manifestRaw
     ? (JSON.parse(manifestRaw) as DeployManifest)
     : { version: 3, bindings: {} };
@@ -273,7 +273,7 @@ app.post("/:id/deploy", async (c) => {
   ) {
     return c.json(
       {
-        error: "Unsupported deploy manifest version. Please update void.",
+        error: 'Unsupported deploy manifest version. Please update void.',
         version: incomingManifest.version ?? null,
         supported: SUPPORTED_MANIFEST_VERSIONS,
       },
@@ -292,17 +292,17 @@ app.post("/:id/deploy", async (c) => {
   // Skip deploy if identical to the current live deployment (same manifest + same assets).
   // Secrets are not checked: the secrets API already live-pushes values to the active
   // worker via putWorkerSecret.
-  if (currentLiveDeployment && currentLiveDeployment.status === "live") {
+  if (currentLiveDeployment && currentLiveDeployment.status === 'live') {
     const sameManifest = currentLiveDeployment.manifest === finalManifestRaw;
-    const incomingAssetManifest = formData.get("assetManifest") as string | null;
+    const incomingAssetManifest = formData.get('assetManifest') as string | null;
     const sameAssets =
       incomingAssetManifest != null &&
       currentLiveDeployment.asset_hashes != null &&
       incomingAssetManifest === currentLiveDeployment.asset_hashes;
     if (sameManifest && sameAssets) {
       const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-      const projectDomains = await getDomainsByProjectId(c.get("db"), projectId);
-      const activeDomains = projectDomains.filter((d) => d.status === "active");
+      const projectDomains = await getDomainsByProjectId(c.get('db'), projectId);
+      const activeDomains = projectDomains.filter((d) => d.status === 'active');
       const fullUrl =
         activeDomains.length > 0
           ? `https://${activeDomains[0].hostname}`
@@ -312,11 +312,11 @@ app.post("/:id/deploy", async (c) => {
       const stream = new ReadableStream({
         start(controller) {
           const emit = (event: DeployEvent) => {
-            controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+            controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'));
           };
-          emit({ event: "start", deploymentId: currentLiveDeployment.id });
+          emit({ event: 'start', deploymentId: currentLiveDeployment.id });
           emit({
-            event: "done",
+            event: 'done',
             deployment: currentLiveDeployment.id,
             url: fullUrl,
             urls: [
@@ -330,7 +330,7 @@ app.post("/:id/deploy", async (c) => {
         },
       });
       return new Response(stream, {
-        headers: { "Content-Type": "application/x-ndjson" },
+        headers: { 'Content-Type': 'application/x-ndjson' },
       });
     }
   }
@@ -338,25 +338,25 @@ app.post("/:id/deploy", async (c) => {
   // Enforce deploy count limit
   const planLimits = getPlanLimits(user.plan);
   if (planLimits.deploysPerDay > 0) {
-    const todayCount = await countUserDeploymentsToday(c.get("db"), c.get("user").id);
+    const todayCount = await countUserDeploymentsToday(c.get('db'), c.get('user').id);
     if (!isWithinLimit(planLimits.deploysPerDay, todayCount)) {
-      return c.json({ error: "deploy limit exceeded", limit: planLimits.deploysPerDay }, 429);
+      return c.json({ error: 'deploy limit exceeded', limit: planLimits.deploysPerDay }, 429);
     }
   }
 
-  const source = (formData.get("source") as string | null) ?? null;
-  const commit = (formData.get("commit") as string | null) ?? null;
+  const source = (formData.get('source') as string | null) ?? null;
+  const commit = (formData.get('commit') as string | null) ?? null;
 
   // Create deployment record
   const deployment = await createDeployment(
-    c.get("db"),
+    c.get('db'),
     projectId,
     finalManifestRaw,
     source,
     commit,
   );
   if (enrichedManifestResult.changed) {
-    await updateProjectWebSocketVersion(c.get("db"), projectId, enrichedManifestResult.nextVersion);
+    await updateProjectWebSocketVersion(c.get('db'), projectId, enrichedManifestResult.nextVersion);
   }
   const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
   const workerName = `user-${project.slug}-${deployment.id}`;
@@ -365,18 +365,18 @@ app.post("/:id/deploy", async (c) => {
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (event: DeployEvent) => {
-        controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+        controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'));
       };
-      let currentStep = "start";
+      let currentStep = 'start';
       let routingSwitched = false;
       let cronSynced = false;
 
       try {
-        emit({ event: "start", deploymentId: deployment.id });
+        emit({ event: 'start', deploymentId: deployment.id });
 
         // === ASSET UPLOAD PHASE ===
-        currentStep = "asset_upload";
-        await updateDeploymentStatus(c.get("db"), deployment.id, "uploading");
+        currentStep = 'asset_upload';
+        await updateDeploymentStatus(c.get('db'), deployment.id, 'uploading');
 
         // Collect assets from FormData and compute CF-compatible hashes
         const { manifest: assetManifest, assetsByHash } = await collectAssets(formData);
@@ -385,12 +385,12 @@ app.post("/:id/deploy", async (c) => {
         // Prefer the CLI's full manifest (new CLIs send it) to avoid accumulating
         // stale entries from previous deploys. Fall back to the previous deploy's
         // manifest for older CLIs that don't send it.
-        const preflightUsed = formData.get("preflight") === "true";
+        const preflightUsed = formData.get('preflight') === 'true';
         if (preflightUsed) {
-          const fullManifestJson = formData.get("assetManifest") as string | null;
+          const fullManifestJson = formData.get('assetManifest') as string | null;
           const fillManifest = fullManifestJson
             ? (JSON.parse(fullManifestJson) as Record<string, { hash: string; size: number }>)
-            : await getLastLiveAssetManifest(c.get("db"), projectId);
+            : await getLastLiveAssetManifest(c.get('db'), projectId);
           if (fillManifest) {
             for (const [path, entry] of Object.entries(fillManifest)) {
               if (!(path in assetManifest)) {
@@ -403,23 +403,23 @@ app.post("/:id/deploy", async (c) => {
         const assetCount = Object.keys(assetManifest).length;
 
         // Determine if this is a static-only deploy (no worker files in FormData)
-        const hasWorkerFiles = [...formData.keys()].some((k) => k.startsWith("worker:"));
+        const hasWorkerFiles = [...formData.keys()].some((k) => k.startsWith('worker:'));
         const isStaticOnly = !hasWorkerFiles;
 
         // Fetch domains once — used in both static-only and full deploy paths
-        const projectDomains = await getDomainsByProjectId(c.get("db"), projectId);
+        const projectDomains = await getDomainsByProjectId(c.get('db'), projectId);
 
         if (isStaticOnly) {
           // Static-only deploy: upload assets to KV/R2, skip bindings/migrations/WfP
-          currentStep = "asset_upload";
+          currentStep = 'asset_upload';
           const assetConfig = manifest.assetConfig ?? {
-            not_found_handling: "single-page-application",
+            not_found_handling: 'single-page-application',
           };
 
           // Upload new assets to KV (< 2 MB) or R2 (>= 2 MB)
           const newAssets = assetsByHash.size;
           emit({
-            event: "asset_upload",
+            event: 'asset_upload',
             total: assetCount,
             new: newAssets,
             cached: assetCount - newAssets,
@@ -430,7 +430,7 @@ app.post("/:id/deploy", async (c) => {
             assetsByHash,
             projectId,
           );
-          emit({ event: "asset_upload_done" });
+          emit({ event: 'asset_upload_done' });
 
           // Build serving manifest: path → hash (prefix with "!" for R2-stored assets)
           // For assets from preflight (not in assetsByHash), carry forward R2 status
@@ -447,7 +447,7 @@ app.post("/:id/deploy", async (c) => {
           const prevR2Hashes = new Set<string>();
           if (prevServingManifest) {
             for (const v of Object.values(prevServingManifest)) {
-              if (v.startsWith("!")) {
+              if (v.startsWith('!')) {
                 prevR2Hashes.add(v.slice(1));
               }
             }
@@ -472,7 +472,7 @@ app.post("/:id/deploy", async (c) => {
 
           // Store asset manifest in DB for future preflight dedup + retention cleanup
           await c
-            .get("db")
+            .get('db')
             .update(deployments)
             .set({ asset_hashes: JSON.stringify(assetManifest) })
             .where(eq(deployments.id, deployment.id));
@@ -480,7 +480,7 @@ app.post("/:id/deploy", async (c) => {
           // Use manifest type when present, fall back to assetConfig-based derivation for older CLIs
           const type =
             manifest.type ??
-            (assetConfig.not_found_handling === "single-page-application" ? "spa" : "static");
+            (assetConfig.not_found_handling === 'single-page-application' ? 'spa' : 'static');
 
           // Set KV routing — uses staticDeploymentId (no WfP worker)
           const existingRouting = await c.env.ROUTING.get(project.slug);
@@ -497,16 +497,16 @@ app.post("/:id/deploy", async (c) => {
           routingSwitched = true;
 
           for (const domain of projectDomains) {
-            if (domain.status === "active") {
+            if (domain.status === 'active') {
               await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
             }
           }
 
           // Mark deployment live + update project type
-          await updateDeploymentStatus(c.get("db"), deployment.id, "live");
-          await updateProjectType(c.get("db"), projectId, type);
-          await setActiveDeployment(c.get("db"), projectId, deployment.id);
-          await markDeploymentRetained(c.get("db"), deployment.id, true);
+          await updateDeploymentStatus(c.get('db'), deployment.id, 'live');
+          await updateProjectType(c.get('db'), projectId, type);
+          await setActiveDeployment(c.get('db'), projectId, deployment.id);
+          await markDeploymentRetained(c.get('db'), deployment.id, true);
 
           // Hard cutoff: delete legacy WfP scripts (one-time cleanup on first KV/R2 deploy)
           const legacyName = `user-${project.slug}`;
@@ -519,7 +519,7 @@ app.post("/:id/deploy", async (c) => {
 
           // Fetch all retained deployments once — used for both WfP cleanup and retention
           const retained = await getRetainedDeploymentsExcluding(
-            c.get("db"),
+            c.get('db'),
             projectId,
             deployment.id,
           );
@@ -575,20 +575,20 @@ app.post("/:id/deploy", async (c) => {
                 }
                 // Delete serving manifest from ROUTING KV
                 await c.env.ROUTING.delete(`manifest:${old.id}`);
-                await markDeploymentRetained(c.get("db"), old.id, false);
+                await markDeploymentRetained(c.get('db'), old.id, false);
               }
             }
           }
 
           const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-          const activeDomains = projectDomains.filter((d) => d.status === "active");
+          const activeDomains = projectDomains.filter((d) => d.status === 'active');
           const url =
             activeDomains.length > 0
               ? `https://${activeDomains[0].hostname}`
               : `https://${project.slug}.${siteDomain}`;
 
           emit({
-            event: "done",
+            event: 'done',
             deployment: deployment.id,
             url,
             urls: [
@@ -603,7 +603,7 @@ app.post("/:id/deploy", async (c) => {
 
         // Full deploy path
         // Provision bindings (D1, KV, R2) — creates CF resources if needed
-        currentStep = "provisioning";
+        currentStep = 'provisioning';
 
         // Derive binding labels from the manifest upfront so we can show the
         // spinner BEFORE the (potentially slow) CF API provisioning calls.
@@ -613,30 +613,30 @@ app.post("/:id/deploy", async (c) => {
         for (const name of manifest.bindings.r2 ?? []) bindingLabels.push(`r2:${name}`);
         for (const q of manifest.queues ?? []) bindingLabels.push(`queue:${q.name}`);
         if (bindingLabels.length > 0) {
-          emit({ event: "provisioning", bindings: bindingLabels });
+          emit({ event: 'provisioning', bindings: bindingLabels });
         }
 
         const workerBindings = await provisionBindings(
-          c.get("db"),
+          c.get('db'),
           c.env.CF_ACCOUNT_ID,
           c.env.CF_API_TOKEN,
           projectId,
           manifest,
           c.env.JWT_SECRET,
-          c.env.VOID_PROXY_SERVICE ?? "void-proxy",
+          c.env.VOID_PROXY_SERVICE ?? 'void-proxy',
         );
 
         if (bindingLabels.length > 0) {
-          emit({ event: "provisioning_done" });
+          emit({ event: 'provisioning_done' });
         }
 
-        if (typeof manifest.vars?.[BETTER_AUTH_SECRET_NAME] === "string") {
+        if (typeof manifest.vars?.[BETTER_AUTH_SECRET_NAME] === 'string') {
           throw new Error(
             `${BETTER_AUTH_SECRET_NAME} must be configured via project secrets, not manifest.vars`,
           );
         }
 
-        let projectSecretRows = await getProjectSecrets(c.get("db"), projectId);
+        let projectSecretRows = await getProjectSecrets(c.get('db'), projectId);
         if (manifest.auth) {
           const existingAuthSecret = projectSecretRows.find(
             (row) => row.name === BETTER_AUTH_SECRET_NAME,
@@ -650,20 +650,20 @@ app.post("/:id/deploy", async (c) => {
               managedSecret,
             );
             await upsertProjectSecret(
-              c.get("db"),
+              c.get('db'),
               projectId,
               BETTER_AUTH_SECRET_NAME,
               encrypted.ciphertext,
               encrypted.iv,
               encrypted.keyVersion,
-              "auth-default",
+              'auth-default',
             );
-            projectSecretRows = await getProjectSecrets(c.get("db"), projectId);
+            projectSecretRows = await getProjectSecrets(c.get('db'), projectId);
           }
         }
         const secretBindings = await Promise.all(
           projectSecretRows.map(async (row) => ({
-            type: "secret_text" as const,
+            type: 'secret_text' as const,
             name: row.name,
             text: await decryptProjectSecret(c.env, projectId, row),
           })),
@@ -672,10 +672,10 @@ app.post("/:id/deploy", async (c) => {
         // Upload assets via CF asset upload API (3-step flow)
         let completionJwt: string | undefined;
         if (assetCount > 0) {
-          currentStep = "asset_upload";
+          currentStep = 'asset_upload';
           const newAssets = assetsByHash.size;
           emit({
-            event: "asset_upload",
+            event: 'asset_upload',
             total: assetCount,
             new: newAssets,
             cached: assetCount - newAssets,
@@ -701,51 +701,51 @@ app.post("/:id/deploy", async (c) => {
             assetsByHash,
           );
           console.log(
-            `[deploy] ${projectId}: asset upload complete, got completion JWT: ${completionJwt ? "yes" : "no"}`,
+            `[deploy] ${projectId}: asset upload complete, got completion JWT: ${completionJwt ? 'yes' : 'no'}`,
           );
-          emit({ event: "asset_upload_done" });
+          emit({ event: 'asset_upload_done' });
         }
 
         // 1. Upload worker to dispatch namespace via CF API
-        currentStep = "worker_upload";
+        currentStep = 'worker_upload';
         const workerFormData = new FormData();
 
         // Collect all worker modules
         const workerFiles: { name: string; content: Blob }[] = [];
         for (const [key, value] of formData.entries()) {
-          if (key.startsWith("worker:")) {
-            const filePath = key.slice("worker:".length);
+          if (key.startsWith('worker:')) {
+            const filePath = key.slice('worker:'.length);
             workerFiles.push({ name: filePath, content: value as Blob });
           }
         }
 
-        emit({ event: "worker_upload", modules: workerFiles.length });
+        emit({ event: 'worker_upload', modules: workerFiles.length });
 
         // Build combined bindings: user vars + provisioned (d1/kv/r2) + ASSETS
         // Platform bindings come LAST so they win on name collision (CF uses last-wins semantics)
         const RESERVED_BINDING_NAMES = new Set([
-          "__VOID_PROXY",
-          "__PROJECT_ID",
-          "__VOID_PROXY_TOKEN",
-          "ASSETS",
+          '__VOID_PROXY',
+          '__PROJECT_ID',
+          '__VOID_PROXY_TOKEN',
+          'ASSETS',
         ]);
 
         const userVarNames = Object.keys(manifest.vars ?? {});
         const reserved = userVarNames.filter((n) => RESERVED_BINDING_NAMES.has(n));
         if (reserved.length > 0) {
-          throw new Error(`reserved binding names: ${reserved.join(", ")}`);
+          throw new Error(`reserved binding names: ${reserved.join(', ')}`);
         }
 
         const secretNames = new Set(secretBindings.map((s) => s.name));
         const collisions = userVarNames.filter((n) => secretNames.has(n));
         if (collisions.length > 0) {
           console.warn(
-            `[deploy] manifest vars collide with project secrets (secrets win): ${collisions.join(", ")}`,
+            `[deploy] manifest vars collide with project secrets (secrets win): ${collisions.join(', ')}`,
           );
         }
 
         const plainTextBindings = Object.entries(manifest.vars ?? {}).map(([name, text]) => ({
-          type: "plain_text" as const,
+          type: 'plain_text' as const,
           name,
           text,
         }));
@@ -755,7 +755,7 @@ app.post("/:id/deploy", async (c) => {
           ...secretBindings,
           ...workerBindings,
           ...websocketBindings,
-          ...(completionJwt ? [{ name: "ASSETS", type: "assets" }] : []),
+          ...(completionJwt ? [{ name: 'ASSETS', type: 'assets' }] : []),
         ];
 
         // Add metadata part (include provisioned bindings + assets)
@@ -765,12 +765,12 @@ app.post("/:id/deploy", async (c) => {
           );
         }
 
-        const assetConfig = manifest.assetConfig ?? { not_found_handling: "none" };
+        const assetConfig = manifest.assetConfig ?? { not_found_handling: 'none' };
         const websocketMigrations = buildWebSocketUploadMigrations(manifest.websocket?.migrations);
         const metadata: Record<string, unknown> = {
-          main_module: manifest.workerMain ?? "index.js",
-          compatibility_date: manifest.compatibilityDate ?? "2026-02-12",
-          compatibility_flags: manifest.compatibilityFlags ?? ["nodejs_compat"],
+          main_module: manifest.workerMain ?? 'index.js',
+          compatibility_date: manifest.compatibilityDate ?? '2026-02-12',
+          compatibility_flags: manifest.compatibilityFlags ?? ['nodejs_compat'],
           bindings: allBindings,
           ...(websocketMigrations ? { migrations: websocketMigrations } : {}),
           ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
@@ -780,8 +780,8 @@ app.post("/:id/deploy", async (c) => {
           },
         };
         workerFormData.append(
-          "metadata",
-          new Blob([JSON.stringify(metadata)], { type: "application/json" }),
+          'metadata',
+          new Blob([JSON.stringify(metadata)], { type: 'application/json' }),
         );
 
         // Add each worker module with correct content type for CF API
@@ -800,7 +800,7 @@ app.post("/:id/deploy", async (c) => {
         await retryWithBackoff(
           async () => {
             const cfResponse = await fetch(workerUploadUrl, {
-              method: "PUT",
+              method: 'PUT',
               headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
               body: workerFormData,
             });
@@ -822,20 +822,20 @@ app.post("/:id/deploy", async (c) => {
             }
             return true;
           },
-          { ...CF_RETRY, errorMessage: "worker upload returned an unexpected Cloudflare response" },
+          { ...CF_RETRY, errorMessage: 'worker upload returned an unexpected Cloudflare response' },
         );
 
-        emit({ event: "worker_upload_done" });
+        emit({ event: 'worker_upload_done' });
 
         // 1b. Run migrations via the newly-uploaded worker (v3 flow)
         let migrationsApplied = 0;
         if (manifest.migrations && manifest.migrations.pending > 0) {
-          currentStep = "migration";
-          await updateDeploymentStatus(c.get("db"), deployment.id, "migrating");
-          emit({ event: "migration_start", pending: manifest.migrations.pending });
+          currentStep = 'migration';
+          await updateDeploymentStatus(c.get('db'), deployment.id, 'migrating');
+          emit({ event: 'migration_start', pending: manifest.migrations.pending });
 
           try {
-            const proxyTokenBinding = workerBindings.find((b) => b.name === "__VOID_PROXY_TOKEN");
+            const proxyTokenBinding = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN');
 
             // CF's WfP dispatch can return the same "Assets have already been
             // uploaded" plain text on the first invocation after a worker upload
@@ -855,9 +855,9 @@ app.post("/:id/deploy", async (c) => {
               async () => {
                 const userWorker = c.env.DISPATCH.get(workerName);
                 const migrateResponse = await userWorker.fetch(
-                  new Request("https://internal/__void/migrate", {
-                    method: "POST",
-                    headers: { "x-void-internal": proxyTokenBinding?.text ?? "" },
+                  new Request('https://internal/__void/migrate', {
+                    method: 'POST',
+                    headers: { 'x-void-internal': proxyTokenBinding?.text ?? '' },
                     signal: AbortSignal.timeout(300_000),
                   }),
                 );
@@ -886,23 +886,23 @@ app.post("/:id/deploy", async (c) => {
               {
                 ...CF_MIGRATION_RETRY,
                 errorMessage:
-                  "migration dispatch failed: CF returned plain-text asset response after retries",
+                  'migration dispatch failed: CF returned plain-text asset response after retries',
               },
             );
 
             if (!result.ok) {
-              throw new Error(`migration failed: ${result.error ?? "unknown error"}`);
+              throw new Error(`migration failed: ${result.error ?? 'unknown error'}`);
             }
 
             for (const m of result.migrations) {
               if (m.applied) {
-                emit({ event: "migration", name: m.name, durationMs: m.durationMs });
+                emit({ event: 'migration', name: m.name, durationMs: m.durationMs });
                 migrationsApplied++;
               }
             }
 
             const allApplied = result.migrations.map((m) => m.name);
-            await setAppliedMigrations(c.get("db"), deployment.id, allApplied);
+            await setAppliedMigrations(c.get('db'), deployment.id, allApplied);
           } catch (err) {
             // Migration failed — delete the new worker, abort
             await deleteDispatchScript(
@@ -916,17 +916,17 @@ app.post("/:id/deploy", async (c) => {
         }
 
         // 2b. Configure queue consumers (dispatch worker relays to user workers)
-        currentStep = "queue_setup";
+        currentStep = 'queue_setup';
         const queueNames = (manifest.queues ?? []).map((q) => q.name);
         if (queueNames.length > 0) {
-          emit({ event: "queue_setup", queues: queueNames });
+          emit({ event: 'queue_setup', queues: queueNames });
         }
 
-        const dispatchWorkerName = c.env.DISPATCH_WORKER_NAME ?? "void-dispatch";
+        const dispatchWorkerName = c.env.DISPATCH_WORKER_NAME ?? 'void-dispatch';
         await Promise.all(
           (manifest.queues ?? []).map(async (q) => {
             const queueBinding = workerBindings.find(
-              (b) => b.type === "queue" && b.name === q.bindingName,
+              (b) => b.type === 'queue' && b.name === q.bindingName,
             );
             if (queueBinding?.queue_id) {
               await addQueueConsumer(
@@ -955,16 +955,16 @@ app.post("/:id/deploy", async (c) => {
         );
 
         // 2c. Sync cron schedules to CronScheduler DO
-        currentStep = "cron_setup";
+        currentStep = 'cron_setup';
         const hasCrons = manifest.schedules && manifest.schedules.length > 0;
 
         if (hasCrons) {
           const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
-          const cronProxyToken = workerBindings.find((b) => b.name === "__VOID_PROXY_TOKEN")?.text;
+          const cronProxyToken = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN')?.text;
           await c.env.CRON_SCHEDULER.get(cronId).fetch(
-            new Request("https://do/sync", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
+            new Request('https://do/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 workerName,
                 schedules: manifest.schedules,
@@ -979,7 +979,7 @@ app.post("/:id/deploy", async (c) => {
           if (prevRouting && JSON.parse(prevRouting).hasCrons) {
             const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
             await c.env.CRON_SCHEDULER.get(cronId).fetch(
-              new Request("https://do/clear", { method: "POST" }),
+              new Request('https://do/clear', { method: 'POST' }),
             );
           }
         }
@@ -990,10 +990,10 @@ app.post("/:id/deploy", async (c) => {
         await clearIsrCache(c.env.ISR_CACHE, projectId);
 
         // 3b. Prerender pages (write ISR cache entries before going live)
-        currentStep = "prerender";
+        currentStep = 'prerender';
         if (manifest.prerender && manifest.prerender.length > 0 && manifest.revalidate) {
-          emit({ event: "prerender", pages: manifest.prerender.length });
-          await updateDeploymentStatus(c.get("db"), deployment.id, "prerendering");
+          emit({ event: 'prerender', pages: manifest.prerender.length });
+          await updateDeploymentStatus(c.get('db'), deployment.id, 'prerendering');
           const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
 
           await uploadPool(manifest.prerender, 3, async (pathname) => {
@@ -1024,7 +1024,7 @@ app.post("/:id/deploy", async (c) => {
               // Prerender failures are non-blocking — page will be rendered on first request
             }
           });
-          emit({ event: "prerender_done" });
+          emit({ event: 'prerender_done' });
         }
 
         // 4. Update KV routing table
@@ -1059,22 +1059,22 @@ app.post("/:id/deploy", async (c) => {
 
         // Update KV routing for active custom domains
         for (const domain of projectDomains) {
-          if (domain.status === "active") {
+          if (domain.status === 'active') {
             await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
           }
         }
 
         // 5. Mark deployment as live + update project mode
-        await updateDeploymentStatus(c.get("db"), deployment.id, "live");
+        await updateDeploymentStatus(c.get('db'), deployment.id, 'live');
         await updateProjectType(
-          c.get("db"),
+          c.get('db'),
           projectId,
-          manifest.type ?? (manifest.framework ? "framework" : "void"),
+          manifest.type ?? (manifest.framework ? 'framework' : 'void'),
         );
 
         // 5b. Set active deployment + mark retained
-        await setActiveDeployment(c.get("db"), projectId, deployment.id);
-        await markDeploymentRetained(c.get("db"), deployment.id, true);
+        await setActiveDeployment(c.get('db'), projectId, deployment.id);
+        await markDeploymentRetained(c.get('db'), deployment.id, true);
 
         // Legacy cleanup — delete unversioned worker script (safe no-op if already gone)
         const legacyWorkerName = `user-${project.slug}`;
@@ -1089,7 +1089,7 @@ app.post("/:id/deploy", async (c) => {
         const retentionLimit = planLimits.retainedDeployments;
         if (retentionLimit > 0) {
           const retained = await getRetainedDeploymentsExcluding(
-            c.get("db"),
+            c.get('db'),
             projectId,
             deployment.id,
           );
@@ -1103,28 +1103,28 @@ app.post("/:id/deploy", async (c) => {
               dispatchNamespace,
               oldWorkerName,
             );
-            await markDeploymentRetained(c.get("db"), old.id, false);
+            await markDeploymentRetained(c.get('db'), old.id, false);
           }
         }
 
         // Store asset manifest for future preflight dedup
         if (assetCount > 0) {
           await c
-            .get("db")
+            .get('db')
             .update(deployments)
             .set({ asset_hashes: JSON.stringify(assetManifest) })
             .where(eq(deployments.id, deployment.id));
         }
 
         const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-        const activeDomains = projectDomains.filter((d) => d.status === "active");
+        const activeDomains = projectDomains.filter((d) => d.status === 'active');
         const fullUrl =
           activeDomains.length > 0
             ? `https://${activeDomains[0].hostname}`
             : `https://${project.slug}.${siteDomain}`;
 
         emit({
-          event: "done",
+          event: 'done',
           deployment: deployment.id,
           url: fullUrl,
           urls: [
@@ -1148,19 +1148,19 @@ app.post("/:id/deploy", async (c) => {
           // (retention cleanup, asset_hashes update, etc.) is non-critical and
           // will self-correct on the next deploy.
           console.error(`[deploy] post-routing step failed for ${workerName}: ${msg}`);
-          await updateDeploymentStatus(c.get("db"), deployment.id, "live").catch(() => {});
+          await updateDeploymentStatus(c.get('db'), deployment.id, 'live').catch(() => {});
           await updateProjectType(
-            c.get("db"),
+            c.get('db'),
             projectId,
-            manifest.type ?? (manifest.framework ? "framework" : "void"),
+            manifest.type ?? (manifest.framework ? 'framework' : 'void'),
           ).catch(() => {});
-          await setActiveDeployment(c.get("db"), projectId, deployment.id).catch(() => {});
-          await markDeploymentRetained(c.get("db"), deployment.id, true).catch(() => {});
+          await setActiveDeployment(c.get('db'), projectId, deployment.id).catch(() => {});
+          await markDeploymentRetained(c.get('db'), deployment.id, true).catch(() => {});
           // Emit "done" so the CLI shows success with the URL — the deploy IS live.
           const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
           const slugUrl = `https://${project.slug}.${siteDomain}`;
           emit({
-            event: "done",
+            event: 'done',
             deployment: deployment.id,
             url: slugUrl,
             urls: [slugUrl],
@@ -1182,13 +1182,13 @@ app.post("/:id/deploy", async (c) => {
           if (cronSynced) {
             const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
             await c.env.CRON_SCHEDULER.get(cronId)
-              .fetch(new Request("https://do/clear", { method: "POST" }))
+              .fetch(new Request('https://do/clear', { method: 'POST' }))
               .catch((e) =>
                 console.error(`[deploy] failed to clear cron scheduler for ${projectId}:`, e),
               );
           }
-          await updateDeploymentStatus(c.get("db"), deployment.id, "failed", msg);
-          emit({ event: "error", message: msg, step: currentStep });
+          await updateDeploymentStatus(c.get('db'), deployment.id, 'failed', msg);
+          emit({ event: 'error', message: msg, step: currentStep });
           if (c.env.EMAIL && user.email) {
             const dashboardUrl = c.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
             c.executionCtx.waitUntil(
@@ -1205,20 +1205,20 @@ app.post("/:id/deploy", async (c) => {
   });
 
   return new Response(stream, {
-    headers: { "Content-Type": "application/x-ndjson" },
+    headers: { 'Content-Type': 'application/x-ndjson' },
   });
 });
 
 // Deploy preflight — returns which assets need uploading based on diff with last deploy
-app.post("/:id/deploy/preflight", async (c) => {
-  const projectId = c.req.param("id");
-  const project = await getProject(c.get("db"), projectId);
+app.post('/:id/deploy/preflight', async (c) => {
+  const projectId = c.req.param('id');
+  const project = await getProject(c.get('db'), projectId);
   if (!project) {
-    return c.json({ error: "project not found" }, 404);
+    return c.json({ error: 'project not found' }, 404);
   }
 
-  if (project.user_id !== c.get("user").id) {
-    return c.json({ error: "forbidden" }, 403);
+  if (project.user_id !== c.get('user').id) {
+    return c.json({ error: 'forbidden' }, 403);
   }
 
   const body = await c.req.json<{
@@ -1228,7 +1228,7 @@ app.post("/:id/deploy/preflight", async (c) => {
   const { assetManifest, hasWorker } = body;
   const total = Object.keys(assetManifest).length;
 
-  const prevManifest = await getLastLiveAssetManifest(c.get("db"), projectId);
+  const prevManifest = await getLastLiveAssetManifest(c.get('db'), projectId);
 
   if (!prevManifest) {
     return c.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
@@ -1313,11 +1313,11 @@ function packIsrValue(headers: Record<string, string>, body: ArrayBuffer): Array
  */
 function isrCacheKey(projectId: string, pathname: string): string {
   let normalized = pathname;
-  if (normalized === "/") {
-    normalized = "__index__";
+  if (normalized === '/') {
+    normalized = '__index__';
   } else {
-    normalized = normalized.startsWith("/") ? normalized.slice(1) : normalized;
-    if (normalized.endsWith("/")) {
+    normalized = normalized.startsWith('/') ? normalized.slice(1) : normalized;
+    if (normalized.endsWith('/')) {
       normalized = normalized.slice(0, -1);
     }
   }
@@ -1333,7 +1333,7 @@ function resolvePathTtl(
   pathname: string,
 ): number {
   if (revalidate == null) return 0;
-  if (typeof revalidate === "number") return revalidate;
+  if (typeof revalidate === 'number') return revalidate;
   for (const [pattern, ttl] of Object.entries(revalidate)) {
     if (matchPattern(pattern, pathname)) return ttl;
   }
@@ -1353,7 +1353,7 @@ function matchPattern(pattern: string, pathname: string): boolean {
     regexCache.delete(pattern);
     regexCache.set(pattern, regex);
   } else {
-    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*");
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*');
     regex = new RegExp(`^${escaped}$`);
     if (regexCache.size >= MAX_CACHE) {
       regexCache.delete(regexCache.keys().next().value!);
@@ -1368,7 +1368,7 @@ function matchPattern(pattern: string, pathname: string): boolean {
  */
 function serializePrerenderHeaders(response: Response): Record<string, string> {
   const result: Record<string, string> = {};
-  const skip = new Set(["cache-control", "x-isr-cache", "x-void-page-data", "set-cookie"]);
+  const skip = new Set(['cache-control', 'x-isr-cache', 'x-void-page-data', 'set-cookie']);
 
   response.headers.forEach((value, key) => {
     if (!skip.has(key.toLowerCase())) {
@@ -1380,11 +1380,11 @@ function serializePrerenderHeaders(response: Response): Record<string, string> {
 }
 
 function moduleContentType(filename: string): string {
-  if (filename.endsWith(".wasm")) return "application/wasm";
-  if (filename.endsWith(".map")) return "application/source-map";
-  if (filename.endsWith(".json")) return "application/json";
-  if (filename.endsWith(".txt")) return "text/plain";
-  return "application/javascript+module";
+  if (filename.endsWith('.wasm')) return 'application/wasm';
+  if (filename.endsWith('.map')) return 'application/source-map';
+  if (filename.endsWith('.json')) return 'application/json';
+  if (filename.endsWith('.txt')) return 'text/plain';
+  return 'application/javascript+module';
 }
 
 export default app;

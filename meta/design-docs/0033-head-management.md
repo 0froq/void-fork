@@ -27,7 +27,7 @@ Pages define head content by exporting a `head()` function from their `.server.t
 ```ts
 // pages/posts/[slug].server.ts
 export const loader = defineHandler(async (c) => {
-  const post = await getPost(c.req.param("slug"));
+  const post = await getPost(c.req.param('slug'));
   return { post };
 });
 
@@ -35,8 +35,8 @@ export function head(c, props) {
   return {
     title: props.post.title,
     meta: [
-      { name: "description", content: props.post.excerpt },
-      { property: "og:title", content: props.post.title },
+      { name: 'description', content: props.post.excerpt },
+      { property: 'og:title', content: props.post.title },
     ],
   };
 }
@@ -68,7 +68,7 @@ For request-scoped head content that depends on auth state, locale, or requires 
 ```ts
 // middleware/01.head.ts
 export default defineMiddleware(async (c, next) => {
-  c.set("headDefaults", {
+  c.set('headDefaults', {
     script: [
       {
         innerHTML: `const t = localStorage.getItem("theme");

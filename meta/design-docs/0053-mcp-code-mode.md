@@ -68,10 +68,10 @@ The `void_` object exposes all `PlatformClient` prototype methods via auto-bindi
 
 ```typescript
 const sdk = createQuerySdk(token);
-const fn = new AsyncFunction("void", `return await (${code})()`);
+const fn = new AsyncFunction('void', `return await (${code})()`);
 const result = await Promise.race([
   fn(sdk),
-  new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10_000)),
+  new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10_000)),
 ]);
 ```
 
@@ -92,8 +92,8 @@ async () => await void_.listProjects();
 ```js
 async () => {
   const projects = await void_.listProjects();
-  const p = projects.find((p) => p.slug === "my-app");
-  const logs = await void_.getLogs(p.id, "1h");
+  const p = projects.find((p) => p.slug === 'my-app');
+  const logs = await void_.getLogs(p.id, '1h');
   return logs.filter((l) => l.exceptions.length > 0);
 };
 ```
@@ -103,9 +103,9 @@ async () => {
 ```js
 async () => {
   const projects = await void_.listProjects();
-  const p = projects.find((p) => p.slug === "my-app");
+  const p = projects.find((p) => p.slug === 'my-app');
   const { deployments } = await void_.listDeployments(p.id);
-  const prev = deployments.find((d) => d.retained && d.status === "active");
+  const prev = deployments.find((d) => d.retained && d.status === 'active');
   return await void_.rollback(p.id, prev.id);
 };
 ```
@@ -115,8 +115,8 @@ async () => {
 ```js
 async () => {
   const projects = await void_.listProjects();
-  const p = projects.find((p) => p.slug === "my-app");
-  return await void_.addDomain(p.id, "example.com");
+  const p = projects.find((p) => p.slug === 'my-app');
+  return await void_.addDomain(p.id, 'example.com');
 };
 ```
 

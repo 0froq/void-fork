@@ -1,16 +1,16 @@
-import { createHash } from "node:crypto";
-import { access, readFile, rename, writeFile } from "node:fs/promises";
-import { readFileSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
-import { PGlite } from "@electric-sql/pglite";
-import { drizzle } from "drizzle-orm/pglite";
-import { migrate } from "drizzle-orm/pglite/migrator";
-import * as schema from "../../src/schema";
+import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync } from 'node:fs';
+import { access, readFile, rename, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
+import { migrate } from 'drizzle-orm/pglite/migrator';
+import * as schema from '../../src/schema';
 
-const MIGRATIONS_DIR = fileURLToPath(new URL("../../drizzle", import.meta.url));
-const TEMPLATE_VERSION = "2";
+const MIGRATIONS_DIR = fileURLToPath(new URL('../../drizzle', import.meta.url));
+const TEMPLATE_VERSION = '2';
 
 function walkFiles(dir: string): string[] {
   const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
@@ -33,7 +33,7 @@ function walkFiles(dir: string): string[] {
 }
 
 function getTemplateHash(): string {
-  const hash = createHash("sha256");
+  const hash = createHash('sha256');
   hash.update(TEMPLATE_VERSION);
 
   for (const file of walkFiles(MIGRATIONS_DIR)) {
@@ -41,7 +41,7 @@ function getTemplateHash(): string {
     hash.update(readFileSync(file));
   }
 
-  return hash.digest("hex").slice(0, 16);
+  return hash.digest('hex').slice(0, 16);
 }
 
 const TEMPLATE_BUNDLE_PATH = join(tmpdir(), `void-api-pglite-${getTemplateHash()}.tar`);
@@ -52,13 +52,13 @@ async function buildTemplateBundle(path: string): Promise<void> {
 
   try {
     await migrate(drizzle(db, { schema }), { migrationsFolder: MIGRATIONS_DIR });
-    const dump = await db.dumpDataDir("none");
+    const dump = await db.dumpDataDir('none');
     await writeFile(tempPath, new Uint8Array(await dump.arrayBuffer()));
     try {
       await rename(tempPath, path);
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
-      if (err.code !== "EEXIST") {
+      if (err.code !== 'EEXIST') {
         throw error;
       }
     }

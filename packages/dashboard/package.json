@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "typecheck": "vue-tsc --noEmit",
     "deploy": "pnpm build && wrangler deploy",
-    "deploy:staging": "CLOUDFLARE_ENV=staging pnpm build && wrangler deploy"
+    "deploy:staging": "CLOUDFLARE_ENV=staging pnpm build && wrangler deploy",
+    "dev": "vite",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.1",

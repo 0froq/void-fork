@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
-import { eq } from "drizzle-orm";
-import app from "../../src/index";
-import { signJwt } from "../../src/auth/jwt";
-import { users } from "../../src/schema";
+import { eq } from 'drizzle-orm';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
+import { signJwt } from '../../src/auth/jwt';
+import app from '../../src/index';
+import { users } from '../../src/schema';
 import {
   setupEnv,
   teardownEnv,
@@ -10,7 +10,7 @@ import {
   createTestUser,
   JWT_SECRET,
   type TestEnv,
-} from "./helpers";
+} from './helpers';
 
 let env: TestEnv;
 
@@ -26,45 +26,45 @@ beforeEach(async () => {
   await clearTables(env.db);
 });
 
-describe("GET /me", () => {
-  it("returns 401 without auth header", async () => {
-    const res = await app.fetch(new Request("http://localhost/me"), env);
+describe('GET /me', () => {
+  it('returns 401 without auth header', async () => {
+    const res = await app.fetch(new Request('http://localhost/me'), env);
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: "unauthorized" });
+    expect(await res.json()).toEqual({ error: 'unauthorized' });
   });
 
-  it("returns 401 with invalid JWT", async () => {
+  it('returns 401 with invalid JWT', async () => {
     const res = await app.fetch(
-      new Request("http://localhost/me", {
-        headers: { Authorization: "Bearer not-a-real-jwt" },
+      new Request('http://localhost/me', {
+        headers: { Authorization: 'Bearer not-a-real-jwt' },
       }),
       env,
     );
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({
-      error: "invalid or expired token",
+      error: 'invalid or expired token',
     });
   });
 
-  it("returns 401 with expired JWT", async () => {
+  it('returns 401 with expired JWT', async () => {
     // Insert user with real timers
-    const userId = "user_expired";
+    const userId = 'user_expired';
     await env.db.insert(users).values({
       id: userId,
-      provider: "github",
-      provider_id: "99999",
-      login: "expired",
+      provider: 'github',
+      provider_id: '99999',
+      login: 'expired',
       email: null,
     });
 
     // Sign JWT in the past so it's expired
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2020-01-01"));
-    const jwt = await signJwt({ sub: userId, login: "expired", aud: "api" }, JWT_SECRET);
+    vi.setSystemTime(new Date('2020-01-01'));
+    const jwt = await signJwt({ sub: userId, login: 'expired', aud: 'api' }, JWT_SECRET);
     vi.useRealTimers();
 
     const res = await app.fetch(
-      new Request("http://localhost/me", {
+      new Request('http://localhost/me', {
         headers: { Authorization: `Bearer ${jwt}` },
       }),
       env,
@@ -72,69 +72,69 @@ describe("GET /me", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 401 when user has been deleted", async () => {
-    const user = await createTestUser(env.db, "deleted-user");
+  it('returns 401 when user has been deleted', async () => {
+    const user = await createTestUser(env.db, 'deleted-user');
     await env.db.delete(users).where(eq(users.id, user.id));
 
     const res = await app.fetch(
-      new Request("http://localhost/me", {
+      new Request('http://localhost/me', {
         headers: { Authorization: `Bearer ${user.jwt}` },
       }),
       env,
     );
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: "user not found" });
+    expect(await res.json()).toEqual({ error: 'user not found' });
   });
 
-  it("returns 403 when user is admin-suspended", async () => {
-    const user = await createTestUser(env.db, "suspended-user");
+  it('returns 403 when user is admin-suspended', async () => {
+    const user = await createTestUser(env.db, 'suspended-user');
     await env.db
       .update(users)
-      .set({ suspended_reason: "admin_suspended" })
+      .set({ suspended_reason: 'admin_suspended' })
       .where(eq(users.id, user.id));
 
     const res = await app.fetch(
-      new Request("http://localhost/me", {
+      new Request('http://localhost/me', {
         headers: { Authorization: `Bearer ${user.jwt}` },
       }),
       env,
     );
     expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ error: "account suspended" });
+    expect(await res.json()).toEqual({ error: 'account suspended' });
   });
 
-  it("allows usage-suspended user through", async () => {
-    const user = await createTestUser(env.db, "usage-limited");
+  it('allows usage-suspended user through', async () => {
+    const user = await createTestUser(env.db, 'usage-limited');
     await env.db
       .update(users)
-      .set({ suspended_reason: "requests_exceeded" })
+      .set({ suspended_reason: 'requests_exceeded' })
       .where(eq(users.id, user.id));
 
     const res = await app.fetch(
-      new Request("http://localhost/me", {
+      new Request('http://localhost/me', {
         headers: { Authorization: `Bearer ${user.jwt}` },
       }),
       env,
     );
     expect(res.status).toBe(200);
     const body: any = await res.json();
-    expect(body.login).toBe("usage-limited");
+    expect(body.login).toBe('usage-limited');
   });
 
-  it("returns user login with valid JWT", async () => {
-    const user = await createTestUser(env.db, "alice");
+  it('returns user login with valid JWT', async () => {
+    const user = await createTestUser(env.db, 'alice');
 
     const res = await app.fetch(
-      new Request("http://localhost/me", {
+      new Request('http://localhost/me', {
         headers: { Authorization: `Bearer ${user.jwt}` },
       }),
       env,
     );
     expect(res.status).toBe(200);
     const body: any = await res.json();
-    expect(body.login).toBe("alice");
-    expect(body.plan).toBe("free");
-    expect(body.provider).toBe("github");
+    expect(body.login).toBe('alice');
+    expect(body.plan).toBe('free');
+    expect(body.provider).toBe('github');
     expect(body.limits).toBeDefined();
     expect(body.limits.requestsPerMonth).toBe(3_000_000);
   });

@@ -1,9 +1,9 @@
-import { Hono, type Context } from "hono";
-import type { ApiEnv } from "../env";
-import { getProject, getDomainsByProjectId } from "../db";
-import { hmacVerifyState } from "../auth/hmac";
-import { SITE_DOMAIN } from "../constants";
-import { purgeZoneCache } from "../provisioning/cloudflare-api";
+import { Hono, type Context } from 'hono';
+import { hmacVerifyState } from '../auth/hmac';
+import { SITE_DOMAIN } from '../constants';
+import { getProject, getDomainsByProjectId } from '../db';
+import type { ApiEnv } from '../env';
+import { purgeZoneCache } from '../provisioning/cloudflare-api';
 
 const R2_CONCURRENCY = 6;
 
@@ -13,21 +13,21 @@ const app = new Hono<ApiEnv>();
  * Internal revalidation endpoint — called by the proxy via service binding.
  * Authenticated via HMAC token in X-Void-Internal header (no JWT/userId).
  */
-app.post("/:id", async (c) => {
-  const projectId = c.req.param("id");
+app.post('/:id', async (c) => {
+  const projectId = c.req.param('id');
 
   // Verify HMAC token
-  const token = c.req.header("x-void-internal");
+  const token = c.req.header('x-void-internal');
   if (!token) {
-    return c.json({ error: "missing internal auth" }, 401);
+    return c.json({ error: 'missing internal auth' }, 401);
   }
   if (!(await hmacVerifyState(projectId, token, c.env.JWT_SECRET))) {
-    return c.json({ error: "invalid internal auth" }, 403);
+    return c.json({ error: 'invalid internal auth' }, 403);
   }
 
-  const project = await getProject(c.get("db"), projectId);
+  const project = await getProject(c.get('db'), projectId);
   if (!project) {
-    return c.json({ error: "project not found" }, 404);
+    return c.json({ error: 'project not found' }, 404);
   }
 
   const body = await c.req.json<{ paths?: string[]; all?: boolean }>();
@@ -43,7 +43,7 @@ app.post("/:id", async (c) => {
       if (listed.keys.length > 0) {
         for (const key of listed.keys) {
           const normalized = key.name.slice(prefix.length);
-          pathnames.push(normalized === "__index__" ? "/" : `/${normalized}`);
+          pathnames.push(normalized === '__index__' ? '/' : `/${normalized}`);
         }
         await uploadPool(listed.keys, R2_CONCURRENCY, (key) => c.env.ISR_CACHE.delete(key.name));
         purged += listed.keys.length;
@@ -56,17 +56,17 @@ app.post("/:id", async (c) => {
   }
 
   if (!body.paths || !Array.isArray(body.paths) || body.paths.length === 0) {
-    return c.json({ error: "provide `paths` array or `all: true`" }, 400);
+    return c.json({ error: 'provide `paths` array or `all: true`' }, 400);
   }
 
   let purged = 0;
   for (const path of body.paths) {
     let normalized = path;
-    if (normalized === "/") {
-      normalized = "__index__";
+    if (normalized === '/') {
+      normalized = '__index__';
     } else {
-      normalized = normalized.startsWith("/") ? normalized.slice(1) : normalized;
-      if (normalized.endsWith("/")) {
+      normalized = normalized.startsWith('/') ? normalized.slice(1) : normalized;
+      if (normalized.endsWith('/')) {
         normalized = normalized.slice(0, -1);
       }
     }
@@ -91,7 +91,7 @@ async function purgeEdgeCache(
     const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
     const hostnames = [`${slug}.${siteDomain}`];
 
-    const customDomains = await getDomainsByProjectId(c.get("db"), projectId);
+    const customDomains = await getDomainsByProjectId(c.get('db'), projectId);
     for (const d of customDomains) {
       hostnames.push(d.hostname);
     }

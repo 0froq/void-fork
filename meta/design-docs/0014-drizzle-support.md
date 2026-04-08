@@ -23,20 +23,20 @@ Users define their schema in Drizzle's TypeScript DSL. This is the single source
 
 ```ts
 // db/schema.ts
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 
-export const users = sqliteTable("users", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull(),
-  email: text("email").notNull(),
-  createdAt: text("created_at").default(sql`(datetime('now'))`),
+export const users = sqliteTable('users', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  createdAt: text('created_at').default(sql`(datetime('now'))`),
 });
 
-export const posts = sqliteTable("posts", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  title: text("title").notNull(),
-  body: text("body").notNull(),
-  authorId: integer("author_id")
+export const posts = sqliteTable('posts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  title: text('title').notNull(),
+  body: text('body').notNull(),
+  authorId: integer('author_id')
     .notNull()
     .references(() => users.id),
 });
@@ -62,8 +62,8 @@ The `void/db` export changes from the custom `QueryClient` to a pre-configured D
 
 ```ts
 // runtime/db.ts
-import { drizzle } from "drizzle-orm/d1";
-import { env } from "cloudflare:workers";
+import { drizzle } from 'drizzle-orm/d1';
+import { env } from 'cloudflare:workers';
 
 export const db = drizzle(() => (env as any).DB);
 ```
@@ -71,9 +71,9 @@ export const db = drizzle(() => (env as any).DB);
 Users import their schema tables alongside `db`:
 
 ```ts
-import { db } from "void/db";
-import { users, posts } from "../db/schema";
-import { eq } from "drizzle-orm";
+import { db } from 'void/db';
+import { users, posts } from '../db/schema';
+import { eq } from 'drizzle-orm';
 
 // Simple
 const allUsers = await db.select().from(users);
@@ -85,10 +85,10 @@ const postsWithAuthors = await db
   .leftJoin(users, eq(posts.authorId, users.id));
 
 // Insert
-await db.insert(users).values({ name: "Alice", email: "a@a.com" });
+await db.insert(users).values({ name: 'Alice', email: 'a@a.com' });
 
 // Update
-await db.update(users).set({ name: "Bob" }).where(eq(users.id, 1));
+await db.update(users).set({ name: 'Bob' }).where(eq(users.id, 1));
 ```
 
 No schema pass-through to `drizzle()` is needed — users import tables directly. This avoids the `db.query.users.findMany()` relational API (which has limitations on PlanetScale Postgres anyway) in favor of the standard select/insert/update/delete builder.
@@ -106,20 +106,20 @@ void gen model posts title:string body:text views:integer?
 **After:** Appends to `db/schema.ts`:
 
 ```ts
-export const posts = sqliteTable("posts", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  title: text("title").notNull(),
-  body: text("body").notNull(),
-  views: integer("views"),
-  createdAt: text("created_at").default(sql`(datetime('now'))`),
+export const posts = sqliteTable('posts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  title: text('title').notNull(),
+  body: text('body').notNull(),
+  views: integer('views'),
+  createdAt: text('created_at').default(sql`(datetime('now'))`),
 });
 ```
 
 Then auto-runs migration generation. Route scaffolding (`routes/api/posts/index.ts`) changes to use Drizzle syntax:
 
 ```ts
-import { db } from "void/db";
-import { posts } from "../../db/schema";
+import { db } from 'void/db';
+import { posts } from '../../db/schema';
 
 export const GET = defineHandler(async () => {
   return db.select().from(posts);
@@ -143,7 +143,7 @@ The current `parseMigrationSchema()` → `generateDbTypes()` pipeline is **remov
 Users who want explicit types:
 
 ```ts
-import { users } from "./db/schema";
+import { users } from './db/schema';
 type User = typeof users.$inferSelect;
 type NewUser = typeof users.$inferInsert;
 ```
@@ -219,8 +219,8 @@ The query builder API is dialect-agnostic. Only the schema definition and the dr
 When the schema uses `pg-core`, `void/db` switches to the Postgres driver:
 
 ```ts
-import { drizzle } from "drizzle-orm/node-postgres";
-import { env } from "cloudflare:workers";
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { env } from 'cloudflare:workers';
 
 export const db = drizzle(() => (env as any).HYPERDRIVE.connectionString);
 ```
@@ -301,8 +301,8 @@ Drizzle provides official companion packages that derive validation schemas dire
 - [`drizzle-typebox`](https://orm.drizzle.team/docs/typebox) — same API surface
 
 ```ts
-import { createInsertSchema } from "drizzle-valibot";
-import { posts } from "../../db/schema";
+import { createInsertSchema } from 'drizzle-valibot';
+import { posts } from '../../db/schema';
 
 const insertPostSchema = createInsertSchema(posts);
 
@@ -322,8 +322,8 @@ This eliminates the dual source of truth — the validation schema is always in 
 2. **Refinements on top of derived schemas.** Drizzle schemas only capture column types and nullability — not business rules like `minLength(1)`, `email()`, or `maxLength(255)`. Users need to layer refinements on top:
 
    ```ts
-   import { createInsertSchema } from "drizzle-valibot";
-   import * as v from "valibot";
+   import { createInsertSchema } from 'drizzle-valibot';
+   import * as v from 'valibot';
 
    const insertPostSchema = createInsertSchema(posts, {
      title: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),

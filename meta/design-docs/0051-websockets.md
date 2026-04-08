@@ -122,13 +122,13 @@ The default payload model is a discriminated JSON event union:
 
 ```ts
 type ClientEvent =
-  | { type: "chat.message"; text: string }
-  | { type: "chat.typing"; active: boolean };
+  | { type: 'chat.message'; text: string }
+  | { type: 'chat.typing'; active: boolean };
 
 type ServerEvent =
-  | { type: "chat.message"; id: string; userId: string; text: string }
-  | { type: "presence.joined"; userId: string; name: string }
-  | { type: "presence.left"; userId: string };
+  | { type: 'chat.message'; id: string; userId: string; text: string }
+  | { type: 'presence.joined'; userId: string; name: string }
+  | { type: 'presence.left'; userId: string };
 ```
 
 V1 should validate and type these event objects directly. It should not make users hand-roll `JSON.parse()` or invent their own wire format for common JSON cases.
@@ -158,34 +158,34 @@ This keeps auth ambient without over-promising full middleware reuse.
 
 ```ts
 // routes/chat/[room].ws.ts
-import * as v from "valibot";
-import { defineRoom } from "void/ws";
+import * as v from 'valibot';
+import { defineRoom } from 'void/ws';
 
-const ClientEvent = v.variant("type", [
+const ClientEvent = v.variant('type', [
   v.object({
-    type: v.literal("chat.message"),
+    type: v.literal('chat.message'),
     text: v.string(),
   }),
   v.object({
-    type: v.literal("chat.typing"),
+    type: v.literal('chat.typing'),
     active: v.boolean(),
   }),
 ]);
 
-const ServerEvent = v.variant("type", [
+const ServerEvent = v.variant('type', [
   v.object({
-    type: v.literal("chat.message"),
+    type: v.literal('chat.message'),
     id: v.string(),
     userId: v.string(),
     text: v.string(),
   }),
   v.object({
-    type: v.literal("presence.joined"),
+    type: v.literal('presence.joined'),
     userId: v.string(),
     name: v.string(),
   }),
   v.object({
-    type: v.literal("presence.left"),
+    type: v.literal('presence.left'),
     userId: v.string(),
   }),
 ]);
@@ -198,23 +198,23 @@ export default defineRoom({
 
   async onBeforeConnect(ctx) {
     if (!ctx.user) {
-      return new Response("Unauthorized", { status: 401 });
+      return new Response('Unauthorized', { status: 401 });
     }
   },
 
   async onConnect(ctx) {
     ctx.room.broadcast({
-      type: "presence.joined",
+      type: 'presence.joined',
       userId: ctx.user.id,
-      name: ctx.user.name ?? ctx.user.email ?? "anonymous",
+      name: ctx.user.name ?? ctx.user.email ?? 'anonymous',
     });
   },
 
   async onMessage(ctx, event) {
-    if (event.type === "chat.message") {
+    if (event.type === 'chat.message') {
       ctx.room.broadcast(
         {
-          type: "chat.message",
+          type: 'chat.message',
           id: crypto.randomUUID(),
           userId: ctx.user!.id,
           text: event.text,
@@ -227,7 +227,7 @@ export default defineRoom({
   async onClose(ctx) {
     if (!ctx.user) return;
     ctx.room.broadcast({
-      type: "presence.left",
+      type: 'presence.left',
       userId: ctx.user.id,
     });
   },
@@ -265,24 +265,24 @@ export default defineRoom({
 
 ```ts
 // routes/notifications.ws.ts
-import * as v from "valibot";
-import { defineWebSocket } from "void/ws";
+import * as v from 'valibot';
+import { defineWebSocket } from 'void/ws';
 
-const ClientEvent = v.variant("type", [
+const ClientEvent = v.variant('type', [
   v.object({
-    type: v.literal("notifications.ack"),
+    type: v.literal('notifications.ack'),
     id: v.string(),
   }),
 ]);
 
-const ServerEvent = v.variant("type", [
+const ServerEvent = v.variant('type', [
   v.object({
-    type: v.literal("notifications.item"),
+    type: v.literal('notifications.item'),
     id: v.string(),
     title: v.string(),
   }),
   v.object({
-    type: v.literal("notifications.error"),
+    type: v.literal('notifications.error'),
     message: v.string(),
   }),
 ]);
@@ -295,20 +295,20 @@ export default defineWebSocket({
 
   async onBeforeConnect(ctx) {
     if (!ctx.user) {
-      return new Response("Unauthorized", { status: 401 });
+      return new Response('Unauthorized', { status: 401 });
     }
   },
 
   async onConnect(ctx) {
     ctx.socket.send({
-      type: "notifications.item",
+      type: 'notifications.item',
       id: crypto.randomUUID(),
       title: `Connected as ${ctx.user!.id}`,
     });
   },
 
   async onMessage(ctx, event) {
-    if (event.type === "notifications.ack") {
+    if (event.type === 'notifications.ack') {
       // app-defined acknowledgment behavior
     }
   },
@@ -322,16 +322,16 @@ This API omits room helpers but keeps the same typed message contract and ambien
 The client should be framework-agnostic in v1 and should mirror the typed `fetch()` philosophy.
 
 ```ts
-import { connect } from "void/ws";
+import { connect } from 'void/ws';
 
-const socket = connect("/chat/:room", {
-  params: { room: "general" },
+const socket = connect('/chat/:room', {
+  params: { room: 'general' },
 });
 
-socket.send({ type: "chat.message", text: "hello" });
+socket.send({ type: 'chat.message', text: 'hello' });
 
-socket.on("message", (event) => {
-  if (event.type === "chat.message") {
+socket.on('message', (event) => {
+  if (event.type === 'chat.message') {
     console.log(event.text);
   }
 });
@@ -392,7 +392,7 @@ interface DeployManifest {
       pattern: string;
       filePath: string;
       className: string;
-      mode: "room" | "socket";
+      mode: 'room' | 'socket';
       hasAuthGate: boolean;
     }[];
     classes: string[];

@@ -1,4 +1,4 @@
-const CF_API_BASE = "https://api.cloudflare.com/client/v4/accounts";
+const CF_API_BASE = 'https://api.cloudflare.com/client/v4/accounts';
 
 export interface RemoteMigration {
   name: string;
@@ -33,7 +33,7 @@ export async function runRemoteMigrations(
 
   // Get already-applied migrations
   const appliedResult = await queryD1(accountId, apiToken, databaseId, {
-    sql: "SELECT name FROM _migrations",
+    sql: 'SELECT name FROM _migrations',
   });
   const applied = new Set(appliedResult.results.map((row) => row.name as string));
 
@@ -48,7 +48,7 @@ export async function runRemoteMigrations(
     // Execute migration SQL, then record in _migrations
     await queryD1(accountId, apiToken, databaseId, { sql: migration.sql });
     await queryD1(accountId, apiToken, databaseId, {
-      sql: "INSERT INTO _migrations (name, applied_at) VALUES (?, ?)",
+      sql: 'INSERT INTO _migrations (name, applied_at) VALUES (?, ?)',
       params: [migration.name, new Date().toISOString()],
     });
 
@@ -75,10 +75,10 @@ export async function queryD1(
 ): Promise<D1QueryResponse> {
   const url = `${CF_API_BASE}/${accountId}/d1/database/${databaseId}/query`;
   const response = await fetch(url, {
-    method: "POST",
+    method: 'POST',
     headers: {
       Authorization: `Bearer ${apiToken}`,
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify(query),
   });
@@ -90,7 +90,7 @@ export async function queryD1(
   };
 
   if (!json.success) {
-    const msg = json.errors.map((e) => e.message).join(", ");
+    const msg = json.errors.map((e) => e.message).join(', ');
     throw new Error(`D1 migration failed: ${msg}`);
   }
 

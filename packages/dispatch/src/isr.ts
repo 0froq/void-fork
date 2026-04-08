@@ -1,5 +1,5 @@
-import type { Env } from "./env";
-import { matchPattern } from "./headers";
+import type { Env } from './env';
+import { matchPattern } from './headers';
 
 export interface IsrCacheEntry {
   body: ReadableStream;
@@ -62,13 +62,13 @@ export function unpackIsrValue(
  */
 export function isrCacheKey(projectId: string, pathname: string): string {
   let normalized = pathname;
-  if (normalized === "/") {
-    normalized = "__index__";
+  if (normalized === '/') {
+    normalized = '__index__';
   } else {
     // Strip leading slash
-    normalized = normalized.startsWith("/") ? normalized.slice(1) : normalized;
+    normalized = normalized.startsWith('/') ? normalized.slice(1) : normalized;
     // Strip trailing slash
-    if (normalized.endsWith("/")) {
+    if (normalized.endsWith('/')) {
       normalized = normalized.slice(0, -1);
     }
   }
@@ -87,7 +87,7 @@ export async function readIsrCache(
   const key = isrCacheKey(projectId, pathname);
   const { value, metadata } = await env.ISR_CACHE.getWithMetadata<IsrCacheMetadata>(
     key,
-    "arrayBuffer",
+    'arrayBuffer',
   );
   if (!value || !metadata) return null;
 
@@ -155,7 +155,7 @@ export function isStale(entry: IsrCacheEntry): boolean {
  */
 export function isrCacheResponse(entry: IsrCacheEntry, stale: boolean): Response {
   const headers = new Headers(entry.headers);
-  headers.set("x-isr-cache", stale ? "STALE" : "HIT");
+  headers.set('x-isr-cache', stale ? 'STALE' : 'HIT');
 
   // Edge-cacheable: s-maxage controls CDN TTL based on remaining ISR freshness.
   // Browser always revalidates (max-age=0) so users see updates after edge expiry.
@@ -163,14 +163,14 @@ export function isrCacheResponse(entry: IsrCacheEntry, stale: boolean): Response
     // Stale: short edge TTL while background revalidation runs.
     // Cap at entry.ttl so short-TTL configs don't serve stale longer than their ISR window.
     const staleTtl = Math.min(10, entry.ttl);
-    headers.set("Cache-Control", `public, s-maxage=${staleTtl}, max-age=0, must-revalidate`);
+    headers.set('Cache-Control', `public, s-maxage=${staleTtl}, max-age=0, must-revalidate`);
   } else {
     const remainingSeconds = Math.max(
       0,
       Math.floor((entry.createdAt + entry.ttl * 1000 - Date.now()) / 1000),
     );
     headers.set(
-      "Cache-Control",
+      'Cache-Control',
       `public, s-maxage=${remainingSeconds}, max-age=0, must-revalidate`,
     );
   }
@@ -187,7 +187,7 @@ export function isrCacheResponse(entry: IsrCacheEntry, stale: boolean): Response
  * A value of 0 means "do not cache this response".
  */
 export function resolveRevalidateTtl(response: Response, defaultTtl: number): number {
-  const header = response.headers.get("x-revalidate");
+  const header = response.headers.get('x-revalidate');
   if (header === null) return defaultTtl;
 
   const value = parseInt(header, 10);
@@ -200,7 +200,7 @@ export function resolveRevalidateTtl(response: Response, defaultTtl: number): nu
  * Pages protocol navigation (X-VoidPages) now uses a separate JSON edge cache.
  */
 export function shouldBypassIsr(request: Request): boolean {
-  return request.headers.has("Cookie") || request.headers.has("Authorization");
+  return request.headers.has('Cookie') || request.headers.has('Authorization');
 }
 
 /**
@@ -213,7 +213,7 @@ export function resolvePathTtl(
   pathname: string,
 ): number {
   if (revalidate == null) return 0;
-  if (typeof revalidate === "number") return revalidate;
+  if (typeof revalidate === 'number') return revalidate;
   for (const [pattern, ttl] of Object.entries(revalidate)) {
     if (matchPattern(pattern, pathname)) return ttl;
   }
@@ -241,7 +241,7 @@ export function extractPageDataFromHtml(html: string): string | null {
 /**
  * Extract response headers as a plain object, skipping ISR-managed headers.
  */
-const SKIP_HEADERS = new Set(["cache-control", "x-isr-cache", "x-void-page-data", "set-cookie"]);
+const SKIP_HEADERS = new Set(['cache-control', 'x-isr-cache', 'x-void-page-data', 'set-cookie']);
 
 export function serializeHeaders(response: Response): Record<string, string> {
   const result: Record<string, string> = {};
@@ -261,7 +261,7 @@ export function serializeHeaders(response: Response): Record<string, string> {
  */
 export function isrEdgeCacheKey(request: Request, pathname: string): Request {
   const url = new URL(request.url);
-  return new Request(`${url.origin}${pathname}`, { method: "GET" });
+  return new Request(`${url.origin}${pathname}`, { method: 'GET' });
 }
 
 /**
@@ -270,5 +270,5 @@ export function isrEdgeCacheKey(request: Request, pathname: string): Request {
  */
 export function isrEdgeCacheKeyJson(request: Request, pathname: string): Request {
   const url = new URL(request.url);
-  return new Request(`${url.origin}${pathname}?__void=json`, { method: "GET" });
+  return new Request(`${url.origin}${pathname}?__void=json`, { method: 'GET' });
 }

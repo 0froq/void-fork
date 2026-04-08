@@ -1,10 +1,10 @@
 export type AllowlistEntry = {
-  type: "github" | "email";
+  type: 'github' | 'email';
   pattern: string;
   note?: string;
 };
 
-const KV_KEY = "signup:allowlist";
+const KV_KEY = 'signup:allowlist';
 
 export async function getAllowlist(kv: KVNamespace): Promise<AllowlistEntry[]> {
   const raw = await kv.get(KV_KEY);
@@ -28,12 +28,12 @@ export function isSignupAllowed(
   if (entries.length === 0) return false;
 
   return entries.some((entry) => {
-    if (entry.type === "github") {
-      return provider === "github" && entry.pattern.toLowerCase() === login.toLowerCase();
+    if (entry.type === 'github') {
+      return provider === 'github' && entry.pattern.toLowerCase() === login.toLowerCase();
     }
     // email entry — matches any provider if they have a matching email
     if (!email) return false;
-    if (entry.pattern.startsWith("*@")) {
+    if (entry.pattern.startsWith('*@')) {
       const domain = entry.pattern.slice(1).toLowerCase();
       return email.toLowerCase().endsWith(domain);
     }

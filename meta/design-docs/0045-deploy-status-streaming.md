@@ -67,19 +67,19 @@ Discriminated union, defined in both `packages/api/src/types.ts` and `framework/
 
 ```ts
 type DeployEvent =
-  | { event: "start"; deploymentId: string }
-  | { event: "asset_upload"; total: number; new: number; cached: number }
-  | { event: "asset_upload_done" }
-  | { event: "provisioning"; bindings: string[] }
-  | { event: "provisioning_done" }
-  | { event: "migration"; name: string; index: number; total: number }
-  | { event: "worker_upload"; modules: number }
-  | { event: "worker_upload_done" }
-  | { event: "queue_setup"; queues: string[] }
-  | { event: "prerender"; pages: number }
-  | { event: "prerender_done" }
+  | { event: 'start'; deploymentId: string }
+  | { event: 'asset_upload'; total: number; new: number; cached: number }
+  | { event: 'asset_upload_done' }
+  | { event: 'provisioning'; bindings: string[] }
+  | { event: 'provisioning_done' }
+  | { event: 'migration'; name: string; index: number; total: number }
+  | { event: 'worker_upload'; modules: number }
+  | { event: 'worker_upload_done' }
+  | { event: 'queue_setup'; queues: string[] }
+  | { event: 'prerender'; pages: number }
+  | { event: 'prerender_done' }
   | {
-      event: "done";
+      event: 'done';
       deployment: string;
       url: string;
       urls: string[];
@@ -87,7 +87,7 @@ type DeployEvent =
       workers: number;
       migrations?: number;
     }
-  | { event: "error"; message: string; step: string };
+  | { event: 'error'; message: string; step: string };
 ```
 
 The `step` field on `error` matches event name prefixes: `"asset_upload"`, `"provisioning"`, `"migration"`, `"worker_upload"`, `"prerender"`, `"routing"`.
@@ -135,7 +135,7 @@ An async generator reads NDJSON lines from the fetch response body:
 async function* readNDJSON(response: Response): AsyncGenerator<DeployEvent> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
-  let buffer = "";
+  let buffer = '';
 
   while (true) {
     const { done, value } = await reader.read();
@@ -143,7 +143,7 @@ async function* readNDJSON(response: Response): AsyncGenerator<DeployEvent> {
     buffer += decoder.decode(value, { stream: true });
 
     let newlineIdx;
-    while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+    while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
       const line = buffer.slice(0, newlineIdx);
       buffer = buffer.slice(newlineIdx + 1);
       if (line.trim()) yield JSON.parse(line);
@@ -157,29 +157,29 @@ The deploy flow updates the `@clack/prompts` spinner message per event:
 ```ts
 for await (const event of readNDJSON(response)) {
   switch (event.event) {
-    case "start":
-      s.message("Deploying...");
+    case 'start':
+      s.message('Deploying...');
       break;
-    case "asset_upload":
+    case 'asset_upload':
       s.message(`Uploading assets (${event.new} new, ${event.cached} cached)`);
       break;
-    case "provisioning":
-      s.message(`Provisioning ${event.bindings.join(", ")}`);
+    case 'provisioning':
+      s.message(`Provisioning ${event.bindings.join(', ')}`);
       break;
-    case "migration":
+    case 'migration':
       s.message(`Running migration ${event.index}/${event.total}: ${event.name}`);
       break;
-    case "worker_upload":
-      s.message("Uploading worker...");
+    case 'worker_upload':
+      s.message('Uploading worker...');
       break;
-    case "prerender":
+    case 'prerender':
       s.message(`Prerendering ${event.pages} pages...`);
       break;
-    case "done":
-      s.stop("Deployed!");
+    case 'done':
+      s.stop('Deployed!');
       break;
-    case "error":
-      s.stop("Deploy failed");
+    case 'error':
+      s.stop('Deploy failed');
       break;
   }
 }

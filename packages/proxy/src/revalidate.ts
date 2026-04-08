@@ -1,5 +1,5 @@
-import { Hono } from "hono";
-import type { ProxyEnv } from "./types";
+import { Hono } from 'hono';
+import type { ProxyEnv } from './types';
 
 const app = new Hono<ProxyEnv>();
 
@@ -9,15 +9,15 @@ const app = new Hono<ProxyEnv>();
  * The auth middleware has already verified the HMAC token and set projectId.
  * We forward the token so the API can verify it independently.
  */
-app.post("/", async (c) => {
-  const projectId = c.get("projectId");
-  const body = c.get("body");
+app.post('/', async (c) => {
+  const projectId = c.get('projectId');
+  const body = c.get('body');
 
   const response = await c.env.API.fetch(`https://api/internal/revalidate/${projectId}`, {
-    method: "POST",
+    method: 'POST',
     headers: {
-      "content-type": "application/json",
-      "x-void-internal": body.aiToken as string,
+      'content-type': 'application/json',
+      'x-void-internal': body.aiToken as string,
     },
     body: JSON.stringify({
       paths: body.paths,

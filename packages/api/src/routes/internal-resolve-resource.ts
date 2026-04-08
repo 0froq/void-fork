@@ -1,7 +1,7 @@
-import { Hono } from "hono";
-import type { ApiEnv } from "../env";
-import { getResourceByBinding } from "../db";
-import { hmacVerifyState } from "../auth/hmac";
+import { Hono } from 'hono';
+import { hmacVerifyState } from '../auth/hmac';
+import { getResourceByBinding } from '../db';
+import type { ApiEnv } from '../env';
 
 const app = new Hono<ApiEnv>();
 
@@ -13,26 +13,26 @@ const app = new Hono<ApiEnv>();
  * Body: { "type": "d1" | "kv" | "r2", "binding": "DB" }
  * Returns: { "cf_id": "..." } or 404
  */
-app.post("/:projectId", async (c) => {
-  const projectId = c.req.param("projectId");
+app.post('/:projectId', async (c) => {
+  const projectId = c.req.param('projectId');
 
-  const token = c.req.header("x-void-internal");
+  const token = c.req.header('x-void-internal');
   if (!token) {
-    return c.json({ error: "missing internal auth" }, 401);
+    return c.json({ error: 'missing internal auth' }, 401);
   }
   if (!(await hmacVerifyState(projectId, token, c.env.JWT_SECRET))) {
-    return c.json({ error: "invalid internal auth" }, 403);
+    return c.json({ error: 'invalid internal auth' }, 403);
   }
 
   const { type, binding } = await c.req.json<{
-    type: "d1" | "kv" | "r2" | "queue";
+    type: 'd1' | 'kv' | 'r2' | 'queue';
     binding: string;
   }>();
   if (!type || !binding) {
-    return c.json({ error: "type and binding required" }, 400);
+    return c.json({ error: 'type and binding required' }, 400);
   }
 
-  const resource = await getResourceByBinding(c.get("db"), projectId, type, binding);
+  const resource = await getResourceByBinding(c.get('db'), projectId, type, binding);
   if (!resource) {
     return c.json({ error: `unknown binding "${binding}"` }, 404);
   }

@@ -192,16 +192,16 @@ When `output: "static"`:
 The Miniflare instance needs to mirror the dev environment:
 
 ```ts
-import { Miniflare } from "miniflare";
+import { Miniflare } from 'miniflare';
 
 const mf = new Miniflare({
-  modules: [{ type: "ESModule", path: workerPath }],
+  modules: [{ type: 'ESModule', path: workerPath }],
   d1Databases: { DB: { id: databaseId } },
   kvNamespaces: { KV: { id: kvId } },
   r2Buckets: { STORAGE: { id: storageId } },
-  d1Persist: ".void",
-  kvPersist: ".void",
-  r2Persist: ".void",
+  d1Persist: '.void',
+  kvPersist: '.void',
+  r2Persist: '.void',
 });
 ```
 

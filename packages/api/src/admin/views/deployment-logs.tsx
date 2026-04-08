@@ -8,9 +8,9 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
       {/* Filter bar */}
       <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center">
         <label>
-          Time:{" "}
+          Time:{' '}
           <select id="log-since">
-            {["1h", "6h", "24h", "7d"].map((v) => (
+            {['1h', '6h', '24h', '7d'].map((v) => (
               <option key={v} value={v}>
                 {v}
               </option>
@@ -21,7 +21,7 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
           Load
         </button>
         <label>
-          Count:{" "}
+          Count:{' '}
           <select id="log-count">
             {[100, 200, 300, 400, 500].map((v) => (
               <option key={v} value={v}>

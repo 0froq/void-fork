@@ -37,41 +37,41 @@ Two deploy paths will coexist:
 **Edit `packages/api/src/schema.ts`** — add two new tables following existing patterns:
 
 ```typescript
-import { index, pgTable, text, timestamp, unique, uniqueIndex } from "drizzle-orm/pg-core";
+import { index, pgTable, text, timestamp, unique, uniqueIndex } from 'drizzle-orm/pg-core';
 
 // ---------------------------------------------------------------------------
 // builds
 // ---------------------------------------------------------------------------
 export const builds = pgTable(
-  "builds",
+  'builds',
   {
-    id: text("id").primaryKey(),
-    project_id: text("project_id")
+    id: text('id').primaryKey(),
+    project_id: text('project_id')
       .notNull()
       .references(() => projects.id),
-    user_id: text("user_id")
+    user_id: text('user_id')
       .notNull()
       .references(() => users.id),
-    status: text("status")
+    status: text('status')
       .notNull()
-      .default("queued")
+      .default('queued')
       .$type<
-        "queued" | "starting" | "building" | "deploying" | "complete" | "failed" | "cancelled"
+        'queued' | 'starting' | 'building' | 'deploying' | 'complete' | 'failed' | 'cancelled'
       >(),
-    commit_sha: text("commit_sha").notNull(),
-    branch: text("branch").notNull(),
-    deployment_id: text("deployment_id").references(() => deployments.id),
-    error: text("error"),
-    exit_code: text("exit_code"),
-    instance_type: text("instance_type"),
-    started_at: timestamp("started_at", { mode: "string" }),
-    completed_at: timestamp("completed_at", { mode: "string" }),
-    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+    commit_sha: text('commit_sha').notNull(),
+    branch: text('branch').notNull(),
+    deployment_id: text('deployment_id').references(() => deployments.id),
+    error: text('error'),
+    exit_code: text('exit_code'),
+    instance_type: text('instance_type'),
+    started_at: timestamp('started_at', { mode: 'string' }),
+    completed_at: timestamp('completed_at', { mode: 'string' }),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
   (t) => [
-    index("idx_builds_project").on(t.project_id, t.created_at),
-    index("idx_builds_status").on(t.status),
-    index("idx_builds_user_status").on(t.user_id, t.status),
+    index('idx_builds_project').on(t.project_id, t.created_at),
+    index('idx_builds_status').on(t.status),
+    index('idx_builds_user_status').on(t.user_id, t.status),
   ],
 );
 
@@ -79,19 +79,19 @@ export const builds = pgTable(
 // github_connections
 // ---------------------------------------------------------------------------
 export const githubConnections = pgTable(
-  "github_connections",
+  'github_connections',
   {
-    id: text("id").primaryKey(),
-    project_id: text("project_id")
+    id: text('id').primaryKey(),
+    project_id: text('project_id')
       .notNull()
       .unique()
       .references(() => projects.id),
-    installation_id: text("installation_id").notNull(),
-    repo_full_name: text("repo_full_name").notNull(),
-    branch: text("branch").notNull().default("main"),
-    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+    installation_id: text('installation_id').notNull(),
+    repo_full_name: text('repo_full_name').notNull(),
+    branch: text('branch').notNull().default('main'),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
-  (t) => [index("idx_github_repo").on(t.installation_id, t.repo_full_name)],
+  (t) => [index('idx_github_repo').on(t.installation_id, t.repo_full_name)],
 );
 ```
 
@@ -102,7 +102,7 @@ Then run `pnpm db:generate` to auto-generate the migration SQL. This is a safe m
 **Edit `packages/api/src/types.ts`** — add inferred types (following existing pattern):
 
 ```typescript
-import type { builds, githubConnections } from "./schema";
+import type { builds, githubConnections } from './schema';
 
 export type Build = InferSelectModel<typeof builds>;
 export type GitHubConnection = InferSelectModel<typeof githubConnections>;
@@ -113,8 +113,8 @@ export type GitHubConnection = InferSelectModel<typeof githubConnections>;
 **Edit `packages/api/src/db.ts`** — add build + github_connection CRUD using Drizzle query builder (following existing patterns like `createDeployment`, `getProjectDeployments`, etc.):
 
 ```typescript
-import { builds, githubConnections } from "./schema";
-import type { Build, GitHubConnection } from "./types";
+import { builds, githubConnections } from './schema';
+import type { Build, GitHubConnection } from './types';
 
 // --- Builds ---
 
@@ -125,7 +125,7 @@ export async function createBuild(
   commitSha: string,
   branch: string,
 ): Promise<Build> {
-  const id = generateId("bld");
+  const id = generateId('bld');
   const [row] = await db
     .insert(builds)
     .values({ id, project_id: projectId, user_id: userId, commit_sha: commitSha, branch })
@@ -150,7 +150,7 @@ export async function getProjectBuilds(db: Db, projectId: string, limit = 10): P
 export async function updateBuildStatus(
   db: Db,
   id: string,
-  status: Build["status"],
+  status: Build['status'],
   opts?: {
     error?: string;
     exitCode?: string;
@@ -183,7 +183,7 @@ export async function countUserActiveBuilds(db: Db, userId: string): Promise<num
     .where(
       and(
         eq(builds.user_id, userId),
-        inArray(builds.status, ["queued", "starting", "building", "deploying"]),
+        inArray(builds.status, ['queued', 'starting', 'building', 'deploying']),
       ),
     );
   return result?.count ?? 0;
@@ -193,7 +193,7 @@ export async function getQueuedBuilds(db: Db, limit = 50): Promise<Build[]> {
   return db
     .select()
     .from(builds)
-    .where(eq(builds.status, "queued"))
+    .where(eq(builds.status, 'queued'))
     .orderBy(asc(builds.created_at))
     .limit(limit);
 }
@@ -216,7 +216,7 @@ export async function createGitHubConnection(
   repoFullName: string,
   branch: string,
 ): Promise<GitHubConnection> {
-  const id = generateId("ghc");
+  const id = generateId('ghc');
   const [row] = await db
     .insert(githubConnections)
     .values({
@@ -327,13 +327,13 @@ Add helper:
 ```typescript
 export function getBuildInstanceType(plan: PlanId): string {
   const map: Record<PlanId, string> = {
-    free: "standard-1",
-    solo: "standard-1",
-    pro: "standard-2",
-    sponsored: "standard-3",
-    custom: "standard-3",
+    free: 'standard-1',
+    solo: 'standard-1',
+    pro: 'standard-2',
+    sponsored: 'standard-3',
+    custom: 'standard-3',
   };
-  return map[plan] ?? "standard-1";
+  return map[plan] ?? 'standard-1';
 }
 ```
 
@@ -392,7 +392,7 @@ Note: The deploy pipeline now includes asset preflight dedup, ISR, prerendering,
 **Mount in `index.ts`:**
 
 ```typescript
-app.route("/webhooks", webhooks); // No auth middleware — uses webhook signature verification
+app.route('/webhooks', webhooks); // No auth middleware — uses webhook signature verification
 ```
 
 ### 4b. Build management routes
@@ -417,10 +417,10 @@ All routes use `authMiddleware` and ownership checks.
 **Mount in `index.ts`:**
 
 ```typescript
-app.use("/projects/*", authMiddleware);
-app.route("/projects", builds);
+app.use('/projects/*', authMiddleware);
+app.route('/projects', builds);
 // Internal artifacts endpoint (no user auth — build token auth)
-app.post("/builds/:buildId/artifacts", buildArtifactsHandler);
+app.post('/builds/:buildId/artifacts', buildArtifactsHandler);
 ```
 
 ### 4c. GitHub connection management routes
@@ -457,19 +457,19 @@ GITHUB_WEBHOOK_SECRET?: string;
 **Create `packages/api/src/durable-objects/build-scheduler.ts`:**
 
 ```typescript
-import { DurableObject } from "cloudflare:workers";
-import type { ApiEnv } from "../env";
-import { createDb } from "../db";
+import { DurableObject } from 'cloudflare:workers';
+import type { ApiEnv } from '../env';
+import { createDb } from '../db';
 
-export class BuildScheduler extends DurableObject<ApiEnv["Bindings"]> {
-  constructor(ctx: DurableObjectState, env: ApiEnv["Bindings"]) {
+export class BuildScheduler extends DurableObject<ApiEnv['Bindings']> {
+  constructor(ctx: DurableObjectState, env: ApiEnv['Bindings']) {
     super(ctx, env);
   }
 
   async fetch(request: Request): Promise<Response> {
     // POST /poke — wake up and reschedule alarm
     await this.ctx.storage.setAlarm(Date.now() + 100); // immediate tick
-    return new Response("ok");
+    return new Response('ok');
   }
 
   async alarm() {
@@ -504,11 +504,11 @@ The scheduler only reschedules its alarm when there are queued builds. When the 
 This is the most complex component. It extends `Container` from `@cloudflare/containers`.
 
 ```typescript
-import { Container } from "@cloudflare/containers";
-import type { ApiEnv } from "../env";
-import { createDb, updateBuildStatus } from "../db";
+import { Container } from '@cloudflare/containers';
+import type { ApiEnv } from '../env';
+import { createDb, updateBuildStatus } from '../db';
 
-export class BuildManager extends Container<ApiEnv["Bindings"]> {
+export class BuildManager extends Container<ApiEnv['Bindings']> {
   defaultPort = 4000;
   enableInternet = true;
 
@@ -545,21 +545,21 @@ export class BuildManager extends Container<ApiEnv["Bindings"]> {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/logs" && request.method === "POST") {
+    if (url.pathname === '/logs' && request.method === 'POST') {
       // Receive batched log lines from container
       // Store in DO SQLite, broadcast to WebSocket clients
     }
 
-    if (url.pathname === "/status" && request.method === "POST") {
+    if (url.pathname === '/status' && request.method === 'POST') {
       // Receive status updates from container (building → deploying)
     }
 
-    if (request.headers.get("Upgrade") === "websocket") {
+    if (request.headers.get('Upgrade') === 'websocket') {
       // Accept WebSocket for log streaming
       // Send buffered logs from DO SQLite, then live-stream
     }
 
-    return new Response("not found", { status: 404 });
+    return new Response('not found', { status: 404 });
   }
 }
 ```
@@ -629,8 +629,8 @@ Mirror all changes in the `env.staging` section with equivalent config.
 **Update exports in `packages/api/src/index.ts`:**
 
 ```typescript
-export { BuildScheduler } from "./durable-objects/build-scheduler";
-export { BuildManager } from "./durable-objects/build-manager";
+export { BuildScheduler } from './durable-objects/build-scheduler';
+export { BuildManager } from './durable-objects/build-manager';
 ```
 
 Add new secrets (via `wrangler secret put`):
@@ -767,8 +767,8 @@ Admin builds view for operational visibility, following existing Hono JSX patter
 **Mount in `src/index.ts`:**
 
 ```typescript
-import adminBuilds from "./admin/routes/builds";
-app.route("/admin/builds", adminBuilds);
+import adminBuilds from './admin/routes/builds';
+app.route('/admin/builds', adminBuilds);
 ```
 
 ### Verify

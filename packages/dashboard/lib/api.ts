@@ -1,6 +1,6 @@
-import { hc, type InferResponseType } from "hono/client";
-import type { ApiRoutes } from "@voidcloud/api/api";
-import type { Context } from "hono";
+import type { ApiRoutes } from '@voidcloud/api/api';
+import type { Context } from 'hono';
+import { hc, type InferResponseType } from 'hono/client';
 
 export type Client = ReturnType<typeof hc<ApiRoutes>>;
 
@@ -10,7 +10,7 @@ export type API<K extends keyof B, B = Client> = InferResponseType<
   200
 >;
 
-const API_URL = "https://api.void.cloud";
+const API_URL = 'https://api.void.cloud';
 
 /** Use service binding when available (production), fall back to HTTP (local dev). */
 function getApiFetch(c: Context): typeof fetch {
@@ -19,7 +19,7 @@ function getApiFetch(c: Context): typeof fetch {
 }
 
 export function createClient(c: Context) {
-  const token = c.get("token") as string | undefined;
+  const token = c.get('token') as string | undefined;
   const baseUrl = (c.env as Record<string, string>).API_URL ?? API_URL;
   return hc<ApiRoutes>(baseUrl, {
     fetch: getApiFetch(c),
@@ -37,7 +37,7 @@ export class ApiError extends Error {
 }
 
 export async function api(c: Context, path: string, options?: RequestInit): Promise<Response> {
-  const token = c.get("token") as string | undefined;
+  const token = c.get('token') as string | undefined;
   const baseUrl = (c.env as Record<string, string>).API_URL ?? API_URL;
   const f = getApiFetch(c);
 
@@ -46,7 +46,7 @@ export async function api(c: Context, path: string, options?: RequestInit): Prom
     headers: {
       ...options?.headers,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     },
   });
 

@@ -39,7 +39,7 @@ export interface VoidVueOptions {
 ### Programmatic Navigation
 
 ```ts
-router.visit("/about", { viewTransition: true });
+router.visit('/about', { viewTransition: true });
 ```
 
 Resolution order: **per-call option > per-link prop > global config > false**.

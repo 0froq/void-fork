@@ -46,11 +46,11 @@ What IS included in framework mode:
 Framework server functions use `cloudflare:workers` for binding access:
 
 ```ts
-import { env } from "cloudflare:workers";
+import { env } from 'cloudflare:workers';
 
 async function getUsers() {
-  "use server";
-  const result = await env.DB.prepare("SELECT * FROM users").all();
+  'use server';
+  const result = await env.DB.prepare('SELECT * FROM users').all();
   return result.results;
 }
 ```
@@ -72,10 +72,10 @@ The binding inference AST walker detects `env.DB`, `env.KV`, `env.STORAGE` from 
 ## Plugin Composition
 
 ```ts
-import { defineConfig } from "vite";
-import { tanstackStart } from "@tanstack/react-start/plugin";
-import react from "@vitejs/plugin-react";
-import { voidPlugin } from "void";
+import { defineConfig } from 'vite';
+import { tanstackStart } from '@tanstack/react-start/plugin';
+import react from '@vitejs/plugin-react';
+import { voidPlugin } from 'void';
 
 export default defineConfig({
   plugins: [tanstackStart(), react(), voidPlugin()],

@@ -112,7 +112,7 @@ If a user never needs those things, they should not need an `auth.ts` file at al
 Existing server-side ergonomics stay intact for Void apps:
 
 ```ts
-import { requireAuth } from "void/auth";
+import { requireAuth } from 'void/auth';
 
 export const GET = defineHandler((c) => {
   const user = requireAuth(c);
@@ -133,7 +133,7 @@ These are convenience wrappers over Better Auth-backed request state, not a sepa
 The primary client UX stays:
 
 ```ts
-import { auth } from "void/client";
+import { auth } from 'void/client';
 ```
 
 `void/client` becomes a virtual module that wires Better Auth's client under the hood.
@@ -201,8 +201,8 @@ The default config should be good enough for the common case without additional 
 Preferred shape:
 
 ```ts
-import { defineAuth } from "void/auth";
-import { username } from "better-auth/plugins";
+import { defineAuth } from 'void/auth';
+import { username } from 'better-auth/plugins';
 
 export default defineAuth(({ defaults, env }) => ({
   ...defaults,
@@ -228,15 +228,15 @@ For Void apps, the generated Hono app should:
 Pseudo-shape:
 
 ```ts
-app.use("*", async (c, next) => {
+app.use('*', async (c, next) => {
   const auth = createVoidAuth(c.env);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  c.set("session", session?.session ?? null);
-  c.set("user", session?.user ?? null);
+  c.set('session', session?.session ?? null);
+  c.set('user', session?.user ?? null);
   await authContext.run({ session: session?.session ?? null, user: session?.user ?? null }, next);
 });
 
-app.on(["GET", "POST", "OPTIONS"], "/api/auth/*", (c) => {
+app.on(['GET', 'POST', 'OPTIONS'], '/api/auth/*', (c) => {
   const auth = createVoidAuth(c.env);
   return auth.handler(c.req.raw);
 });
@@ -317,8 +317,8 @@ That means:
 Example shape:
 
 ```ts
-import { defineAuth } from "void/auth";
-import { sendEmail } from "~/lib/email";
+import { defineAuth } from 'void/auth';
+import { sendEmail } from '~/lib/email';
 
 export default defineAuth(({ defaults }) => ({
   ...defaults,
@@ -327,7 +327,7 @@ export default defineAuth(({ defaults }) => ({
     sendVerificationEmail: async ({ user, url }) => {
       await sendEmail({
         to: user.email,
-        subject: "Verify your email",
+        subject: 'Verify your email',
         html: `<a href="${url}">Verify email</a>`,
       });
     },
@@ -337,7 +337,7 @@ export default defineAuth(({ defaults }) => ({
     sendResetPassword: async ({ user, url }) => {
       await sendEmail({
         to: user.email,
-        subject: "Reset your password",
+        subject: 'Reset your password',
         html: `<a href="${url}">Reset password</a>`,
       });
     },

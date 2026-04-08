@@ -1,4 +1,4 @@
-import type { Child } from "hono/jsx";
+import type { Child } from 'hono/jsx';
 
 export function Layout({
   title,
@@ -36,10 +36,10 @@ export function Layout({
         <div style="max-width: 1100px; margin: 0 auto; padding: 20px; padding-bottom: 60px">
           <nav style="display: flex; justify-content: space-between; padding-bottom: 10px; margin-bottom: 20px; border-bottom: 1px solid #ccc">
             <span>
-              <strong>Void Admin</strong> &mdash; <a href="/admin/">Dashboard</a> |{" "}
-              <a href="/admin/users">Users</a> | <a href="/admin/projects">Projects</a> |{" "}
-              <a href="/admin/deployments">Deployments</a> |{" "}
-              <a href="/admin/signup-control">Signup</a> |{" "}
+              <strong>Void Admin</strong> &mdash; <a href="/admin/">Dashboard</a> |{' '}
+              <a href="/admin/users">Users</a> | <a href="/admin/projects">Projects</a> |{' '}
+              <a href="/admin/deployments">Deployments</a> |{' '}
+              <a href="/admin/signup-control">Signup</a> |{' '}
               <a href="/admin/invitations">Invitations</a> | <a href="/admin/platform">Platform</a>
             </span>
             <span>

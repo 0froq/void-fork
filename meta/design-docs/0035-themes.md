@@ -73,8 +73,8 @@ For partial overrides, theme layouts expose named slots. Users wrap the theme la
 ```vue
 <!-- pages/layout.vue — override just the sidebar -->
 <script setup>
-import ThemeLayout from "void-theme-docs/layouts/layout.vue";
-import MySidebar from "../components/MySidebar.vue";
+import ThemeLayout from 'void-theme-docs/layouts/layout.vue';
+import MySidebar from '../components/MySidebar.vue';
 </script>
 
 <template>
@@ -102,8 +102,8 @@ Themes expose CSS custom properties. Users override them in their own CSS:
 Themes can export composables for runtime utilities (sidebar state, search, etc.):
 
 ```ts
-import { useSidebar } from "void-theme-docs/composables/useSidebar";
-import { useThemeConfig } from "void-theme-docs/composables/useThemeConfig";
+import { useSidebar } from 'void-theme-docs/composables/useSidebar';
+import { useThemeConfig } from 'void-theme-docs/composables/useThemeConfig';
 ```
 
 ---
@@ -116,22 +116,22 @@ A theme's entry point is a default export created with `defineTheme()`:
 
 ```ts
 // void-theme-docs/theme.ts
-import { defineTheme } from "void";
+import { defineTheme } from 'void';
 
 export default defineTheme({
   // Required: which framework adapter this theme targets
-  adapter: "vue", // "vue" | "react" | "svelte" | "solid"
+  adapter: 'vue', // "vue" | "react" | "svelte" | "solid"
 
   // Default void.json values — user's config wins on conflict (deep merge)
   defaults: {
-    output: "static",
+    output: 'static',
   },
 
   // Optional: validate user-provided theme options at build time
   options: {
-    logo: { type: "string", optional: true },
-    nav: { type: "array", optional: true },
-    sidebar: { type: "object", optional: true },
+    logo: { type: 'string', optional: true },
+    nav: { type: 'array', optional: true },
+    sidebar: { type: 'object', optional: true },
   },
 
   // Optional Vite plugins the theme needs
@@ -219,7 +219,7 @@ Theme authors ship a typed composable:
 
 ```ts
 // composables/useThemeConfig.ts
-import { inject } from "@void/vue";
+import { inject } from '@void/vue';
 
 interface DocsThemeConfig {
   logo?: string;
@@ -228,7 +228,7 @@ interface DocsThemeConfig {
 }
 
 export function useThemeConfig(): DocsThemeConfig {
-  return inject<DocsThemeConfig>("void-theme-options", {});
+  return inject<DocsThemeConfig>('void-theme-options', {});
 }
 ```
 
@@ -236,7 +236,7 @@ Theme layouts and components import this composable to read config:
 
 ```vue
 <script setup>
-import { useThemeConfig } from "../composables/useThemeConfig";
+import { useThemeConfig } from '../composables/useThemeConfig';
 const config = useThemeConfig();
 </script>
 ```
@@ -254,13 +254,13 @@ Themes ship two CSS files:
   --void-docs-primary: #5b7ee5;
   --void-docs-sidebar-width: 280px;
   --void-docs-font-body: system-ui, sans-serif;
-  --void-docs-font-code: "Fira Code", monospace;
+  --void-docs-font-code: 'Fira Code', monospace;
 }
 ```
 
 ```css
 /* styles/theme.css */
-@import "./tokens.css";
+@import './tokens.css';
 
 .docs-layout {
   /* uses var(--void-docs-*) */

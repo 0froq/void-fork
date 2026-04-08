@@ -10,7 +10,7 @@
 Islands mode adds selective hydration to Vite Cloud's pages routing. Pages opt in via a `.island.tsx` / `.island.vue` file suffix. Components within island pages are server-only by default — zero JavaScript shipped. Individual components opt into client-side hydration via import attributes:
 
 ```tsx
-import Counter from "../components/Counter" with { island: "load" };
+import Counter from '../components/Counter' with { island: 'load' };
 ```
 
 The server-side story is completely unchanged: same `.server.ts` files, same `defineHandler`, same loaders, same actions, same middleware, same layouts, same edge caching. Islands is purely a client-side hydration strategy.
@@ -68,10 +68,10 @@ Inside an `.island` page, all components are server-only by default. To hydrate 
 
 ```tsx
 // pages/index.island.tsx
-import Counter from "../components/Counter" with { island: "load" };
-import NewsletterForm from "../components/NewsletterForm" with { island: "visible" };
-import PricingCalc from "../components/PricingCalc" with { island: "idle" };
-import MobileNav from "../components/MobileNav" with { island: "media:(max-width: 768px)" };
+import Counter from '../components/Counter' with { island: 'load' };
+import NewsletterForm from '../components/NewsletterForm' with { island: 'visible' };
+import PricingCalc from '../components/PricingCalc' with { island: 'idle' };
+import MobileNav from '../components/MobileNav' with { island: 'media:(max-width: 768px)' };
 
 export default function Home({ posts, stats }: Props) {
   return (
@@ -117,8 +117,8 @@ Identical syntax in `<script setup>`:
 ```vue
 <!-- pages/index.island.vue -->
 <script setup lang="ts">
-import Counter from "../components/Counter.vue" with { island: "load" };
-import NewsletterForm from "../components/NewsletterForm.vue" with { island: "visible" };
+import Counter from '../components/Counter.vue' with { island: 'load' };
+import NewsletterForm from '../components/NewsletterForm.vue' with { island: 'visible' };
 
 defineProps<{ posts: Post[]; stats: Stats }>();
 </script>
@@ -140,8 +140,8 @@ defineProps<{ posts: Post[]; stats: Stats }>();
 Import attributes are per-import. To use the same component with different hydration strategies on the same page (rare), use aliased imports:
 
 ```tsx
-import Counter from "../components/Counter" with { island: "load" };
-import CounterLazy from "../components/Counter" with { island: "visible" };
+import Counter from '../components/Counter' with { island: 'load' };
+import CounterLazy from '../components/Counter' with { island: 'visible' };
 ```
 
 ---
@@ -154,8 +154,8 @@ Island pages use the exact same `.server.ts` convention as regular pages. The se
 
 ```ts
 // pages/blog/[slug].server.ts
-import { defineHandler } from "vite-cloud";
-import { db } from "vite-cloud/db";
+import { defineHandler } from 'vite-cloud';
+import { db } from 'vite-cloud/db';
 
 export interface Props {
   post: { title: string; body: string; publishedAt: string };
@@ -163,10 +163,10 @@ export interface Props {
 }
 
 export const loader = defineHandler<Props>(async (c) => {
-  const slug = c.req.param("slug");
-  const post = await db.get("posts", { where: { slug } });
+  const slug = c.req.param('slug');
+  const post = await db.get('posts', { where: { slug } });
   if (!post) return c.notFound();
-  const comments = await db.list("comments", { where: { post_id: post.id } });
+  const comments = await db.list('comments', { where: { post_id: post.id } });
   return { post, comments };
 });
 ```
@@ -180,14 +180,14 @@ Actions work via standard HTML forms (zero JS) or island-hydrated form component
 export const action = defineHandler.withValidator({
   body: commentSchema,
 })(async (c, { body }) => {
-  await db.insert("comments", { ...body, post_id: c.req.param("slug") });
+  await db.insert('comments', { ...body, post_id: c.req.param('slug') });
   // No return → re-runs loader, full page reload with fresh data
 });
 ```
 
 ```tsx
 // pages/blog/[slug].island.tsx
-import CommentForm from "../components/CommentForm" with { island: "visible" };
+import CommentForm from '../components/CommentForm' with { island: 'visible' };
 
 export default function BlogPost({ post, comments }: Props) {
   return (
@@ -333,7 +333,7 @@ An island layout is server-only. It can contain island components (interactive n
 
 ```tsx
 // pages/blog/layout.island.tsx
-import MobileNav from "../../components/MobileNav" with { island: "media:(max-width: 768px)" };
+import MobileNav from '../../components/MobileNav' with { island: 'media:(max-width: 768px)' };
 
 export default function BlogLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -396,10 +396,10 @@ Deferred to post-v1, but design should leave the door open. Island pages are goo
 Ship `useIslandForm` in v1. Simple: `fetch()` to submit, full page reload on success to pick up fresh loader data. No optimistic updates.
 
 ```tsx
-import { useIslandForm } from "@vite-cloud/react";
+import { useIslandForm } from '@vite-cloud/react';
 
 function CommentForm({ postId }: { postId: string }) {
-  const form = useIslandForm({ body: "" });
+  const form = useIslandForm({ body: '' });
   return (
     <form
       onSubmit={(e) => {
@@ -407,7 +407,7 @@ function CommentForm({ postId }: { postId: string }) {
         form.post(`/blog/${postId}`);
       }}
     >
-      <textarea value={form.data.body} onChange={(e) => form.setData("body", e.target.value)} />
+      <textarea value={form.data.body} onChange={(e) => form.setData('body', e.target.value)} />
       <button disabled={form.processing}>Submit</button>
     </form>
   );

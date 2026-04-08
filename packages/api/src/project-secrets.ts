@@ -1,16 +1,16 @@
-import type { ApiEnv } from "./env";
-import type { ProjectSecret } from "./types";
+import type { ApiEnv } from './env';
+import type { ProjectSecret } from './types';
 
-export const BETTER_AUTH_SECRET_NAME = "BETTER_AUTH_SECRET";
+export const BETTER_AUTH_SECRET_NAME = 'BETTER_AUTH_SECRET';
 
 const encoder = new TextEncoder();
 
 type ProjectSecretBindings = Pick<
-  ApiEnv["Bindings"],
-  "PROJECT_SECRET_KEYS_JSON" | "PROJECT_SECRET_ACTIVE_KEY_VERSION"
+  ApiEnv['Bindings'],
+  'PROJECT_SECRET_KEYS_JSON' | 'PROJECT_SECRET_ACTIVE_KEY_VERSION'
 >;
 
-type WorkerSecretBindings = Pick<ApiEnv["Bindings"], "CF_ACCOUNT_ID" | "CF_API_TOKEN">;
+type WorkerSecretBindings = Pick<ApiEnv['Bindings'], 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'>;
 
 interface ParsedProjectSecretKeys {
   activeVersion: string;
@@ -27,7 +27,7 @@ let cachedKeyConfig:
   | undefined;
 
 function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
+  let binary = '';
   for (const byte of bytes) {
     binary += String.fromCharCode(byte);
   }
@@ -66,16 +66,16 @@ function parseProjectSecretKeys(env: ProjectSecretBindings): ParsedProjectSecret
   try {
     parsedJson = JSON.parse(env.PROJECT_SECRET_KEYS_JSON);
   } catch {
-    throw new Error("PROJECT_SECRET_KEYS_JSON must be valid JSON.");
+    throw new Error('PROJECT_SECRET_KEYS_JSON must be valid JSON.');
   }
 
-  if (!parsedJson || typeof parsedJson !== "object" || Array.isArray(parsedJson)) {
-    throw new Error("PROJECT_SECRET_KEYS_JSON must be a JSON object.");
+  if (!parsedJson || typeof parsedJson !== 'object' || Array.isArray(parsedJson)) {
+    throw new Error('PROJECT_SECRET_KEYS_JSON must be a JSON object.');
   }
 
   const rawKeys = new Map<string, ArrayBuffer>();
   for (const [version, encoded] of Object.entries(parsedJson)) {
-    if (typeof encoded !== "string" || encoded.length === 0) {
+    if (typeof encoded !== 'string' || encoded.length === 0) {
       throw new Error(`PROJECT_SECRET_KEYS_JSON entry "${version}" must be a non-empty string.`);
     }
 
@@ -93,7 +93,7 @@ function parseProjectSecretKeys(env: ProjectSecretBindings): ParsedProjectSecret
   }
 
   if (rawKeys.size === 0) {
-    throw new Error("PROJECT_SECRET_KEYS_JSON must define at least one key.");
+    throw new Error('PROJECT_SECRET_KEYS_JSON must define at least one key.');
   }
 
   if (!rawKeys.has(env.PROJECT_SECRET_ACTIVE_KEY_VERSION)) {
@@ -127,14 +127,14 @@ async function getCryptoKey(env: ProjectSecretBindings, version: string): Promis
     throw new Error(`Unknown project secret key version "${version}".`);
   }
 
-  const promise = crypto.subtle.importKey("raw", rawKey, "AES-GCM", false, ["encrypt", "decrypt"]);
+  const promise = crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false, ['encrypt', 'decrypt']);
   config.cryptoKeys.set(version, promise);
   return promise;
 }
 
 export function generateManagedAuthSecret(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 export async function encryptProjectSecret(
@@ -148,7 +148,7 @@ export async function encryptProjectSecret(
   const key = await getCryptoKey(env, activeVersion);
   const ciphertext = await crypto.subtle.encrypt(
     {
-      name: "AES-GCM",
+      name: 'AES-GCM',
       iv: toArrayBuffer(iv),
       additionalData: getProjectSecretAad(projectId, name),
     },
@@ -166,7 +166,7 @@ export async function encryptProjectSecret(
 export async function decryptProjectSecret(
   env: ProjectSecretBindings,
   projectId: string,
-  row: Pick<ProjectSecret, "name" | "ciphertext" | "iv" | "key_version">,
+  row: Pick<ProjectSecret, 'name' | 'ciphertext' | 'iv' | 'key_version'>,
 ): Promise<string> {
   const key = await getCryptoKey(env, row.key_version);
 
@@ -174,7 +174,7 @@ export async function decryptProjectSecret(
   try {
     plaintext = await crypto.subtle.decrypt(
       {
-        name: "AES-GCM",
+        name: 'AES-GCM',
         iv: toArrayBuffer(base64ToBytes(row.iv)),
         additionalData: getProjectSecretAad(projectId, row.name),
       },
@@ -189,7 +189,7 @@ export async function decryptProjectSecret(
 }
 
 function buildWorkerSecretUrl(
-  env: Pick<WorkerSecretBindings, "CF_ACCOUNT_ID">,
+  env: Pick<WorkerSecretBindings, 'CF_ACCOUNT_ID'>,
   dispatchNamespace: string,
   workerName: string,
   secretName?: string,
@@ -212,15 +212,15 @@ export async function putWorkerSecret(
   value: string,
 ): Promise<void> {
   const cfRes = await fetch(buildWorkerSecretUrl(env, dispatchNamespace, workerName), {
-    method: "PUT",
+    method: 'PUT',
     headers: {
       Authorization: `Bearer ${env.CF_API_TOKEN}`,
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       name,
       text: value,
-      type: "secret_text",
+      type: 'secret_text',
     }),
   });
 
@@ -237,7 +237,7 @@ export async function deleteWorkerSecret(
   name: string,
 ): Promise<void> {
   const cfRes = await fetch(buildWorkerSecretUrl(env, dispatchNamespace, workerName, name), {
-    method: "DELETE",
+    method: 'DELETE',
     headers: {
       Authorization: `Bearer ${env.CF_API_TOKEN}`,
     },

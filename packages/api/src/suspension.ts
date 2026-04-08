@@ -1,4 +1,4 @@
-export const REASON_REQUESTS_EXCEEDED = "requests_exceeded";
+export const REASON_REQUESTS_EXCEEDED = 'requests_exceeded';
 
 const USAGE_LIMIT_REASONS = new Set([REASON_REQUESTS_EXCEEDED]);
 

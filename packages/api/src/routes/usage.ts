@@ -1,19 +1,19 @@
-import { Hono } from "hono";
-import { type ApiEnv, isDevBypass } from "../env";
-import { getProject, getProjectsByUserId } from "../db";
-import { getCurrentBillingPeriodStart } from "../tiers";
+import { Hono } from 'hono';
+import { getProject, getProjectsByUserId } from '../db';
+import { type ApiEnv, isDevBypass } from '../env';
+import { getCurrentBillingPeriodStart } from '../tiers';
 
 const projectUsage = new Hono<ApiEnv>()
 
   // Project usage for current billing period
-  .get("/:id/usage", async (c) => {
-    const projectId = c.req.param("id");
-    const project = await getProject(c.get("db"), projectId);
+  .get('/:id/usage', async (c) => {
+    const projectId = c.req.param('id');
+    const project = await getProject(c.get('db'), projectId);
     if (!project) {
-      return c.json({ error: "project not found" }, 404);
+      return c.json({ error: 'project not found' }, 404);
     }
-    if (project.user_id !== c.get("user").id) {
-      return c.json({ error: "forbidden" }, 403);
+    if (project.user_id !== c.get('user').id) {
+      return c.json({ error: 'forbidden' }, 403);
     }
 
     // Dev bypass — skip slow CF Analytics Engine API calls
@@ -27,7 +27,7 @@ const projectUsage = new Hono<ApiEnv>()
       });
     }
 
-    const since = getCurrentBillingPeriodStart(c.get("user").billing_cycle_start);
+    const since = getCurrentBillingPeriodStart(c.get('user').billing_cycle_start);
     const [usage, aiUsage] = await Promise.all([
       queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since),
       queryProjectAiUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since),
@@ -44,8 +44,8 @@ const projectUsage = new Hono<ApiEnv>()
 const accountUsage = new Hono<ApiEnv>()
 
   // Aggregate usage across all user's projects
-  .get("/", async (c) => {
-    const projects = await getProjectsByUserId(c.get("db"), c.get("user").id);
+  .get('/', async (c) => {
+    const projects = await getProjectsByUserId(c.get('db'), c.get('user').id);
     if (projects.length === 0) {
       return c.json({ requests: 0, bandwidthBytes: 0, aiNeurons: 0, projects: [] });
     }
@@ -67,7 +67,7 @@ const accountUsage = new Hono<ApiEnv>()
       });
     }
 
-    const since = getCurrentBillingPeriodStart(c.get("user").billing_cycle_start);
+    const since = getCurrentBillingPeriodStart(c.get('user').billing_cycle_start);
 
     const [usageMap, ...aiUsages] = await Promise.all([
       queryBatchProjectUsage(
@@ -114,7 +114,7 @@ async function queryProjectUsage(
   projectId: string,
   since: Date,
 ): Promise<{ requests: number; bandwidthBytes: number }> {
-  const sinceStr = since.toISOString().replace("T", " ").slice(0, 19);
+  const sinceStr = since.toISOString().replace('T', ' ').slice(0, 19);
   const query = `
     SELECT
       SUM(_sample_interval * double1) as requests,
@@ -127,10 +127,10 @@ async function queryProjectUsage(
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
     {
-      method: "POST",
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${apiToken}`,
-        "Content-Type": "text/plain",
+        'Content-Type': 'text/plain',
       },
       body: query,
     },
@@ -159,8 +159,8 @@ async function queryBatchProjectUsage(
 ): Promise<Map<string, UsageEntry>> {
   if (projectIds.length === 0) return new Map();
 
-  const sinceStr = since.toISOString().replace("T", " ").slice(0, 19);
-  const inList = projectIds.map((id) => `'${id}'`).join(", ");
+  const sinceStr = since.toISOString().replace('T', ' ').slice(0, 19);
+  const inList = projectIds.map((id) => `'${id}'`).join(', ');
   const query = `
     SELECT
       blob1,
@@ -175,10 +175,10 @@ async function queryBatchProjectUsage(
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
     {
-      method: "POST",
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${apiToken}`,
-        "Content-Type": "text/plain",
+        'Content-Type': 'text/plain',
       },
       body: query,
     },
@@ -231,11 +231,11 @@ async function queryProjectAiUsage(
   }
 }`;
 
-  const response = await fetch("https://api.cloudflare.com/client/v4/graphql", {
-    method: "POST",
+  const response = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+    method: 'POST',
     headers: {
       Authorization: `Bearer ${apiToken}`,
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify({ query }),
   });

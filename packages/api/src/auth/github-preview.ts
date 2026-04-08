@@ -1,8 +1,8 @@
-const GITHUB_API_BASE = "https://api.github.com";
-const GITHUB_API_VERSION = "2026-03-10";
-const PREVIEW_REPO_OWNER = "void-sdk";
-const PREVIEW_REPO_NAME = "void";
-const PREVIEW_REPO_PERMISSION = "pull";
+const GITHUB_API_BASE = 'https://api.github.com';
+const GITHUB_API_VERSION = '2026-03-10';
+const PREVIEW_REPO_OWNER = 'void-sdk';
+const PREVIEW_REPO_NAME = 'void';
+const PREVIEW_REPO_PERMISSION = 'pull';
 
 export type GitHubPreviewRepoConfig = {
   pat: string;
@@ -79,8 +79,8 @@ export async function ensureGitHubPreviewRepoAccess(
   }
 
   const inviteRes = await githubRequest(config.pat, collaboratorUrl, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ permission: PREVIEW_REPO_PERMISSION }),
   });
 
@@ -97,10 +97,10 @@ function getCollaboratorUrl(login: string): string {
 
 function githubRequest(pat: string, url: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
-  headers.set("Accept", "application/vnd.github+json");
-  headers.set("Authorization", `Bearer ${pat}`);
-  headers.set("User-Agent", "void-api");
-  headers.set("X-GitHub-Api-Version", GITHUB_API_VERSION);
+  headers.set('Accept', 'application/vnd.github+json');
+  headers.set('Authorization', `Bearer ${pat}`);
+  headers.set('User-Agent', 'void-api');
+  headers.set('X-GitHub-Api-Version', GITHUB_API_VERSION);
 
   return fetch(url, { ...init, headers });
 }
@@ -108,8 +108,8 @@ function githubRequest(pat: string, url: string, init?: RequestInit): Promise<Re
 async function readErrorBody(response: Response): Promise<string> {
   try {
     const text = await response.text();
-    return text.trim() || "<empty>";
+    return text.trim() || '<empty>';
   } catch {
-    return "<unreadable>";
+    return '<unreadable>';
   }
 }

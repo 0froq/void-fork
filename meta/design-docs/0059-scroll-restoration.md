@@ -34,8 +34,8 @@ In `start()`, set `history.scrollRestoration = "manual"` to prevent the browser'
 Before every `pushState` in `visit()`, save the current scroll into the outgoing history entry via `replaceState`:
 
 ```ts
-history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, "");
-history.pushState({}, "", finalUrl);
+history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, '');
+history.pushState({}, '', finalUrl);
 ```
 
 ### 3. Popstate reads saved position
@@ -43,7 +43,7 @@ history.pushState({}, "", finalUrl);
 The popstate handler reads `event.state` and passes the saved scroll position to `visit()` via an internal `_scrollPosition` option:
 
 ```ts
-window.addEventListener("popstate", (e) => {
+window.addEventListener('popstate', (e) => {
   const scrollPosition = e.state ? { x: e.state.scrollX ?? 0, y: e.state.scrollY ?? 0 } : null;
   router.visit(window.location.pathname + window.location.search + window.location.hash, {
     preserveState: true,
@@ -59,8 +59,8 @@ window.addEventListener("popstate", (e) => {
 At the top of `visit()`, split the hash from the URL before fetching:
 
 ```ts
-const hashIndex = url.indexOf("#");
-const hash = hashIndex !== -1 ? url.slice(hashIndex) : "";
+const hashIndex = url.indexOf('#');
+const hash = hashIndex !== -1 ? url.slice(hashIndex) : '';
 const fetchUrl = hashIndex !== -1 ? url.slice(0, hashIndex) : url;
 ```
 
@@ -73,8 +73,8 @@ If path+search match the current page and there's a hash, skip the server fetch 
 ```ts
 const current = window.location.pathname + window.location.search;
 if (fetchUrl === current && hash && !options.method) {
-  history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, "");
-  history.pushState({}, "", fetchUrl + hash);
+  history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, '');
+  history.pushState({}, '', fetchUrl + hash);
   const el = document.getElementById(hash.slice(1));
   if (el) el.scrollIntoView();
   else window.scrollTo(0, 0);

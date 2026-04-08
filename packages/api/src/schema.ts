@@ -7,33 +7,33 @@ import {
   timestamp,
   unique,
   uniqueIndex,
-} from "drizzle-orm/pg-core";
-import type { PlanId } from "./tiers";
-import type { PlatformWorkerName, PlatformEnv } from "./admin/platform-workers";
-import type { InvitationStatus } from "./types";
+} from 'drizzle-orm/pg-core';
+import type { PlatformWorkerName, PlatformEnv } from './admin/platform-workers';
+import type { PlanId } from './tiers';
+import type { InvitationStatus } from './types';
 
 // ---------------------------------------------------------------------------
 // users
 // ---------------------------------------------------------------------------
 export const users = pgTable(
-  "users",
+  'users',
   {
-    id: text("id").primaryKey(),
-    provider: text("provider").notNull().default("github"),
-    provider_id: text("provider_id").notNull().default(""),
-    login: text("login").notNull().default(""),
-    email: text("email"),
-    plan: text("plan").notNull().default("free").$type<PlanId>(),
-    role: text("role").notNull().default("user").$type<"user" | "admin">(),
-    billing_cycle_start: timestamp("billing_cycle_start", { mode: "string" })
+    id: text('id').primaryKey(),
+    provider: text('provider').notNull().default('github'),
+    provider_id: text('provider_id').notNull().default(''),
+    login: text('login').notNull().default(''),
+    email: text('email'),
+    plan: text('plan').notNull().default('free').$type<PlanId>(),
+    role: text('role').notNull().default('user').$type<'user' | 'admin'>(),
+    billing_cycle_start: timestamp('billing_cycle_start', { mode: 'string' })
       .notNull()
       .defaultNow(),
-    suspended_reason: text("suspended_reason"),
-    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+    suspended_reason: text('suspended_reason'),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("idx_users_provider_id").on(t.provider, t.provider_id),
-    index("idx_users_email").on(t.email),
+    uniqueIndex('idx_users_provider_id').on(t.provider, t.provider_id),
+    index('idx_users_email').on(t.email),
   ],
 );
 
@@ -41,19 +41,19 @@ export const users = pgTable(
 // oauth_accounts
 // ---------------------------------------------------------------------------
 export const oauthAccounts = pgTable(
-  "oauth_accounts",
+  'oauth_accounts',
   {
-    id: text("id").primaryKey(),
-    user_id: text("user_id")
+    id: text('id').primaryKey(),
+    user_id: text('user_id')
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    provider: text("provider").notNull(),
-    provider_id: text("provider_id").notNull(),
-    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    provider_id: text('provider_id').notNull(),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("idx_oauth_accounts_provider_id").on(t.provider, t.provider_id),
-    index("idx_oauth_accounts_user_id").on(t.user_id),
+    uniqueIndex('idx_oauth_accounts_provider_id').on(t.provider, t.provider_id),
+    index('idx_oauth_accounts_user_id').on(t.user_id),
   ],
 );
 
@@ -61,22 +61,22 @@ export const oauthAccounts = pgTable(
 // projects
 // ---------------------------------------------------------------------------
 export const projects = pgTable(
-  "projects",
+  'projects',
   {
-    id: text("id").primaryKey(),
-    user_id: text("user_id")
+    id: text('id').primaryKey(),
+    user_id: text('user_id')
       .notNull()
       .references(() => users.id),
-    slug: text("slug").notNull(),
-    type: text("mode").notNull().default("worker").$type<"void" | "spa" | "static" | "framework">(),
-    active_deployment_id: text("active_deployment_id"),
-    websocket_version: integer("websocket_version").notNull().default(0),
-    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+    slug: text('slug').notNull(),
+    type: text('mode').notNull().default('worker').$type<'void' | 'spa' | 'static' | 'framework'>(),
+    active_deployment_id: text('active_deployment_id'),
+    websocket_version: integer('websocket_version').notNull().default(0),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
   (t) => [
     unique().on(t.user_id, t.slug),
-    uniqueIndex("idx_projects_slug").on(t.slug),
-    index("idx_projects_user_id").on(t.user_id),
+    uniqueIndex('idx_projects_slug').on(t.slug),
+    index('idx_projects_user_id').on(t.user_id),
   ],
 );
 
@@ -84,30 +84,30 @@ export const projects = pgTable(
 // deployments
 // ---------------------------------------------------------------------------
 export const deployments = pgTable(
-  "deployments",
+  'deployments',
   {
-    id: text("id").primaryKey(),
-    project_id: text("project_id")
+    id: text('id').primaryKey(),
+    project_id: text('project_id')
       .notNull()
       .references(() => projects.id),
-    status: text("status")
+    status: text('status')
       .notNull()
-      .default("pending")
-      .$type<"pending" | "uploading" | "migrating" | "prerendering" | "live" | "failed">(),
-    manifest: text("manifest"),
-    source: text("source"),
-    commit: text("commit"),
-    error_message: text("error_message"),
-    asset_hashes: text("asset_hashes"),
-    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
-    updated_at: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
-    deployed_at: timestamp("deployed_at", { mode: "string" }),
-    retained: boolean("retained").notNull().default(false),
-    applied_migrations: text("applied_migrations"),
+      .default('pending')
+      .$type<'pending' | 'uploading' | 'migrating' | 'prerendering' | 'live' | 'failed'>(),
+    manifest: text('manifest'),
+    source: text('source'),
+    commit: text('commit'),
+    error_message: text('error_message'),
+    asset_hashes: text('asset_hashes'),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { mode: 'string' }).notNull().defaultNow(),
+    deployed_at: timestamp('deployed_at', { mode: 'string' }),
+    retained: boolean('retained').notNull().default(false),
+    applied_migrations: text('applied_migrations'),
   },
   (t) => [
-    index("idx_deployments_project_id").on(t.project_id, t.created_at),
-    index("idx_deployments_project_status").on(t.project_id, t.status),
+    index('idx_deployments_project_id').on(t.project_id, t.created_at),
+    index('idx_deployments_project_status').on(t.project_id, t.status),
   ],
 );
 
@@ -115,23 +115,23 @@ export const deployments = pgTable(
 // project_secrets
 // ---------------------------------------------------------------------------
 export const projectSecrets = pgTable(
-  "project_secrets",
+  'project_secrets',
   {
-    id: text("id").primaryKey(),
-    project_id: text("project_id")
+    id: text('id').primaryKey(),
+    project_id: text('project_id')
       .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    ciphertext: text("ciphertext").notNull(),
-    iv: text("iv").notNull(),
-    key_version: text("key_version").notNull(),
-    managed_reason: text("managed_reason"),
-    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
-    updated_at: timestamp("updated_at", { mode: "string" }).notNull().defaultNow(),
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    ciphertext: text('ciphertext').notNull(),
+    iv: text('iv').notNull(),
+    key_version: text('key_version').notNull(),
+    managed_reason: text('managed_reason'),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { mode: 'string' }).notNull().defaultNow(),
   },
   (t) => [
     unique().on(t.project_id, t.name),
-    index("idx_project_secrets_project_id").on(t.project_id),
+    index('idx_project_secrets_project_id').on(t.project_id),
   ],
 );
 
@@ -139,16 +139,16 @@ export const projectSecrets = pgTable(
 // resources
 // ---------------------------------------------------------------------------
 export const resources = pgTable(
-  "resources",
+  'resources',
   {
-    id: text("id").primaryKey(),
-    project_id: text("project_id")
+    id: text('id').primaryKey(),
+    project_id: text('project_id')
       .notNull()
       .references(() => projects.id),
-    type: text("type").notNull().$type<"d1" | "kv" | "r2" | "queue" | "hyperdrive">(),
-    cf_id: text("cf_id").notNull(),
-    binding_name: text("binding_name").notNull(),
-    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+    type: text('type').notNull().$type<'d1' | 'kv' | 'r2' | 'queue' | 'hyperdrive'>(),
+    cf_id: text('cf_id').notNull(),
+    binding_name: text('binding_name').notNull(),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
   (t) => [unique().on(t.project_id, t.type, t.binding_name)],
 );
@@ -157,45 +157,45 @@ export const resources = pgTable(
 // domains
 // ---------------------------------------------------------------------------
 export const domains = pgTable(
-  "domains",
+  'domains',
   {
-    id: text("id").primaryKey(),
-    project_id: text("project_id")
+    id: text('id').primaryKey(),
+    project_id: text('project_id')
       .notNull()
       .references(() => projects.id),
-    hostname: text("hostname").notNull().unique(),
-    cf_hostname_id: text("cf_hostname_id").notNull(),
-    status: text("status").notNull().default("pending").$type<"pending" | "active">(),
-    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+    hostname: text('hostname').notNull().unique(),
+    cf_hostname_id: text('cf_hostname_id').notNull(),
+    status: text('status').notNull().default('pending').$type<'pending' | 'active'>(),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
-  (t) => [index("idx_domains_project_id").on(t.project_id, t.created_at)],
+  (t) => [index('idx_domains_project_id').on(t.project_id, t.created_at)],
 );
 
 // ---------------------------------------------------------------------------
 // platform_events (audit log for admin platform rollbacks)
 // ---------------------------------------------------------------------------
 export const platformEvents = pgTable(
-  "platform_events",
+  'platform_events',
   {
-    id: text("id").primaryKey(),
-    batch_id: text("batch_id"),
-    action: text("action").notNull().$type<"rollback" | "rollback_all">(),
-    worker_name: text("worker_name").notNull().$type<PlatformWorkerName>(),
-    environment: text("environment").notNull().$type<PlatformEnv>(),
-    version_id: text("version_id").notNull(),
-    script_name: text("script_name").notNull(),
-    status: text("status")
+    id: text('id').primaryKey(),
+    batch_id: text('batch_id'),
+    action: text('action').notNull().$type<'rollback' | 'rollback_all'>(),
+    worker_name: text('worker_name').notNull().$type<PlatformWorkerName>(),
+    environment: text('environment').notNull().$type<PlatformEnv>(),
+    version_id: text('version_id').notNull(),
+    script_name: text('script_name').notNull(),
+    status: text('status')
       .notNull()
-      .default("pending")
-      .$type<"pending" | "success" | "failed" | "skipped">(),
-    error_message: text("error_message"),
-    admin_user_id: text("admin_user_id").notNull(),
-    admin_login: text("admin_login").notNull(),
-    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+      .default('pending')
+      .$type<'pending' | 'success' | 'failed' | 'skipped'>(),
+    error_message: text('error_message'),
+    admin_user_id: text('admin_user_id').notNull(),
+    admin_login: text('admin_login').notNull(),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
   (t) => [
-    index("idx_platform_events_batch_id").on(t.batch_id),
-    index("idx_platform_events_env_created").on(t.environment, t.created_at),
+    index('idx_platform_events_batch_id').on(t.batch_id),
+    index('idx_platform_events_env_created').on(t.environment, t.created_at),
   ],
 );
 
@@ -205,9 +205,9 @@ export const platformEvents = pgTable(
 // different CF colos, and KV's eventual consistency would make nonce lookups flaky.
 // Atomic DELETE … RETURNING guarantees true single-use semantics.
 // ---------------------------------------------------------------------------
-export const oauthNonces = pgTable("oauth_nonces", {
-  nonce: text("nonce").primaryKey(),
-  expires_at: timestamp("expires_at", { mode: "string" }).notNull(),
+export const oauthNonces = pgTable('oauth_nonces', {
+  nonce: text('nonce').primaryKey(),
+  expires_at: timestamp('expires_at', { mode: 'string' }).notNull(),
 });
 
 // ---------------------------------------------------------------------------
@@ -215,29 +215,29 @@ export const oauthNonces = pgTable("oauth_nonces", {
 // Same rationale as oauth_nonces: cross-colo consistency requires PostgreSQL,
 // and atomic DELETE … RETURNING guarantees single-use.
 // ---------------------------------------------------------------------------
-export const authCodes = pgTable("auth_codes", {
-  code: text("code").primaryKey(),
-  jwt: text("jwt").notNull(),
-  expires_at: timestamp("expires_at", { mode: "string" }).notNull(),
+export const authCodes = pgTable('auth_codes', {
+  code: text('code').primaryKey(),
+  jwt: text('jwt').notNull(),
+  expires_at: timestamp('expires_at', { mode: 'string' }).notNull(),
 });
 
 // ---------------------------------------------------------------------------
 // invitations
 // ---------------------------------------------------------------------------
 export const invitations = pgTable(
-  "invitations",
+  'invitations',
   {
-    id: text("id").primaryKey(),
-    email: text("email").notNull(),
-    status: text("status").notNull().default("pending").$type<InvitationStatus>(),
-    invited_by: text("invited_by")
+    id: text('id').primaryKey(),
+    email: text('email').notNull(),
+    status: text('status').notNull().default('pending').$type<InvitationStatus>(),
+    invited_by: text('invited_by')
       .notNull()
       .references(() => users.id),
-    accepted_by: text("accepted_by").references(() => users.id),
-    revoked_at: timestamp("revoked_at", { mode: "string" }),
-    revoked_by: text("revoked_by").references(() => users.id),
-    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
-    accepted_at: timestamp("accepted_at", { mode: "string" }),
+    accepted_by: text('accepted_by').references(() => users.id),
+    revoked_at: timestamp('revoked_at', { mode: 'string' }),
+    revoked_by: text('revoked_by').references(() => users.id),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+    accepted_at: timestamp('accepted_at', { mode: 'string' }),
   },
-  (t) => [index("idx_invitations_email").on(t.email), index("idx_invitations_status").on(t.status)],
+  (t) => [index('idx_invitations_email').on(t.email), index('idx_invitations_status').on(t.status)],
 );

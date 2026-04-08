@@ -1,8 +1,8 @@
-import { extname } from "node:path";
-import { hash as blake3hash } from "blake3-jit";
-import mime from "mime";
-import type { AssetConfig } from "./types";
-import { retryWithBackoff } from "./cf-api";
+import { extname } from 'node:path';
+import { hash as blake3hash } from 'blake3-jit';
+import mime from 'mime';
+import { retryWithBackoff } from './cf-api';
+import type { AssetConfig } from './types';
 
 class AssetUploadError extends Error {
   constructor(
@@ -72,13 +72,13 @@ export async function createAssetUploadSession(
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${workerName}/assets-upload-session`;
   const headers = {
     Authorization: `Bearer ${apiToken}`,
-    "Content-Type": "application/json",
+    'Content-Type': 'application/json',
   };
   const body = JSON.stringify({ manifest });
 
   return retryWithBackoff(
     async () => {
-      const response = await fetch(url, { method: "POST", headers, body });
+      const response = await fetch(url, { method: 'POST', headers, body });
 
       if (!response.ok) {
         const error = await response.text();
@@ -95,7 +95,7 @@ export async function createAssetUploadSession(
           `[assets] session created: ${bucketCount} bucket(s), ${hashCount} hash(es) to upload`,
         );
         if (hashCount === 0) {
-          console.log("[assets] all assets cached — no uploads needed");
+          console.log('[assets] all assets cached — no uploads needed');
         }
         return { jwt: data.result.jwt, buckets: data.result.buckets };
       }
@@ -107,7 +107,7 @@ export async function createAssetUploadSession(
     {
       maxRetries: ASSET_SESSION_MAX_RETRIES,
       delayMs: retryDelayMs,
-      errorMessage: "asset upload session returned invalid response after retries",
+      errorMessage: 'asset upload session returned invalid response after retries',
     },
   );
 }
@@ -131,11 +131,11 @@ export async function uploadAssetBuckets(
   }: { retryDelayMs?: number; gatewayDelayMs?: number } = {},
 ): Promise<string> {
   if (!buckets.some((b) => b.length > 0)) {
-    console.log("[assets] all assets cached — session JWT is completion token");
+    console.log('[assets] all assets cached — session JWT is completion token');
     return jwt;
   }
 
-  let completionJwt = "";
+  let completionJwt = '';
 
   // Adaptive concurrency — shared across bucket tasks, drops to 1 on 524
   let concurrency = UPLOAD_CONCURRENCY;
@@ -261,9 +261,9 @@ export async function uploadAssetBuckets(
   if (completionJwt) return completionJwt;
 
   // No JWT — find the first bucket error to surface, or throw a generic message
-  const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+  const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
   throw (
-    failed?.reason ?? new Error("asset upload completed but no completion JWT received from CF")
+    failed?.reason ?? new Error('asset upload completed but no completion JWT received from CF')
   );
 }
 
@@ -275,7 +275,7 @@ async function postAssetUpload(
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/assets/upload?base64=true`,
     {
-      method: "POST",
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${jwt}`,
       },
@@ -304,9 +304,9 @@ async function postAssetUpload(
 function isJwtExpired(jwt: string): boolean {
   try {
     // CF JWTs use base64url encoding — normalize to standard base64 before decoding
-    const raw = jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const raw = jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
     const payload = JSON.parse(atob(raw));
-    return typeof payload.exp === "number" && payload.exp < Date.now() / 1000;
+    return typeof payload.exp === 'number' && payload.exp < Date.now() / 1000;
   } catch {
     return false;
   }
@@ -314,7 +314,7 @@ function isJwtExpired(jwt: string): boolean {
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
-  let binary = "";
+  let binary = '';
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
@@ -335,8 +335,8 @@ export function computeAssetHash(content: ArrayBuffer, filePath: string): string
   const digest = blake3hash(input);
   return [...digest]
     .slice(0, 16)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 /**
@@ -350,8 +350,8 @@ export async function collectAssets(formData: FormData): Promise<{
   const assetsByHash = new Map<string, AssetEntry>();
 
   for (const [key, value] of formData.entries()) {
-    if (key.startsWith("asset:")) {
-      const path = "/" + key.slice("asset:".length);
+    if (key.startsWith('asset:')) {
+      const path = '/' + key.slice('asset:'.length);
       const blob = value as Blob;
       const buffer = await blob.arrayBuffer();
       const hash = computeAssetHash(buffer, path);
@@ -374,20 +374,20 @@ export async function collectAssets(formData: FormData): Promise<{
  */
 /** MIME types that are text-based and should include charset=utf-8. */
 const CHARSET_TYPES = new Set([
-  "application/json",
-  "application/xml",
-  "application/manifest+json",
-  "image/svg+xml",
+  'application/json',
+  'application/xml',
+  'application/manifest+json',
+  'image/svg+xml',
 ]);
 
 export function getContentType(path: string): string {
   let contentType = mime.getType(path);
-  if (contentType && !contentType.includes("charset")) {
-    if (contentType.startsWith("text/") || CHARSET_TYPES.has(contentType)) {
+  if (contentType && !contentType.includes('charset')) {
+    if (contentType.startsWith('text/') || CHARSET_TYPES.has(contentType)) {
       contentType = `${contentType}; charset=utf-8`;
     }
   }
-  return contentType ?? "application/null";
+  return contentType ?? 'application/null';
 }
 
 /**

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { scheduled } from "../../src/index";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { scheduled } from '../../src/index';
 import {
   setupEnv,
   teardownEnv,
@@ -7,7 +7,7 @@ import {
   createTestUser,
   createTestProject,
   type TestEnv,
-} from "./helpers";
+} from './helpers';
 
 let env: TestEnv;
 
@@ -53,15 +53,15 @@ beforeEach(async () => {
   await clearTables(env.db);
 });
 
-describe("scheduled()", () => {
-  it("completes without error on empty database", async () => {
+describe('scheduled()', () => {
+  it('completes without error on empty database', async () => {
     await expect(scheduled(mockController, makeBindings(env), mockCtx)).resolves.toBeUndefined();
   });
 
-  it("skips unlimited plan users", async () => {
-    const { id } = await createTestUser(env.db, "sponsor", "github", undefined, "sponsored");
+  it('skips unlimited plan users', async () => {
+    const { id } = await createTestUser(env.db, 'sponsor', 'github', undefined, 'sponsored');
     const proj = await createTestProject(env.db, id);
-    await env.ROUTING.put(proj.slug, JSON.stringify({ worker: "test" }));
+    await env.ROUTING.put(proj.slug, JSON.stringify({ worker: 'test' }));
 
     // Should complete without errors (skips unlimited plans for usage counting)
     await scheduled(mockController, makeBindings(env), mockCtx);
@@ -71,16 +71,16 @@ describe("scheduled()", () => {
     expect(routing.userId).toBe(id);
   });
 
-  it("skips users with no projects", async () => {
-    await createTestUser(env.db, "noprojects", "github", undefined, "free");
+  it('skips users with no projects', async () => {
+    await createTestUser(env.db, 'noprojects', 'github', undefined, 'free');
     await expect(scheduled(mockController, makeBindings(env), mockCtx)).resolves.toBeUndefined();
   });
 
-  it("backfills userId into routing entries", async () => {
-    const { id } = await createTestUser(env.db, "backfill", "github", undefined, "free");
+  it('backfills userId into routing entries', async () => {
+    const { id } = await createTestUser(env.db, 'backfill', 'github', undefined, 'free');
     const proj = await createTestProject(env.db, id);
     // Old routing entry without userId
-    await env.ROUTING.put(proj.slug, JSON.stringify({ worker: "test", projectId: proj.id }));
+    await env.ROUTING.put(proj.slug, JSON.stringify({ worker: 'test', projectId: proj.id }));
 
     await scheduled(mockController, makeBindings(env), mockCtx);
 
@@ -89,42 +89,42 @@ describe("scheduled()", () => {
     expect(routing.userId).toBe(id);
   });
 
-  it("does not overwrite existing userId in routing entries", async () => {
-    const { id } = await createTestUser(env.db, "existing", "github", undefined, "free");
+  it('does not overwrite existing userId in routing entries', async () => {
+    const { id } = await createTestUser(env.db, 'existing', 'github', undefined, 'free');
     const proj = await createTestProject(env.db, id);
     // Routing entry already has userId
     await env.ROUTING.put(
       proj.slug,
-      JSON.stringify({ worker: "test", projectId: proj.id, userId: "existing-user-id" }),
+      JSON.stringify({ worker: 'test', projectId: proj.id, userId: 'existing-user-id' }),
     );
 
     await scheduled(mockController, makeBindings(env), mockCtx);
 
     // Should preserve existing userId
     const routing = JSON.parse((await env.ROUTING.get(proj.slug))!);
-    expect(routing.userId).toBe("existing-user-id");
+    expect(routing.userId).toBe('existing-user-id');
   });
 
-  it("processes multiple batches of users", async () => {
+  it('processes multiple batches of users', async () => {
     for (let i = 0; i < 55; i++) {
-      const { id } = await createTestUser(env.db, `batchuser${i}`, "github", undefined, "free");
+      const { id } = await createTestUser(env.db, `batchuser${i}`, 'github', undefined, 'free');
       const proj = await createTestProject(env.db, id);
-      await env.ROUTING.put(proj.slug, JSON.stringify({ worker: "test", projectId: proj.id }));
+      await env.ROUTING.put(proj.slug, JSON.stringify({ worker: 'test', projectId: proj.id }));
     }
 
     // Should complete without errors across multiple batches
     await expect(scheduled(mockController, makeBindings(env), mockCtx)).resolves.toBeUndefined();
   });
 
-  it("isolates errors — one user failure does not block others", async () => {
+  it('isolates errors — one user failure does not block others', async () => {
     // Create two users
-    const { id: id1 } = await createTestUser(env.db, "user1", "github", undefined, "free");
+    const { id: id1 } = await createTestUser(env.db, 'user1', 'github', undefined, 'free');
     const proj1 = await createTestProject(env.db, id1);
-    await env.ROUTING.put(proj1.slug, JSON.stringify({ worker: "test", projectId: proj1.id }));
+    await env.ROUTING.put(proj1.slug, JSON.stringify({ worker: 'test', projectId: proj1.id }));
 
-    const { id: id2 } = await createTestUser(env.db, "user2", "github", undefined, "free");
+    const { id: id2 } = await createTestUser(env.db, 'user2', 'github', undefined, 'free');
     const proj2 = await createTestProject(env.db, id2);
-    await env.ROUTING.put(proj2.slug, JSON.stringify({ worker: "test", projectId: proj2.id }));
+    await env.ROUTING.put(proj2.slug, JSON.stringify({ worker: 'test', projectId: proj2.id }));
 
     // Use a USAGE_COUNTER that fails for the first user but works for the second
     let callCount = 0;
@@ -134,10 +134,10 @@ describe("scheduled()", () => {
         fetch: async (req: Request) => {
           callCount++;
           // Fail on first rollover call (first user), succeed on rest
-          if (callCount === 1) throw new Error("DO failure");
+          if (callCount === 1) throw new Error('DO failure');
           const url = new URL(req.url);
-          if (url.pathname === "/rollover") return Response.json({ rolled: false });
-          if (url.pathname === "/init") return Response.json({ ok: true });
+          if (url.pathname === '/rollover') return Response.json({ rolled: false });
+          if (url.pathname === '/init') return Response.json({ ok: true });
           return Response.json({});
         },
       }),

@@ -1,7 +1,7 @@
-import type { ProjectRow } from "./projects-table";
-import { ProjectsTable } from "./projects-table";
-import { Layout } from "./layout";
-import { Pagination } from "./pagination";
+import { Layout } from './layout';
+import { Pagination } from './pagination';
+import type { ProjectRow } from './projects-table';
+import { ProjectsTable } from './projects-table';
 
 export function ProjectsListPage({
   projects,
@@ -26,13 +26,13 @@ export function ProjectsListPage({
           type="text"
           name="search"
           placeholder="Search projects..."
-          value={search ?? ""}
+          value={search ?? ''}
           id="search-input"
-        />{" "}
+        />{' '}
         <button type="submit">Search</button>
         {search && (
           <>
-            {" "}
+            {' '}
             | <a href="/admin/projects">Clear</a>
           </>
         )}

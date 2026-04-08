@@ -9,7 +9,7 @@ const DESTRUCTIVE_PATTERNS = [
   /\bALTER\s+TABLE\s+\S+\s+RENAME\b/i,
 ];
 
-const PRAGMA_COMMENT = "-- void:allow-destructive";
+const PRAGMA_COMMENT = '-- void:allow-destructive';
 
 export function validateMigrationSQL(sql: string): {
   destructive: boolean;

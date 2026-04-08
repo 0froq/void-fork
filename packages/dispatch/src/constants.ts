@@ -1,1 +1,1 @@
-export const SITE_DOMAIN = "void.app";
+export const SITE_DOMAIN = 'void.app';

@@ -1,6 +1,6 @@
-import type { Env } from "hono";
-import type { Db } from "./db";
-import type { User } from "./types";
+import type { Env } from 'hono';
+import type { Db } from './db';
+import type { User } from './types';
 
 /**
  * Returns true when DEV_AUTH_BYPASS is set and we are NOT in production.
@@ -10,7 +10,7 @@ import type { User } from "./types";
 export function isDevBypass(env: { DEV_AUTH_BYPASS?: string; PLATFORM_ENV?: string }): boolean {
   if (!env.DEV_AUTH_BYPASS) return false;
   const pe = env.PLATFORM_ENV;
-  return pe === undefined || pe === "" || pe === "staging";
+  return pe === undefined || pe === '' || pe === 'staging';
 }
 
 export interface ApiEnv extends Env {

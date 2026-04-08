@@ -1,8 +1,8 @@
-import { Layout } from "./layout";
-import { formatDateTime, STATUS_COLORS } from "./format";
-import type { PlatformWorker, PlatformEnv } from "../platform-workers";
-import type { WorkerDeployment } from "../../provisioning/workers-versions";
-import type { ActivityEntry } from "../routes/platform";
+import type { WorkerDeployment } from '../../provisioning/workers-versions';
+import type { PlatformWorker, PlatformEnv } from '../platform-workers';
+import type { ActivityEntry } from '../routes/platform';
+import { formatDateTime, STATUS_COLORS } from './format';
+import { Layout } from './layout';
 
 interface WorkerStatus {
   worker: PlatformWorker;
@@ -59,7 +59,7 @@ export function PlatformPage({
                   <a href={`/admin/platform/${worker.name}`}>{worker.name}</a>
                   {worker.rollbackWarning && (
                     <span title={worker.rollbackWarning} style="cursor: help">
-                      {" "}
+                      {' '}
                       *
                     </span>
                   )}
@@ -80,8 +80,8 @@ export function PlatformPage({
                     <em>unknown</em>
                   )}
                 </td>
-                <td>{deployment && !error ? formatDateTime(deployment.created_on, tz) : "—"}</td>
-                <td>{deployment && !error ? deployment.author_email : "—"}</td>
+                <td>{deployment && !error ? formatDateTime(deployment.created_on, tz) : '—'}</td>
+                <td>{deployment && !error ? deployment.author_email : '—'}</td>
                 <td>
                   {error ? (
                     <span
@@ -116,7 +116,7 @@ export function PlatformPage({
         migrations are forward-only; schema-compat CI ensures backward compatibility.
       </div>
 
-      <form method="post" action={"/admin/platform/rollback-all"} id="rollback-all-form">
+      <form method="post" action={'/admin/platform/rollback-all'} id="rollback-all-form">
         <table>
           <thead>
             <tr>
@@ -137,8 +137,8 @@ export function PlatformPage({
                     key={worker.name}
                     class="rollback-row"
                     data-worker={worker.name}
-                    data-current={error ? "" : (activeVersion?.version_id ?? "")}
-                    data-target={error ? "" : (previousVersionId ?? "")}
+                    data-current={error ? '' : (activeVersion?.version_id ?? '')}
+                    data-target={error ? '' : (previousVersionId ?? '')}
                   >
                     <td>{worker.deployOrder}</td>
                     <td>{worker.name}</td>
@@ -146,7 +146,7 @@ export function PlatformPage({
                       {error ? (
                         <span style="color: #dc2626">error</span>
                       ) : activeVersion ? (
-                        activeVersion.version_id.slice(0, 8) + "..."
+                        activeVersion.version_id.slice(0, 8) + '...'
                       ) : (
                         <em>unknown</em>
                       )}
@@ -154,7 +154,7 @@ export function PlatformPage({
                     <td style="text-align: center; color: #6b7280">→</td>
                     <td>
                       {error ? (
-                        "—"
+                        '—'
                       ) : previousVersionId ? (
                         <>
                           <span style="font-size: 0.75rem">{previousVersionId.slice(0, 8)}...</span>
@@ -234,7 +234,7 @@ document.getElementById('rollback-all-form').addEventListener('submit', function
             </thead>
             <tbody>
               {entries.map((entry) => {
-                if (entry.kind === "single") {
+                if (entry.kind === 'single') {
                   const e = entry.event;
                   return (
                     <tr key={e.id}>
@@ -244,7 +244,7 @@ document.getElementById('rollback-all-form').addEventListener('submit', function
                       <td style="font-size: 0.75rem">{e.version_id.slice(0, 8)}...</td>
                       <td>
                         <span
-                          style={`color: ${STATUS_COLORS[e.status] ?? "#000"}; font-weight: 600`}
+                          style={`color: ${STATUS_COLORS[e.status] ?? '#000'}; font-weight: 600`}
                         >
                           {e.status}
                         </span>
@@ -255,15 +255,15 @@ document.getElementById('rollback-all-form').addEventListener('submit', function
                 }
 
                 const first = entry.events[0];
-                const succeeded = entry.events.filter((e) => e.status === "success").length;
-                const failed = entry.events.filter((e) => e.status === "failed").length;
-                const skipped = entry.events.filter((e) => e.status === "skipped").length;
+                const succeeded = entry.events.filter((e) => e.status === 'success').length;
+                const failed = entry.events.filter((e) => e.status === 'failed').length;
+                const skipped = entry.events.filter((e) => e.status === 'skipped').length;
                 const statusParts: string[] = [];
                 if (succeeded > 0) statusParts.push(`${succeeded} success`);
                 if (failed > 0) statusParts.push(`${failed} failed`);
                 if (skipped > 0) statusParts.push(`${skipped} skipped`);
                 const allSuccess = succeeded === entry.events.length;
-                const statusColor = failed > 0 ? "#dc2626" : allSuccess ? "#16a34a" : "#d97706";
+                const statusColor = failed > 0 ? '#dc2626' : allSuccess ? '#16a34a' : '#d97706';
 
                 return (
                   <tr key={entry.batchId}>
@@ -280,7 +280,7 @@ document.getElementById('rollback-all-form').addEventListener('submit', function
                     </td>
                     <td>
                       <span style={`color: ${statusColor}; font-weight: 600`}>
-                        {statusParts.join(", ")}
+                        {statusParts.join(', ')}
                       </span>
                     </td>
                     <td>{first.admin_login}</td>

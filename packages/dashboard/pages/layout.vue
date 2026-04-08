@@ -1,24 +1,24 @@
 <script setup lang="ts">
-import "../app.css";
-import { ref } from "vue";
-import { Link, useShared, useNavigation } from "@void/vue";
+import '../app.css';
+import { Link, useShared, useNavigation } from '@void/vue';
+import { ref } from 'vue';
 
 const shared = useShared<{ user: { login: string } | null }>();
 
-const barState = ref<"idle" | "loading" | "completing">("idle");
+const barState = ref<'idle' | 'loading' | 'completing'>('idle');
 let completingTimer: ReturnType<typeof setTimeout>;
 
 useNavigation(
   () => {
     clearTimeout(completingTimer);
-    barState.value = "loading";
+    barState.value = 'loading';
   },
   () => {
     clearTimeout(completingTimer);
-    if (barState.value === "loading") {
-      barState.value = "completing";
+    if (barState.value === 'loading') {
+      barState.value = 'completing';
       completingTimer = setTimeout(() => {
-        barState.value = "idle";
+        barState.value = 'idle';
       }, 500);
     }
   },

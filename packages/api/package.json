@@ -17,14 +17,14 @@
     "./suspension": "./src/suspension.ts"
   },
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "migrate": "drizzle-kit migrate",
-    "migrate:staging": "DATABASE_URL=$STAGING_DATABASE_URL drizzle-kit migrate",
-    "typecheck": "tsgo --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "setup": "node scripts/setup-local.ts"
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "migrate": "drizzle-kit migrate",
+    "migrate:staging": "DATABASE_URL=$STAGING_DATABASE_URL drizzle-kit migrate",
+    "setup": "node scripts/setup-local.ts",
+    "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
     "blake3-jit": "^1.0.0",

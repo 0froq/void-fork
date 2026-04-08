@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Props } from "./login.server";
+import type { Props } from './login.server';
 
 const { githubUrl, googleUrl } = defineProps<Props>();
 </script>

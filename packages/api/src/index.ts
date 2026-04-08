@@ -1,33 +1,14 @@
-import { Hono } from "hono";
-import type { ApiEnv } from "./env";
-import { REASON_REQUESTS_EXCEEDED } from "./suspension";
-import { UsageCounter } from "./usage-counter";
-import { CronScheduler } from "./cron-scheduler";
-import { processUsageEventBatch } from "./usage-queue";
-import auth from "./routes/auth";
-import projects from "./routes/projects";
-import deploy from "./routes/deploy";
-import deleteRoute from "./routes/delete";
-import revalidate from "./routes/revalidate";
-import internalRevalidate from "./routes/internal-revalidate";
-import internalResolveResource from "./routes/internal-resolve-resource";
-import internalResolveWorker from "./routes/internal-resolve-worker";
-import internalVerifyOwner from "./routes/internal-verify-owner";
-import secrets from "./routes/secrets";
-import domains from "./routes/domains";
-import { projectUsage, accountUsage } from "./routes/usage";
-import { authMiddleware } from "./middleware/auth";
-import adminLogin from "./admin/routes/login";
-import { adminAuthMiddleware } from "./admin/middleware/auth";
-import { dashboardHandler, adminSystem } from "./admin/routes/system";
-import adminUsers from "./admin/routes/users";
-import adminProjects from "./admin/routes/projects";
-import adminDeployments from "./admin/routes/deployments";
-import adminSignupControl from "./admin/routes/signup-control";
-import adminInvitations from "./admin/routes/invitations";
-import adminPlatform from "./admin/routes/platform";
-import { escapeHtml } from "./email";
-import me from "./routes/me";
+import { Hono } from 'hono';
+import { adminAuthMiddleware } from './admin/middleware/auth';
+import adminDeployments from './admin/routes/deployments';
+import adminInvitations from './admin/routes/invitations';
+import adminLogin from './admin/routes/login';
+import adminPlatform from './admin/routes/platform';
+import adminProjects from './admin/routes/projects';
+import adminSignupControl from './admin/routes/signup-control';
+import { dashboardHandler, adminSystem } from './admin/routes/system';
+import adminUsers from './admin/routes/users';
+import { CronScheduler } from './cron-scheduler';
 import {
   createDb,
   getUsersWithProjectsBatch,
@@ -37,20 +18,39 @@ import {
   purgeExpiredAuthCodes,
   failStaleDeployments,
   type Db,
-} from "./db";
-import { getCurrentBillingPeriodStart, getPlanLimits } from "./tiers";
-import { ErrorAlertMonitor } from "./error-alert-monitor";
+} from './db';
+import { escapeHtml } from './email';
+import type { ApiEnv } from './env';
+import { ErrorAlertMonitor } from './error-alert-monitor';
+import { authMiddleware } from './middleware/auth';
+import auth from './routes/auth';
+import deleteRoute from './routes/delete';
+import deploy from './routes/deploy';
+import domains from './routes/domains';
+import internalResolveResource from './routes/internal-resolve-resource';
+import internalResolveWorker from './routes/internal-resolve-worker';
+import internalRevalidate from './routes/internal-revalidate';
+import internalVerifyOwner from './routes/internal-verify-owner';
+import me from './routes/me';
+import projects from './routes/projects';
+import revalidate from './routes/revalidate';
+import secrets from './routes/secrets';
+import { projectUsage, accountUsage } from './routes/usage';
+import { REASON_REQUESTS_EXCEEDED } from './suspension';
+import { getCurrentBillingPeriodStart, getPlanLimits } from './tiers';
+import { UsageCounter } from './usage-counter';
+import { processUsageEventBatch } from './usage-queue';
 
 const app = new Hono<ApiEnv>()
 
   // Drizzle middleware — creates a Db instance per request
-  .use("*", async (c, next) => {
-    c.set("db", createDb(c.env.HYPERDRIVE.connectionString));
+  .use('*', async (c, next) => {
+    c.set('db', createDb(c.env.HYPERDRIVE.connectionString));
     await next();
   })
 
-  .get("/health", (c) => c.json({ status: "ok" }))
-  .get("/signup-restricted", (c) =>
+  .get('/health', (c) => c.json({ status: 'ok' }))
+  .get('/signup-restricted', (c) =>
     c.html(`<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
@@ -61,8 +61,8 @@ const app = new Hono<ApiEnv>()
 <div class="card"><h1>Private Beta</h1><p>Sorry, we are still in private beta and your login is not currently in the allowed list. Check back later!</p></div>
 </body></html>`),
   )
-  .get("/invite", (c) => {
-    const quickstartUrl = escapeHtml("https://github.com/void-sdk/void#quickstart");
+  .get('/invite', (c) => {
+    const quickstartUrl = escapeHtml('https://github.com/void-sdk/void#quickstart');
     return c.html(`<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
@@ -77,41 +77,41 @@ const app = new Hono<ApiEnv>()
 </div>
 </body></html>`);
   })
-  .route("/auth", auth)
-  .route("/internal/revalidate", internalRevalidate)
-  .route("/internal/resolve-resource", internalResolveResource)
-  .route("/internal/resolve-worker", internalResolveWorker)
-  .route("/internal/verify-owner", internalVerifyOwner)
-  .use("/me", authMiddleware)
-  .route("/me", me)
-  .use("/projects/*", authMiddleware)
-  .route("/projects", projects)
-  .route("/projects", deploy)
-  .route("/projects", deleteRoute)
-  .route("/projects", revalidate)
-  .route("/projects", secrets)
-  .route("/projects", domains)
-  .route("/projects", projectUsage)
-  .use("/usage", authMiddleware)
-  .route("/usage", accountUsage);
+  .route('/auth', auth)
+  .route('/internal/revalidate', internalRevalidate)
+  .route('/internal/resolve-resource', internalResolveResource)
+  .route('/internal/resolve-worker', internalResolveWorker)
+  .route('/internal/verify-owner', internalVerifyOwner)
+  .use('/me', authMiddleware)
+  .route('/me', me)
+  .use('/projects/*', authMiddleware)
+  .route('/projects', projects)
+  .route('/projects', deploy)
+  .route('/projects', deleteRoute)
+  .route('/projects', revalidate)
+  .route('/projects', secrets)
+  .route('/projects', domains)
+  .route('/projects', projectUsage)
+  .use('/usage', authMiddleware)
+  .route('/usage', accountUsage);
 
 // Admin dashboard (HTML, cookie-based auth)
-app.route("/admin", adminLogin);
-app.use("/admin/*", adminAuthMiddleware);
-app.get("/admin/", adminAuthMiddleware, dashboardHandler);
-app.route("/admin/users", adminUsers);
-app.route("/admin/projects", adminProjects);
-app.route("/admin/deployments", adminDeployments);
-app.route("/admin/signup-control", adminSignupControl);
-app.route("/admin/invitations", adminInvitations);
-app.route("/admin/platform", adminPlatform);
-app.route("/admin", adminSystem);
+app.route('/admin', adminLogin);
+app.use('/admin/*', adminAuthMiddleware);
+app.get('/admin/', adminAuthMiddleware, dashboardHandler);
+app.route('/admin/users', adminUsers);
+app.route('/admin/projects', adminProjects);
+app.route('/admin/deployments', adminDeployments);
+app.route('/admin/signup-control', adminSignupControl);
+app.route('/admin/invitations', adminInvitations);
+app.route('/admin/platform', adminPlatform);
+app.route('/admin', adminSystem);
 
 const BATCH_SIZE = 50;
 
 async function scheduled(
   _controller: ScheduledController,
-  env: ApiEnv["Bindings"],
+  env: ApiEnv['Bindings'],
   _ctx: ExecutionContext,
 ): Promise<void> {
   const db = createDb(env.HYPERDRIVE.connectionString);
@@ -121,14 +121,14 @@ async function scheduled(
     .then((n) => {
       if (n > 0) console.log(`[scheduled] auto-failed ${n} stale deployment(s)`);
     })
-    .catch((err) => console.error("[scheduled] failed to clean up stale deployments:", err));
+    .catch((err) => console.error('[scheduled] failed to clean up stale deployments:', err));
 
   // Purge expired OAuth nonces and auth codes left by abandoned login flows (best-effort)
   await purgeExpiredOAuthNonces(db).catch((err) =>
-    console.error("[scheduled] failed to purge expired OAuth nonces:", err),
+    console.error('[scheduled] failed to purge expired OAuth nonces:', err),
   );
   await purgeExpiredAuthCodes(db).catch((err) =>
-    console.error("[scheduled] failed to purge expired auth codes:", err),
+    console.error('[scheduled] failed to purge expired auth codes:', err),
   );
 
   let offset = 0;
@@ -137,7 +137,7 @@ async function scheduled(
     try {
       batch = await getUsersWithProjectsBatch(db, BATCH_SIZE, offset);
     } catch (err) {
-      console.error("[scheduled] failed to fetch user batch at offset", offset, err);
+      console.error('[scheduled] failed to fetch user batch at offset', offset, err);
       break;
     }
     if (batch.length === 0) break;
@@ -151,7 +151,7 @@ async function scheduled(
 }
 
 async function processUserRollover(
-  env: ApiEnv["Bindings"],
+  env: ApiEnv['Bindings'],
   db: Db,
   user: { id: string; plan: string; billing_cycle_start: string; suspended_reason: string | null },
   userProjects: { id: string; slug: string }[],
@@ -178,7 +178,7 @@ async function processUserRollover(
         const projectDomains = domainMap.get(projectId);
         if (!projectDomains) continue;
         for (const domain of projectDomains) {
-          if (domain.status !== "active") continue;
+          if (domain.status !== 'active') continue;
           const raw = await env.ROUTING.get(`domain:${domain.hostname}`);
           if (!raw) continue;
           const routing = JSON.parse(raw);
@@ -209,9 +209,9 @@ async function processUserRollover(
 
   // Send rollover check (DO only resets if period actually changed)
   const rolloverRes = await stub.fetch(
-    new Request("https://do/rollover", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    new Request('https://do/rollover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ billingPeriodStart, plan: user.plan }),
     }),
   );
@@ -231,9 +231,9 @@ async function processUserRollover(
 
   // Initialize DO with current project slugs (handles new users/projects)
   await stub.fetch(
-    new Request("https://do/init", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    new Request('https://do/init', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ plan: user.plan, billingPeriodStart, projectSlugs }),
     }),
   );
@@ -246,7 +246,7 @@ export { app, scheduled };
 export default {
   fetch: app.fetch,
   scheduled,
-  async queue(batch: MessageBatch<unknown>, env: ApiEnv["Bindings"]): Promise<void> {
+  async queue(batch: MessageBatch<unknown>, env: ApiEnv['Bindings']): Promise<void> {
     await processUsageEventBatch(batch, env);
   },
-} satisfies ExportedHandler<ApiEnv["Bindings"]>;
+} satisfies ExportedHandler<ApiEnv['Bindings']>;

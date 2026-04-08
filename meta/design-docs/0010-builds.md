@@ -141,19 +141,19 @@ export class BuildManager extends Container {
 
   override onStart() {
     // Container is up, health check passed
-    this.transition("building");
+    this.transition('building');
   }
 
   override onStop({ exitCode, reason }) {
-    if (this.state === "deploying" && exitCode === 0) {
-      this.transition("complete");
+    if (this.state === 'deploying' && exitCode === 0) {
+      this.transition('complete');
     } else if (exitCode !== 0) {
-      this.transition("failed", `Exit code ${exitCode}: ${reason}`);
+      this.transition('failed', `Exit code ${exitCode}: ${reason}`);
     }
   }
 
   override onError(error: string) {
-    this.transition("failed", error);
+    this.transition('failed', error);
   }
 }
 ```
@@ -300,35 +300,35 @@ The platform uses PostgreSQL (PlanetScale) via Cloudflare Hyperdrive, with Drizz
 // builds
 // ---------------------------------------------------------------------------
 export const builds = pgTable(
-  "builds",
+  'builds',
   {
-    id: text("id").primaryKey(),
-    project_id: text("project_id")
+    id: text('id').primaryKey(),
+    project_id: text('project_id')
       .notNull()
       .references(() => projects.id),
-    user_id: text("user_id")
+    user_id: text('user_id')
       .notNull()
       .references(() => users.id),
-    status: text("status")
+    status: text('status')
       .notNull()
-      .default("queued")
+      .default('queued')
       .$type<
-        "queued" | "starting" | "building" | "deploying" | "complete" | "failed" | "cancelled"
+        'queued' | 'starting' | 'building' | 'deploying' | 'complete' | 'failed' | 'cancelled'
       >(),
-    commit_sha: text("commit_sha").notNull(),
-    branch: text("branch").notNull(),
-    deployment_id: text("deployment_id").references(() => deployments.id),
-    error: text("error"),
-    exit_code: text("exit_code"),
-    instance_type: text("instance_type"),
-    started_at: timestamp("started_at", { mode: "string" }),
-    completed_at: timestamp("completed_at", { mode: "string" }),
-    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+    commit_sha: text('commit_sha').notNull(),
+    branch: text('branch').notNull(),
+    deployment_id: text('deployment_id').references(() => deployments.id),
+    error: text('error'),
+    exit_code: text('exit_code'),
+    instance_type: text('instance_type'),
+    started_at: timestamp('started_at', { mode: 'string' }),
+    completed_at: timestamp('completed_at', { mode: 'string' }),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
   (t) => [
-    index("idx_builds_project").on(t.project_id, t.created_at),
-    index("idx_builds_status").on(t.status),
-    index("idx_builds_user_status").on(t.user_id, t.status),
+    index('idx_builds_project').on(t.project_id, t.created_at),
+    index('idx_builds_status').on(t.status),
+    index('idx_builds_user_status').on(t.user_id, t.status),
   ],
 );
 
@@ -336,26 +336,26 @@ export const builds = pgTable(
 // github_connections
 // ---------------------------------------------------------------------------
 export const githubConnections = pgTable(
-  "github_connections",
+  'github_connections',
   {
-    id: text("id").primaryKey(),
-    project_id: text("project_id")
+    id: text('id').primaryKey(),
+    project_id: text('project_id')
       .notNull()
       .unique()
       .references(() => projects.id),
-    installation_id: text("installation_id").notNull(),
-    repo_full_name: text("repo_full_name").notNull(),
-    branch: text("branch").notNull().default("main"),
-    created_at: timestamp("created_at", { mode: "string" }).notNull().defaultNow(),
+    installation_id: text('installation_id').notNull(),
+    repo_full_name: text('repo_full_name').notNull(),
+    branch: text('branch').notNull().default('main'),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
-  (t) => [index("idx_github_repo").on(t.installation_id, t.repo_full_name)],
+  (t) => [index('idx_github_repo').on(t.installation_id, t.repo_full_name)],
 );
 ```
 
 **Types (in `packages/api/src/types.ts`):**
 
 ```typescript
-import type { builds, githubConnections } from "./schema";
+import type { builds, githubConnections } from './schema';
 export type Build = InferSelectModel<typeof builds>;
 export type GitHubConnection = InferSelectModel<typeof githubConnections>;
 ```

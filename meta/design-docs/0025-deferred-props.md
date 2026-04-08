@@ -74,7 +74,7 @@ export type Props = InferProps<typeof loader>;
 At runtime, `defer()` returns a marker object:
 
 ```ts
-const DEFERRED = Symbol("deferred");
+const DEFERRED = Symbol('deferred');
 
 function defer(groupOrResolver, maybeResolver?) {
   const [group, resolver] = maybeResolver
@@ -189,7 +189,7 @@ function createDeferred<T>(): Deferred<T> {
 
 ```vue
 <script setup lang="ts">
-import type { Props } from "./index.server";
+import type { Props } from './index.server';
 const { projects, usage, metrics, chart } = defineProps<Props>();
 </script>
 

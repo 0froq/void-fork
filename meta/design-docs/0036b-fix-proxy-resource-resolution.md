@@ -57,10 +57,10 @@ Ensure `and` is imported from `drizzle-orm` (check existing imports at top of fi
 Follow the exact pattern of `packages/api/src/routes/internal-revalidate.ts`:
 
 ```typescript
-import { Hono } from "hono";
-import type { ApiEnv } from "../env";
-import { getResourceByBinding } from "../db";
-import { hmacVerifyState } from "../auth/hmac";
+import { Hono } from 'hono';
+import type { ApiEnv } from '../env';
+import { getResourceByBinding } from '../db';
+import { hmacVerifyState } from '../auth/hmac';
 
 const app = new Hono<ApiEnv>();
 
@@ -72,23 +72,23 @@ const app = new Hono<ApiEnv>();
  * Body: { "type": "d1" | "kv" | "r2", "binding": "DB" }
  * Returns: { "cf_id": "..." } or 404
  */
-app.post("/:projectId", async (c) => {
-  const projectId = c.req.param("projectId");
+app.post('/:projectId', async (c) => {
+  const projectId = c.req.param('projectId');
 
-  const token = c.req.header("x-void-internal");
+  const token = c.req.header('x-void-internal');
   if (!token) {
-    return c.json({ error: "missing internal auth" }, 401);
+    return c.json({ error: 'missing internal auth' }, 401);
   }
   if (!(await hmacVerifyState(projectId, token, c.env.JWT_SECRET))) {
-    return c.json({ error: "invalid internal auth" }, 403);
+    return c.json({ error: 'invalid internal auth' }, 403);
   }
 
   const { type, binding } = await c.req.json<{ type: string; binding: string }>();
   if (!type || !binding) {
-    return c.json({ error: "type and binding required" }, 400);
+    return c.json({ error: 'type and binding required' }, 400);
   }
 
-  const resource = await getResourceByBinding(c.get("db"), projectId, type, binding);
+  const resource = await getResourceByBinding(c.get('db'), projectId, type, binding);
   if (!resource) {
     return c.json({ error: `unknown binding "${binding}"` }, 404);
   }
@@ -132,15 +132,15 @@ export async function resolveResource(
   api: Fetcher,
   jwtSecret: string,
   projectId: string,
-  type: "d1" | "kv" | "r2",
+  type: 'd1' | 'kv' | 'r2',
   bindingName: string,
 ): Promise<string> {
   const token = await hmacSign(projectId, jwtSecret);
   const res = await api.fetch(`https://api/internal/resolve-resource/${projectId}`, {
-    method: "POST",
+    method: 'POST',
     headers: {
-      "content-type": "application/json",
-      "x-void-internal": token,
+      'content-type': 'application/json',
+      'x-void-internal': token,
     },
     body: JSON.stringify({ type, binding: bindingName }),
   });
@@ -163,11 +163,11 @@ let cachedKeySecret: string | undefined;
 async function getSignKey(secret: string): Promise<CryptoKey> {
   if (cachedSignKey && cachedKeySecret === secret) return cachedSignKey;
   cachedSignKey = await crypto.subtle.importKey(
-    "raw",
+    'raw',
     encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
+    { name: 'HMAC', hash: 'SHA-256' },
     false,
-    ["sign"],
+    ['sign'],
   );
   cachedKeySecret = secret;
   return cachedSignKey;
@@ -175,9 +175,9 @@ async function getSignKey(secret: string): Promise<CryptoKey> {
 
 async function hmacSign(data: string, secret: string): Promise<string> {
   const key = await getSignKey(secret);
-  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(data));
+  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
   const binary = String.fromCharCode(...new Uint8Array(sig));
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 ```
 
@@ -198,13 +198,13 @@ Remove `DB: D1Database` from the `Env` interface in `packages/proxy/src/types.ts
 All callers currently do:
 
 ```typescript
-dbId = await resolveResource(c.env.DB, projectId, "d1", body.binding);
+dbId = await resolveResource(c.env.DB, projectId, 'd1', body.binding);
 ```
 
 Change to:
 
 ```typescript
-dbId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, "d1", body.binding);
+dbId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'd1', body.binding);
 ```
 
 Same pattern for all kv.ts and r2.ts callers — replace `c.env.DB` with `c.env.API, c.env.JWT_SECRET`.
