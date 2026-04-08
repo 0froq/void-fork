@@ -317,7 +317,7 @@ function toAliasedPreviewSpec(
   if (spec.startsWith('catalog:')) {
     return spec;
   }
-  return `npm:${previewPackageName}@${spec || `^${fallbackVersion}`}`;
+  return `npm:${previewPackageName}@${spec || fallbackVersion}`;
 }
 
 function usesPreviewPackageAliases(root: string): boolean {
@@ -351,7 +351,7 @@ function resolveScaffoldDependencySpec(
     return toAliasedPreviewSpec(previewPackageName, existingVoidSpec, fallbackVersion);
   }
 
-  return `^${fallbackVersion}`;
+  return `npm:${previewPackageName}@${fallbackVersion}`;
 }
 
 function setupTsconfig(
