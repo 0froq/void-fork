@@ -9,6 +9,9 @@
   "placement": {
     "mode": "smart",
   },
+  "limits": {
+    "cpu_ms": 300000,
+  },
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",

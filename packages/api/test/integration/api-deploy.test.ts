@@ -433,15 +433,21 @@ describe('POST /projects/:id/deploy', () => {
       createD1: () => cfSuccess({ uuid: 'd1-migrate-uuid', name: 'test-db' }),
     });
 
-    // Mock the DISPATCH namespace so the deploy route can call the worker's migration endpoint
+    // Mock the DISPATCH namespace so the deploy route can call the worker's
+    // readiness probe and migration endpoint
     const originalDispatch = env.DISPATCH;
     env.DISPATCH = {
       get: () => ({
-        fetch: async () =>
-          Response.json({
+        fetch: async (req: Request) => {
+          const url = new URL(req.url);
+          if (url.pathname === '/__void/ready') {
+            return Response.json({ ready: true });
+          }
+          return Response.json({
             ok: true,
             migrations: [{ name: '001_create_table.sql', applied: true, durationMs: 5 }],
-          }),
+          });
+        },
       }),
     } as unknown as DispatchNamespace;
 
@@ -1121,22 +1127,29 @@ describe('POST /projects/:id/deploy', () => {
       },
     );
 
-    it('retries migration dispatch when CF returns plain-text asset response', async () => {
+    it('polls readiness probe before dispatching migrations', async () => {
       const user = await createTestUser(env.db);
       const project = await createTestProject(env.db, user.id, 'migrate-dispatch-retry-test');
       mockCfApi({
         createD1: () => cfSuccess({ uuid: 'd1-retry-uuid', name: 'test-db' }),
       });
 
-      let dispatchCalls = 0;
+      let readyCalls = 0;
+      let migrateCalls = 0;
       const originalDispatch = env.DISPATCH;
       env.DISPATCH = {
         get: () => ({
-          fetch: async () => {
-            dispatchCalls++;
-            if (dispatchCalls <= 3) {
-              return new Response('Assets have already been uploaded.');
+          fetch: async (req: Request) => {
+            const url = new URL(req.url);
+            if (url.pathname === '/__void/ready') {
+              readyCalls++;
+              if (readyCalls <= 3) {
+                return new Response('Assets have already been uploaded.');
+              }
+              return Response.json({ ready: true });
             }
+            // /__void/migrate
+            migrateCalls++;
             return Response.json({
               ok: true,
               migrations: [{ name: '001_create_table.sql', applied: true, durationMs: 3 }],
@@ -1163,15 +1176,129 @@ describe('POST /projects/:id/deploy', () => {
         expect(res.status).toBe(200);
         const events = parseDeployStream(await res.text());
         expect(events.at(-1)).toMatchObject({ event: 'done' });
-        expect(dispatchCalls).toBe(4);
+        // Readiness probe polled 4 times (3 failures + 1 success)
+        expect(readyCalls).toBe(4);
+        // Migration dispatched once (worker already confirmed live)
+        expect(migrateCalls).toBe(1);
+      } finally {
+        env.DISPATCH = originalDispatch;
+      }
+    });
+
+    it('treats 404 from readiness probe as compatible (older worker without /__void/ready)', async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, 'migrate-compat-404-test');
+      mockCfApi({
+        createD1: () => cfSuccess({ uuid: 'd1-compat-uuid', name: 'test-db' }),
+      });
+
+      let readyCalls = 0;
+      let migrateCalls = 0;
+      const originalDispatch = env.DISPATCH;
+      env.DISPATCH = {
+        get: () => ({
+          fetch: async (req: Request) => {
+            const url = new URL(req.url);
+            if (url.pathname === '/__void/ready') {
+              readyCalls++;
+              // Older worker returns 404 — endpoint doesn't exist
+              return new Response('Not Found', { status: 404 });
+            }
+            // /__void/migrate
+            migrateCalls++;
+            return Response.json({
+              ok: true,
+              migrations: [{ name: '001_create_table.sql', applied: true, durationMs: 2 }],
+            });
+          },
+        }),
+      } as unknown as DispatchNamespace;
+
+      try {
+        const res = await app.fetch(
+          new Request(`http://localhost/projects/${project.id}/deploy`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${user.jwt}` },
+            body: buildDeployForm({
+              manifest: {
+                version: 3,
+                bindings: { d1: ['DB'] },
+                migrations: { dialect: 'sqlite', pending: 1 },
+              },
+            }),
+          }),
+          env,
+        );
+        expect(res.status).toBe(200);
+        const events = parseDeployStream(await res.text());
+        expect(events.at(-1)).toMatchObject({ event: 'done' });
+        // 404 treated as "ready" on first attempt — no retries
+        expect(readyCalls).toBe(1);
+        // Migration dispatched once
+        expect(migrateCalls).toBe(1);
+      } finally {
+        env.DISPATCH = originalDispatch;
+      }
+    });
+
+    it('compat path retries migration with longer window when readiness probe returns 404', async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, 'migrate-compat-retry-test');
+      mockCfApi({
+        createD1: () => cfSuccess({ uuid: 'd1-compat-retry-uuid', name: 'test-db' }),
+      });
+
+      let migrateCalls = 0;
+      const originalDispatch = env.DISPATCH;
+      env.DISPATCH = {
+        get: () => ({
+          fetch: async (req: Request) => {
+            const url = new URL(req.url);
+            if (url.pathname === '/__void/ready') {
+              return new Response('Not Found', { status: 404 });
+            }
+            // /__void/migrate — first 3 calls hit CF propagation lag
+            migrateCalls++;
+            if (migrateCalls <= 3) {
+              return new Response('Assets have already been uploaded.');
+            }
+            return Response.json({
+              ok: true,
+              migrations: [{ name: '001_create_table.sql', applied: true, durationMs: 4 }],
+            });
+          },
+        }),
+      } as unknown as DispatchNamespace;
+
+      try {
+        const res = await app.fetch(
+          new Request(`http://localhost/projects/${project.id}/deploy`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${user.jwt}` },
+            body: buildDeployForm({
+              manifest: {
+                version: 3,
+                bindings: { d1: ['DB'] },
+                migrations: { dialect: 'sqlite', pending: 1 },
+              },
+            }),
+          }),
+          env,
+        );
+        expect(res.status).toBe(200);
+        const events = parseDeployStream(await res.text());
+        expect(events.at(-1)).toMatchObject({ event: 'done' });
+        // 3 CF plain-text retries + 1 success = 4 calls.
+        // This would fail with CF_MIGRATION_RETRY (maxRetries: 2, only 3 attempts).
+        expect(migrateCalls).toBe(4);
       } finally {
         env.DISPATCH = originalDispatch;
       }
     });
 
     it(
-      'sanitizes error after migration dispatch retries exhausted on persistent plain-text response',
-      { timeout: 15_000 },
+      'fails at readiness probe when worker never becomes reachable',
+      { timeout: 30_000 },
       async () => {
         const user = await createTestUser(env.db);
         const project = await createTestProject(env.db, user.id, 'migrate-dispatch-exhaust-test');
@@ -1179,10 +1306,18 @@ describe('POST /projects/:id/deploy', () => {
           createD1: () => cfSuccess({ uuid: 'd1-exhaust-uuid', name: 'test-db' }),
         });
 
+        let migrateCalls = 0;
         const originalDispatch = env.DISPATCH;
         env.DISPATCH = {
           get: () => ({
-            fetch: async () => new Response('Assets have already been uploaded.'),
+            fetch: async (req: Request) => {
+              const url = new URL(req.url);
+              if (url.pathname === '/__void/ready') {
+                return new Response('Assets have already been uploaded.');
+              }
+              migrateCalls++;
+              return Response.json({ ok: true, migrations: [] });
+            },
           }),
         } as unknown as DispatchNamespace;
 
@@ -1208,9 +1343,10 @@ describe('POST /projects/:id/deploy', () => {
           expect(events.at(-1)).toMatchObject({
             event: 'error',
             step: 'migration',
-            message:
-              'migration dispatch failed: CF returned plain-text asset response after retries',
+            message: 'worker readiness probe failed: new worker not reachable after retries',
           });
+          // Migration dispatch should never be attempted
+          expect(migrateCalls).toBe(0);
         } finally {
           env.DISPATCH = originalDispatch;
         }

@@ -73,6 +73,15 @@ describe('internal route blocking', () => {
     expect(response.status).toBe(404);
   });
 
+  it('blocks GET /__void/ready with 404', async () => {
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/__void/ready', { method: 'GET' }),
+      createEnv(),
+      createCtx(),
+    );
+    expect(response.status).toBe(404);
+  });
+
   it('does not block normal paths', async () => {
     const env = createEnv();
     const response = await app.fetch(

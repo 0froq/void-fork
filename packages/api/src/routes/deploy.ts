@@ -58,7 +58,13 @@ function isCfAssetPlainText(text: string): boolean {
 }
 
 const CF_RETRY = { maxRetries: 3, delayMs: 1000 };
-const CF_MIGRATION_RETRY = { maxRetries: 5, delayMs: 1000 };
+// Readiness probe: confirms the new worker is live in the dispatch namespace
+// before dispatching migrations. Absorbs CF's WfP propagation delay.
+// Backoff: 0 + 1 + 2 + 4 + 8 + 16 + 32 = ~63s max window.
+const CF_READINESS_RETRY = { maxRetries: 6, delayMs: 1000 };
+// Migration dispatch: propagation lag is handled by the readiness probe,
+// so this only retries genuine transient failures (e.g. network blips).
+const CF_MIGRATION_RETRY = { maxRetries: 2, delayMs: 1000 };
 
 const app = new Hono<ApiEnv>();
 
@@ -855,10 +861,69 @@ app.post('/:id/deploy', async (c) => {
           try {
             const proxyTokenBinding = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN');
 
-            // CF's WfP dispatch can return the same "Assets have already been
-            // uploaded" plain text on the first invocation after a worker upload
-            // (asset state propagation lag). Retry with backoff, same as the
-            // worker upload step.
+            // Worker name is unique per deployment, so the probe always targets the new script.
+            // Returns "ready" when the endpoint confirms, or "compat" when the worker
+            // is live but doesn't expose /__void/ready (older framework version).
+            const probeResult = await retryWithBackoff<'ready' | 'compat'>(
+              async () => {
+                try {
+                  const userWorker = c.env.DISPATCH.get(workerName);
+                  const readyResponse = await userWorker.fetch(
+                    new Request('https://internal/__void/ready', {
+                      signal: AbortSignal.timeout(10_000),
+                    }),
+                  );
+                  const text = await readyResponse.text();
+                  if (isCfAssetPlainText(text)) {
+                    console.warn(
+                      `[deploy] ${projectId}: readiness probe returned CF plain text: ${text}`,
+                    );
+                    return undefined; // retry
+                  }
+                  try {
+                    const data = JSON.parse(text);
+                    if (data.ready === true) {
+                      return 'ready';
+                    }
+                  } catch {
+                    // fall through
+                  }
+                  if (readyResponse.status === 404) {
+                    // Worker is live but doesn't expose /__void/ready (older framework version).
+                    return 'compat';
+                  }
+                  if (readyResponse.ok) {
+                    // 2xx but not { ready: true } — likely CF propagation lag
+                    console.warn(
+                      `[deploy] ${projectId}: readiness probe returned non-JSON 2xx, retrying: ${text.slice(0, 200)}`,
+                    );
+                    return undefined;
+                  }
+                  console.warn(
+                    `[deploy] ${projectId}: readiness probe returned ${readyResponse.status}, retrying`,
+                  );
+                  return undefined;
+                } catch (err) {
+                  console.warn(
+                    `[deploy] ${projectId}: readiness probe threw: ${err instanceof Error ? err.message : err}`,
+                  );
+                  return undefined; // retry on timeout / network errors
+                }
+              },
+              {
+                ...CF_READINESS_RETRY,
+                errorMessage:
+                  'worker readiness probe failed: new worker not reachable after retries',
+              },
+            );
+
+            // When the probe confirmed readiness, migration only needs short retries
+            // for transient failures. When the probe was skipped (compat), migration
+            // must absorb CF propagation lag itself — use the longer window.
+            const migrationRetry =
+              probeResult === 'ready' ? CF_MIGRATION_RETRY : CF_READINESS_RETRY;
+
+            // Dispatch migration
             type MigrationResult = {
               ok: boolean;
               migrations: {
@@ -881,6 +946,7 @@ app.post('/:id/deploy', async (c) => {
                 );
 
                 const text = await migrateResponse.text();
+                // CF dispatch can regress between consecutive calls; re-check
                 if (isCfAssetPlainText(text)) {
                   console.warn(`[deploy] migration dispatch returned CF plain text: ${text}`);
                   return undefined; // retry
@@ -890,7 +956,6 @@ app.post('/:id/deploy', async (c) => {
                   return JSON.parse(text) as MigrationResult;
                 } catch {
                   if (migrateResponse.ok) {
-                    // 2xx but non-JSON — likely CF propagation lag, retry.
                     console.warn(
                       `[deploy] migration returned non-JSON 2xx, retrying: ${text.slice(0, 500)}`,
                     );
@@ -902,9 +967,8 @@ app.post('/:id/deploy', async (c) => {
                 }
               },
               {
-                ...CF_MIGRATION_RETRY,
-                errorMessage:
-                  'migration dispatch failed: CF returned plain-text asset response after retries',
+                ...migrationRetry,
+                errorMessage: 'migration dispatch failed after retries',
               },
             );
 
