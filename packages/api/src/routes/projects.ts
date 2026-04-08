@@ -17,6 +17,7 @@ import { buildRoutingJson, buildStaticRoutingJson } from "../routing";
 import { getPlanLimits } from "../tiers";
 import type { DeployManifest } from "../types";
 import { getProjectDeploymentWorkerName, getProjectQueueName } from "../naming";
+import { hmacSignState } from "../auth/hmac";
 
 export const RESERVED_SLUGS = new Set([
   "admin",
@@ -240,11 +241,12 @@ const app = new Hono<ApiEnv>()
     // Sync cron scheduler to point at the rollback target
     if (manifest?.schedules?.length) {
       const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
+      const proxyToken = await hmacSignState(projectId, c.env.JWT_SECRET);
       await c.env.CRON_SCHEDULER.get(cronId).fetch(
         new Request("https://do/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workerName, schedules: manifest.schedules }),
+          body: JSON.stringify({ workerName, schedules: manifest.schedules, proxyToken }),
         }),
       );
     } else if (existingEntry?.hasCrons) {

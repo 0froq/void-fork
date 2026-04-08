@@ -277,6 +277,8 @@ describe("POST /projects/:id/deploy", () => {
     const payload = JSON.parse(syncCall!.body);
     expect(payload.workerName).toMatch(/^user-cron-app-dpl_/);
     expect(payload.schedules).toEqual([{ name: "sync", cron: "0 * * * *" }]);
+    expect(payload.proxyToken).toEqual(expect.any(String));
+    expect(payload.proxyToken.length).toBeGreaterThan(0);
   });
 
   it("clears cron schedules when previous deploy had crons", async () => {

@@ -5,6 +5,7 @@ import type { ApiEnv } from "./env";
 interface CronState {
   workerName: string;
   schedules: { name: string; cron: string }[];
+  proxyToken?: string;
 }
 
 /** Thrown when the worker script cannot be reached (deleted/evicted). */
@@ -141,12 +142,24 @@ export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
     const state = await this.getState();
     const alarm = await this.ctx.storage.getAlarm();
     const failures = (await this.ctx.storage.get<number>("failures")) ?? 0;
-    return Response.json({ state, nextAlarm: alarm, failures });
+    // Omit proxyToken from status response to avoid leaking secrets
+    const { proxyToken: _, ...safeState } = state ?? {};
+    return Response.json({ state: state ? safeState : null, nextAlarm: alarm, failures });
   }
 
   async alarm(): Promise<void> {
     const state = await this.getState();
     if (!state || state.schedules.length === 0) return;
+
+    // State created before the proxyToken fix lacks auth credentials.
+    // Skip invocation to avoid sending unauthenticated requests — the next
+    // deploy will resync state with the token.
+    if (!state.proxyToken) {
+      console.warn(
+        `CronScheduler: missing proxyToken for ${state.workerName}, skipping until next deploy resync`,
+      );
+      return;
+    }
 
     const now = Date.now();
     const matching = state.schedules.filter((s) => cronMatchesMinute(s.cron, now));
@@ -157,7 +170,7 @@ export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
     }
 
     const results = await Promise.allSettled(
-      matching.map((s) => this.invokeWorker(state.workerName, s.cron, now)),
+      matching.map((s) => this.invokeWorker(state.workerName, s.cron, now, state.proxyToken)),
     );
 
     for (let i = 0; i < results.length; i++) {
@@ -195,14 +208,19 @@ export class CronScheduler extends DurableObject<ApiEnv["Bindings"]> {
     workerName: string,
     cron: string,
     scheduledTime: number,
+    proxyToken?: string,
   ): Promise<void> {
     let res: Response;
     try {
       const worker = this.env.DISPATCH.get(workerName);
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (proxyToken) {
+        headers["x-void-internal"] = proxyToken;
+      }
       res = await worker.fetch(
         new Request("https://internal/__scheduled", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({ cron, scheduledTime }),
         }),
       );

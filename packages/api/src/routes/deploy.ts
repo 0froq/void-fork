@@ -960,6 +960,7 @@ app.post("/:id/deploy", async (c) => {
 
         if (hasCrons) {
           const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
+          const cronProxyToken = workerBindings.find((b) => b.name === "__VOID_PROXY_TOKEN")?.text;
           await c.env.CRON_SCHEDULER.get(cronId).fetch(
             new Request("https://do/sync", {
               method: "POST",
@@ -967,6 +968,7 @@ app.post("/:id/deploy", async (c) => {
               body: JSON.stringify({
                 workerName,
                 schedules: manifest.schedules,
+                proxyToken: cronProxyToken,
               }),
             }),
           );
