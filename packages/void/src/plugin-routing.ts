@@ -122,6 +122,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     runtimeEnvPath: resolveFile('#self/_env'),
     webSocketRuntimePath: resolveFile('#self/runtime/ws-server'),
     reactRefresh: false,
+    dev: false,
     auth: null,
     nodeTarget: !!options.target,
     headerRules: options.headerRules,
@@ -252,6 +253,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     configResolved(config) {
       resolvedConfig = config;
       authClientPath = resolveAuthClientPath(config);
+      compileOptions.dev = config.command === 'serve';
       compileOptions.reactRefresh = config.plugins.some(
         (plugin) =>
           plugin.name === 'vite:react-babel' ||

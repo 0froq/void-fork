@@ -7,6 +7,7 @@ const testOptions = {
   responsePath: '/resolved/void/runtime/response.mjs',
   runtimeEnvPath: '/resolved/void/runtime/env.mjs',
   reactRefresh: false,
+  dev: true,
   auth: null,
 };
 
@@ -214,7 +215,7 @@ describe('compileRouteTable with pages', () => {
     expect(code).toContain('serveCustomErrorPage(c, 404, "Not Found")');
   });
 
-  it('embeds the default self-contained error page helper', () => {
+  it('embeds the default self-contained error page helper and dev overlay support', () => {
     const scan = makeScan({
       pages: [
         {
@@ -245,7 +246,21 @@ describe('compileRouteTable with pages', () => {
     expect(code).toContain('place-items: center;');
     expect(code).toContain('border-radius: 32px;');
     expect(code).toContain('corner-shape: squircle;');
-    expect(code).toContain('return __voidCreateErrorResponse(c.req.raw, status, fallbackText);');
+    expect(code).toContain('function __voidRenderDevErrorOverlay(request, status, title, error) {');
+    expect(code).toContain('function __voidInjectDevErrorOverlay(html, overlay) {');
+    expect(code).toContain('const __VOID_DEV = true;');
+    expect(code).toContain('__VOID_DEV && status === 500 && error');
+    expect(code).toContain('data-void-error-close');
+    expect(code).toContain('data-void-error-toggle');
+    expect(code).toContain('is-minimized');
+    expect(code).toContain('Minimize error overlay');
+    expect(code).toContain(
+      'return __voidCreateErrorResponse(c.req.raw, status, fallbackText, error);',
+    );
+    expect(code).toContain(
+      'if (err && typeof err === "object" && "getResponse" in err) return err.getResponse();',
+    );
+    expect(code).toContain('return serveCustomErrorPage(c, 500, "Internal Server Error", err);');
   });
 
   it('does not generate page code when pages is null', () => {

@@ -13,10 +13,11 @@ const BINDING_HINT_SCRIPT = `<script type="module" src="/@id/virtual:void/bindin
 const DEFAULT_ERROR_PAGE_FONT_STACK =
   'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
-function pushDefaultErrorPageHelpers(lines: string[]): void {
+function pushDefaultErrorPageHelpers(lines: string[], dev: boolean): void {
   lines.push(
     `const __VOID_ERROR_PAGE_FONT_STACK = ${JSON.stringify(DEFAULT_ERROR_PAGE_FONT_STACK)};`,
   );
+  lines.push(`const __VOID_DEV = ${JSON.stringify(dev)};`);
   lines.push(`function __voidEscapeHtml(value) {`);
   lines.push(
     `  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");`,
@@ -36,9 +37,281 @@ function pushDefaultErrorPageHelpers(lines: string[]): void {
   lines.push(`  return !accept || accept.includes("text/html") || accept.includes("*/*");`);
   lines.push(`}`);
   lines.push('');
-  lines.push(`function __voidRenderErrorPage(status, title) {`);
+  lines.push(`function __voidDescribeThrownValue(value) {`);
+  lines.push(`  if (value instanceof Error) {`);
+  lines.push(`    return {`);
+  lines.push(`      name: value.name || "Error",`);
+  lines.push(`      message: value.message || "",`);
+  lines.push(`      stack: typeof value.stack === "string" ? value.stack : "",`);
+  lines.push(`    };`);
+  lines.push(`  }`);
+  lines.push(`  if (typeof value === "string") {`);
+  lines.push(`    return { name: "Thrown value", message: value, stack: "" };`);
+  lines.push(`  }`);
+  lines.push(`  let message = "";`);
+  lines.push(`  try {`);
+  lines.push(`    if (typeof value === "object" && value !== null) {`);
+  lines.push(`      message = JSON.stringify(value, null, 2) ?? String(value);`);
+  lines.push(`    } else {`);
+  lines.push(`      message = String(value);`);
+  lines.push(`    }`);
+  lines.push(`  } catch {`);
+  lines.push(`    message = String(value);`);
+  lines.push(`  }`);
+  lines.push(`  return { name: "Thrown value", message, stack: "" };`);
+  lines.push(`}`);
+  lines.push('');
+  lines.push(`function __voidCollectErrorChain(error) {`);
+  lines.push(`  const chain = [];`);
+  lines.push(`  const seen = new Set();`);
+  lines.push(`  let current = error;`);
+  lines.push(`  let depth = 0;`);
+  lines.push(`  while (current != null && depth < 8 && !seen.has(current)) {`);
+  lines.push(`    seen.add(current);`);
+  lines.push(`    const entry = __voidDescribeThrownValue(current);`);
+  lines.push(`    chain.push({`);
+  lines.push(`      label: depth === 0 ? "Error" : "Cause " + depth,`);
+  lines.push(`      ...entry,`);
+  lines.push(`    });`);
+  lines.push(`    current = current instanceof Error ? current.cause : undefined;`);
+  lines.push(`    depth += 1;`);
+  lines.push(`  }`);
+  lines.push(`  if (current != null) {`);
+  lines.push(`    chain.push({`);
+  lines.push(`      label: "Cause " + depth,`);
+  lines.push(`      name: "Truncated",`);
+  lines.push(`      message: "Additional nested causes were omitted.",`);
+  lines.push(`      stack: "",`);
+  lines.push(`    });`);
+  lines.push(`  }`);
+  lines.push(`  if (chain.length === 0) {`);
+  lines.push(`    chain.push({`);
+  lines.push(`      label: "Error",`);
+  lines.push(`      name: "Unknown error",`);
+  lines.push(`      message: "No error details were available.",`);
+  lines.push(`      stack: "",`);
+  lines.push(`    });`);
+  lines.push(`  }`);
+  lines.push(`  return chain;`);
+  lines.push(`}`);
+  lines.push('');
+  lines.push(`function __voidRenderDevErrorOverlay(request, status, title, error) {`);
+  lines.push(`  const chain = __voidCollectErrorChain(error);`);
+  lines.push(
+    `  const errorCountLabel = chain.length + (chain.length === 1 ? " Error" : " Errors");`,
+  );
+  lines.push(`  const sections = chain.map((entry, index) => {`);
+  lines.push(`    const heading = entry.name || (index === 0 ? title : "Cause");`);
+  lines.push(`    const message = entry.message || title;`);
+  lines.push(
+    `    const stack = entry.stack ? \`<div class="__void-error-stack"><div class="__void-error-stack-label">Stack trace</div><pre>\${__voidEscapeHtml(entry.stack)}</pre></div>\` : "";`,
+  );
+  lines.push(`    if (index === 0) {`);
+  lines.push(
+    `      return \`<section class="__void-error-section is-root"><p class="__void-error-message">\${__voidEscapeHtml(message)}</p>\${stack}</section>\`;`,
+  );
+  lines.push(`    }`);
+  lines.push(
+    `    return \`<section class="__void-error-section"><div class="__void-error-kicker">\${__voidEscapeHtml(entry.label)}</div><h2>\${__voidEscapeHtml(heading)}</h2><p>\${__voidEscapeHtml(message)}</p>\${stack}</section>\`;`,
+  );
+  lines.push(`  }).join("");`);
+  lines.push(`  return \`<style>`);
+  lines.push(`    .__void-error-overlay {`);
+  lines.push(`      position: fixed;`);
+  lines.push(`      inset: 0;`);
+  lines.push(`      z-index: 2147483647;`);
+  lines.push(`      pointer-events: none;`);
+  lines.push(`      font-family: \${__VOID_ERROR_PAGE_FONT_STACK};`);
+  lines.push(`      color: #f5f5f5;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-backdrop {`);
+  lines.push(`      position: absolute;`);
+  lines.push(`      inset: 0;`);
+  lines.push(`      background: rgba(10, 10, 10, 0.52);`);
+  lines.push(`      backdrop-filter: blur(4px);`);
+  lines.push(`      transition: opacity 180ms ease;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-panel {`);
+  lines.push(`      position: absolute;`);
+  lines.push(`      inset: auto auto 24px 24px;`);
+  lines.push(`      inline-size: min(760px, calc(100vw - 48px));`);
+  lines.push(`      max-block-size: min(80dvh, 920px);`);
+  lines.push(`      overflow: auto;`);
+  lines.push(`      pointer-events: auto;`);
+  lines.push(`      border-radius: 32px;`);
+  lines.push(`      corner-shape: squircle;`);
+  lines.push(`      border: 1px solid rgba(255, 255, 255, 0.14);`);
+  lines.push(
+    `      background: linear-gradient(180deg, rgba(24, 24, 27, 0.98), rgba(9, 9, 11, 0.98));`,
+  );
+  lines.push(`      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);`);
+  lines.push(`      padding: 12px 16px;`);
+  lines.push(`      transition: transform 180ms ease, opacity 180ms ease;`);
+  lines.push(`      transform-origin: bottom left;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-close {`);
+  lines.push(`      position: absolute;`);
+  lines.push(`      inset: 8px 12px auto auto;`);
+  lines.push(`      inline-size: 36px;`);
+  lines.push(`      block-size: 36px;`);
+  lines.push(`      border: 0;`);
+  lines.push(`      border-radius: 999px;`);
+  lines.push(`      background: rgba(255, 255, 255, 0.08);`);
+  lines.push(`      color: #fafafa;`);
+  lines.push(`      cursor: pointer;`);
+  lines.push(`      display: grid;`);
+  lines.push(`      place-items: center;`);
+  lines.push(`      padding: 0;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-close:hover {`);
+  lines.push(`      background: rgba(255, 255, 255, 0.14);`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-close svg {`);
+  lines.push(`      inline-size: 16px;`);
+  lines.push(`      block-size: 16px;`);
+  lines.push(`      display: block;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-minimized {`);
+  lines.push(`      position: absolute;`);
+  lines.push(`      inset: auto auto 24px 24px;`);
+  lines.push(`      pointer-events: none;`);
+  lines.push(`      opacity: 0;`);
+  lines.push(`      transform: scale(0.92);`);
+  lines.push(`      transform-origin: bottom left;`);
+  lines.push(`      border: 1px solid rgba(248, 113, 113, 0.35);`);
+  lines.push(`      border-radius: 32px;`);
+  lines.push(`      corner-shape: squircle;`);
+  lines.push(`      background: rgba(24, 24, 27, 0.96);`);
+  lines.push(`      color: #fca5a5;`);
+  lines.push(`      padding: 12px 8px;`);
+  lines.push(`      box-shadow: 0 18px 36px rgba(0, 0, 0, 0.28);`);
+  lines.push(`      cursor: pointer;`);
+  lines.push(`      font: 700 13px/1 \${__VOID_ERROR_PAGE_FONT_STACK};`);
+  lines.push(`      letter-spacing: 0.04em;`);
+  lines.push(`      text-transform: uppercase;`);
+  lines.push(`      transition: transform 180ms ease, opacity 180ms ease;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-header {`);
+  lines.push(`      display: flex;`);
+  lines.push(`      flex-direction: column;`);
+  lines.push(`      gap: 6px;`);
+  lines.push(`      margin-block-end: 0;`);
+  lines.push(`      padding-right: 52px;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-eyebrow {`);
+  lines.push(`      font-size: 12px;`);
+  lines.push(`      font-weight: 700;`);
+  lines.push(`      letter-spacing: 0.12em;`);
+  lines.push(`      text-transform: uppercase;`);
+  lines.push(`      color: #fca5a5;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-status {`);
+  lines.push(`      margin: 0;`);
+  lines.push(`      color: #fca5a5;`);
+  lines.push(`      font-size: 12px;`);
+  lines.push(`      font-weight: 700;`);
+  lines.push(`      letter-spacing: 0.12em;`);
+  lines.push(`      text-transform: uppercase;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-section {`);
+  lines.push(`      border-top: 1px solid rgba(255, 255, 255, 0.08);`);
+  lines.push(`      padding-top: 16px;`);
+  lines.push(`      margin-top: 16px;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-section.is-root {`);
+  lines.push(`      border-top: 0;`);
+  lines.push(`      padding-top: 0;`);
+  lines.push(`      margin-top: 0;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-message {`);
+  lines.push(`      margin: 0;`);
+  lines.push(`      color: #fff;`);
+  lines.push(`      font-size: clamp(1.35rem, 1rem + 1vw, 1.9rem);`);
+  lines.push(`      line-height: 1.15;`);
+  lines.push(`      letter-spacing: -0.03em;`);
+  lines.push(`      white-space: pre-wrap;`);
+  lines.push(`      word-break: break-word;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-kicker {`);
+  lines.push(`      margin-bottom: 6px;`);
+  lines.push(`      color: #fda4af;`);
+  lines.push(`      font-size: 12px;`);
+  lines.push(`      font-weight: 700;`);
+  lines.push(`      letter-spacing: 0.08em;`);
+  lines.push(`      text-transform: uppercase;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-section h2 {`);
+  lines.push(`      margin: 0 0 8px;`);
+  lines.push(`      font-size: 1.05rem;`);
+  lines.push(`      color: #fff;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-section p {`);
+  lines.push(`      margin: 0;`);
+  lines.push(`      color: #e4e4e7;`);
+  lines.push(`      white-space: pre-wrap;`);
+  lines.push(`      word-break: break-word;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-stack {`);
+  lines.push(`      margin-top: 12px;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-stack-label {`);
+  lines.push(`      padding: 0 0 8px;`);
+  lines.push(`      color: #f4f4f5;`);
+  lines.push(`      font-size: 13px;`);
+  lines.push(`      font-weight: 600;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-section pre {`);
+  lines.push(`      margin: 0;`);
+  lines.push(`      padding: 0;`);
+  lines.push(`      overflow: auto;`);
+  lines.push(`      color: #e4e4e7;`);
+  lines.push(`      font: 500 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;`);
+  lines.push(`      white-space: pre-wrap;`);
+  lines.push(`      word-break: break-word;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-overlay.is-minimized .__void-error-backdrop {`);
+  lines.push(`      opacity: 0;`);
+  lines.push(`      pointer-events: none;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-overlay.is-minimized .__void-error-panel {`);
+  lines.push(`      opacity: 0;`);
+  lines.push(`      pointer-events: none;`);
+  lines.push(`      transform: scale(0.92);`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-overlay.is-minimized .__void-error-minimized {`);
+  lines.push(`      opacity: 1;`);
+  lines.push(`      pointer-events: auto;`);
+  lines.push(`      transform: scale(1);`);
+  lines.push(`    }`);
+  lines.push(`    @media (max-width: 720px) {`);
+  lines.push(`      .__void-error-panel {`);
+  lines.push(`        inset: auto 12px 12px 12px;`);
+  lines.push(`        inline-size: auto;`);
+  lines.push(`        max-block-size: min(70dvh, 920px);`);
+  lines.push(`        padding: 16px;`);
+  lines.push(`      }`);
+  lines.push(`      .__void-error-minimized {`);
+  lines.push(`        inset: auto auto 12px 12px;`);
+  lines.push(`      }`);
+  lines.push(`    }`);
+  lines.push(`  </style>`);
+  lines.push(
+    `<aside class="__void-error-overlay" data-void-error-overlay role="dialog" aria-label="Void dev error overlay"><div class="__void-error-backdrop" data-void-error-backdrop></div><section class="__void-error-panel"><button type="button" class="__void-error-close" data-void-error-close aria-label="Minimize error overlay"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3.757 3.757 12.243 12.243M12.243 3.757 3.757 12.243" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg></button><header class="__void-error-header"><p class="__void-error-status">\${__voidEscapeHtml(String(status) + ": " + title)}</p></header>\${sections}</section><button type="button" class="__void-error-minimized" data-void-error-toggle aria-label="Show dev error overlay" aria-expanded="true">\${__voidEscapeHtml(errorCountLabel)}</button><script>(function(){const script=document.currentScript;if(!(script instanceof HTMLScriptElement))return;const root=script.closest("[data-void-error-overlay]");if(!(root instanceof HTMLElement))return;const backdrop=root.querySelector("[data-void-error-backdrop]");const closeButton=root.querySelector("[data-void-error-close]");const toggle=root.querySelector("[data-void-error-toggle]");const setMinimized=(minimized)=>{root.classList.toggle("is-minimized", minimized);if(toggle instanceof HTMLElement)toggle.setAttribute("aria-expanded", minimized ? "false" : "true");};if(backdrop instanceof HTMLElement)backdrop.addEventListener("click",()=>setMinimized(true));if(closeButton instanceof HTMLElement)closeButton.addEventListener("click",()=>setMinimized(true));if(toggle instanceof HTMLElement)toggle.addEventListener("click",()=>setMinimized(false));})();</script></aside>\`;`,
+  );
+  lines.push(`}`);
+  lines.push('');
+  lines.push(`function __voidInjectDevErrorOverlay(html, overlay) {`);
+  lines.push(
+    `  return /<\\/body\\s*>/i.test(html) ? html.replace(/<\\/body\\s*>/i, overlay + "</body>") : html + overlay;`,
+  );
+  lines.push(`}`);
+  lines.push('');
+  lines.push(`function __voidRenderErrorPage(request, status, title, error) {`);
   lines.push(`  const heading = status + ": " + title;`);
   lines.push(`  const prefix = status + ": ";`);
+  lines.push(
+    `  const overlay = __VOID_DEV && status === 500 && error ? __voidRenderDevErrorOverlay(request, status, title, error) : "";`,
+  );
   lines.push(`  return \`<!doctype html>`);
   lines.push(`<html lang="en">`);
   lines.push(`  <head>`);
@@ -92,16 +365,17 @@ function pushDefaultErrorPageHelpers(lines: string[]): void {
     `      <h1><strong>\${__voidEscapeHtml(prefix)}</strong>\${__voidEscapeHtml(title)}</h1>`,
   );
   lines.push(`    </main>`);
+  lines.push(`    \${overlay}`);
   lines.push(`  </body>`);
   lines.push(`</html>\`;`);
   lines.push(`}`);
   lines.push('');
-  lines.push(`function __voidCreateErrorResponse(request, status, title) {`);
+  lines.push(`function __voidCreateErrorResponse(request, status, title, error) {`);
   lines.push(`  if (!__voidShouldServeHtmlErrorPage(request)) {`);
   lines.push(`    return new Response(title, { status });`);
   lines.push(`  }`);
   lines.push(
-    `  return new Response(request.method === "HEAD" ? null : __voidRenderErrorPage(status, title), {`,
+    `  return new Response(request.method === "HEAD" ? null : __voidRenderErrorPage(request, status, title, error), {`,
   );
   lines.push(`    status,`);
   lines.push(`    headers: { "content-type": "text/html; charset=utf-8" },`);
@@ -128,6 +402,8 @@ export interface CompileOptions {
   runtimeEnvPath: string;
   /** Whether to inject React Fast Refresh preamble in dev SSR HTML. */
   reactRefresh: boolean;
+  /** Whether the generated route module is being compiled for dev server usage. */
+  dev?: boolean;
   /** Auth configuration (null = disabled) */
   auth: AuthCompileOptions | null;
   /** Non-CF target — omits executionCtx from ALS context */
@@ -390,7 +666,7 @@ export function compileRouteTable(
 
   // Pages mode — generate page route handlers
   if (pages && scan.pages.pages.length > 0) {
-    compilePageRoutes(lines, scan, pages);
+    compilePageRoutes(lines, scan, pages, options);
   }
 
   compilePrerenderCollector(lines, scan, ssr, options);
@@ -794,7 +1070,12 @@ function compilePrerenderCollector(
   lines.push('');
 }
 
-function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompileOptions): void {
+function compilePageRoutes(
+  lines: string[],
+  scan: ScanResult,
+  pages: PagesCompileOptions,
+  options: CompileOptions,
+): void {
   // Import protocol helpers and renderer
   lines.push(
     `import { handlePageGet, handlePageMutation } from ${JSON.stringify(pages.protocolPath)};`,
@@ -814,7 +1095,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   // Emit head config constant from void.json
   lines.push(`const __voidHeadConfig = ${JSON.stringify(pages.headConfig ?? null)};`);
   lines.push('');
-  pushDefaultErrorPageHelpers(lines);
+  pushDefaultErrorPageHelpers(lines, options.dev === true);
 
   // Asset tags — reuse the SSR asset tags pattern with the pages client entry
   const clientEntryId = pages.clientEntryId;
@@ -1178,7 +1459,7 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push('');
 
   // Custom error page helper — serves {status}.html from static assets (e.g. 404.html, 500.html)
-  lines.push(`async function serveCustomErrorPage(c, status, fallbackText) {`);
+  lines.push(`async function serveCustomErrorPage(c, status, fallbackText, error) {`);
   lines.push(`  try {`);
   lines.push(`    const assets = c.env?.ASSETS;`);
   lines.push(`    if (assets && typeof assets.fetch === "function") {`);
@@ -1186,21 +1467,37 @@ function compilePageRoutes(lines: string[], scan: ScanResult, pages: PagesCompil
   lines.push(`      const errRes = await assets.fetch(errReq);`);
   lines.push(`      if (errRes.ok) {`);
   lines.push(
+    `        if (__VOID_DEV && status === 500 && error && __voidShouldServeHtmlErrorPage(c.req.raw)) {`,
+  );
+  lines.push(
+    `          const overlay = __voidRenderDevErrorOverlay(c.req.raw, status, fallbackText, error);`,
+  );
+  lines.push(`          const html = await errRes.text();`);
+  lines.push(
+    `          return new Response(c.req.method === "HEAD" ? null : __voidInjectDevErrorOverlay(html, overlay), {`,
+  );
+  lines.push(`            status,`);
+  lines.push(`            headers: { "content-type": "text/html; charset=utf-8" },`);
+  lines.push(`          });`);
+  lines.push(`        }`);
+  lines.push(
     `        return new Response(errRes.body, { status, headers: { "content-type": "text/html; charset=utf-8" } });`,
   );
   lines.push(`      }`);
   lines.push(`    }`);
   lines.push(`  } catch {}`);
-  lines.push(`  return __voidCreateErrorResponse(c.req.raw, status, fallbackText);`);
+  lines.push(`  return __voidCreateErrorResponse(c.req.raw, status, fallbackText, error);`);
   lines.push(`}`);
   lines.push('');
 
   // Global error handler — preserve HTTPException responses (e.g. 401 from requireAuth),
   // serve custom 500.html for unexpected errors
   lines.push(`app.onError((err, c) => {`);
-  lines.push(`  if ("getResponse" in err) return err.getResponse();`);
+  lines.push(
+    `  if (err && typeof err === "object" && "getResponse" in err) return err.getResponse();`,
+  );
   lines.push(`  console.error(err);`);
-  lines.push(`  return serveCustomErrorPage(c, 500, "Internal Server Error");`);
+  lines.push(`  return serveCustomErrorPage(c, 500, "Internal Server Error", err);`);
   lines.push(`});`);
   lines.push('');
 
