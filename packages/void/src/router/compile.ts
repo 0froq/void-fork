@@ -151,7 +151,7 @@ function pushDefaultErrorPageHelpers(lines: string[], dev: boolean): void {
   lines.push(`    }`);
   lines.push(`    .__void-error-close {`);
   lines.push(`      position: absolute;`);
-  lines.push(`      inset: 8px 12px auto auto;`);
+  lines.push(`      inset: 12px 12px auto auto;`);
   lines.push(`      inline-size: 36px;`);
   lines.push(`      block-size: 36px;`);
   lines.push(`      border: 0;`);
