@@ -11,31 +11,71 @@ export interface MigrationResult {
 }
 
 /**
+ * One-time migration: rename legacy `_migrations` table to `_void_migrations`.
+ * Copies all rows from the old table to the new one, then drops the old table.
+ */
+async function upgradeTrackingTable(
+  accountId: string,
+  apiToken: string,
+  databaseId: string,
+): Promise<void> {
+  const result = await queryD1(accountId, apiToken, databaseId, {
+    sql: "SELECT name FROM sqlite_master WHERE type='table' AND name='_migrations'",
+  });
+  if (!result.results || result.results.length === 0) {
+    return;
+  }
+  // INSERT must succeed — propagate failures so the applied set is complete.
+  await queryD1(accountId, apiToken, databaseId, {
+    sql: `INSERT OR IGNORE INTO _void_migrations (name, applied_at) SELECT name, applied_at FROM _migrations`,
+  });
+  // DROP can fail if a concurrent caller already dropped the table — safe to ignore.
+  try {
+    await queryD1(accountId, apiToken, databaseId, {
+      sql: `DROP TABLE _migrations`,
+    });
+  } catch {
+    // Concurrent upgrade already dropped the table
+  }
+}
+
+/**
  * Run migrations against a remote D1 database via the CF REST API.
  *
- * 1. Ensure _migrations tracking table exists
+ * 1. Ensure _void_migrations tracking table exists
  * 2. Query already-applied migrations
- * 3. For each pending: execute SQL + record in _migrations
+ * 3. For each pending: execute SQL + record in _void_migrations
  */
+/**
+ * Ensure _void_migrations table exists and upgrade legacy _migrations if present.
+ * Returns the set of already-applied migration names.
+ */
+export async function ensureTrackingTable(
+  accountId: string,
+  apiToken: string,
+  databaseId: string,
+): Promise<Set<string>> {
+  await queryD1(accountId, apiToken, databaseId, {
+    sql: `CREATE TABLE IF NOT EXISTS _void_migrations (
+      name TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    )`,
+  });
+  await upgradeTrackingTable(accountId, apiToken, databaseId);
+  const appliedResult = await queryD1(accountId, apiToken, databaseId, {
+    sql: 'SELECT name FROM _void_migrations',
+  });
+  return new Set(appliedResult.results.map((row) => row.name as string));
+}
+
 export async function runRemoteMigrations(
   accountId: string,
   apiToken: string,
   databaseId: string,
   migrations: RemoteMigration[],
+  appliedSet?: Set<string>,
 ): Promise<MigrationResult> {
-  // Ensure tracking table exists
-  await queryD1(accountId, apiToken, databaseId, {
-    sql: `CREATE TABLE IF NOT EXISTS _migrations (
-      name TEXT PRIMARY KEY,
-      applied_at TEXT NOT NULL
-    )`,
-  });
-
-  // Get already-applied migrations
-  const appliedResult = await queryD1(accountId, apiToken, databaseId, {
-    sql: 'SELECT name FROM _migrations',
-  });
-  const applied = new Set(appliedResult.results.map((row) => row.name as string));
+  const applied = appliedSet ?? (await ensureTrackingTable(accountId, apiToken, databaseId));
 
   const result: MigrationResult = { applied: [], skipped: [] };
 
@@ -45,10 +85,10 @@ export async function runRemoteMigrations(
       continue;
     }
 
-    // Execute migration SQL, then record in _migrations
+    // Execute migration SQL, then record in _void_migrations
     await queryD1(accountId, apiToken, databaseId, { sql: migration.sql });
     await queryD1(accountId, apiToken, databaseId, {
-      sql: 'INSERT INTO _migrations (name, applied_at) VALUES (?, ?)',
+      sql: 'INSERT INTO _void_migrations (name, applied_at) VALUES (?, ?)',
       params: [migration.name, new Date().toISOString()],
     });
 

@@ -11,9 +11,10 @@ import {
   getDomainsByProjectIds,
   getDeployment,
   setActiveDeployment,
+  setAppliedMigrations,
 } from '../db';
 import type { ApiEnv } from '../env';
-import { queryD1 } from '../migrations/remote-runner';
+import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations/remote-runner';
 import { getProjectDeploymentWorkerName, getProjectQueueName } from '../naming';
 import { buildRoutingJson, buildStaticRoutingJson } from '../routing';
 import { getPlanLimits } from '../tiers';
@@ -55,6 +56,26 @@ export const RESERVED_SLUGS = new Set([
   'support',
   'www',
 ]);
+
+const DESTRUCTIVE_PATTERNS = [
+  /\bDROP\s+TABLE\b/i,
+  /\bDROP\s+COLUMN\b/i,
+  /\bALTER\s+TABLE\s+\S+\s+RENAME\b/i,
+  /\bTRUNCATE\b/i,
+];
+
+const DESTRUCTIVE_PRAGMA = '-- void:allow-destructive';
+
+function hasUnauthorizedDestructive(migrations: { name: string; sql: string }[]): string[] {
+  const violations: string[] = [];
+  for (const m of migrations) {
+    const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(m.sql));
+    if (isDestructive && !m.sql.includes(DESTRUCTIVE_PRAGMA)) {
+      violations.push(m.name);
+    }
+  }
+  return violations;
+}
 
 const app = new Hono<ApiEnv>()
 
@@ -314,18 +335,181 @@ const app = new Hono<ApiEnv>()
       return c.json({ applied: [] });
     }
 
+    const applied: { name: string; applied_at: string }[] = [];
+    const seen = new Set<string>();
+
+    // Read from _void_migrations (primary)
     try {
       const result = await queryD1(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, d1Resource.cf_id, {
+        sql: 'SELECT name, applied_at FROM _void_migrations ORDER BY name',
+      });
+      for (const r of result.results) {
+        const name = r.name as string;
+        if (!seen.has(name)) {
+          seen.add(name);
+          applied.push({ name, applied_at: r.applied_at as string });
+        }
+      }
+    } catch {
+      // _void_migrations table doesn't exist yet
+    }
+
+    // Also read from legacy _migrations (for projects mid-upgrade)
+    try {
+      const legacy = await queryD1(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, d1Resource.cf_id, {
         sql: 'SELECT name, applied_at FROM _migrations ORDER BY name',
       });
-      return c.json({
-        applied: result.results.map((r) => ({
-          name: r.name as string,
-          applied_at: r.applied_at as string,
-        })),
-      });
+      for (const r of legacy.results) {
+        const name = r.name as string;
+        if (!seen.has(name)) {
+          seen.add(name);
+          applied.push({ name, applied_at: r.applied_at as string });
+        }
+      }
     } catch {
-      return c.json({ applied: [] });
+      // Legacy table doesn't exist
+    }
+
+    applied.sort((a, b) => a.name.localeCompare(b.name));
+    return c.json({ applied });
+  })
+
+  // Apply migrations to a project's remote D1 database
+  .post('/:id/migrations/apply', async (c) => {
+    const project = await getProject(c.get('db'), c.req.param('id'));
+    if (!project) {
+      return c.json({ error: 'project not found' }, 404);
+    }
+    if (project.user_id !== c.get('user').id) {
+      return c.json({ error: 'forbidden' }, 403);
+    }
+
+    const body = await c.req.json<{ migrations: { name: string; sql: string }[] }>();
+    if (!body.migrations || !Array.isArray(body.migrations)) {
+      return c.json({ error: 'migrations array required' }, 400);
+    }
+    const invalidEntry = body.migrations.find(
+      (m) => typeof m.name !== 'string' || !m.name || typeof m.sql !== 'string',
+    );
+    if (invalidEntry) {
+      return c.json(
+        { error: 'each migration must have a non-empty string "name" and string "sql"' },
+        400,
+      );
+    }
+    const nameSet = new Set<string>();
+    for (const m of body.migrations) {
+      if (nameSet.has(m.name)) {
+        return c.json({ error: `duplicate migration name: ${m.name}` }, 400);
+      }
+      nameSet.add(m.name);
+    }
+
+    const resources = await getProjectResources(c.get('db'), project.id);
+    const d1Resource = resources.find((r) => r.type === 'd1');
+    if (!d1Resource) {
+      return c.json({ error: 'no D1 database found for this project' }, 400);
+    }
+
+    try {
+      // Filter to pending-only before validating destructive patterns
+      const applied = await ensureTrackingTable(
+        c.env.CF_ACCOUNT_ID,
+        c.env.CF_API_TOKEN,
+        d1Resource.cf_id,
+      );
+      const pending = body.migrations.filter((m) => !applied.has(m.name));
+
+      const violations = hasUnauthorizedDestructive(pending);
+      if (violations.length > 0) {
+        return c.json(
+          {
+            ok: false,
+            error: `Destructive migrations without pragma: ${violations.join(', ')}. Add "${DESTRUCTIVE_PRAGMA}" to allow.`,
+          },
+          400,
+        );
+      }
+
+      const result = await runRemoteMigrations(
+        c.env.CF_ACCOUNT_ID,
+        c.env.CF_API_TOKEN,
+        d1Resource.cf_id,
+        body.migrations,
+        applied,
+      );
+
+      // Update the active deployment's applied_migrations metadata
+      if (result.applied.length > 0 && project.active_deployment_id) {
+        const deployment = await getDeployment(c.get('db'), project.active_deployment_id);
+        if (deployment) {
+          const existing: string[] = deployment.applied_migrations
+            ? JSON.parse(deployment.applied_migrations)
+            : [];
+          const existingSet = new Set(existing);
+          const merged = [...existing, ...result.applied.filter((m) => !existingSet.has(m))];
+          await setAppliedMigrations(c.get('db'), deployment.id, merged);
+        }
+      }
+
+      return c.json({ ok: true, ...result });
+    } catch (err) {
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  })
+
+  // Rename migration records in a project's remote D1 database
+  .post('/:id/migrations/rename', async (c) => {
+    const project = await getProject(c.get('db'), c.req.param('id'));
+    if (!project) {
+      return c.json({ error: 'project not found' }, 404);
+    }
+    if (project.user_id !== c.get('user').id) {
+      return c.json({ error: 'forbidden' }, 403);
+    }
+
+    const body = await c.req.json<{ renames: { from: string; to: string }[] }>();
+    if (!body.renames || !Array.isArray(body.renames) || body.renames.length === 0) {
+      return c.json({ error: 'renames array required' }, 400);
+    }
+    const invalidRename = body.renames.find(
+      (r) => typeof r.from !== 'string' || !r.from || typeof r.to !== 'string' || !r.to,
+    );
+    if (invalidRename) {
+      return c.json({ error: 'each rename must have non-empty string "from" and "to"' }, 400);
+    }
+
+    const resources = await getProjectResources(c.get('db'), project.id);
+    const d1Resource = resources.find((r) => r.type === 'd1');
+    if (!d1Resource) {
+      return c.json({ error: 'no D1 database found for this project' }, 400);
+    }
+
+    try {
+      // Ensure tracking table exists and upgrade legacy _migrations if needed
+      await ensureTrackingTable(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, d1Resource.cf_id);
+
+      for (const { from, to } of body.renames) {
+        await queryD1(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, d1Resource.cf_id, {
+          sql: 'UPDATE _void_migrations SET name = ? WHERE name = ?',
+          params: [to, from],
+        });
+      }
+
+      if (project.active_deployment_id) {
+        const deployment = await getDeployment(c.get('db'), project.active_deployment_id);
+        if (deployment?.applied_migrations) {
+          let migrations: string[] = JSON.parse(deployment.applied_migrations);
+          for (const { from, to } of body.renames) {
+            migrations = migrations.map((m) => (m === from ? to : m));
+          }
+          await setAppliedMigrations(c.get('db'), deployment.id, migrations);
+        }
+      }
+
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
     }
   })
 
