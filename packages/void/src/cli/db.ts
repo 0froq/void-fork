@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { intro, outro, log } from '@clack/prompts';
@@ -9,6 +9,7 @@ import type { SeedFn } from '../runtime/seed';
 import { getToken } from './auth';
 import { PlatformClient } from './client';
 import type { DbArgs } from './db-args';
+import { formatTimestamp } from './gen';
 import { cliTitle, dim, pc } from './output';
 import { readProjectConfig } from './project';
 
@@ -115,6 +116,8 @@ export async function runDbCommand(root: string, args: DbArgs): Promise<void> {
     await runStudio(root, dialect);
   } else if (args.action === 'set-url') {
     await runSetUrl(root);
+  } else if (args.action === 'rename-migrations') {
+    await runRenameMigrations(root, dialect);
   } else {
     await runExport(root, args, dialect);
   }
@@ -596,6 +599,206 @@ async function runStudio(root: string, dialect: DatabaseDialect): Promise<void> 
   } catch {
     process.exit(1);
   }
+}
+
+async function runRenameMigrations(root: string, dialect: DatabaseDialect): Promise<void> {
+  const migrationsDir = join(root, 'db', 'migrations');
+  if (!existsSync(migrationsDir)) {
+    log.info('No migrations directory found.');
+    outro('Done.');
+    return;
+  }
+
+  const files = readdirSync(migrationsDir)
+    .filter((f) => f.endsWith('.sql') && f !== 'seed.sql')
+    .sort();
+
+  const oldStyleFiles = files.filter((f) => /^\d{1,4}_/.test(f));
+  if (oldStyleFiles.length === 0) {
+    log.info('No migrations with numeric prefixes found. Nothing to rename.');
+    outro('Done.');
+    return;
+  }
+
+  // Find the earliest existing timestamp-prefixed migration so renamed files sort before them
+  const timestampFiles = files.filter((f) => /^\d{14}_/.test(f));
+  const formatTs = formatTimestamp;
+
+  let baseTime: Date;
+  if (timestampFiles.length > 0) {
+    // Parse the earliest timestamp (always UTC) and place renamed files before it
+    const earliest = timestampFiles[0].slice(0, 14);
+    const y = +earliest.slice(0, 4),
+      mo = +earliest.slice(4, 6) - 1,
+      d = +earliest.slice(6, 8);
+    const h = +earliest.slice(8, 10),
+      mi = +earliest.slice(10, 12),
+      s = +earliest.slice(12, 14);
+    baseTime = new Date(Date.UTC(y, mo, d, h, mi, s - oldStyleFiles.length));
+  } else {
+    baseTime = new Date(Date.now() - oldStyleFiles.length * 1000);
+  }
+
+  const renames: { from: string; to: string }[] = [];
+  for (let i = 0; i < oldStyleFiles.length; i++) {
+    const oldName = oldStyleFiles[i];
+    const description = oldName.replace(/^\d+_/, '');
+    const ts = new Date(baseTime.getTime() + i * 1000);
+    const newName = `${formatTs(ts)}_${description}`;
+    renames.push({ from: oldName, to: newName });
+  }
+
+  // Update remote tracking first — if this fails, nothing local has changed yet
+  const token = getToken();
+  const config = readProjectConfig(root);
+  let remoteRenamed = false;
+  if (config && !token) {
+    log.error(
+      'Project is linked but you are not logged in.\n' +
+        'Run `void auth login` first so remote migration records can be updated.',
+    );
+    process.exit(1);
+  }
+  if (token && config) {
+    try {
+      const client = new PlatformClient(token);
+      await client.renameMigrations(config.projectId, renames);
+      remoteRenamed = true;
+      log.info('Remote migration records updated.');
+    } catch (err) {
+      log.error(
+        'Failed to update remote migration records. No local changes were made.\n' +
+          'Fix the connection and run `void db rename-migrations` again.',
+      );
+      log.error(String(err));
+      process.exit(1);
+    }
+  }
+
+  // Best-effort reversal of remote renames when a later step fails
+  const reverseRemote = async () => {
+    if (!remoteRenamed || !token || !config) {
+      return;
+    }
+    try {
+      const client = new PlatformClient(token);
+      const reversed = renames.map(({ from, to }) => ({ from: to, to: from }));
+      await client.renameMigrations(config.projectId, reversed);
+    } catch {
+      log.warn('Could not reverse remote rename. Run `void deploy` to sync remote records.');
+    }
+  };
+
+  // Rename files — roll back completed renames (and remote) on any failure
+  const renamed: { from: string; to: string }[] = [];
+  try {
+    for (const { from, to } of renames) {
+      renameSync(join(migrationsDir, from), join(migrationsDir, to));
+      renamed.push({ from, to });
+      log.step(`${from} → ${to}`);
+    }
+  } catch (err) {
+    for (const { from, to } of renamed) {
+      try {
+        renameSync(join(migrationsDir, to), join(migrationsDir, from));
+      } catch {
+        // best-effort rollback
+      }
+    }
+    await reverseRemote();
+    log.error('Failed to rename migration files. All changes have been reverted.');
+    log.error(String(err));
+    process.exit(1);
+  }
+
+  if (dialect === 'postgresql') {
+    try {
+      await withPgClient(root, async (client) => {
+        const tableCheck = await client.query(
+          `SELECT 1 FROM information_schema.tables WHERE table_name = '_void_migrations' LIMIT 1`,
+        );
+        if (tableCheck.rows.length === 0) {
+          return;
+        }
+        await client.query('BEGIN');
+        try {
+          for (const { from, to } of renames) {
+            await client.query('UPDATE _void_migrations SET name = $1 WHERE name = $2', [to, from]);
+          }
+          await client.query('COMMIT');
+        } catch (err) {
+          await client.query('ROLLBACK');
+          throw err;
+        }
+      });
+    } catch (err) {
+      // Roll back file renames so tracking and filenames stay in sync
+      for (const { from, to } of renames) {
+        try {
+          renameSync(join(migrationsDir, to), join(migrationsDir, from));
+        } catch {
+          // best-effort rollback — ignore individual rename failures
+        }
+      }
+      await reverseRemote();
+      log.error(
+        'Failed to update PostgreSQL tracking table. File renames have been reverted.\n' +
+          'Fix the database connection and run `void db rename-migrations` again.',
+      );
+      log.error(String(err));
+      process.exit(1);
+    }
+  } else {
+    const { getMiniflareDatabasePath, openSqliteDatabase } = await import('../migrations/runner');
+    const persistRoot = join(root, '.void');
+    const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+    if (existsSync(dbPath)) {
+      try {
+        const db = await openSqliteDatabase(dbPath);
+        try {
+          const hasNew = db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type='table' AND name='_void_migrations'",
+            )
+            .get();
+          const hasLegacy = db
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_migrations'")
+            .get();
+          const tableName = hasNew ? '_void_migrations' : hasLegacy ? '_migrations' : null;
+          if (tableName) {
+            const updateStmt = db.prepare(`UPDATE ${tableName} SET name = ? WHERE name = ?`);
+            const applyRenames = db.transaction(() => {
+              for (const { from, to } of renames) {
+                updateStmt.run(to, from);
+              }
+            });
+            applyRenames();
+          }
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        // Roll back file renames so tracking and filenames stay in sync
+        for (const { from, to } of renames) {
+          try {
+            renameSync(join(migrationsDir, to), join(migrationsDir, from));
+          } catch {
+            // best-effort rollback — ignore individual rename failures
+          }
+        }
+        await reverseRemote();
+        log.error(
+          'Failed to update SQLite tracking table. File renames have been reverted.\n' +
+            'Fix the database issue and run `void db rename-migrations` again.',
+        );
+        log.error(String(err));
+        process.exit(1);
+      }
+    }
+  }
+
+  log.success(`Renamed ${renames.length} migration(s) to timestamp format.`);
+  outro('Done.');
 }
 
 async function runExport(

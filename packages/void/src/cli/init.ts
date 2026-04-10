@@ -24,6 +24,7 @@ import {
   type McpConfigTarget,
 } from './agents';
 import { maybeSetupDeployProject } from './deploy-setup';
+import { formatTimestamp } from './gen';
 import { cliTitle } from './output';
 import { formatProjectCommand } from './preset';
 import {
@@ -1113,8 +1114,10 @@ function scaffoldDemo(root: string): void {
 
   // Migration
   mkdirSync(join(root, 'db', 'migrations'), { recursive: true });
+  const migrationTs = formatTimestamp(new Date());
+  const migrationFile = `${migrationTs}_create_posts.sql`;
   writeFileSync(
-    join(root, 'db', 'migrations', '0000_create_posts.sql'),
+    join(root, 'db', 'migrations', migrationFile),
     `CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,
@@ -1123,7 +1126,7 @@ function scaffoldDemo(root: string): void {
 );
 `,
   );
-  log.success('Created db/migrations/0000_create_posts.sql');
+  log.success(`Created db/migrations/${migrationFile}`);
 
   mkdirSync(join(root, 'db'), { recursive: true });
   writeFileSync(
