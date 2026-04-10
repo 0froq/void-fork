@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv, type Plugin } from 'vite';
@@ -120,6 +121,8 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     honoPath: resolveFile('hono'),
     responsePath: resolveFile('#self/response'),
     runtimeEnvPath: resolveFile('#self/_env'),
+    projectRoot: root,
+    homeDir: homedir(),
     webSocketRuntimePath: resolveFile('#self/runtime/ws-server'),
     reactRefresh: false,
     dev: false,

@@ -11,6 +11,8 @@ const testOptions = {
   honoPath: '/resolved/hono/index.mjs',
   responsePath: '/resolved/void/runtime/response.mjs',
   runtimeEnvPath: '/resolved/void/runtime/env.mjs',
+  projectRoot: '/project',
+  homeDir: '/Users/test',
   webSocketRuntimePath: '/resolved/void/runtime/ws-server.mjs',
   reactRefresh: true,
   auth: null,

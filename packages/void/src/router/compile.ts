@@ -13,11 +13,14 @@ const BINDING_HINT_SCRIPT = `<script type="module" src="/@id/virtual:void/bindin
 const DEFAULT_ERROR_PAGE_FONT_STACK =
   'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
-function pushDefaultErrorPageHelpers(lines: string[], dev: boolean): void {
+function pushDefaultErrorPageHelpers(lines: string[], options: CompileOptions): void {
+  const dev = options.dev === true;
   lines.push(
     `const __VOID_ERROR_PAGE_FONT_STACK = ${JSON.stringify(DEFAULT_ERROR_PAGE_FONT_STACK)};`,
   );
   lines.push(`const __VOID_DEV = ${JSON.stringify(dev)};`);
+  lines.push(`const __VOID_PROJECT_ROOT = ${JSON.stringify(options.projectRoot)};`);
+  lines.push(`const __VOID_HOME_DIR = ${JSON.stringify(options.homeDir)};`);
   lines.push(`function __voidEscapeHtml(value) {`);
   lines.push(
     `  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");`,
@@ -37,16 +40,153 @@ function pushDefaultErrorPageHelpers(lines: string[], dev: boolean): void {
   lines.push(`  return !accept || accept.includes("text/html") || accept.includes("*/*");`);
   lines.push(`}`);
   lines.push('');
+  lines.push(`function __voidNormalizeFsPath(value) {`);
+  lines.push(`  return typeof value === "string" ? value.replaceAll("\\\\", "/") : "";`);
+  lines.push(`}`);
+  lines.push('');
+  lines.push(`function __voidIsAbsolutePath(value) {`);
+  lines.push(`  return value.startsWith("/") || /^[A-Za-z]:\\//.test(value);`);
+  lines.push(`}`);
+  lines.push('');
+  lines.push(`function __voidDisplayPath(value) {`);
+  lines.push(`  const path = __voidNormalizeFsPath(value);`);
+  lines.push(`  const homeDir = __voidNormalizeFsPath(__VOID_HOME_DIR);`);
+  lines.push(`  const projectRoot = __voidNormalizeFsPath(__VOID_PROJECT_ROOT);`);
+  lines.push(`  if (!path) return "";`);
+  lines.push(
+    `  if (projectRoot && (path === projectRoot || path.startsWith(projectRoot + "/"))) {`,
+  );
+  lines.push(`    const suffix = path.slice(projectRoot.length).replace(/^\\/?/, "");`);
+  lines.push(`    return suffix ? "./" + suffix : "./";`);
+  lines.push(`  }`);
+  lines.push(`  if (homeDir && (path === homeDir || path.startsWith(homeDir + "/"))) {`);
+  lines.push(`    const suffix = path.slice(homeDir.length).replace(/^\\/?/, "");`);
+  lines.push(`    return suffix ? "~/" + suffix : "~/";`);
+  lines.push(`  }`);
+  lines.push(`  return path;`);
+  lines.push(`}`);
+  lines.push('');
+  lines.push(`function __voidEditorHref(value, line, column) {`);
+  lines.push(`  const path = __voidNormalizeFsPath(value);`);
+  lines.push(`  if (!__voidIsAbsolutePath(path)) return "";`);
+  lines.push(
+    `  return "vscode://file/" + encodeURI(path).replaceAll("#", "%23").replaceAll("?", "%3F") + ":" + String(line) + ":" + String(column);`,
+  );
+  lines.push(`}`);
+  lines.push('');
+  lines.push(`function __voidCreateStackFrame(functionName, file, line, column, raw) {`);
+  lines.push(`  const normalizedFile = __voidNormalizeFsPath(file);`);
+  lines.push(`  const lineNumber = Number(line);`);
+  lines.push(`  const columnNumber = Number(column);`);
+  lines.push(
+    `  if (!normalizedFile || !Number.isFinite(lineNumber) || lineNumber <= 0) return null;`,
+  );
+  lines.push(
+    `  const safeColumn = Number.isFinite(columnNumber) && columnNumber > 0 ? columnNumber : 1;`,
+  );
+  lines.push(`  return {`);
+  lines.push(`    functionName: functionName || "",`);
+  lines.push(`    file: normalizedFile,`);
+  lines.push(`    line: lineNumber,`);
+  lines.push(`    column: safeColumn,`);
+  lines.push(`    displayPath: __voidDisplayPath(normalizedFile),`);
+  lines.push(`    href: __voidEditorHref(normalizedFile, lineNumber, safeColumn),`);
+  lines.push(`    raw: raw || "",`);
+  lines.push(`  };`);
+  lines.push(`}`);
+  lines.push('');
+  lines.push(`function __voidParseFrameLocation(value) {`);
+  lines.push(`  const match = value.match(/^(.*):(\\d+):(\\d+)$/);`);
+  lines.push(`  if (!match) return null;`);
+  lines.push(
+    `  return __voidCreateStackFrame("", match[1], Number(match[2]), Number(match[3]), value);`,
+  );
+  lines.push(`}`);
+  lines.push('');
+  lines.push(`function __voidParseStackFrames(stack) {`);
+  lines.push(`  if (!stack) return [];`);
+  lines.push(`  const frames = [];`);
+  lines.push(`  for (const rawLine of stack.split(/\\n+/)) {`);
+  lines.push(`    const line = rawLine.trim();`);
+  lines.push(`    if (!line) continue;`);
+  lines.push(`    let frame = null;`);
+  lines.push(`    let match = line.match(/^at\\s+(?:async\\s+)?(.+?)\\s+\\((.+)\\)$/);`);
+  lines.push(`    if (match) {`);
+  lines.push(`      const location = __voidParseFrameLocation(match[2]);`);
+  lines.push(`      frame = location ? { ...location, functionName: match[1] } : null;`);
+  lines.push(`    } else {`);
+  lines.push(`      match = line.match(/^at\\s+(.+)$/);`);
+  lines.push(`      if (match) {`);
+  lines.push(`        frame = __voidParseFrameLocation(match[1]);`);
+  lines.push(`      } else {`);
+  lines.push(`        match = line.match(/^(.*?)@(.+)$/);`);
+  lines.push(`        if (match) {`);
+  lines.push(`          const location = __voidParseFrameLocation(match[2]);`);
+  lines.push(`          frame = location ? { ...location, functionName: match[1] } : null;`);
+  lines.push(`        }`);
+  lines.push(`      }`);
+  lines.push(`    }`);
+  lines.push(`    if (frame) frames.push({ ...frame, raw: line });`);
+  lines.push(`  }`);
+  lines.push(`  return frames;`);
+  lines.push(`}`);
+  lines.push('');
+  lines.push(`function __voidGetStackFrames(error) {`);
+  lines.push(`  if (!(error instanceof Error)) return [];`);
+  lines.push(`  if (!error.stack && typeof Error.captureStackTrace === "function") {`);
+  lines.push(`    try {`);
+  lines.push(`      Error.captureStackTrace(error, __voidGetStackFrames);`);
+  lines.push(`    } catch {`);
+  lines.push(`      // Ignore runtimes that reject captureStackTrace on thrown errors.`);
+  lines.push(`    }`);
+  lines.push(`  }`);
+  lines.push(`  const originalPrepareStackTrace = Error.prepareStackTrace;`);
+  lines.push(`  try {`);
+  lines.push(`    Error.prepareStackTrace = (_, callSites) => callSites;`);
+  lines.push(`    const structured = error.stack;`);
+  lines.push(`    if (Array.isArray(structured)) {`);
+  lines.push(`      const frames = [];`);
+  lines.push(`      for (const callSite of structured) {`);
+  lines.push(`        try {`);
+  lines.push(
+    `          const fileName = callSite.getFileName?.() || callSite.getScriptNameOrSourceURL?.();`,
+  );
+  lines.push(`          const line = callSite.getLineNumber?.();`);
+  lines.push(`          const column = callSite.getColumnNumber?.();`);
+  lines.push(
+    `          const functionName = callSite.getFunctionName?.() || callSite.getMethodName?.() || "";`,
+  );
+  lines.push(
+    `          const frame = __voidCreateStackFrame(functionName, fileName || "", line, column, String(callSite));`,
+  );
+  lines.push(`          if (frame) frames.push(frame);`);
+  lines.push(`        } catch {`);
+  lines.push(`          // Ignore malformed CallSite entries and continue rendering.`);
+  lines.push(`        }`);
+  lines.push(`      }`);
+  lines.push(`      if (frames.length > 0) return frames;`);
+  lines.push(`    }`);
+  lines.push(`  } catch {`);
+  lines.push(`    // Fall through to string parsing.`);
+  lines.push(`  } finally {`);
+  lines.push(`    Error.prepareStackTrace = originalPrepareStackTrace;`);
+  lines.push(`  }`);
+  lines.push(
+    `  return __voidParseStackFrames(typeof error.stack === "string" ? error.stack : "");`,
+  );
+  lines.push(`}`);
+  lines.push('');
   lines.push(`function __voidDescribeThrownValue(value) {`);
   lines.push(`  if (value instanceof Error) {`);
   lines.push(`    return {`);
   lines.push(`      name: value.name || "Error",`);
   lines.push(`      message: value.message || "",`);
   lines.push(`      stack: typeof value.stack === "string" ? value.stack : "",`);
+  lines.push(`      frames: __voidGetStackFrames(value),`);
   lines.push(`    };`);
   lines.push(`  }`);
   lines.push(`  if (typeof value === "string") {`);
-  lines.push(`    return { name: "Thrown value", message: value, stack: "" };`);
+  lines.push(`    return { name: "Thrown value", message: value, stack: "", frames: [] };`);
   lines.push(`  }`);
   lines.push(`  let message = "";`);
   lines.push(`  try {`);
@@ -58,7 +198,32 @@ function pushDefaultErrorPageHelpers(lines: string[], dev: boolean): void {
   lines.push(`  } catch {`);
   lines.push(`    message = String(value);`);
   lines.push(`  }`);
-  lines.push(`  return { name: "Thrown value", message, stack: "" };`);
+  lines.push(`  return { name: "Thrown value", message, stack: "", frames: [] };`);
+  lines.push(`}`);
+  lines.push('');
+  lines.push(`function __voidRenderStack(entry) {`);
+  lines.push(`  if (Array.isArray(entry.frames) && entry.frames.length > 0) {`);
+  lines.push(`    const items = entry.frames.map((frame) => {`);
+  lines.push(`      const name = frame.functionName || "(anonymous)";`);
+  lines.push(`      const location = frame.displayPath + ":" + frame.line + ":" + frame.column;`);
+  lines.push(
+    `      const body = \`<span class="__void-error-frame-function">\${__voidEscapeHtml(name)}</span><span class="__void-error-frame-location">\${__voidEscapeHtml(location)}</span>\`;`,
+  );
+  lines.push(`      if (frame.href) {`);
+  lines.push(
+    `        return \`<a class="__void-error-frame" href="\${__voidEscapeHtml(frame.href)}">\${body}</a>\`;`,
+  );
+  lines.push(`      }`);
+  lines.push(`      return \`<div class="__void-error-frame is-static">\${body}</div>\`;`);
+  lines.push(`    }).join("");`);
+  lines.push(
+    `    return \`<div class="__void-error-stack"><div class="__void-error-stack-label">Stack trace</div><div class="__void-error-frames">\${items}</div></div>\`;`,
+  );
+  lines.push(`  }`);
+  lines.push(`  if (!entry.stack) return "";`);
+  lines.push(
+    `  return \`<div class="__void-error-stack"><div class="__void-error-stack-label">Stack trace</div><pre>\${__voidEscapeHtml(entry.stack)}</pre></div>\`;`,
+  );
   lines.push(`}`);
   lines.push('');
   lines.push(`function __voidCollectErrorChain(error) {`);
@@ -82,6 +247,7 @@ function pushDefaultErrorPageHelpers(lines: string[], dev: boolean): void {
   lines.push(`      name: "Truncated",`);
   lines.push(`      message: "Additional nested causes were omitted.",`);
   lines.push(`      stack: "",`);
+  lines.push(`      frames: [],`);
   lines.push(`    });`);
   lines.push(`  }`);
   lines.push(`  if (chain.length === 0) {`);
@@ -90,6 +256,7 @@ function pushDefaultErrorPageHelpers(lines: string[], dev: boolean): void {
   lines.push(`      name: "Unknown error",`);
   lines.push(`      message: "No error details were available.",`);
   lines.push(`      stack: "",`);
+  lines.push(`      frames: [],`);
   lines.push(`    });`);
   lines.push(`  }`);
   lines.push(`  return chain;`);
@@ -103,9 +270,7 @@ function pushDefaultErrorPageHelpers(lines: string[], dev: boolean): void {
   lines.push(`  const sections = chain.map((entry, index) => {`);
   lines.push(`    const heading = entry.name || (index === 0 ? title : "Cause");`);
   lines.push(`    const message = entry.message || title;`);
-  lines.push(
-    `    const stack = entry.stack ? \`<div class="__void-error-stack"><div class="__void-error-stack-label">Stack trace</div><pre>\${__voidEscapeHtml(entry.stack)}</pre></div>\` : "";`,
-  );
+  lines.push(`    const stack = __voidRenderStack(entry);`);
   lines.push(`    if (index === 0) {`);
   lines.push(
     `      return \`<section class="__void-error-section is-root"><p class="__void-error-message">\${__voidEscapeHtml(message)}</p>\${stack}</section>\`;`,
@@ -198,13 +363,6 @@ function pushDefaultErrorPageHelpers(lines: string[], dev: boolean): void {
   lines.push(`      margin-block-end: 0;`);
   lines.push(`      padding-right: 52px;`);
   lines.push(`    }`);
-  lines.push(`    .__void-error-eyebrow {`);
-  lines.push(`      font-size: 12px;`);
-  lines.push(`      font-weight: 700;`);
-  lines.push(`      letter-spacing: 0.12em;`);
-  lines.push(`      text-transform: uppercase;`);
-  lines.push(`      color: #fca5a5;`);
-  lines.push(`    }`);
   lines.push(`    .__void-error-status {`);
   lines.push(`      margin: 0;`);
   lines.push(`      color: #fca5a5;`);
@@ -226,7 +384,7 @@ function pushDefaultErrorPageHelpers(lines: string[], dev: boolean): void {
   lines.push(`    .__void-error-message {`);
   lines.push(`      margin: 0;`);
   lines.push(`      color: #fff;`);
-  lines.push(`      font-size: clamp(1.35rem, 1rem + 1vw, 1.9rem);`);
+  lines.push(`      font-size: 1.7rem;`);
   lines.push(`      line-height: 1.15;`);
   lines.push(`      letter-spacing: -0.03em;`);
   lines.push(`      white-space: pre-wrap;`);
@@ -252,17 +410,67 @@ function pushDefaultErrorPageHelpers(lines: string[], dev: boolean): void {
   lines.push(`      word-break: break-word;`);
   lines.push(`    }`);
   lines.push(`    .__void-error-stack {`);
-  lines.push(`      margin-top: 12px;`);
+  lines.push(`      margin-top: 18px;`);
+  lines.push(`      border: 1px solid rgba(255, 255, 255, 0.08);`);
+  lines.push(`      border-radius: 32px;`);
+  lines.push(`      background: rgba(255, 255, 255, 0.03);`);
+  lines.push(`      corner-shape: squircle;`);
+  lines.push(`      overflow: hidden;`);
   lines.push(`    }`);
   lines.push(`    .__void-error-stack-label {`);
-  lines.push(`      padding: 0 0 8px;`);
+  lines.push(`      padding: 12px 14px 10px;`);
   lines.push(`      color: #f4f4f5;`);
-  lines.push(`      font-size: 13px;`);
-  lines.push(`      font-weight: 600;`);
+  lines.push(`      font-size: 12px;`);
+  lines.push(`      font-weight: 700;`);
+  lines.push(`      letter-spacing: 0.08em;`);
+  lines.push(`      text-transform: uppercase;`);
+  lines.push(`      border-bottom: 1px solid rgba(255, 255, 255, 0.08);`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-frames {`);
+  lines.push(`      display: flex;`);
+  lines.push(`      flex-direction: column;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-frame {`);
+  lines.push(`      display: flex;`);
+  lines.push(`      align-items: baseline;`);
+  lines.push(`      justify-content: space-between;`);
+  lines.push(`      gap: 16px;`);
+  lines.push(`      padding: 12px 14px;`);
+  lines.push(`      color: inherit;`);
+  lines.push(`      text-decoration: none;`);
+  lines.push(`      border-top: 1px solid rgba(255, 255, 255, 0.06);`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-frame:first-child {`);
+  lines.push(`      border-top: 0;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-frame:hover {`);
+  lines.push(`      background: rgba(255, 255, 255, 0.05);`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-frame.is-static {`);
+  lines.push(`      cursor: default;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-frame-function {`);
+  lines.push(`      flex: 1 1 auto;`);
+  lines.push(`      min-width: 0;`);
+  lines.push(`      color: #fafafa;`);
+  lines.push(`      font: 600 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;`);
+  lines.push(`      white-space: nowrap;`);
+  lines.push(`      overflow: hidden;`);
+  lines.push(`      text-overflow: ellipsis;`);
+  lines.push(`    }`);
+  lines.push(`    .__void-error-frame-location {`);
+  lines.push(`      flex: 0 1 52%;`);
+  lines.push(`      min-width: 0;`);
+  lines.push(`      color: #fda4af;`);
+  lines.push(`      font: 500 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;`);
+  lines.push(`      text-align: right;`);
+  lines.push(`      white-space: nowrap;`);
+  lines.push(`      overflow: hidden;`);
+  lines.push(`      text-overflow: ellipsis;`);
   lines.push(`    }`);
   lines.push(`    .__void-error-section pre {`);
   lines.push(`      margin: 0;`);
-  lines.push(`      padding: 0;`);
+  lines.push(`      padding: 12px 14px;`);
   lines.push(`      overflow: auto;`);
   lines.push(`      color: #e4e4e7;`);
   lines.push(`      font: 500 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;`);
@@ -292,6 +500,13 @@ function pushDefaultErrorPageHelpers(lines: string[], dev: boolean): void {
   lines.push(`      }`);
   lines.push(`      .__void-error-minimized {`);
   lines.push(`        inset: auto auto 12px 12px;`);
+  lines.push(`      }`);
+  lines.push(`      .__void-error-frame {`);
+  lines.push(`        flex-direction: column;`);
+  lines.push(`        align-items: flex-start;`);
+  lines.push(`      }`);
+  lines.push(`      .__void-error-frame-location {`);
+  lines.push(`        text-align: left;`);
   lines.push(`      }`);
   lines.push(`    }`);
   lines.push(`  </style>`);
@@ -400,6 +615,10 @@ export interface CompileOptions {
   responsePath: string;
   /** Absolute path to the void/_env module */
   runtimeEnvPath: string;
+  /** Absolute path to the project root */
+  projectRoot: string;
+  /** Absolute path to the current user's home directory */
+  homeDir: string;
   /** Whether to inject React Fast Refresh preamble in dev SSR HTML. */
   reactRefresh: boolean;
   /** Whether the generated route module is being compiled for dev server usage. */
@@ -1095,7 +1314,7 @@ function compilePageRoutes(
   // Emit head config constant from void.json
   lines.push(`const __voidHeadConfig = ${JSON.stringify(pages.headConfig ?? null)};`);
   lines.push('');
-  pushDefaultErrorPageHelpers(lines, options.dev === true);
+  pushDefaultErrorPageHelpers(lines, options);
 
   // Asset tags — reuse the SSR asset tags pattern with the pages client entry
   const clientEntryId = pages.clientEntryId;

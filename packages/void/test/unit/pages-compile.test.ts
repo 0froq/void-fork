@@ -6,6 +6,8 @@ const testOptions = {
   honoPath: '/resolved/hono/index.mjs',
   responsePath: '/resolved/void/runtime/response.mjs',
   runtimeEnvPath: '/resolved/void/runtime/env.mjs',
+  projectRoot: '/project',
+  homeDir: '/Users/test',
   reactRefresh: false,
   dev: true,
   auth: null,
@@ -248,12 +250,17 @@ describe('compileRouteTable with pages', () => {
     expect(code).toContain('corner-shape: squircle;');
     expect(code).toContain('function __voidRenderDevErrorOverlay(request, status, title, error) {');
     expect(code).toContain('function __voidInjectDevErrorOverlay(html, overlay) {');
+    expect(code).toContain('function __voidGetStackFrames(error) {');
+    expect(code).toContain('function __voidEditorHref(value, line, column) {');
     expect(code).toContain('const __VOID_DEV = true;');
+    expect(code).toContain('const __VOID_PROJECT_ROOT =');
+    expect(code).toContain('const __VOID_HOME_DIR =');
     expect(code).toContain('__VOID_DEV && status === 500 && error');
     expect(code).toContain('data-void-error-close');
     expect(code).toContain('data-void-error-toggle');
     expect(code).toContain('is-minimized');
     expect(code).toContain('Minimize error overlay');
+    expect(code).toContain('vscode://file/');
     expect(code).toContain(
       'return __voidCreateErrorResponse(c.req.raw, status, fallbackText, error);',
     );
