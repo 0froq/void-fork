@@ -481,6 +481,31 @@ function getTodayCompatDate(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function readProjectWranglerCompatDate(root: string): string | undefined {
+  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
+    const configPath = join(root, name);
+    if (!existsSync(configPath)) {
+      continue;
+    }
+
+    try {
+      const raw = readFileSync(configPath, 'utf-8');
+      const errors: ParseError[] = [];
+      const parsed = parse(raw, errors);
+      if (errors.length > 0) {
+        throw new SyntaxError('Failed to parse JSONC');
+      }
+      if (typeof parsed?.compatibility_date === 'string') {
+        return parsed.compatibility_date;
+      }
+    } catch {
+      // Ignore unreadable or invalid wrangler config and fall back to today's date.
+    }
+  }
+
+  return undefined;
+}
+
 /**
  * Ensure wrangler.jsonc exists with `compatibility_date` and `nodejs_als` flag
  * for class B/C meta-frameworks that need it for local dev.
@@ -549,6 +574,27 @@ function setupWranglerConfig(root: string, framework: DetectedFramework): void {
 
 function writeVoidConfig(root: string, config: Record<string, unknown>): void {
   writeFileSync(join(root, VOID_CONFIG_FILE), JSON.stringify(config, null, 2) + '\n');
+}
+
+function ensureVoidWorkerCompatibilityDate(root: string): void {
+  const config = readConfig(root) as Record<string, unknown>;
+
+  if (typeof config.target === 'string' && config.target !== 'cloudflare') {
+    return;
+  }
+
+  const worker = asRecord(config.worker) ?? {};
+  if (typeof worker.compatibility_date === 'string' && worker.compatibility_date.length > 0) {
+    return;
+  }
+
+  const compatibilityDate = readProjectWranglerCompatDate(root) ?? getTodayCompatDate();
+  config.worker = {
+    ...worker,
+    compatibility_date: compatibilityDate,
+  };
+  writeVoidConfig(root, config);
+  log.success('Pinned worker compatibility_date in void.json');
 }
 
 function clearConfiguredDatabase(
@@ -1392,6 +1438,10 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   // Step 2: Wrangler config (class B/C meta-frameworks)
   if (framework) {
     setupWranglerConfig(root, framework);
+  }
+
+  if (!targeted) {
+    ensureVoidWorkerCompatibilityDate(root);
   }
 
   // Step 3: Database dialect

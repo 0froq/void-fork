@@ -121,6 +121,14 @@ function listMigrationSqlFiles(root: string): string[] {
     .sort();
 }
 
+function getTodayCompatDate(): string {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 afterEach(() => {
   mockSpawnSync.mockReset();
   mockSelect.mockReset();
@@ -284,7 +292,11 @@ describe('isScaffoldableEmptyProject', () => {
       );
       expect(() => readFileSync(join(root, 'index.html'), 'utf-8')).toThrow(/ENOENT/);
       expect(() => readFileSync(join(root, 'src', 'main.ts'), 'utf-8')).toThrow(/ENOENT/);
-      expect(() => readFileSync(join(root, 'void.json'), 'utf-8')).toThrow(/ENOENT/);
+      expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
+        worker: {
+          compatibility_date: getTodayCompatDate(),
+        },
+      });
       expect(() =>
         readFileSync(join(root, 'db', 'migrations', '0000_initial.sql'), 'utf-8'),
       ).toThrow(/ENOENT/);
@@ -316,6 +328,9 @@ describe('isScaffoldableEmptyProject', () => {
 
       expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
         database: 'pg',
+        worker: {
+          compatibility_date: getTodayCompatDate(),
+        },
       });
 
       const vueViteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
@@ -409,7 +424,11 @@ describe('isScaffoldableEmptyProject', () => {
       expect(() =>
         readFileSync(join(root, 'db', 'migrations', '0000_generated.sql'), 'utf-8'),
       ).toThrow();
-      expect(() => readFileSync(join(root, 'void.json'), 'utf-8')).toThrow();
+      expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
+        worker: {
+          compatibility_date: getTodayCompatDate(),
+        },
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -539,7 +558,11 @@ describe('isScaffoldableEmptyProject', () => {
 
       await runInitCommand(root);
 
-      expect(() => readFileSync(join(root, 'void.json'), 'utf-8')).toThrow(/ENOENT/);
+      expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
+        worker: {
+          compatibility_date: getTodayCompatDate(),
+        },
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -573,6 +596,9 @@ describe('isScaffoldableEmptyProject', () => {
         routing: {
           prerender: ['/'],
         },
+        worker: {
+          compatibility_date: getTodayCompatDate(),
+        },
       });
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -587,7 +613,11 @@ describe('isScaffoldableEmptyProject', () => {
 
       await runInitCommand(root);
 
-      expect(() => readFileSync(join(root, 'void.json'), 'utf-8')).toThrow();
+      expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
+        worker: {
+          compatibility_date: getTodayCompatDate(),
+        },
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
