@@ -502,6 +502,33 @@ import { db, eq, and, or, desc, like, inArray, sql } from 'void/db';
 
 **Full list:** `sql`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `and`, `or`, `not`, `desc`, `asc`, `like`, `ilike`, `notLike`, `inArray`, `notInArray`, `isNull`, `isNotNull`, `between`, `notBetween`, `exists`, `notExists`, `count`, `sum`, `avg`, `min`, `max`.
 
+## Seeding
+
+Imported from `"void/seed"`.
+
+### `defineSeed(fn)`
+
+Identity helper for programmatic seed modules used by `void db seed`.
+
+```ts
+import { defineSeed } from 'void/seed';
+
+export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
+  await db.insert(schema.users).values([
+    { name: 'Alice', email: 'alice@example.com' },
+    { name: 'Bob', email: 'bob@example.com' },
+  ]);
+});
+```
+
+The callback receives:
+
+- `dialect`: `"sqlite"` or `"postgresql"`
+- `db`: a local Drizzle instance for the active dialect
+- `schema`: the exports from `db/schema.ts` or `db/schema/`
+
+Seed modules can export either `default` or a named `seed` function.
+
 ## Types
 
 ### `CloudContext`
@@ -739,6 +766,7 @@ Imported from `"@void/svelte"`.
 | `void/schema-d1`       | Re-exports [`drizzle-orm/sqlite-core`](https://orm.drizzle.team/docs/column-types/sqlite) for D1 table and column builders                                       |
 | `void/schema-pg`       | Re-exports [`drizzle-orm/pg-core`](https://orm.drizzle.team/docs/column-types/pg) for PostgreSQL table and column builders                                       |
 | `void/db`              | `db` ([Drizzle D1](https://orm.drizzle.team/docs/get-started/d1-new) instance), `createDb`, query operators (`eq`, `and`, `or`, `desc`, `like`, `inArray`, etc.) |
+| `void/seed`            | `defineSeed`, `SeedContext`, `SeedFn` for programmatic `void db seed` modules                                                                                    |
 | `void/routes`          | `RouteMap` and `WebSocketRouteMap` stubs (types only)                                                                                                            |
 | `void/queues`          | `queues` proxy for sending messages to typed queues                                                                                                              |
 | `void/env`             | Global Cloudflare env types (types only)                                                                                                                         |

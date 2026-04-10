@@ -157,7 +157,7 @@ export function createPagesStarterTemplate(options: {
     files['pages/index.server.ts'] = getIndexServer();
     files['routes/api/hello.ts'] = getHelloRoute(config.label, starterMode);
     files['db/schema.ts'] = getSchemaFile(starterMode);
-    files['db/seed.sql'] = getSeedFile();
+    files['db/seed.ts'] = getSeedFile();
   }
 
   return {
@@ -246,8 +246,17 @@ export const messages = sqliteTable("messages", {
 }
 
 function getSeedFile(): string {
-  return `-- Seed starter content for local development.
-INSERT INTO messages (text) VALUES ('Hello from Void');
+  return `import { defineSeed } from "void/seed";
+
+const SAMPLE_MESSAGES = ["Hello from Void"];
+
+export default defineSeed<typeof import("./schema")>(async ({ db, schema }) => {
+  await db.insert(schema.messages).values(
+    SAMPLE_MESSAGES.map((text) => ({
+      text,
+    })),
+  );
+});
 `;
 }
 
@@ -325,7 +334,7 @@ export default function HomePage({ messages }: Props) {
       {messages.length === 0 ? (
         <p>
           No messages yet. Run <code>void db seed</code> to load the sample row from
-          <code> db/seed.sql</code>.
+          <code> db/seed.ts</code>.
         </p>
       ) : (
         <ul>
@@ -361,7 +370,7 @@ defineProps<Props>();
     </p>
     <p v-if="messages.length === 0">
       No messages yet. Run <code>void db seed</code> to load the sample row from
-      <code>db/seed.sql</code>.
+      <code>db/seed.ts</code>.
     </p>
     <ul v-else>
       <li v-for="message in messages" :key="message.id">
@@ -392,7 +401,7 @@ defineProps<Props>();
   {#if messages.length === 0}
     <p>
       No messages yet. Run <code>void db seed</code> to load the sample row from
-      <code>db/seed.sql</code>.
+      <code>db/seed.ts</code>.
     </p>
   {:else}
     <ul>
@@ -424,7 +433,7 @@ export default function HomePage(props: Props) {
       {props.messages.length === 0 ? (
         <p>
           No messages yet. Run <code>void db seed</code> to load the sample row from
-          <code> db/seed.sql</code>.
+          <code> db/seed.ts</code>.
         </p>
       ) : (
         <ul>

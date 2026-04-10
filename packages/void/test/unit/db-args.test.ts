@@ -21,6 +21,13 @@ describe('parseDbArgs', () => {
     });
   });
 
+  it('parses seed with a TypeScript file', () => {
+    expect(parseDbArgs(['seed', '--file', 'db/seed.ts'])).toEqual({
+      action: 'seed',
+      file: 'db/seed.ts',
+    });
+  });
+
   it('parses execute with inline SQL', () => {
     expect(parseDbArgs(['execute', 'SELECT * FROM users'])).toEqual({
       action: 'execute',

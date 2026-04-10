@@ -24,7 +24,8 @@ const dbFileItems = [
           { name: "0001_add_posts.sql" },
         ],
       },
-      { name: "seed.sql", description: "Seed SQL for local development (optional)" },
+      { name: "seed.ts", description: "Programmatic seed script (optional)" },
+      { name: "seed.sql", description: "Raw SQL seed file (optional alternative)" },
     ],
   },
 ]
@@ -227,6 +228,51 @@ The user schema is automatically loaded into the `db` instance via a Vite plugin
 ::: warning ⚠️ Nuxt limitation
 Nuxt uses Nitro, which bundles server routes outside of Vite's plugin pipeline. The schema cannot be injected into the `db` instance, so `db.query.*` relational queries are not available in Nuxt. Use the standard query builder API (`db.select().from(table)`) instead.
 :::
+
+## Seeding
+
+Use `void db seed` to reset your local database, re-apply migrations, and then run a seed file.
+
+Void resolves default seed files in this order:
+
+1. `db/seed.ts`
+2. `db/seed.mts`
+3. `db/seed.js`
+4. `db/seed.mjs`
+5. `db/seed.sql`
+
+If more than one default seed file exists, pass `--file <path>` explicitly.
+
+### Programmatic seeding
+
+`db/seed.ts` is the first-class path for generated or randomized data. Seed modules can export either a default function or a named `seed` function.
+
+```ts
+// db/seed.ts
+import { defineSeed } from 'void/seed';
+
+export default defineSeed<typeof import('./schema')>(async ({ db, schema }) => {
+  const rows = Array.from({ length: 100 }, (_, i) => ({
+    text: `Seed message ${i + 1}`,
+  }));
+
+  await db.insert(schema.messages).values(rows);
+});
+```
+
+The seed context includes:
+
+- `dialect`: `"sqlite"` or `"postgresql"`
+- `db`: a Drizzle instance for the local database
+- `schema`: the exports from your `db/schema.ts` or `db/schema/` modules
+
+### SQL seeding
+
+If you prefer raw SQL, keep using `db/seed.sql`:
+
+```sql
+INSERT INTO messages (text) VALUES ('Hello from SQL');
+```
 
 ## Schema-Derived Validators
 

@@ -69,6 +69,7 @@ export default defineConfig({
     'src/runtime/env.ts',
     'src/runtime/db.ts',
     'src/runtime/db-pg.ts',
+    'src/runtime/seed.ts',
     'src/runtime/drizzle-zod.ts',
     'src/runtime/drizzle-valibot.ts',
     'src/runtime/drizzle-arktype.ts',

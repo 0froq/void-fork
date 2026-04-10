@@ -85,6 +85,11 @@
       "import": "./dist/runtime/db.mjs",
       "require": "./dist/runtime/db.mjs"
     },
+    "./seed": {
+      "types": "./dist/runtime/seed.d.mts",
+      "import": "./dist/runtime/seed.mjs",
+      "require": "./dist/runtime/seed.mjs"
+    },
     "./drizzle-zod": {
       "types": "./dist/runtime/drizzle-zod.d.mts",
       "import": "./dist/runtime/drizzle-zod.mjs",

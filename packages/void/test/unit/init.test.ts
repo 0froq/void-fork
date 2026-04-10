@@ -270,7 +270,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(readFileSync(join(root, 'db', 'schema.ts'), 'utf-8')).toContain(
         'from "void/schema-d1"',
       );
-      expect(readFileSync(join(root, 'db', 'seed.sql'), 'utf-8')).toContain('INSERT INTO messages');
+      expect(readFileSync(join(root, 'db', 'seed.ts'), 'utf-8')).toContain('defineSeed');
       expect(listMigrationSqlFiles(root)).toEqual(['0000_generated.sql']);
       expect(readFileSync(join(root, 'db', 'migrations', '0000_generated.sql'), 'utf-8')).toContain(
         'CREATE TABLE',
@@ -325,7 +325,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(readFileSync(join(root, 'db', 'schema.ts'), 'utf-8')).toContain(
         'from "void/schema-pg"',
       );
-      expect(readFileSync(join(root, 'db', 'seed.sql'), 'utf-8')).toContain('INSERT INTO messages');
+      expect(readFileSync(join(root, 'db', 'seed.ts'), 'utf-8')).toContain('defineSeed');
       expect(listMigrationSqlFiles(root)).toEqual(['0000_generated.sql']);
       expect(readFileSync(join(root, 'db', 'migrations', '0000_generated.sql'), 'utf-8')).toContain(
         'CREATE TABLE "messages"',
@@ -405,7 +405,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(() => readFileSync(join(root, 'pages', 'index.server.ts'), 'utf-8')).toThrow();
       expect(() => readFileSync(join(root, 'routes', 'api', 'hello.ts'), 'utf-8')).toThrow();
       expect(() => readFileSync(join(root, 'db', 'schema.ts'), 'utf-8')).toThrow();
-      expect(() => readFileSync(join(root, 'db', 'seed.sql'), 'utf-8')).toThrow();
+      expect(() => readFileSync(join(root, 'db', 'seed.ts'), 'utf-8')).toThrow();
       expect(() =>
         readFileSync(join(root, 'db', 'migrations', '0000_generated.sql'), 'utf-8'),
       ).toThrow();

@@ -1,10 +1,11 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { extname, join, relative, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { intro, outro, log } from '@clack/prompts';
 import { readConfig, getDatabaseDialect, type DatabaseDialect } from '../config';
 import { collectMigrations } from '../migrations/collect';
 import { validateMigrations } from '../migrations/validate';
+import type { SeedFn } from '../runtime/seed';
 import { getToken } from './auth';
 import { PlatformClient } from './client';
 import type { DbArgs } from './db-args';
@@ -12,6 +13,20 @@ import { cliTitle, dim, pc } from './output';
 import { readProjectConfig } from './project';
 
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
+const DEFAULT_SEED_FILES = [
+  'db/seed.ts',
+  'db/seed.mts',
+  'db/seed.js',
+  'db/seed.mjs',
+  'db/seed.sql',
+];
+const MODULE_SEED_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs']);
+
+type SeedTarget = {
+  displayPath: string;
+  kind: 'module' | 'sql';
+  path: string;
+};
 
 function readEnvLocal(root: string): Record<string, string> {
   const envPath = join(root, '.env.local');
@@ -302,34 +317,34 @@ async function runSeed(
   const migrationCount = await resetDatabase(root, dialect);
   log.step(`Reset database. Applied ${migrationCount} migration(s).`);
 
-  const seedPath = file ? join(root, file) : join(root, 'db', 'seed.sql');
-  if (!existsSync(seedPath)) {
-    log.error(`Seed file not found: ${seedPath}`);
-    process.exit(1);
+  const seed = resolveSeedTarget(root, file);
+
+  if (seed.kind === 'sql') {
+    const sql = readFileSync(seed.path, 'utf-8');
+
+    if (dialect === 'postgresql') {
+      await withPgClient(root, async (client) => {
+        await client.query(sql);
+      });
+      log.success(`Seeded from ${seed.displayPath}.`);
+      outro('Done.');
+      return;
+    }
+
+    const { getMiniflareDatabasePath, openSqliteDatabase } = await import('../migrations/runner');
+    const persistRoot = join(root, '.void');
+    const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+    const db = await openSqliteDatabase(dbPath);
+    try {
+      db.exec(sql);
+    } finally {
+      db.close();
+    }
+  } else {
+    await runSeedModule(root, seed.path, dialect);
   }
 
-  const sql = readFileSync(seedPath, 'utf-8');
-
-  if (dialect === 'postgresql') {
-    await withPgClient(root, async (client) => {
-      await client.query(sql);
-    });
-    log.success(`Seeded from ${file ?? 'db/seed.sql'}.`);
-    outro('Done.');
-    return;
-  }
-
-  const { getMiniflareDatabasePath, openSqliteDatabase } = await import('../migrations/runner');
-  const persistRoot = join(root, '.void');
-  const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
-  const db = await openSqliteDatabase(dbPath);
-  try {
-    db.exec(sql);
-  } finally {
-    db.close();
-  }
-
-  log.success(`Seeded from ${file ?? 'db/seed.sql'}.`);
+  log.success(`Seeded from ${seed.displayPath}.`);
   log.info(dim("Restart your dev server if it's running."));
   outro('Done.');
 }
@@ -712,4 +727,148 @@ async function runSetUrl(root: string): Promise<void> {
 
   log.success('Database URL updated.');
   outro('Done.');
+}
+
+function resolveSeedTarget(root: string, file: string | undefined): SeedTarget {
+  if (file) {
+    return toSeedTarget(root, resolve(root, file), file);
+  }
+
+  const defaults = DEFAULT_SEED_FILES.filter((candidate) => existsSync(join(root, candidate)));
+  if (defaults.length === 0) {
+    log.error(
+      `No seed file found. Create one of: ${DEFAULT_SEED_FILES.join(', ')} or pass --file <path>.`,
+    );
+    process.exit(1);
+  }
+
+  if (defaults.length > 1) {
+    log.error(
+      `Multiple default seed files found: ${defaults.join(', ')}. Use --file <path> to choose one.`,
+    );
+    process.exit(1);
+  }
+
+  const [seedPath] = defaults;
+  return toSeedTarget(root, join(root, seedPath), seedPath);
+}
+
+function toSeedTarget(root: string, seedPath: string, displayPath?: string): SeedTarget {
+  if (!existsSync(seedPath)) {
+    log.error(`Seed file not found: ${seedPath}`);
+    process.exit(1);
+  }
+
+  const ext = extname(seedPath);
+  const normalizedDisplay = (displayPath ?? relative(root, seedPath)).replaceAll('\\', '/');
+  if (ext === '.sql') {
+    return { path: seedPath, displayPath: normalizedDisplay, kind: 'sql' };
+  }
+  if (MODULE_SEED_EXTENSIONS.has(ext)) {
+    return { path: seedPath, displayPath: normalizedDisplay, kind: 'module' };
+  }
+
+  log.error(`Unsupported seed file: ${normalizedDisplay}. Use .sql, .ts, .mts, .js, or .mjs.`);
+  process.exit(1);
+}
+
+async function runSeedModule(
+  root: string,
+  seedPath: string,
+  dialect: DatabaseDialect,
+): Promise<void> {
+  const seed = await loadSeedFunction(seedPath);
+  const schema = await loadSeedSchema(root);
+
+  if (dialect === 'postgresql') {
+    const { drizzle } = await import('drizzle-orm/node-postgres');
+    await withPgClient(root, async (client) => {
+      const options = getDrizzleSchemaOptions(schema);
+      const db = options ? drizzle(client, options) : drizzle(client);
+      await seed({ dialect, db, schema });
+    });
+    return;
+  }
+
+  const { drizzle } = await import('drizzle-orm/better-sqlite3');
+  const { getMiniflareDatabasePath, openSqliteDatabase } = await import('../migrations/runner');
+  const persistRoot = join(root, '.void');
+  const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+  const sqlite = await openSqliteDatabase(dbPath);
+  try {
+    const options = getDrizzleSchemaOptions(schema);
+    const db = options ? drizzle(sqlite, options) : drizzle(sqlite);
+    await seed({ dialect, db, schema });
+  } finally {
+    sqlite.close();
+  }
+}
+
+async function loadSeedFunction(seedPath: string): Promise<SeedFn<Record<string, unknown>>> {
+  const mod = await importLocalModule(seedPath);
+  const seed =
+    typeof mod.default === 'function'
+      ? mod.default
+      : typeof mod.seed === 'function'
+        ? mod.seed
+        : undefined;
+  if (!seed) {
+    throw new Error(
+      `Seed module must export a default function or a named "seed" function: ${seedPath}`,
+    );
+  }
+  return seed as SeedFn<Record<string, unknown>>;
+}
+
+async function loadSeedSchema(root: string): Promise<Record<string, unknown>> {
+  const { discoverSchema } = await import('../drizzle/discover');
+  const location = discoverSchema(root);
+  if (!location) {
+    return {};
+  }
+
+  if (location.type === 'file') {
+    const mod = await importLocalModule(location.path);
+    return Object.fromEntries(
+      Object.entries(mod).filter(([name]) => name !== 'default' && name !== '__esModule'),
+    );
+  }
+
+  const files = collectSchemaModuleFiles(location.path);
+  const parts = await Promise.all(files.map((file) => importLocalModule(file)));
+  return Object.assign(
+    {},
+    ...parts.map((mod) =>
+      Object.fromEntries(Object.entries(mod).filter(([name]) => name !== 'default')),
+    ),
+  );
+}
+
+function collectSchemaModuleFiles(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...collectSchemaModuleFiles(fullPath));
+      continue;
+    }
+    if (
+      MODULE_SEED_EXTENSIONS.has(extname(entry.name)) &&
+      !entry.name.endsWith('.d.ts') &&
+      !entry.name.endsWith('.d.mts')
+    ) {
+      files.push(fullPath);
+    }
+  }
+  return files.sort();
+}
+
+async function importLocalModule(modulePath: string): Promise<Record<string, unknown>> {
+  return import(`${pathToFileURL(modulePath).href}?t=${Date.now()}`);
+}
+
+function getDrizzleSchemaOptions(
+  schema: Record<string, unknown>,
+): { schema: Record<string, unknown> } | undefined {
+  return Object.keys(schema).length > 0 ? { schema } : undefined;
 }
