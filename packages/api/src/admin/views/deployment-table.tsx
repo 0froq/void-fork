@@ -29,7 +29,10 @@ function statusColor(status: string): string | undefined {
     case 'evicted':
       return 'color: #888';
     case 'failed':
+    case 'canceled':
       return 'color: #dc2626';
+    case 'canceling':
+      return 'color: #ca8a04';
     default:
       return undefined;
   }

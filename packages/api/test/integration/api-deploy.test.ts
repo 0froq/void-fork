@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { updateDeploymentStatus } from '../../src/db';
 import app from '../../src/index';
 import { deployments, resources, domains, projects, projectSecrets } from '../../src/schema';
 import {
@@ -1589,6 +1590,85 @@ describe('Deploy serialization (concurrent deploy guard)', () => {
       .where(eq(deployments.id, 'dpl_stale'));
     expect(stale?.status).toBe('failed');
     expect(stale?.error_message).toBe('timed out');
+  });
+
+  it('keeps a canceling deployment active until the deploy handler observes cancellation', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'cancel-active-app');
+
+    await env.db.insert(deployments).values({
+      id: 'dpl_cancel_active',
+      project_id: project.id,
+      status: 'uploading',
+      created_at: sql`now()`,
+    });
+
+    const cancelRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deployments/dpl_cancel_active/cancel`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(cancelRes.status).toBe(200);
+    expect(await cancelRes.json()).toMatchObject({
+      ok: true,
+      deploymentId: 'dpl_cancel_active',
+      status: 'canceling',
+    });
+
+    const [canceling] = await env.db
+      .select({ status: deployments.status, error_message: deployments.error_message })
+      .from(deployments)
+      .where(eq(deployments.id, 'dpl_cancel_active'));
+    expect(canceling).toEqual({ status: 'canceling', error_message: 'canceled by user' });
+
+    mockCfApi();
+    const deployRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm(),
+      }),
+      env,
+    );
+    expect(deployRes.status).toBe(409);
+    expect(await deployRes.json()).toEqual({
+      error: 'deploy in progress',
+      deployment: 'dpl_cancel_active',
+    });
+
+    await updateDeploymentStatus(env.db, 'dpl_cancel_active', 'migrating');
+    const [stillCanceling] = await env.db
+      .select({ status: deployments.status })
+      .from(deployments)
+      .where(eq(deployments.id, 'dpl_cancel_active'));
+    expect(stillCanceling?.status).toBe('canceling');
+  });
+
+  it('does not cancel a terminal deployment', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'cancel-live-app');
+    await env.db.insert(deployments).values({
+      id: 'dpl_cancel_live',
+      project_id: project.id,
+      status: 'live',
+      created_at: sql`now()`,
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deployments/dpl_cancel_live/cancel`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: 'deployment already completed',
+      status: 'live',
+    });
   });
 
   it('allows deploy when previous deployment is terminal (live)', async () => {

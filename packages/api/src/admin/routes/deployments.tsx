@@ -5,6 +5,7 @@ import {
   searchDeployments,
   getDeployment,
   getProject,
+  cancelDeployment,
 } from '../../db';
 import { type ApiEnv, isDevBypass } from '../../env';
 import type { DeployManifest } from '../../types';
@@ -16,6 +17,8 @@ import { Layout } from '../views/layout';
 
 const PAGE_SIZE = 20;
 const app = new Hono<ApiEnv>();
+
+const ACTIVE_DEPLOYMENT_STATUSES = new Set(['pending', 'uploading', 'migrating', 'prerendering']);
 
 // GET /deployments
 app.get('/', async (c) => {
@@ -58,6 +61,7 @@ app.get('/:id', async (c) => {
   }
   const project = await getProject(c.get('db'), deployment.project_id);
   const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
+  const canCancel = ACTIVE_DEPLOYMENT_STATUSES.has(deployment.status);
 
   let manifest: DeployManifest | null = null;
   try {
@@ -72,17 +76,34 @@ app.get('/:id', async (c) => {
     <Layout title={`Deployment ${deployment.id}`} username={c.get('user').login}>
       <h1>Deployment {deployment.id}</h1>
 
-      {deployment.status === 'failed' && deployment.error_message && (
+      {canCancel && (
         <>
-          <h2>Error</h2>
-          <pre>{deployment.error_message}</pre>
-          <p>
-            <button type="button" class="copy-btn" data-copy={deployment.error_message}>
-              Copy error
+          <h2>Deploy Control</h2>
+          <form
+            method="post"
+            action={`/admin/deployments/${deployment.id}/cancel`}
+            onsubmit="return confirm('Cancel deployment &quot;' + this.dataset.deployment + '&quot;?')"
+            data-deployment={deployment.id}
+          >
+            <button type="submit" class="danger">
+              Cancel Deploy
             </button>
-          </p>
+          </form>
         </>
       )}
+
+      {(deployment.status === 'failed' || deployment.status === 'canceled') &&
+        deployment.error_message && (
+          <>
+            <h2>Error</h2>
+            <pre>{deployment.error_message}</pre>
+            <p>
+              <button type="button" class="copy-btn" data-copy={deployment.error_message}>
+                Copy error
+              </button>
+            </p>
+          </>
+        )}
 
       <table>
         <tbody>
@@ -208,6 +229,17 @@ app.get('/:id', async (c) => {
       {deployment.status === 'live' && project && <DeploymentLogs deploymentId={deployment.id} />}
     </Layout>,
   );
+});
+
+// POST /deployments/:id/cancel
+app.post('/:id/cancel', async (c) => {
+  const deployment = await getDeployment(c.get('db'), c.req.param('id'));
+  if (!deployment) {
+    return c.html('<h1>Deployment not found</h1>', 404);
+  }
+
+  await cancelDeployment(c.get('db'), deployment.id, 'canceled by admin');
+  return c.redirect(`/admin/deployments/${deployment.id}`);
 });
 
 // GET /deployments/:id/logs — query historical logs via Analytics Engine

@@ -19,7 +19,9 @@ const statusColor: Record<string, string> = {
   uploading: 'text-status-pending',
   migrating: 'text-status-pending',
   prerendering: 'text-status-pending',
+  canceling: 'text-status-pending',
   failed: 'text-status-failed',
+  canceled: 'text-status-failed',
 };
 
 function formatNumber(n: number): string {

@@ -10,6 +10,7 @@ import {
   getDomainsByProjectId,
   getDomainsByProjectIds,
   getDeployment,
+  cancelDeployment,
   setActiveDeployment,
   setAppliedMigrations,
 } from '../db';
@@ -173,6 +174,31 @@ const app = new Hono<ApiEnv>()
       deployments,
       activeDeploymentId: project.active_deployment_id,
     });
+  })
+
+  // Request cancellation of an active deployment
+  .post('/:id/deployments/:deploymentId/cancel', async (c) => {
+    const projectId = c.req.param('id');
+    const deploymentId = c.req.param('deploymentId');
+    const project = await getProject(c.get('db'), projectId);
+    if (!project) {
+      return c.json({ error: 'project not found' }, 404);
+    }
+    if (project.user_id !== c.get('user').id) {
+      return c.json({ error: 'forbidden' }, 403);
+    }
+
+    const deployment = await getDeployment(c.get('db'), deploymentId);
+    if (!deployment || deployment.project_id !== projectId) {
+      return c.json({ error: 'deployment not found' }, 404);
+    }
+
+    const canceling = await cancelDeployment(c.get('db'), deploymentId, 'canceled by user');
+    if (!canceling) {
+      return c.json({ error: 'deployment already completed', status: deployment.status }, 409);
+    }
+
+    return c.json({ ok: true, deploymentId, status: 'canceling' });
   })
 
   // Rollback to a previous deployment

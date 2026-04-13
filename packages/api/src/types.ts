@@ -17,6 +17,7 @@ export type User = InferSelectModel<typeof users>;
 export type OAuthAccount = InferSelectModel<typeof oauthAccounts>;
 export type Project = InferSelectModel<typeof projects>;
 export type Deployment = InferSelectModel<typeof deployments>;
+export type DeploymentStatus = Deployment['status'];
 export type ProjectSecret = InferSelectModel<typeof projectSecrets>;
 export type Resource = InferSelectModel<typeof resources>;
 export type Domain = InferSelectModel<typeof domains>;
@@ -104,6 +105,7 @@ export interface DeployManifest {
 
 export type DeployEvent =
   | { event: 'start'; deploymentId: string }
+  | { event: 'heartbeat'; deploymentId: string; step: string }
   | { event: 'asset_upload'; total: number; new: number; cached: number }
   | { event: 'asset_upload_done' }
   | { event: 'provisioning'; bindings: string[] }

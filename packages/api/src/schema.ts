@@ -93,7 +93,16 @@ export const deployments = pgTable(
     status: text('status')
       .notNull()
       .default('pending')
-      .$type<'pending' | 'uploading' | 'migrating' | 'prerendering' | 'live' | 'failed'>(),
+      .$type<
+        | 'pending'
+        | 'uploading'
+        | 'migrating'
+        | 'prerendering'
+        | 'canceling'
+        | 'live'
+        | 'failed'
+        | 'canceled'
+      >(),
     manifest: text('manifest'),
     source: text('source'),
     commit: text('commit'),

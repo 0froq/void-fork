@@ -28,6 +28,8 @@ import {
   getRetainedDeploymentsExcluding,
   getProjectSecrets,
   upsertProjectSecret,
+  CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES,
+  type Db,
 } from '../db';
 import { sendDeployFailedEmail } from '../email';
 import type { ApiEnv } from '../env';
@@ -98,6 +100,13 @@ function sanitizeDeployErrorMessage(message: string): string {
     return 'asset upload returned an unexpected Cloudflare response';
   }
   return message;
+}
+
+async function assertDeploymentNotCanceled(db: Db, deploymentId: string): Promise<void> {
+  const latest = await getDeployment(db, deploymentId);
+  if (latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status)) {
+    throw new Error('deployment canceled');
+  }
 }
 
 export function buildWebSocketUploadMigrations(migrations: WebSocketMigrationMeta[] | undefined):
@@ -273,7 +282,13 @@ app.post('/:id/deploy', async (c) => {
       return c.json({ error: 'deploy in progress', deployment: activeDeploy.id }, 409);
     }
     // Stale — auto-fail and proceed
-    await updateDeploymentStatus(c.get('db'), activeDeploy.id, 'failed', 'timed out');
+    await updateDeploymentStatus(
+      c.get('db'),
+      activeDeploy.id,
+      activeDeploy.status === 'canceling' ? 'canceled' : 'failed',
+      'timed out',
+      activeDeploy.status === 'canceling' ? { force: true } : undefined,
+    );
   }
 
   const formData = await c.req.formData();
@@ -380,10 +395,26 @@ app.post('/:id/deploy', async (c) => {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const emit = (event: DeployEvent) => {
-        controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'));
-      };
       let currentStep = 'start';
+      let streamOpen = true;
+      const emit = (event: DeployEvent) => {
+        if (!streamOpen) {
+          return;
+        }
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'));
+        } catch (err) {
+          streamOpen = false;
+          console.warn(
+            `[deploy] ${projectId}: deploy stream closed while emitting ${event.event}: ${
+              err instanceof Error ? err.message : err
+            }`,
+          );
+        }
+      };
+      const heartbeat = setInterval(() => {
+        emit({ event: 'heartbeat', deploymentId: deployment.id, step: currentStep });
+      }, 15_000);
       let routingSwitched = false;
       let cronSynced = false;
 
@@ -393,9 +424,11 @@ app.post('/:id/deploy', async (c) => {
         // === ASSET UPLOAD PHASE ===
         currentStep = 'asset_upload';
         await updateDeploymentStatus(c.get('db'), deployment.id, 'uploading');
+        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
         // Collect assets from FormData and compute CF-compatible hashes
         const { manifest: assetManifest, assetsByHash } = await collectAssets(formData);
+        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
         // When preflight was used, fill in skipped assets.
         // Prefer the CLI's full manifest (new CLIs send it) to avoid accumulating
@@ -446,6 +479,7 @@ app.post('/:id/deploy', async (c) => {
             assetsByHash,
             projectId,
           );
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
           emit({ event: 'asset_upload_done' });
 
           // Build serving manifest: path → hash (prefix with "!" for R2-stored assets)
@@ -509,6 +543,7 @@ app.post('/:id/deploy', async (c) => {
             manifest,
             suspended: existingEntry?.suspended,
           });
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
           await c.env.ROUTING.put(project.slug, routingJson);
           routingSwitched = true;
 
@@ -519,7 +554,9 @@ app.post('/:id/deploy', async (c) => {
           }
 
           // Mark deployment live + update project type
-          await updateDeploymentStatus(c.get('db'), deployment.id, 'live');
+          await updateDeploymentStatus(c.get('db'), deployment.id, 'live', undefined, {
+            force: true,
+          });
           await updateProjectType(c.get('db'), projectId, type);
           await setActiveDeployment(c.get('db'), projectId, deployment.id);
           await markDeploymentRetained(c.get('db'), deployment.id, true);
@@ -649,6 +686,7 @@ app.post('/:id/deploy', async (c) => {
           c.env.JWT_SECRET,
           c.env.VOID_PROXY_SERVICE ?? 'void-proxy',
         );
+        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
         if (bindingLabels.length > 0) {
           emit({ event: 'provisioning_done' });
@@ -724,6 +762,7 @@ app.post('/:id/deploy', async (c) => {
             session.buckets,
             assetsByHash,
           );
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
           console.log(
             `[deploy] ${projectId}: asset upload complete, got completion JWT: ${completionJwt ? 'yes' : 'no'}`,
           );
@@ -848,6 +887,7 @@ app.post('/:id/deploy', async (c) => {
           },
           { ...CF_RETRY, errorMessage: 'worker upload returned an unexpected Cloudflare response' },
         );
+        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
         emit({ event: 'worker_upload_done' });
 
@@ -856,6 +896,7 @@ app.post('/:id/deploy', async (c) => {
         if (manifest.migrations && manifest.migrations.pending > 0) {
           currentStep = 'migration';
           await updateDeploymentStatus(c.get('db'), deployment.id, 'migrating');
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
           emit({ event: 'migration_start', pending: manifest.migrations.pending });
 
           try {
@@ -995,6 +1036,7 @@ app.post('/:id/deploy', async (c) => {
             );
             throw err;
           }
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
         }
 
         // 2b. Configure queue consumers (dispatch worker relays to user workers)
@@ -1035,6 +1077,7 @@ app.post('/:id/deploy', async (c) => {
             }
           }),
         );
+        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
         // 2c. Sync cron schedules to CronScheduler DO
         currentStep = 'cron_setup';
@@ -1065,17 +1108,20 @@ app.post('/:id/deploy', async (c) => {
             );
           }
         }
+        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
         // 3. Clear previous ISR cache on deploy.
         // Always clear — handles both "new deploy has ISR" and "previous deploy had ISR
         // but new one doesn't" (avoids orphaned KV entries). No-op for empty prefixes.
         await clearIsrCache(c.env.ISR_CACHE, projectId);
+        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
         // 3b. Prerender pages (write ISR cache entries before going live)
         currentStep = 'prerender';
         if (manifest.prerender && manifest.prerender.length > 0 && manifest.revalidate) {
           emit({ event: 'prerender', pages: manifest.prerender.length });
           await updateDeploymentStatus(c.get('db'), deployment.id, 'prerendering');
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
           const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
 
           await uploadPool(manifest.prerender, 3, async (pathname) => {
@@ -1110,6 +1156,7 @@ app.post('/:id/deploy', async (c) => {
           });
           emit({ event: 'prerender_done' });
         }
+        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
         // 4. Update KV routing table
         // Carry forward suspended flag from current KV entry
@@ -1135,6 +1182,7 @@ app.post('/:id/deploy', async (c) => {
           suspended: existingEntry?.suspended,
           hasCrons,
         });
+        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
         await c.env.ROUTING.put(project.slug, routingJson);
 
         // Traffic can now reach the new worker via project.slug.
@@ -1149,7 +1197,9 @@ app.post('/:id/deploy', async (c) => {
         }
 
         // 5. Mark deployment as live + update project mode
-        await updateDeploymentStatus(c.get('db'), deployment.id, 'live');
+        await updateDeploymentStatus(c.get('db'), deployment.id, 'live', undefined, {
+          force: true,
+        });
         await updateProjectType(
           c.get('db'),
           projectId,
@@ -1232,7 +1282,9 @@ app.post('/:id/deploy', async (c) => {
           // (retention cleanup, asset_hashes update, etc.) is non-critical and
           // will self-correct on the next deploy.
           console.error(`[deploy] post-routing step failed for ${workerName}: ${msg}`);
-          await updateDeploymentStatus(c.get('db'), deployment.id, 'live').catch(() => {});
+          await updateDeploymentStatus(c.get('db'), deployment.id, 'live', undefined, {
+            force: true,
+          }).catch(() => {});
           await updateProjectType(
             c.get('db'),
             projectId,
@@ -1254,6 +1306,9 @@ app.post('/:id/deploy', async (c) => {
         } else {
           // Routing not yet switched — safe to clean up the worker script and
           // mark the deployment as failed.
+          const latest = await getDeployment(c.get('db'), deployment.id);
+          const wasCanceled =
+            latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status);
           await deleteDispatchScript(
             c.env.CF_ACCOUNT_ID,
             c.env.CF_API_TOKEN,
@@ -1271,9 +1326,15 @@ app.post('/:id/deploy', async (c) => {
                 console.error(`[deploy] failed to clear cron scheduler for ${projectId}:`, e),
               );
           }
-          await updateDeploymentStatus(c.get('db'), deployment.id, 'failed', msg);
+          if (!wasCanceled) {
+            await updateDeploymentStatus(c.get('db'), deployment.id, 'failed', msg);
+          } else {
+            await updateDeploymentStatus(c.get('db'), deployment.id, 'canceled', msg, {
+              force: true,
+            });
+          }
           emit({ event: 'error', message: msg, step: currentStep });
-          if (c.env.EMAIL && user.email) {
+          if (!wasCanceled && c.env.EMAIL && user.email) {
             const dashboardUrl = c.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
             c.executionCtx.waitUntil(
               sendDeployFailedEmail(c.env.EMAIL, user.email, project.slug, msg, dashboardUrl).catch(
@@ -1283,7 +1344,11 @@ app.post('/:id/deploy', async (c) => {
           }
         }
       } finally {
-        controller.close();
+        clearInterval(heartbeat);
+        if (streamOpen) {
+          streamOpen = false;
+          controller.close();
+        }
       }
     },
   });

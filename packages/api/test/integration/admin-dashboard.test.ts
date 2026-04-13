@@ -422,6 +422,47 @@ describe('GET /admin/deployments/:id', () => {
     const res = await req('/admin/deployments/dpl_nonexistent', admin.adminJwt);
     expect(res.status).toBe(404);
   });
+
+  test('shows cancel button for active deployment', async () => {
+    const admin = await createTestUser(env.db, 'admin12d', 'github', undefined, 'free', 'admin');
+    const project = await createTestProject(env.db, admin.id, 'active-deploy-proj');
+    const deployment = await createTestDeployment(env.db, project.id, 'uploading');
+
+    const res = await req(`/admin/deployments/${deployment.id}`, admin.adminJwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('Deploy Control');
+    expect(html).toContain('Cancel Deploy');
+    expect(html).toContain(`/admin/deployments/${deployment.id}/cancel`);
+  });
+});
+
+describe('POST /admin/deployments/:id/cancel', () => {
+  test('cancels active deployment and redirects to detail', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'admin-cancel1',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const project = await createTestProject(env.db, admin.id, 'cancel-admin-proj');
+    const deployment = await createTestDeployment(env.db, project.id, 'uploading');
+
+    const res = await req(`/admin/deployments/${deployment.id}/cancel`, admin.adminJwt, {
+      method: 'POST',
+      body: '',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe(`/admin/deployments/${deployment.id}`);
+
+    const rows = await env.db.select().from(deployments);
+    const canceling = rows.find((d) => d.id === deployment.id);
+    expect(canceling?.status).toBe('canceling');
+    expect(canceling?.error_message).toBe('canceled by admin');
+  });
 });
 
 describe('GET /admin/login', () => {

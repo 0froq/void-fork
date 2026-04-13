@@ -338,7 +338,15 @@ let deploymentCounter = 0;
 export async function createTestDeployment(
   db: Db,
   projectId: string,
-  status: 'pending' | 'live' | 'failed' = 'live',
+  status:
+    | 'pending'
+    | 'uploading'
+    | 'migrating'
+    | 'prerendering'
+    | 'canceling'
+    | 'live'
+    | 'failed'
+    | 'canceled' = 'live',
   source?: string,
   errorMessage?: string,
 ): Promise<{ id: string }> {

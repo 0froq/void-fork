@@ -32,6 +32,7 @@ import {
 import type { PlanId } from './tiers';
 import type {
   Deployment,
+  DeploymentStatus,
   Domain,
   Invitation,
   OAuthAccount,
@@ -46,6 +47,12 @@ export function createDb(connectionString: string) {
   return drizzle(connectionString, { schema });
 }
 export type Db = ReturnType<typeof createDb>;
+
+export const TERMINAL_DEPLOYMENT_STATUSES: DeploymentStatus[] = ['live', 'failed', 'canceled'];
+export const CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES: DeploymentStatus[] = [
+  'canceling',
+  'canceled',
+];
 
 // --- Users ---
 
@@ -209,6 +216,7 @@ export async function updateDeploymentStatus(
   id: string,
   status: Deployment['status'],
   errorMessage?: string,
+  options?: { force?: boolean },
 ): Promise<void> {
   await db
     .update(deployments)
@@ -221,7 +229,14 @@ export async function updateDeploymentStatus(
           : sql`${deployments.deployed_at}`,
       error_message: sql`COALESCE(${errorMessage ?? null}, ${deployments.error_message})`,
     })
-    .where(eq(deployments.id, id));
+    .where(
+      options?.force
+        ? eq(deployments.id, id)
+        : and(
+            eq(deployments.id, id),
+            notInArray(deployments.status, CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES),
+          ),
+    );
 }
 
 export async function getDeployment(db: Db, id: string): Promise<Deployment | null> {
@@ -283,7 +298,7 @@ export async function failStaleDeployments(db: Db): Promise<number> {
     })
     .where(
       and(
-        notInArray(deployments.status, ['live', 'failed']),
+        notInArray(deployments.status, TERMINAL_DEPLOYMENT_STATUSES),
         sql`${deployments.updated_at} < now() - interval '30 minutes'`,
       ),
     );
@@ -297,10 +312,33 @@ export async function getActiveDeployment(db: Db, projectId: string): Promise<De
     .where(
       and(
         eq(deployments.project_id, projectId),
-        notInArray(deployments.status, ['live', 'failed']),
+        notInArray(deployments.status, TERMINAL_DEPLOYMENT_STATUSES),
       ),
     )
+    .orderBy(desc(deployments.created_at))
     .limit(1);
+  return row ?? null;
+}
+
+export async function cancelDeployment(
+  db: Db,
+  deploymentId: string,
+  errorMessage = 'canceled',
+): Promise<Deployment | null> {
+  const [row] = await db
+    .update(deployments)
+    .set({
+      status: 'canceling',
+      updated_at: sql`now()`,
+      error_message: sql`COALESCE(${deployments.error_message}, ${errorMessage})`,
+    })
+    .where(
+      and(
+        eq(deployments.id, deploymentId),
+        notInArray(deployments.status, TERMINAL_DEPLOYMENT_STATUSES),
+      ),
+    )
+    .returning();
   return row ?? null;
 }
 
