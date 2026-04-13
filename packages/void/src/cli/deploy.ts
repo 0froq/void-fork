@@ -359,10 +359,11 @@ async function runStaticDeploy(
   }
 
   const s = createSpinner();
+  const onProgress = (msg: string) => s.message(msg);
 
   // Preflight: hash assets and check which ones changed
   s.start('Checking for changes...');
-  const { assetManifest } = collectAndHashAssets(preset.outputDir);
+  const { assetManifest } = await collectAndHashAssets(preset.outputDir, onProgress);
   const { needed, skipped } = await client.preflight(config.projectId, assetManifest);
   s.stop('Checked for changes');
 
@@ -372,13 +373,14 @@ async function runStaticDeploy(
 
   s.start('Packaging...');
   const neededSet = skipped > 0 ? new Set(needed) : null;
-  const formData = packageStaticBuild(
+  const formData = await packageStaticBuild(
     preset.outputDir,
     preset.appType,
     neededSet,
     hashedAssetsPrefix ?? 'assets',
     headerRules,
     redirectRules,
+    onProgress,
   );
   if (neededSet) {
     formData.append('assetManifest', JSON.stringify(assetManifest));
@@ -566,10 +568,11 @@ async function runFrameworkDeploy(
 
   // 11. Package & deploy
   const s = createSpinner();
+  const onProgress = (msg: string) => s.message(msg);
 
   // Preflight: hash assets and check which ones changed
   s.start('Checking for changes...');
-  const { assetManifest } = collectAndHashAssets(assetsDir);
+  const { assetManifest } = await collectAndHashAssets(assetsDir, onProgress);
   const { needed, skipped } = await client.preflight(config.projectId, assetManifest, true);
   s.stop('Checked for changes');
 
@@ -579,7 +582,7 @@ async function runFrameworkDeploy(
 
   s.start('Packaging...');
   const neededSet = skipped > 0 ? new Set(needed) : null;
-  const formData = packageFrameworkBuild({
+  const formData = await packageFrameworkBuild({
     frameworkName: detected.name,
     workerDir: actualWorkerDir,
     workerMain: actualWorkerMain,
@@ -603,6 +606,7 @@ async function runFrameworkDeploy(
     headerRules,
     redirectRules,
     dialect,
+    onProgress,
   });
   if (neededSet) {
     formData.append('assetManifest', JSON.stringify(assetManifest));
@@ -894,6 +898,7 @@ async function runFullDeploy(
 
   // 10. Package & Upload
   const s = createSpinner();
+  const onProgress = (msg: string) => s.message(msg);
 
   // Derive asset config: SSR and pages-mode workers handle their own 404s, non-SSR uses SPA fallback
   const assetConfig: AssetConfig =
@@ -903,7 +908,7 @@ async function runFullDeploy(
 
   // Preflight: hash assets and check which ones changed
   s.start('Checking for changes...');
-  const { assetManifest } = collectAndHashAssets(clientDir);
+  const { assetManifest } = await collectAndHashAssets(clientDir, onProgress);
   const { needed, skipped } = await client.preflight(config.projectId, assetManifest, true);
   s.stop('Checked for changes');
 
@@ -913,7 +918,7 @@ async function runFullDeploy(
 
   s.start('Packaging...');
   const neededSet = skipped > 0 ? new Set(needed) : null;
-  const formData = packageBuild(
+  const formData = await packageBuild(
     distDir,
     workerDirName,
     effectiveBindings,
@@ -936,6 +941,7 @@ async function runFullDeploy(
     redirectRules,
     dialect,
     webSockets,
+    onProgress,
   );
   if (neededSet) {
     formData.append('assetManifest', JSON.stringify(assetManifest));
