@@ -217,6 +217,15 @@ interface ProjectState {
   typescriptWanted: boolean;
 }
 
+function isCommandAvailable(command: string): boolean {
+  const result = spawnSync(command, ['--version'], {
+    stdio: 'ignore',
+    shell: process.platform === 'win32',
+  });
+
+  return !result.error && result.status === 0;
+}
+
 function detectProjectState(root: string): ProjectState {
   let hasTypescript = false;
   try {
@@ -234,6 +243,8 @@ function detectProjectState(root: string): ProjectState {
     packageManager = 'yarn';
   } else if (existsSync(join(root, 'bun.lock')) || existsSync(join(root, 'bun.lockb'))) {
     packageManager = 'bun';
+  } else if (isCommandAvailable('pnpm')) {
+    packageManager = 'pnpm';
   }
 
   return {
