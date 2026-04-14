@@ -29,21 +29,21 @@
   "dependencies": {
     "blake3-jit": "^1.0.0",
     "cron-parser": "5.5.0",
-    "drizzle-orm": "^0.45.1",
+    "drizzle-orm": "^0.45.2",
     "hono": "catalog:",
     "mime": "^4.1.0",
     "pg": "8.20.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
-    "@electric-sql/pglite": "0.4.1",
+    "@electric-sql/pglite": "0.4.4",
     "@types/pg": "8.20.0",
     "@typescript/native-preview": "catalog:",
     "drizzle-kit": "^0.31.10",
-    "miniflare": "^4.20260317.2",
+    "miniflare": "^4.20260410.0",
     "wrangler": "catalog:"
   },
   "optionalDependencies": {
-    "@clack/prompts": "^1.1.0"
+    "@clack/prompts": "^1.2.0"
   }
 }
