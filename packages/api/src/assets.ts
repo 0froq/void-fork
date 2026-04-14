@@ -179,23 +179,10 @@ export async function uploadAssetBuckets(
 
       await acquireSlot();
       try {
-        const formData = new FormData();
-        for (const hash of bucket) {
-          const entry = assetsByHash.get(hash);
-          if (!entry) {
-            throw new AssetHashMissError(
-              `[assets] bucket ${bucketIndex}: hash ${hash} requested by CF but not found in assetsByHash. ` +
-                `This indicates a manifest/upload mismatch — the hash was declared in the manifest ` +
-                `but the corresponding file was not included in the upload.`,
-            );
-          }
+        const parts = resolveAssetUploadParts(bucket, bucketIndex, assetsByHash);
+        const { body, contentType } = createBase64MultipartBody(parts);
 
-          const buffer = await entry.blob.arrayBuffer();
-          const base64 = arrayBufferToBase64(buffer);
-          formData.append(hash, new File([base64], hash, { type: entry.contentType }), hash);
-        }
-
-        const result = await postAssetUpload(accountId, jwt, formData);
+        const result = await postAssetUpload(accountId, jwt, body, contentType);
         if (result) {
           completionJwt = result;
         }
@@ -277,7 +264,8 @@ export async function uploadAssetBuckets(
 async function postAssetUpload(
   accountId: string,
   jwt: string,
-  body: FormData,
+  body: BodyInit,
+  contentType: string,
 ): Promise<string | null> {
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/assets/upload?base64=true`,
@@ -285,6 +273,7 @@ async function postAssetUpload(
       method: 'POST',
       headers: {
         Authorization: `Bearer ${jwt}`,
+        'Content-Type': contentType,
       },
       body,
     },
@@ -333,6 +322,97 @@ function bytesToBase64(bytes: Uint8Array): string {
 }
 
 const textEncoder = new TextEncoder();
+
+interface AssetUploadPart {
+  hash: string;
+  entry: AssetEntry;
+}
+
+function resolveAssetUploadParts(
+  bucket: string[],
+  bucketIndex: number,
+  assetsByHash: Map<string, AssetEntry>,
+): AssetUploadPart[] {
+  return bucket.map((hash) => {
+    const entry = assetsByHash.get(hash);
+    if (!entry) {
+      throw new AssetHashMissError(
+        `[assets] bucket ${bucketIndex}: hash ${hash} requested by CF but not found in assetsByHash. ` +
+          `This indicates a manifest/upload mismatch — the hash was declared in the manifest ` +
+          `but the corresponding file was not included in the upload.`,
+      );
+    }
+    return { hash, entry };
+  });
+}
+
+function createBase64MultipartBody(parts: AssetUploadPart[]): {
+  body: ReadableStream<Uint8Array>;
+  contentType: string;
+} {
+  const boundary = `----void-assets-${Math.random().toString(36).slice(2)}`;
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = writable.getWriter();
+
+  void (async () => {
+    try {
+      for (const { hash, entry } of parts) {
+        await writer.write(
+          textEncoder.encode(
+            `--${boundary}\r\n` +
+              `Content-Disposition: form-data; name="${hash}"; filename="${hash}"\r\n` +
+              `Content-Type: ${entry.contentType}\r\n\r\n`,
+          ),
+        );
+        await writeBase64Blob(writer, entry.blob);
+        await writer.write(textEncoder.encode('\r\n'));
+      }
+      await writer.write(textEncoder.encode(`--${boundary}--\r\n`));
+      await writer.close();
+    } catch (err) {
+      await writer.abort(err);
+    }
+  })();
+
+  return { body: readable, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+async function writeBase64Blob(
+  writer: WritableStreamDefaultWriter<Uint8Array>,
+  blob: Blob,
+): Promise<void> {
+  const reader = blob.stream().getReader();
+  let carry = new Uint8Array(0);
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      let bytes = value;
+      if (carry.length > 0) {
+        bytes = new Uint8Array(carry.length + value.length);
+        bytes.set(carry);
+        bytes.set(value, carry.length);
+        carry = new Uint8Array(0);
+      }
+
+      const encodableLength = bytes.length - (bytes.length % 3);
+      if (encodableLength > 0) {
+        await writer.write(textEncoder.encode(bytesToBase64(bytes.subarray(0, encodableLength))));
+      }
+      carry = bytes.slice(encodableLength);
+    }
+
+    if (carry.length > 0) {
+      await writer.write(textEncoder.encode(bytesToBase64(carry)));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 function digestToAssetHash(digest: Uint8Array): string {
   return [...digest]

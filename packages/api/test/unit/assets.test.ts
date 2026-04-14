@@ -72,6 +72,32 @@ function toArrayBuffer(value: unknown): ArrayBuffer {
   throw new Error('unsupported mock storage value');
 }
 
+async function readBodyText(body: unknown): Promise<string> {
+  if (body instanceof ReadableStream) {
+    const reader = body.getReader();
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      chunks.push(value);
+    }
+    const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder().decode(bytes);
+  }
+  if (typeof body === 'string') {
+    return body;
+  }
+  throw new Error('unsupported body type');
+}
+
 /** Create a JWT with the given expiration time (Unix seconds). */
 function makeJwt(exp: number): string {
   const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
@@ -396,6 +422,35 @@ describe('uploadAssetBuckets', () => {
 
     expect(completionJwt).toBe('completion-jwt');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('streams base64 multipart asset bodies without reading blobs into arrayBuffers', async () => {
+    const arrayBuffer = vi.spyOn(Blob.prototype, 'arrayBuffer');
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect(init?.headers).toMatchObject({
+        Authorization: 'Bearer session-jwt',
+      });
+      expect(init?.headers).toMatchObject({
+        'Content-Type': expect.stringContaining('multipart/form-data; boundary='),
+      });
+      const body = await readBodyText(init?.body);
+      expect(body).toContain('Content-Disposition: form-data; name="hash1"; filename="hash1"');
+      expect(body).toContain('Content-Type: text/plain');
+      expect(body).toContain('aGVsbG8=');
+      return Response.json({ result: { jwt: 'completion-jwt' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const completionJwt = await uploadAssetBuckets(
+      'acct',
+      'session-jwt',
+      [['hash1']],
+      singleAssetMap,
+      opts,
+    );
+
+    expect(completionJwt).toBe('completion-jwt');
+    expect(arrayBuffer).not.toHaveBeenCalled();
   });
 
   it('retries on 5xx errors and succeeds', async () => {
