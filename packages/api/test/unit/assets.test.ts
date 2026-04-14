@@ -1,5 +1,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
+  collectAssets,
+  computeAssetHash,
   createAssetUploadSession,
   deleteUnreferencedAssets,
   uploadAssetBuckets,
@@ -55,6 +57,21 @@ function createMockR2() {
   } as unknown as R2Bucket & { store: Map<string, ArrayBuffer> };
 }
 
+function toArrayBuffer(value: unknown): ArrayBuffer {
+  if (value instanceof ArrayBuffer) {
+    return value;
+  }
+  if (ArrayBuffer.isView(value)) {
+    const copy = new Uint8Array(value.byteLength);
+    copy.set(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    return copy.buffer;
+  }
+  if (typeof value === 'string') {
+    return new TextEncoder().encode(value).buffer;
+  }
+  throw new Error('unsupported mock storage value');
+}
+
 /** Create a JWT with the given expiration time (Unix seconds). */
 function makeJwt(exp: number): string {
   const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
@@ -67,6 +84,52 @@ const KV_THRESHOLD = 2 * 1024 * 1024; // 2 MB
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+describe('collectAssets', () => {
+  it('uses the declared asset manifest after verifying the blob hash without re-reading the blob', async () => {
+    const blob = new Blob(['hello']);
+    const hash = computeAssetHash(await blob.arrayBuffer(), '/index.html');
+    const manifest = {
+      '/index.html': { hash, size: blob.size },
+    };
+    const form = new FormData();
+    form.append('asset:index.html', blob, 'index.html');
+    const arrayBuffer = vi.spyOn(Blob.prototype, 'arrayBuffer');
+
+    const result = await collectAssets(form, manifest);
+
+    expect(result.manifest).toEqual(manifest);
+    expect(result.assetsByHash.has(manifest['/index.html'].hash)).toBe(true);
+    expect(arrayBuffer).not.toHaveBeenCalled();
+  });
+
+  it('computes the hash when the declared asset size does not match', async () => {
+    const blob = new Blob(['hello']);
+    const form = new FormData();
+    form.append('asset:index.html', blob, 'index.html');
+    const arrayBuffer = vi.spyOn(Blob.prototype, 'arrayBuffer');
+
+    const result = await collectAssets(form, {
+      '/index.html': { hash: 'a'.repeat(32), size: blob.size + 1 },
+    });
+
+    expect(result.manifest['/index.html'].hash).not.toBe('a'.repeat(32));
+    expect(result.manifest['/index.html'].size).toBe(blob.size);
+    expect(arrayBuffer).not.toHaveBeenCalled();
+  });
+
+  it('rejects a declared asset hash that does not match same-size content', async () => {
+    const blob = new Blob(['hello']);
+    const form = new FormData();
+    form.append('asset:index.html', blob, 'index.html');
+
+    await expect(
+      collectAssets(form, {
+        '/index.html': { hash: 'a'.repeat(32), size: blob.size },
+      }),
+    ).rejects.toThrow('asset hash mismatch for /index.html');
+  });
 });
 
 describe('uploadStaticAssets', () => {
@@ -105,6 +168,28 @@ describe('uploadStaticAssets', () => {
     expect(kv.put).toHaveBeenCalledTimes(2); // both assets, no existence check
   });
 
+  it('retries transient KV upload failures', async () => {
+    const kv = createMockKV();
+    const r2 = createMockR2();
+    let attempts = 0;
+    vi.mocked(kv.put).mockImplementation(async (key, value, _opts) => {
+      attempts++;
+      if (attempts === 1) {
+        throw new Error('temporary KV failure');
+      }
+      kv.store.set(key, toArrayBuffer(value));
+    });
+
+    const assetsByHash = new Map([
+      ['retryhash000000000000000000000', { blob: new Blob(['retry']), contentType: 'text/plain' }],
+    ]);
+
+    await uploadStaticAssets(kv, r2, assetsByHash, 'proj_test', { retryDelayMs: 0 });
+
+    expect(kv.put).toHaveBeenCalledTimes(2);
+    expect(kv.store.has('assets/proj_test/retryhash000000000000000000000')).toBe(true);
+  });
+
   it('overwrites assets that already exist in R2 (idempotent puts)', async () => {
     const kv = createMockKV();
     const r2 = createMockR2();
@@ -127,6 +212,38 @@ describe('uploadStaticAssets', () => {
 
     expect(r2.put).toHaveBeenCalledTimes(1); // idempotent put, no existence check
     expect(largeHashes.has('existinglarge00000000000000000')).toBe(true);
+  });
+
+  it('retries transient R2 upload failures', async () => {
+    const kv = createMockKV();
+    const r2 = createMockR2();
+    let attempts = 0;
+    vi.mocked(r2.put).mockImplementation(async (key, value, _opts) => {
+      attempts++;
+      if (attempts === 1) {
+        throw new Error('temporary R2 failure');
+      }
+      r2.store.set(key, toArrayBuffer(value));
+      return { key } as R2Object;
+    });
+
+    const assetsByHash = new Map([
+      [
+        'retrylarge00000000000000000000',
+        {
+          blob: new Blob([new ArrayBuffer(KV_THRESHOLD + 1)]),
+          contentType: 'video/mp4',
+        },
+      ],
+    ]);
+
+    const largeHashes = await uploadStaticAssets(kv, r2, assetsByHash, 'proj_test', {
+      retryDelayMs: 0,
+    });
+
+    expect(r2.put).toHaveBeenCalledTimes(2);
+    expect(r2.store.has('assets/proj_test/retrylarge00000000000000000000')).toBe(true);
+    expect(largeHashes.has('retrylarge00000000000000000000')).toBe(true);
   });
 
   it('scopes asset keys by project ID', async () => {

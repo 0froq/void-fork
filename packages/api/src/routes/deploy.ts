@@ -7,6 +7,7 @@ import {
   buildAssetMetadata,
   uploadStaticAssets,
   deleteUnreferencedAssets,
+  type AssetManifestEntry,
 } from '../assets';
 import { deleteDispatchScript, retryWithBackoff } from '../cf-api';
 import { SITE_DOMAIN } from '../constants';
@@ -84,6 +85,23 @@ function parseManifest(raw: string | null | undefined): DeployManifest | null {
   }
   try {
     return JSON.parse(raw) as DeployManifest;
+  } catch {
+    return null;
+  }
+}
+
+function parseAssetManifest(
+  raw: FormDataEntryValue | null,
+): Record<string, AssetManifestEntry> | null {
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    return parsed as Record<string, AssetManifestEntry>;
   } catch {
     return null;
   }
@@ -292,10 +310,13 @@ app.post('/:id/deploy', async (c) => {
   }
 
   const formData = await c.req.formData();
+  const incomingAssetManifestRaw = formData.get('assetManifest');
+  const incomingAssetManifest = parseAssetManifest(incomingAssetManifestRaw);
   const manifestRaw = formData.get('manifest') as string | null;
   const incomingManifest: DeployManifest = manifestRaw
     ? (JSON.parse(manifestRaw) as DeployManifest)
     : { version: 3, bindings: {} };
+  const hasWorkerFiles = [...formData.keys()].some((key) => key.startsWith('worker:'));
 
   // Validate deploy manifest version
   if (
@@ -320,16 +341,17 @@ app.post('/:id/deploy', async (c) => {
   const manifest = enrichedManifestResult.manifest;
   const finalManifestRaw = JSON.stringify(manifest);
 
-  // Skip deploy if identical to the current live deployment (same manifest + same assets).
+  // Skip static-only deploys if identical to the current live deployment.
+  // Worker-backed deploys are not skipped because the deploy manifest does not
+  // include worker module content hashes.
   // Secrets are not checked: the secrets API already live-pushes values to the active
   // worker via putWorkerSecret.
-  if (currentLiveDeployment && currentLiveDeployment.status === 'live') {
+  if (!hasWorkerFiles && currentLiveDeployment && currentLiveDeployment.status === 'live') {
     const sameManifest = currentLiveDeployment.manifest === finalManifestRaw;
-    const incomingAssetManifest = formData.get('assetManifest') as string | null;
     const sameAssets =
-      incomingAssetManifest != null &&
+      typeof incomingAssetManifestRaw === 'string' &&
       currentLiveDeployment.asset_hashes != null &&
-      incomingAssetManifest === currentLiveDeployment.asset_hashes;
+      incomingAssetManifestRaw === currentLiveDeployment.asset_hashes;
     if (sameManifest && sameAssets) {
       const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
       const projectDomains = await getDomainsByProjectId(c.get('db'), projectId);
@@ -427,7 +449,10 @@ app.post('/:id/deploy', async (c) => {
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
         // Collect assets from FormData and compute CF-compatible hashes
-        const { manifest: assetManifest, assetsByHash } = await collectAssets(formData);
+        const { manifest: assetManifest, assetsByHash } = await collectAssets(
+          formData,
+          incomingAssetManifest ?? undefined,
+        );
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
         // When preflight was used, fill in skipped assets.
@@ -436,10 +461,8 @@ app.post('/:id/deploy', async (c) => {
         // manifest for older CLIs that don't send it.
         const preflightUsed = formData.get('preflight') === 'true';
         if (preflightUsed) {
-          const fullManifestJson = formData.get('assetManifest') as string | null;
-          const fillManifest = fullManifestJson
-            ? (JSON.parse(fullManifestJson) as Record<string, { hash: string; size: number }>)
-            : await getLastLiveAssetManifest(c.get('db'), projectId);
+          const fillManifest =
+            incomingAssetManifest ?? (await getLastLiveAssetManifest(c.get('db'), projectId));
           if (fillManifest) {
             for (const [path, entry] of Object.entries(fillManifest)) {
               if (!(path in assetManifest)) {
@@ -452,7 +475,6 @@ app.post('/:id/deploy', async (c) => {
         const assetCount = Object.keys(assetManifest).length;
 
         // Determine if this is a static-only deploy (no worker files in FormData)
-        const hasWorkerFiles = [...formData.keys()].some((k) => k.startsWith('worker:'));
         const isStaticOnly = !hasWorkerFiles;
 
         // Fetch domains once — used in both static-only and full deploy paths

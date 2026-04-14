@@ -1,5 +1,5 @@
 import { extname } from 'node:path';
-import { hash as blake3hash } from 'blake3-jit';
+import { createHasher, hash as blake3hash } from 'blake3-jit';
 import mime from 'mime';
 import { retryWithBackoff } from './cf-api';
 import type { AssetConfig } from './types';
@@ -16,7 +16,7 @@ class AssetUploadError extends Error {
 /** Non-retriable error — the hash will never appear locally. */
 class AssetHashMissError extends Error {}
 
-interface AssetManifestEntry {
+export interface AssetManifestEntry {
   hash: string;
   size: number;
 }
@@ -50,6 +50,9 @@ const ASSET_BUCKET_UPLOAD_RETRY_DELAY_MS = 1000;
 
 const MAX_UPLOAD_RETRIES = 5; // 5 retries + 1 initial = 6 total tries (matching Wrangler)
 const UPLOAD_CONCURRENCY = 3;
+const STATIC_ASSET_UPLOAD_CONCURRENCY = 4;
+const STATIC_ASSET_UPLOAD_MAX_RETRIES = 3;
+const STATIC_ASSET_UPLOAD_RETRY_DELAY_MS = 250;
 const GATEWAY_BACKOFF_BASE_MS = 5000;
 const MAX_GATEWAY_ERRORS = 5; // start counting attempts after this many 524s (4 free retries)
 
@@ -168,10 +171,6 @@ export async function uploadAssetBuckets(
     let bucketGatewayErrors = 0;
     let lastErr: unknown;
 
-    // Base64 entries are computed once (before entering retry loop) and reused.
-    // Built under the concurrency limit to avoid loading all buckets at once.
-    let entries: { hash: string; base64: string; contentType: string }[] | null = null;
-
     while (true) {
       // Short-circuit: another bucket already got the JWT — upload is complete
       if (completionJwt) {
@@ -180,30 +179,20 @@ export async function uploadAssetBuckets(
 
       await acquireSlot();
       try {
-        if (!entries) {
-          const built: { hash: string; base64: string; contentType: string }[] = [];
-          for (const hash of bucket) {
-            const entry = assetsByHash.get(hash);
-            if (!entry) {
-              throw new AssetHashMissError(
-                `[assets] bucket ${bucketIndex}: hash ${hash} requested by CF but not found in assetsByHash. ` +
-                  `This indicates a manifest/upload mismatch — the hash was declared in the manifest ` +
-                  `but the corresponding file was not included in the upload.`,
-              );
-            }
-            const buffer = await entry.blob.arrayBuffer();
-            built.push({
-              hash,
-              base64: arrayBufferToBase64(buffer),
-              contentType: entry.contentType,
-            });
-          }
-          entries = built;
-        }
-
         const formData = new FormData();
-        for (const { hash, base64, contentType } of entries) {
-          formData.append(hash, new File([base64], hash, { type: contentType }), hash);
+        for (const hash of bucket) {
+          const entry = assetsByHash.get(hash);
+          if (!entry) {
+            throw new AssetHashMissError(
+              `[assets] bucket ${bucketIndex}: hash ${hash} requested by CF but not found in assetsByHash. ` +
+                `This indicates a manifest/upload mismatch — the hash was declared in the manifest ` +
+                `but the corresponding file was not included in the upload.`,
+            );
+          }
+
+          const buffer = await entry.blob.arrayBuffer();
+          const base64 = arrayBufferToBase64(buffer);
+          formData.append(hash, new File([base64], hash, { type: entry.contentType }), hash);
         }
 
         const result = await postAssetUpload(accountId, jwt, formData);
@@ -331,15 +320,26 @@ function isJwtExpired(jwt: string): boolean {
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
+  return bytesToBase64(new Uint8Array(buffer));
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
   return btoa(binary);
 }
 
 const textEncoder = new TextEncoder();
+
+function digestToAssetHash(digest: Uint8Array): string {
+  return [...digest]
+    .slice(0, 16)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
 
 /**
  * Compute a CF-compatible asset hash: BLAKE3 of base64(content) + extension,
@@ -350,17 +350,72 @@ export function computeAssetHash(content: ArrayBuffer, filePath: string): string
   const base64 = arrayBufferToBase64(content);
   const ext = extname(filePath).substring(1);
   const input = textEncoder.encode(base64 + ext);
-  const digest = blake3hash(input);
-  return [...digest]
-    .slice(0, 16)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  return digestToAssetHash(blake3hash(input));
+}
+
+function updateBase64Hash(hasher: ReturnType<typeof createHasher>, bytes: Uint8Array): void {
+  if (bytes.length === 0) {
+    return;
+  }
+  hasher.update(textEncoder.encode(bytesToBase64(bytes)));
+}
+
+async function computeAssetHashFromBlob(blob: Blob, filePath: string): Promise<string> {
+  const hasher = createHasher();
+  const reader = blob.stream().getReader();
+  let carry = new Uint8Array(0);
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    let bytes = value;
+    if (carry.length > 0) {
+      bytes = new Uint8Array(carry.length + value.length);
+      bytes.set(carry);
+      bytes.set(value, carry.length);
+      carry = new Uint8Array(0);
+    }
+
+    const hashableLength = bytes.length - (bytes.length % 3);
+    updateBase64Hash(hasher, bytes.subarray(0, hashableLength));
+    carry = bytes.slice(hashableLength);
+  }
+
+  updateBase64Hash(hasher, carry);
+  hasher.update(textEncoder.encode(extname(filePath).substring(1)));
+  return digestToAssetHash(hasher.finalize());
 }
 
 /**
  * Collect assets from FormData and build the CF asset manifest + hash→entry map.
  */
-export async function collectAssets(formData: FormData): Promise<{
+function getDeclaredAssetEntry(
+  declaredManifest: Record<string, AssetManifestEntry> | undefined,
+  path: string,
+  blob: Blob,
+): AssetManifestEntry | undefined {
+  const entry = declaredManifest?.[path];
+  if (
+    entry &&
+    typeof entry.hash === 'string' &&
+    entry.hash.length === 32 &&
+    Number.isFinite(entry.size) &&
+    entry.size >= 0 &&
+    entry.size === blob.size
+  ) {
+    return entry;
+  }
+}
+
+class AssetHashMismatchError extends Error {}
+
+export async function collectAssets(
+  formData: FormData,
+  declaredManifest?: Record<string, AssetManifestEntry>,
+): Promise<{
   manifest: Record<string, AssetManifestEntry>;
   assetsByHash: Map<string, AssetEntry>;
 }> {
@@ -371,9 +426,15 @@ export async function collectAssets(formData: FormData): Promise<{
     if (key.startsWith('asset:')) {
       const path = '/' + key.slice('asset:'.length);
       const blob = value as Blob;
-      const buffer = await blob.arrayBuffer();
-      const hash = computeAssetHash(buffer, path);
-      manifest[path] = { hash, size: buffer.byteLength };
+      const declaredEntry = getDeclaredAssetEntry(declaredManifest, path, blob);
+      const hash = await computeAssetHashFromBlob(blob, path);
+      if (declaredEntry && declaredEntry.hash !== hash) {
+        throw new AssetHashMismatchError(
+          `asset hash mismatch for ${path}: declared ${declaredEntry.hash}, computed ${hash}`,
+        );
+      }
+
+      manifest[path] = declaredEntry ?? { hash, size: blob.size };
       assetsByHash.set(hash, {
         blob,
         contentType: getContentType(path),
@@ -423,10 +484,50 @@ export function buildAssetMetadata(
 
 const KV_THRESHOLD = 2 * 1024 * 1024; // 2 MB
 
+async function uploadStaticAssetWithRetries(
+  kv: KVNamespace,
+  r2: R2Bucket,
+  key: string,
+  entry: AssetEntry,
+  retryDelayMs: number,
+): Promise<'kv' | 'r2'> {
+  const buffer = await entry.blob.arrayBuffer();
+  const store = buffer.byteLength >= KV_THRESHOLD ? 'r2' : 'kv';
+  let lastErr: unknown;
+
+  for (let attempt = 0; attempt <= STATIC_ASSET_UPLOAD_MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, retryDelayMs * 2 ** (attempt - 1)));
+    }
+
+    try {
+      if (store === 'r2') {
+        await r2.put(key, buffer, {
+          httpMetadata: { contentType: entry.contentType },
+        });
+      } else {
+        await kv.put(key, buffer, {
+          metadata: { ct: entry.contentType },
+        });
+      }
+      return store;
+    } catch (err) {
+      lastErr = err;
+      console.warn(
+        `[assets] static ${store} upload failed for ${key} ` +
+          `(attempt ${attempt + 1}/${STATIC_ASSET_UPLOAD_MAX_RETRIES + 1})`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  throw lastErr ?? new Error(`static asset upload failed for ${key}`);
+}
+
 /**
  * Upload static assets to KV (< 2 MB) or R2 (>= 2 MB).
  * Content-addressed keys make puts idempotent, so no existence checks needed.
- * Uploads run concurrently in batches for speed.
+ * Uploads run with bounded concurrency to avoid holding every asset body in Worker memory.
  * Returns the set of hashes that were stored in R2 (large assets).
  */
 export async function uploadStaticAssets(
@@ -434,28 +535,28 @@ export async function uploadStaticAssets(
   r2: R2Bucket,
   assetsByHash: Map<string, AssetEntry>,
   projectId: string,
+  { retryDelayMs = STATIC_ASSET_UPLOAD_RETRY_DELAY_MS }: { retryDelayMs?: number } = {},
 ): Promise<Set<string>> {
   const largeHashes = new Set<string>();
-  const tasks: Promise<void>[] = [];
+  const entries = Array.from(assetsByHash);
+  let index = 0;
 
-  for (const [hash, entry] of assetsByHash) {
-    const key = `assets/${projectId}/${hash}`;
-    const task = entry.blob.arrayBuffer().then(async (buffer) => {
-      if (buffer.byteLength >= KV_THRESHOLD) {
-        await r2.put(key, buffer, {
-          httpMetadata: { contentType: entry.contentType },
-        });
+  async function worker(): Promise<void> {
+    while (index < entries.length) {
+      const [hash, entry] = entries[index++];
+      const key = `assets/${projectId}/${hash}`;
+      const store = await uploadStaticAssetWithRetries(kv, r2, key, entry, retryDelayMs);
+      if (store === 'r2') {
         largeHashes.add(hash);
-      } else {
-        await kv.put(key, buffer, {
-          metadata: { ct: entry.contentType },
-        });
       }
-    });
-    tasks.push(task);
+    }
   }
 
-  await Promise.all(tasks);
+  await Promise.all(
+    Array.from({ length: Math.min(STATIC_ASSET_UPLOAD_CONCURRENCY, entries.length) }, () =>
+      worker(),
+    ),
+  );
   return largeHashes;
 }
 
