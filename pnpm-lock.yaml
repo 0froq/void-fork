@@ -21,9 +21,6 @@ catalogs:
     tsdown:
       specifier: ^0.21.8
       version: 0.21.8
-    vite:
-      specifier: ^8.0.8
-      version: 8.0.8
     wrangler:
       specifier: ^4.82.2
       version: 4.82.2
@@ -143,7 +140,7 @@ importers:
         specifier: 'catalog:'
         version: 0.21.8(@typescript/native-preview@7.0.0-dev.20260413.1)(typescript@6.0.2)(vue-tsc@3.2.6(typescript@6.0.2))
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -177,7 +174,7 @@ importers:
         specifier: 'catalog:'
         version: 0.21.8(@typescript/native-preview@7.0.0-dev.20260413.1)(typescript@6.0.2)(vue-tsc@3.2.6(typescript@6.0.2))
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -199,7 +196,7 @@ importers:
         specifier: 'catalog:'
         version: 0.21.8(@typescript/native-preview@7.0.0-dev.20260413.1)(typescript@6.0.2)(vue-tsc@3.2.6(typescript@6.0.2))
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -221,7 +218,7 @@ importers:
         specifier: 'catalog:'
         version: 0.21.8(@typescript/native-preview@7.0.0-dev.20260413.1)(typescript@6.0.2)(vue-tsc@3.2.6(typescript@6.0.2))
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -342,7 +339,7 @@ importers:
         specifier: ^1.3.1
         version: 1.3.1(typescript@6.0.2)
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       zod:
         specifier: ^4.3.6
@@ -361,7 +358,7 @@ importers:
         specifier: 'catalog:'
         version: 0.21.8(@typescript/native-preview@7.0.0-dev.20260413.1)(typescript@6.0.2)(vue-tsc@3.2.6(typescript@6.0.2))
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -419,7 +416,7 @@ importers:
         specifier: ~6.0.2
         version: 6.0.2
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -441,7 +438,7 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260413.1
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -466,7 +463,7 @@ importers:
         specifier: ~6.0.2
         version: 6.0.2
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -491,7 +488,7 @@ importers:
         specifier: ~6.0.2
         version: 6.0.2
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -528,7 +525,7 @@ importers:
         specifier: workspace:@void-sdk/react@*
         version: link:../../packages/react
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -559,7 +556,7 @@ importers:
         specifier: workspace:@void-sdk/react@*
         version: link:../../packages/react
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -590,7 +587,7 @@ importers:
         specifier: workspace:@void-sdk/react@*
         version: link:../../packages/react
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -606,7 +603,7 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260413.1
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -643,7 +640,7 @@ importers:
         specifier: workspace:@void-sdk/react@*
         version: link:../../packages/react
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -677,7 +674,7 @@ importers:
         specifier: workspace:@void-sdk/react@*
         version: link:../../packages/react
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -705,7 +702,7 @@ importers:
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.14)
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -730,7 +727,7 @@ importers:
         specifier: workspace:@void-sdk/solid@*
         version: link:../../packages/solid
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -764,7 +761,7 @@ importers:
         specifier: ^6.0.1
         version: 6.0.1(vite@8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3))
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -795,7 +792,7 @@ importers:
         specifier: ^6.0.1
         version: 6.0.1(vite@8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3))
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -814,7 +811,7 @@ importers:
         specifier: workspace:@void-sdk/vue@*
         version: link:../../packages/vue
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -839,7 +836,7 @@ importers:
         specifier: workspace:@void-sdk/svelte@*
         version: link:../../packages/svelte
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -864,7 +861,7 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260413.1
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -898,7 +895,7 @@ importers:
         specifier: ^6.0.1
         version: 6.0.1(vite@8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3))
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -932,7 +929,7 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260413.1
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -960,7 +957,7 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260413.1
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -985,7 +982,7 @@ importers:
         specifier: ~6.0.2
         version: 6.0.2
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -1022,7 +1019,7 @@ importers:
         specifier: workspace:@void-sdk/react@*
         version: link:../../packages/react
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -1041,7 +1038,7 @@ importers:
         specifier: workspace:@void-sdk/vue@*
         version: link:../../packages/vue
       vite:
-        specifier: 'catalog:'
+        specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
       void:
         specifier: workspace:@void-sdk/void@*
@@ -9353,7 +9350,7 @@ snapshots:
       '@babel/types': 7.29.0
       '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.31
-      jsesc: 3.0.2
+      jsesc: 3.1.0
 
   '@babel/generator@8.0.0-rc.3':
     dependencies:
