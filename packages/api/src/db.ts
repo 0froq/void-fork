@@ -415,6 +415,24 @@ export async function getRetainedDeploymentsExcluding(
     .orderBy(desc(deployments.created_at));
 }
 
+export async function getInFlightDeploymentsExcluding(
+  db: Db,
+  projectId: string,
+  excludeId?: string | null,
+): Promise<Deployment[]> {
+  return db
+    .select()
+    .from(deployments)
+    .where(
+      and(
+        eq(deployments.project_id, projectId),
+        notInArray(deployments.status, TERMINAL_DEPLOYMENT_STATUSES),
+        excludeId ? ne(deployments.id, excludeId) : undefined,
+      ),
+    )
+    .orderBy(desc(deployments.created_at));
+}
+
 // --- Project secrets ---
 
 export async function listProjectSecretNames(

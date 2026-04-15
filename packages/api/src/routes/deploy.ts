@@ -1,12 +1,16 @@
 import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import {
-  collectAssets,
+  applyDeclaredAssetManifest,
+  cleanupStreamedStaticAssets,
+  collectAndUploadStaticAsset,
+  collectBufferedAsset,
   createAssetUploadSession,
   uploadAssetBuckets,
   buildAssetMetadata,
   uploadStaticAssets,
   deleteUnreferencedAssets,
+  type AssetEntry,
   type AssetManifestEntry,
 } from '../assets';
 import { deleteDispatchScript, retryWithBackoff } from '../cf-api';
@@ -22,10 +26,12 @@ import {
   getDomainsByProjectId,
   countUserDeploymentsToday,
   getActiveDeployment,
+  getInFlightDeploymentsExcluding,
   getLastLiveAssetManifest,
   setActiveDeployment,
   markDeploymentRetained,
   setAppliedMigrations,
+  getRetainedDeployments,
   getRetainedDeploymentsExcluding,
   getProjectSecrets,
   upsertProjectSecret,
@@ -34,6 +40,13 @@ import {
 } from '../db';
 import { sendDeployFailedEmail } from '../email';
 import type { ApiEnv } from '../env';
+import {
+  type BufferedBudget,
+  MultipartParseError,
+  parseBoundary,
+  parseMultipart,
+  PartTooLargeError,
+} from '../multipart';
 import {
   BETTER_AUTH_SECRET_NAME,
   decryptProjectSecret,
@@ -50,6 +63,32 @@ import type { WebSocketMigrationMeta } from '../types';
 
 const DEFAULT_DISPATCH_NAMESPACE = 'void-users';
 const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
+
+// Per-part byte caps for buffered text fields. The Cloudflare Workers request
+// budget is 128 MiB, and these parts are fully buffered in memory before
+// `validateManifestShape` can run — so we must refuse oversized inputs before
+// we allocate. Numbers below are generous for legitimate deploys while still
+// bounding any single buffered allocation well under the request budget.
+const MAX_MANIFEST_BYTES = 8 * 1024 * 1024; // 8 MiB — DeployManifest JSON
+const MAX_ASSET_MANIFEST_BYTES = 32 * 1024 * 1024; // 32 MiB — per-asset records for huge static sites
+const MAX_PREFLIGHT_BYTES = 1 * 1024 * 1024; // 1 MiB — preflight metadata
+const MAX_SMALL_TEXT_BYTES = 64 * 1024; // 64 KiB — source, commit, misc
+// CF's worker script size limit (free plan 1 MiB, paid plan 10 MiB compressed;
+// uncompressed/multipart headroom is roughly 32 MiB). Enforced per part so a
+// single runaway worker:* module cannot OOM the request before the upload to
+// CF ever happens.
+const MAX_WORKER_FILE_BYTES = 32 * 1024 * 1024; // 32 MiB
+// Aggregate ceiling on everything the deploy handler buffers in memory per
+// request (manifest + assetManifest + source/commit/preflight + worker:*
+// modules + asset:* payloads for worker-backed deploys). Per-part caps alone
+// cannot prevent a combination of legally-sized parts from summing past the
+// 128 MiB Worker request budget — e.g. 2x 32 MiB workers + 1x 50 MiB asset =
+// 114 MiB leaves almost no headroom for downstream work. 64 MiB caps the
+// total, and because the largest per-part cap is 50 MiB, the transient peak
+// during the final read is bounded at ~114 MiB (still under 128 MiB).
+const MAX_AGGREGATE_BUFFERED_BYTES = 64 * 1024 * 1024;
+const STREAMED_ASSET_CLAIM_PREFIX = 'deploy-asset-claim';
+const STREAMED_ASSET_CLAIM_TTL_SECONDS = 60 * 60;
 /**
  * Detect the known CF WfP bug where APIs return plain text about asset state
  * instead of JSON. CF returns different messages depending on propagation state
@@ -71,12 +110,414 @@ const CF_MIGRATION_RETRY = { maxRetries: 2, delayMs: 1000 };
 
 const app = new Hono<ApiEnv>();
 
+/**
+ * Read a multipart part body up to `maxBytes`. Throws `PartTooLargeError` as
+ * soon as the cap is exceeded — we stop reading rather than draining the
+ * remainder, so abandoning the stream does NOT buffer past the cap.
+ *
+ * When `budget` is supplied, every chunk read is also checked against the
+ * aggregate buffered-bytes ceiling: a part that would push the running total
+ * past `budget.limit` is rejected mid-stream with
+ * `PartTooLargeError('aggregate buffered deploy payload', limit)`. The
+ * per-part cap and the aggregate cap both fire mid-read, so neither path
+ * can materialize bytes beyond its respective ceiling.
+ */
+async function readPartBytes(
+  body: ReadableStream<Uint8Array>,
+  partName: string,
+  maxBytes: number,
+  budget?: BufferedBudget,
+): Promise<Uint8Array> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      total += value.length;
+      if (total > maxBytes) {
+        throw new PartTooLargeError(partName, maxBytes);
+      }
+      if (budget && budget.used + total > budget.limit) {
+        throw new PartTooLargeError('aggregate buffered deploy payload', budget.limit);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Reader may already be in a terminal state; nothing to release.
+    }
+  }
+  if (budget) {
+    budget.used += total;
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return merged;
+}
+
+async function readPartText(
+  body: ReadableStream<Uint8Array>,
+  partName: string,
+  maxBytes: number,
+  budget?: BufferedBudget,
+): Promise<string> {
+  return new TextDecoder().decode(await readPartBytes(body, partName, maxBytes, budget));
+}
+
+/**
+ * Read a multipart part body directly into a `Blob` with the given content
+ * type. Same per-part and aggregate budget semantics as `readPartBytes`, but
+ * never exposes a merged `Uint8Array` to the caller — the chunks are handed
+ * straight to the `Blob` constructor inside this function, and only the
+ * resulting `Blob` escapes.
+ *
+ * Why this exists instead of `new Blob([await readPartBytes(...)])`:
+ * `new Blob([uint8])` always copies the source bytes, so that two-step form
+ * momentarily holds two full-size copies (the returned `Uint8Array` AND the
+ * `Blob`'s internal buffer). When the caller reads several large worker
+ * modules in a `for await` loop, V8 may not reclaim the previous iteration's
+ * dead `const bytes` binding before the next parse begins — pushing the
+ * per-request peak toward the 128 MiB Worker budget. Keeping the raw chunks
+ * strictly local to this function means the caller's loop body never names a
+ * `Uint8Array` that could survive into the next iteration.
+ */
+async function readPartAsBlob(
+  body: ReadableStream<Uint8Array>,
+  partName: string,
+  maxBytes: number,
+  contentType: string,
+  budget?: BufferedBudget,
+): Promise<Blob> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      total += value.length;
+      if (total > maxBytes) {
+        throw new PartTooLargeError(partName, maxBytes);
+      }
+      if (budget && budget.used + total > budget.limit) {
+        throw new PartTooLargeError('aggregate buffered deploy payload', budget.limit);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Reader may already be in a terminal state; nothing to release.
+    }
+  }
+  if (budget) {
+    budget.used += total;
+  }
+  // Hand chunks directly to the Blob constructor — no merged-Uint8Array
+  // intermediary. `chunks` is strictly local to this function and becomes
+  // unreachable when we return, so the caller never holds a raw byte buffer
+  // that could survive into the next iteration of a buffering loop. The
+  // `as BlobPart[]` cast exists because lib.dom types widen `Uint8Array`'s
+  // buffer to `ArrayBufferLike`, which includes `SharedArrayBuffer` and is
+  // not directly assignable to `BlobPart`. Our chunks come from a
+  // `ReadableStream<Uint8Array>` reader — never shared memory.
+  return new Blob(chunks as unknown as BlobPart[], { type: contentType });
+}
+
 function sameClassSet(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 function sortUnique(values: string[] | undefined): string[] {
   return [...new Set(values ?? [])].sort((a, b) => a.localeCompare(b));
+}
+
+// Runtime shape validation for incoming deploy manifests. Downstream code
+// indexes deeply into the manifest (bindings.d1, queues[i].name,
+// websocket.classes, etc.) without re-guarding, so a malformed-but-JSON-valid
+// payload would otherwise crash with a 500 — sometimes after a deployment row
+// or CF resources were created. Everything the deploy pipeline reads must be
+// validated here BEFORE createDeployment runs.
+function validateManifestShape(parsed: unknown): string | null {
+  if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return 'invalid manifest shape: expected a JSON object';
+  }
+  const m = parsed as Record<string, unknown>;
+
+  if (m.bindings == null || typeof m.bindings !== 'object' || Array.isArray(m.bindings)) {
+    return 'invalid manifest shape: bindings must be an object';
+  }
+  const b = m.bindings as Record<string, unknown>;
+  for (const key of ['d1', 'kv', 'r2', 'hyperdrive'] as const) {
+    const v = b[key];
+    if (v === undefined) {
+      continue;
+    }
+    if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) {
+      return `invalid manifest shape: bindings.${key} must be an array of strings`;
+    }
+  }
+
+  if (m.queues !== undefined) {
+    if (!Array.isArray(m.queues)) {
+      return 'invalid manifest shape: queues must be an array';
+    }
+    for (const q of m.queues) {
+      if (q == null || typeof q !== 'object' || Array.isArray(q)) {
+        return 'invalid manifest shape: queues entries must be objects';
+      }
+      const qo = q as Record<string, unknown>;
+      if (typeof qo.name !== 'string' || typeof qo.bindingName !== 'string') {
+        return 'invalid manifest shape: queues entries must have string name and bindingName';
+      }
+      for (const tuning of [
+        'maxBatchSize',
+        'maxBatchTimeout',
+        'maxRetries',
+        'retryDelay',
+      ] as const) {
+        const v = qo[tuning];
+        if (v === undefined) {
+          continue;
+        }
+        if (typeof v !== 'number' || !Number.isFinite(v)) {
+          return `invalid manifest shape: queues entry ${tuning} must be a finite number`;
+        }
+      }
+    }
+  }
+
+  if (m.schedules !== undefined) {
+    if (!Array.isArray(m.schedules)) {
+      return 'invalid manifest shape: schedules must be an array';
+    }
+    for (const s of m.schedules) {
+      if (s == null || typeof s !== 'object' || Array.isArray(s)) {
+        return 'invalid manifest shape: schedules entries must be objects';
+      }
+      const so = s as Record<string, unknown>;
+      if (typeof so.name !== 'string' || typeof so.cron !== 'string') {
+        return 'invalid manifest shape: schedules entries must have string name and cron';
+      }
+    }
+  }
+
+  if (m.prerender !== undefined) {
+    if (!Array.isArray(m.prerender) || !m.prerender.every((x) => typeof x === 'string')) {
+      return 'invalid manifest shape: prerender must be an array of strings';
+    }
+  }
+
+  if (m.vars !== undefined) {
+    if (m.vars == null || typeof m.vars !== 'object' || Array.isArray(m.vars)) {
+      return 'invalid manifest shape: vars must be an object';
+    }
+    for (const [k, v] of Object.entries(m.vars as Record<string, unknown>)) {
+      if (typeof v !== 'string') {
+        return `invalid manifest shape: vars.${k} must be a string`;
+      }
+    }
+  }
+
+  if (m.migrations !== undefined) {
+    if (m.migrations == null || typeof m.migrations !== 'object' || Array.isArray(m.migrations)) {
+      return 'invalid manifest shape: migrations must be an object';
+    }
+    const mig = m.migrations as Record<string, unknown>;
+    // `dialect` and `pending` are read unconditionally by the migration
+    // dispatch path (`manifest.migrations.pending > 0`). A wrong-typed value
+    // would reach the CF migration runner and crash mid-deploy.
+    if (mig.dialect !== undefined) {
+      const allowed = ['sqlite', 'postgresql'];
+      if (typeof mig.dialect !== 'string' || !allowed.includes(mig.dialect)) {
+        return `invalid manifest shape: migrations.dialect must be one of ${allowed.join(', ')}`;
+      }
+    }
+    if (mig.pending !== undefined) {
+      if (typeof mig.pending !== 'number' || !Number.isInteger(mig.pending) || mig.pending < 0) {
+        return 'invalid manifest shape: migrations.pending must be a non-negative integer';
+      }
+    }
+  }
+
+  if (m.auth !== undefined && typeof m.auth !== 'boolean') {
+    return 'invalid manifest shape: auth must be a boolean';
+  }
+
+  if (m.ssr !== undefined && typeof m.ssr !== 'boolean') {
+    return 'invalid manifest shape: ssr must be a boolean';
+  }
+
+  for (const key of [
+    'workerMain',
+    'compatibilityDate',
+    'hashedAssetsPrefix',
+    'framework',
+  ] as const) {
+    if (m[key] !== undefined && typeof m[key] !== 'string') {
+      return `invalid manifest shape: ${key} must be a string`;
+    }
+  }
+
+  if (m.compatibilityFlags !== undefined) {
+    if (
+      !Array.isArray(m.compatibilityFlags) ||
+      !m.compatibilityFlags.every((x) => typeof x === 'string')
+    ) {
+      return 'invalid manifest shape: compatibilityFlags must be an array of strings';
+    }
+  }
+
+  if (m.type !== undefined) {
+    const allowed = ['void', 'spa', 'static', 'framework'];
+    if (typeof m.type !== 'string' || !allowed.includes(m.type)) {
+      return `invalid manifest shape: type must be one of ${allowed.join(', ')}`;
+    }
+  }
+
+  if (m.assetConfig !== undefined) {
+    if (
+      m.assetConfig == null ||
+      typeof m.assetConfig !== 'object' ||
+      Array.isArray(m.assetConfig)
+    ) {
+      return 'invalid manifest shape: assetConfig must be an object';
+    }
+    const ac = m.assetConfig as Record<string, unknown>;
+    if (
+      ac.not_found_handling !== undefined &&
+      !['none', 'single-page-application', '404-page'].includes(ac.not_found_handling as string)
+    ) {
+      return 'invalid manifest shape: assetConfig.not_found_handling must be one of none, single-page-application, 404-page';
+    }
+    if (
+      ac.html_handling !== undefined &&
+      !['auto-trailing-slash', 'force-trailing-slash', 'drop-trailing-slash', 'none'].includes(
+        ac.html_handling as string,
+      )
+    ) {
+      return 'invalid manifest shape: assetConfig.html_handling must be one of auto-trailing-slash, force-trailing-slash, drop-trailing-slash, none';
+    }
+  }
+
+  if (m.revalidate !== undefined) {
+    if (typeof m.revalidate === 'number') {
+      // ok
+    } else if (
+      m.revalidate == null ||
+      typeof m.revalidate !== 'object' ||
+      Array.isArray(m.revalidate)
+    ) {
+      return 'invalid manifest shape: revalidate must be a number or object';
+    } else {
+      for (const [k, v] of Object.entries(m.revalidate as Record<string, unknown>)) {
+        if (typeof v !== 'number') {
+          return `invalid manifest shape: revalidate.${k} must be a number`;
+        }
+      }
+    }
+  }
+
+  if (m.headerRules !== undefined) {
+    if (!Array.isArray(m.headerRules)) {
+      return 'invalid manifest shape: headerRules must be an array';
+    }
+    for (const rule of m.headerRules) {
+      if (rule == null || typeof rule !== 'object' || Array.isArray(rule)) {
+        return 'invalid manifest shape: headerRules entries must be objects';
+      }
+      const ro = rule as Record<string, unknown>;
+      if (typeof ro.pattern !== 'string') {
+        return 'invalid manifest shape: headerRules entries must have a string pattern';
+      }
+      if (!Array.isArray(ro.headers)) {
+        return 'invalid manifest shape: headerRules entries must have a headers array';
+      }
+      for (const pair of ro.headers) {
+        if (
+          !Array.isArray(pair) ||
+          pair.length !== 2 ||
+          typeof pair[0] !== 'string' ||
+          typeof pair[1] !== 'string'
+        ) {
+          return 'invalid manifest shape: headerRules headers entries must be [name, value] string pairs';
+        }
+      }
+    }
+  }
+
+  if (m.redirectRules !== undefined) {
+    if (!Array.isArray(m.redirectRules)) {
+      return 'invalid manifest shape: redirectRules must be an array';
+    }
+    for (const rule of m.redirectRules) {
+      if (rule == null || typeof rule !== 'object' || Array.isArray(rule)) {
+        return 'invalid manifest shape: redirectRules entries must be objects';
+      }
+      const ro = rule as Record<string, unknown>;
+      if (
+        typeof ro.source !== 'string' ||
+        typeof ro.destination !== 'string' ||
+        typeof ro.status !== 'number'
+      ) {
+        return 'invalid manifest shape: redirectRules entries must have string source, string destination, and numeric status';
+      }
+      const allowedStatuses = [301, 302, 303, 307, 308];
+      if (!allowedStatuses.includes(ro.status)) {
+        return `invalid manifest shape: redirectRules entry status must be one of ${allowedStatuses.join(', ')}`;
+      }
+    }
+  }
+
+  if (m.websocket !== undefined) {
+    if (m.websocket == null || typeof m.websocket !== 'object' || Array.isArray(m.websocket)) {
+      return 'invalid manifest shape: websocket must be an object';
+    }
+    const ws = m.websocket as Record<string, unknown>;
+    if (!Array.isArray(ws.routes)) {
+      return 'invalid manifest shape: websocket.routes must be an array';
+    }
+    for (const r of ws.routes) {
+      if (r == null || typeof r !== 'object' || Array.isArray(r)) {
+        return 'invalid manifest shape: websocket.routes entries must be objects';
+      }
+      const ro = r as Record<string, unknown>;
+      if (typeof ro.className !== 'string') {
+        return 'invalid manifest shape: websocket.routes entries must have a string className';
+      }
+      if (ro.bindingName !== undefined && typeof ro.bindingName !== 'string') {
+        return 'invalid manifest shape: websocket.routes entry bindingName must be a string';
+      }
+    }
+    if (!Array.isArray(ws.classes) || !ws.classes.every((x) => typeof x === 'string')) {
+      return 'invalid manifest shape: websocket.classes must be an array of strings';
+    }
+    if (ws.migrations !== undefined) {
+      if (!Array.isArray(ws.migrations)) {
+        return 'invalid manifest shape: websocket.migrations must be an array';
+      }
+      for (const mg of ws.migrations) {
+        if (mg == null || typeof mg !== 'object' || Array.isArray(mg)) {
+          return 'invalid manifest shape: websocket.migrations entries must be objects';
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 function parseManifest(raw: string | null | undefined): DeployManifest | null {
@@ -90,10 +531,8 @@ function parseManifest(raw: string | null | undefined): DeployManifest | null {
   }
 }
 
-function parseAssetManifest(
-  raw: FormDataEntryValue | null,
-): Record<string, AssetManifestEntry> | null {
-  if (typeof raw !== 'string' || !raw.trim()) {
+function parseAssetManifest(raw: string | null): Record<string, AssetManifestEntry> | null {
+  if (raw === null || !raw.trim()) {
     return null;
   }
   try {
@@ -107,6 +546,78 @@ function parseAssetManifest(
   }
 }
 
+function equalAssetManifests(
+  a: Record<string, AssetManifestEntry> | null,
+  b: Record<string, AssetManifestEntry> | null,
+): boolean {
+  if (!a || !b) {
+    return false;
+  }
+  const aEntries = Object.entries(a);
+  const bEntries = Object.entries(b);
+  if (aEntries.length !== bEntries.length) {
+    return false;
+  }
+  for (const [path, entry] of aEntries) {
+    const other = b[path];
+    if (!other || other.hash !== entry.hash || other.size !== entry.size) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function buildComparableAssetManifestForDedupe(
+  db: Db,
+  projectId: string,
+  built: Record<string, AssetManifestEntry>,
+  declared: Record<string, AssetManifestEntry> | null,
+  preflightRaw: string | null,
+): Promise<Record<string, AssetManifestEntry> | null> {
+  const result: Record<string, AssetManifestEntry> = declared ? { ...declared } : { ...built };
+
+  for (const [path, entry] of Object.entries(built)) {
+    const declaredEntry = declared?.[path];
+    if (declared && !declaredEntry) {
+      continue;
+    }
+    if (
+      declaredEntry &&
+      typeof declaredEntry.hash === 'string' &&
+      declaredEntry.hash.length === 32 &&
+      Number.isFinite(declaredEntry.size) &&
+      declaredEntry.size >= 0
+    ) {
+      // The real deploy path must still surface this as an error event after
+      // createDeployment; returning null here only disables the dedupe
+      // short-circuit for an invalid request.
+      if (declaredEntry.hash !== entry.hash) {
+        return null;
+      }
+      if (declaredEntry.size === entry.size) {
+        result[path] = declaredEntry;
+      } else {
+        result[path] = entry;
+      }
+    } else {
+      result[path] = entry;
+    }
+  }
+
+  if (preflightRaw === 'true' && !declared) {
+    const fillManifest = await getLastLiveAssetManifest(db, projectId);
+    if (fillManifest) {
+      for (const [path, entry] of Object.entries(fillManifest)) {
+        if (!(path in result)) {
+          result[path] = entry;
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
 function sanitizeDeployErrorMessage(message: string): string {
   const trimmed = message.trim();
   if (
@@ -118,6 +629,10 @@ function sanitizeDeployErrorMessage(message: string): string {
     return 'asset upload returned an unexpected Cloudflare response';
   }
   return message;
+}
+
+function streamedAssetClaimKey(projectId: string, hash: string, token: string): string {
+  return `${STREAMED_ASSET_CLAIM_PREFIX}:${projectId}:${hash}:${token}`;
 }
 
 async function assertDeploymentNotCanceled(db: Db, deploymentId: string): Promise<void> {
@@ -274,10 +789,9 @@ app.post('/:id/deploy', async (c) => {
     return c.json({ error: 'forbidden' }, 403);
   }
 
-  // Block deploys for suspended users
-  if (c.get('user').suspended_reason) {
-    return c.json({ error: 'account suspended: ' + c.get('user').suspended_reason }, 403);
-  }
+  // Admin suspensions are already blocked by authMiddleware → 403. Usage-limit
+  // suspensions (requests_exceeded) must remain able to deploy so users can
+  // ship fixes and roll back while their limits reset.
 
   // Run independent pre-checks in parallel
   const [activeDeploy, currentLiveDeployment] = await Promise.all([
@@ -309,619 +823,1014 @@ app.post('/:id/deploy', async (c) => {
     );
   }
 
-  const formData = await c.req.formData();
-  const incomingAssetManifestRaw = formData.get('assetManifest');
-  const incomingAssetManifest = parseAssetManifest(incomingAssetManifestRaw);
-  const manifestRaw = formData.get('manifest') as string | null;
-  const incomingManifest: DeployManifest = manifestRaw
-    ? (JSON.parse(manifestRaw) as DeployManifest)
-    : { version: 3, bindings: {} };
-  const hasWorkerFiles = [...formData.keys()].some((key) => key.startsWith('worker:'));
-
-  // Validate deploy manifest version
-  if (
-    incomingManifest.version == null ||
-    !SUPPORTED_MANIFEST_VERSIONS.includes(incomingManifest.version)
-  ) {
-    return c.json(
-      {
-        error: 'Unsupported deploy manifest version. Please update void.',
-        version: incomingManifest.version ?? null,
-        supported: SUPPORTED_MANIFEST_VERSIONS,
-      },
-      400,
-    );
-  }
-
-  const enrichedManifestResult = enrichWebSocketManifest(
-    incomingManifest,
-    parseManifest(currentLiveDeployment?.manifest),
-    project.websocket_version,
-  );
-  const manifest = enrichedManifestResult.manifest;
-  const finalManifestRaw = JSON.stringify(manifest);
-
-  // Skip static-only deploys if identical to the current live deployment.
-  // Worker-backed deploys are not skipped because the deploy manifest does not
-  // include worker module content hashes.
-  // Secrets are not checked: the secrets API already live-pushes values to the active
-  // worker via putWorkerSecret.
-  if (!hasWorkerFiles && currentLiveDeployment && currentLiveDeployment.status === 'live') {
-    const sameManifest = currentLiveDeployment.manifest === finalManifestRaw;
-    const sameAssets =
-      typeof incomingAssetManifestRaw === 'string' &&
-      currentLiveDeployment.asset_hashes != null &&
-      incomingAssetManifestRaw === currentLiveDeployment.asset_hashes;
-    if (sameManifest && sameAssets) {
-      const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-      const projectDomains = await getDomainsByProjectId(c.get('db'), projectId);
-      const activeDomains = projectDomains.filter((d) => d.status === 'active');
-      const fullUrl =
-        activeDomains.length > 0
-          ? `https://${activeDomains[0].hostname}`
-          : `https://${project.slug}.${siteDomain}`;
-
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream({
-        start(controller) {
-          const emit = (event: DeployEvent) => {
-            controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'));
-          };
-          emit({ event: 'start', deploymentId: currentLiveDeployment.id });
-          emit({
-            event: 'done',
-            deployment: currentLiveDeployment.id,
-            url: fullUrl,
-            urls: [
-              ...activeDomains.map((d) => `https://${d.hostname}`),
-              `https://${project.slug}.${siteDomain}`,
-            ],
-            assets: 0,
-            workers: 0,
-          });
-          controller.close();
-        },
-      });
-      return new Response(stream, {
-        headers: { 'Content-Type': 'application/x-ndjson' },
-      });
-    }
-  }
-
-  // Enforce deploy count limit
+  // The daily deploy-count limit is evaluated in two places depending on the
+  // deploy mode:
+  //   - worker-backed deploys: post-parse, AFTER the static no-op dedupe
+  //     branch, so an identical retry at the cap still returns the existing
+  //     live deployment.
+  //   - streamed-static deploys: immediately after the manifest part is
+  //     parsed, BEFORE any `asset:*` parts are written to KV/R2, so an
+  //     over-quota user never pays storage write cost for a rejected request.
   const planLimits = getPlanLimits(user.plan);
-  if (planLimits.deploysPerDay > 0) {
-    const todayCount = await countUserDeploymentsToday(c.get('db'), c.get('user').id);
-    if (!isWithinLimit(planLimits.deploysPerDay, todayCount)) {
-      return c.json({ error: 'deploy limit exceeded', limit: planLimits.deploysPerDay }, 429);
+
+  // Stream the multipart body instead of buffering it via c.req.formData(),
+  // which would decode every asset blob into Worker memory at once and OOM
+  // on media-heavy deploys. Small text parts and worker modules are still
+  // buffered (they are tiny). For static deploys (manifest.type === 'spa' |
+  // 'static') asset parts are piped straight into KV/R2 as they arrive so
+  // peak memory is bounded by one asset at a time. For other deploy modes
+  // assets fall back to being buffered into a hash map, matching the old
+  // behaviour so the CF asset upload session can consume them later.
+  let manifestRaw: string | null = null;
+  let incomingManifest: DeployManifest | null = null;
+  let incomingAssetManifestRaw: string | null = null;
+  let source: string | null = null;
+  let commit: string | null = null;
+  let preflightRaw: string | null = null;
+  // Worker modules are stored as a `Blob` built once, inside `readPartAsBlob`,
+  // from the raw chunks. We never name a `Uint8Array` in the parse loop, so
+  // there is no per-iteration `const bytes` that could survive into the next
+  // parse before GC. The upload loop below also reuses these Blobs directly
+  // without re-wrapping — so each worker module only ever exists as a single
+  // full-size byte copy inside its `Blob`, rather than doubling to ~2x during
+  // the upload step (the exact per-request OOM class this branch hardens
+  // against).
+  const workerFiles: { name: string; content: Blob }[] = [];
+  const assetsByHash = new Map<string, AssetEntry>();
+  const builtAssetManifest: Record<string, AssetManifestEntry> = {};
+  const streamedHashStores = new Map<string, 'kv' | 'r2'>();
+  const streamedLargeHashes = new Set<string>();
+  let hasWorkerFiles = false;
+  let manifestSeen = false;
+  let streamedStaticAssets = false;
+  let newStaticAssetCount = 0;
+  let cleanupExcludeDeploymentId: string | null = null;
+  const streamedAssetClaimToken = crypto.randomUUID();
+  const claimedStreamedHashes = new Set<string>();
+  // Aggregate counter shared across every buffered read in this request so
+  // a combination of legally-sized parts cannot sum past the request budget.
+  const bufferedBudget: BufferedBudget = { used: 0, limit: MAX_AGGREGATE_BUFFERED_BYTES };
+
+  const ensureStreamedAssetClaim = async (hash: string): Promise<void> => {
+    if (claimedStreamedHashes.has(hash)) {
+      return;
     }
-  }
+    await c.env.ROUTING.put(streamedAssetClaimKey(projectId, hash, streamedAssetClaimToken), '1', {
+      expirationTtl: STREAMED_ASSET_CLAIM_TTL_SECONDS,
+    });
+    claimedStreamedHashes.add(hash);
+  };
 
-  const source = (formData.get('source') as string | null) ?? null;
-  const commit = (formData.get('commit') as string | null) ?? null;
+  const cleanupOwnStreamedAssetClaims = async (): Promise<void> => {
+    if (claimedStreamedHashes.size === 0) {
+      return;
+    }
+    await Promise.allSettled(
+      Array.from(claimedStreamedHashes, (hash) =>
+        c.env.ROUTING.delete(streamedAssetClaimKey(projectId, hash, streamedAssetClaimToken)),
+      ),
+    );
+    claimedStreamedHashes.clear();
+  };
 
-  // Create deployment record
-  const deployment = await createDeployment(
-    c.get('db'),
-    projectId,
-    finalManifestRaw,
-    source,
-    commit,
-  );
-  if (enrichedManifestResult.changed) {
-    await updateProjectWebSocketVersion(c.get('db'), projectId, enrichedManifestResult.nextVersion);
-  }
-  const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
-  const workerName = `user-${project.slug}-${deployment.id}`;
-
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    async start(controller) {
-      let currentStep = 'start';
-      let streamOpen = true;
-      const emit = (event: DeployEvent) => {
-        if (!streamOpen) {
+  /**
+   * Delete assets that were streamed into KV/R2 during a failed/rejected parse.
+   * Uses retained-deployment hashes as a safety net: content-addressed keys may
+   * be shared across deploys, so we must never evict a hash that some retained
+   * deployment still references.
+   *
+   * The protection set is built from two sources: (1) all `retained=true`
+   * deployments, and (2) the current live deployment (regardless of its
+   * `retained` flag). Including (2) guards against the post-routing recovery
+   * path where `markDeploymentRetained(...).catch(()=>{})` can silently fail,
+   * leaving a deployment that is live but `retained=false`; without this
+   * second source we would happily evict assets out from under real traffic.
+   */
+  const cleanupStreamedAssetsOnAbort = async (): Promise<void> => {
+    if (streamedHashStores.size === 0) {
+      return;
+    }
+    try {
+      const retainedHashes = new Set<string>();
+      const collectFromAssetHashes = (raw: string | null): void => {
+        if (!raw) {
           return;
         }
         try {
-          controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'));
-        } catch (err) {
-          streamOpen = false;
-          console.warn(
-            `[deploy] ${projectId}: deploy stream closed while emitting ${event.event}: ${
-              err instanceof Error ? err.message : err
-            }`,
-          );
+          const parsed = JSON.parse(raw) as Record<string, { hash?: string }>;
+          for (const entry of Object.values(parsed)) {
+            if (entry && typeof entry.hash === 'string') {
+              retainedHashes.add(entry.hash);
+            }
+          }
+        } catch {
+          // ignore malformed manifests — be conservative and continue
         }
       };
-      const heartbeat = setInterval(() => {
-        emit({ event: 'heartbeat', deploymentId: deployment.id, step: currentStep });
-      }, 15_000);
-      let routingSwitched = false;
-      let cronSynced = false;
-
-      try {
-        emit({ event: 'start', deploymentId: deployment.id });
-
-        // === ASSET UPLOAD PHASE ===
-        currentStep = 'asset_upload';
-        await updateDeploymentStatus(c.get('db'), deployment.id, 'uploading');
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-
-        // Collect assets from FormData and compute CF-compatible hashes
-        const { manifest: assetManifest, assetsByHash } = await collectAssets(
-          formData,
-          incomingAssetManifest ?? undefined,
+      const hasForeignStreamedAssetClaim = async (hash: string): Promise<boolean> => {
+        const foreignClaims = await c.env.ROUTING.list({
+          prefix: `${STREAMED_ASSET_CLAIM_PREFIX}:${projectId}:${hash}:`,
+        });
+        return foreignClaims.keys.some(
+          (key) => key.name !== streamedAssetClaimKey(projectId, hash, streamedAssetClaimToken),
         );
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+      };
 
-        // When preflight was used, fill in skipped assets.
-        // Prefer the CLI's full manifest (new CLIs send it) to avoid accumulating
-        // stale entries from previous deploys. Fall back to the previous deploy's
-        // manifest for older CLIs that don't send it.
-        const preflightUsed = formData.get('preflight') === 'true';
-        if (preflightUsed) {
-          const fillManifest =
-            incomingAssetManifest ?? (await getLastLiveAssetManifest(c.get('db'), projectId));
-          if (fillManifest) {
-            for (const [path, entry] of Object.entries(fillManifest)) {
-              if (!(path in assetManifest)) {
-                assetManifest[path] = entry;
-              }
-            }
+      const retained = await getRetainedDeployments(c.get('db'), projectId);
+      for (const dep of retained) {
+        collectFromAssetHashes(dep.asset_hashes ?? null);
+      }
+
+      const inFlight = await getInFlightDeploymentsExcluding(
+        c.get('db'),
+        projectId,
+        cleanupExcludeDeploymentId,
+      );
+      for (const dep of inFlight) {
+        collectFromAssetHashes(dep.asset_hashes ?? null);
+      }
+
+      // Other concurrent streamed-static requests may already have hashed the
+      // same content-addressed blob and published an in-flight claim, but not
+      // yet persisted `asset_hashes` to their deployment row. Protect those
+      // hashes too, while explicitly ignoring this request's own claim token
+      // so abort cleanup still sweeps blobs that are only referenced by the
+      // failing request itself.
+      for (const hash of streamedHashStores.keys()) {
+        if (await hasForeignStreamedAssetClaim(hash)) {
+          retainedHashes.add(hash);
+        }
+      }
+
+      // Also protect the current live deployment even if it is not in the
+      // retained set. A live-but-not-retained deployment is possible after
+      // a post-routing recovery where markDeploymentRetained failed silently
+      // but routing is still pointed at the deployment, so its asset hashes
+      // are still being served by traffic.
+      const latestProject = await getProject(c.get('db'), projectId);
+      if (latestProject?.active_deployment_id) {
+        const inRetainedList = retained.some((d) => d.id === latestProject.active_deployment_id);
+        if (!inRetainedList) {
+          const active = await getDeployment(c.get('db'), latestProject.active_deployment_id);
+          if (active) {
+            collectFromAssetHashes(active.asset_hashes ?? null);
           }
         }
+      }
 
-        const assetCount = Object.keys(assetManifest).length;
+      await cleanupStreamedStaticAssets(
+        c.env.STATIC_ASSETS,
+        c.env.STATIC_ASSETS_R2,
+        projectId,
+        streamedHashStores,
+        retainedHashes,
+        hasForeignStreamedAssetClaim,
+      );
+    } catch (err) {
+      console.warn(
+        `[deploy] streamed asset cleanup failed for project ${projectId}`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  };
 
-        // Determine if this is a static-only deploy (no worker files in FormData)
-        const isStaticOnly = !hasWorkerFiles;
+  let earlyResponse: Response | null = null;
+  try {
+    const boundary = parseBoundary(c.req.raw.headers.get('content-type'));
+    for await (const part of parseMultipart(c.req.raw.body, boundary)) {
+      if (part.name === 'manifest') {
+        if (manifestSeen) {
+          earlyResponse = c.json({ error: 'duplicate manifest part' }, 400);
+          break;
+        }
+        manifestRaw = await readPartText(part.body, 'manifest', MAX_MANIFEST_BYTES, bufferedBudget);
+        let parsedManifest: unknown;
+        try {
+          parsedManifest = JSON.parse(manifestRaw);
+        } catch (parseErr) {
+          earlyResponse = c.json(
+            {
+              error:
+                'invalid manifest JSON: ' +
+                (parseErr instanceof Error ? parseErr.message : String(parseErr)),
+            },
+            400,
+          );
+          break;
+        }
+        const shapeError = validateManifestShape(parsedManifest);
+        if (shapeError) {
+          earlyResponse = c.json({ error: shapeError }, 400);
+          break;
+        }
+        incomingManifest = parsedManifest as DeployManifest;
+        if (
+          incomingManifest.version == null ||
+          !SUPPORTED_MANIFEST_VERSIONS.includes(incomingManifest.version)
+        ) {
+          earlyResponse = c.json(
+            {
+              error: 'Unsupported deploy manifest version. Please update void.',
+              version: incomingManifest.version ?? null,
+              supported: SUPPORTED_MANIFEST_VERSIONS,
+            },
+            400,
+          );
+          break;
+        }
+        manifestSeen = true;
+        streamedStaticAssets =
+          incomingManifest.type === 'spa' || incomingManifest.type === 'static';
 
-        // Fetch domains once — used in both static-only and full deploy paths
-        const projectDomains = await getDomainsByProjectId(c.get('db'), projectId);
-
-        if (isStaticOnly) {
-          // Static-only deploy: upload assets to KV/R2, skip bindings/migrations/WfP
-          currentStep = 'asset_upload';
-          const assetConfig = manifest.assetConfig ?? {
-            not_found_handling: 'single-page-application',
-          };
-
-          // Upload new assets to KV (< 2 MB) or R2 (>= 2 MB)
-          const newAssets = assetsByHash.size;
-          emit({
-            event: 'asset_upload',
-            total: assetCount,
-            new: newAssets,
-            cached: assetCount - newAssets,
-          });
-          const largeHashes = await uploadStaticAssets(
+        // For streamed-static deploys we cannot defer the daily-cap check
+        // until after the parse: `asset:*` parts are written to KV/R2 as
+        // they arrive (see `collectAndUploadStaticAsset` below), so by the
+        // time the post-parse check fires an over-quota user has already
+        // paid for every byte in storage write cost. Reject here, before
+        // any asset part is streamed. This sacrifices dedupe-at-cap for
+        // static retries, which is an acceptable tradeoff: the cap is
+        // intended to be a hard ceiling and storage writes should not
+        // happen past it. Worker-backed deploys still defer to the
+        // post-dedupe check further down because their worker modules are
+        // buffered in RAM, not persisted during parse.
+        if (streamedStaticAssets && planLimits.deploysPerDay > 0) {
+          const todayCount = await countUserDeploymentsToday(c.get('db'), c.get('user').id);
+          if (!isWithinLimit(planLimits.deploysPerDay, todayCount)) {
+            earlyResponse = c.json(
+              { error: 'deploy limit exceeded', limit: planLimits.deploysPerDay },
+              429,
+            );
+            break;
+          }
+        }
+        continue;
+      }
+      if (part.name === 'assetManifest') {
+        incomingAssetManifestRaw = await readPartText(
+          part.body,
+          'assetManifest',
+          MAX_ASSET_MANIFEST_BYTES,
+          bufferedBudget,
+        );
+        continue;
+      }
+      if (part.name === 'source') {
+        source = await readPartText(part.body, 'source', MAX_SMALL_TEXT_BYTES, bufferedBudget);
+        continue;
+      }
+      if (part.name === 'commit') {
+        commit = await readPartText(part.body, 'commit', MAX_SMALL_TEXT_BYTES, bufferedBudget);
+        continue;
+      }
+      if (part.name === 'preflight') {
+        preflightRaw = await readPartText(
+          part.body,
+          'preflight',
+          MAX_PREFLIGHT_BYTES,
+          bufferedBudget,
+        );
+        continue;
+      }
+      // `worker:*` and `asset:*` parts depend on the deploy mode decided by
+      // the manifest. They MUST arrive after the manifest so we know whether
+      // to buffer them (full deploy) or stream directly to KV/R2 (static).
+      if (part.name.startsWith('worker:') || part.name.startsWith('asset:')) {
+        if (!manifestSeen) {
+          earlyResponse = c.json(
+            { error: 'manifest part must precede worker and asset parts' },
+            400,
+          );
+          break;
+        }
+      }
+      if (part.name.startsWith('worker:')) {
+        // Static deploys have no worker script. Rejecting here avoids orphaned
+        // streamed assets when a malformed payload mixes a static manifest with
+        // worker parts.
+        if (streamedStaticAssets) {
+          earlyResponse = c.json(
+            { error: 'worker parts are not allowed when manifest.type is spa or static' },
+            400,
+          );
+          break;
+        }
+        hasWorkerFiles = true;
+        const filePath = part.name.slice('worker:'.length);
+        // Read the module body directly into a Blob inside `readPartAsBlob`.
+        // This avoids naming a `Uint8Array` in this loop body — a local const
+        // here can survive into the next iteration before V8 runs GC, which
+        // is the exact path that can push the per-request peak over 128 MiB
+        // when several large `worker:*` parts are back-to-back.
+        workerFiles.push({
+          name: filePath,
+          content: await readPartAsBlob(
+            part.body,
+            `worker:${filePath}`,
+            MAX_WORKER_FILE_BYTES,
+            moduleContentType(filePath),
+            bufferedBudget,
+          ),
+        });
+        continue;
+      }
+      if (part.name.startsWith('asset:')) {
+        const path = '/' + part.name.slice('asset:'.length);
+        if (streamedStaticAssets) {
+          const { entry, hash, store, isNew } = await collectAndUploadStaticAsset(
             c.env.STATIC_ASSETS,
             c.env.STATIC_ASSETS_R2,
-            assetsByHash,
             projectId,
+            path,
+            part.body,
+            streamedHashStores,
+            {
+              budget: bufferedBudget,
+              onHashed: ensureStreamedAssetClaim,
+            },
+          );
+          builtAssetManifest[path] = entry;
+          if (store === 'r2') {
+            streamedLargeHashes.add(hash);
+          }
+          if (isNew) {
+            newStaticAssetCount++;
+          }
+        } else {
+          const { entry, hash, assetEntry } = await collectBufferedAsset(path, part.body, {
+            budget: bufferedBudget,
+          });
+          builtAssetManifest[path] = entry;
+          const previous = assetsByHash.get(hash);
+          assetsByHash.set(hash, assetEntry);
+          if (previous) {
+            // Duplicate content hashes collapse to one live buffered blob in
+            // assetsByHash. Release the replaced entry's charge so the
+            // aggregate budget tracks current residency after the swap.
+            bufferedBudget.used -= previous.bytes.byteLength;
+          }
+        }
+        continue;
+      }
+      // Unknown part (e.g. legacy `migration:*`) — the parser auto-drains it
+      // when we don't consume its body.
+    }
+  } catch (err) {
+    await cleanupStreamedAssetsOnAbort();
+    await cleanupOwnStreamedAssetClaims();
+    if (err instanceof MultipartParseError) {
+      return c.json({ error: err.message }, 400);
+    }
+    if (err instanceof PartTooLargeError) {
+      return c.json({ error: err.message }, 413);
+    }
+    throw err;
+  }
+
+  if (earlyResponse) {
+    await cleanupStreamedAssetsOnAbort();
+    await cleanupOwnStreamedAssetClaims();
+    return earlyResponse;
+  }
+
+  // All code from here through ReadableStream construction runs inside a
+  // try/finally so that any early return, validation rejection, or thrown
+  // error between the end of the parse loop and the handoff to the deploy
+  // ReadableStream sweeps orphaned streamed assets out of KV/R2. `preStreamOk`
+  // is flipped right before `return new Response(stream, ...)`; the stream
+  // `start` callback runs as a microtask after that point, so if we exit
+  // this outer try before the flag is set, the callback has not begun and
+  // no routing has been switched — the streamed hashes are never live.
+  let preStreamOk = false;
+  try {
+    const incomingAssetManifest = parseAssetManifest(incomingAssetManifestRaw);
+
+    // Guard against a body that parsed cleanly but never included a manifest
+    // part. A missing manifest must not fall through to the deploy pipeline
+    // (where an empty default would silently create a blank live deployment).
+    if (!manifestSeen || incomingManifest == null) {
+      return c.json({ error: 'manifest part is required' }, 400);
+    }
+
+    const enrichedManifestResult = enrichWebSocketManifest(
+      incomingManifest,
+      parseManifest(currentLiveDeployment?.manifest),
+      project.websocket_version,
+    );
+    const manifest = enrichedManifestResult.manifest;
+    const finalManifestRaw = JSON.stringify(manifest);
+    const comparableAssetManifest = await buildComparableAssetManifestForDedupe(
+      c.get('db'),
+      projectId,
+      builtAssetManifest,
+      incomingAssetManifest,
+      preflightRaw,
+    );
+
+    // Skip static-only deploys if identical to the current live deployment.
+    // Worker-backed deploys are not skipped because the deploy manifest does not
+    // include worker module content hashes.
+    // Secrets are not checked: the secrets API already live-pushes values to the active
+    // worker via putWorkerSecret.
+    if (!hasWorkerFiles && currentLiveDeployment && currentLiveDeployment.status === 'live') {
+      const sameManifest = currentLiveDeployment.manifest === finalManifestRaw;
+      const sameAssets = equalAssetManifests(
+        comparableAssetManifest,
+        parseAssetManifest(currentLiveDeployment.asset_hashes),
+      );
+      if (sameManifest && sameAssets) {
+        const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+        const projectDomains = await getDomainsByProjectId(c.get('db'), projectId);
+        const activeDomains = projectDomains.filter((d) => d.status === 'active');
+        const fullUrl =
+          activeDomains.length > 0
+            ? `https://${activeDomains[0].hostname}`
+            : `https://${project.slug}.${siteDomain}`;
+
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            const emit = (event: DeployEvent) => {
+              controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'));
+            };
+            emit({ event: 'start', deploymentId: currentLiveDeployment.id });
+            emit({
+              event: 'done',
+              deployment: currentLiveDeployment.id,
+              url: fullUrl,
+              urls: [
+                ...activeDomains.map((d) => `https://${d.hostname}`),
+                `https://${project.slug}.${siteDomain}`,
+              ],
+              assets: 0,
+              workers: 0,
+            });
+            controller.close();
+          },
+        });
+        // Dedupe short-circuit: fall through to `finally` so
+        // `cleanupStreamedAssetsOnAbort` sweeps anything the client streamed
+        // that is NOT referenced by the matched live deployment. Hashes that
+        // are part of the matched manifest are in the retained-hash set and
+        // will be preserved by deleteUnreferencedAssets.
+        return new Response(stream, {
+          headers: { 'Content-Type': 'application/x-ndjson' },
+        });
+      }
+    }
+
+    // Daily deploy-count limit for worker-backed deploys. Runs AFTER the
+    // dedupe branch so an identical retry at the cap is still served from
+    // the live deployment instead of failing hard with 429. Worker parts
+    // are buffered in RAM during parse (not persisted), so deferring the
+    // check here costs nothing in storage writes. Streamed-static deploys
+    // are gated earlier, at manifest-parse time, because they start writing
+    // to KV/R2 during the parse loop — see the early check in the parse
+    // loop above.
+    if (!streamedStaticAssets && planLimits.deploysPerDay > 0) {
+      const todayCount = await countUserDeploymentsToday(c.get('db'), c.get('user').id);
+      if (!isWithinLimit(planLimits.deploysPerDay, todayCount)) {
+        return c.json({ error: 'deploy limit exceeded', limit: planLimits.deploysPerDay }, 429);
+      }
+    }
+
+    // Create deployment record
+    const deployment = await createDeployment(
+      c.get('db'),
+      projectId,
+      finalManifestRaw,
+      source,
+      commit,
+    );
+    cleanupExcludeDeploymentId = deployment.id;
+    if (enrichedManifestResult.changed) {
+      await updateProjectWebSocketVersion(
+        c.get('db'),
+        projectId,
+        enrichedManifestResult.nextVersion,
+      );
+    }
+    const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
+    const workerName = `user-${project.slug}-${deployment.id}`;
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        let currentStep = 'start';
+        let streamOpen = true;
+        const emit = (event: DeployEvent) => {
+          if (!streamOpen) {
+            return;
+          }
+          try {
+            controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'));
+          } catch (err) {
+            streamOpen = false;
+            console.warn(
+              `[deploy] ${projectId}: deploy stream closed while emitting ${event.event}: ${
+                err instanceof Error ? err.message : err
+              }`,
+            );
+          }
+        };
+        const heartbeat = setInterval(() => {
+          emit({ event: 'heartbeat', deploymentId: deployment.id, step: currentStep });
+        }, 15_000);
+        let routingSwitched = false;
+        let cronSynced = false;
+
+        try {
+          emit({ event: 'start', deploymentId: deployment.id });
+
+          // === ASSET UPLOAD PHASE ===
+          currentStep = 'asset_upload';
+          await updateDeploymentStatus(c.get('db'), deployment.id, 'uploading');
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+
+          // Merge the declared asset manifest into the one we built from the
+          // streamed parts — this validates hash agreement and preserves the
+          // CLI-declared `size` field verbatim when it matches.
+          const assetManifest = applyDeclaredAssetManifest(
+            builtAssetManifest,
+            incomingAssetManifest ?? undefined,
           );
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-          emit({ event: 'asset_upload_done' });
 
-          // Build serving manifest: path → hash (prefix with "!" for R2-stored assets)
-          // For assets from preflight (not in assetsByHash), carry forward R2 status
-          // from the previous deployment's manifest
-          let prevServingManifest: Record<string, string> | null = null;
-          if (preflightUsed && project.active_deployment_id) {
-            const prev = await c.env.ROUTING.get(`manifest:${project.active_deployment_id}`);
-            if (prev) {
-              prevServingManifest = JSON.parse(prev) as Record<string, string>;
-            }
-          }
-
-          // Build a reverse lookup from hash → "!" prefix status from previous manifest
-          const prevR2Hashes = new Set<string>();
-          if (prevServingManifest) {
-            for (const v of Object.values(prevServingManifest)) {
-              if (v.startsWith('!')) {
-                prevR2Hashes.add(v.slice(1));
+          // When preflight was used, fill in skipped assets.
+          // Prefer the CLI's full manifest (new CLIs send it) to avoid accumulating
+          // stale entries from previous deploys. Fall back to the previous deploy's
+          // manifest for older CLIs that don't send it.
+          const preflightUsed = preflightRaw === 'true';
+          if (preflightUsed) {
+            const fillManifest =
+              incomingAssetManifest ?? (await getLastLiveAssetManifest(c.get('db'), projectId));
+            if (fillManifest) {
+              for (const [path, entry] of Object.entries(fillManifest)) {
+                if (!(path in assetManifest)) {
+                  assetManifest[path] = entry;
+                }
               }
             }
           }
 
-          const servingManifest: Record<string, string> = {};
-          for (const [path, entry] of Object.entries(assetManifest)) {
-            if (largeHashes.has(entry.hash)) {
-              // Newly uploaded to R2
-              servingManifest[path] = `!${entry.hash}`;
-            } else if (prevR2Hashes.has(entry.hash)) {
-              // Preflight-skipped asset that was previously in R2
-              servingManifest[path] = `!${entry.hash}`;
-            } else {
-              // KV-stored asset (newly uploaded or preflight-skipped)
-              servingManifest[path] = entry.hash;
+          const assetCount = Object.keys(assetManifest).length;
+
+          // Determine if this is a static-only deploy (no worker files in FormData)
+          const isStaticOnly = !hasWorkerFiles;
+
+          // Fetch domains once — used in both static-only and full deploy paths
+          const projectDomains = await getDomainsByProjectId(c.get('db'), projectId);
+
+          if (isStaticOnly) {
+            // Static-only deploy: upload assets to KV/R2, skip bindings/migrations/WfP
+            currentStep = 'asset_upload';
+            const assetConfig = manifest.assetConfig ?? {
+              not_found_handling: 'single-page-application',
+            };
+
+            // For streamed static deploys, assets were already piped into KV/R2
+            // during body parsing — just reuse the set of R2-stored hashes.
+            // For buffered static deploys (older CLIs without manifest.type),
+            // upload from the assetsByHash map as before.
+            const newAssets = streamedStaticAssets ? newStaticAssetCount : assetsByHash.size;
+            emit({
+              event: 'asset_upload',
+              total: assetCount,
+              new: newAssets,
+              cached: assetCount - newAssets,
+            });
+            const largeHashes = streamedStaticAssets
+              ? streamedLargeHashes
+              : await uploadStaticAssets(
+                  c.env.STATIC_ASSETS,
+                  c.env.STATIC_ASSETS_R2,
+                  assetsByHash,
+                  projectId,
+                );
+            await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+            emit({ event: 'asset_upload_done' });
+
+            // Build serving manifest: path → hash (prefix with "!" for R2-stored assets)
+            // For assets from preflight (not in assetsByHash), carry forward R2 status
+            // from the previous deployment's manifest
+            let prevServingManifest: Record<string, string> | null = null;
+            if (preflightUsed && project.active_deployment_id) {
+              const prev = await c.env.ROUTING.get(`manifest:${project.active_deployment_id}`);
+              if (prev) {
+                prevServingManifest = JSON.parse(prev) as Record<string, string>;
+              }
             }
-          }
 
-          // Store serving manifest in ROUTING KV for dispatch to look up
-          await c.env.ROUTING.put(`manifest:${deployment.id}`, JSON.stringify(servingManifest));
-
-          // Store asset manifest in DB for future preflight dedup + retention cleanup
-          await c
-            .get('db')
-            .update(deployments)
-            .set({ asset_hashes: JSON.stringify(assetManifest) })
-            .where(eq(deployments.id, deployment.id));
-
-          // Use manifest type when present, fall back to assetConfig-based derivation for older CLIs
-          const type =
-            manifest.type ??
-            (assetConfig.not_found_handling === 'single-page-application' ? 'spa' : 'static');
-
-          // Set KV routing — uses staticDeploymentId (no WfP worker)
-          const existingRouting = await c.env.ROUTING.get(project.slug);
-          const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
-          const routingJson = buildStaticRoutingJson({
-            projectId,
-            userId: project.user_id,
-            deploymentId: deployment.id,
-            assetConfig,
-            manifest,
-            suspended: existingEntry?.suspended,
-          });
-          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-          await c.env.ROUTING.put(project.slug, routingJson);
-          routingSwitched = true;
-
-          for (const domain of projectDomains) {
-            if (domain.status === 'active') {
-              await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
+            // Build a reverse lookup from hash → "!" prefix status from previous manifest
+            const prevR2Hashes = new Set<string>();
+            if (prevServingManifest) {
+              for (const v of Object.values(prevServingManifest)) {
+                if (v.startsWith('!')) {
+                  prevR2Hashes.add(v.slice(1));
+                }
+              }
             }
-          }
 
-          // Mark deployment live + update project type
-          await updateDeploymentStatus(c.get('db'), deployment.id, 'live', undefined, {
-            force: true,
-          });
-          await updateProjectType(c.get('db'), projectId, type);
-          await setActiveDeployment(c.get('db'), projectId, deployment.id);
-          await markDeploymentRetained(c.get('db'), deployment.id, true);
+            const servingManifest: Record<string, string> = {};
+            for (const [path, entry] of Object.entries(assetManifest)) {
+              if (largeHashes.has(entry.hash)) {
+                // Newly uploaded to R2
+                servingManifest[path] = `!${entry.hash}`;
+              } else if (prevR2Hashes.has(entry.hash)) {
+                // Preflight-skipped asset that was previously in R2
+                servingManifest[path] = `!${entry.hash}`;
+              } else {
+                // KV-stored asset (newly uploaded or preflight-skipped)
+                servingManifest[path] = entry.hash;
+              }
+            }
 
-          // Hard cutoff: delete legacy WfP scripts (one-time cleanup on first KV/R2 deploy)
-          const legacyName = `user-${project.slug}`;
-          await deleteDispatchScript(
-            c.env.CF_ACCOUNT_ID,
-            c.env.CF_API_TOKEN,
-            dispatchNamespace,
-            legacyName,
-          );
+            // Store serving manifest in ROUTING KV for dispatch to look up
+            await c.env.ROUTING.put(`manifest:${deployment.id}`, JSON.stringify(servingManifest));
 
-          // Fetch all retained deployments once — used for both WfP cleanup and retention
-          const retained = await getRetainedDeploymentsExcluding(
-            c.get('db'),
-            projectId,
-            deployment.id,
-          );
+            // Store asset manifest in DB for future preflight dedup + retention cleanup.
+            // The retention claim below (markDeploymentRetained) is what actually
+            // guarantees these hashes are visible to future cleanup — until then
+            // `getRetainedDeployments` filters on `retained=true` and wouldn't
+            // see this deployment, so a failure between here and the retention
+            // claim must still sweep the streamed blobs.
+            await c
+              .get('db')
+              .update(deployments)
+              .set({ asset_hashes: JSON.stringify(assetManifest) })
+              .where(eq(deployments.id, deployment.id));
 
-          // Delete any previously retained versioned WfP scripts
-          for (const old of retained) {
+            // Use manifest type when present, fall back to assetConfig-based derivation for older CLIs
+            const type =
+              manifest.type ??
+              (assetConfig.not_found_handling === 'single-page-application' ? 'spa' : 'static');
+
+            // Set KV routing — uses staticDeploymentId (no WfP worker)
+            const existingRouting = await c.env.ROUTING.get(project.slug);
+            const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
+            const routingJson = buildStaticRoutingJson({
+              projectId,
+              userId: project.user_id,
+              deploymentId: deployment.id,
+              assetConfig,
+              manifest,
+              suspended: existingEntry?.suspended,
+            });
+            await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+            await c.env.ROUTING.put(project.slug, routingJson);
+            routingSwitched = true;
+
+            for (const domain of projectDomains) {
+              if (domain.status === 'active') {
+                await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
+              }
+            }
+
+            // Mark deployment live + update project type
+            await updateDeploymentStatus(c.get('db'), deployment.id, 'live', undefined, {
+              force: true,
+            });
+            await updateProjectType(c.get('db'), projectId, type);
+            await setActiveDeployment(c.get('db'), projectId, deployment.id);
+            await markDeploymentRetained(c.get('db'), deployment.id, true);
+
+            // Hard cutoff: delete legacy WfP scripts (one-time cleanup on first KV/R2 deploy)
+            const legacyName = `user-${project.slug}`;
             await deleteDispatchScript(
               c.env.CF_ACCOUNT_ID,
               c.env.CF_API_TOKEN,
               dispatchNamespace,
-              `user-${project.slug}-${old.id}`,
+              legacyName,
             );
-          }
 
-          // Static retention cleanup — STATIC_RETENTION_LIMIT (100) instead of per-plan limits
-          if (STATIC_RETENTION_LIMIT > 0) {
-            // STATIC_RETENTION_LIMIT includes the active deployment, so keep (limit - 1) others
-            const toEvict = retained.slice(STATIC_RETENTION_LIMIT - 1);
-            if (toEvict.length > 0) {
-              // Collect all hashes from the current + remaining retained deployments
-              const retainedHashes = new Set<string>();
-              for (const [, entry] of Object.entries(assetManifest)) {
-                retainedHashes.add(entry.hash);
-              }
-              const keptDeployments = retained.slice(0, STATIC_RETENTION_LIMIT - 1);
-              for (const kept of keptDeployments) {
-                if (kept.asset_hashes) {
-                  const keptManifest = JSON.parse(kept.asset_hashes) as Record<
-                    string,
-                    { hash: string }
-                  >;
-                  for (const entry of Object.values(keptManifest)) {
-                    retainedHashes.add(entry.hash);
-                  }
-                }
-              }
-
-              for (const old of toEvict) {
-                // Collect evicted hashes and delete unreferenced assets
-                if (old.asset_hashes) {
-                  const evictedManifest = JSON.parse(old.asset_hashes) as Record<
-                    string,
-                    { hash: string }
-                  >;
-                  const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
-                  await deleteUnreferencedAssets(
-                    c.env.STATIC_ASSETS,
-                    c.env.STATIC_ASSETS_R2,
-                    evictedHashes,
-                    retainedHashes,
-                    projectId,
-                  );
-                }
-                // Delete serving manifest from ROUTING KV
-                await c.env.ROUTING.delete(`manifest:${old.id}`);
-                await markDeploymentRetained(c.get('db'), old.id, false);
-              }
-            }
-          }
-
-          const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-          const activeDomains = projectDomains.filter((d) => d.status === 'active');
-          const url =
-            activeDomains.length > 0
-              ? `https://${activeDomains[0].hostname}`
-              : `https://${project.slug}.${siteDomain}`;
-
-          emit({
-            event: 'done',
-            deployment: deployment.id,
-            url,
-            urls: [
-              ...activeDomains.map((d) => `https://${d.hostname}`),
-              `https://${project.slug}.${siteDomain}`,
-            ],
-            assets: assetCount,
-            workers: 0,
-          });
-          return;
-        }
-
-        // Full deploy path
-        // Provision bindings (D1, KV, R2) — creates CF resources if needed
-        currentStep = 'provisioning';
-
-        // Derive binding labels from the manifest upfront so we can show the
-        // spinner BEFORE the (potentially slow) CF API provisioning calls.
-        const bindingLabels: string[] = [];
-        for (const name of manifest.bindings.d1 ?? []) {
-          bindingLabels.push(`d1:${name}`);
-        }
-        for (const name of manifest.bindings.kv ?? []) {
-          bindingLabels.push(`kv:${name}`);
-        }
-        for (const name of manifest.bindings.r2 ?? []) {
-          bindingLabels.push(`r2:${name}`);
-        }
-        for (const q of manifest.queues ?? []) {
-          bindingLabels.push(`queue:${q.name}`);
-        }
-        if (bindingLabels.length > 0) {
-          emit({ event: 'provisioning', bindings: bindingLabels });
-        }
-
-        const workerBindings = await provisionBindings(
-          c.get('db'),
-          c.env.CF_ACCOUNT_ID,
-          c.env.CF_API_TOKEN,
-          projectId,
-          manifest,
-          c.env.JWT_SECRET,
-          c.env.VOID_PROXY_SERVICE ?? 'void-proxy',
-        );
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-
-        if (bindingLabels.length > 0) {
-          emit({ event: 'provisioning_done' });
-        }
-
-        if (typeof manifest.vars?.[BETTER_AUTH_SECRET_NAME] === 'string') {
-          throw new Error(
-            `${BETTER_AUTH_SECRET_NAME} must be configured via project secrets, not manifest.vars`,
-          );
-        }
-
-        let projectSecretRows = await getProjectSecrets(c.get('db'), projectId);
-        if (manifest.auth) {
-          const existingAuthSecret = projectSecretRows.find(
-            (row) => row.name === BETTER_AUTH_SECRET_NAME,
-          );
-          if (!existingAuthSecret) {
-            const managedSecret = generateManagedAuthSecret();
-            const encrypted = await encryptProjectSecret(
-              c.env,
-              projectId,
-              BETTER_AUTH_SECRET_NAME,
-              managedSecret,
-            );
-            await upsertProjectSecret(
+            // Fetch all retained deployments once — used for both WfP cleanup and retention
+            const retained = await getRetainedDeploymentsExcluding(
               c.get('db'),
               projectId,
-              BETTER_AUTH_SECRET_NAME,
-              encrypted.ciphertext,
-              encrypted.iv,
-              encrypted.keyVersion,
-              'auth-default',
+              deployment.id,
             );
-            projectSecretRows = await getProjectSecrets(c.get('db'), projectId);
+
+            // Delete any previously retained versioned WfP scripts
+            for (const old of retained) {
+              await deleteDispatchScript(
+                c.env.CF_ACCOUNT_ID,
+                c.env.CF_API_TOKEN,
+                dispatchNamespace,
+                `user-${project.slug}-${old.id}`,
+              );
+            }
+
+            // Static retention cleanup — STATIC_RETENTION_LIMIT (100) instead of per-plan limits
+            if (STATIC_RETENTION_LIMIT > 0) {
+              // STATIC_RETENTION_LIMIT includes the active deployment, so keep (limit - 1) others
+              const toEvict = retained.slice(STATIC_RETENTION_LIMIT - 1);
+              if (toEvict.length > 0) {
+                // Collect all hashes from the current + remaining retained deployments
+                const retainedHashes = new Set<string>();
+                for (const [, entry] of Object.entries(assetManifest)) {
+                  retainedHashes.add(entry.hash);
+                }
+                const keptDeployments = retained.slice(0, STATIC_RETENTION_LIMIT - 1);
+                for (const kept of keptDeployments) {
+                  if (kept.asset_hashes) {
+                    const keptManifest = JSON.parse(kept.asset_hashes) as Record<
+                      string,
+                      { hash: string }
+                    >;
+                    for (const entry of Object.values(keptManifest)) {
+                      retainedHashes.add(entry.hash);
+                    }
+                  }
+                }
+
+                for (const old of toEvict) {
+                  // Collect evicted hashes and delete unreferenced assets
+                  if (old.asset_hashes) {
+                    const evictedManifest = JSON.parse(old.asset_hashes) as Record<
+                      string,
+                      { hash: string }
+                    >;
+                    const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
+                    await deleteUnreferencedAssets(
+                      c.env.STATIC_ASSETS,
+                      c.env.STATIC_ASSETS_R2,
+                      evictedHashes,
+                      retainedHashes,
+                      projectId,
+                    );
+                  }
+                  // Delete serving manifest from ROUTING KV
+                  await c.env.ROUTING.delete(`manifest:${old.id}`);
+                  await markDeploymentRetained(c.get('db'), old.id, false);
+                }
+              }
+            }
+
+            const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+            const activeDomains = projectDomains.filter((d) => d.status === 'active');
+            const url =
+              activeDomains.length > 0
+                ? `https://${activeDomains[0].hostname}`
+                : `https://${project.slug}.${siteDomain}`;
+
+            emit({
+              event: 'done',
+              deployment: deployment.id,
+              url,
+              urls: [
+                ...activeDomains.map((d) => `https://${d.hostname}`),
+                `https://${project.slug}.${siteDomain}`,
+              ],
+              assets: assetCount,
+              workers: 0,
+            });
+            return;
           }
-        }
-        const secretBindings = await Promise.all(
-          projectSecretRows.map(async (row) => ({
-            type: 'secret_text' as const,
-            name: row.name,
-            text: await decryptProjectSecret(c.env, projectId, row),
-          })),
-        );
 
-        // Upload assets via CF asset upload API (3-step flow)
-        let completionJwt: string | undefined;
-        if (assetCount > 0) {
-          currentStep = 'asset_upload';
-          const newAssets = assetsByHash.size;
-          emit({
-            event: 'asset_upload',
-            total: assetCount,
-            new: newAssets,
-            cached: assetCount - newAssets,
-          });
+          // Full deploy path
+          // Provision bindings (D1, KV, R2) — creates CF resources if needed
+          currentStep = 'provisioning';
 
-          const session = await createAssetUploadSession(
+          // Derive binding labels from the manifest upfront so we can show the
+          // spinner BEFORE the (potentially slow) CF API provisioning calls.
+          const bindingLabels: string[] = [];
+          for (const name of manifest.bindings.d1 ?? []) {
+            bindingLabels.push(`d1:${name}`);
+          }
+          for (const name of manifest.bindings.kv ?? []) {
+            bindingLabels.push(`kv:${name}`);
+          }
+          for (const name of manifest.bindings.r2 ?? []) {
+            bindingLabels.push(`r2:${name}`);
+          }
+          for (const q of manifest.queues ?? []) {
+            bindingLabels.push(`queue:${q.name}`);
+          }
+          if (bindingLabels.length > 0) {
+            emit({ event: 'provisioning', bindings: bindingLabels });
+          }
+
+          const workerBindings = await provisionBindings(
+            c.get('db'),
             c.env.CF_ACCOUNT_ID,
             c.env.CF_API_TOKEN,
-            dispatchNamespace,
-            workerName,
-            assetManifest,
-          );
-          console.log(
-            `[deploy] ${projectId}: asset session created, ${Object.keys(assetManifest).length} manifest entries, ${session.buckets.length} bucket(s), ${assetsByHash.size} blobs available`,
-          );
-
-          // Upload asset buckets to CF. When all assets are cached (empty buckets),
-          // the session JWT is already the completion token — no exchange needed.
-          completionJwt = await uploadAssetBuckets(
-            c.env.CF_ACCOUNT_ID,
-            session.jwt,
-            session.buckets,
-            assetsByHash,
+            projectId,
+            manifest,
+            c.env.JWT_SECRET,
+            c.env.VOID_PROXY_SERVICE ?? 'void-proxy',
           );
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-          console.log(
-            `[deploy] ${projectId}: asset upload complete, got completion JWT: ${completionJwt ? 'yes' : 'no'}`,
-          );
-          emit({ event: 'asset_upload_done' });
-        }
 
-        // 1. Upload worker to dispatch namespace via CF API
-        currentStep = 'worker_upload';
-        const workerFormData = new FormData();
-
-        // Collect all worker modules
-        const workerFiles: { name: string; content: Blob }[] = [];
-        for (const [key, value] of formData.entries()) {
-          if (key.startsWith('worker:')) {
-            const filePath = key.slice('worker:'.length);
-            workerFiles.push({ name: filePath, content: value as Blob });
+          if (bindingLabels.length > 0) {
+            emit({ event: 'provisioning_done' });
           }
-        }
 
-        emit({ event: 'worker_upload', modules: workerFiles.length });
+          if (typeof manifest.vars?.[BETTER_AUTH_SECRET_NAME] === 'string') {
+            throw new Error(
+              `${BETTER_AUTH_SECRET_NAME} must be configured via project secrets, not manifest.vars`,
+            );
+          }
 
-        // Build combined bindings: user vars + provisioned (d1/kv/r2) + ASSETS
-        // Platform bindings come LAST so they win on name collision (CF uses last-wins semantics)
-        const RESERVED_BINDING_NAMES = new Set([
-          '__VOID_PROXY',
-          '__PROJECT_ID',
-          '__VOID_PROXY_TOKEN',
-          'ASSETS',
-        ]);
-
-        const userVarNames = Object.keys(manifest.vars ?? {});
-        const reserved = userVarNames.filter((n) => RESERVED_BINDING_NAMES.has(n));
-        if (reserved.length > 0) {
-          throw new Error(`reserved binding names: ${reserved.join(', ')}`);
-        }
-
-        const secretNames = new Set(secretBindings.map((s) => s.name));
-        const collisions = userVarNames.filter((n) => secretNames.has(n));
-        if (collisions.length > 0) {
-          console.warn(
-            `[deploy] manifest vars collide with project secrets (secrets win): ${collisions.join(', ')}`,
+          let projectSecretRows = await getProjectSecrets(c.get('db'), projectId);
+          if (manifest.auth) {
+            const existingAuthSecret = projectSecretRows.find(
+              (row) => row.name === BETTER_AUTH_SECRET_NAME,
+            );
+            if (!existingAuthSecret) {
+              const managedSecret = generateManagedAuthSecret();
+              const encrypted = await encryptProjectSecret(
+                c.env,
+                projectId,
+                BETTER_AUTH_SECRET_NAME,
+                managedSecret,
+              );
+              await upsertProjectSecret(
+                c.get('db'),
+                projectId,
+                BETTER_AUTH_SECRET_NAME,
+                encrypted.ciphertext,
+                encrypted.iv,
+                encrypted.keyVersion,
+                'auth-default',
+              );
+              projectSecretRows = await getProjectSecrets(c.get('db'), projectId);
+            }
+          }
+          const secretBindings = await Promise.all(
+            projectSecretRows.map(async (row) => ({
+              type: 'secret_text' as const,
+              name: row.name,
+              text: await decryptProjectSecret(c.env, projectId, row),
+            })),
           );
-        }
 
-        const plainTextBindings = Object.entries(manifest.vars ?? {}).map(([name, text]) => ({
-          type: 'plain_text' as const,
-          name,
-          text,
-        }));
-        const websocketBindings = buildWebSocketUploadBindings(manifest.websocket);
-        const allBindings = [
-          ...plainTextBindings,
-          ...secretBindings,
-          ...workerBindings,
-          ...websocketBindings,
-          ...(completionJwt ? [{ name: 'ASSETS', type: 'assets' }] : []),
-        ];
-
-        // Add metadata part (include provisioned bindings + assets)
-        if (!manifest.compatibilityDate) {
-          console.warn(
-            `[deploy] manifest missing compatibilityDate for project ${project.id}, using fallback`,
-          );
-        }
-
-        const assetConfig = manifest.assetConfig ?? { not_found_handling: 'none' };
-        const websocketMigrations = buildWebSocketUploadMigrations(manifest.websocket?.migrations);
-        const metadata: Record<string, unknown> = {
-          main_module: manifest.workerMain ?? 'index.js',
-          compatibility_date: manifest.compatibilityDate ?? '2026-02-12',
-          compatibility_flags: manifest.compatibilityFlags ?? ['nodejs_compat'],
-          bindings: allBindings,
-          ...(websocketMigrations ? { migrations: websocketMigrations } : {}),
-          ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
-          observability: {
-            enabled: true,
-            logs: { invocation_logs: true, head_sampling_rate: 1 },
-          },
-        };
-        workerFormData.append(
-          'metadata',
-          new Blob([JSON.stringify(metadata)], { type: 'application/json' }),
-        );
-
-        // Add each worker module with correct content type for CF API
-        for (const file of workerFiles) {
-          const type = moduleContentType(file.name);
-          const blob = new Blob([file.content], { type });
-          workerFormData.append(file.name, blob, file.name);
-        }
-
-        // Upload to CF Workers for Platforms API.
-        // CF's WfP API sometimes returns plain text (e.g. "Assets have already
-        // been uploaded") with 200 status instead of completing the upload.
-        // This is the same CF bug handled in createAssetUploadSession — retry
-        // to hit a different edge node.
-        const workerUploadUrl = `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`;
-        await retryWithBackoff(
-          async () => {
-            const cfResponse = await fetch(workerUploadUrl, {
-              method: 'PUT',
-              headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
-              body: workerFormData,
+          // Upload assets via CF asset upload API (3-step flow)
+          let completionJwt: string | undefined;
+          if (assetCount > 0) {
+            currentStep = 'asset_upload';
+            const newAssets = assetsByHash.size;
+            emit({
+              event: 'asset_upload',
+              total: assetCount,
+              new: newAssets,
+              cached: assetCount - newAssets,
             });
 
-            if (!cfResponse.ok) {
-              const error = await cfResponse.text();
-              console.error(
-                `[deploy] ${projectId}: worker upload failed (${cfResponse.status}): ${error.slice(0, 500)}`,
-              );
-              throw new Error(`worker upload failed: ${error}`);
-            }
+            const session = await createAssetUploadSession(
+              c.env.CF_ACCOUNT_ID,
+              c.env.CF_API_TOKEN,
+              dispatchNamespace,
+              workerName,
+              assetManifest,
+            );
+            console.log(
+              `[deploy] ${projectId}: asset session created, ${Object.keys(assetManifest).length} manifest entries, ${session.buckets.length} bucket(s), ${assetsByHash.size} blobs available`,
+            );
 
-            const cfBody = await cfResponse.text();
-            if (isCfAssetPlainText(cfBody)) {
-              console.warn(
-                `[deploy] ${projectId}: worker upload got CF plain-text response, retrying: ${cfBody.slice(0, 100)}`,
-              );
-              return undefined; // retry
-            }
-            return true;
-          },
-          { ...CF_RETRY, errorMessage: 'worker upload returned an unexpected Cloudflare response' },
-        );
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+            // Upload asset buckets to CF. When all assets are cached (empty buckets),
+            // the session JWT is already the completion token — no exchange needed.
+            completionJwt = await uploadAssetBuckets(
+              c.env.CF_ACCOUNT_ID,
+              session.jwt,
+              session.buckets,
+              assetsByHash,
+            );
+            await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+            console.log(
+              `[deploy] ${projectId}: asset upload complete, got completion JWT: ${completionJwt ? 'yes' : 'no'}`,
+            );
+            emit({ event: 'asset_upload_done' });
+          }
 
-        emit({ event: 'worker_upload_done' });
+          // 1. Upload worker to dispatch namespace via CF API
+          currentStep = 'worker_upload';
+          const workerFormData = new FormData();
 
-        // 1b. Run migrations via the newly-uploaded worker (v3 flow)
-        let migrationsApplied = 0;
-        if (manifest.migrations && manifest.migrations.pending > 0) {
-          currentStep = 'migration';
-          await updateDeploymentStatus(c.get('db'), deployment.id, 'migrating');
+          // Worker modules were already buffered during the streaming body parse.
+          emit({ event: 'worker_upload', modules: workerFiles.length });
+
+          // Build combined bindings: user vars + provisioned (d1/kv/r2) + ASSETS
+          // Platform bindings come LAST so they win on name collision (CF uses last-wins semantics)
+          const RESERVED_BINDING_NAMES = new Set([
+            '__VOID_PROXY',
+            '__PROJECT_ID',
+            '__VOID_PROXY_TOKEN',
+            'ASSETS',
+          ]);
+
+          const userVarNames = Object.keys(manifest.vars ?? {});
+          const reserved = userVarNames.filter((n) => RESERVED_BINDING_NAMES.has(n));
+          if (reserved.length > 0) {
+            throw new Error(`reserved binding names: ${reserved.join(', ')}`);
+          }
+
+          const secretNames = new Set(secretBindings.map((s) => s.name));
+          const collisions = userVarNames.filter((n) => secretNames.has(n));
+          if (collisions.length > 0) {
+            console.warn(
+              `[deploy] manifest vars collide with project secrets (secrets win): ${collisions.join(', ')}`,
+            );
+          }
+
+          const plainTextBindings = Object.entries(manifest.vars ?? {}).map(([name, text]) => ({
+            type: 'plain_text' as const,
+            name,
+            text,
+          }));
+          const websocketBindings = buildWebSocketUploadBindings(manifest.websocket);
+          const allBindings = [
+            ...plainTextBindings,
+            ...secretBindings,
+            ...workerBindings,
+            ...websocketBindings,
+            ...(completionJwt ? [{ name: 'ASSETS', type: 'assets' }] : []),
+          ];
+
+          // Add metadata part (include provisioned bindings + assets)
+          if (!manifest.compatibilityDate) {
+            console.warn(
+              `[deploy] manifest missing compatibilityDate for project ${project.id}, using fallback`,
+            );
+          }
+
+          const assetConfig = manifest.assetConfig ?? { not_found_handling: 'none' };
+          const websocketMigrations = buildWebSocketUploadMigrations(
+            manifest.websocket?.migrations,
+          );
+          const metadata: Record<string, unknown> = {
+            main_module: manifest.workerMain ?? 'index.js',
+            compatibility_date: manifest.compatibilityDate ?? '2026-02-12',
+            compatibility_flags: manifest.compatibilityFlags ?? ['nodejs_compat'],
+            bindings: allBindings,
+            ...(websocketMigrations ? { migrations: websocketMigrations } : {}),
+            ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
+            observability: {
+              enabled: true,
+              logs: { invocation_logs: true, head_sampling_rate: 1 },
+            },
+          };
+          workerFormData.append(
+            'metadata',
+            new Blob([JSON.stringify(metadata)], { type: 'application/json' }),
+          );
+
+          // Add each worker module. The Blob was constructed at parse time
+          // with the correct module content type, so we can append the
+          // existing Blob directly instead of allocating a second copy here.
+          for (const file of workerFiles) {
+            workerFormData.append(file.name, file.content, file.name);
+          }
+
+          // Upload to CF Workers for Platforms API.
+          // CF's WfP API sometimes returns plain text (e.g. "Assets have already
+          // been uploaded") with 200 status instead of completing the upload.
+          // This is the same CF bug handled in createAssetUploadSession — retry
+          // to hit a different edge node.
+          const workerUploadUrl = `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`;
+          await retryWithBackoff(
+            async () => {
+              const cfResponse = await fetch(workerUploadUrl, {
+                method: 'PUT',
+                headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
+                body: workerFormData,
+              });
+
+              if (!cfResponse.ok) {
+                const error = await cfResponse.text();
+                console.error(
+                  `[deploy] ${projectId}: worker upload failed (${cfResponse.status}): ${error.slice(0, 500)}`,
+                );
+                throw new Error(`worker upload failed: ${error}`);
+              }
+
+              const cfBody = await cfResponse.text();
+              if (isCfAssetPlainText(cfBody)) {
+                console.warn(
+                  `[deploy] ${projectId}: worker upload got CF plain-text response, retrying: ${cfBody.slice(0, 100)}`,
+                );
+                return undefined; // retry
+              }
+              return true;
+            },
+            {
+              ...CF_RETRY,
+              errorMessage: 'worker upload returned an unexpected Cloudflare response',
+            },
+          );
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-          emit({ event: 'migration_start', pending: manifest.migrations.pending });
 
-          try {
+          emit({ event: 'worker_upload_done' });
+
+          // 1b. Run migrations via the newly-uploaded worker (v3 flow).
+          // On failure, the thrown error propagates to the outer catch which
+          // runs the pre-routing cleanup branch (`routingSwitched === false`)
+          // and deletes the freshly-uploaded worker exactly once.
+          let migrationsApplied = 0;
+          if (manifest.migrations && manifest.migrations.pending > 0) {
+            currentStep = 'migration';
+            await updateDeploymentStatus(c.get('db'), deployment.id, 'migrating');
+            await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+            emit({ event: 'migration_start', pending: manifest.migrations.pending });
+
             const proxyTokenBinding = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN');
 
             // Worker name is unique per deployment, so the probe always targets the new script.
@@ -1048,336 +1957,356 @@ app.post('/:id/deploy', async (c) => {
 
             const allApplied = result.migrations.map((m) => m.name);
             await setAppliedMigrations(c.get('db'), deployment.id, allApplied);
-          } catch (err) {
-            // Migration failed — delete the new worker, abort
+            await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+          }
+
+          // 2b. Configure queue consumers (dispatch worker relays to user workers)
+          currentStep = 'queue_setup';
+          const queueNames = (manifest.queues ?? []).map((q) => q.name);
+          if (queueNames.length > 0) {
+            emit({ event: 'queue_setup', queues: queueNames });
+          }
+
+          const dispatchWorkerName = c.env.DISPATCH_WORKER_NAME ?? 'void-dispatch';
+          await Promise.all(
+            (manifest.queues ?? []).map(async (q) => {
+              const queueBinding = workerBindings.find(
+                (b) => b.type === 'queue' && b.name === q.bindingName,
+              );
+              if (queueBinding?.queue_id) {
+                await addQueueConsumer(
+                  c.env.CF_ACCOUNT_ID,
+                  c.env.CF_API_TOKEN,
+                  queueBinding.queue_id,
+                  dispatchWorkerName,
+                  {
+                    ...(q.maxBatchSize != null && { batch_size: q.maxBatchSize }),
+                    ...(q.maxBatchTimeout != null && {
+                      max_wait_time_ms: q.maxBatchTimeout * 1000,
+                    }),
+                    ...(q.maxRetries != null && { max_retries: q.maxRetries }),
+                    ...(q.retryDelay != null && { retry_delay: q.retryDelay }),
+                  },
+                );
+                // Store queue→worker mapping for relay routing
+                await c.env.ROUTING.put(
+                  `queue:${queueBinding.queue_name}`,
+                  JSON.stringify({
+                    workerName,
+                    projectId,
+                    queueName: q.name,
+                  }),
+                );
+              }
+            }),
+          );
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+
+          // 2c. Sync cron schedules to CronScheduler DO
+          currentStep = 'cron_setup';
+          const hasCrons = manifest.schedules && manifest.schedules.length > 0;
+
+          if (hasCrons) {
+            const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
+            const cronProxyToken = workerBindings.find(
+              (b) => b.name === '__VOID_PROXY_TOKEN',
+            )?.text;
+            await c.env.CRON_SCHEDULER.get(cronId).fetch(
+              new Request('https://do/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  workerName,
+                  schedules: manifest.schedules,
+                  proxyToken: cronProxyToken,
+                }),
+              }),
+            );
+            cronSynced = true;
+          } else {
+            // Only clear if previous deploy had crons (avoid creating empty DOs)
+            const prevRouting = await c.env.ROUTING.get(project.slug);
+            if (prevRouting && JSON.parse(prevRouting).hasCrons) {
+              const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
+              await c.env.CRON_SCHEDULER.get(cronId).fetch(
+                new Request('https://do/clear', { method: 'POST' }),
+              );
+            }
+          }
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+
+          // 3. Clear previous ISR cache on deploy.
+          // Always clear — handles both "new deploy has ISR" and "previous deploy had ISR
+          // but new one doesn't" (avoids orphaned KV entries). No-op for empty prefixes.
+          await clearIsrCache(c.env.ISR_CACHE, projectId);
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+
+          // 3b. Prerender pages (write ISR cache entries before going live)
+          currentStep = 'prerender';
+          if (manifest.prerender && manifest.prerender.length > 0 && manifest.revalidate) {
+            emit({ event: 'prerender', pages: manifest.prerender.length });
+            await updateDeploymentStatus(c.get('db'), deployment.id, 'prerendering');
+            await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+            const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+
+            await uploadPool(manifest.prerender, 3, async (pathname) => {
+              const ttl = resolvePathTtl(manifest.revalidate, pathname);
+              if (ttl <= 0) {
+                return;
+              }
+
+              try {
+                // Invoke the user worker directly via dispatch namespace
+                const userWorker = c.env.DISPATCH.get(workerName);
+                const url = `https://${project.slug}.${siteDomain}${pathname}`;
+                const response = await userWorker.fetch(new Request(url));
+
+                if (response.ok) {
+                  const key = isrCacheKey(projectId, pathname);
+                  const headers = serializePrerenderHeaders(response);
+                  const body = await response.arrayBuffer();
+                  const packed = packIsrValue(headers, body);
+
+                  await c.env.ISR_CACHE.put(key, packed, {
+                    metadata: {
+                      s: response.status,
+                      c: Date.now(),
+                      t: ttl,
+                    },
+                  });
+                }
+              } catch {
+                // Prerender failures are non-blocking — page will be rendered on first request
+              }
+            });
+            emit({ event: 'prerender_done' });
+          }
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+
+          // 4. Update KV routing table
+          // Carry forward suspended flag from current KV entry
+          const existingRouting = await c.env.ROUTING.get(project.slug);
+          const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
+          // Include per-request limits for dispatch enforcement
+          const dispatchLimits =
+            planLimits.cpuMsPerRequest > 0 || planLimits.subRequestsPerInvocation > 0
+              ? {
+                  ...(planLimits.cpuMsPerRequest > 0 ? { cpuMs: planLimits.cpuMsPerRequest } : {}),
+                  ...(planLimits.subRequestsPerInvocation > 0
+                    ? { subRequests: planLimits.subRequestsPerInvocation }
+                    : {}),
+                }
+              : null;
+          const routingJson = buildRoutingJson({
+            workerName,
+            projectId,
+            userId: project.user_id,
+            manifest,
+            deploymentId: deployment.id,
+            dispatchLimits,
+            suspended: existingEntry?.suspended,
+            hasCrons,
+          });
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+          await c.env.ROUTING.put(project.slug, routingJson);
+
+          // Traffic can now reach the new worker via project.slug.
+          // Set the flag immediately so the outer catch never deletes a live worker.
+          routingSwitched = true;
+
+          // Update KV routing for active custom domains
+          for (const domain of projectDomains) {
+            if (domain.status === 'active') {
+              await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
+            }
+          }
+
+          // 5. Mark deployment as live + update project mode
+          await updateDeploymentStatus(c.get('db'), deployment.id, 'live', undefined, {
+            force: true,
+          });
+          await updateProjectType(
+            c.get('db'),
+            projectId,
+            manifest.type ?? (manifest.framework ? 'framework' : 'void'),
+          );
+
+          // 5b. Set active deployment + mark retained
+          await setActiveDeployment(c.get('db'), projectId, deployment.id);
+          await markDeploymentRetained(c.get('db'), deployment.id, true);
+
+          // Legacy cleanup — delete unversioned worker script (safe no-op if already gone)
+          const legacyWorkerName = `user-${project.slug}`;
+          await deleteDispatchScript(
+            c.env.CF_ACCOUNT_ID,
+            c.env.CF_API_TOKEN,
+            dispatchNamespace,
+            legacyWorkerName,
+          );
+
+          // Retention cleanup — delete old worker scripts beyond plan limit
+          const retentionLimit = planLimits.retainedDeployments;
+          if (retentionLimit > 0) {
+            const retained = await getRetainedDeploymentsExcluding(
+              c.get('db'),
+              projectId,
+              deployment.id,
+            );
+            // retentionLimit includes the active deployment, so keep (limit - 1) others
+            const toEvict = retained.slice(retentionLimit - 1);
+            for (const old of toEvict) {
+              const oldWorkerName = `user-${project.slug}-${old.id}`;
+              await deleteDispatchScript(
+                c.env.CF_ACCOUNT_ID,
+                c.env.CF_API_TOKEN,
+                dispatchNamespace,
+                oldWorkerName,
+              );
+              await markDeploymentRetained(c.get('db'), old.id, false);
+            }
+          }
+
+          // Store asset manifest for future preflight dedup
+          if (assetCount > 0) {
+            await c
+              .get('db')
+              .update(deployments)
+              .set({ asset_hashes: JSON.stringify(assetManifest) })
+              .where(eq(deployments.id, deployment.id));
+          }
+
+          const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+          const activeDomains = projectDomains.filter((d) => d.status === 'active');
+          const fullUrl =
+            activeDomains.length > 0
+              ? `https://${activeDomains[0].hostname}`
+              : `https://${project.slug}.${siteDomain}`;
+
+          emit({
+            event: 'done',
+            deployment: deployment.id,
+            url: fullUrl,
+            urls: [
+              ...activeDomains.map((d) => `https://${d.hostname}`),
+              `https://${project.slug}.${siteDomain}`,
+            ],
+            assets: assetCount,
+            workers: workerFiles.length,
+            ...(migrationsApplied > 0 && { migrations: migrationsApplied }),
+          });
+        } catch (err) {
+          const raw = err instanceof Error ? err.message : String(err);
+          const msg = sanitizeDeployErrorMessage(raw);
+          if (msg !== raw) {
+            console.error(`[deploy] raw error before sanitization for ${workerName}: ${raw}`);
+          }
+
+          // Sweep streamed static assets only if the slug/domain routing has
+          // not yet switched over to this deployment. Once `routingSwitched`
+          // is true, the new hashes are actively serving live traffic (via
+          // the static serving manifest in ROUTING KV) and deleting them
+          // from STATIC_ASSETS/STATIC_ASSETS_R2 would break the live site
+          // even though the post-routing recovery branch below keeps the
+          // deployment marked live. For non-streamed (buffered) deploys this
+          // is a no-op because `streamedHashStores` is empty.
+          if (!routingSwitched) {
+            await cleanupStreamedAssetsOnAbort();
+          }
+
+          if (routingSwitched) {
+            // Routing already points to this worker — it IS serving live traffic.
+            // Mark as "live" so DB state matches reality. The late-step failure
+            // (retention cleanup, asset_hashes update, etc.) is non-critical and
+            // will self-correct on the next deploy.
+            console.error(`[deploy] post-routing step failed for ${workerName}: ${msg}`);
+            await updateDeploymentStatus(c.get('db'), deployment.id, 'live', undefined, {
+              force: true,
+            }).catch(() => {});
+            await updateProjectType(
+              c.get('db'),
+              projectId,
+              manifest.type ?? (manifest.framework ? 'framework' : 'void'),
+            ).catch(() => {});
+            await setActiveDeployment(c.get('db'), projectId, deployment.id).catch(() => {});
+            await markDeploymentRetained(c.get('db'), deployment.id, true).catch(() => {});
+            // Emit "done" so the CLI shows success with the URL — the deploy IS live.
+            const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+            const slugUrl = `https://${project.slug}.${siteDomain}`;
+            emit({
+              event: 'done',
+              deployment: deployment.id,
+              url: slugUrl,
+              urls: [slugUrl],
+              assets: 0,
+              workers: 0,
+            });
+          } else {
+            // Routing not yet switched — safe to clean up the worker script and
+            // mark the deployment as failed.
+            const latest = await getDeployment(c.get('db'), deployment.id);
+            const wasCanceled =
+              latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status);
             await deleteDispatchScript(
               c.env.CF_ACCOUNT_ID,
               c.env.CF_API_TOKEN,
               dispatchNamespace,
               workerName,
+            ).catch((e) =>
+              console.error(`[deploy] failed to clean up worker script ${workerName}:`, e),
             );
-            throw err;
-          }
-          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-        }
-
-        // 2b. Configure queue consumers (dispatch worker relays to user workers)
-        currentStep = 'queue_setup';
-        const queueNames = (manifest.queues ?? []).map((q) => q.name);
-        if (queueNames.length > 0) {
-          emit({ event: 'queue_setup', queues: queueNames });
-        }
-
-        const dispatchWorkerName = c.env.DISPATCH_WORKER_NAME ?? 'void-dispatch';
-        await Promise.all(
-          (manifest.queues ?? []).map(async (q) => {
-            const queueBinding = workerBindings.find(
-              (b) => b.type === 'queue' && b.name === q.bindingName,
-            );
-            if (queueBinding?.queue_id) {
-              await addQueueConsumer(
-                c.env.CF_ACCOUNT_ID,
-                c.env.CF_API_TOKEN,
-                queueBinding.queue_id,
-                dispatchWorkerName,
-                {
-                  ...(q.maxBatchSize != null && { batch_size: q.maxBatchSize }),
-                  ...(q.maxBatchTimeout != null && { max_wait_time_ms: q.maxBatchTimeout * 1000 }),
-                  ...(q.maxRetries != null && { max_retries: q.maxRetries }),
-                  ...(q.retryDelay != null && { retry_delay: q.retryDelay }),
-                },
-              );
-              // Store queue→worker mapping for relay routing
-              await c.env.ROUTING.put(
-                `queue:${queueBinding.queue_name}`,
-                JSON.stringify({
-                  workerName,
-                  projectId,
-                  queueName: q.name,
-                }),
+            // Clear cron DO if we synced it before the failure (step 2c runs before routing switch)
+            if (cronSynced) {
+              const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
+              await c.env.CRON_SCHEDULER.get(cronId)
+                .fetch(new Request('https://do/clear', { method: 'POST' }))
+                .catch((e) =>
+                  console.error(`[deploy] failed to clear cron scheduler for ${projectId}:`, e),
+                );
+            }
+            if (!wasCanceled) {
+              await updateDeploymentStatus(c.get('db'), deployment.id, 'failed', msg);
+            } else {
+              await updateDeploymentStatus(c.get('db'), deployment.id, 'canceled', msg, {
+                force: true,
+              });
+            }
+            emit({ event: 'error', message: msg, step: currentStep });
+            if (!wasCanceled && c.env.EMAIL && user.email) {
+              const dashboardUrl = c.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
+              c.executionCtx.waitUntil(
+                sendDeployFailedEmail(
+                  c.env.EMAIL,
+                  user.email,
+                  project.slug,
+                  msg,
+                  dashboardUrl,
+                ).catch((err) =>
+                  console.error(`[deploy-failed-email] Failed for ${project.slug}:`, err),
+                ),
               );
             }
-          }),
-        );
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-
-        // 2c. Sync cron schedules to CronScheduler DO
-        currentStep = 'cron_setup';
-        const hasCrons = manifest.schedules && manifest.schedules.length > 0;
-
-        if (hasCrons) {
-          const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
-          const cronProxyToken = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN')?.text;
-          await c.env.CRON_SCHEDULER.get(cronId).fetch(
-            new Request('https://do/sync', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                workerName,
-                schedules: manifest.schedules,
-                proxyToken: cronProxyToken,
-              }),
-            }),
-          );
-          cronSynced = true;
-        } else {
-          // Only clear if previous deploy had crons (avoid creating empty DOs)
-          const prevRouting = await c.env.ROUTING.get(project.slug);
-          if (prevRouting && JSON.parse(prevRouting).hasCrons) {
-            const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
-            await c.env.CRON_SCHEDULER.get(cronId).fetch(
-              new Request('https://do/clear', { method: 'POST' }),
-            );
+          }
+        } finally {
+          clearInterval(heartbeat);
+          await cleanupOwnStreamedAssetClaims();
+          if (streamOpen) {
+            streamOpen = false;
+            controller.close();
           }
         }
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+      },
+    });
 
-        // 3. Clear previous ISR cache on deploy.
-        // Always clear — handles both "new deploy has ISR" and "previous deploy had ISR
-        // but new one doesn't" (avoids orphaned KV entries). No-op for empty prefixes.
-        await clearIsrCache(c.env.ISR_CACHE, projectId);
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-
-        // 3b. Prerender pages (write ISR cache entries before going live)
-        currentStep = 'prerender';
-        if (manifest.prerender && manifest.prerender.length > 0 && manifest.revalidate) {
-          emit({ event: 'prerender', pages: manifest.prerender.length });
-          await updateDeploymentStatus(c.get('db'), deployment.id, 'prerendering');
-          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-          const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-
-          await uploadPool(manifest.prerender, 3, async (pathname) => {
-            const ttl = resolvePathTtl(manifest.revalidate, pathname);
-            if (ttl <= 0) {
-              return;
-            }
-
-            try {
-              // Invoke the user worker directly via dispatch namespace
-              const userWorker = c.env.DISPATCH.get(workerName);
-              const url = `https://${project.slug}.${siteDomain}${pathname}`;
-              const response = await userWorker.fetch(new Request(url));
-
-              if (response.ok) {
-                const key = isrCacheKey(projectId, pathname);
-                const headers = serializePrerenderHeaders(response);
-                const body = await response.arrayBuffer();
-                const packed = packIsrValue(headers, body);
-
-                await c.env.ISR_CACHE.put(key, packed, {
-                  metadata: {
-                    s: response.status,
-                    c: Date.now(),
-                    t: ttl,
-                  },
-                });
-              }
-            } catch {
-              // Prerender failures are non-blocking — page will be rendered on first request
-            }
-          });
-          emit({ event: 'prerender_done' });
-        }
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-
-        // 4. Update KV routing table
-        // Carry forward suspended flag from current KV entry
-        const existingRouting = await c.env.ROUTING.get(project.slug);
-        const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
-        // Include per-request limits for dispatch enforcement
-        const dispatchLimits =
-          planLimits.cpuMsPerRequest > 0 || planLimits.subRequestsPerInvocation > 0
-            ? {
-                ...(planLimits.cpuMsPerRequest > 0 ? { cpuMs: planLimits.cpuMsPerRequest } : {}),
-                ...(planLimits.subRequestsPerInvocation > 0
-                  ? { subRequests: planLimits.subRequestsPerInvocation }
-                  : {}),
-              }
-            : null;
-        const routingJson = buildRoutingJson({
-          workerName,
-          projectId,
-          userId: project.user_id,
-          manifest,
-          deploymentId: deployment.id,
-          dispatchLimits,
-          suspended: existingEntry?.suspended,
-          hasCrons,
-        });
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-        await c.env.ROUTING.put(project.slug, routingJson);
-
-        // Traffic can now reach the new worker via project.slug.
-        // Set the flag immediately so the outer catch never deletes a live worker.
-        routingSwitched = true;
-
-        // Update KV routing for active custom domains
-        for (const domain of projectDomains) {
-          if (domain.status === 'active') {
-            await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
-          }
-        }
-
-        // 5. Mark deployment as live + update project mode
-        await updateDeploymentStatus(c.get('db'), deployment.id, 'live', undefined, {
-          force: true,
-        });
-        await updateProjectType(
-          c.get('db'),
-          projectId,
-          manifest.type ?? (manifest.framework ? 'framework' : 'void'),
-        );
-
-        // 5b. Set active deployment + mark retained
-        await setActiveDeployment(c.get('db'), projectId, deployment.id);
-        await markDeploymentRetained(c.get('db'), deployment.id, true);
-
-        // Legacy cleanup — delete unversioned worker script (safe no-op if already gone)
-        const legacyWorkerName = `user-${project.slug}`;
-        await deleteDispatchScript(
-          c.env.CF_ACCOUNT_ID,
-          c.env.CF_API_TOKEN,
-          dispatchNamespace,
-          legacyWorkerName,
-        );
-
-        // Retention cleanup — delete old worker scripts beyond plan limit
-        const retentionLimit = planLimits.retainedDeployments;
-        if (retentionLimit > 0) {
-          const retained = await getRetainedDeploymentsExcluding(
-            c.get('db'),
-            projectId,
-            deployment.id,
-          );
-          // retentionLimit includes the active deployment, so keep (limit - 1) others
-          const toEvict = retained.slice(retentionLimit - 1);
-          for (const old of toEvict) {
-            const oldWorkerName = `user-${project.slug}-${old.id}`;
-            await deleteDispatchScript(
-              c.env.CF_ACCOUNT_ID,
-              c.env.CF_API_TOKEN,
-              dispatchNamespace,
-              oldWorkerName,
-            );
-            await markDeploymentRetained(c.get('db'), old.id, false);
-          }
-        }
-
-        // Store asset manifest for future preflight dedup
-        if (assetCount > 0) {
-          await c
-            .get('db')
-            .update(deployments)
-            .set({ asset_hashes: JSON.stringify(assetManifest) })
-            .where(eq(deployments.id, deployment.id));
-        }
-
-        const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-        const activeDomains = projectDomains.filter((d) => d.status === 'active');
-        const fullUrl =
-          activeDomains.length > 0
-            ? `https://${activeDomains[0].hostname}`
-            : `https://${project.slug}.${siteDomain}`;
-
-        emit({
-          event: 'done',
-          deployment: deployment.id,
-          url: fullUrl,
-          urls: [
-            ...activeDomains.map((d) => `https://${d.hostname}`),
-            `https://${project.slug}.${siteDomain}`,
-          ],
-          assets: assetCount,
-          workers: workerFiles.length,
-          ...(migrationsApplied > 0 && { migrations: migrationsApplied }),
-        });
-      } catch (err) {
-        const raw = err instanceof Error ? err.message : String(err);
-        const msg = sanitizeDeployErrorMessage(raw);
-        if (msg !== raw) {
-          console.error(`[deploy] raw error before sanitization for ${workerName}: ${raw}`);
-        }
-
-        if (routingSwitched) {
-          // Routing already points to this worker — it IS serving live traffic.
-          // Mark as "live" so DB state matches reality. The late-step failure
-          // (retention cleanup, asset_hashes update, etc.) is non-critical and
-          // will self-correct on the next deploy.
-          console.error(`[deploy] post-routing step failed for ${workerName}: ${msg}`);
-          await updateDeploymentStatus(c.get('db'), deployment.id, 'live', undefined, {
-            force: true,
-          }).catch(() => {});
-          await updateProjectType(
-            c.get('db'),
-            projectId,
-            manifest.type ?? (manifest.framework ? 'framework' : 'void'),
-          ).catch(() => {});
-          await setActiveDeployment(c.get('db'), projectId, deployment.id).catch(() => {});
-          await markDeploymentRetained(c.get('db'), deployment.id, true).catch(() => {});
-          // Emit "done" so the CLI shows success with the URL — the deploy IS live.
-          const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-          const slugUrl = `https://${project.slug}.${siteDomain}`;
-          emit({
-            event: 'done',
-            deployment: deployment.id,
-            url: slugUrl,
-            urls: [slugUrl],
-            assets: 0,
-            workers: 0,
-          });
-        } else {
-          // Routing not yet switched — safe to clean up the worker script and
-          // mark the deployment as failed.
-          const latest = await getDeployment(c.get('db'), deployment.id);
-          const wasCanceled =
-            latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status);
-          await deleteDispatchScript(
-            c.env.CF_ACCOUNT_ID,
-            c.env.CF_API_TOKEN,
-            dispatchNamespace,
-            workerName,
-          ).catch((e) =>
-            console.error(`[deploy] failed to clean up worker script ${workerName}:`, e),
-          );
-          // Clear cron DO if we synced it before the failure (step 2c runs before routing switch)
-          if (cronSynced) {
-            const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
-            await c.env.CRON_SCHEDULER.get(cronId)
-              .fetch(new Request('https://do/clear', { method: 'POST' }))
-              .catch((e) =>
-                console.error(`[deploy] failed to clear cron scheduler for ${projectId}:`, e),
-              );
-          }
-          if (!wasCanceled) {
-            await updateDeploymentStatus(c.get('db'), deployment.id, 'failed', msg);
-          } else {
-            await updateDeploymentStatus(c.get('db'), deployment.id, 'canceled', msg, {
-              force: true,
-            });
-          }
-          emit({ event: 'error', message: msg, step: currentStep });
-          if (!wasCanceled && c.env.EMAIL && user.email) {
-            const dashboardUrl = c.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
-            c.executionCtx.waitUntil(
-              sendDeployFailedEmail(c.env.EMAIL, user.email, project.slug, msg, dashboardUrl).catch(
-                (err) => console.error(`[deploy-failed-email] Failed for ${project.slug}:`, err),
-              ),
-            );
-          }
-        }
-      } finally {
-        clearInterval(heartbeat);
-        if (streamOpen) {
-          streamOpen = false;
-          controller.close();
-        }
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: { 'Content-Type': 'application/x-ndjson' },
-  });
+    preStreamOk = true;
+    return new Response(stream, {
+      headers: { 'Content-Type': 'application/x-ndjson' },
+    });
+  } finally {
+    if (!preStreamOk) {
+      await cleanupStreamedAssetsOnAbort();
+      await cleanupOwnStreamedAssetClaims();
+    }
+  }
 });
 
 // Deploy preflight — returns which assets need uploading based on diff with last deploy

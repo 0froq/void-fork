@@ -202,6 +202,31 @@ class MemoryR2Bucket {
     this.store.set(key, { body, httpMetadata: options?.httpMetadata });
   }
 
+  async get(
+    key: string,
+  ): Promise<{ key: string; size: number; arrayBuffer: () => Promise<ArrayBuffer> } | null> {
+    const entry = this.store.get(key);
+    if (!entry) {
+      return null;
+    }
+    return {
+      key,
+      size: entry.body.byteLength,
+      arrayBuffer: async () => entry.body.slice(0),
+    };
+  }
+
+  async list(options?: {
+    prefix?: string;
+  }): Promise<{ objects: { key: string; size: number }[]; truncated: boolean }> {
+    const prefix = options?.prefix ?? '';
+    const objects = Array.from(this.store.entries())
+      .filter(([key]) => key.startsWith(prefix))
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, entry]) => ({ key, size: entry.body.byteLength }));
+    return { objects, truncated: false };
+  }
+
   async delete(keys: string | string[]): Promise<void> {
     const list = Array.isArray(keys) ? keys : [keys];
     for (const key of list) {
@@ -448,7 +473,8 @@ const defaultMocks: CfApiMocks = {
   uploadWorker: () => new Response('ok', { status: 200 }),
   assetUploadSession: async (_url: string, init?: RequestInit) => {
     // Extract real hashes from the manifest in the request body so the mock
-    // bucket matches what collectAssets actually computed (BLAKE3 hashes).
+    // bucket matches what the streaming deploy route actually computed
+    // (BLAKE3 hashes from readAssetBody / collectBufferedAsset).
     try {
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
       if (body?.manifest) {

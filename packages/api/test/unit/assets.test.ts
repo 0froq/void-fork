@@ -1,12 +1,23 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
-  collectAssets,
+  applyDeclaredAssetManifest,
+  AssetHashMismatchError,
+  cleanupStreamedStaticAssets,
   computeAssetHash,
   createAssetUploadSession,
   deleteUnreferencedAssets,
   uploadAssetBuckets,
   uploadStaticAssets,
+  type AssetEntry,
 } from '../../src/assets';
+
+const enc = new TextEncoder();
+function entry(content: string | Uint8Array, contentType: string): AssetEntry {
+  return {
+    bytes: typeof content === 'string' ? enc.encode(content) : content,
+    contentType,
+  };
+}
 
 function createMockKV() {
   const store = new Map<string, ArrayBuffer>();
@@ -112,49 +123,37 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('collectAssets', () => {
-  it('uses the declared asset manifest after verifying the blob hash without re-reading the blob', async () => {
-    const blob = new Blob(['hello']);
-    const hash = computeAssetHash(await blob.arrayBuffer(), '/index.html');
-    const manifest = {
-      '/index.html': { hash, size: blob.size },
-    };
-    const form = new FormData();
-    form.append('asset:index.html', blob, 'index.html');
-    const arrayBuffer = vi.spyOn(Blob.prototype, 'arrayBuffer');
+describe('applyDeclaredAssetManifest', () => {
+  it('prefers the declared entry when both hash and size match the built entry', () => {
+    const bytes = enc.encode('hello');
+    const hash = computeAssetHash(bytes.buffer, '/index.html');
+    const built = { '/index.html': { hash, size: bytes.length } };
+    const declared = { '/index.html': { hash, size: bytes.length } };
 
-    const result = await collectAssets(form, manifest);
+    const result = applyDeclaredAssetManifest(built, declared);
 
-    expect(result.manifest).toEqual(manifest);
-    expect(result.assetsByHash.has(manifest['/index.html'].hash)).toBe(true);
-    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(result).toEqual(built);
+    expect(result['/index.html']).toBe(declared['/index.html']);
   });
 
-  it('computes the hash when the declared asset size does not match', async () => {
-    const blob = new Blob(['hello']);
-    const form = new FormData();
-    form.append('asset:index.html', blob, 'index.html');
-    const arrayBuffer = vi.spyOn(Blob.prototype, 'arrayBuffer');
+  it('keeps the built entry when the declared size does not match', () => {
+    const bytes = enc.encode('hello');
+    const hash = computeAssetHash(bytes.buffer, '/index.html');
+    const built = { '/index.html': { hash, size: bytes.length } };
+    const declared = { '/index.html': { hash, size: bytes.length + 1 } };
 
-    const result = await collectAssets(form, {
-      '/index.html': { hash: 'a'.repeat(32), size: blob.size + 1 },
-    });
+    const result = applyDeclaredAssetManifest(built, declared);
 
-    expect(result.manifest['/index.html'].hash).not.toBe('a'.repeat(32));
-    expect(result.manifest['/index.html'].size).toBe(blob.size);
-    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(result['/index.html']).toBe(built['/index.html']);
   });
 
-  it('rejects a declared asset hash that does not match same-size content', async () => {
-    const blob = new Blob(['hello']);
-    const form = new FormData();
-    form.append('asset:index.html', blob, 'index.html');
+  it('throws AssetHashMismatchError when the declared hash does not match the built hash', () => {
+    const bytes = enc.encode('hello');
+    const hash = computeAssetHash(bytes.buffer, '/index.html');
+    const built = { '/index.html': { hash, size: bytes.length } };
+    const declared = { '/index.html': { hash: 'a'.repeat(32), size: bytes.length } };
 
-    await expect(
-      collectAssets(form, {
-        '/index.html': { hash: 'a'.repeat(32), size: blob.size },
-      }),
-    ).rejects.toThrow('asset hash mismatch for /index.html');
+    expect(() => applyDeclaredAssetManifest(built, declared)).toThrow(AssetHashMismatchError);
   });
 });
 
@@ -163,12 +162,9 @@ describe('uploadStaticAssets', () => {
     const kv = createMockKV();
     const r2 = createMockR2();
 
-    const smallContent = new Blob(['small file']);
-    const largeContent = new Blob([new ArrayBuffer(KV_THRESHOLD + 1)]); // > 2 MB
-
-    const assetsByHash = new Map([
-      ['smallhash0000000000000000000000', { blob: smallContent, contentType: 'text/html' }],
-      ['largehash0000000000000000000000', { blob: largeContent, contentType: 'video/mp4' }],
+    const assetsByHash = new Map<string, AssetEntry>([
+      ['smallhash0000000000000000000000', entry('small file', 'text/html')],
+      ['largehash0000000000000000000000', entry(new Uint8Array(KV_THRESHOLD + 1), 'video/mp4')],
     ]);
 
     const largeHashes = await uploadStaticAssets(kv, r2, assetsByHash, 'proj_test');
@@ -184,9 +180,9 @@ describe('uploadStaticAssets', () => {
     const r2 = createMockR2();
     kv.store.set('assets/proj_test/existinghash000000000000000000', new ArrayBuffer(1));
 
-    const assetsByHash = new Map([
-      ['existinghash000000000000000000', { blob: new Blob(['exists']), contentType: 'text/html' }],
-      ['newhash00000000000000000000000', { blob: new Blob(['new']), contentType: 'text/css' }],
+    const assetsByHash = new Map<string, AssetEntry>([
+      ['existinghash000000000000000000', entry('exists', 'text/html')],
+      ['newhash00000000000000000000000', entry('new', 'text/css')],
     ]);
 
     await uploadStaticAssets(kv, r2, assetsByHash, 'proj_test');
@@ -206,8 +202,8 @@ describe('uploadStaticAssets', () => {
       kv.store.set(key, toArrayBuffer(value));
     });
 
-    const assetsByHash = new Map([
-      ['retryhash000000000000000000000', { blob: new Blob(['retry']), contentType: 'text/plain' }],
+    const assetsByHash = new Map<string, AssetEntry>([
+      ['retryhash000000000000000000000', entry('retry', 'text/plain')],
     ]);
 
     await uploadStaticAssets(kv, r2, assetsByHash, 'proj_test', { retryDelayMs: 0 });
@@ -224,14 +220,8 @@ describe('uploadStaticAssets', () => {
       new ArrayBuffer(KV_THRESHOLD + 1),
     );
 
-    const assetsByHash = new Map([
-      [
-        'existinglarge00000000000000000',
-        {
-          blob: new Blob([new ArrayBuffer(KV_THRESHOLD + 1)]),
-          contentType: 'video/mp4',
-        },
-      ],
+    const assetsByHash = new Map<string, AssetEntry>([
+      ['existinglarge00000000000000000', entry(new Uint8Array(KV_THRESHOLD + 1), 'video/mp4')],
     ]);
 
     const largeHashes = await uploadStaticAssets(kv, r2, assetsByHash, 'proj_test');
@@ -253,14 +243,8 @@ describe('uploadStaticAssets', () => {
       return { key } as R2Object;
     });
 
-    const assetsByHash = new Map([
-      [
-        'retrylarge00000000000000000000',
-        {
-          blob: new Blob([new ArrayBuffer(KV_THRESHOLD + 1)]),
-          contentType: 'video/mp4',
-        },
-      ],
+    const assetsByHash = new Map<string, AssetEntry>([
+      ['retrylarge00000000000000000000', entry(new Uint8Array(KV_THRESHOLD + 1), 'video/mp4')],
     ]);
 
     const largeHashes = await uploadStaticAssets(kv, r2, assetsByHash, 'proj_test', {
@@ -276,15 +260,15 @@ describe('uploadStaticAssets', () => {
     const kv = createMockKV();
     const r2 = createMockR2();
 
-    const assetsByHash = new Map([
-      ['deadbeef12345678', { blob: new Blob(['test']), contentType: 'text/plain' }],
+    const assetsByHash = new Map<string, AssetEntry>([
+      ['deadbeef12345678', entry('test', 'text/plain')],
     ]);
 
     await uploadStaticAssets(kv, r2, assetsByHash, 'proj_abc123');
 
     expect(kv.put).toHaveBeenCalledWith(
       'assets/proj_abc123/deadbeef12345678',
-      expect.any(ArrayBuffer),
+      expect.any(Uint8Array),
       expect.anything(),
     );
   });
@@ -293,8 +277,8 @@ describe('uploadStaticAssets', () => {
     const kv = createMockKV();
     const r2 = createMockR2();
 
-    const assetsByHash = new Map([
-      ['deadbeef12345678', { blob: new Blob(['test']), contentType: 'text/plain' }],
+    const assetsByHash = new Map<string, AssetEntry>([
+      ['deadbeef12345678', entry('test', 'text/plain')],
     ]);
 
     await uploadStaticAssets(kv, r2, assetsByHash, 'proj_aaa');
@@ -302,12 +286,12 @@ describe('uploadStaticAssets', () => {
 
     expect(kv.put).toHaveBeenCalledWith(
       'assets/proj_aaa/deadbeef12345678',
-      expect.any(ArrayBuffer),
+      expect.any(Uint8Array),
       expect.anything(),
     );
     expect(kv.put).toHaveBeenCalledWith(
       'assets/proj_bbb/deadbeef12345678',
-      expect.any(ArrayBuffer),
+      expect.any(Uint8Array),
       expect.anything(),
     );
   });
@@ -376,10 +360,114 @@ describe('deleteUnreferencedAssets', () => {
   });
 });
 
+describe('cleanupStreamedStaticAssets', () => {
+  it('removes retained entries from the tracking map without deleting them', async () => {
+    const kv = createMockKV();
+    const r2 = createMockR2();
+    kv.store.set('assets/proj_test/hash_live', new ArrayBuffer(4));
+
+    const uploaded = new Map<string, 'kv' | 'r2'>([['hash_live', 'kv']]);
+    const retainedHashes = new Set(['hash_live']);
+
+    await cleanupStreamedStaticAssets(kv, r2, 'proj_test', uploaded, retainedHashes);
+
+    expect(kv.delete).not.toHaveBeenCalled();
+    expect(r2.delete).not.toHaveBeenCalled();
+    expect(kv.store.has('assets/proj_test/hash_live')).toBe(true);
+    expect(uploaded.size).toBe(0);
+  });
+
+  it('deletes unreferenced entries from their recorded store and clears them', async () => {
+    const kv = createMockKV();
+    const r2 = createMockR2();
+    kv.store.set('assets/proj_test/hash_a', new ArrayBuffer(4));
+    r2.store.set('assets/proj_test/hash_b', new ArrayBuffer(4));
+
+    const uploaded = new Map<string, 'kv' | 'r2'>([
+      ['hash_a', 'kv'],
+      ['hash_b', 'r2'],
+    ]);
+
+    await cleanupStreamedStaticAssets(kv, r2, 'proj_test', uploaded, new Set());
+
+    expect(kv.store.has('assets/proj_test/hash_a')).toBe(false);
+    expect(r2.store.has('assets/proj_test/hash_b')).toBe(false);
+    expect(uploaded.size).toBe(0);
+  });
+
+  it('only targets the recorded store, not both', async () => {
+    const kv = createMockKV();
+    const r2 = createMockR2();
+    kv.store.set('assets/proj_test/hash_r2only', new ArrayBuffer(4));
+    r2.store.set('assets/proj_test/hash_r2only', new ArrayBuffer(4));
+
+    const uploaded = new Map<string, 'kv' | 'r2'>([['hash_r2only', 'r2']]);
+
+    await cleanupStreamedStaticAssets(kv, r2, 'proj_test', uploaded, new Set());
+
+    // Only the R2 copy (the recorded store) is touched.
+    expect(r2.delete).toHaveBeenCalledTimes(1);
+    expect(kv.delete).not.toHaveBeenCalled();
+    expect(r2.store.has('assets/proj_test/hash_r2only')).toBe(false);
+    // KV still holds its copy (no phantom delete).
+    expect(kv.store.has('assets/proj_test/hash_r2only')).toBe(true);
+  });
+
+  it('retains failed hashes in the map so a later retry can re-attempt them', async () => {
+    const kv = createMockKV();
+    const r2 = createMockR2();
+    kv.store.set('assets/proj_test/hash_fail', new ArrayBuffer(4));
+    kv.store.set('assets/proj_test/hash_ok', new ArrayBuffer(4));
+
+    let kvFailOnce = true;
+    // First call for hash_fail throws; second call (retry) succeeds.
+    kv.delete = vi.fn(async (key: string) => {
+      if (key === 'assets/proj_test/hash_fail' && kvFailOnce) {
+        kvFailOnce = false;
+        throw new Error('transient KV failure');
+      }
+      kv.store.delete(key);
+    });
+
+    const uploaded = new Map<string, 'kv' | 'r2'>([
+      ['hash_fail', 'kv'],
+      ['hash_ok', 'kv'],
+    ]);
+
+    await cleanupStreamedStaticAssets(kv, r2, 'proj_test', uploaded, new Set());
+
+    // First pass: hash_ok was deleted, hash_fail is still in the tracking
+    // map so an outer-finally retry can re-attempt it.
+    expect(uploaded.has('hash_ok')).toBe(false);
+    expect(uploaded.has('hash_fail')).toBe(true);
+    expect(kv.store.has('assets/proj_test/hash_fail')).toBe(true);
+
+    // Retry pass with a fresh call — hash_fail now deletes cleanly and is
+    // removed from the tracking map.
+    await cleanupStreamedStaticAssets(kv, r2, 'proj_test', uploaded, new Set());
+    expect(uploaded.size).toBe(0);
+    expect(kv.store.has('assets/proj_test/hash_fail')).toBe(false);
+  });
+
+  it('revalidates a hash with shouldProtectHash immediately before delete', async () => {
+    const kv = createMockKV();
+    const r2 = createMockR2();
+    kv.store.set('assets/proj_test/hash_late', new ArrayBuffer(4));
+
+    const uploaded = new Map<string, 'kv' | 'r2'>([['hash_late', 'kv']]);
+    const shouldProtectHash = vi.fn(async (hash: string) => hash === 'hash_late');
+
+    await cleanupStreamedStaticAssets(kv, r2, 'proj_test', uploaded, new Set(), shouldProtectHash);
+
+    expect(shouldProtectHash).toHaveBeenCalledWith('hash_late');
+    expect(kv.delete).not.toHaveBeenCalled();
+    expect(kv.store.has('assets/proj_test/hash_late')).toBe(true);
+    expect(uploaded.size).toBe(0);
+  });
+});
+
 describe('uploadAssetBuckets', () => {
-  const singleAssetMap = new Map([
-    ['hash1', { blob: new Blob(['hello']), contentType: 'text/plain' }],
-  ]);
+  const singleAssetMap = new Map<string, AssetEntry>([['hash1', entry('hello', 'text/plain')]]);
   const opts = { retryDelayMs: 0, gatewayDelayMs: 0 };
 
   it('returns session JWT directly when buckets are empty (all cached)', async () => {
@@ -424,8 +512,7 @@ describe('uploadAssetBuckets', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('streams base64 multipart asset bodies without reading blobs into arrayBuffers', async () => {
-    const arrayBuffer = vi.spyOn(Blob.prototype, 'arrayBuffer');
+  it('streams base64 multipart asset bodies with correct headers and encoded content', async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       expect(init?.headers).toMatchObject({
         Authorization: 'Bearer session-jwt',
@@ -450,7 +537,6 @@ describe('uploadAssetBuckets', () => {
     );
 
     expect(completionJwt).toBe('completion-jwt');
-    expect(arrayBuffer).not.toHaveBeenCalled();
   });
 
   it('retries on 5xx errors and succeeds', async () => {
@@ -493,9 +579,9 @@ describe('uploadAssetBuckets', () => {
       'acct',
       'session-jwt',
       [['hash1'], ['hash2']],
-      new Map([
-        ['hash1', { blob: new Blob(['a']), contentType: 'text/plain' }],
-        ['hash2', { blob: new Blob(['b']), contentType: 'text/plain' }],
+      new Map<string, AssetEntry>([
+        ['hash1', entry('a', 'text/plain')],
+        ['hash2', entry('b', 'text/plain')],
       ]),
       opts,
     );
@@ -514,9 +600,9 @@ describe('uploadAssetBuckets', () => {
       'acct',
       'session-jwt',
       [['hash1'], ['hash2']],
-      new Map([
-        ['hash1', { blob: new Blob(['a']), contentType: 'text/plain' }],
-        ['hash2', { blob: new Blob(['b']), contentType: 'text/plain' }],
+      new Map<string, AssetEntry>([
+        ['hash1', entry('a', 'text/plain')],
+        ['hash2', entry('b', 'text/plain')],
       ]),
       opts,
     );
@@ -637,10 +723,10 @@ describe('uploadAssetBuckets', () => {
       'acct',
       'session-jwt',
       [['h1'], ['h2'], ['h3']],
-      new Map([
-        ['h1', { blob: new Blob(['a']), contentType: 'text/plain' }],
-        ['h2', { blob: new Blob(['b']), contentType: 'text/plain' }],
-        ['h3', { blob: new Blob(['c']), contentType: 'text/plain' }],
+      new Map<string, AssetEntry>([
+        ['h1', entry('a', 'text/plain')],
+        ['h2', entry('b', 'text/plain')],
+        ['h3', entry('c', 'text/plain')],
       ]),
       opts,
     );

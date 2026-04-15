@@ -2,7 +2,17 @@ import { extname } from 'node:path';
 import { createHasher, hash as blake3hash } from 'blake3-jit';
 import mime from 'mime';
 import { retryWithBackoff } from './cf-api';
+import { type BufferedBudget, PartTooLargeError } from './multipart';
 import type { AssetConfig } from './types';
+
+/**
+ * Per-asset body cap. Enforced while the part is still streaming, so a single
+ * oversized asset (image, video, etc.) never materializes into Worker memory.
+ * Sized to cover legitimate large binary assets (SPAs with fonts/videos) while
+ * bounding peak memory well under the 128 MiB request budget even when
+ * multiple assets arrive back-to-back.
+ */
+export const MAX_ASSET_BYTES = 50 * 1024 * 1024; // 50 MiB
 
 class AssetUploadError extends Error {
   constructor(
@@ -22,7 +32,7 @@ export interface AssetManifestEntry {
 }
 
 export interface AssetEntry {
-  blob: Blob;
+  bytes: Uint8Array;
   contentType: string;
 }
 
@@ -364,7 +374,7 @@ function createBase64MultipartBody(parts: AssetUploadPart[]): {
               `Content-Type: ${entry.contentType}\r\n\r\n`,
           ),
         );
-        await writeBase64Blob(writer, entry.blob);
+        await writeBase64Bytes(writer, entry.bytes);
         await writer.write(textEncoder.encode('\r\n'));
       }
       await writer.write(textEncoder.encode(`--${boundary}--\r\n`));
@@ -377,40 +387,21 @@ function createBase64MultipartBody(parts: AssetUploadPart[]): {
   return { body: readable, contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
-async function writeBase64Blob(
+// Emit base64 of `bytes` to `writer` in bounded chunks so a large asset is
+// never rendered into a single mega-allocation. Chunks are aligned to 3 bytes
+// (base64's natural boundary) except for the final tail, which pads as usual.
+async function writeBase64Bytes(
   writer: WritableStreamDefaultWriter<Uint8Array>,
-  blob: Blob,
+  bytes: Uint8Array,
 ): Promise<void> {
-  const reader = blob.stream().getReader();
-  let carry = new Uint8Array(0);
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      let bytes = value;
-      if (carry.length > 0) {
-        bytes = new Uint8Array(carry.length + value.length);
-        bytes.set(carry);
-        bytes.set(value, carry.length);
-        carry = new Uint8Array(0);
-      }
-
-      const encodableLength = bytes.length - (bytes.length % 3);
-      if (encodableLength > 0) {
-        await writer.write(textEncoder.encode(bytesToBase64(bytes.subarray(0, encodableLength))));
-      }
-      carry = bytes.slice(encodableLength);
-    }
-
-    if (carry.length > 0) {
-      await writer.write(textEncoder.encode(bytesToBase64(carry)));
-    }
-  } finally {
-    reader.releaseLock();
+  const STEP = 48 * 1024; // 48 KiB raw → 64 KiB of base64 output
+  let offset = 0;
+  while (offset + STEP < bytes.length) {
+    await writer.write(textEncoder.encode(bytesToBase64(bytes.subarray(offset, offset + STEP))));
+    offset += STEP;
+  }
+  if (offset < bytes.length) {
+    await writer.write(textEncoder.encode(bytesToBase64(bytes.subarray(offset))));
   }
 }
 
@@ -440,89 +431,201 @@ function updateBase64Hash(hasher: ReturnType<typeof createHasher>, bytes: Uint8A
   hasher.update(textEncoder.encode(bytesToBase64(bytes)));
 }
 
-async function computeAssetHashFromBlob(blob: Blob, filePath: string): Promise<string> {
+/**
+ * Stream-read a multipart asset body with a hard per-asset byte cap, hashing
+ * incrementally as bytes arrive and assembling them into a single Uint8Array
+ * at the end. The running total is checked after every reader chunk, so a
+ * payload that exceeds `maxBytes` throws `PartTooLargeError` the instant it
+ * crosses the cap — the full-size allocation is never reached. Replaces the
+ * previous `await new Response(body).blob()` → `blob.arrayBuffer()` pipeline
+ * that held each asset in memory twice and had no cap at all.
+ */
+async function readAssetBody(
+  body: ReadableStream<Uint8Array>,
+  path: string,
+  maxBytes: number,
+  budget?: BufferedBudget,
+): Promise<{ bytes: Uint8Array; hash: string; size: number }> {
   const hasher = createHasher();
-  const reader = blob.stream().getReader();
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
   let carry = new Uint8Array(0);
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value.length === 0) {
+        continue;
+      }
+      total += value.length;
+      if (total > maxBytes) {
+        throw new PartTooLargeError(`asset:${path}`, maxBytes);
+      }
+      if (budget && budget.used + total > budget.limit) {
+        throw new PartTooLargeError('aggregate buffered deploy payload', budget.limit);
+      }
+      chunks.push(value);
 
-    let bytes = value;
-    if (carry.length > 0) {
-      bytes = new Uint8Array(carry.length + value.length);
-      bytes.set(carry);
-      bytes.set(value, carry.length);
-      carry = new Uint8Array(0);
+      // Hash incrementally on 3-byte-aligned blocks so we never need to
+      // re-base64 the whole payload at the end.
+      let combined = value;
+      if (carry.length > 0) {
+        combined = new Uint8Array(carry.length + value.length);
+        combined.set(carry);
+        combined.set(value, carry.length);
+        carry = new Uint8Array(0);
+      }
+      const hashableLength = combined.length - (combined.length % 3);
+      if (hashableLength > 0) {
+        updateBase64Hash(hasher, combined.subarray(0, hashableLength));
+      }
+      carry = combined.slice(hashableLength);
     }
-
-    const hashableLength = bytes.length - (bytes.length % 3);
-    updateBase64Hash(hasher, bytes.subarray(0, hashableLength));
-    carry = bytes.slice(hashableLength);
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Reader may already be in a terminal state; nothing to release.
+    }
   }
 
   updateBase64Hash(hasher, carry);
-  hasher.update(textEncoder.encode(extname(filePath).substring(1)));
-  return digestToAssetHash(hasher.finalize());
+  hasher.update(textEncoder.encode(extname(path).substring(1)));
+  const hash = digestToAssetHash(hasher.finalize());
+
+  if (budget) {
+    budget.used += total;
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return { bytes, hash, size: total };
+}
+
+export class AssetHashMismatchError extends Error {}
+
+/**
+ * Buffer one multipart asset part into memory, hash it, and write it straight
+ * to KV (if small) or R2 (if large). Used by the static-only deploy path so
+ * that peak memory is bounded by one asset at a time instead of the entire
+ * multipart upload.
+ *
+ * The caller passes a persistent `uploadedHashes` map; if the same content
+ * hash has already been uploaded in this deploy, the upload is skipped
+ * (matching the dedupe semantics of the buffered `assetsByHash` path) and
+ * `isNew` is returned as false.
+ */
+export async function collectAndUploadStaticAsset(
+  kv: KVNamespace,
+  r2: R2Bucket,
+  projectId: string,
+  path: string,
+  body: ReadableStream<Uint8Array>,
+  uploadedHashes: Map<string, 'kv' | 'r2'>,
+  {
+    retryDelayMs = STATIC_ASSET_UPLOAD_RETRY_DELAY_MS,
+    maxBytes = MAX_ASSET_BYTES,
+    budget,
+    onHashed,
+  }: {
+    retryDelayMs?: number;
+    maxBytes?: number;
+    budget?: BufferedBudget;
+    onHashed?: (hash: string) => Promise<void> | void;
+  } = {},
+): Promise<{ entry: AssetManifestEntry; hash: string; store: 'kv' | 'r2'; isNew: boolean }> {
+  // The streamed static path buffers one asset at a time and releases its
+  // bytes back to GC as soon as the upload completes. Thread `budget` through
+  // `readAssetBody` so the aggregate request budget still catches "big text
+  // parts already resident + one large streamed asset" combos, but scope the
+  // charge to this function's lifetime: on success, `readAssetBody`
+  // increments `budget.used`; the `finally` below decrements it once the
+  // upload is done (or on throw), so streamed assets do not permanently
+  // consume the aggregate allowance.
+  const { bytes, hash, size } = await readAssetBody(body, path, maxBytes, budget);
+  try {
+    await onHashed?.(hash);
+    const cached = uploadedHashes.get(hash);
+    if (cached) {
+      return { entry: { hash, size }, hash, store: cached, isNew: false };
+    }
+    const assetEntry: AssetEntry = { bytes, contentType: getContentType(path) };
+    const key = `assets/${projectId}/${hash}`;
+    const store = await uploadStaticAssetWithRetries(kv, r2, key, assetEntry, retryDelayMs);
+    uploadedHashes.set(hash, store);
+    return { entry: { hash, size }, hash, store, isNew: true };
+  } finally {
+    if (budget) {
+      budget.used -= size;
+    }
+  }
 }
 
 /**
- * Collect assets from FormData and build the CF asset manifest + hash→entry map.
+ * Stream-read one multipart asset part into memory with a hard per-asset size
+ * cap, hashing incrementally. Used by the worker-backed deploy path, where
+ * assets are later uploaded to CF via the asset upload session API and must
+ * be held in memory until then. Rejects oversized parts (via
+ * `PartTooLargeError`) the moment the cap is crossed, so a single runaway
+ * asset can never force the 128 MiB request budget over the edge.
  */
-function getDeclaredAssetEntry(
-  declaredManifest: Record<string, AssetManifestEntry> | undefined,
+export async function collectBufferedAsset(
   path: string,
-  blob: Blob,
-): AssetManifestEntry | undefined {
-  const entry = declaredManifest?.[path];
-  if (
-    entry &&
-    typeof entry.hash === 'string' &&
-    entry.hash.length === 32 &&
-    Number.isFinite(entry.size) &&
-    entry.size >= 0 &&
-    entry.size === blob.size
-  ) {
-    return entry;
-  }
+  body: ReadableStream<Uint8Array>,
+  { maxBytes = MAX_ASSET_BYTES, budget }: { maxBytes?: number; budget?: BufferedBudget } = {},
+): Promise<{ entry: AssetManifestEntry; hash: string; assetEntry: AssetEntry }> {
+  const { bytes, hash, size } = await readAssetBody(body, path, maxBytes, budget);
+  return {
+    entry: { hash, size },
+    hash,
+    assetEntry: { bytes, contentType: getContentType(path) },
+  };
 }
 
-class AssetHashMismatchError extends Error {}
-
-export async function collectAssets(
-  formData: FormData,
-  declaredManifest?: Record<string, AssetManifestEntry>,
-): Promise<{
-  manifest: Record<string, AssetManifestEntry>;
-  assetsByHash: Map<string, AssetEntry>;
-}> {
-  const manifest: Record<string, AssetManifestEntry> = {};
-  const assetsByHash = new Map<string, AssetEntry>();
-
-  for (const [key, value] of formData.entries()) {
-    if (key.startsWith('asset:')) {
-      const path = '/' + key.slice('asset:'.length);
-      const blob = value as Blob;
-      const declaredEntry = getDeclaredAssetEntry(declaredManifest, path, blob);
-      const hash = await computeAssetHashFromBlob(blob, path);
-      if (declaredEntry && declaredEntry.hash !== hash) {
+/**
+ * Merge a declared (client-sent) asset manifest into a built-from-content manifest.
+ * Validates that declared hashes match what we computed; if so, prefers the declared
+ * entry verbatim so the upload manifest matches what the CLI sent.
+ */
+export function applyDeclaredAssetManifest(
+  built: Record<string, AssetManifestEntry>,
+  declared: Record<string, AssetManifestEntry> | undefined,
+): Record<string, AssetManifestEntry> {
+  // Always return a fresh object so callers may freely mutate the result
+  // (e.g. preflight fill-ins) without reaching back through a shared reference
+  // into the builder's state.
+  const result: Record<string, AssetManifestEntry> = { ...built };
+  if (!declared) {
+    return result;
+  }
+  for (const [path, entry] of Object.entries(built)) {
+    const d = declared[path];
+    if (
+      d &&
+      typeof d.hash === 'string' &&
+      d.hash.length === 32 &&
+      Number.isFinite(d.size) &&
+      d.size >= 0
+    ) {
+      if (d.hash !== entry.hash) {
         throw new AssetHashMismatchError(
-          `asset hash mismatch for ${path}: declared ${declaredEntry.hash}, computed ${hash}`,
+          `asset hash mismatch for ${path}: declared ${d.hash}, computed ${entry.hash}`,
         );
       }
-
-      manifest[path] = declaredEntry ?? { hash, size: blob.size };
-      assetsByHash.set(hash, {
-        blob,
-        contentType: getContentType(path),
-      });
+      if (d.size === entry.size) {
+        result[path] = d;
+      }
     }
   }
-
-  return { manifest, assetsByHash };
+  return result;
 }
 
 /**
@@ -571,8 +674,7 @@ async function uploadStaticAssetWithRetries(
   entry: AssetEntry,
   retryDelayMs: number,
 ): Promise<'kv' | 'r2'> {
-  const buffer = await entry.blob.arrayBuffer();
-  const store = buffer.byteLength >= KV_THRESHOLD ? 'r2' : 'kv';
+  const store = entry.bytes.byteLength >= KV_THRESHOLD ? 'r2' : 'kv';
   let lastErr: unknown;
 
   for (let attempt = 0; attempt <= STATIC_ASSET_UPLOAD_MAX_RETRIES; attempt++) {
@@ -582,11 +684,11 @@ async function uploadStaticAssetWithRetries(
 
     try {
       if (store === 'r2') {
-        await r2.put(key, buffer, {
+        await r2.put(key, entry.bytes, {
           httpMetadata: { contentType: entry.contentType },
         });
       } else {
-        await kv.put(key, buffer, {
+        await kv.put(key, entry.bytes, {
           metadata: { ct: entry.contentType },
         });
       }
@@ -638,6 +740,76 @@ export async function uploadStaticAssets(
     ),
   );
   return largeHashes;
+}
+
+/**
+ * Best-effort cleanup of assets that were streamed into KV/R2 before a deploy
+ * parse failure. Only deletes hashes that are NOT referenced by any retained
+ * deployment, so aborting a retry never evicts content that a previous
+ * successful deploy still depends on. Failures are logged and swallowed — the
+ * caller is already on the error path and must not mask the underlying cause.
+ *
+ * Each entry is removed from `uploaded` only after its store successfully
+ * drops the key (or, for retained hashes, once we've confirmed it is
+ * protected). Entries whose delete throws are left in the map so a later
+ * cleanup pass (outer finally retry) can re-attempt them instead of leaking
+ * them into KV/R2 permanently.
+ */
+export async function cleanupStreamedStaticAssets(
+  kv: KVNamespace,
+  r2: R2Bucket,
+  projectId: string,
+  uploaded: Map<string, 'kv' | 'r2'>,
+  retainedHashes: Set<string>,
+  shouldProtectHash?: (hash: string) => Promise<boolean>,
+): Promise<void> {
+  if (uploaded.size === 0) {
+    return;
+  }
+
+  // Retained hashes are live in at least one protected deployment — we must
+  // not delete them, and they do not need to be retried on the next pass.
+  // Iterating uploaded.keys() while deleting is well-defined per ECMAScript:
+  // the Map iterator skips entries that were already visited or deleted.
+  for (const hash of uploaded.keys()) {
+    if (retainedHashes.has(hash)) {
+      uploaded.delete(hash);
+    }
+  }
+  if (uploaded.size === 0) {
+    return;
+  }
+
+  // Targeted per-store deletes. The map records whether each hash landed in
+  // KV or R2 so we skip the belt-and-suspenders double-delete and, more
+  // importantly, only clear entries that actually succeeded.
+  let failureCount = 0;
+  for (const [hash, store] of uploaded) {
+    const key = `assets/${projectId}/${hash}`;
+    try {
+      if (await shouldProtectHash?.(hash)) {
+        uploaded.delete(hash);
+        continue;
+      }
+      if (store === 'r2') {
+        await r2.delete(key);
+      } else {
+        await kv.delete(key);
+      }
+      uploaded.delete(hash);
+    } catch (err) {
+      failureCount++;
+      console.warn(
+        `[assets] cleanup failed for ${hash} in ${store}`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  if (failureCount > 0) {
+    console.warn(
+      `[assets] cleanup after parse failure retained ${failureCount} hash(es) for retry`,
+    );
+  }
 }
 
 /**
