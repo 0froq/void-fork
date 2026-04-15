@@ -11,6 +11,7 @@ export interface VisitOptions {
   data?: unknown;
   preserveScroll?: boolean;
   preserveState?: boolean;
+  replace?: boolean;
   viewTransition?: boolean;
   /** @internal Used by popstate handler to pass saved scroll position */
   _scrollPosition?: { x: number; y: number } | null;
@@ -430,8 +431,12 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
           !options.data &&
           !options.preserveState
         ) {
-          history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, '');
-          history.pushState({}, '', effectiveFetchUrl + hash);
+          if (options.replace) {
+            history.replaceState({}, '', effectiveFetchUrl + hash);
+          } else {
+            history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, '');
+            history.pushState({}, '', effectiveFetchUrl + hash);
+          }
           const el = document.getElementById(hash.slice(1));
           if (el) {
             el.scrollIntoView();
@@ -549,7 +554,12 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
               window.location.href = method === 'GET' ? url : response.url;
               return;
             }
-            return router.visit(redirectUrl.pathname + redirectUrl.search + redirectUrl.hash);
+            return router.visit(redirectUrl.pathname + redirectUrl.search + redirectUrl.hash, {
+              preserveScroll: options.preserveScroll,
+              preserveState: options.preserveState,
+              replace: options.replace,
+              viewTransition: options.viewTransition,
+            });
           }
 
           if (response && !response.headers.get('X-VoidPages')) {
@@ -673,8 +683,13 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
         applyClientHead(pageData.head);
 
         if (!options.preserveState) {
-          history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, '');
-          history.pushState({}, '', pageData.url + hash);
+          const historyUrl = effectiveFetchUrl + hash;
+          if (options.replace) {
+            history.replaceState({}, '', historyUrl);
+          } else {
+            history.replaceState({ scrollX: window.scrollX, scrollY: window.scrollY }, '');
+            history.pushState({}, '', historyUrl);
+          }
         }
 
         // Scroll logic — runs after DOM update
@@ -716,6 +731,11 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
     },
 
     prefetch(url, options = {}) {
+      const method = (options.method || 'GET').toUpperCase();
+      if (method !== 'GET') {
+        throw new Error('router.prefetch() only supports GET requests.');
+      }
+
       const id = matchRoute(url);
       if (!id) {
         return;
@@ -746,7 +766,6 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
       const hashIdx = url.indexOf('#');
       const prefetchUrl = hashIdx !== -1 ? url.slice(0, hashIdx) : url;
 
-      const method = (options.method || 'GET').toUpperCase();
       if (_prefetchCache.has(prefetchUrl, method)) {
         return;
       }
