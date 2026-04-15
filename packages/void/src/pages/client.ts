@@ -50,6 +50,8 @@ export interface PageRouterConfig {
   layoutTree: Record<string, string[]>;
   routeMeta: Record<string, { island?: boolean }>;
   matchRoute(url: string): string | null;
+  staticPageData?: boolean;
+  staticPageDataFastPath?: boolean;
   viewTransitions: boolean;
   prefetchHoverDelay: number;
   prefetchDefaultCacheFor: CacheForResult;
@@ -144,6 +146,8 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
     layoutTree,
     routeMeta,
     matchRoute,
+    staticPageData: STATIC_PAGE_DATA_ENABLED = false,
+    staticPageDataFastPath: STATIC_PAGE_DATA_FAST_PATH = STATIC_PAGE_DATA_ENABLED,
     viewTransitions: VIEW_TRANSITIONS_ENABLED,
     prefetchHoverDelay: PREFETCH_HOVER_DELAY,
     prefetchDefaultCacheFor: PREFETCH_DEFAULT_CACHE_FOR,
@@ -227,18 +231,24 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
     );
   }
 
-  async function loadStaticPageData(
+  async function fetchPageResponse(fetchUrl: string, init: RequestInit): Promise<Response | null> {
+    try {
+      return await fetch(fetchUrl, init);
+    } catch (error) {
+      if (init.signal?.aborted || isAbortError(error)) {
+        throw error;
+      }
+      return null;
+    }
+  }
+
+  async function loadStaticPageDataFile(
     fetchUrl: string,
-    response: Response,
     signal?: AbortSignal,
   ): Promise<{
     pageData: any;
     resolvedDeferred: boolean;
   } | null> {
-    if (!response.ok) {
-      return null;
-    }
-
     const matchedId = matchRoute(fetchUrl || window.location.pathname + window.location.search);
     if (!matchedId || routeMeta[matchedId]?.island || !components[matchedId]) {
       return null;
@@ -262,9 +272,46 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
       // Fall back to parsing the HTML response below.
     }
 
+    return null;
+  }
+
+  async function loadStaticPageData(
+    fetchUrl: string,
+    response: Response,
+    signal?: AbortSignal,
+    verifyPageResponse = false,
+  ): Promise<{
+    pageData: any;
+    resolvedDeferred: boolean;
+  } | null> {
+    if (!response.ok) {
+      return null;
+    }
+
+    const matchedId = matchRoute(fetchUrl || window.location.pathname + window.location.search);
+    if (!matchedId || routeMeta[matchedId]?.island || !components[matchedId]) {
+      return null;
+    }
+
     const contentType = response.headers.get('content-type') || '';
     if (contentType && !contentType.includes('text/html')) {
       return null;
+    }
+
+    if (verifyPageResponse) {
+      const pageData = parsePageDataFromHtml(await response.text());
+      if (!isUsablePageData(pageData, matchedId)) {
+        return null;
+      }
+      if (!pageData.deferredKeys) {
+        return { pageData, resolvedDeferred: false };
+      }
+      return loadStaticPageDataFile(fetchUrl, signal);
+    }
+
+    const filePageData = await loadStaticPageDataFile(fetchUrl, signal);
+    if (filePageData) {
+      return filePageData;
     }
 
     const pageData = parsePageDataFromHtml(await response.text());
@@ -427,24 +474,72 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
               Accept: 'application/json',
               Purpose: 'prefetch',
             };
-            const bgFetch = fetch(fetchUrl, { method, headers: bgHeaders }).then(async (r) => {
-              if (!r.headers.get('X-VoidPages')) {
-                return (await loadStaticPageData(fetchUrl, r))?.pageData ?? null;
+            const bgFetch = (
+              STATIC_PAGE_DATA_ENABLED && STATIC_PAGE_DATA_FAST_PATH && method === 'GET'
+                ? loadStaticPageDataFile(fetchUrl).then((result) => result?.pageData)
+                : Promise.resolve(undefined)
+            ).then((pageData) => {
+              if (pageData !== undefined) {
+                return pageData;
               }
-              return r.json();
+              return fetchPageResponse(fetchUrl, { method, headers: bgHeaders }).then(async (r) => {
+                if (!r) {
+                  return null;
+                }
+                if (r.redirected) {
+                  return null;
+                }
+                if (!r.headers.get('X-VoidPages')) {
+                  return (
+                    (await loadStaticPageData(fetchUrl, r, undefined, !STATIC_PAGE_DATA_FAST_PATH))
+                      ?.pageData ?? null
+                  );
+                }
+                return r.json();
+              });
             });
             _prefetchCache.set(fetchUrl, method, bgFetch, PREFETCH_DEFAULT_CACHE_FOR);
           }
         } else {
-          const response = await fetch(fetchUrl, fetchOptions);
-
-          if (response.redirected) {
-            return router.visit(response.url);
+          if (method === 'GET' && STATIC_PAGE_DATA_ENABLED && STATIC_PAGE_DATA_FAST_PATH) {
+            const staticPageData = await loadStaticPageDataFile(fetchUrl, visitSignal);
+            if (staticPageData) {
+              pageData = staticPageData.pageData;
+              if (staticPageData.resolvedDeferred) {
+                wrapResolvedDeferredProps(pageData);
+              }
+            }
           }
 
-          if (!response.headers.get('X-VoidPages')) {
+          const response =
+            pageData === undefined
+              ? method === 'GET'
+                ? await fetchPageResponse(fetchUrl, fetchOptions)
+                : await fetch(fetchUrl, fetchOptions)
+              : null;
+
+          if (pageData === undefined && !response) {
+            window.location.href = url;
+            return;
+          }
+
+          if (response?.redirected) {
+            const redirectUrl = new URL(response.url, window.location.origin);
+            if (redirectUrl.origin !== window.location.origin) {
+              window.location.href = method === 'GET' ? url : response.url;
+              return;
+            }
+            return router.visit(redirectUrl.pathname + redirectUrl.search + redirectUrl.hash);
+          }
+
+          if (response && !response.headers.get('X-VoidPages')) {
             if (method === 'GET') {
-              const staticPageData = await loadStaticPageData(fetchUrl, response, visitSignal);
+              const staticPageData = await loadStaticPageData(
+                fetchUrl,
+                response,
+                visitSignal,
+                !STATIC_PAGE_DATA_FAST_PATH,
+              );
               if (staticPageData) {
                 pageData = staticPageData.pageData;
                 if (staticPageData.resolvedDeferred) {
@@ -460,12 +555,12 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
             }
           }
 
-          const contentType = response.headers.get('content-type') || '';
+          const contentType = response?.headers.get('content-type') || '';
 
           if (pageData !== undefined) {
             // Static page-data fallback already loaded the page object.
           } else if (contentType.includes('application/x-ndjson')) {
-            const reader = response.body!.getReader();
+            const reader = response!.body!.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
             let firstLine = true;
@@ -535,7 +630,7 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
               }
             })();
           } else {
-            pageData = await response.json();
+            pageData = await response!.json();
           }
         }
 
@@ -641,14 +736,31 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
         Accept: 'application/json',
         Purpose: 'prefetch',
       };
-      const fetchPromise = fetch(prefetchUrl, { method, headers }).then((r) => {
-        if (!r.headers.get('X-VoidPages')) {
-          if (method !== 'GET') {
+      const fetchPromise = (
+        STATIC_PAGE_DATA_ENABLED && STATIC_PAGE_DATA_FAST_PATH && method === 'GET'
+          ? loadStaticPageDataFile(prefetchUrl).then((result) => result?.pageData)
+          : Promise.resolve(undefined)
+      ).then((pageData) => {
+        if (pageData !== undefined) {
+          return pageData;
+        }
+        return fetchPageResponse(prefetchUrl, { method, headers }).then((r) => {
+          if (!r) {
             return null;
           }
-          return loadStaticPageData(prefetchUrl, r).then((result) => result?.pageData ?? null);
-        }
-        return r.json();
+          if (r.redirected) {
+            return null;
+          }
+          if (!r.headers.get('X-VoidPages')) {
+            if (method !== 'GET') {
+              return null;
+            }
+            return loadStaticPageData(prefetchUrl, r, undefined, !STATIC_PAGE_DATA_FAST_PATH).then(
+              (result) => result?.pageData ?? null,
+            );
+          }
+          return r.json();
+        });
       });
       _prefetchCache.set(prefetchUrl, method, fetchPromise, ttl);
     },
