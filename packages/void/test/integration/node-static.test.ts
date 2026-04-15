@@ -228,6 +228,47 @@ describe('playground/node-static build (target: node, output: static)', () => {
     }
   });
 
+  it('reuses on-demand static page data for non-prefetched Link routes', async () => {
+    const browser = await chromium.launch();
+    const page = await browser.newPage();
+    page.setDefaultTimeout(10_000);
+
+    try {
+      await page.goto(`${staticBase}/`);
+      await page.waitForSelector('#app[data-hydrated="true"]');
+
+      const requests: string[] = [];
+      page.on('request', (request) => {
+        const url = request.url();
+        if (url.startsWith(staticBase)) {
+          requests.push(`${request.resourceType()} ${url.slice(staticBase.length)}`);
+        }
+      });
+
+      await page.evaluate(() => {
+        (document.querySelector('a[href="/legacy"]') as HTMLAnchorElement).click();
+      });
+      await page.waitForSelector('[data-testid="legacy-title"]');
+
+      await page.evaluate(() => {
+        (document.querySelector('a[href="/"]') as HTMLAnchorElement).click();
+      });
+      await page.waitForSelector('[data-testid="home-title"]');
+
+      await page.evaluate(() => {
+        (document.querySelector('a[href="/legacy"]') as HTMLAnchorElement).click();
+      });
+      await page.waitForSelector('[data-testid="legacy-title"]');
+
+      expect(
+        requests.filter((request) => request === 'fetch /_void/pages/legacy.json'),
+      ).toHaveLength(1);
+    } finally {
+      await page.close();
+      await browser.close();
+    }
+  });
+
   it('collects prerender paths from the built node app endpoint', async () => {
     const paths = await collectPrerenderPathsNode({
       root: join(ROOT, PLAYGROUND),

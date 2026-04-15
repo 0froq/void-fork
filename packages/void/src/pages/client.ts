@@ -154,6 +154,15 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
   } = config;
 
   const _prefetchCache = new PrefetchCache();
+  const _staticPageDataCacheKeys = new Set<string>();
+
+  function getPageDataCacheKey(url: string, method = 'GET'): string {
+    return `${method}:${url}`;
+  }
+
+  function clonePageData(pageData: any): any {
+    return JSON.parse(JSON.stringify(pageData));
+  }
 
   function readInitialPageData(appEl: HTMLElement): any {
     const scriptEl = document.getElementById(PAGE_DATA_SCRIPT_ID);
@@ -437,6 +446,7 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
 
         if (method !== 'GET') {
           _prefetchCache.flushAll();
+          _staticPageDataCacheKeys.clear();
         }
 
         const headers: Record<string, string> = {
@@ -459,7 +469,10 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
         const cacheEntry = method === 'GET' ? _prefetchCache.get(fetchUrl, method) : null;
 
         if (cacheEntry) {
-          pageData = await cacheEntry.response;
+          const cachedPageData = await cacheEntry.response;
+          pageData = _staticPageDataCacheKeys.has(getPageDataCacheKey(fetchUrl, method))
+            ? clonePageData(cachedPageData)
+            : cachedPageData;
           _prefetchCache.consume(fetchUrl, method);
           if (pageData === null) {
             window.location.href = url;
@@ -505,6 +518,13 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
             const staticPageData = await loadStaticPageDataFile(fetchUrl, visitSignal);
             if (staticPageData) {
               pageData = staticPageData.pageData;
+              _staticPageDataCacheKeys.add(getPageDataCacheKey(fetchUrl, method));
+              _prefetchCache.set(
+                fetchUrl,
+                method,
+                Promise.resolve(clonePageData(pageData)),
+                PREFETCH_DEFAULT_CACHE_FOR,
+              );
               if (staticPageData.resolvedDeferred) {
                 wrapResolvedDeferredProps(pageData);
               }
@@ -767,10 +787,12 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
 
     flush(url, method = 'GET') {
       _prefetchCache.flush(url, method);
+      _staticPageDataCacheKeys.delete(getPageDataCacheKey(url, method));
     },
 
     flushAll() {
       _prefetchCache.flushAll();
+      _staticPageDataCacheKeys.clear();
     },
 
     async reload() {
