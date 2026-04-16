@@ -60,7 +60,15 @@ const ASSET_BUCKET_UPLOAD_RETRY_DELAY_MS = 1000;
 
 const MAX_UPLOAD_RETRIES = 5; // 5 retries + 1 initial = 6 total tries (matching Wrangler)
 const UPLOAD_CONCURRENCY = 3;
-const STATIC_ASSET_UPLOAD_CONCURRENCY = 4;
+/**
+ * Maximum concurrent static-asset KV/R2 PUTs per deploy. Used by the
+ * worker-free (streamed) deploy path so the handler can fan uploads out
+ * while the main parse loop keeps draining the inbound multipart request
+ * body. Exported so the deploy handler shares the limit with
+ * `uploadStaticAssets` (post-parse bulk upload), keeping the two paths
+ * from accidentally drifting.
+ */
+export const STATIC_ASSET_UPLOAD_CONCURRENCY = 4;
 const STATIC_ASSET_UPLOAD_MAX_RETRIES = 3;
 const STATIC_ASSET_UPLOAD_RETRY_DELAY_MS = 250;
 const GATEWAY_BACKOFF_BASE_MS = 5000;
@@ -512,59 +520,112 @@ async function readAssetBody(
 
 export class AssetHashMismatchError extends Error {}
 
+/** A streamed static-asset part that has been read + hashed but not yet uploaded. */
+export interface PreparedStaticAsset {
+  bytes: Uint8Array;
+  hash: string;
+  size: number;
+  contentType: string;
+}
+
 /**
- * Buffer one multipart asset part into memory, hash it, and write it straight
- * to KV (if small) or R2 (if large). Used by the static-only deploy path so
- * that peak memory is bounded by one asset at a time instead of the entire
- * multipart upload.
+ * Stream-read one multipart asset body for the streamed-static deploy path,
+ * hashing incrementally and enforcing the per-asset + aggregate byte caps.
+ * The returned `size` has been charged to `budget.used`; the caller MUST
+ * decrement it once the bytes are no longer resident (typically after
+ * `uploadStaticAssetPart` completes or throws).
  *
- * The caller passes a persistent `uploadedHashes` map; if the same content
- * hash has already been uploaded in this deploy, the upload is skipped
- * (matching the dedupe semantics of the buffered `assetsByHash` path) and
- * `isNew` is returned as false.
+ * Split out from the old `collectAndUploadStaticAsset` so the deploy handler
+ * can perform reads inline in the parse loop (keeping the upstream request
+ * reader draining) while fanning KV/R2 uploads out to a bounded concurrency
+ * pool. Performing the upload inline caused the inbound-body reader to
+ * starve on asset-heavy deploys, surfacing as "Connection lost during
+ * deploy" in the CLI.
  */
-export async function collectAndUploadStaticAsset(
+export async function readStaticAssetPart(
+  body: ReadableStream<Uint8Array>,
+  path: string,
+  { maxBytes = MAX_ASSET_BYTES, budget }: { maxBytes?: number; budget?: BufferedBudget } = {},
+): Promise<PreparedStaticAsset> {
+  const { bytes, hash, size } = await readAssetBody(body, path, maxBytes, budget);
+  return { bytes, hash, size, contentType: getContentType(path) };
+}
+
+/**
+ * Upload a pre-read static-asset blob to KV (< 2 MB) or R2 (>= 2 MB), with
+ * content-hash dedupe against `uploadedHashes` plus an in-flight registry
+ * so concurrent pool tasks with the same content hash collapse into a
+ * single KV/R2 PUT. Callers typically pair this with
+ * {@link readStaticAssetPart} and manage the aggregate byte budget
+ * externally so reads can happen sequentially in the multipart parse loop
+ * while uploads fan out to a concurrency-limited pool.
+ *
+ * Concurrency invariant (why `inFlightUploadByHash` is required):
+ * `uploadedHashes` is only populated *after* an upload settles, so two
+ * tasks racing on the same new hash would both miss the completed cache
+ * and both issue a full PUT — doubling cost and inflating the
+ * `isNew: true` count. The synchronous `get` → `set` on
+ * `inFlightUploadByHash` below (no await between them) closes that
+ * window: the second task finds a pending promise and joins it as
+ * `isNew: false`, guaranteeing exactly one PUT per content hash per
+ * request.
+ */
+export async function uploadStaticAssetPart(
   kv: KVNamespace,
   r2: R2Bucket,
   projectId: string,
-  path: string,
-  body: ReadableStream<Uint8Array>,
+  prepared: PreparedStaticAsset,
   uploadedHashes: Map<string, 'kv' | 'r2'>,
+  inFlightUploadByHash: Map<string, Promise<'kv' | 'r2'>>,
   {
     retryDelayMs = STATIC_ASSET_UPLOAD_RETRY_DELAY_MS,
-    maxBytes = MAX_ASSET_BYTES,
-    budget,
     onHashed,
   }: {
     retryDelayMs?: number;
-    maxBytes?: number;
-    budget?: BufferedBudget;
     onHashed?: (hash: string) => Promise<void> | void;
   } = {},
-): Promise<{ entry: AssetManifestEntry; hash: string; store: 'kv' | 'r2'; isNew: boolean }> {
-  // The streamed static path buffers one asset at a time and releases its
-  // bytes back to GC as soon as the upload completes. Thread `budget` through
-  // `readAssetBody` so the aggregate request budget still catches "big text
-  // parts already resident + one large streamed asset" combos, but scope the
-  // charge to this function's lifetime: on success, `readAssetBody`
-  // increments `budget.used`; the `finally` below decrements it once the
-  // upload is done (or on throw), so streamed assets do not permanently
-  // consume the aggregate allowance.
-  const { bytes, hash, size } = await readAssetBody(body, path, maxBytes, budget);
-  try {
+): Promise<{ entry: AssetManifestEntry; store: 'kv' | 'r2'; isNew: boolean }> {
+  const { bytes, hash, size, contentType } = prepared;
+  // Dedupe #1: this request already completed an upload for this hash.
+  const cached = uploadedHashes.get(hash);
+  if (cached) {
     await onHashed?.(hash);
-    const cached = uploadedHashes.get(hash);
-    if (cached) {
-      return { entry: { hash, size }, hash, store: cached, isNew: false };
-    }
-    const assetEntry: AssetEntry = { bytes, contentType: getContentType(path) };
-    const key = `assets/${projectId}/${hash}`;
-    const store = await uploadStaticAssetWithRetries(kv, r2, key, assetEntry, retryDelayMs);
+    return { entry: { hash, size }, store: cached, isNew: false };
+  }
+  // Dedupe #2: another pool task is mid-upload for this hash. Sync
+  // `get` → sync `set` below is the atomicity guarantee: no microtask
+  // boundary separates the two, so two concurrent callers cannot both
+  // observe an empty slot and both schedule fresh uploads.
+  const pending = inFlightUploadByHash.get(hash);
+  if (pending) {
+    await onHashed?.(hash);
+    const store = await pending;
+    return { entry: { hash, size }, store, isNew: false };
+  }
+  const key = `assets/${projectId}/${hash}`;
+  const uploadTask = (async (): Promise<'kv' | 'r2'> => {
+    await onHashed?.(hash);
+    const store = await uploadStaticAssetWithRetries(
+      kv,
+      r2,
+      key,
+      { bytes, contentType },
+      retryDelayMs,
+    );
     uploadedHashes.set(hash, store);
-    return { entry: { hash, size }, hash, store, isNew: true };
+    return store;
+  })();
+  inFlightUploadByHash.set(hash, uploadTask);
+  try {
+    const store = await uploadTask;
+    return { entry: { hash, size }, store, isNew: true };
   } finally {
-    if (budget) {
-      budget.used -= size;
+    // Ownership check: only clear the slot if we are still its owner.
+    // A later retry installing a new entry would be preserved — not
+    // expected in this flow (the task above is the only writer), but
+    // cheap defensive programming.
+    if (inFlightUploadByHash.get(hash) === uploadTask) {
+      inFlightUploadByHash.delete(hash);
     }
   }
 }

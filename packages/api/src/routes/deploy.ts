@@ -3,10 +3,12 @@ import { Hono } from 'hono';
 import {
   applyDeclaredAssetManifest,
   cleanupStreamedStaticAssets,
-  collectAndUploadStaticAsset,
   collectBufferedAsset,
   createAssetUploadSession,
+  readStaticAssetPart,
+  STATIC_ASSET_UPLOAD_CONCURRENCY,
   uploadAssetBuckets,
+  uploadStaticAssetPart,
   buildAssetMetadata,
   uploadStaticAssets,
   deleteUnreferencedAssets,
@@ -860,6 +862,26 @@ app.post('/:id/deploy', async (c) => {
   const builtAssetManifest: Record<string, AssetManifestEntry> = {};
   const streamedHashStores = new Map<string, 'kv' | 'r2'>();
   const streamedLargeHashes = new Set<string>();
+  // Bounded-concurrency upload pool for streamed static assets. The parse
+  // loop reads one part's bytes inline, then fans the KV/R2 PUT off into a
+  // task tracked by both sets. `inFlightStaticUploads` gates the pool
+  // (`while (size >= STATIC_ASSET_UPLOAD_CONCURRENCY) await Promise.race
+  // (...)`); `staticUploadPromises` keeps a permanent reference so that a
+  // task which settles (and deletes itself from the in-flight set) before
+  // the post-parse drain still surfaces its rejection via Promise.all. This
+  // split is what keeps the upstream multipart reader draining while PUTs
+  // are in flight — the bug that previously caused "Connection lost during
+  // deploy" on asset-heavy payloads.
+  const inFlightStaticUploads = new Set<Promise<void>>();
+  const staticUploadPromises: Promise<void>[] = [];
+  // Per-hash in-flight dedupe for the upload pool. Keyed by content hash,
+  // value is the outstanding KV/R2 PUT promise for that hash. Without this
+  // map two concurrent pool tasks with identical content would both miss
+  // the post-settle `streamedHashStores` cache (only populated once an
+  // upload resolves) and both issue a full PUT, doubling cost and
+  // inflating `newStaticAssetCount`. See `uploadStaticAssetPart` in
+  // `src/assets.ts` for the sync check-then-set atomicity guarantee.
+  const inFlightUploadByHash = new Map<string, Promise<'kv' | 'r2'>>();
   let hasWorkerFiles = false;
   let manifestSeen = false;
   let streamedStaticAssets = false;
@@ -881,7 +903,25 @@ app.post('/:id/deploy', async (c) => {
     claimedStreamedHashes.add(hash);
   };
 
+  // Wait for any still-running pool tasks from the streamed-static upload
+  // path to settle. Invoked from the two cleanup helpers so every abort
+  // path — parse-loop early returns, the catch block, post-parse validation
+  // failures — converges on the same invariant: no KV/R2 PUT or claim
+  // write is in flight when we start deleting. After this returns each
+  // task's `.finally(() => inFlightStaticUploads.delete(task))` has run,
+  // so a second call from the second cleanup helper is a cheap no-op.
+  const drainInFlightStaticUploads = async (): Promise<void> => {
+    if (inFlightStaticUploads.size > 0) {
+      await Promise.allSettled(inFlightStaticUploads);
+    }
+  };
+
   const cleanupOwnStreamedAssetClaims = async (): Promise<void> => {
+    // Drain first: pool tasks call `ensureStreamedAssetClaim` via
+    // `onHashed`, which writes to ROUTING KV. Deleting claims before those
+    // writes finish would let a late PUT re-publish a claim we just
+    // deleted, leaking an orphan until its TTL expires.
+    await drainInFlightStaticUploads();
     if (claimedStreamedHashes.size === 0) {
       return;
     }
@@ -907,6 +947,13 @@ app.post('/:id/deploy', async (c) => {
    * second source we would happily evict assets out from under real traffic.
    */
   const cleanupStreamedAssetsOnAbort = async (): Promise<void> => {
+    // Drain first: a task still in flight may publish fresh entries to
+    // `streamedHashStores` (and its claim) after we've computed the
+    // retained-set. Without draining, those keys would escape eviction and
+    // leak as orphan blobs. Draining before the size check also catches
+    // the edge case where the pool had tasks pending but none had reached
+    // `streamedHashStores.set(...)` yet.
+    await drainInFlightStaticUploads();
     if (streamedHashStores.size === 0) {
       return;
     }
@@ -1149,8 +1196,8 @@ app.post('/:id/deploy', async (c) => {
 
             // For streamed-static deploys we cannot defer the daily-cap check
             // until after the parse: `asset:*` parts are written to KV/R2 as
-            // they arrive (see `collectAndUploadStaticAsset` below), so by the
-            // time the post-parse check fires an over-quota user has already
+            // they arrive (see the concurrency-limited upload pool below), so
+            // by the time the post-parse check fires an over-quota user has already
             // paid for every byte in storage write cost. Reject here, before
             // any asset part is streamed. This sacrifices dedupe-at-cap for
             // static retries, which is an acceptable tradeoff: the cap is
@@ -1246,25 +1293,89 @@ app.post('/:id/deploy', async (c) => {
           if (part.name.startsWith('asset:')) {
             const path = '/' + part.name.slice('asset:'.length);
             if (streamedStaticAssets) {
-              const { entry, hash, store, isNew } = await collectAndUploadStaticAsset(
-                c.env.STATIC_ASSETS,
-                c.env.STATIC_ASSETS_R2,
-                projectId,
-                path,
-                part.body,
-                streamedHashStores,
-                {
-                  budget: bufferedBudget,
-                  onHashed: ensureStreamedAssetClaim,
-                },
-              );
-              builtAssetManifest[path] = entry;
-              if (store === 'r2') {
-                streamedLargeHashes.add(hash);
+              // Gate BEFORE reading the part body. `readStaticAssetPart`
+              // charges `bufferedBudget.used` as bytes arrive (see
+              // `readAssetBody` in assets.ts), so reading a fifth asset
+              // while four uploads are still in flight would momentarily
+              // hold five assets' worth of bytes against the 64 MiB
+              // aggregate cap — tripping `PartTooLargeError('aggregate
+              // buffered deploy payload')` on deploys that would otherwise
+              // pass. Waiting here caps peak concurrent charge at exactly
+              // `STATIC_ASSET_UPLOAD_CONCURRENCY` (the currently-reading
+              // task slots into a freed spot). The gate also serves as
+              // reader-safety backpressure: a burst of tiny assets can't
+              // schedule hundreds of PUTs whose retries would stall the
+              // runtime. Reader-starvation behaviour is unchanged by the
+              // reorder — we weren't pulling `part.body` during the wait
+              // either way, so the outer transport reader sees the same
+              // idle window.
+              //
+              // Promise.race resolves when any upload settles, and that
+              // promise's `.finally` removes it from the set *before*
+              // settling its derived promise, so the while-condition
+              // observes the new size on the next iteration.
+              while (inFlightStaticUploads.size >= STATIC_ASSET_UPLOAD_CONCURRENCY) {
+                await Promise.race(inFlightStaticUploads);
               }
-              if (isNew) {
-                newStaticAssetCount++;
-              }
+              const prepared = await readStaticAssetPart(part.body, path, {
+                budget: bufferedBudget,
+              });
+              // Commit the manifest entry synchronously in parse order.
+              // `uploadStaticAssetPart` returns `entry = { hash, size }`
+              // in every dedupe branch — values we already have from
+              // `prepared` — so deferring this write into the upload
+              // task's async body would make last-writer-wins depend on
+              // KV/R2 completion order, not multipart parse order. For
+              // a payload that repeats the same asset path, that split
+              // would let a slower earlier upload overwrite a faster
+              // later upload and silently flip the deployed content (or
+              // trip `AssetHashMismatchError` against the declared
+              // manifest). Writing here mirrors the old sequential
+              // behaviour: whichever part appears last in the multipart
+              // stream wins the path deterministically.
+              builtAssetManifest[path] = { hash: prepared.hash, size: prepared.size };
+              const uploadTask = (async () => {
+                try {
+                  const { store, isNew } = await uploadStaticAssetPart(
+                    c.env.STATIC_ASSETS,
+                    c.env.STATIC_ASSETS_R2,
+                    projectId,
+                    prepared,
+                    streamedHashStores,
+                    inFlightUploadByHash,
+                    { onHashed: ensureStreamedAssetClaim },
+                  );
+                  if (store === 'r2') {
+                    streamedLargeHashes.add(prepared.hash);
+                  }
+                  if (isNew) {
+                    newStaticAssetCount++;
+                  }
+                } finally {
+                  // Release the budget charge once the bytes are no longer
+                  // needed (successful upload or failure). Matches the
+                  // invariant in the old inline `collectAndUploadStaticAsset`
+                  // finally block.
+                  bufferedBudget.used -= prepared.size;
+                }
+              })();
+              inFlightStaticUploads.add(uploadTask);
+              // Retain a reference in `staticUploadPromises` so a rejection
+              // that settles before the post-parse drain is still surfaced —
+              // if we relied on `inFlightStaticUploads` alone, early
+              // rejections would be removed from the set by their `.finally`
+              // deletion before `Promise.all` ran, and the error would be
+              // silently lost.
+              staticUploadPromises.push(uploadTask);
+              uploadTask
+                .finally(() => {
+                  inFlightStaticUploads.delete(uploadTask);
+                })
+                .catch(() => {
+                  // Suppress unhandled-rejection warning: the rejection is
+                  // re-surfaced via `await Promise.all(staticUploadPromises)`
+                  // after the parse loop.
+                });
             } else {
               const { entry, hash, assetEntry } = await collectBufferedAsset(path, part.body, {
                 budget: bufferedBudget,
@@ -1284,7 +1395,23 @@ app.post('/:id/deploy', async (c) => {
           // Unknown part (e.g. legacy `migration:*`) — the parser auto-drains it
           // when we don't consume its body.
         }
+        // Drain the streamed-static upload pool before post-parse validation:
+        // `builtAssetManifest`, `streamedHashStores`, `streamedLargeHashes`,
+        // and `newStaticAssetCount` are all written from inside the pool
+        // tasks, so any code that reads them (dedupe compare,
+        // cleanup-on-abort, the final asset-count event) must see a
+        // fully-settled state. `Promise.all` re-surfaces the first upload
+        // rejection here, inside the parse `try`, so the existing `catch`
+        // below routes it through the same cleanup path as a parse error.
+        if (staticUploadPromises.length > 0) {
+          await Promise.all(staticUploadPromises);
+        }
       } catch (err) {
+        // Both cleanup helpers drain `inFlightStaticUploads` internally
+        // before touching KV/R2 or ROUTING, so a late-settling PUT cannot
+        // resurrect a key or claim we just deleted. Call them in order —
+        // claim-delete must follow the PUT whose `onHashed` wrote it,
+        // which the shared drain guarantees.
         await cleanupStreamedAssetsOnAbort();
         await cleanupOwnStreamedAssetClaims();
         if (err instanceof MultipartParseError || err instanceof PartTooLargeError) {

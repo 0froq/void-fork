@@ -4513,6 +4513,162 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     expect(dpls).toEqual([]);
   });
 
+  // Reader-starvation regression: per-asset KV/R2 PUTs must not block the
+  // multipart parse loop. Awaiting `collectAndUploadStaticAsset` inline inside
+  // the for-await loop holds `c.req.raw.body`'s reader idle while each PUT is
+  // pending — for deploys with many assets + slow storage, the CF edge closes
+  // the stalled inbound socket and the CLI surfaces "Connection lost during
+  // deploy". This test pins the invariant: once the first PUT registers, the
+  // parse loop keeps advancing and all remaining asset PUTs get scheduled
+  // before the first one resolves.
+  it('keeps draining the request body while static asset PUTs are in flight', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-reader-starvation');
+    mockCfApi();
+
+    const ASSET_COUNT = 3;
+
+    // Hang every KV put on a test-controlled gate. Before the fix, the parse
+    // loop awaits the first hanging PUT and cannot reach the next asset part,
+    // so pendingPuts.length stays at 1. After the fix, pool-scheduled PUTs let
+    // the loop advance and all ASSET_COUNT PUTs register concurrently.
+    const pendingPuts: Array<{ key: string; release: () => void }> = [];
+    let unblockAll = false;
+    const originalPut = env.STATIC_ASSETS.put.bind(env.STATIC_ASSETS);
+    vi.spyOn(env.STATIC_ASSETS, 'put').mockImplementation(
+      async (key: string, value: unknown, options?: unknown) => {
+        if (unblockAll) {
+          // After the observation window, let any straggler PUT through so
+          // the IIFE can finish and the test does not leak state.
+          return originalPut(
+            key,
+            value as Parameters<typeof originalPut>[1],
+            options as Parameters<typeof originalPut>[2],
+          );
+        }
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        pendingPuts.push({ key, release });
+        await gate;
+        return originalPut(
+          key,
+          value as Parameters<typeof originalPut>[1],
+          options as Parameters<typeof originalPut>[2],
+        );
+      },
+    );
+
+    // Build a multipart body we control byte-for-byte so the Request keeps a
+    // live ReadableStream instead of a pre-serialized FormData buffer.
+    const boundary = `-----void-test-${Math.random().toString(36).slice(2)}`;
+    const enc = new TextEncoder();
+    const frags: Uint8Array[] = [];
+    const addPart = (name: string, body: string): void => {
+      frags.push(
+        enc.encode(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n`),
+      );
+      frags.push(enc.encode(body));
+      frags.push(enc.encode('\r\n'));
+    };
+    addPart(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        type: 'spa',
+        bindings: {},
+        assetConfig: { not_found_handling: 'single-page-application' },
+      }),
+    );
+    for (let i = 0; i < ASSET_COUNT; i++) {
+      addPart(`asset:/a${i}.html`, `<html>body ${i}</html>`);
+    }
+    frags.push(enc.encode(`--${boundary}--\r\n`));
+    const totalLen = frags.reduce((s, c) => s + c.length, 0);
+    const bodyBytes = new Uint8Array(totalLen);
+    {
+      let off = 0;
+      for (const c of frags) {
+        bodyBytes.set(c, off);
+        off += c.length;
+      }
+    }
+
+    // Chunk the body so parseMultipart makes multiple reader.read() calls —
+    // otherwise one fill() swallows the whole body and the test loses its
+    // ability to observe back-pressure on the upstream reader.
+    const CHUNK = 32;
+    let offset = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(ctrl) {
+        if (offset >= bodyBytes.length) {
+          ctrl.close();
+          return;
+        }
+        const end = Math.min(offset + CHUNK, bodyBytes.length);
+        ctrl.enqueue(bodyBytes.slice(offset, end));
+        offset = end;
+      },
+    });
+
+    const resPromise = app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        },
+        body,
+        // Required by Node/undici when the Request body is a ReadableStream.
+        duplex: 'half',
+      } as RequestInit & { duplex: 'half' }),
+      env,
+    );
+
+    let assertionErr: unknown;
+    try {
+      // Wait until the first PUT registers (the deploy reached the parse loop
+      // and started uploading asset 0), then yield macrotasks to give the
+      // parse loop time to schedule the remaining asset PUTs if it is no
+      // longer blocked by the await. The body is only ~500 bytes; once PUTs
+      // no longer gate the loop, it reaches end-of-body in microseconds.
+      const deadline = Date.now() + 2000;
+      while (pendingPuts.length === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      expect(pendingPuts.length).toBeGreaterThanOrEqual(1);
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+
+      // Oracle: all ASSET_COUNT PUTs are in flight concurrently. Before the
+      // fix, pendingPuts.length is 1 because the parse loop is blocked
+      // awaiting the first PUT and cannot reach the next asset part.
+      expect(pendingPuts.length).toBe(ASSET_COUNT);
+    } catch (err) {
+      assertionErr = err;
+    } finally {
+      // Release every pending gate AND flip unblockAll so any PUT scheduled
+      // after this point skips the gate. Without the flag, releasing gate 0
+      // lets the handler advance to asset 1, which would block on a fresh
+      // gate that nobody is waiting to release — and resPromise would hang.
+      unblockAll = true;
+      for (const p of pendingPuts) {
+        p.release();
+      }
+      try {
+        const res = await resPromise;
+        await res.text();
+      } catch {
+        // ignore — we only care about the assertion above
+      }
+    }
+    if (assertionErr) {
+      throw assertionErr;
+    }
+  });
+
   // ---- Post-parse DB failures ----
 
   it('sweeps streamed assets when createDeployment throws after parsing', async () => {
