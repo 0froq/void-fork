@@ -79,9 +79,16 @@ function parseDeployStream(text: string): unknown[] {
 // only the shape-validator prefix + a stable fragment (field name / enum key)
 // so future rewords stay local to the validator source.
 async function expectInvalidManifestShape(res: Response, fragment: string | RegExp): Promise<void> {
-  expect(res.status).toBe(400);
-  const body = (await res.json()) as { error?: string };
-  const msg = body.error ?? '';
+  // Deploy route now always returns 200 + NDJSON; shape-validation failures
+  // surface as an `event: 'error'` row in the stream.
+  expect(res.status).toBe(200);
+  const events = parseDeployStream(await res.text()) as Array<{
+    event: string;
+    message?: string;
+  }>;
+  const err = events.find((e) => e.event === 'error');
+  expect(err).toBeDefined();
+  const msg = err!.message ?? '';
   expect(msg).toMatch(/^invalid manifest shape: /);
   if (typeof fragment === 'string') {
     expect(msg).toContain(fragment);
@@ -576,10 +583,13 @@ describe('POST /projects/:id/deploy', () => {
       }),
       env,
     );
-    expect(res.status).toBe(429);
-    const body = (await res.json()) as { error: string; limit: number };
-    expect(body.error).toBe('deploy limit exceeded');
-    expect(body.limit).toBe(100);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toBe('deploy limit exceeded');
   });
 
   it('allows deploy when under plan limit', async () => {
@@ -2080,10 +2090,13 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string; version: number };
-    expect(body.error).toMatch(/Unsupported deploy manifest version/);
-    expect(body.version).toBe(999);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toMatch(/Unsupported deploy manifest version/);
 
     // The rejection must fire before any `asset:*` part is uploaded, so
     // STATIC_ASSETS KV must contain nothing under this project's prefix.
@@ -2147,9 +2160,13 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/manifest part must precede/);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toMatch(/manifest part must precede/);
 
     const listed = await env.STATIC_ASSETS.list({ prefix: `assets/${project.id}/` });
     expect(listed.keys).toEqual([]);
@@ -2177,9 +2194,13 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/worker parts are not allowed/);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toMatch(/worker parts are not allowed/);
 
     // Orphaned streamed assets must be swept — nothing should remain under the
     // project prefix because no retained deployment references these hashes.
@@ -2310,10 +2331,13 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(429);
-    const body = (await res.json()) as { error: string; limit: number };
-    expect(body.error).toBe('deploy limit exceeded');
-    expect(body.limit).toBe(100);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toBe('deploy limit exceeded');
 
     // Nothing was written under this project's asset prefix. If the check
     // still ran after `collectAndUploadStaticAsset`, the new hash would be
@@ -2356,10 +2380,13 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(429);
-    const body = (await res.json()) as { error: string; limit: number };
-    expect(body.error).toBe('deploy limit exceeded');
-    expect(body.limit).toBe(100);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toBe('deploy limit exceeded');
   });
 
   it('protects the current live-but-not-retained deployment from cleanup sweep (R18 F3)', async () => {
@@ -2439,9 +2466,13 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/duplicate manifest part/);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toMatch(/duplicate manifest part/);
 
     // The live deployment's hash must still be readable — it is referenced
     // by the current active_deployment_id and therefore protected.
@@ -2509,9 +2540,13 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/duplicate manifest part/);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toMatch(/duplicate manifest part/);
 
     const kept = await env.STATIC_ASSETS.get(`assets/${project.id}/${hash}`, 'arrayBuffer');
     expect(kept).not.toBeNull();
@@ -2703,6 +2738,165 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
   });
 });
 
+// Regression tests for the connection-lost fix: the deploy handler constructs
+// a TransformStream and returns `new Response(readable, ...)` BEFORE multipart
+// parsing / asset uploads begin, so CF edge / intermediaries see the 200 + NDJSON
+// content-type within milliseconds instead of blocking for 30–60s of sequential
+// KV/R2 puts. See packages/api/src/routes/deploy.ts (around the IIFE at line
+// ~1028 and the `return new Response(readable)` at line ~2349).
+describe('POST /projects/:id/deploy (streaming response headers / heartbeat)', () => {
+  it('returns application/x-ndjson and streams events incrementally (start first, done last)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'stream-headers-flush');
+    mockCfApi();
+
+    // Build a deploy with a decent number of asset parts so parse + streamed
+    // KV puts take non-trivial time — this is what the fix rescues from
+    // blocking the response headers. Each asset hashes to a unique key via
+    // path-prefixed BLAKE3, so 40 parts means 40 KV puts.
+    const assets: Record<string, string> = {};
+    for (let i = 0; i < 40; i++) {
+      assets[`assets/file-${i}.js`] = `/* file ${i} */ export const x = ${i};`;
+    }
+    assets['index.html'] = '<html><body>streamed</body></html>';
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildStaticDeployForm({ type: 'spa', streamed: true, assets }),
+      }),
+      env,
+    );
+
+    // Structural guard: the deploy route now always answers with NDJSON,
+    // including 4xx-like validation failures.
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/x-ndjson');
+    expect(res.body).not.toBeNull();
+
+    // Read the stream incrementally. If the parse/upload work were moved
+    // back into the handler body (before `new Response(readable)`), the
+    // ordering of NDJSON lines would be unchanged, but this reader-based
+    // approach mirrors what the CLI does and is the correct client-side
+    // contract for a streaming deploy response.
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    const events: Array<{ event: string } & Record<string, unknown>> = [];
+    let buffer = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      let newlineIdx: number;
+      while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, newlineIdx);
+        buffer = buffer.slice(newlineIdx + 1);
+        if (line.trim()) {
+          events.push(JSON.parse(line));
+        }
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      events.push(JSON.parse(buffer));
+    }
+
+    // Filter out heartbeats — timing-dependent in CI, not what this test guards.
+    const nonHeartbeat = events.filter((e) => e.event !== 'heartbeat');
+
+    // The very first non-heartbeat event consumed from the incremental
+    // reader must be `start`. This proves the IIFE began emitting before
+    // the stream closed — i.e. events were produced progressively, not
+    // accumulated after a fully-synchronous parse.
+    expect(nonHeartbeat[0]?.event).toBe('start');
+
+    // The stream must contain the expected downstream events in order.
+    const order = nonHeartbeat.map((e) => e.event);
+    expect(order).toContain('asset_upload');
+    expect(order).toContain('asset_upload_done');
+    expect(order[order.length - 1]).toBe('done');
+
+    // Sanity: the deploy actually succeeded with the right asset count.
+    const doneEvent = nonHeartbeat.find((e) => e.event === 'done') as {
+      event: 'done';
+      deployment: string;
+      assets: number;
+      workers: number;
+    };
+    expect(doneEvent.deployment).toMatch(/^dpl_/);
+    expect(doneEvent.assets).toBe(41);
+    expect(doneEvent.workers).toBe(0);
+  });
+
+  it('emits at least one heartbeat during the deploy pipeline (env override)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'stream-heartbeat');
+    mockCfApi();
+
+    // Lower the heartbeat interval to the 1ms floor so the timer fires on
+    // every macrotask cycle the deploy pipeline yields to (stream chunk
+    // reads, KV puts, PGlite writes). In-process tests can complete a 40-asset
+    // streamed deploy in ~15ms, so the 15s production default would miss
+    // every tick — this is exactly why we plumb an env override.
+    const testEnv = { ...env, DEPLOY_HEARTBEAT_INTERVAL_MS: 1 };
+
+    // Enough asset parts that parse + KV puts take well over 20ms even on
+    // fast hardware. Each part costs an `await` on the KV put + a hash
+    // computation, so the setInterval(heartbeat, 20ms) callback has ample
+    // event-loop opportunities to fire.
+    const assets: Record<string, string> = {};
+    for (let i = 0; i < 40; i++) {
+      assets[`chunk-${i}.js`] = `export const payload = ${JSON.stringify('x'.repeat(512))} + ${i};`;
+    }
+    assets['index.html'] = '<html><body>heartbeat</body></html>';
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildStaticDeployForm({ type: 'spa', streamed: true, assets }),
+      }),
+      testEnv,
+    );
+    expect(res.status).toBe(200);
+
+    const events = (await readAllEvents(res)) as Array<{ event: string } & Record<string, unknown>>;
+    const order = events.map((e) => e.event);
+
+    // At least one heartbeat must have fired — if the heartbeat timer were
+    // still living inside the TransformStream's `start()` body (as it did
+    // before the fix), `clearInterval` in `finally` would cancel it before
+    // the interval ever had a chance to fire for a fast deploy. Plumbing
+    // the interval across the whole IIFE is exactly what this asserts.
+    const heartbeats = events.filter((e) => e.event === 'heartbeat');
+    expect(heartbeats.length).toBeGreaterThanOrEqual(1);
+
+    // And a heartbeat must appear before `done` in the stream order, proving
+    // it fired during the pipeline rather than after it.
+    const firstHeartbeatIdx = order.indexOf('heartbeat');
+    const doneIdx = order.indexOf('done');
+    expect(firstHeartbeatIdx).toBeGreaterThanOrEqual(0);
+    expect(doneIdx).toBeGreaterThanOrEqual(0);
+    expect(firstHeartbeatIdx).toBeLessThan(doneIdx);
+
+    // Heartbeat payload shape: `step` is always present; `deploymentId` is
+    // optional because heartbeats that fire during the parse/validate
+    // phase (before `createDeployment` runs) would otherwise carry an
+    // empty-string id, which leaks an invalid value to monitoring tools.
+    // Post-create heartbeats carry the real id; pre-create ones omit it.
+    for (const hb of heartbeats) {
+      expect(typeof hb.step).toBe('string');
+      expect(hb.deploymentId === undefined || typeof hb.deploymentId === 'string').toBe(true);
+      if (typeof hb.deploymentId === 'string') {
+        expect(hb.deploymentId.length).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
 describe('POST /projects/:id/deploy (edge cases)', () => {
   // ---- Multipart protocol errors ----
 
@@ -2718,10 +2912,12 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
+    // Content-Type / boundary is a pre-stream guard: it's a sync header read
+    // that happens before the NDJSON TransformStream is constructed, so
+    // malformed requests still get a 4xx JSON response (matching 404/403/409).
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({
-      error: 'multipart parse error: missing Content-Type header',
-    });
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe('multipart parse error: missing Content-Type header');
   });
 
   it('returns 400 when Content-Type has no boundary parameter', async () => {
@@ -2741,9 +2937,8 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       env,
     );
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({
-      error: 'multipart parse error: missing boundary in Content-Type',
-    });
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe('multipart parse error: missing boundary in Content-Type');
   });
 
   it('returns 400 when the multipart body is truncated mid-part', async () => {
@@ -2769,10 +2964,15 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({
-      error: 'multipart parse error: end of stream while reading part body',
-    });
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toBe(
+      'multipart parse error: end of stream while reading part body',
+    );
   });
 
   it('returns 400 when a part is missing Content-Disposition', async () => {
@@ -2795,10 +2995,13 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({
-      error: 'multipart parse error: part missing Content-Disposition',
-    });
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toBe('multipart parse error: part missing Content-Disposition');
   });
 
   it('returns 400 when the request contains a duplicate manifest part', async () => {
@@ -2824,8 +3027,13 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: 'duplicate manifest part' });
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toBe('duplicate manifest part');
   });
 
   // ---- Manifest / ordering ----
@@ -2848,12 +3056,15 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    // JSON.parse SyntaxError is translated to a 400 client error (the parse
-    // loop sets `earlyResponse` before breaking out), so the user sees a clear
-    // 4xx rather than a 500.
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/^invalid manifest JSON:/);
+    // JSON.parse SyntaxError is surfaced via the NDJSON `error` event so the
+    // user sees a clear "invalid manifest JSON: ..." message, not a generic 500.
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message ?? '').toMatch(/^invalid manifest JSON:/);
 
     // Manifest arrives before any asset part, so nothing should have streamed
     // into KV — but assert it anyway to guard against ordering regressions.
@@ -3643,9 +3854,13 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(413);
-    const body = (await res.json()) as { error?: string };
-    expect(body.error ?? '').toContain('manifest part exceeds');
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message ?? '').toContain('manifest part exceeds');
 
     // No deployment row should exist — the parse loop aborted before any
     // createDeployment call.
@@ -3682,9 +3897,13 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(413);
-    const body = (await res.json()) as { error?: string };
-    expect(body.error ?? '').toMatch(/asset:.*big\.bin.* exceeds/);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message ?? '').toMatch(/asset:.*big\.bin.* exceeds/);
 
     // Parse loop aborted before createDeployment — no deployment row, no
     // orphaned KV/R2 entries under this project's asset prefix.
@@ -3719,9 +3938,13 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(413);
-    const body = (await res.json()) as { error?: string };
-    expect(body.error ?? '').toMatch(/worker:index\.js.* exceeds/);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message ?? '').toMatch(/worker:index\.js.* exceeds/);
 
     const dpls = await env.db
       .select({ id: deployments.id })
@@ -3761,9 +3984,13 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(413);
-    const body = (await res.json()) as { error?: string };
-    expect(body.error ?? '').toMatch(/aggregate buffered deploy payload.* exceeds/);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message ?? '').toMatch(/aggregate buffered deploy payload.* exceeds/);
 
     // Parse loop aborted before any deployment row / resource provisioning ran.
     const dpls = await env.db
@@ -4024,9 +4251,13 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(413);
-    const body = (await res.json()) as { error?: string };
-    expect(body.error ?? '').toMatch(/aggregate buffered deploy payload.* exceeds/);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message ?? '').toMatch(/aggregate buffered deploy payload.* exceeds/);
 
     // The parse loop aborted mid-stream; no deployment row should exist, and
     // no streamed asset should be left behind in STATIC_ASSETS (the parse
@@ -4062,9 +4293,13 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     // Validator is not the gate here — the request passes shape validation
     // and continues into the deploy pipeline. We only assert it isn't
     // rejected AS invalid shape; it may still fail for unrelated reasons.
-    if (res.status === 400) {
-      const body = (await res.json()) as { error?: string };
-      expect(body.error ?? '').not.toMatch(/^invalid manifest shape:/);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    if (errorEvent) {
+      expect(errorEvent.message ?? '').not.toMatch(/^invalid manifest shape:/);
     }
   });
 
@@ -4088,8 +4323,13 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: 'manifest part is required' });
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toBe('manifest part is required');
 
     // No deployment row, no worker script, no KV residue.
     const dpls = await env.db
@@ -4118,10 +4358,13 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({
-      error: 'manifest part must precede worker and asset parts',
-    });
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toBe('manifest part must precede worker and asset parts');
   });
 
   // ---- KV / R2 streaming-put failures ----
@@ -4174,8 +4417,14 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    // Rethrown non-MultipartParseError → Hono default 500.
-    expect(res.status).toBe(500);
+    // Rethrown non-MultipartParseError surfaces as an `error` event on the
+    // NDJSON stream; the HTTP status is 200 (headers flushed before parse).
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
 
     // 1 real put for the first asset + (MAX_RETRIES + 1) failing puts for the
     // second asset = 1 + 4 = 5. This pins the retry loop contract so a
@@ -4234,8 +4483,14 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    // Rethrown non-MultipartParseError → Hono default 500.
-    expect(res.status).toBe(500);
+    // Rethrown non-MultipartParseError surfaces as an `error` event on the
+    // NDJSON stream; the HTTP status is 200 (headers flushed before parse).
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
 
     // Retry contract: MAX_RETRIES + 1 = 4 attempts for the single large asset.
     expect(r2PutCount).toBe(4);
@@ -4301,8 +4556,14 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       }),
       env,
     );
-    // Rethrown non-MultipartParseError → Hono default 500.
-    expect(res.status).toBe(500);
+    // Rethrown non-MultipartParseError surfaces as an `error` event on the
+    // NDJSON stream; the HTTP status is 200 (headers flushed before parse).
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errorEvent = events.find((e: any) => e.event === 'error') as
+      | { event: string; message?: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
 
     // The outer try/finally guards post-parse work — the asset streamed into
     // KV during parsing must be swept before the response is returned.

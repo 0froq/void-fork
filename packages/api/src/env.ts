@@ -48,6 +48,13 @@ export interface ApiEnv extends Env {
     PROJECT_SECRET_KEYS_JSON: string;
     PROJECT_SECRET_ACTIVE_KEY_VERSION: string;
     EMAIL?: SendEmail;
+    /**
+     * Test-only override for the deploy handler's heartbeat interval in ms.
+     * Falls back to 15_000 when undefined, falsy, or non-positive. Kept on
+     * `ApiEnv` (rather than wiring a fresh plumbing path) so integration tests
+     * can exercise the heartbeat timer without waiting 15 seconds per case.
+     */
+    DEPLOY_HEARTBEAT_INTERVAL_MS?: number;
   };
   Variables: {
     user: User;

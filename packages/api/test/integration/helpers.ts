@@ -59,6 +59,8 @@ export type TestEnv = {
   USAGE_COUNTER: DurableObjectNamespace;
   CRON_SCHEDULER: DurableObjectNamespace;
   ERROR_ALERT_MONITOR: DurableObjectNamespace;
+  /** Test-only override for the deploy handler's heartbeat interval. */
+  DEPLOY_HEARTBEAT_INTERVAL_MS?: number;
 };
 
 export function createMockExecutionContext(): ExecutionContext {
