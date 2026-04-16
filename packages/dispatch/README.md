@@ -26,7 +26,7 @@ The dispatch worker also exports `queue()`:
 
 1. Cloudflare delivers a `MessageBatch`
 2. `queue:{queueId}` is resolved from `ROUTING` KV
-3. The batch is serialized and forwarded to the active user worker at `/__queue`
+3. The batch is serialized and forwarded to the active user worker at `/__void/queue`
 4. Success acks the whole batch; failure retries the batch
 
 ## Source Layout

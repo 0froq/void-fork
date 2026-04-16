@@ -75,8 +75,17 @@ export default {
     const startTime = Date.now();
     const url = new URL(request.url);
 
-    // Block internal framework routes from external HTTP access
-    if (url.pathname.startsWith('/__')) {
+    // Block Void-internal routes from external HTTP access.
+    // Only /__void/* is reserved by the platform — other __ prefixes
+    // (e.g. /__nuxt_content, /__og-image__) are user/framework assets.
+    if (
+      url.pathname.startsWith('/__void/') ||
+      // Legacy: old SDK versions register these top-level paths. Block them
+      // at the edge so we don't rely solely on worker-side token checks.
+      // TODO: remove once all deployed workers use /__void/* paths. See #88
+      url.pathname === '/__scheduled' ||
+      url.pathname === '/__queue'
+    ) {
       return createErrorResponse(request, 404, 'Not Found');
     }
 
@@ -440,13 +449,26 @@ export default {
 
     const worker = env.DISPATCH.get(workerName);
     try {
-      const res = await worker.fetch(
-        new Request('https://internal/__queue', {
+      const body = JSON.stringify({ queue: queueName, messages });
+      const queueHeaders = { 'Content-Type': 'application/json' };
+      let res = await worker.fetch(
+        new Request('https://internal/__void/queue', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ queue: queueName, messages }),
+          headers: queueHeaders,
+          body,
         }),
       );
+      // Legacy: fall back for workers deployed before the /__void/ migration.
+      // TODO: remove once all deployed workers use /__void/* paths.
+      if (res.status === 404) {
+        res = await worker.fetch(
+          new Request('https://internal/__queue', {
+            method: 'POST',
+            headers: queueHeaders,
+            body,
+          }),
+        );
+      }
 
       if (!res.ok) {
         batch.retryAll();

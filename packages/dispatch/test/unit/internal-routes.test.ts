@@ -35,35 +35,6 @@ function createEnv(): Env {
 }
 
 describe('internal route blocking', () => {
-  it('blocks GET /__scheduled with 404', async () => {
-    const response = await app.fetch(
-      new Request('https://my-app.void.app/__scheduled'),
-      createEnv(),
-      createCtx(),
-    );
-    expect(response.status).toBe(404);
-    expect(response.headers.get('content-type')).toContain('text/html');
-    expect(await response.text()).toContain('404: Not Found');
-  });
-
-  it('blocks POST /__scheduled with 404', async () => {
-    const response = await app.fetch(
-      new Request('https://my-app.void.app/__scheduled', { method: 'POST' }),
-      createEnv(),
-      createCtx(),
-    );
-    expect(response.status).toBe(404);
-  });
-
-  it('blocks POST /__queue with 404', async () => {
-    const response = await app.fetch(
-      new Request('https://my-app.void.app/__queue', { method: 'POST' }),
-      createEnv(),
-      createCtx(),
-    );
-    expect(response.status).toBe(404);
-  });
-
   it('blocks POST /__void/migrate with 404', async () => {
     const response = await app.fetch(
       new Request('https://my-app.void.app/__void/migrate', { method: 'POST' }),
@@ -82,6 +53,66 @@ describe('internal route blocking', () => {
     expect(response.status).toBe(404);
   });
 
+  it('blocks /__void/scheduled with 404', async () => {
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/__void/scheduled', { method: 'POST' }),
+      createEnv(),
+      createCtx(),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('blocks /__void/queue with 404', async () => {
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/__void/queue', { method: 'POST' }),
+      createEnv(),
+      createCtx(),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  // Legacy: old SDK versions register these top-level paths.
+  // TODO: remove these blocks once all deployed workers use /__void/* paths. See #88
+  it('blocks /__scheduled (legacy compat) with 404', async () => {
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/__scheduled', { method: 'POST' }),
+      createEnv(),
+      createCtx(),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('blocks /__queue (legacy compat) with 404', async () => {
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/__queue', { method: 'POST' }),
+      createEnv(),
+      createCtx(),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('does not block /__nuxt_content paths (framework assets)', async () => {
+    const env = createEnv();
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/__nuxt_content/articles/query'),
+      env,
+      createCtx(),
+    );
+    expect(response.status).not.toBe(404);
+    expect(await response.text()).toContain('worker');
+  });
+
+  it('does not block /__og-image__ paths (framework assets)', async () => {
+    const env = createEnv();
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/__og-image__/static/og.png'),
+      env,
+      createCtx(),
+    );
+    expect(response.status).not.toBe(404);
+    expect(await response.text()).toContain('worker');
+  });
+
   it('does not block normal paths', async () => {
     const env = createEnv();
     const response = await app.fetch(
@@ -89,7 +120,6 @@ describe('internal route blocking', () => {
       env,
       createCtx(),
     );
-    // Should proceed past the internal route check — the response comes from the worker mock
     expect(response.status).not.toBe(404);
     expect(await response.text()).toContain('worker');
   });

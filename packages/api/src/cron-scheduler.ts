@@ -229,13 +229,25 @@ export class CronScheduler extends DurableObject<ApiEnv['Bindings']> {
       if (proxyToken) {
         headers['x-void-internal'] = proxyToken;
       }
+      const body = JSON.stringify({ cron, scheduledTime });
       res = await worker.fetch(
-        new Request('https://internal/__scheduled', {
+        new Request('https://internal/__void/scheduled', {
           method: 'POST',
           headers,
-          body: JSON.stringify({ cron, scheduledTime }),
+          body,
         }),
       );
+      // Legacy: fall back for workers deployed before the /__void/ migration.
+      // TODO: remove once all deployed workers use /__void/* paths. See #88
+      if (res.status === 404) {
+        res = await worker.fetch(
+          new Request('https://internal/__scheduled', {
+            method: 'POST',
+            headers,
+            body,
+          }),
+        );
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       // Only classify as unreachable when the worker script is definitively gone.
