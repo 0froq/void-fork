@@ -2,9 +2,11 @@ import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import {
   applyDeclaredAssetManifest,
+  AssetHashMismatchError,
   cleanupStreamedStaticAssets,
   collectBufferedAsset,
   createAssetUploadSession,
+  MAX_ASSET_BYTES,
   readStaticAssetPart,
   STATIC_ASSET_UPLOAD_CONCURRENCY,
   uploadAssetBuckets,
@@ -12,6 +14,7 @@ import {
   buildAssetMetadata,
   uploadStaticAssets,
   deleteUnreferencedAssets,
+  verifyStreamedAssetPart,
   type AssetEntry,
   type AssetManifestEntry,
 } from '../assets';
@@ -846,6 +849,14 @@ app.post('/:id/deploy', async (c) => {
   let manifestRaw: string | null = null;
   let incomingManifest: DeployManifest | null = null;
   let incomingAssetManifestRaw: string | null = null;
+  // Declared asset manifest parsed eagerly when the `assetManifest` part
+  // arrives. Used by the streamed-static `asset:*` fast-path to detect
+  // duplicate paths that map to a hash already being processed this
+  // request — those bodies are drained without buffering or re-hashing,
+  // eliminating a per-duplicate `bufferedBudget` charge. Left `null` if
+  // the client never sends `assetManifest` (the fast-path simply never
+  // activates and the full read path handles every asset as before).
+  let declaredAssetManifest: Record<string, AssetManifestEntry> | null = null;
   let source: string | null = null;
   let commit: string | null = null;
   let preflightRaw: string | null = null;
@@ -1223,6 +1234,15 @@ app.post('/:id/deploy', async (c) => {
               MAX_ASSET_MANIFEST_BYTES,
               bufferedBudget,
             );
+            // Parse eagerly so the `asset:*` fast-path below can detect
+            // in-request duplicate hashes (common with CLIs that mirror the
+            // same asset under multiple paths — e.g. a blog that emits every
+            // media file both under `/client/blog/...` and `/blog/...`).
+            // `parseAssetManifest` returns `null` on malformed/empty input
+            // and never throws; the stricter shape validation still runs
+            // post-parse at `applyDeclaredAssetManifest` time, so an invalid
+            // declared manifest simply means the fast-path doesn't activate.
+            declaredAssetManifest = parseAssetManifest(incomingAssetManifestRaw);
             continue;
           }
           if (part.name === 'source') {
@@ -1293,6 +1313,72 @@ app.post('/:id/deploy', async (c) => {
           if (part.name.startsWith('asset:')) {
             const path = '/' + part.name.slice('asset:'.length);
             if (streamedStaticAssets) {
+              // Fast-path: drain duplicate-hash bodies without buffering.
+              //
+              // Many CLIs (and some SSG frameworks like the cpojer-blog
+              // build) emit the same binary under multiple URL paths —
+              // a 19 MiB Git.mp4 appearing as both `/client/blog/.../Git.mp4`
+              // and `/blog/.../Git.mp4` is typical. Under the full-read path
+              // both parts charge `bufferedBudget` for 19 MiB each, even
+              // though `uploadStaticAssetPart`'s dedupe #2 ultimately issues
+              // only one KV/R2 PUT. With `STATIC_ASSET_UPLOAD_CONCURRENCY`
+              // slots each independently charged, a handful of mirrored
+              // large assets can trip the 64 MiB aggregate cap on deploys
+              // that would otherwise fit.
+              //
+              // If the declared manifest maps `path` to a hash we are
+              // already uploading (or have uploaded) in THIS request, we
+              // already hold the verified bytes for that hash — the server
+              // stores the first occurrence's fully-hashed content at
+              // `assets/${projectId}/${declared.hash}`. We can drain this
+              // duplicate's body with byte-count verification and commit
+              // `builtAssetManifest[path] = { hash, size }` directly, with
+              // zero budget charge and no additional PUT.
+              //
+              // Security: dedupe is per-request, keyed by blobs this same
+              // request already read-and-verified. A malicious client that
+              // declares a wrong hash for a later path can only cause the
+              // first-occurrence's content to serve at that later path —
+              // which is exactly what the declared manifest asked for.
+              // Cross-project bleed is blocked by the `projectId`-scoped
+              // KV/R2 key namespace.
+              //
+              // Size verification: we still enforce `bytesSeen ===
+              // declared.size` so a client cannot lie about size to
+              // smuggle past per-part caps or create an inconsistent
+              // manifest entry that would mismatch the stored blob.
+              const declared = declaredAssetManifest?.[path];
+              if (
+                declared &&
+                typeof declared.hash === 'string' &&
+                declared.hash.length === 32 &&
+                Number.isFinite(declared.size) &&
+                declared.size >= 0 &&
+                declared.size <= MAX_ASSET_BYTES &&
+                (streamedHashStores.has(declared.hash) || inFlightUploadByHash.has(declared.hash))
+              ) {
+                // Stream-hash verify the body against the declared hash.
+                // Byte-count-only drain would let a duplicate-path part with
+                // corrupted or tampered bytes silently commit a manifest
+                // entry pointing at the first occurrence's content —
+                // `applyDeclaredAssetManifest` then sees matching declared
+                // values and never revalidates, losing the end-to-end
+                // integrity check the full-read path provides on the first
+                // occurrence. Incremental hashing has constant memory cost
+                // (hasher state + a ≤2 byte carry), so this preserves the
+                // "zero budget charge" property that makes the fast-path
+                // worthwhile while restoring the mismatch detection.
+                await verifyStreamedAssetPart(part.body, path, declared);
+                builtAssetManifest[path] = {
+                  hash: declared.hash,
+                  size: declared.size,
+                };
+                // Publish our own claim for this hash so `cleanupOwnStreamedAssetClaims`
+                // still has something to delete if the deploy fails later.
+                // Idempotent via the sync `claimedStreamedHashes.has` guard.
+                await ensureStreamedAssetClaim(declared.hash);
+                continue;
+              }
               // Gate BEFORE reading the part body. `readStaticAssetPart`
               // charges `bufferedBudget.used` as bytes arrive (see
               // `readAssetBody` in assets.ts), so reading a fifth asset
@@ -1414,7 +1500,16 @@ app.post('/:id/deploy', async (c) => {
         // which the shared drain guarantees.
         await cleanupStreamedAssetsOnAbort();
         await cleanupOwnStreamedAssetClaims();
-        if (err instanceof MultipartParseError || err instanceof PartTooLargeError) {
+        if (
+          err instanceof MultipartParseError ||
+          err instanceof PartTooLargeError ||
+          err instanceof AssetHashMismatchError
+        ) {
+          // `AssetHashMismatchError` reaches here from `verifyStreamedAssetPart`
+          // in the duplicate-hash fast-path. Treat it as a parse-time client
+          // error (same as size/shape mismatches) so the NDJSON event carries
+          // `step: 'parsing'` rather than the misleading later step it would
+          // land on if it bubbled to the outer catch.
           emit({ event: 'error', message: err.message, step: currentStep });
           return;
         }
@@ -1423,7 +1518,12 @@ app.post('/:id/deploy', async (c) => {
 
       // === POST-PARSE VALIDATION ===
       currentStep = 'validating';
-      const incomingAssetManifest = parseAssetManifest(incomingAssetManifestRaw);
+      // Reuse the eagerly-parsed manifest from the `assetManifest` part
+      // handler above — same input string, never mutated during parse, and
+      // the declared manifest can be up to `MAX_ASSET_MANIFEST_BYTES` (32 MiB)
+      // so a second `JSON.parse` would duplicate both the CPU cost and the
+      // parsed-object heap footprint.
+      const incomingAssetManifest = declaredAssetManifest;
 
       // Guard against a body that parsed cleanly but never included a manifest
       // part. A missing manifest must not fall through to the deploy pipeline

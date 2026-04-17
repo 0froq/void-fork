@@ -2,7 +2,7 @@ import { extname } from 'node:path';
 import { createHasher, hash as blake3hash } from 'blake3-jit';
 import mime from 'mime';
 import { retryWithBackoff } from './cf-api';
-import { type BufferedBudget, PartTooLargeError } from './multipart';
+import { type BufferedBudget, MultipartParseError, PartTooLargeError } from './multipart';
 import type { AssetConfig } from './types';
 
 /**
@@ -519,6 +519,95 @@ async function readAssetBody(
 }
 
 export class AssetHashMismatchError extends Error {}
+
+/**
+ * Stream-consume a multipart asset body without buffering its bytes, hashing
+ * incrementally and verifying against the declared hash/size. Used by the
+ * streamed-static fast-path to validate duplicate-hash parts: the server
+ * already holds the first occurrence's content under `assets/${projectId}/
+ * ${declared.hash}`, so we have no need to keep the duplicate's bytes — we
+ * only need to prove the duplicate really does hash to the same value (which
+ * in turn proves the client isn't smuggling corrupted or tampered content
+ * into a deployment entry that points at trusted bytes).
+ *
+ * Shares the hash construction with `readAssetBody` — base64 of content
+ * plus the path extension — so a byte-for-byte identical asset produces the
+ * identical hash regardless of which path consumed it. Throws in three
+ * cases, all of which the deploy handler maps to an NDJSON error event:
+ *   - `PartTooLargeError` if byte count crosses `min(maxBytes, declared.size)`
+ *   - `MultipartParseError` if stream ends with a byte count not equal to
+ *      `declared.size` (size lie, zero-padded body, truncated body, etc.)
+ *   - `AssetHashMismatchError` if the computed hash doesn't match `declared.hash`
+ *
+ * Worker memory cost: ~O(hasher-state) plus a single CRLF-carry Uint8Array
+ * (≤ 2 bytes). The transport chunks are never retained past one iteration.
+ */
+export async function verifyStreamedAssetPart(
+  body: ReadableStream<Uint8Array>,
+  path: string,
+  declared: { hash: string; size: number },
+  { maxBytes = MAX_ASSET_BYTES }: { maxBytes?: number } = {},
+): Promise<void> {
+  const hasher = createHasher();
+  const reader = body.getReader();
+  let total = 0;
+  let carry = new Uint8Array(0);
+  // Stop the moment we cross the smaller of the user-facing per-asset cap
+  // and what the client declared — both are invariants the client agreed to.
+  const cap = Math.min(maxBytes, declared.size);
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value.length === 0) {
+        continue;
+      }
+      total += value.length;
+      if (total > cap) {
+        // Re-use the per-asset cap error class so the handler surfaces the
+        // same HTTP 413 semantics it would for an over-sized first-occurrence
+        // asset. `declared.size` is the tighter bound in the common case.
+        throw new PartTooLargeError(`asset:${path}`, cap);
+      }
+      let combined = value;
+      if (carry.length > 0) {
+        combined = new Uint8Array(carry.length + value.length);
+        combined.set(carry);
+        combined.set(value, carry.length);
+        carry = new Uint8Array(0);
+      }
+      const hashableLength = combined.length - (combined.length % 3);
+      if (hashableLength > 0) {
+        updateBase64Hash(hasher, combined.subarray(0, hashableLength));
+      }
+      carry = combined.slice(hashableLength);
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Reader may already be in a terminal state; nothing to release.
+    }
+  }
+
+  updateBase64Hash(hasher, carry);
+  hasher.update(textEncoder.encode(extname(path).substring(1)));
+  const actualHash = digestToAssetHash(hasher.finalize());
+
+  if (total !== declared.size) {
+    throw new MultipartParseError(
+      `asset:${path} body size ${total} does not match declared ${declared.size}`,
+    );
+  }
+  if (actualHash !== declared.hash) {
+    throw new AssetHashMismatchError(
+      `asset:${path}: declared hash ${declared.hash}, computed ${actualHash}`,
+    );
+  }
+}
 
 /** A streamed static-asset part that has been read + hashed but not yet uploaded. */
 export interface PreparedStaticAsset {
