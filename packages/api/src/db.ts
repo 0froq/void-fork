@@ -8,6 +8,8 @@ import {
   inArray,
   notInArray,
   ilike,
+  isNotNull,
+  isNull,
   or,
   sql,
   getTableColumns,
@@ -28,6 +30,7 @@ import {
   invitations,
   oauthNonces,
   authCodes,
+  migrationRenames,
 } from './schema';
 import type { PlanId } from './tiers';
 import type {
@@ -389,6 +392,230 @@ export async function setAppliedMigrations(
     .where(eq(deployments.id, deploymentId));
 }
 
+/**
+ * Atomically append newly-applied migration names to a deployment's
+ * applied_migrations JSON text column, de-duping against what's already there.
+ *
+ * The previous read/merge/write pattern (fetch, JSON.parse, union, stringify,
+ * UPDATE) lost entries under concurrent POST /migrations/apply requests: two
+ * callers could both see the same pre-merge state and each overwrite with
+ * their own partial union. Wrapping the read-then-write in a SERIALIZABLE
+ * transaction with `SELECT … FOR UPDATE` serializes writers at the row level
+ * so the second request waits for the first commit and observes its write.
+ *
+ * No-op when `newMigrations` is empty or the deployment row doesn't exist.
+ */
+export async function appendAppliedMigrations(
+  db: Db,
+  deploymentId: string,
+  newMigrations: string[],
+): Promise<void> {
+  if (newMigrations.length === 0) {
+    return;
+  }
+  await db.transaction(async (tx) => {
+    const rows = await tx
+      .select({ applied_migrations: deployments.applied_migrations })
+      .from(deployments)
+      .where(eq(deployments.id, deploymentId))
+      .for('update');
+    if (rows.length === 0) {
+      return;
+    }
+    const existing: string[] = rows[0]!.applied_migrations
+      ? JSON.parse(rows[0]!.applied_migrations)
+      : [];
+    const existingSet = new Set(existing);
+    const toAdd = newMigrations.filter((m) => !existingSet.has(m));
+    if (toAdd.length === 0) {
+      return;
+    }
+    const merged = [...existing, ...toAdd];
+    await tx
+      .update(deployments)
+      .set({ applied_migrations: JSON.stringify(merged) })
+      .where(eq(deployments.id, deploymentId));
+  });
+}
+
+/**
+ * Check whether the CURRENT active deployment of a project has `migrationName`
+ * present in its `applied_migrations` JSON array. Used by the rename endpoint
+ * to corroborate ambiguous `!fromExists && toExists` classifications against
+ * pg before rewriting metadata — a legitimate idempotent retry of a rename
+ * that landed in D1 but failed to commit to pg will still reference the old
+ * name on the active deployment.
+ *
+ * Scoped to the active deployment only. Stale retained deployment rows from
+ * pre-R6 (when /migrations/rename only updated the active deployment's
+ * `applied_migrations`) could be historically inaccurate and would silently
+ * authorize incorrect rename requests that happen to name a
+ * historically-present migration. The active deployment is the only source
+ * of truth we can rely on for corroboration.
+ *
+ * The column is stored as text (see `setAppliedMigrations`), so the query
+ * casts at read time. `jsonb ? text` returns true iff the JSON array has
+ * `migrationName` as a top-level element.
+ */
+export async function activeDeploymentContainsMigration(
+  db: Db,
+  projectId: string,
+  migrationName: string,
+): Promise<boolean> {
+  const result = (await db.execute(sql`
+    SELECT 1
+    FROM ${projects}
+    INNER JOIN ${deployments} ON ${deployments.id} = ${projects.active_deployment_id}
+    WHERE ${projects.id} = ${projectId}
+      AND ${deployments.applied_migrations} IS NOT NULL
+      AND (${deployments.applied_migrations})::jsonb ? ${migrationName}
+    LIMIT 1
+  `)) as { rows: unknown[] };
+  return result.rows.length > 0;
+}
+
+/**
+ * Rewrite `applied_migrations` entries across every deployment of a project.
+ *
+ * The rename endpoint updates remote `_void_migrations` rows in D1 and must
+ * also keep the platform-side record consistent. A previous implementation
+ * only rewrote the active deployment's `applied_migrations`, which left
+ * retained and inactive deployments pointing at the old migration names and
+ * broke rollback diffs that compare `applied_migrations` arrays. Rewriting
+ * every project deployment in one transaction keeps all rows in sync.
+ */
+export async function renameAppliedMigrationsForProject(
+  db: Db,
+  projectId: string,
+  renames: { from: string; to: string }[],
+): Promise<void> {
+  if (renames.length === 0) {
+    return;
+  }
+  const fromToMap = new Map(renames.map((r) => [r.from, r.to]));
+  await db.transaction(async (tx) => {
+    const rows = await tx
+      .select({ id: deployments.id, applied_migrations: deployments.applied_migrations })
+      .from(deployments)
+      .where(eq(deployments.project_id, projectId))
+      .for('update');
+    for (const row of rows) {
+      if (!row.applied_migrations) {
+        continue;
+      }
+      const parsed: string[] = JSON.parse(row.applied_migrations);
+      let changed = false;
+      const next = parsed.map((m) => {
+        const to = fromToMap.get(m);
+        if (to !== undefined) {
+          changed = true;
+          return to;
+        }
+        return m;
+      });
+      if (changed) {
+        await tx
+          .update(deployments)
+          .set({ applied_migrations: JSON.stringify(next) })
+          .where(eq(deployments.id, row.id));
+      }
+    }
+  });
+}
+
+/**
+ * Append committed /migrations/rename pairs to the audit log.
+ *
+ * The /rename partial-failure heal writes pg's `applied_migrations` before
+ * surfacing a later pair's failure, which erases
+ * `activeDeploymentContainsMigration(from)` as a corroboration source for
+ * same-payload retries of an already-committed prefix. This audit log is
+ * the durable, rename-specific second corroboration source:
+ * `migrationRenameExists(project_id, from, to)` returning true means the
+ * exact pair was already committed here in a previous locked tx, so an
+ * idempotent retry must NOT be rejected as ambiguous.
+ *
+ * Called from the /rename handler inside the same locked tx as
+ * `renameAppliedMigrationsForProject`, after every successful/idempotent
+ * pair has been folded into `committed`. Uses ON CONFLICT DO NOTHING so
+ * retries (and already-landed pairs from prior runs that land here again)
+ * are no-ops. Note: the primary key is `(project_id, from_name, to_name)`
+ * so this dedupes by the exact tuple — we never overwrite an existing row.
+ */
+export async function recordMigrationRenames(
+  db: Db,
+  projectId: string,
+  pairs: { from: string; to: string }[],
+): Promise<void> {
+  if (pairs.length === 0) {
+    return;
+  }
+  await db
+    .insert(migrationRenames)
+    .values(pairs.map((p) => ({ project_id: projectId, from_name: p.from, to_name: p.to })))
+    .onConflictDoNothing();
+}
+
+/**
+ * Returns true iff a committed rename from `from` to `to` has been recorded
+ * for the given project. See `recordMigrationRenames` for the rationale.
+ */
+export async function migrationRenameExists(
+  db: Db,
+  projectId: string,
+  from: string,
+  to: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ project_id: migrationRenames.project_id })
+    .from(migrationRenames)
+    .where(
+      and(
+        eq(migrationRenames.project_id, projectId),
+        eq(migrationRenames.from_name, from),
+        eq(migrationRenames.to_name, to),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
+/**
+ * Invalidate stale `migration_renames` rows whose `to_name` matches a
+ * migration that is now being renamed AWAY.
+ *
+ * Migration names can be recycled: if `(a, a1)` is logged, then `a1` is
+ * later renamed to `b`, then a different migration `x` is renamed INTO
+ * `a1`, the original `(a, a1)` row is stale. A fat-fingered retry of
+ * `a → a1` would then pass the classifier on corroborated-by-audit
+ * grounds even though `a1` now represents `x`'s migration, not `a`'s
+ * lineage — silently rewriting any retained-deployment rows that still
+ * mention `a`.
+ *
+ * Invariant: whenever we record a new rename X→Y, delete any prior
+ * `migration_renames` rows where `to_name = X`. Rationale: those rows
+ * assume X is still the canonical landing spot, but X is now being
+ * renamed away, so their "landed at X" claim is no longer valid.
+ *
+ * Only `to_name` is invalidated, not `from_name`. If the user previously
+ * renamed `a → a1` and now renames `a → a2`, both intents should remain
+ * auditable. The stale-lineage issue is specifically about a previously
+ * logged LANDING being recycled as a new SOURCE.
+ *
+ * Must be called inside the same locked tx as `recordMigrationRenames`
+ * and `renameAppliedMigrationsForProject` so a rollback also rolls back
+ * the invalidation.
+ */
+export async function invalidateMigrationRenamesForOldName(
+  db: Db,
+  projectId: string,
+  oldName: string,
+): Promise<void> {
+  await db
+    .delete(migrationRenames)
+    .where(and(eq(migrationRenames.project_id, projectId), eq(migrationRenames.to_name, oldName)));
+}
+
 export async function getRetainedDeployments(db: Db, projectId: string): Promise<Deployment[]> {
   return db
     .select()
@@ -428,6 +655,42 @@ export async function getInFlightDeploymentsExcluding(
         eq(deployments.project_id, projectId),
         notInArray(deployments.status, TERMINAL_DEPLOYMENT_STATUSES),
         excludeId ? ne(deployments.id, excludeId) : undefined,
+      ),
+    )
+    .orderBy(desc(deployments.created_at));
+}
+
+/**
+ * Every deployment that has ever reached `live` (deployed_at IS NOT NULL),
+ * regardless of current retention. Used by the rollback queue sweep to
+ * union every queue that was ever owned by an activated deployment.
+ */
+export async function getActivatedDeployments(db: Db, projectId: string): Promise<Deployment[]> {
+  return db
+    .select()
+    .from(deployments)
+    .where(and(eq(deployments.project_id, projectId), isNotNull(deployments.deployed_at)))
+    .orderBy(desc(deployments.created_at));
+}
+
+/**
+ * Deployments that reached a terminal non-success state without ever
+ * activating (deployed_at IS NULL, status in 'failed' | 'canceled').
+ * Union'd with getActivatedDeployments at rollback to catch `queue:<name>`
+ * KV routes a failed deploy wrote before the routing flip.
+ */
+export async function getTerminalFailedDeployments(
+  db: Db,
+  projectId: string,
+): Promise<Deployment[]> {
+  return db
+    .select()
+    .from(deployments)
+    .where(
+      and(
+        eq(deployments.project_id, projectId),
+        isNull(deployments.deployed_at),
+        inArray(deployments.status, ['failed', 'canceled']),
       ),
     )
     .orderBy(desc(deployments.created_at));

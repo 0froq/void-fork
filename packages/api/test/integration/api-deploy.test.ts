@@ -616,6 +616,9 @@ describe('POST /projects/:id/deploy', () => {
       env,
     );
     expect(res.status).toBe(200);
+    // Drain the NDJSON stream so the deploy IIFE (which holds deployments-table
+    // writes) finishes before the next beforeEach runs clearTables.
+    await readAllEvents(res);
   });
 
   it('includes limits in KV routing entry matching user plan', async () => {
@@ -1854,6 +1857,9 @@ describe('Deploy serialization (concurrent deploy guard)', () => {
       env,
     );
     expect(res.status).toBe(200);
+    // Drain the NDJSON stream so the deploy IIFE (which holds deployments-table
+    // writes) finishes before the next beforeEach runs clearTables.
+    await readAllEvents(res);
   });
 });
 

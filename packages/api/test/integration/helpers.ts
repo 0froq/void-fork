@@ -94,6 +94,13 @@ function createMockDoNamespace(): DurableObjectNamespace {
 type StoredValue = {
   value: string | ArrayBuffer;
   metadata?: unknown;
+  /**
+   * KV `expirationTtl` option captured so tests can assert that ISR
+   * entries come with an upper-bound reclaim window. Real KV enforces
+   * this at the storage layer; the in-memory mock only records it for
+   * assertions — it does not evict.
+   */
+  expirationTtl?: number;
 };
 
 function toArrayBuffer(value: ArrayBuffer | ArrayBufferView): ArrayBuffer {
@@ -104,7 +111,7 @@ function toArrayBuffer(value: ArrayBuffer | ArrayBufferView): ArrayBuffer {
   return new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice().buffer;
 }
 
-class MemoryKVNamespace {
+export class MemoryKVNamespace {
   private readonly store = new Map<string, StoredValue>();
 
   async get(
@@ -155,14 +162,23 @@ class MemoryKVNamespace {
   async put(
     key: string,
     value: string | ArrayBuffer | ArrayBufferView,
-    options?: { metadata?: unknown },
+    options?: { metadata?: unknown; expirationTtl?: number },
   ): Promise<void> {
     const normalized = typeof value === 'string' ? value : toArrayBuffer(value);
 
     this.store.set(key, {
       value: normalized,
       metadata: options?.metadata === undefined ? undefined : structuredClone(options.metadata),
+      expirationTtl: options?.expirationTtl,
     });
+  }
+
+  /**
+   * Read the recorded `expirationTtl` for a key. Returns `undefined`
+   * if the key doesn't exist or was put without the option.
+   */
+  getExpirationTtl(key: string): number | undefined {
+    return this.store.get(key)?.expirationTtl;
   }
 
   async delete(key: string): Promise<void> {
@@ -467,12 +483,18 @@ export async function createTestDeployment(
 ): Promise<{ id: string }> {
   const n = ++deploymentCounter;
   const id = `dpl_test${n}`;
+  // Mirror production semantics from `updateDeploymentStatus`:
+  // `deployed_at` is stamped via `COALESCE(deployed_at, now())` on the
+  // first transition to `live` and is never overwritten. Tests seeding
+  // a deployment directly in `live` state need the same marker, otherwise
+  // `getActivatedDeployments` won't see it.
   await db.insert(deployments).values({
     id,
     project_id: projectId,
     status,
     source: source ?? null,
     error_message: errorMessage ?? null,
+    deployed_at: status === 'live' ? sql`now()` : null,
   });
   if (status === 'live') {
     await db.update(projects).set({ active_deployment_id: id }).where(eq(projects.id, projectId));

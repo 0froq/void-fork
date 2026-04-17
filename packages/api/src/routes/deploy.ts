@@ -2742,7 +2742,7 @@ async function uploadPool<T>(
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
 }
 
-async function clearIsrCache(kv: KVNamespace, projectId: string): Promise<void> {
+export async function clearIsrCache(kv: KVNamespace, projectId: string): Promise<void> {
   const prefix = `${projectId}/isr/`;
   let cursor: string | undefined;
 

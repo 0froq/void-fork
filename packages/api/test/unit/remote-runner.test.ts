@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { runRemoteMigrations, isSingleStatement } from '../../src/migrations/remote-runner';
+import {
+  runRemoteMigrations,
+  isSingleStatement,
+  queryD1,
+} from '../../src/migrations/remote-runner';
 
 const ACCOUNT_ID = 'test-account';
 const API_TOKEN = 'test-token';
@@ -16,8 +20,15 @@ let hasLegacyTable = false;
 let legacyMigrations: string[] = [];
 
 // SQL strings that should trigger a failure response. Map from a substring
-// match (or regex) to the error message to return.
-let failingSql: { match: string | RegExp; message: string }[] = [];
+// match (or regex) to the error message to return. `beforeFail` is an optional
+// side-effect hook fired once per match — used to simulate state changes (e.g.
+// a concurrent winner inserting a tracking row) before the loser's request is
+// rejected.
+let failingSql: {
+  match: string | RegExp;
+  message: string;
+  beforeFail?: () => void;
+}[] = [];
 
 beforeEach(() => {
   queries = [];
@@ -37,6 +48,7 @@ beforeEach(() => {
         typeof f.match === 'string' ? body.sql?.includes(f.match) : f.match.test(body.sql ?? ''),
       );
       if (failure) {
+        failure.beforeFail?.();
         return new Response(
           JSON.stringify({
             success: false,
@@ -63,6 +75,22 @@ beforeEach(() => {
             success: true,
             errors: [],
             result: [{ results: appliedMigrations.map((name) => ({ name })) }],
+          }),
+        );
+      }
+
+      // Multi-statement recovery recheck: runRemoteMigrations re-queries the
+      // tracking table after an "already exists" error to distinguish a true
+      // concurrent winner from an unrecoverable partial commit. Match the
+      // current state of `appliedMigrations`, not the stale preflight set.
+      if (body.sql === 'SELECT name FROM _void_migrations WHERE name = ?') {
+        const name = body.params?.[0] as string | undefined;
+        const found = name !== undefined && appliedMigrations.includes(name) ? [{ name }] : [];
+        return new Response(
+          JSON.stringify({
+            success: true,
+            errors: [],
+            result: [{ results: found }],
           }),
         );
       }
@@ -246,6 +274,70 @@ describe('runRemoteMigrations', () => {
     expect(sqlList).toContainEqual(expect.stringContaining('DROP TABLE _migrations'));
   });
 
+  it('tolerates a concurrent upgrade race where the winner already dropped _migrations', async () => {
+    // Two concurrent ensureTrackingTable callers both pass the sqlite_master
+    // probe for the legacy `_migrations` table. The winner runs the
+    // INSERT OR IGNORE ... FROM _migrations copy AND drops the legacy table.
+    // The loser's copy INSERT then fails with `no such table: _migrations`.
+    // The loser swallows `no such table` specifically and continues; the
+    // DROP also fails safely.
+    hasLegacyTable = true;
+    legacyMigrations = ['001_create.sql'];
+
+    failingSql = [
+      {
+        // Only the legacy-upgrade shape (FROM _migrations). The tracking
+        // INSERT in runRemoteMigrations uses VALUES and stays untouched.
+        match: /INSERT OR IGNORE INTO _void_migrations[\s\S]*FROM _migrations/,
+        message: 'no such table: _migrations',
+        // Simulate the concurrent winner's outcome: rows already copied
+        // into _void_migrations and the legacy table dropped by the time
+        // the loser's failing copy dispatch happens. The winner's INSERT
+        // landed and its DROP cleared the flag.
+        beforeFail: () => {
+          for (const name of legacyMigrations) {
+            if (!appliedMigrations.includes(name)) {
+              appliedMigrations.push(name);
+            }
+          }
+          hasLegacyTable = false;
+          legacyMigrations = [];
+        },
+      },
+    ];
+
+    const result = await runRemoteMigrations(ACCOUNT_ID, API_TOKEN, DATABASE_ID, [
+      { name: '001_create.sql', sql: 'CREATE TABLE users (id TEXT);' },
+      { name: '002_new.sql', sql: 'CREATE TABLE posts (id TEXT);' },
+    ]);
+
+    // 001 was already copied by the winner; we only apply 002.
+    expect(result.skipped).toEqual(['001_create.sql']);
+    expect(result.applied).toEqual(['002_new.sql']);
+    // The winner's row is preserved and 002 was tracked.
+    expect(appliedMigrations).toContain('001_create.sql');
+    expect(appliedMigrations).toContain('002_new.sql');
+  });
+
+  it('propagates non-"no such table" errors from the legacy upgrade copy INSERT', async () => {
+    // Safety guard: the narrow catch must ONLY swallow `no such table`
+    // errors. Any other failure on the copy INSERT (auth, quota, schema
+    // mismatch on `_void_migrations`) must still propagate so the operator
+    // sees it.
+    hasLegacyTable = true;
+    legacyMigrations = ['001_create.sql'];
+    failingSql = [
+      {
+        match: /INSERT OR IGNORE INTO _void_migrations[\s\S]*FROM _migrations/,
+        message: 'Authentication error',
+      },
+    ];
+
+    await expect(runRemoteMigrations(ACCOUNT_ID, API_TOKEN, DATABASE_ID, [])).rejects.toThrow(
+      /Authentication error/,
+    );
+  });
+
   it('skips upgrade when no legacy _migrations table exists', async () => {
     hasLegacyTable = false;
 
@@ -329,38 +421,52 @@ describe('runRemoteMigrations', () => {
     expect(migrationSqlCalls).toHaveLength(0);
   });
 
-  it('propagates unrelated errors (syntax error) instead of recovering', async () => {
+  it('reports unrelated errors (syntax error) on result.failed instead of recovering', async () => {
     // Only "already exists" / "duplicate column" triggers the narrow
     // recovery. A syntax error means the migration is broken — fail loud.
+    //
+    // The runner returns the failure on `result.failed` instead of
+    // throwing so /apply can persist the committed prefix before surfacing
+    // the error. The end-state guarantee (tracking row NOT written) is
+    // preserved.
     failingSql = [{ match: 'CREATE TABEL', message: 'syntax error near "TABEL"' }];
 
-    await expect(
-      runRemoteMigrations(ACCOUNT_ID, API_TOKEN, DATABASE_ID, [
-        { name: '001_bad.sql', sql: 'CREATE TABEL oops (id TEXT);' },
-      ]),
-    ).rejects.toThrow('syntax error');
+    const result = await runRemoteMigrations(ACCOUNT_ID, API_TOKEN, DATABASE_ID, [
+      { name: '001_bad.sql', sql: 'CREATE TABEL oops (id TEXT);' },
+    ]);
+    expect(result.applied).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(result.failed).toBeDefined();
+    expect(result.failed!.name).toBe('001_bad.sql');
+    expect(result.failed!.error).toContain('syntax error');
 
     // Tracking row must NOT be written for the failed migration.
     expect(appliedMigrations).not.toContain('001_bad.sql');
   });
 
-  it('propagates "already exists" for multi-statement migrations (not safe to recover)', async () => {
+  it('reports "already exists" for multi-statement migrations on result.failed (not safe to recover)', async () => {
     // Multi-statement migrations CANNOT safely fall through the recovery
     // path. Consider `CREATE TABLE a; CREATE INDEX idx ON a(id);` where
     // statement 1 committed on a prior deploy and statement 2 failed
     // (network blip). The retry re-runs the whole body, D1 aborts at the
     // first "already exists" error on statement 1, and marking the
     // migration applied would permanently skip statement 2 — the index
-    // would never get created. Propagate the error instead and leave the
-    // tracking row unwritten so the operator can reconcile by hand.
+    // would never get created. Surface the error via result.failed instead
+    // and leave the tracking row unwritten so the operator can reconcile.
+    //
+    // Propagation is via the structured result, not a thrown error,
+    // so /apply can still persist any committed prefix before surfacing.
     const multiSql = 'CREATE TABLE a (id TEXT); CREATE INDEX idx_a ON a(id);';
     failingSql = [{ match: 'CREATE TABLE a', message: 'table a already exists' }];
 
-    await expect(
-      runRemoteMigrations(ACCOUNT_ID, API_TOKEN, DATABASE_ID, [
-        { name: '001_multi.sql', sql: multiSql },
-      ]),
-    ).rejects.toThrow(/already exists/);
+    const result = await runRemoteMigrations(ACCOUNT_ID, API_TOKEN, DATABASE_ID, [
+      { name: '001_multi.sql', sql: multiSql },
+    ]);
+    expect(result.applied).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(result.failed).toBeDefined();
+    expect(result.failed!.name).toBe('001_multi.sql');
+    expect(result.failed!.error).toMatch(/already exists/);
 
     // Tracking row must NOT be written for a migration we refused to recover.
     expect(appliedMigrations).not.toContain('001_multi.sql');
@@ -375,23 +481,161 @@ describe('runRemoteMigrations', () => {
     expect(trackingInserts).toHaveLength(0);
   });
 
-  it('propagates "already exists" when -- inside a quoted literal masks a second statement', async () => {
-    // Direct regression for the Codex finding. A multi-statement migration
-    // whose first statement defaults a column to a string containing `--`
-    // used to be misclassified as single-statement by the regex-based
-    // stripper, which meant the "already exists" recovery path would
-    // silently mark the whole migration applied — leaving the second
-    // CREATE TABLE missing from the remote schema forever. With the
-    // tokenizer, isSingleStatement correctly reports multi, the recovery
-    // path is skipped, and the error propagates.
+  it('recovers a multi-statement migration when a concurrent winner already recorded it', async () => {
+    // Two overlapping /apply requests race on the same multi-statement
+    // migration. The first lands the SQL and the tracking INSERT. The
+    // second has a stale preflight `applied` set, so it re-runs the body,
+    // hits "already exists", and must re-check `_void_migrations` directly
+    // — finding the winner's tracking row, it marks the migration skipped
+    // instead of failing. The partial-commit safety direction is preserved
+    // by the `propagates ... when no concurrent winner` test below.
+    const multiSql = 'CREATE TABLE a (id TEXT); CREATE INDEX idx_a ON a(id);';
+    failingSql = [
+      {
+        match: 'CREATE TABLE a',
+        message: 'table a already exists',
+        // Simulate the concurrent winner having already inserted the
+        // tracking row by the time the loser's failing SQL dispatch
+        // happens. The recheck (which reads `appliedMigrations` directly)
+        // will then find the winner's row and recover.
+        beforeFail: () => {
+          if (!appliedMigrations.includes('001_multi.sql')) {
+            appliedMigrations.push('001_multi.sql');
+          }
+        },
+      },
+    ];
+
+    const result = await runRemoteMigrations(ACCOUNT_ID, API_TOKEN, DATABASE_ID, [
+      { name: '001_multi.sql', sql: multiSql },
+    ]);
+
+    expect(result.applied).toEqual([]);
+    expect(result.skipped).toEqual(['001_multi.sql']);
+    // The tracking row from the concurrent winner is preserved and the
+    // loser did NOT issue its own VALUES-form INSERT (no double-write).
+    expect(appliedMigrations).toEqual(['001_multi.sql']);
+    const trackingInserts = queries.filter(
+      (q) =>
+        typeof q.sql === 'string' &&
+        q.sql.startsWith('INSERT OR IGNORE INTO _void_migrations') &&
+        q.sql.includes('VALUES'),
+    );
+    expect(trackingInserts).toHaveLength(0);
+    // The recheck SELECT was issued.
+    const recheckQueries = queries.filter(
+      (q) => q.sql === 'SELECT name FROM _void_migrations WHERE name = ?',
+    );
+    expect(recheckQueries).toHaveLength(1);
+    expect(recheckQueries[0].params?.[0]).toBe('001_multi.sql');
+  });
+
+  it('bounds-retries the multi-statement recheck so the loser can wait for the winner INSERT', async () => {
+    // The recheck and the winner's tracking INSERT are two non-atomic
+    // HTTP calls. A loser that fires its recheck microseconds before the
+    // winner's INSERT lands sees an empty result; the recheck retries up
+    // to 5× × 50ms and sees the row as soon as it lands.
+    //
+    // Simulate this by having the mock tracking-row SELECT return empty
+    // for the first call and "land" the winner's row on the second.
+    const multiSql = 'CREATE TABLE a (id TEXT); CREATE INDEX idx_a ON a(id);';
+    let recheckCount = 0;
+    failingSql = [{ match: 'CREATE TABLE a', message: 'table a already exists' }];
+
+    const originalFetch = globalThis.fetch as unknown as (
+      url: string,
+      init: RequestInit,
+    ) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string) as { sql: string; params?: unknown[] };
+        if (body.sql === 'SELECT name FROM _void_migrations WHERE name = ?') {
+          recheckCount++;
+          // Land the winner's tracking row right before the loser's second
+          // recheck observes the table — this is exactly the interleaving
+          // the bounded retry exists to survive.
+          if (recheckCount === 2 && !appliedMigrations.includes('001_multi.sql')) {
+            appliedMigrations.push('001_multi.sql');
+          }
+        }
+        return originalFetch(url, init);
+      }),
+    );
+
+    const result = await runRemoteMigrations(ACCOUNT_ID, API_TOKEN, DATABASE_ID, [
+      { name: '001_multi.sql', sql: multiSql },
+    ]);
+
+    expect(result.applied).toEqual([]);
+    expect(result.skipped).toEqual(['001_multi.sql']);
+    // The recheck was retried at least twice — first attempt observed the
+    // empty state, second observed the freshly-landed winner row.
+    expect(recheckCount).toBeGreaterThanOrEqual(2);
+    // The loser did NOT issue its own VALUES-form tracking INSERT (only the
+    // winner's row, which the test injected via beforeFail-style hook above).
+    const trackingInserts = queries.filter(
+      (q) =>
+        typeof q.sql === 'string' &&
+        q.sql.startsWith('INSERT OR IGNORE INTO _void_migrations') &&
+        q.sql.includes('VALUES'),
+    );
+    expect(trackingInserts).toHaveLength(0);
+  });
+
+  it('reports "already exists" on result.failed for multi-statement when no concurrent winner exists', async () => {
+    // The recheck must NOT recover when the tracking row is genuinely
+    // absent — that's a real partial commit the operator has to
+    // investigate. Same setup as the recovery test above but WITHOUT
+    // injecting the winner's row. Returns result.failed rather than
+    // throwing so the caller can heal any committed prefix from earlier
+    // in the batch.
+    const multiSql = 'CREATE TABLE a (id TEXT); CREATE INDEX idx_a ON a(id);';
+    failingSql = [{ match: 'CREATE TABLE a', message: 'table a already exists' }];
+
+    const result = await runRemoteMigrations(ACCOUNT_ID, API_TOKEN, DATABASE_ID, [
+      { name: '001_multi.sql', sql: multiSql },
+    ]);
+    expect(result.failed).toBeDefined();
+    expect(result.failed!.name).toBe('001_multi.sql');
+    expect(result.failed!.error).toMatch(/already exists/);
+
+    // Tracking row must NOT be written.
+    expect(appliedMigrations).not.toContain('001_multi.sql');
+    const trackingInserts = queries.filter(
+      (q) =>
+        typeof q.sql === 'string' &&
+        q.sql.startsWith('INSERT OR IGNORE INTO _void_migrations') &&
+        q.sql.includes('VALUES'),
+    );
+    expect(trackingInserts).toHaveLength(0);
+    // Recheck WAS issued and returned empty. The loser polls up to 5
+    // times before giving up, so assert at least one attempt and at
+    // most the full budget.
+    const recheckQueries = queries.filter(
+      (q) => q.sql === 'SELECT name FROM _void_migrations WHERE name = ?',
+    );
+    expect(recheckQueries.length).toBeGreaterThanOrEqual(1);
+    expect(recheckQueries.length).toBeLessThanOrEqual(5);
+  });
+
+  it('reports "already exists" on result.failed when -- inside a quoted literal masks a second statement', async () => {
+    // A multi-statement migration whose first statement defaults a column
+    // to a string containing `--` must be classified as multi-statement.
+    // With the tokenizer, isSingleStatement correctly reports multi, the
+    // recovery path is skipped, and the error surfaces on result.failed.
+    // A regex-based stripper would misclassify this as single-statement
+    // and silently mark the whole migration applied, leaving the second
+    // CREATE TABLE missing from the remote schema.
     const multiSql = "CREATE TABLE t (x TEXT DEFAULT '-- none'); CREATE TABLE u (y TEXT);";
     failingSql = [{ match: 'CREATE TABLE t', message: 'table t already exists' }];
 
-    await expect(
-      runRemoteMigrations(ACCOUNT_ID, API_TOKEN, DATABASE_ID, [
-        { name: '001_quoted_comment.sql', sql: multiSql },
-      ]),
-    ).rejects.toThrow(/already exists/);
+    const result = await runRemoteMigrations(ACCOUNT_ID, API_TOKEN, DATABASE_ID, [
+      { name: '001_quoted_comment.sql', sql: multiSql },
+    ]);
+    expect(result.failed).toBeDefined();
+    expect(result.failed!.name).toBe('001_quoted_comment.sql');
+    expect(result.failed!.error).toMatch(/already exists/);
 
     // Tracking row must NOT be written — the tokenizer correctly
     // refused to reconcile a multi-statement body.
@@ -434,6 +678,94 @@ describe('runRemoteMigrations', () => {
       { name: '001_create.sql', sql: 'CREATE TABLE users (id TEXT);' },
     ]);
     expect(appliedMigrations.filter((n) => n === '001_create.sql')).toHaveLength(1);
+  });
+});
+
+describe('queryD1 timeout', () => {
+  it('aborts the fetch and throws a timed-out error when the request hangs', async () => {
+    // Without a timeout, a hung D1 REST call would hold the
+    // migration row lock indefinitely — every subsequent apply/
+    // rename/rollback on the same project would pile up on the
+    // project's FOR UPDATE row lock. queryD1 must abort the fetch
+    // on its own timeout so the transaction unwinds and releases
+    // the lock.
+    let abortSignal: AbortSignal | undefined;
+    const hangingFetch = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          abortSignal = init.signal ?? undefined;
+          init.signal?.addEventListener('abort', () => {
+            const err = new Error('aborted');
+            err.name = 'AbortError';
+            reject(err);
+          });
+        }),
+    );
+    vi.stubGlobal('fetch', hangingFetch);
+
+    await expect(
+      queryD1(ACCOUNT_ID, API_TOKEN, DATABASE_ID, { sql: 'SELECT 1' }, 50),
+    ).rejects.toThrow(/timed out after 50ms/);
+    expect(abortSignal?.aborted).toBe(true);
+  });
+
+  it('propagates non-abort fetch errors unchanged', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('network unreachable');
+      }),
+    );
+    await expect(
+      queryD1(ACCOUNT_ID, API_TOKEN, DATABASE_ID, { sql: 'SELECT 1' }, 50),
+    ).rejects.toThrow('network unreachable');
+  });
+
+  it('clears the timeout on a successful response so no dangling timer fires', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ success: true, errors: [], result: [{ results: [] }] })),
+      ),
+    );
+    await expect(
+      queryD1(ACCOUNT_ID, API_TOKEN, DATABASE_ID, { sql: 'SELECT 1' }, 50),
+    ).resolves.toEqual({ results: [], meta: undefined });
+  });
+
+  it('aborts and rejects when headers arrive but the body stalls', async () => {
+    // `fetch()` resolves on response HEADERS, not the full body. A D1
+    // that sends headers and then stalls the chunked body (or sends a
+    // truncated stream that never closes) would hang the `response.json()`
+    // await forever, holding the row lock and pg pool connection. The
+    // abort controller must stay active until AFTER json() completes so
+    // abort propagates into the body stream and rejects the parse.
+    //
+    // The test constructs a Response whose body is a ReadableStream that
+    // never emits a byte. When the timer fires, the abort listener
+    // errors the stream, which propagates through json() as an
+    // AbortError, and queryD1 rethrows it as a timeout.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const stream = new ReadableStream({
+          start(controller) {
+            init.signal?.addEventListener('abort', () => {
+              controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+            });
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+
+    await expect(
+      queryD1(ACCOUNT_ID, API_TOKEN, DATABASE_ID, { sql: 'SELECT 1' }, 50),
+    ).rejects.toThrow(/timed out after 50ms/);
   });
 });
 
@@ -492,10 +824,10 @@ describe('isSingleStatement', () => {
   });
 
   it('-- inside a string literal does not mask a second statement', () => {
-    // This is the exact bug Codex caught. The previous implementation
-    // would strip everything from the first `--` onward (including the
-    // closing quote and the second statement), leaving a single fragment
-    // that parsed as "1 statement". The tokenizer must count both.
+    // A regex stripper would eat everything from the first `--` onward
+    // (including the closing quote and the second statement), leaving a
+    // single fragment that parsed as "1 statement". The tokenizer must
+    // count both.
     expect(
       isSingleStatement("CREATE TABLE t (x TEXT DEFAULT '-- none'); CREATE TABLE u (y TEXT);"),
     ).toBe(false);
@@ -517,6 +849,29 @@ describe('isSingleStatement', () => {
   it('doubled double-quote escape stays inside the identifier', () => {
     // `""` is an escaped inner double quote — the identifier keeps running.
     expect(isSingleStatement('INSERT INTO "weird""name" (x) VALUES (1);')).toBe(true);
+  });
+
+  it('-- inside a backtick identifier does not mask a second statement', () => {
+    // The tokenizer must treat backtick as an identifier quote so `--`
+    // inside a backtick identifier is not interpreted as a line comment.
+    // Otherwise the `;` terminator gets eaten and a multi-statement body
+    // is misclassified as single, enabling the single-statement recovery
+    // path to silently mark a half-applied body as complete.
+    const sql = ['CREATE TABLE `a--x` (id INT);', 'CREATE INDEX idx ON `a--x`(id);'].join('\n');
+    expect(isSingleStatement(sql)).toBe(false);
+  });
+
+  it('-- inside a bracket identifier does not mask a second statement', () => {
+    const sql = ['CREATE TABLE [a--x] (id INT);', 'CREATE INDEX idx ON [a--x](id);'].join('\n');
+    expect(isSingleStatement(sql)).toBe(false);
+  });
+
+  it('; inside a backtick identifier is not a statement terminator', () => {
+    expect(isSingleStatement('CREATE TABLE `a;b` (id INT)')).toBe(true);
+  });
+
+  it('; inside a bracket identifier is not a statement terminator', () => {
+    expect(isSingleStatement('CREATE TABLE [a;b] (id INT)')).toBe(true);
   });
 
   describe('drizzle-kit statement-breakpoint marker (primary gate)', () => {

@@ -3,6 +3,7 @@ import {
   index,
   integer,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -229,6 +230,37 @@ export const authCodes = pgTable('auth_codes', {
   jwt: text('jwt').notNull(),
   expires_at: timestamp('expires_at', { mode: 'string' }).notNull(),
 });
+
+// ---------------------------------------------------------------------------
+// migration_renames — audit log of successfully committed `/migrations/rename`
+// pairs. Written inside the same locked transaction as the D1 UPDATE +
+// `renameAppliedMigrationsForProject` healing write, so a row exists iff
+// both the D1 UPDATE and the pg rewrite have committed.
+//
+// This table is a durable, rename-specific second corroboration source for
+// same-payload retries after a partial-failure heal: a matching row means
+// "this exact (project_id, from, to) rename was already committed here, so
+// an idempotent retry that observes `to` in D1 and not `from` is genuine
+// rather than a fat-fingered request against an unrelated existing migration".
+// It is needed because the heal rewrites the active deployment's
+// `applied_migrations` to the new name, erasing the active-deployment-based
+// corroboration that would otherwise classify the retry.
+// ---------------------------------------------------------------------------
+export const migrationRenames = pgTable(
+  'migration_renames',
+  {
+    project_id: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    from_name: text('from_name').notNull(),
+    to_name: text('to_name').notNull(),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.project_id, t.from_name, t.to_name] }),
+    index('idx_migration_renames_project_id').on(t.project_id),
+  ],
+);
 
 // ---------------------------------------------------------------------------
 // invitations

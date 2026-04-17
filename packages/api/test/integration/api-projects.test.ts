@@ -497,7 +497,15 @@ describe('POST /projects/:id/rollback', () => {
           Authorization: `Bearer ${user.jwt}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ deploymentId: d1.id }),
+        // Rolling back to d1 drops 002/003 from the target's known
+        // migrations while D1 still has them — destructive rollback. The
+        // caller must echo the exact set of migrations that make up the
+        // server-computed diff (currentActive minus target) as
+        // `allowDestructive`; a mismatch is rejected with 400.
+        body: JSON.stringify({
+          deploymentId: d1.id,
+          allowDestructive: ['002_add_email.sql', '003_add_roles.sql'],
+        }),
       }),
       env,
     );
