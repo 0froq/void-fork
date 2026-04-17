@@ -8,7 +8,7 @@ import {
   readdirSync,
   readFileSync,
 } from 'node:fs';
-import { join, extname } from 'node:path';
+import { join, extname } from 'pathe';
 import { build } from 'vite';
 
 export interface WrapperFeatures {
