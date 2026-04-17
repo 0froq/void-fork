@@ -6,15 +6,17 @@ import {
   cleanupStreamedStaticAssets,
   collectBufferedAsset,
   createAssetUploadSession,
-  MAX_ASSET_BYTES,
+  KV_THRESHOLD,
   readStaticAssetPart,
   STATIC_ASSET_UPLOAD_CONCURRENCY,
+  streamStaticAssetToR2,
   uploadAssetBuckets,
   uploadStaticAssetPart,
   buildAssetMetadata,
   uploadStaticAssets,
   deleteUnreferencedAssets,
   verifyStreamedAssetPart,
+  getContentType,
   type AssetEntry,
   type AssetManifestEntry,
 } from '../assets';
@@ -46,7 +48,6 @@ import {
 import { sendDeployFailedEmail } from '../email';
 import type { ApiEnv } from '../env';
 import {
-  type BufferedBudget,
   MultipartParseError,
   parseBoundary,
   parseMultipart,
@@ -83,15 +84,13 @@ const MAX_SMALL_TEXT_BYTES = 64 * 1024; // 64 KiB — source, commit, misc
 // single runaway worker:* module cannot OOM the request before the upload to
 // CF ever happens.
 const MAX_WORKER_FILE_BYTES = 32 * 1024 * 1024; // 32 MiB
-// Aggregate ceiling on everything the deploy handler buffers in memory per
-// request (manifest + assetManifest + source/commit/preflight + worker:*
-// modules + asset:* payloads for worker-backed deploys). Per-part caps alone
-// cannot prevent a combination of legally-sized parts from summing past the
-// 128 MiB Worker request budget — e.g. 2x 32 MiB workers + 1x 50 MiB asset =
-// 114 MiB leaves almost no headroom for downstream work. 64 MiB caps the
-// total, and because the largest per-part cap is 50 MiB, the transient peak
-// during the final read is bounded at ~114 MiB (still under 128 MiB).
-const MAX_AGGREGATE_BUFFERED_BYTES = 64 * 1024 * 1024;
+// There is no aggregate in-memory cap on buffered deploy payloads: the
+// direct-to-R2 streaming path handles the large-asset case with O(1)
+// residency, and per-part caps above (plus the 128 MiB Worker isolate
+// memory hard wall) are the only remaining backstops for buffered paths
+// (worker-backed asset uploads and the streamed-static pool for small
+// assets). A deploy that buffers many legally-sized parts may approach
+// the 128 MiB isolate budget; that is accepted as the user's own risk.
 const STREAMED_ASSET_CLAIM_PREFIX = 'deploy-asset-claim';
 const STREAMED_ASSET_CLAIM_TTL_SECONDS = 60 * 60;
 /**
@@ -119,19 +118,11 @@ const app = new Hono<ApiEnv>();
  * Read a multipart part body up to `maxBytes`. Throws `PartTooLargeError` as
  * soon as the cap is exceeded — we stop reading rather than draining the
  * remainder, so abandoning the stream does NOT buffer past the cap.
- *
- * When `budget` is supplied, every chunk read is also checked against the
- * aggregate buffered-bytes ceiling: a part that would push the running total
- * past `budget.limit` is rejected mid-stream with
- * `PartTooLargeError('aggregate buffered deploy payload', limit)`. The
- * per-part cap and the aggregate cap both fire mid-read, so neither path
- * can materialize bytes beyond its respective ceiling.
  */
 async function readPartBytes(
   body: ReadableStream<Uint8Array>,
   partName: string,
   maxBytes: number,
-  budget?: BufferedBudget,
 ): Promise<Uint8Array> {
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
@@ -146,9 +137,6 @@ async function readPartBytes(
       if (total > maxBytes) {
         throw new PartTooLargeError(partName, maxBytes);
       }
-      if (budget && budget.used + total > budget.limit) {
-        throw new PartTooLargeError('aggregate buffered deploy payload', budget.limit);
-      }
       chunks.push(value);
     }
   } finally {
@@ -157,9 +145,6 @@ async function readPartBytes(
     } catch {
       // Reader may already be in a terminal state; nothing to release.
     }
-  }
-  if (budget) {
-    budget.used += total;
   }
   const merged = new Uint8Array(total);
   let offset = 0;
@@ -174,17 +159,16 @@ async function readPartText(
   body: ReadableStream<Uint8Array>,
   partName: string,
   maxBytes: number,
-  budget?: BufferedBudget,
 ): Promise<string> {
-  return new TextDecoder().decode(await readPartBytes(body, partName, maxBytes, budget));
+  return new TextDecoder().decode(await readPartBytes(body, partName, maxBytes));
 }
 
 /**
  * Read a multipart part body directly into a `Blob` with the given content
- * type. Same per-part and aggregate budget semantics as `readPartBytes`, but
- * never exposes a merged `Uint8Array` to the caller — the chunks are handed
- * straight to the `Blob` constructor inside this function, and only the
- * resulting `Blob` escapes.
+ * type. Same per-part cap semantics as `readPartBytes`, but never exposes a
+ * merged `Uint8Array` to the caller — the chunks are handed straight to the
+ * `Blob` constructor inside this function, and only the resulting `Blob`
+ * escapes.
  *
  * Why this exists instead of `new Blob([await readPartBytes(...)])`:
  * `new Blob([uint8])` always copies the source bytes, so that two-step form
@@ -201,7 +185,6 @@ async function readPartAsBlob(
   partName: string,
   maxBytes: number,
   contentType: string,
-  budget?: BufferedBudget,
 ): Promise<Blob> {
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
@@ -216,9 +199,6 @@ async function readPartAsBlob(
       if (total > maxBytes) {
         throw new PartTooLargeError(partName, maxBytes);
       }
-      if (budget && budget.used + total > budget.limit) {
-        throw new PartTooLargeError('aggregate buffered deploy payload', budget.limit);
-      }
       chunks.push(value);
     }
   } finally {
@@ -227,9 +207,6 @@ async function readPartAsBlob(
     } catch {
       // Reader may already be in a terminal state; nothing to release.
     }
-  }
-  if (budget) {
-    budget.used += total;
   }
   // Hand chunks directly to the Blob constructor — no merged-Uint8Array
   // intermediary. `chunks` is strictly local to this function and becomes
@@ -853,9 +830,10 @@ app.post('/:id/deploy', async (c) => {
   // arrives. Used by the streamed-static `asset:*` fast-path to detect
   // duplicate paths that map to a hash already being processed this
   // request — those bodies are drained without buffering or re-hashing,
-  // eliminating a per-duplicate `bufferedBudget` charge. Left `null` if
-  // the client never sends `assetManifest` (the fast-path simply never
-  // activates and the full read path handles every asset as before).
+  // eliminating a redundant memory allocation for the duplicate. Left
+  // `null` if the client never sends `assetManifest` (the fast-path
+  // simply never activates and the full read path handles every asset
+  // as before).
   let declaredAssetManifest: Record<string, AssetManifestEntry> | null = null;
   let source: string | null = null;
   let commit: string | null = null;
@@ -900,9 +878,6 @@ app.post('/:id/deploy', async (c) => {
   let cleanupExcludeDeploymentId: string | null = null;
   const streamedAssetClaimToken = crypto.randomUUID();
   const claimedStreamedHashes = new Set<string>();
-  // Aggregate counter shared across every buffered read in this request so
-  // a combination of legally-sized parts cannot sum past the request budget.
-  const bufferedBudget: BufferedBudget = { used: 0, limit: MAX_AGGREGATE_BUFFERED_BYTES };
 
   const ensureStreamedAssetClaim = async (hash: string): Promise<void> => {
     if (claimedStreamedHashes.has(hash)) {
@@ -1159,12 +1134,7 @@ app.post('/:id/deploy', async (c) => {
               await cleanupOwnStreamedAssetClaims();
               return;
             }
-            manifestRaw = await readPartText(
-              part.body,
-              'manifest',
-              MAX_MANIFEST_BYTES,
-              bufferedBudget,
-            );
+            manifestRaw = await readPartText(part.body, 'manifest', MAX_MANIFEST_BYTES);
             let parsedManifest: unknown;
             try {
               parsedManifest = JSON.parse(manifestRaw);
@@ -1232,7 +1202,6 @@ app.post('/:id/deploy', async (c) => {
               part.body,
               'assetManifest',
               MAX_ASSET_MANIFEST_BYTES,
-              bufferedBudget,
             );
             // Parse eagerly so the `asset:*` fast-path below can detect
             // in-request duplicate hashes (common with CLIs that mirror the
@@ -1246,20 +1215,15 @@ app.post('/:id/deploy', async (c) => {
             continue;
           }
           if (part.name === 'source') {
-            source = await readPartText(part.body, 'source', MAX_SMALL_TEXT_BYTES, bufferedBudget);
+            source = await readPartText(part.body, 'source', MAX_SMALL_TEXT_BYTES);
             continue;
           }
           if (part.name === 'commit') {
-            commit = await readPartText(part.body, 'commit', MAX_SMALL_TEXT_BYTES, bufferedBudget);
+            commit = await readPartText(part.body, 'commit', MAX_SMALL_TEXT_BYTES);
             continue;
           }
           if (part.name === 'preflight') {
-            preflightRaw = await readPartText(
-              part.body,
-              'preflight',
-              MAX_PREFLIGHT_BYTES,
-              bufferedBudget,
-            );
+            preflightRaw = await readPartText(part.body, 'preflight', MAX_PREFLIGHT_BYTES);
             continue;
           }
           // `worker:*` and `asset:*` parts depend on the deploy mode decided by
@@ -1305,7 +1269,6 @@ app.post('/:id/deploy', async (c) => {
                 `worker:${filePath}`,
                 MAX_WORKER_FILE_BYTES,
                 moduleContentType(filePath),
-                bufferedBudget,
               ),
             });
             continue;
@@ -1319,12 +1282,11 @@ app.post('/:id/deploy', async (c) => {
               // build) emit the same binary under multiple URL paths —
               // a 19 MiB Git.mp4 appearing as both `/client/blog/.../Git.mp4`
               // and `/blog/.../Git.mp4` is typical. Under the full-read path
-              // both parts charge `bufferedBudget` for 19 MiB each, even
-              // though `uploadStaticAssetPart`'s dedupe #2 ultimately issues
-              // only one KV/R2 PUT. With `STATIC_ASSET_UPLOAD_CONCURRENCY`
-              // slots each independently charged, a handful of mirrored
-              // large assets can trip the 64 MiB aggregate cap on deploys
-              // that would otherwise fit.
+              // both parts allocate and hash 19 MiB each, even though
+              // `uploadStaticAssetPart`'s dedupe #2 ultimately issues only
+              // one KV/R2 PUT. Skipping the buffered read for duplicates
+              // removes that redundant allocation entirely, keeping peak
+              // memory proportional to unique content rather than part count.
               //
               // If the declared manifest maps `path` to a hash we are
               // already uploading (or have uploaded) in THIS request, we
@@ -1333,7 +1295,7 @@ app.post('/:id/deploy', async (c) => {
               // `assets/${projectId}/${declared.hash}`. We can drain this
               // duplicate's body with byte-count verification and commit
               // `builtAssetManifest[path] = { hash, size }` directly, with
-              // zero budget charge and no additional PUT.
+              // no buffered allocation and no additional PUT.
               //
               // Security: dedupe is per-request, keyed by blobs this same
               // request already read-and-verified. A malicious client that
@@ -1345,16 +1307,28 @@ app.post('/:id/deploy', async (c) => {
               //
               // Size verification: we still enforce `bytesSeen ===
               // declared.size` so a client cannot lie about size to
-              // smuggle past per-part caps or create an inconsistent
-              // manifest entry that would mismatch the stored blob.
-              const declared = declaredAssetManifest?.[path];
+              // create an inconsistent manifest entry that would
+              // mismatch the stored blob.
+              //
+              // One lookup + shape validation shared across both
+              // declared-manifest branches below (fast-path and streaming):
+              // the two have identical "client sent a well-formed
+              // `{ hash, size }` for this path" invariant and only differ
+              // by whether the hash is already resident this request and
+              // whether the size crosses the streaming threshold. A single
+              // validated reference keeps future changes to the
+              // well-formed-ness rules in lockstep.
+              const declaredEntry = declaredAssetManifest?.[path];
+              const declared =
+                declaredEntry != null &&
+                typeof declaredEntry.hash === 'string' &&
+                declaredEntry.hash.length === 32 &&
+                Number.isFinite(declaredEntry.size) &&
+                declaredEntry.size >= 0
+                  ? declaredEntry
+                  : null;
               if (
                 declared &&
-                typeof declared.hash === 'string' &&
-                declared.hash.length === 32 &&
-                Number.isFinite(declared.size) &&
-                declared.size >= 0 &&
-                declared.size <= MAX_ASSET_BYTES &&
                 (streamedHashStores.has(declared.hash) || inFlightUploadByHash.has(declared.hash))
               ) {
                 // Stream-hash verify the body against the declared hash.
@@ -1366,7 +1340,7 @@ app.post('/:id/deploy', async (c) => {
                 // integrity check the full-read path provides on the first
                 // occurrence. Incremental hashing has constant memory cost
                 // (hasher state + a ≤2 byte carry), so this preserves the
-                // "zero budget charge" property that makes the fast-path
+                // O(1)-residency property that makes the fast-path
                 // worthwhile while restoring the mismatch detection.
                 await verifyStreamedAssetPart(part.body, path, declared);
                 builtAssetManifest[path] = {
@@ -1379,22 +1353,115 @@ app.post('/:id/deploy', async (c) => {
                 await ensureStreamedAssetClaim(declared.hash);
                 continue;
               }
-              // Gate BEFORE reading the part body. `readStaticAssetPart`
-              // charges `bufferedBudget.used` as bytes arrive (see
-              // `readAssetBody` in assets.ts), so reading a fifth asset
-              // while four uploads are still in flight would momentarily
-              // hold five assets' worth of bytes against the 64 MiB
-              // aggregate cap — tripping `PartTooLargeError('aggregate
-              // buffered deploy payload')` on deploys that would otherwise
-              // pass. Waiting here caps peak concurrent charge at exactly
-              // `STATIC_ASSET_UPLOAD_CONCURRENCY` (the currently-reading
-              // task slots into a freed spot). The gate also serves as
-              // reader-safety backpressure: a burst of tiny assets can't
-              // schedule hundreds of PUTs whose retries would stall the
-              // runtime. Reader-starvation behaviour is unchanged by the
-              // reorder — we weren't pulling `part.body` during the wait
-              // either way, so the outer transport reader sees the same
-              // idle window.
+              // Direct-to-R2 streaming path: when the client declared a valid
+              // `{ hash, size }` for this path AND the declared size crosses
+              // the KV threshold, pipe `part.body` straight through a hashing
+              // transform into `r2.put` without buffering the bytes. Per-asset
+              // memory is O(1) (hasher state + ≤ 2-byte carry), so a single
+              // large asset no longer pins its full size against the 128 MiB
+              // request budget.
+              //
+              // Preconditions (all required — otherwise fall through to the
+              // buffered pool path, which handles smaller files and recovers
+              // from any declared-manifest anomalies the full read would catch):
+              //   - `declaredAssetManifest` entry exists for this path
+              //   - `declared.hash` is the right shape (32 hex chars)
+              //   - `declared.size` is a sane, non-negative, cap-abiding integer
+              //   - `declared.size >= KV_THRESHOLD` (smaller assets still go
+              //     through KV via the pool path — KV PUTs are cheap and the
+              //     small payload doesn't justify the streaming complexity)
+              //   - the hash is NOT already handled this request (branch 1
+              //     above owns the duplicate-hash case)
+              //
+              // Serialization: `streamStaticAssetToR2` drives `part.body` to
+              // completion before returning, which means the multipart parser
+              // is blocked for the duration. We MUST drain `inFlightStaticUploads`
+              // first — otherwise a pool task could be mid-stream on a prior
+              // `part.body`, racing the transport reader with our new pipe
+              // reader. The pool size is bounded by `STATIC_ASSET_UPLOAD_CONCURRENCY`,
+              // so this is a short wait on asset-heavy deploys. This path
+              // never buffers asset bytes in Worker memory — O(1) residency
+              // for an arbitrarily large asset.
+              if (
+                declared &&
+                declared.size >= KV_THRESHOLD &&
+                !streamedHashStores.has(declared.hash) &&
+                !inFlightUploadByHash.has(declared.hash)
+              ) {
+                while (inFlightStaticUploads.size > 0) {
+                  // Drain the KV/R2 pool before we start streaming: the pool
+                  // tasks own the previous part's buffered read, but they
+                  // don't necessarily contend for the transport reader once
+                  // `readStaticAssetPart` returns. Still, running a stream
+                  // pipe concurrently with an in-flight task that itself
+                  // calls `onHashed` → `ROUTING.put` would race on KV order,
+                  // and more importantly we want the streaming path to have
+                  // uncontested access to the request body's reader during
+                  // its single-threaded pipeThrough/pipeTo pair.
+                  await Promise.race(inFlightStaticUploads);
+                }
+                // Register the hash for abort cleanup BEFORE `r2.put` can
+                // succeed. `streamStaticAssetToR2` can throw *after* it has
+                // already written bytes to R2 — specifically on the
+                // hash-mismatch-after-write path, where its best-effort
+                // `r2.delete` may transiently fail. If we waited to
+                // populate `streamedHashStores` until after the call
+                // returned, `cleanupStreamedAssetsOnAbort` would have no
+                // record of this hash and the poisoned blob would linger
+                // at `assets/${projectId}/${declared.hash}`. A later
+                // deploy with correct bytes would then hit the
+                // precondition-miss path (key exists) and trust the stored
+                // bytes — serving corrupted content.
+                //
+                // Pre-registering is safe on every other outcome:
+                //   - Happy path: no abort runs, the map is discarded at
+                //     request end.
+                //   - Early throw (FixedLengthStream size mismatch before
+                //     the put completes): cleanup tries to delete a key
+                //     that was never written → R2 delete is a no-op.
+                //   - Precondition miss (result === null): the existing
+                //     blob was written by another deploy. That deploy's
+                //     claim and/or its retained deployment row mark the
+                //     hash as foreign, so `cleanupStreamedAssetsOnAbort`
+                //     protects it via `hasForeignStreamedAssetClaim` /
+                //     `retainedHashes` — our registration does not cause
+                //     a cross-deploy wipe.
+                //
+                // Claim publishing (`ensureStreamedAssetClaim`) moves up
+                // for the same reason: a late claim write after the put
+                // succeeded would miss an abort-cleanup window. It's
+                // idempotent via `claimedStreamedHashes.has`, so the
+                // pre-put call is cheap.
+                streamedHashStores.set(declared.hash, 'r2');
+                streamedLargeHashes.add(declared.hash);
+                await ensureStreamedAssetClaim(declared.hash);
+
+                const { isNew } = await streamStaticAssetToR2(
+                  c.env.STATIC_ASSETS_R2,
+                  projectId,
+                  path,
+                  part.body,
+                  declared,
+                  getContentType(path),
+                );
+                // Parse-order deterministic, synchronous writes: same shape
+                // as both the fast-path (branch 1) and the pool path commit
+                // (branch 3). Last multipart-part wins if a path repeats.
+                builtAssetManifest[path] = {
+                  hash: declared.hash,
+                  size: declared.size,
+                };
+                if (isNew) {
+                  newStaticAssetCount++;
+                }
+                continue;
+              }
+              // Gate BEFORE reading the part body. Waiting here caps peak
+              // pool concurrency at `STATIC_ASSET_UPLOAD_CONCURRENCY` (the
+              // currently-reading task slots into a freed spot), serving
+              // as reader-safety backpressure: a burst of tiny assets
+              // can't schedule hundreds of PUTs whose retries would stall
+              // the runtime.
               //
               // Promise.race resolves when any upload settles, and that
               // promise's `.finally` removes it from the set *before*
@@ -1403,9 +1470,7 @@ app.post('/:id/deploy', async (c) => {
               while (inFlightStaticUploads.size >= STATIC_ASSET_UPLOAD_CONCURRENCY) {
                 await Promise.race(inFlightStaticUploads);
               }
-              const prepared = await readStaticAssetPart(part.body, path, {
-                budget: bufferedBudget,
-              });
+              const prepared = await readStaticAssetPart(part.body, path);
               // Commit the manifest entry synchronously in parse order.
               // `uploadStaticAssetPart` returns `entry = { hash, size }`
               // in every dedupe branch — values we already have from
@@ -1421,28 +1486,20 @@ app.post('/:id/deploy', async (c) => {
               // stream wins the path deterministically.
               builtAssetManifest[path] = { hash: prepared.hash, size: prepared.size };
               const uploadTask = (async () => {
-                try {
-                  const { store, isNew } = await uploadStaticAssetPart(
-                    c.env.STATIC_ASSETS,
-                    c.env.STATIC_ASSETS_R2,
-                    projectId,
-                    prepared,
-                    streamedHashStores,
-                    inFlightUploadByHash,
-                    { onHashed: ensureStreamedAssetClaim },
-                  );
-                  if (store === 'r2') {
-                    streamedLargeHashes.add(prepared.hash);
-                  }
-                  if (isNew) {
-                    newStaticAssetCount++;
-                  }
-                } finally {
-                  // Release the budget charge once the bytes are no longer
-                  // needed (successful upload or failure). Matches the
-                  // invariant in the old inline `collectAndUploadStaticAsset`
-                  // finally block.
-                  bufferedBudget.used -= prepared.size;
+                const { store, isNew } = await uploadStaticAssetPart(
+                  c.env.STATIC_ASSETS,
+                  c.env.STATIC_ASSETS_R2,
+                  projectId,
+                  prepared,
+                  streamedHashStores,
+                  inFlightUploadByHash,
+                  { onHashed: ensureStreamedAssetClaim },
+                );
+                if (store === 'r2') {
+                  streamedLargeHashes.add(prepared.hash);
+                }
+                if (isNew) {
+                  newStaticAssetCount++;
                 }
               })();
               inFlightStaticUploads.add(uploadTask);
@@ -1463,18 +1520,12 @@ app.post('/:id/deploy', async (c) => {
                   // after the parse loop.
                 });
             } else {
-              const { entry, hash, assetEntry } = await collectBufferedAsset(path, part.body, {
-                budget: bufferedBudget,
-              });
+              const { entry, hash, assetEntry } = await collectBufferedAsset(path, part.body);
               builtAssetManifest[path] = entry;
-              const previous = assetsByHash.get(hash);
+              // Duplicate content hashes collapse to one live buffered blob
+              // in `assetsByHash` — the replaced entry is unreachable and
+              // becomes GC-eligible.
               assetsByHash.set(hash, assetEntry);
-              if (previous) {
-                // Duplicate content hashes collapse to one live buffered blob in
-                // assetsByHash. Release the replaced entry's charge so the
-                // aggregate budget tracks current residency after the swap.
-                bufferedBudget.used -= previous.bytes.byteLength;
-              }
             }
             continue;
           }

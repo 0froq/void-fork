@@ -50,20 +50,6 @@ export class PartTooLargeError extends Error {
   }
 }
 
-/**
- * Shared aggregate-byte counter threaded through streaming body readers so a
- * caller (e.g. the deploy route) can enforce a ceiling on the *total* bytes
- * buffered across multiple parts. Per-part caps alone are not enough: a
- * handful of legally-sized `worker:*` + `asset:*` parts can still sum past
- * the 128 MiB Worker request budget. Readers check `used + localTotal` on
- * each chunk and abort with `PartTooLargeError('aggregate buffered ...')`
- * the instant the sum would cross the cap.
- */
-export interface BufferedBudget {
-  used: number;
-  readonly limit: number;
-}
-
 export function parseBoundary(contentType: string | null | undefined): string {
   if (!contentType) {
     throw new MultipartParseError('missing Content-Type header');

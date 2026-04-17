@@ -2738,6 +2738,633 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
   });
 });
 
+// Direct-stream-to-R2 path: when the client declared { hash, size } for an
+// asset whose size crosses the KV threshold, `asset:*` bodies are piped
+// straight through a hashing transform into `r2.put` without buffering.
+// Per-asset Worker memory becomes O(hasher-state + ≤ 2-byte carry), so a
+// multi-hundred-MiB asset no longer charges the 128 MiB request budget at all.
+// These tests live here (not in unit tests) because the behaviour depends
+// on the multipart parse loop + declared-manifest gate + real R2 binding
+// semantics (atomic write-if-absent via onlyIf), and those only line up
+// under the miniflare integration harness.
+describe('POST /projects/:id/deploy (streaming static direct-to-R2)', () => {
+  it('streams a large declared-manifest asset directly into STATIC_ASSETS_R2 with zero buffered residency', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'stream-r2-large');
+    mockCfApi();
+
+    // 10 MiB asset — well above the 2 MiB KV threshold so the streaming
+    // branch fires, and large enough that a buffered path would pin real
+    // memory against the 128 MiB Worker isolate budget.
+    const largeSize = 10 * 1024 * 1024;
+    const largeBytes = new Uint8Array(largeSize);
+    for (let i = 0; i < largeSize; i++) {
+      largeBytes[i] = (i * 31 + 7) & 0xff;
+    }
+    const largeHash = computeAssetHash(largeBytes.buffer, '/bundle.bin');
+    // A second large asset so we prove concurrent large payloads don't
+    // cumulatively pin memory against the isolate budget (the whole point
+    // of streaming).
+    const otherSize = 8 * 1024 * 1024;
+    const otherBytes = new Uint8Array(otherSize);
+    for (let i = 0; i < otherSize; i++) {
+      otherBytes[i] = (i * 13 + 2) & 0xff;
+    }
+    const otherHash = computeAssetHash(otherBytes.buffer, '/video.mp4');
+
+    const htmlBody = '<html>hi</html>';
+    const htmlHash = computeAssetHash(new TextEncoder().encode(htmlBody).buffer, '/index.html');
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        type: 'spa',
+        bindings: {},
+        assetConfig: { not_found_handling: 'single-page-application' },
+      }),
+    );
+    form.append(
+      'assetManifest',
+      JSON.stringify({
+        '/index.html': { hash: htmlHash, size: htmlBody.length },
+        '/bundle.bin': { hash: largeHash, size: largeSize },
+        '/video.mp4': { hash: otherHash, size: otherSize },
+      }),
+    );
+    form.append('asset:index.html', new Blob([htmlBody]));
+    form.append('asset:bundle.bin', new Blob([largeBytes], { type: 'application/octet-stream' }));
+    form.append('asset:video.mp4', new Blob([otherBytes], { type: 'video/mp4' }));
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const done = events.find((e: any) => e.event === 'done') as any;
+    expect(done).toBeDefined();
+    expect(done.assets).toBe(3);
+    expect(done.workers).toBe(0);
+
+    const assetUploadEvent = events.find((e: any) => e.event === 'asset_upload') as any;
+    expect(assetUploadEvent).toEqual({ event: 'asset_upload', total: 3, new: 3, cached: 0 });
+
+    // Both large assets landed in R2 under their content-addressed keys.
+    const largeHead = await env.STATIC_ASSETS_R2.head(`assets/${project.id}/${largeHash}`);
+    expect(largeHead).not.toBeNull();
+    expect(largeHead!.size).toBe(largeSize);
+    const otherHead = await env.STATIC_ASSETS_R2.head(`assets/${project.id}/${otherHash}`);
+    expect(otherHead).not.toBeNull();
+    expect(otherHead!.size).toBe(otherSize);
+
+    // Large assets must NOT appear in KV (streaming always writes R2).
+    const largeInKv = await env.STATIC_ASSETS.get(`assets/${project.id}/${largeHash}`);
+    expect(largeInKv).toBeNull();
+    const otherInKv = await env.STATIC_ASSETS.get(`assets/${project.id}/${otherHash}`);
+    expect(otherInKv).toBeNull();
+
+    // Small asset still flows through KV via the pool path.
+    const htmlStored = await env.STATIC_ASSETS.get(
+      `assets/${project.id}/${htmlHash}`,
+      'arrayBuffer',
+    );
+    expect(htmlStored).not.toBeNull();
+    expect(new TextDecoder().decode(htmlStored as ArrayBuffer)).toBe(htmlBody);
+
+    // Serving manifest marks R2-backed hashes with the "!" prefix.
+    const servingManifestRaw = await env.ROUTING.get(`manifest:${done.deployment}`);
+    const servingManifest = JSON.parse(servingManifestRaw as string) as Record<string, string>;
+    expect(servingManifest['/index.html']).toBe(htmlHash);
+    expect(servingManifest['/bundle.bin']).toBe(`!${largeHash}`);
+    expect(servingManifest['/video.mp4']).toBe(`!${otherHash}`);
+
+    // Round-trip readback through R2 confirms bytes were not corrupted by
+    // the pipe-through (hash match implies this, but read back anyway).
+    const largeBody = await env.STATIC_ASSETS_R2.get(`assets/${project.id}/${largeHash}`);
+    expect(largeBody).not.toBeNull();
+    const readBack = new Uint8Array(await largeBody!.arrayBuffer());
+    expect(readBack.length).toBe(largeSize);
+    // Spot-check — byte-for-byte equal at a few deterministic offsets.
+    expect(readBack[0]).toBe(largeBytes[0]);
+    expect(readBack[largeSize - 1]).toBe(largeBytes[largeSize - 1]);
+    expect(readBack[largeSize >> 1]).toBe(largeBytes[largeSize >> 1]);
+  });
+
+  it('surfaces a parse error and deletes the corrupted R2 blob when the declared hash does not match the body', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'stream-r2-bad-hash');
+    mockCfApi();
+
+    // Real content that will stream + be hashed server-side, but we declare
+    // a wrong hash. The wrong hash is what gates the streaming branch, so
+    // the R2 key ends up under the DECLARED (wrong) hash — which must be
+    // deleted once the post-stream verify catches the mismatch.
+    const bodySize = 4 * 1024 * 1024; // > KV_THRESHOLD to hit streaming path
+    const bodyBytes = new Uint8Array(bodySize);
+    for (let i = 0; i < bodySize; i++) {
+      bodyBytes[i] = (i * 11 + 1) & 0xff;
+    }
+    const realHash = computeAssetHash(bodyBytes.buffer, '/corrupt.bin');
+    const wrongHash = (realHash[0] === 'a' ? 'b' : 'a') + realHash.slice(1);
+    expect(wrongHash).not.toBe(realHash);
+    expect(wrongHash).toHaveLength(32);
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        type: 'spa',
+        bindings: {},
+        assetConfig: { not_found_handling: 'single-page-application' },
+      }),
+    );
+    form.append(
+      'assetManifest',
+      JSON.stringify({ '/corrupt.bin': { hash: wrongHash, size: bodySize } }),
+    );
+    form.append('asset:corrupt.bin', new Blob([bodyBytes], { type: 'application/octet-stream' }));
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    expect(errEvent).toBeDefined();
+    expect(errEvent.message).toMatch(/asset hash mismatch|declared hash/);
+
+    // The blob must have been deleted under the wrong-hash key (we wrote,
+    // then the hash verify failed, so our function deletes its own bytes).
+    const stillThere = await env.STATIC_ASSETS_R2.head(`assets/${project.id}/${wrongHash}`);
+    expect(stillThere).toBeNull();
+    // And it was never written under the real hash either (streaming path
+    // keys by declared hash, not computed hash).
+    const neverWrote = await env.STATIC_ASSETS_R2.head(`assets/${project.id}/${realHash}`);
+    expect(neverWrote).toBeNull();
+  });
+
+  it('surfaces a parse error when the declared size does not match the body length', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'stream-r2-bad-size');
+    mockCfApi();
+
+    // Actual body is 4 MiB; we lie and tell the server it's 5 MiB. The
+    // FixedLengthStream in the pipeline must reject, and the error maps
+    // to an NDJSON parse error.
+    const actualSize = 4 * 1024 * 1024;
+    const declaredSize = 5 * 1024 * 1024;
+    const bodyBytes = new Uint8Array(actualSize);
+    for (let i = 0; i < actualSize; i++) {
+      bodyBytes[i] = (i * 7 + 3) & 0xff;
+    }
+    // Hash value doesn't matter for this test — the size check fires first.
+    const bogusHash = 'f'.repeat(32);
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        type: 'spa',
+        bindings: {},
+        assetConfig: { not_found_handling: 'single-page-application' },
+      }),
+    );
+    form.append(
+      'assetManifest',
+      JSON.stringify({ '/size-lie.bin': { hash: bogusHash, size: declaredSize } }),
+    );
+    form.append('asset:size-lie.bin', new Blob([bodyBytes], { type: 'application/octet-stream' }));
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    expect(errEvent).toBeDefined();
+    // Deploy must surface an error (exact message is best-effort — a
+    // short-body TypeError from FixedLengthStream propagates through the
+    // put path and is deliberately not rewritten at the streamStaticAssetToR2
+    // boundary any more, because doing so would also misclassify R2
+    // infra TypeErrors as client size mismatches; see the
+    // `surfaces R2 put failures raw` test below for the correctness
+    // counter-case). The LOAD-BEARING invariant is that no deployment
+    // row and no stranded R2 blob survive — the cleanup paths fire
+    // regardless of which error channel surfaced the failure.
+    expect(errEvent.message.length).toBeGreaterThan(0);
+
+    // No R2 blob must have survived under the declared hash.
+    const stranded = await env.STATIC_ASSETS_R2.head(`assets/${project.id}/${bogusHash}`);
+    expect(stranded).toBeNull();
+  });
+
+  it('treats an R2 precondition-miss (content-addressed key already exists) as a dedupe hit across deploys', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'stream-r2-precond');
+    mockCfApi();
+
+    const size = 3 * 1024 * 1024;
+    const bytes = new Uint8Array(size);
+    for (let i = 0; i < size; i++) {
+      bytes[i] = (i * 23 + 9) & 0xff;
+    }
+    const hash = computeAssetHash(bytes.buffer, '/shared.bin');
+
+    function buildForm(): FormData {
+      const form = new FormData();
+      form.append(
+        'manifest',
+        JSON.stringify({
+          version: 3,
+          type: 'spa',
+          bindings: {},
+          assetConfig: { not_found_handling: 'single-page-application' },
+        }),
+      );
+      form.append('assetManifest', JSON.stringify({ '/shared.bin': { hash, size } }));
+      form.append('asset:shared.bin', new Blob([bytes], { type: 'application/octet-stream' }));
+      return form;
+    }
+
+    // First deploy: fresh put, creates the content-addressed R2 key.
+    const firstRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildForm(),
+      }),
+      env,
+    );
+    expect(firstRes.status).toBe(200);
+    const firstEvents = await readAllEvents(firstRes);
+    const firstDone = firstEvents.find((e: any) => e.event === 'done') as any;
+    expect(firstDone).toBeDefined();
+    const firstBlob = await env.STATIC_ASSETS_R2.head(`assets/${project.id}/${hash}`);
+    expect(firstBlob).not.toBeNull();
+    const originalEtag = firstBlob!.etag;
+
+    // Second deploy: same body, same declared hash. The second `r2.put`
+    // MUST be a precondition miss (etagDoesNotMatch: '*' returns null),
+    // and the deploy MUST still succeed with the hash verified.
+    const secondRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildForm(),
+      }),
+      env,
+    );
+    expect(secondRes.status).toBe(200);
+    const secondEvents = await readAllEvents(secondRes);
+    const secondDone = secondEvents.find((e: any) => e.event === 'done') as any;
+    expect(secondDone).toBeDefined();
+
+    // The R2 object is unchanged — same etag, same size.
+    const secondBlob = await env.STATIC_ASSETS_R2.head(`assets/${project.id}/${hash}`);
+    expect(secondBlob).not.toBeNull();
+    expect(secondBlob!.etag).toBe(originalEtag);
+    expect(secondBlob!.size).toBe(size);
+  });
+
+  it('preserves a pre-existing R2 blob when a new deploy sends bad bytes under the same declared hash', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'stream-r2-precond-safe');
+    mockCfApi();
+
+    // Seed R2 with a known-good blob that a retained deployment depends on.
+    // The hash is computed from the legitimate bytes so a well-behaved
+    // deploy would never have a reason to rewrite them.
+    const size = 3 * 1024 * 1024;
+    const goodBytes = new Uint8Array(size);
+    for (let i = 0; i < size; i++) {
+      goodBytes[i] = (i * 17 + 11) & 0xff;
+    }
+    const hash = computeAssetHash(goodBytes.buffer, '/shared.bin');
+    const key = `assets/${project.id}/${hash}`;
+    await env.STATIC_ASSETS_R2.put(key, goodBytes, {
+      httpMetadata: { contentType: 'application/octet-stream' },
+    });
+    const seededBlob = await env.STATIC_ASSETS_R2.head(key);
+    expect(seededBlob).not.toBeNull();
+    const seededEtag = seededBlob!.etag;
+
+    // Simulate a retained deployment that references this hash so the
+    // abort-cleanup path would protect it (the poisoning protection is the
+    // R2 precondition — this retained row is belt-and-suspenders).
+    const liveAssetManifest = { '/shared.bin': { hash, size } };
+    const liveManifestObj = {
+      version: 3,
+      type: 'spa',
+      bindings: {},
+      assetConfig: { not_found_handling: 'single-page-application' as const },
+    };
+    await env.db.insert(deployments).values({
+      id: 'dpl_retained_precond',
+      project_id: project.id,
+      status: 'live',
+      manifest: JSON.stringify(liveManifestObj),
+      asset_hashes: JSON.stringify(liveAssetManifest),
+      retained: true,
+      created_at: sql`now()`,
+    });
+
+    // New deploy: declares the SAME hash, but sends DIFFERENT bytes.
+    // The R2 put returns null (precondition miss), then the post-stream
+    // hash computes to the bad body's hash — which does not match the
+    // declared hash — so we throw AssetHashMismatchError. Critically,
+    // the existing good blob must NOT be deleted by the mismatch branch.
+    const badBytes = new Uint8Array(size);
+    for (let i = 0; i < size; i++) {
+      badBytes[i] = ((i * 29 + 5) ^ 0xa5) & 0xff;
+    }
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        type: 'spa',
+        bindings: {},
+        assetConfig: { not_found_handling: 'single-page-application' },
+      }),
+    );
+    form.append('assetManifest', JSON.stringify({ '/shared.bin': { hash, size } }));
+    form.append('asset:shared.bin', new Blob([badBytes], { type: 'application/octet-stream' }));
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    expect(errEvent).toBeDefined();
+    expect(errEvent.message).toMatch(/hash mismatch|declared hash/);
+
+    // Pre-existing R2 blob MUST still be present with the same etag.
+    // If this assertion fails, the precondition protection is broken and
+    // a malicious or buggy client can poison retained deployments.
+    const afterBlob = await env.STATIC_ASSETS_R2.head(key);
+    expect(afterBlob).not.toBeNull();
+    expect(afterBlob!.etag).toBe(seededEtag);
+    expect(afterBlob!.size).toBe(size);
+
+    // Sanity: round-trip the bytes and confirm we still have the original
+    // good content, not the bad body.
+    const reread = await env.STATIC_ASSETS_R2.get(key);
+    expect(reread).not.toBeNull();
+    const rereadBytes = new Uint8Array(await reread!.arrayBuffer());
+    expect(rereadBytes[0]).toBe(goodBytes[0]);
+    expect(rereadBytes[size - 1]).toBe(goodBytes[size - 1]);
+  });
+
+  // Reviewer caught that a transient r2.delete failure inside
+  // streamStaticAssetToR2's mismatch-after-write branch would strand a
+  // poisoned blob at the content-addressed key forever: streamedHashStores
+  // was populated only AFTER the call returned, so abort cleanup never
+  // retried the delete. A later deploy with correct bytes would then hit
+  // the precondition-miss path and trust the stored bytes — serving
+  // corrupted content. Fix: pre-register the hash in streamedHashStores
+  // + publish the claim BEFORE the call, so abort cleanup sweeps the
+  // blob regardless of where the throw happens inside the function.
+  it('retries r2.delete via abort cleanup when the inline delete fails after a hash-mismatch write', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'stream-r2-delete-retry');
+    mockCfApi();
+
+    const bodySize = 4 * 1024 * 1024;
+    const bodyBytes = new Uint8Array(bodySize);
+    for (let i = 0; i < bodySize; i++) {
+      bodyBytes[i] = (i * 19 + 2) & 0xff;
+    }
+    const realHash = computeAssetHash(bodyBytes.buffer, '/corrupt.bin');
+    const wrongHash = (realHash[0] === 'a' ? 'b' : 'a') + realHash.slice(1);
+    expect(wrongHash).not.toBe(realHash);
+
+    // Fail the first r2.delete (the inline one inside streamStaticAssetToR2)
+    // and succeed on the second (invoked by abort cleanup via
+    // cleanupStreamedStaticAssets). If the fix is present, both deletes
+    // fire and the blob is gone at end; without the fix, only the inline
+    // delete fires (and fails), leaving the poisoned key in R2.
+    const originalDelete = env.STATIC_ASSETS_R2.delete.bind(env.STATIC_ASSETS_R2);
+    let deleteCallCount = 0;
+    const deleteSpy = vi
+      .spyOn(env.STATIC_ASSETS_R2, 'delete')
+      .mockImplementation(async (keys: string | string[]) => {
+        deleteCallCount++;
+        if (deleteCallCount === 1) {
+          throw new Error('simulated transient R2 delete failure');
+        }
+        return originalDelete(keys as string);
+      });
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        type: 'spa',
+        bindings: {},
+        assetConfig: { not_found_handling: 'single-page-application' },
+      }),
+    );
+    form.append(
+      'assetManifest',
+      JSON.stringify({ '/corrupt.bin': { hash: wrongHash, size: bodySize } }),
+    );
+    form.append('asset:corrupt.bin', new Blob([bodyBytes], { type: 'application/octet-stream' }));
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    expect(errEvent).toBeDefined();
+    expect(errEvent.message).toMatch(/hash mismatch|declared hash/);
+
+    // Load-bearing invariants for the fix:
+    //   1. Inline delete fired (deleteCallCount ≥ 1).
+    //   2. Abort cleanup ALSO fired a delete for the same key
+    //      (deleteCallCount === 2), proving `streamedHashStores` was
+    //      pre-populated so the sweep could find it.
+    //   3. The blob is gone at end: the cleanup retry succeeded.
+    expect(deleteCallCount).toBe(2);
+    const stranded = await env.STATIC_ASSETS_R2.head(`assets/${project.id}/${wrongHash}`);
+    expect(stranded).toBeNull();
+
+    deleteSpy.mockRestore();
+  });
+
+  // Reviewer caught that `streamStaticAssetToR2`'s catch block used to
+  // rewrite ANY non-`MultipartParseError` into a size-mismatch parse
+  // error whenever `bytesSeen < declared.size`. That condition is also
+  // true when `r2.put` fails early — R2 cancels its consumer, the pipe
+  // sees fewer bytes than declared, and the valid server-side infra
+  // error gets surfaced to the client as a bogus "body size does not
+  // match declared" parse error. Fix: prefer the raw R2 put rejection
+  // when the put side failed, mapping to size-mismatch ONLY on a
+  // genuine short-body pipe failure.
+  it('surfaces R2 put failures raw instead of rewrapping them as size mismatches', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'stream-r2-put-failure');
+    mockCfApi();
+
+    const size = 4 * 1024 * 1024;
+    const bytes = new Uint8Array(size);
+    for (let i = 0; i < size; i++) {
+      bytes[i] = (i * 37 + 5) & 0xff;
+    }
+    const hash = computeAssetHash(bytes.buffer, '/infra-fail.bin');
+
+    // Fail the streaming put immediately — the consumer-side cancellation
+    // triggers a pipe reject with `bytesSeen < declared.size`, exercising
+    // the code path the reviewer identified.
+    const putSpy = vi.spyOn(env.STATIC_ASSETS_R2, 'put').mockImplementation(async () => {
+      throw new Error('simulated R2 upstream 500');
+    });
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        type: 'spa',
+        bindings: {},
+        assetConfig: { not_found_handling: 'single-page-application' },
+      }),
+    );
+    form.append('assetManifest', JSON.stringify({ '/infra-fail.bin': { hash, size } }));
+    form.append('asset:infra-fail.bin', new Blob([bytes], { type: 'application/octet-stream' }));
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    expect(errEvent).toBeDefined();
+    // Load-bearing: R2 put failures used to get rewritten as
+    // `MultipartParseError('body size X does not match declared Y')`
+    // because `bytesSeen < declared.size` is also true when r2.put
+    // cancels its consumer mid-stream. That misled operators — the
+    // parse-error event looked like a client protocol violation instead
+    // of an infra fault. The fix surfaces the raw R2 error class; the
+    // outer deploy handler's `sanitizeDeployErrorMessage` then maps
+    // unknown internal errors to the generic "deploy failed due to an
+    // internal error" message (not leaking infra internals to clients,
+    // but still correctly distinct from the parse-path message). So the
+    // assertion is: the NDJSON error is NOT the size-mismatch message.
+    expect(errEvent.message).not.toMatch(/does not match declared/);
+    expect(errEvent.message).not.toMatch(/body size/);
+
+    putSpy.mockRestore();
+  });
+
+  // Reviewer caught the edge case where r2.put rejects with a TypeError
+  // (rare but not impossible: a cancelled-consumer cascade, a malformed-
+  // response parser TypeError, etc.). The prior implementation checked
+  // `err instanceof TypeError && bytesSeen < declared.size` BEFORE the
+  // `putFailure` surfacing, so a TypeError from the R2 put itself would
+  // get rewritten as a client size-mismatch — hiding a real server-side
+  // fault behind a misleading "body size does not match declared" event.
+  // Fix: always prefer `putFailure` over the TypeError short-stream
+  // rewrite. The FLX close-count TypeError still surfaces cleanly for
+  // genuine short-body cases because in that scenario there's no
+  // independent put failure driving the error path (put also rejects,
+  // but with the same cascaded TypeError that the outer handler's
+  // sanitizer routes through the generic internal-error event). Either
+  // way, the key correctness invariant tested here: R2 rejections are
+  // NOT misclassified as client size mismatches.
+  it('does not misclassify a TypeError-shaped R2 put failure as a client size mismatch', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'stream-r2-put-typeerror');
+    mockCfApi();
+
+    const size = 4 * 1024 * 1024;
+    const bytes = new Uint8Array(size);
+    for (let i = 0; i < size; i++) {
+      bytes[i] = (i * 41 + 11) & 0xff;
+    }
+    const hash = computeAssetHash(bytes.buffer, '/type-err.bin');
+
+    // Simulate an R2 put that rejects with a TypeError mid-upload. Per
+    // the reviewer's report, this was the exact shape that defeated the
+    // class-based detector in the earlier revision.
+    const putSpy = vi.spyOn(env.STATIC_ASSETS_R2, 'put').mockImplementation(async () => {
+      throw new TypeError('simulated R2 internal TypeError');
+    });
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        type: 'spa',
+        bindings: {},
+        assetConfig: { not_found_handling: 'single-page-application' },
+      }),
+    );
+    form.append('assetManifest', JSON.stringify({ '/type-err.bin': { hash, size } }));
+    form.append('asset:type-err.bin', new Blob([bytes], { type: 'application/octet-stream' }));
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    expect(errEvent).toBeDefined();
+    // LOAD-BEARING: the client must NOT see a "body size does not match
+    // declared" message when the real failure is on the server storage
+    // side. The raw TypeError bubbles to the outer catch and is mapped
+    // to the generic internal-error event by the sanitizer — which is
+    // the correct outcome (client gets a non-misleading error without
+    // infra internals leaking).
+    expect(errEvent.message).not.toMatch(/does not match declared/);
+    expect(errEvent.message).not.toMatch(/body size/);
+
+    putSpy.mockRestore();
+  });
+});
+
 // Regression tests for the connection-lost fix: the deploy handler constructs
 // a TransformStream and returns `new Response(readable, ...)` BEFORE multipart
 // parsing / asset uploads begin, so CF edge / intermediaries see the 200 + NDJSON
@@ -3871,51 +4498,6 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     expect(dpls).toEqual([]);
   });
 
-  // Regression: round 10 review caught that `asset:*` parts were still
-  // buffered into memory via `blob()` + `arrayBuffer()` double-copy on the
-  // static/SPA path, reintroducing the 128 MiB OOM class on multi-megabyte
-  // binary assets. Each asset is now streamed with a hard 50 MiB per-part
-  // cap and rejected with 413 the instant it exceeds the limit.
-  it('returns 413 when a single asset:* part exceeds the 50 MiB cap', async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'edge-asset-too-large');
-    mockCfApi();
-
-    // Build a payload just over the 50 MiB cap. The reader must throw as
-    // soon as the cumulative byte total crosses the limit, before the
-    // entire body is buffered.
-    const oversized = new Uint8Array(51 * 1024 * 1024);
-    const form = new FormData();
-    form.append('manifest', JSON.stringify({ version: 3, type: 'static', bindings: {} }));
-    form.append('asset:big.bin', new Blob([oversized]));
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: form,
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-    const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message ?? '').toMatch(/asset:.*big\.bin.* exceeds/);
-
-    // Parse loop aborted before createDeployment — no deployment row, no
-    // orphaned KV/R2 entries under this project's asset prefix.
-    const dpls = await env.db
-      .select({ id: deployments.id })
-      .from(deployments)
-      .where(eq(deployments.project_id, project.id));
-    expect(dpls).toEqual([]);
-    const listed = await env.STATIC_ASSETS.list({ prefix: `assets/${project.id}/` });
-    expect(listed.keys).toEqual([]);
-  });
-
   // Regression: same round-10 class of OOM, but for `worker:*` parts.
   // Worker script bytes are already streamed through readPartBytes with a
   // 32 MiB cap; this test pins the 413 mapping end-to-end so a future
@@ -3951,83 +4533,6 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       .from(deployments)
       .where(eq(deployments.project_id, project.id));
     expect(dpls).toEqual([]);
-  });
-
-  // Regression: round 11 review caught that per-part caps alone allow a
-  // combination of legally-sized parts to sum past the 128 MiB Worker
-  // request budget. The aggregate counter must fail the second buffered
-  // part mid-stream once the running total crosses the 64 MiB headroom —
-  // regardless of how each individual part compares to its own cap.
-  it('returns 413 when buffered parts sum past the aggregate 64 MiB cap', async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'edge-aggregate-too-large');
-    mockCfApi();
-
-    // One legal 32 MiB worker + one legal 40 MiB buffered asset = 72 MiB
-    // total, ~8 MiB past the 64 MiB aggregate cap. Neither part alone
-    // trips its per-part limit (32 MiB for worker, 50 MiB for asset), so
-    // only the aggregate guard can stop this.
-    const worker = new Uint8Array(32 * 1024 * 1024);
-    const asset = new Uint8Array(40 * 1024 * 1024);
-    const form = new FormData();
-    // No `type` field → worker-backed deploy → asset:* goes through
-    // collectBufferedAsset and is subject to the aggregate budget.
-    form.append('manifest', JSON.stringify({ version: 3, bindings: {} }));
-    form.append('worker:index.js', new Blob([worker]));
-    form.append('asset:big.bin', new Blob([asset]));
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: form,
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-    const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message ?? '').toMatch(/aggregate buffered deploy payload.* exceeds/);
-
-    // Parse loop aborted before any deployment row / resource provisioning ran.
-    const dpls = await env.db
-      .select({ id: deployments.id })
-      .from(deployments)
-      .where(eq(deployments.project_id, project.id));
-    expect(dpls).toEqual([]);
-  });
-
-  it('does not leak aggregate budget when duplicate asset hashes replace buffered entries', async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'edge-aggregate-dedupe');
-    mockCfApi();
-
-    const worker = new Uint8Array(8 * 1024 * 1024);
-    const duplicate = new Uint8Array(20 * 1024 * 1024);
-    const unique = new Uint8Array(20 * 1024 * 1024);
-    const form = new FormData();
-    form.append('manifest', JSON.stringify({ version: 3, bindings: {} }));
-    form.append('worker:index.js', new Blob([worker]));
-    form.append('asset:dup-a.bin', new Blob([duplicate]));
-    form.append('asset:dup-b.bin', new Blob([duplicate]));
-    form.append('asset:unique.bin', new Blob([unique]));
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: form,
-      }),
-      env,
-    );
-
-    expect(res.status).toBe(200);
-    const events = await readAllEvents(res);
-    expect(events.some((e: any) => e.event === 'error')).toBe(false);
-    expect(events[events.length - 1]).toMatchObject({ event: 'done' });
   });
 
   // Regression: round 11 review caught a leak window on static deploys.
@@ -4201,74 +4706,6 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       .where(eq(deployments.project_id, project.id));
     expect(row?.retained).toBe(true);
     expect(row?.status).toBe('live');
-  });
-
-  // Regression: round 12 review caught that the aggregate 64 MiB budget was
-  // bypassed for streamed static assets — `collectAndUploadStaticAsset`
-  // called `readAssetBody` without a `BufferedBudget`, so the big
-  // buffered text parts (`assetManifest`, `manifest`) plus one near-cap
-  // streamed asset could push peak memory past 128 MiB during the final
-  // chunks→merged double-allocation in `readAssetBody`. The fix threads
-  // `bufferedBudget` into the streamed path with a scoped lifetime
-  // (increment on read, decrement in `finally` after upload).
-  it('returns 413 on streamed static deploys that sum past the aggregate 64 MiB cap', async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'edge-streamed-static-aggregate');
-    mockCfApi();
-
-    // 30 MiB `assetManifest` + 40 MiB streamed static asset = 70 MiB total,
-    // ~6 MiB past the 64 MiB aggregate cap. Neither part alone trips its
-    // per-part limit (32 MiB manifest cap, 50 MiB asset cap). The aggregate
-    // budget must fire on the streamed asset mid-read via the `budget`
-    // thread-through into `collectAndUploadStaticAsset`. The parse loop
-    // aborts before `parseAssetManifest` runs, so the assetManifest content
-    // is never JSON-parsed — using a raw padded string keeps the test fast
-    // and avoids building a multi-megabyte JSON object.
-    const assetManifestRaw = 'x'.repeat(30 * 1024 * 1024);
-    // Sanity: the assetManifest part must itself be legal per-part.
-    expect(assetManifestRaw.length).toBeLessThan(32 * 1024 * 1024);
-
-    const streamedAsset = new Uint8Array(40 * 1024 * 1024);
-
-    const form = new FormData();
-    form.append(
-      'manifest',
-      JSON.stringify({
-        version: 3,
-        type: 'spa',
-        bindings: {},
-        assetConfig: { not_found_handling: 'single-page-application' },
-      }),
-    );
-    form.append('assetManifest', assetManifestRaw);
-    form.append('asset:big.bin', new Blob([streamedAsset]));
-
-    const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: form,
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-    const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message ?? '').toMatch(/aggregate buffered deploy payload.* exceeds/);
-
-    // The parse loop aborted mid-stream; no deployment row should exist, and
-    // no streamed asset should be left behind in STATIC_ASSETS (the parse
-    // catch runs `cleanupStreamedAssetsOnAbort`).
-    const dpls = await env.db
-      .select({ id: deployments.id })
-      .from(deployments)
-      .where(eq(deployments.project_id, project.id));
-    expect(dpls).toEqual([]);
-    const listed = await env.STATIC_ASSETS.list({ prefix: `assets/${project.id}/` });
-    expect(listed.keys).toEqual([]);
   });
 
   // Sanity: `bindings.ai: true` is a legitimate payload and must NOT

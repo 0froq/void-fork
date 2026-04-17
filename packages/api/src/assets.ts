@@ -2,17 +2,23 @@ import { extname } from 'node:path';
 import { createHasher, hash as blake3hash } from 'blake3-jit';
 import mime from 'mime';
 import { retryWithBackoff } from './cf-api';
-import { type BufferedBudget, MultipartParseError, PartTooLargeError } from './multipart';
+import { MultipartParseError, PartTooLargeError } from './multipart';
 import type { AssetConfig } from './types';
 
-/**
- * Per-asset body cap. Enforced while the part is still streaming, so a single
- * oversized asset (image, video, etc.) never materializes into Worker memory.
- * Sized to cover legitimate large binary assets (SPAs with fonts/videos) while
- * bounding peak memory well under the 128 MiB request budget even when
- * multiple assets arrive back-to-back.
- */
-export const MAX_ASSET_BYTES = 50 * 1024 * 1024; // 50 MiB
+// Per-asset upload size is bounded by which path consumes the bytes:
+//
+//   - `streamStaticAssetToR2` (direct-to-R2 streaming, SPA/static deploys
+//     with a declared manifest) pipes bytes straight through a hashing
+//     Transform into `r2.put`. Per-asset residency is O(hasher state +
+//     one chunk in flight) ≈ 64 KiB, independent of asset size. The
+//     effective ceiling is R2's 5 GiB single-`put` limit.
+//
+//   - Buffered paths (`readAssetBody`, worker-backed `collectBufferedAsset`,
+//     the streamed-static pool) allocate a contiguous Uint8Array of the
+//     asset size. There is no per-asset cap and no aggregate cap — the
+//     128 MiB Worker isolate memory hard wall is the ultimate backstop,
+//     alongside per-part caps that apply to other multipart fields
+//     (`MAX_WORKER_FILE_BYTES`, `MAX_MANIFEST_BYTES`, etc. in deploy.ts).
 
 class AssetUploadError extends Error {
   constructor(
@@ -440,19 +446,15 @@ function updateBase64Hash(hasher: ReturnType<typeof createHasher>, bytes: Uint8A
 }
 
 /**
- * Stream-read a multipart asset body with a hard per-asset byte cap, hashing
- * incrementally as bytes arrive and assembling them into a single Uint8Array
- * at the end. The running total is checked after every reader chunk, so a
- * payload that exceeds `maxBytes` throws `PartTooLargeError` the instant it
- * crosses the cap — the full-size allocation is never reached. Replaces the
+ * Stream-read a multipart asset body, hashing incrementally as bytes arrive
+ * and assembling them into a single Uint8Array at the end. Replaces the
  * previous `await new Response(body).blob()` → `blob.arrayBuffer()` pipeline
- * that held each asset in memory twice and had no cap at all.
+ * that held each asset in memory twice. Memory ceiling is the 128 MiB Worker
+ * isolate budget — there is no per-asset or aggregate cap here.
  */
 async function readAssetBody(
   body: ReadableStream<Uint8Array>,
   path: string,
-  maxBytes: number,
-  budget?: BufferedBudget,
 ): Promise<{ bytes: Uint8Array; hash: string; size: number }> {
   const hasher = createHasher();
   const reader = body.getReader();
@@ -470,12 +472,6 @@ async function readAssetBody(
         continue;
       }
       total += value.length;
-      if (total > maxBytes) {
-        throw new PartTooLargeError(`asset:${path}`, maxBytes);
-      }
-      if (budget && budget.used + total > budget.limit) {
-        throw new PartTooLargeError('aggregate buffered deploy payload', budget.limit);
-      }
       chunks.push(value);
 
       // Hash incrementally on 3-byte-aligned blocks so we never need to
@@ -505,10 +501,6 @@ async function readAssetBody(
   hasher.update(textEncoder.encode(extname(path).substring(1)));
   const hash = digestToAssetHash(hasher.finalize());
 
-  if (budget) {
-    budget.used += total;
-  }
-
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) {
@@ -534,7 +526,8 @@ export class AssetHashMismatchError extends Error {}
  * plus the path extension — so a byte-for-byte identical asset produces the
  * identical hash regardless of which path consumed it. Throws in three
  * cases, all of which the deploy handler maps to an NDJSON error event:
- *   - `PartTooLargeError` if byte count crosses `min(maxBytes, declared.size)`
+ *   - `PartTooLargeError` if the body exceeds the declared size (client lied
+ *     about how big the asset is, or the stream was extended mid-flight)
  *   - `MultipartParseError` if stream ends with a byte count not equal to
  *      `declared.size` (size lie, zero-padded body, truncated body, etc.)
  *   - `AssetHashMismatchError` if the computed hash doesn't match `declared.hash`
@@ -546,15 +539,11 @@ export async function verifyStreamedAssetPart(
   body: ReadableStream<Uint8Array>,
   path: string,
   declared: { hash: string; size: number },
-  { maxBytes = MAX_ASSET_BYTES }: { maxBytes?: number } = {},
 ): Promise<void> {
   const hasher = createHasher();
   const reader = body.getReader();
   let total = 0;
   let carry = new Uint8Array(0);
-  // Stop the moment we cross the smaller of the user-facing per-asset cap
-  // and what the client declared — both are invariants the client agreed to.
-  const cap = Math.min(maxBytes, declared.size);
 
   try {
     while (true) {
@@ -566,11 +555,12 @@ export async function verifyStreamedAssetPart(
         continue;
       }
       total += value.length;
-      if (total > cap) {
-        // Re-use the per-asset cap error class so the handler surfaces the
-        // same HTTP 413 semantics it would for an over-sized first-occurrence
-        // asset. `declared.size` is the tighter bound in the common case.
-        throw new PartTooLargeError(`asset:${path}`, cap);
+      if (total > declared.size) {
+        // Client declared `declared.size` and agreed to that as the
+        // per-asset cap; a stream that produces more bytes is a protocol
+        // violation we surface as 413. The post-pipe total-vs-declared
+        // check below catches the opposite case (short stream).
+        throw new PartTooLargeError(`asset:${path}`, declared.size);
       }
       let combined = value;
       if (carry.length > 0) {
@@ -609,6 +599,241 @@ export async function verifyStreamedAssetPart(
   }
 }
 
+/**
+ * Stream a multipart asset body directly into R2 without buffering its bytes
+ * in Worker memory. Memory cost is O(1) per asset — just the BLAKE3 hasher
+ * state plus a ≤ 2-byte carry for 3-byte-aligned base64 hashing — so a large
+ * SPA bundle no longer pins its full size against the 128 MiB request budget.
+ *
+ * Pipeline shape (deliberate — NOT `tee()`):
+ *
+ *   body ─▶ hashingTransform ─▶ FixedLengthStream ─▶ r2.put
+ *
+ * Each byte passes through exactly once, in order, with the hasher updated
+ * synchronously inside `transform`. A `tee()` fork would buffer for the
+ * slower branch and reintroduce asset-sized residency — defeating the point.
+ *
+ * Invariants (all load-bearing, do not weaken without understanding why):
+ *
+ *   1. `onlyIf: { etagDoesNotMatch: '*' }` makes this a conditional write.
+ *      R2 returns `null` when the content-addressed key already exists,
+ *      which means another deploy (identical bytes) has already populated
+ *      the key and our put was a no-op. Without the precondition, a put
+ *      with *different* bytes (a lying client, or a mangled stream) would
+ *      silently overwrite trusted content that a retained deployment is
+ *      still serving. The `*` wildcard means "fail if any etag is present"
+ *      i.e. "write iff the object doesn't exist" — confirmed against
+ *      workers-sdk R2 semantics and miniflare.
+ *
+ *   2. The returned promise type is `Promise<R2Object | null>` *only*
+ *      because `onlyIf` is present. The TS overload on `R2Bucket.put`
+ *      reflects this — without `onlyIf`, put resolves to non-null
+ *      `R2Object` and a null-check would be dead code.
+ *
+ *   3. We verify the computed hash against `declared.hash` AFTER the stream
+ *      settles. Skipping verification on an existing-key hit would let a
+ *      malicious client commit a manifest entry pointing at bytes it does
+ *      not own — the duplicate-hash fast-path in PR #93 had exactly this
+ *      bug before review caught it. We compute regardless of whether we
+ *      wrote or hit the precondition miss.
+ *
+ *   4. Hash construction matches `readAssetBody` / `verifyStreamedAssetPart`
+ *      exactly: base64 of the bytes, accumulated on 3-byte-aligned blocks
+ *      through the hasher, then the path extension appended as the final
+ *      update, then first 16 bytes of the BLAKE3 digest as lowercase hex.
+ *      A byte-for-byte identical asset therefore produces the identical
+ *      hash regardless of which code path consumed it.
+ *
+ *   5. If our put wrote bytes but the computed hash doesn't match
+ *      `declared.hash`, we delete the key we just wrote. If the put was a
+ *      precondition miss (pre-existing key), we DO NOT delete — another
+ *      retained deployment may still depend on those bytes, and the miss
+ *      is proof our stream never reached R2 in the first place.
+ *
+ *   6. `FixedLengthStream` rejects the pipe-through promise with a
+ *      `TypeError` the instant actual bytes diverge from `declared.size`
+ *      (too few or too many). We map that single failure mode to
+ *      `MultipartParseError` so the deploy handler emits an NDJSON parse
+ *      error — every other error (R2 transport, hash computation) passes
+ *      through unchanged.
+ *
+ * The parse loop is intentionally serialized while this function runs: the
+ * multipart parser cannot advance past `part.body` until its ReadableStream
+ * is drained, and our pipeline is the drain. Callers must drain any
+ * concurrent upload pool BEFORE invoking this function, so the reader
+ * doesn't race with other in-flight pool tasks on the same request body.
+ */
+export async function streamStaticAssetToR2(
+  r2: R2Bucket,
+  projectId: string,
+  path: string,
+  body: ReadableStream<Uint8Array>,
+  declared: { hash: string; size: number },
+  contentType: string,
+): Promise<{ store: 'r2'; isNew: boolean }> {
+  const hasher = createHasher();
+  let carry = new Uint8Array(0);
+  // Count bytes directly in our hashing transform so we can surface
+  // size-mismatch deterministically as `MultipartParseError`, independent
+  // of whatever FixedLengthStream / R2 transport happen to throw. A short
+  // stream closes with `bytesSeen < declared.size` (pipeTo resolves even
+  // though FixedLengthStream erred because workerd cancels the writable
+  // first); a long stream errors inside transform when we exceed the cap.
+  let bytesSeen = 0;
+
+  const hashingTransform = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      if (chunk.length > 0) {
+        bytesSeen += chunk.length;
+        if (bytesSeen > declared.size) {
+          // Match the per-asset cap semantics: error the instant we exceed
+          // the declared ceiling rather than letting more bytes flow into
+          // FixedLengthStream (which would also reject, but we want the
+          // deterministic client-visible error shape).
+          controller.error(
+            new MultipartParseError(`asset:${path} body exceeds declared size ${declared.size}`),
+          );
+          return;
+        }
+        // Match `readAssetBody`: only hash 3-byte-aligned prefixes so the
+        // final base64 encoding matches a one-shot `bytesToBase64(wholeFile)`.
+        // The < 3-byte tail carries into the next chunk and is flushed after
+        // the pipe settles.
+        let combined = chunk;
+        if (carry.length > 0) {
+          combined = new Uint8Array(carry.length + chunk.length);
+          combined.set(carry);
+          combined.set(chunk, carry.length);
+          carry = new Uint8Array(0);
+        }
+        const hashableLength = combined.length - (combined.length % 3);
+        if (hashableLength > 0) {
+          updateBase64Hash(hasher, combined.subarray(0, hashableLength));
+        }
+        carry = combined.slice(hashableLength);
+      }
+      controller.enqueue(chunk);
+    },
+  });
+
+  const fixed = new FixedLengthStream(declared.size);
+  const key = `assets/${projectId}/${declared.hash}`;
+
+  const pipePromise = body.pipeThrough(hashingTransform).pipeTo(fixed.writable);
+
+  let result: R2Object | null = null;
+  // Track the R2 put rejection separately so we can tell, in the catch
+  // below, whether the pipeline failed because of a genuine client-side
+  // size issue or because `r2.put` rejected and cancelled its consumer.
+  // Both sides propagate the same error through the shared FixedLengthStream
+  // when anything goes wrong, so the catch can't rely on `Promise.all`
+  // alone to identify the root cause — see the class-based disambiguation
+  // below.
+  let putFailure: unknown | undefined;
+  try {
+    // Run put and the pipe concurrently: `r2.put` starts draining
+    // `fixed.readable` as soon as bytes are available, and the pipe feeds
+    // bytes in. If either side errors (over-sized body, FixedLengthStream
+    // short-stream, R2 transport), the other settles too.
+    const putPromise = r2
+      .put(key, fixed.readable, {
+        httpMetadata: { contentType },
+        onlyIf: { etagDoesNotMatch: '*' },
+      })
+      .catch((err: unknown) => {
+        putFailure = err;
+        throw err;
+      });
+    [result] = await Promise.all([putPromise, pipePromise]);
+  } catch (err) {
+    // Our overflow transform routes size-cap violations via
+    // `controller.error(new MultipartParseError(...))` — that class is
+    // unambiguously client-side, pass through untouched.
+    if (err instanceof MultipartParseError) {
+      throw err;
+    }
+    // R2 put rejection is the root cause. ALWAYS prefer it raw, including
+    // the case where put's rejection reason is itself a TypeError. Mid-
+    // upload R2 failures cancel the consumer and leave `bytesSeen <
+    // declared.size` as a downstream cascade, so the short-read symptom
+    // is NOT a reliable indicator of a client-sent short body when the
+    // put side failed. Surfacing `putFailure` untransformed sends the
+    // real infra error to the outer deploy handler, which maps it to
+    // the generic "internal error" event (no leakage of internals), and
+    // keeps the parse-step error channel reserved for genuinely
+    // client-visible protocol violations.
+    if (putFailure !== undefined) {
+      throw putFailure;
+    }
+    // Pipe rejected without a corresponding put failure — the put either
+    // already finished (e.g., received all bytes and resolved) or was
+    // never reached. `bytesSeen < declared.size` at this point confirms
+    // FixedLengthStream's close-with-wrong-count TypeError on a genuine
+    // short body. Rewrite to the clean client-facing parse error.
+    if (err instanceof TypeError && bytesSeen < declared.size) {
+      throw new MultipartParseError(
+        `asset:${path} body size ${bytesSeen} does not match declared ${declared.size}`,
+      );
+    }
+    throw err;
+  }
+
+  // Defensive: the happy path shouldn't hit this, but if a pipeline ever
+  // lets an under-sized stream through silently, we catch it here.
+  if (bytesSeen !== declared.size) {
+    if (result !== null) {
+      try {
+        await r2.delete(key);
+      } catch (delErr) {
+        console.warn(
+          `[assets] failed to delete under-sized R2 blob ${key}`,
+          delErr instanceof Error ? delErr.message : delErr,
+        );
+      }
+    }
+    throw new MultipartParseError(
+      `asset:${path} body size ${bytesSeen} does not match declared ${declared.size}`,
+    );
+  }
+
+  // Flush the final < 3-byte carry (the base64 tail that `readAssetBody`
+  // emits with padding on the last write) and append the path extension,
+  // matching both `readAssetBody` and `verifyStreamedAssetPart`.
+  updateBase64Hash(hasher, carry);
+  hasher.update(textEncoder.encode(extname(path).substring(1)));
+  const actualHash = digestToAssetHash(hasher.finalize());
+
+  if (actualHash !== declared.hash) {
+    // Only delete if we actually wrote bytes. A precondition miss means the
+    // key already held content a prior retained deployment depends on —
+    // deleting it would poison that deployment. The hash mismatch still
+    // aborts the current deploy, but it aborts SAFELY.
+    if (result !== null) {
+      try {
+        await r2.delete(key);
+      } catch (delErr) {
+        // Log and swallow — we're already on the error path, and a
+        // lingering orphaned blob will be caught by the retained-hash
+        // sweep in `cleanupStreamedStaticAssets`.
+        console.warn(
+          `[assets] failed to delete mismatched R2 blob ${key}`,
+          delErr instanceof Error ? delErr.message : delErr,
+        );
+      }
+    }
+    throw new AssetHashMismatchError(
+      `asset:${path}: declared hash ${declared.hash}, computed ${actualHash}`,
+    );
+  }
+
+  // result === null: precondition miss. An identical content-addressed key
+  // already exists and we left it untouched. Hash verified above, so the
+  // caller can commit the manifest entry and treat this as a dedupe hit
+  // (isNew: false — no new bytes written this request).
+  // result !== null: we wrote, and the bytes hash to what the client said.
+  return { store: 'r2', isNew: result !== null };
+}
+
 /** A streamed static-asset part that has been read + hashed but not yet uploaded. */
 export interface PreparedStaticAsset {
   bytes: Uint8Array;
@@ -619,10 +844,7 @@ export interface PreparedStaticAsset {
 
 /**
  * Stream-read one multipart asset body for the streamed-static deploy path,
- * hashing incrementally and enforcing the per-asset + aggregate byte caps.
- * The returned `size` has been charged to `budget.used`; the caller MUST
- * decrement it once the bytes are no longer resident (typically after
- * `uploadStaticAssetPart` completes or throws).
+ * hashing incrementally.
  *
  * Split out from the old `collectAndUploadStaticAsset` so the deploy handler
  * can perform reads inline in the parse loop (keeping the upstream request
@@ -634,9 +856,8 @@ export interface PreparedStaticAsset {
 export async function readStaticAssetPart(
   body: ReadableStream<Uint8Array>,
   path: string,
-  { maxBytes = MAX_ASSET_BYTES, budget }: { maxBytes?: number; budget?: BufferedBudget } = {},
 ): Promise<PreparedStaticAsset> {
-  const { bytes, hash, size } = await readAssetBody(body, path, maxBytes, budget);
+  const { bytes, hash, size } = await readAssetBody(body, path);
   return { bytes, hash, size, contentType: getContentType(path) };
 }
 
@@ -645,9 +866,8 @@ export async function readStaticAssetPart(
  * content-hash dedupe against `uploadedHashes` plus an in-flight registry
  * so concurrent pool tasks with the same content hash collapse into a
  * single KV/R2 PUT. Callers typically pair this with
- * {@link readStaticAssetPart} and manage the aggregate byte budget
- * externally so reads can happen sequentially in the multipart parse loop
- * while uploads fan out to a concurrency-limited pool.
+ * {@link readStaticAssetPart} so reads can happen sequentially in the
+ * multipart parse loop while uploads fan out to a concurrency-limited pool.
  *
  * Concurrency invariant (why `inFlightUploadByHash` is required):
  * `uploadedHashes` is only populated *after* an upload settles, so two
@@ -720,19 +940,17 @@ export async function uploadStaticAssetPart(
 }
 
 /**
- * Stream-read one multipart asset part into memory with a hard per-asset size
- * cap, hashing incrementally. Used by the worker-backed deploy path, where
- * assets are later uploaded to CF via the asset upload session API and must
- * be held in memory until then. Rejects oversized parts (via
- * `PartTooLargeError`) the moment the cap is crossed, so a single runaway
- * asset can never force the 128 MiB request budget over the edge.
+ * Stream-read one multipart asset part into memory, hashing incrementally.
+ * Used by the worker-backed deploy path, where assets are later uploaded to
+ * CF via the asset upload session API and must be held in memory until then.
+ * Per-asset residency is bounded only by the 128 MiB Worker isolate memory
+ * budget — there is no explicit cap here.
  */
 export async function collectBufferedAsset(
   path: string,
   body: ReadableStream<Uint8Array>,
-  { maxBytes = MAX_ASSET_BYTES, budget }: { maxBytes?: number; budget?: BufferedBudget } = {},
 ): Promise<{ entry: AssetManifestEntry; hash: string; assetEntry: AssetEntry }> {
-  const { bytes, hash, size } = await readAssetBody(body, path, maxBytes, budget);
+  const { bytes, hash, size } = await readAssetBody(body, path);
   return {
     entry: { hash, size },
     hash,
@@ -815,7 +1033,7 @@ export function buildAssetMetadata(
   };
 }
 
-const KV_THRESHOLD = 2 * 1024 * 1024; // 2 MB
+export const KV_THRESHOLD = 2 * 1024 * 1024; // 2 MB
 
 async function uploadStaticAssetWithRetries(
   kv: KVNamespace,

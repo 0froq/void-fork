@@ -189,24 +189,110 @@ class MemoryKVNamespace {
   }
 }
 
+interface MemoryR2Entry {
+  body: ArrayBuffer;
+  httpMetadata?: unknown;
+  etag: string;
+  uploaded: Date;
+}
+
+function memoryR2Etag(): string {
+  // Stable-ish etag: monotonically increasing counter is enough for tests
+  // to detect "same object, different object, same bytes different identity".
+  return `memr2-${++memoryR2EtagCounter}-${Math.random().toString(36).slice(2, 10)}`;
+}
+let memoryR2EtagCounter = 0;
+
+async function readStreamToBytes(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value.length > 0) {
+        chunks.push(value);
+        total += value.length;
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // ignore
+    }
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
 class MemoryR2Bucket {
-  private readonly store = new Map<string, { body: ArrayBuffer; httpMetadata?: unknown }>();
+  private readonly store = new Map<string, MemoryR2Entry>();
+
+  async head(
+    key: string,
+  ): Promise<{ key: string; size: number; etag: string; uploaded: Date } | null> {
+    const entry = this.store.get(key);
+    if (!entry) {
+      return null;
+    }
+    return { key, size: entry.body.byteLength, etag: entry.etag, uploaded: entry.uploaded };
+  }
 
   async put(
     key: string,
-    value: ArrayBuffer | ArrayBufferView | string,
-    options?: { httpMetadata?: unknown },
-  ): Promise<void> {
-    const body =
-      typeof value === 'string'
-        ? toArrayBuffer(new TextEncoder().encode(value))
-        : toArrayBuffer(value);
-    this.store.set(key, { body, httpMetadata: options?.httpMetadata });
+    value: ArrayBuffer | ArrayBufferView | ReadableStream<Uint8Array> | string,
+    options?: {
+      httpMetadata?: unknown;
+      onlyIf?: { etagMatches?: string; etagDoesNotMatch?: string };
+    },
+  ): Promise<{ key: string; size: number; etag: string; uploaded: Date } | null> {
+    // Evaluate precondition BEFORE draining the stream, matching R2's
+    // behaviour on a wildcard etagDoesNotMatch='*' hit: if the key exists,
+    // the put is a no-op and returns null. We still need to drain any
+    // ReadableStream so our streaming producer (hashing transform in
+    // `streamStaticAssetToR2`) sees closure and settles its hash state.
+    const preconditionFail = options?.onlyIf?.etagDoesNotMatch === '*' && this.store.has(key);
+
+    let body: ArrayBuffer;
+    if (typeof value === 'string') {
+      body = toArrayBuffer(new TextEncoder().encode(value));
+    } else if (value instanceof ReadableStream) {
+      const bytes = await readStreamToBytes(value);
+      body = toArrayBuffer(bytes);
+    } else {
+      body = toArrayBuffer(value);
+    }
+
+    if (preconditionFail) {
+      return null;
+    }
+
+    const entry: MemoryR2Entry = {
+      body,
+      httpMetadata: options?.httpMetadata,
+      etag: memoryR2Etag(),
+      uploaded: new Date(),
+    };
+    this.store.set(key, entry);
+    return { key, size: body.byteLength, etag: entry.etag, uploaded: entry.uploaded };
   }
 
-  async get(
-    key: string,
-  ): Promise<{ key: string; size: number; arrayBuffer: () => Promise<ArrayBuffer> } | null> {
+  async get(key: string): Promise<{
+    key: string;
+    size: number;
+    etag: string;
+    uploaded: Date;
+    arrayBuffer: () => Promise<ArrayBuffer>;
+  } | null> {
     const entry = this.store.get(key);
     if (!entry) {
       return null;
@@ -214,6 +300,8 @@ class MemoryR2Bucket {
     return {
       key,
       size: entry.body.byteLength,
+      etag: entry.etag,
+      uploaded: entry.uploaded,
       arrayBuffer: async () => entry.body.slice(0),
     };
   }
