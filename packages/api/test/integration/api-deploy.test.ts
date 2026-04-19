@@ -987,7 +987,7 @@ describe('POST /projects/:id/deploy', () => {
           { status: 400 },
         ),
       listQueueConsumers: () =>
-        cfSuccess([{ consumer_id: 'c_other', script_name: 'other-dispatch', settings: {} }]),
+        cfSuccess([{ consumer_id: 'c_other', script: 'other-dispatch', settings: {} }]),
     });
 
     const res = await app.fetch(
@@ -1029,7 +1029,7 @@ describe('POST /projects/:id/deploy', () => {
           { status: 400 },
         ),
       listQueueConsumers: () =>
-        cfSuccess([{ consumer_id: 'c_other', script_name: 'other-dispatch', settings: {} }]),
+        cfSuccess([{ consumer_id: 'c_other', script: 'other-dispatch', settings: {} }]),
     });
 
     const res = await app.fetch(

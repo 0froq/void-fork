@@ -43,7 +43,7 @@ describe('addQueueConsumer', () => {
     fetchMock.mockResolvedValueOnce(cfError('queue already has a consumer'));
     // GET lists our consumer
     fetchMock.mockResolvedValueOnce(
-      cfSuccess([{ consumer_id: 'c1', script_name: SCRIPT, settings: {} }]),
+      cfSuccess([{ consumer_id: 'c1', script: SCRIPT, settings: {} }]),
     );
     // PUT to update settings
     fetchMock.mockResolvedValueOnce(cfSuccess({ consumer_id: 'c1' }));
@@ -58,7 +58,7 @@ describe('addQueueConsumer', () => {
   it('returns {status:"conflict", ownerScript} when a different script owns the consumer', async () => {
     fetchMock.mockResolvedValueOnce(cfError('queue already has a consumer'));
     fetchMock.mockResolvedValueOnce(
-      cfSuccess([{ consumer_id: 'c1', script_name: 'other-script', settings: {} }]),
+      cfSuccess([{ consumer_id: 'c1', script: 'other-script', settings: {} }]),
     );
 
     const result = await addQueueConsumer(ACCOUNT, TOKEN, QUEUE_ID, SCRIPT, { batch_size: 1 });

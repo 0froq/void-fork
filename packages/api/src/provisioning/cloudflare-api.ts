@@ -173,7 +173,14 @@ interface QueueConsumerSettings {
 
 interface QueueConsumerInfo {
   consumer_id: string;
-  script_name: string;
+  // CF Queues API asymmetry: POST/PUT bodies use `script_name`, but
+  // GET /queues/{id}/consumers returns the subscribed worker under
+  // `script`. Using `script_name` for reads returns `undefined` for
+  // every consumer, so a legitimate same-script re-deploy falls
+  // through to the "different owner" branch and reports
+  // `ownerScript: 'unknown'` — which the post-ba41cef conflict path
+  // then treats as a fatal deploy failure on every subsequent deploy.
+  script: string;
   type: string;
   settings: QueueConsumerSettings;
 }
@@ -229,13 +236,13 @@ export async function addQueueConsumer(
 
   // Consumer exists — find ours and update settings
   const consumers = await cfFetch<QueueConsumerInfo[]>(consumersUrl, apiToken);
-  const ours = consumers.find((c) => c.script_name === scriptName);
+  const ours = consumers.find((c) => c.script === scriptName);
 
   if (!ours) {
     // A different script owns this consumer. Surface the owner so the
     // caller can emit a deploy warning; do not throw — the deploy should
     // still complete so other queues in the same manifest can succeed.
-    const ownerScript = consumers[0]?.script_name ?? 'unknown';
+    const ownerScript = consumers[0]?.script ?? 'unknown';
     return { status: 'conflict', ownerScript };
   }
 
