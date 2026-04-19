@@ -1233,7 +1233,8 @@ describe('queue relay', () => {
     workerFetchImpl?: () => Promise<Response>;
   }) {
     const workerFetch = vi.fn(
-      async () => options.workerFetchImpl?.() ?? options.workerResponse ?? new Response('ok'),
+      async (_req: Request) =>
+        options.workerFetchImpl?.() ?? options.workerResponse ?? new Response('ok'),
     );
     return {
       env: {
@@ -1393,6 +1394,158 @@ describe('queue relay', () => {
     await app.queue(batch, env);
 
     expect(batch.ackAll).toHaveBeenCalledOnce();
+  });
+
+  it('forwards x-void-internal header to user worker when proxyToken is in routing entry', async () => {
+    const routing = JSON.stringify({
+      workerName: 'user-app',
+      projectId: 'proj-1',
+      queueName: 'emails',
+      proxyToken: 'super-secret-token',
+    });
+    const batch = createMockBatch('test-queue', [{ id: 'm1', body: 'hello' }]);
+    const { env, workerFetch } = createQueueEnv({
+      routingRaw: routing,
+      workerResponse: Response.json({ ok: true }),
+    });
+
+    await app.queue(batch, env);
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    const req = workerFetch.mock.calls[0][0] as Request;
+    expect(req.headers.get('x-void-internal')).toBe('super-secret-token');
+  });
+
+  it('omits x-void-internal header when proxyToken is missing (backward-compat)', async () => {
+    const routing = JSON.stringify({
+      workerName: 'user-app',
+      projectId: 'proj-1',
+      queueName: 'emails',
+    });
+    const batch = createMockBatch('test-queue', [{ id: 'm1', body: 'hello' }]);
+    const { env, workerFetch } = createQueueEnv({
+      routingRaw: routing,
+      workerResponse: Response.json({ ok: true }),
+    });
+
+    await app.queue(batch, env);
+
+    const req = workerFetch.mock.calls[0][0] as Request;
+    expect(req.headers.get('x-void-internal')).toBeNull();
+  });
+
+  it('logs a structured error when the user worker returns non-2xx', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const routing = JSON.stringify({
+        workerName: 'user-app',
+        projectId: 'proj-1',
+        queueName: 'emails',
+        proxyToken: 'tok',
+      });
+      const batch = createMockBatch('test-queue', [{ id: 'm1', body: 'hello' }]);
+      const { env } = createQueueEnv({
+        routingRaw: routing,
+        workerResponse: new Response('unauthorized', { status: 401 }),
+      });
+
+      await app.queue(batch, env);
+
+      expect(errSpy).toHaveBeenCalled();
+      const logged = errSpy.mock.calls
+        .flat()
+        .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
+        .join(' ');
+      expect(logged).toMatch(/queue.*emails/i);
+      expect(logged).toMatch(/user-app/);
+      expect(logged).toMatch(/401/);
+      expect(logged).toMatch(/unauthorized/);
+      expect(batch.retryAll).toHaveBeenCalledOnce();
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('logs a structured error when the relay fetch throws', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const routing = JSON.stringify({
+        workerName: 'user-app',
+        projectId: 'proj-1',
+        queueName: 'emails',
+        proxyToken: 'tok',
+      });
+      const batch = createMockBatch('test-queue', [{ id: 'm1', body: 'hello' }]);
+      const { env } = createQueueEnv({
+        routingRaw: routing,
+        workerFetchImpl: () => Promise.reject(new Error('connection reset')),
+      });
+
+      await app.queue(batch, env);
+
+      expect(errSpy).toHaveBeenCalled();
+      const logged = errSpy.mock.calls
+        .flat()
+        .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
+        .join(' ');
+      expect(logged).toMatch(/emails/);
+      expect(logged).toMatch(/user-app/);
+      expect(logged).toMatch(/connection reset/);
+      expect(batch.retryAll).toHaveBeenCalledOnce();
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('logs a structured error when the routing entry is missing', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const batch = createMockBatch('orphan-queue', [{ id: 'm1', body: 'hello' }]);
+      const { env } = createQueueEnv({ routingRaw: null });
+
+      await app.queue(batch, env);
+
+      expect(errSpy).toHaveBeenCalled();
+      const logged = errSpy.mock.calls
+        .flat()
+        .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
+        .join(' ');
+      expect(logged).toMatch(/orphan-queue/);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('forwards x-void-internal on legacy /__queue fallback too', async () => {
+    const routing = JSON.stringify({
+      workerName: 'user-app',
+      projectId: 'proj-1',
+      queueName: 'emails',
+      proxyToken: 'legacy-token',
+    });
+    const batch = createMockBatch('test-queue', [{ id: 'm1', body: 'hello' }]);
+    const calls: { path: string; header: string | null }[] = [];
+    const workerFetch = vi.fn(async (req: Request) => {
+      const url = new URL(req.url);
+      calls.push({ path: url.pathname, header: req.headers.get('x-void-internal') });
+      if (url.pathname === '/__void/queue') {
+        return new Response('not found', { status: 404 });
+      }
+      return Response.json({ ok: true });
+    });
+    const env = {
+      ROUTING: { get: async () => routing },
+      DISPATCH: { get: () => ({ fetch: workerFetch }) },
+      ISR_CACHE: { getWithMetadata: async () => ({ value: null, metadata: null }) },
+      ANALYTICS: { writeDataPoint: () => {} },
+    } as unknown as Env;
+
+    await app.queue(batch, env);
+
+    expect(calls).toEqual([
+      { path: '/__void/queue', header: 'legacy-token' },
+      { path: '/__queue', header: 'legacy-token' },
+    ]);
   });
 });
 

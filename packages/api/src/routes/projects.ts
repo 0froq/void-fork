@@ -1,6 +1,7 @@
 import { sql as drizzleSql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { hmacSignState } from '../auth/hmac';
+import { DEFAULT_DISPATCH_NAMESPACE } from '../constants';
 import type { Db } from '../db';
 import {
   createProject,
@@ -26,6 +27,7 @@ import {
 import type { ApiEnv } from '../env';
 import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations/remote-runner';
 import { getProjectDeploymentWorkerName, getProjectQueueName } from '../naming';
+import { getDispatchWorkerProxyToken } from '../provisioning/cloudflare-api';
 import { buildRoutingJson, buildStaticRoutingJson } from '../routing';
 import { tokenizeSql } from '../sql/tokenize';
 import { getPlanLimits } from '../tiers';
@@ -150,6 +152,53 @@ class RollbackError extends Error {
  * timeout, quota, "database is locked", etc.) — those should surface to the
  * caller instead of returning an empty applied set.
  */
+/**
+ * Resolve the proxy token to use when re-targeting routing/cron at a
+ * historical deployment.
+ *
+ * Preferred path: fetch the EXACT `__VOID_PROXY_TOKEN` plain_text
+ * binding baked into the target worker. Rotating `JWT_SECRET` after
+ * that worker was deployed would make a fresh `hmacSignState` value
+ * mismatch the worker and 401 every /__void/queue and /__void/scheduled
+ * relay.
+ *
+ * Legacy workers (deployed before the binding was introduced) report
+ * `{kind: "missing"}`. Falling back to the current-secret derivation is
+ * safe only if `JWT_SECRET` has not rotated since the worker was
+ * deployed; the warning surfaces the risk to operators so they can
+ * redeploy instead of relying on the fallback.
+ *
+ * Transient CF API failures MUST propagate. A silent null that becomes
+ * a fallback can write a mismatched token into KV that will 401 the
+ * worker indefinitely.
+ */
+async function resolveRollbackProxyToken(
+  env: ApiEnv['Bindings'],
+  workerName: string,
+  projectId: string,
+): Promise<string> {
+  const dispatchNamespace = env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
+  const lookup = await getDispatchWorkerProxyToken(
+    env.CF_ACCOUNT_ID,
+    env.CF_API_TOKEN,
+    dispatchNamespace,
+    workerName,
+  );
+  if (lookup.kind === 'found') {
+    return lookup.token;
+  }
+  if (lookup.kind === 'error') {
+    throw new Error(
+      `rollback: could not read __VOID_PROXY_TOKEN from worker "${workerName}": ${lookup.error.message}`,
+    );
+  }
+  // lookup.kind === 'missing' — legacy worker.
+  console.warn(
+    `[rollback] worker "${workerName}" has no __VOID_PROXY_TOKEN binding; falling back to current-secret derivation. If JWT_SECRET has rotated since this deployment was live, you must redeploy the project instead.`,
+  );
+  return hmacSignState(projectId, env.JWT_SECRET);
+}
+
 function isMissingTableError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return /no such table/i.test(msg);
@@ -613,6 +662,20 @@ const app = new Hono<ApiEnv>()
         // keyed by slug/hostname; cron DO sync is a replace).
         await c.env.ROUTING.put(lockedProject.slug, routingJson);
 
+        // Resolve the target worker's baked __VOID_PROXY_TOKEN once if
+        // either cron or queues need it. Re-fetching on each path would
+        // double the CF API round-trips AND widen the failure window
+        // between cron DO sync and queue KV write: a transient CF 429
+        // on the second fetch would abort the transaction after cron
+        // state was already committed to the DO. The framework's
+        // /__void/scheduled and /__void/queue handlers both validate
+        // against the SAME __VOID_PROXY_TOKEN binding, so one lookup
+        // is authoritative for both.
+        const needsProxyToken = !!manifest?.schedules?.length || !!manifest?.queues?.length;
+        const targetProxyToken = needsProxyToken
+          ? await resolveRollbackProxyToken(c.env, workerName, projectId)
+          : null;
+
         // Sync cron scheduler to point at the rollback target.
         //
         // When target has no schedules, `/clear` is called unconditionally
@@ -622,12 +685,15 @@ const app = new Hono<ApiEnv>()
         // that stale DO state persist across every future rollback.
         if (manifest?.schedules?.length) {
           const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
-          const proxyToken = await hmacSignState(projectId, c.env.JWT_SECRET);
           await c.env.CRON_SCHEDULER.get(cronId).fetch(
             new Request('https://do/sync', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ workerName, schedules: manifest.schedules, proxyToken }),
+              body: JSON.stringify({
+                workerName,
+                schedules: manifest.schedules,
+                proxyToken: targetProxyToken!,
+              }),
             }),
           );
         } else {
@@ -694,7 +760,12 @@ const app = new Hono<ApiEnv>()
           for (const q of manifest.queues) {
             await c.env.ROUTING.put(
               `queue:${getProjectQueueName(projectId, q.name)}`,
-              JSON.stringify({ workerName, projectId, queueName: q.name }),
+              JSON.stringify({
+                workerName,
+                projectId,
+                queueName: q.name,
+                proxyToken: targetProxyToken!,
+              }),
             );
           }
         }

@@ -41,6 +41,11 @@ interface QueueRoutingEntry {
   workerName: string;
   projectId: string;
   queueName: string;
+  // HMAC-signed proxy token matching the user worker's __VOID_PROXY_TOKEN
+  // binding. The framework-generated /__void/queue handler rejects relays
+  // without a matching `x-void-internal` header with 401. Absent on entries
+  // written by older API versions.
+  proxyToken?: string;
 }
 
 function jsonCacheResponse(pageData: string, ttl: number, state: 'HIT' | 'MISS'): Response {
@@ -434,10 +439,13 @@ export default {
     // Look up which user worker handles this queue
     const routingRaw = await env.ROUTING.get(`queue:${batch.queue}`, { cacheTtl: 60 });
     if (!routingRaw) {
+      console.error(
+        `[queue-relay] missing routing entry for queue="${batch.queue}"; retrying all messages`,
+      );
       batch.retryAll();
       return;
     }
-    const { workerName, queueName } = JSON.parse(routingRaw) as QueueRoutingEntry;
+    const { workerName, queueName, proxyToken } = JSON.parse(routingRaw) as QueueRoutingEntry;
 
     // Serialize batch for relay
     const messages = Array.from(batch.messages, (m) => ({
@@ -450,7 +458,10 @@ export default {
     const worker = env.DISPATCH.get(workerName);
     try {
       const body = JSON.stringify({ queue: queueName, messages });
-      const queueHeaders = { 'Content-Type': 'application/json' };
+      const queueHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (proxyToken) {
+        queueHeaders['x-void-internal'] = proxyToken;
+      }
       let res = await worker.fetch(
         new Request('https://internal/__void/queue', {
           method: 'POST',
@@ -471,6 +482,18 @@ export default {
       }
 
       if (!res.ok) {
+        // Preserve observability: dispatch tail ingests this under the
+        // __platform-dispatch project key so operators can query who is
+        // rejecting relays and why.
+        let snippet = '';
+        try {
+          snippet = (await res.clone().text()).slice(0, 200);
+        } catch {
+          /* body may be unreadable — status alone is still useful */
+        }
+        console.error(
+          `[queue-relay] relay failed queue="${queueName}" worker="${workerName}" status=${res.status} body=${JSON.stringify(snippet)}`,
+        );
         batch.retryAll();
         return;
       }
@@ -518,7 +541,11 @@ export default {
         batch.retryAll();
       }
       // If ok=true, undecided messages get implicit ack (CF default on successful consumer return)
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[queue-relay] relay threw queue="${queueName}" worker="${workerName}" error=${JSON.stringify(msg)}`,
+      );
       batch.retryAll();
     }
   },

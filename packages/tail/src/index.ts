@@ -10,6 +10,10 @@ function isFetchEvent(event: TraceItem['event']): event is TraceItemFetchEventIn
  * Parse versioned or legacy worker script names.
  * Versioned: "user-{slug}-dpl_{id}" → projectKey "user-{slug}", deployId "dpl_{id}"
  * Legacy: "user-{slug}" → projectKey "user-{slug}", deployId ""
+ * Platform dispatch: "void-dispatch" / "void-dispatch-staging" →
+ *   projectKey "__platform-dispatch" / "__platform-dispatch-staging"
+ *   (reserved prefix so admin tooling can surface relay errors without
+ *   colliding with any user-* key).
  */
 export function parseScriptName(
   scriptName: string,
@@ -23,6 +27,9 @@ export function parseScriptName(
   }
   if (scriptName.startsWith('user-')) {
     return { projectKey: scriptName, deployId: '' };
+  }
+  if (scriptName === 'void-dispatch' || scriptName === 'void-dispatch-staging') {
+    return { projectKey: `__platform-${scriptName.slice('void-'.length)}`, deployId: '' };
   }
   return null;
 }

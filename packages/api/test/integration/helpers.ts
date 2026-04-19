@@ -550,6 +550,9 @@ export interface CfApiMocks {
   createR2: (url: string, init?: RequestInit) => Response;
   createQueue: (url: string, init?: RequestInit) => Response;
   addQueueConsumer: (url: string, init?: RequestInit) => Response;
+  listQueueConsumers: (url: string, init?: RequestInit) => Response;
+  updateQueueConsumer: (url: string, init?: RequestInit) => Response;
+  listWorkerBindings: (url: string, init?: RequestInit) => Response;
   deleteD1: (url: string, init?: RequestInit) => Response;
   deleteKV: (url: string, init?: RequestInit) => Response;
   deleteR2: (url: string, init?: RequestInit) => Response;
@@ -576,6 +579,10 @@ const defaultMocks: CfApiMocks = {
   createQueue: () =>
     cfSuccess({ queue_id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', queue_name: 'test-queue' }),
   addQueueConsumer: () => cfSuccess({}),
+  listQueueConsumers: () => cfSuccess([]),
+  updateQueueConsumer: () => cfSuccess({}),
+  listWorkerBindings: () =>
+    cfSuccess([{ type: 'plain_text', name: '__VOID_PROXY_TOKEN', text: 'mock-proxy-token' }]),
   deleteD1: () => cfSuccess(null),
   deleteKV: () => cfSuccess(null),
   deleteR2: () => cfSuccess(null),
@@ -689,6 +696,15 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
     }
     if (method === 'POST' && url.includes('/queues/') && url.includes('/consumers')) {
       return mocks.addQueueConsumer(url, init);
+    }
+    if (method === 'GET' && url.includes('/queues/') && url.includes('/consumers')) {
+      return mocks.listQueueConsumers(url, init);
+    }
+    if (method === 'PUT' && url.includes('/queues/') && url.includes('/consumers/')) {
+      return mocks.updateQueueConsumer(url, init);
+    }
+    if (method === 'GET' && url.includes('/workers/dispatch/') && url.includes('/bindings')) {
+      return mocks.listWorkerBindings(url, init);
     }
     if (method === 'POST' && url.includes('/queues')) {
       return mocks.createQueue(url, init);

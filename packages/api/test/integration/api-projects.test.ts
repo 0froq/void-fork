@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import {
   createDeployment,
   updateDeploymentStatus,
@@ -17,6 +17,7 @@ import {
   createTestUser,
   createTestProject,
   mockCfApi,
+  cfSuccess,
   type TestEnv,
 } from './helpers';
 
@@ -32,6 +33,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await clearTables(env.db);
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('GET /projects', () => {
@@ -564,6 +567,160 @@ describe('POST /projects/:id/rollback', () => {
     expect(domainRouting.workerName).toBe(`user-domain-roll-${d1.id}`);
   });
 
+  it('rollback resolves the proxy token once for both cron and queues (no duplicate CF fetch)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'cron-and-queue-roll');
+    const queueRoutingKey = `queue:${project.id.replaceAll('_', '-')}-emails`;
+
+    await env.db.insert(resources).values({
+      id: 'res_mixed_roll',
+      project_id: project.id,
+      type: 'queue',
+      cf_id: '25832cb0ce3d4f60b1e538911a4629f4',
+      binding_name: 'emails',
+    });
+
+    const manifest = JSON.stringify({
+      version: 3,
+      bindings: {},
+      schedules: [{ cron: '*/5 * * * *', filePath: 'crons/tick.ts' }],
+      queues: [{ name: 'emails', bindingName: 'QUEUE_EMAILS' }],
+    });
+
+    const d1 = await createDeployment(env.db, project.id, manifest);
+    await updateDeploymentStatus(env.db, d1.id, 'live');
+    await markDeploymentRetained(env.db, d1.id, true);
+
+    const d2 = await createDeployment(env.db, project.id, manifest);
+    await updateDeploymentStatus(env.db, d2.id, 'live');
+    await markDeploymentRetained(env.db, d2.id, true);
+    await setActiveDeployment(env.db, project.id, d2.id);
+
+    // Simulate a transient CF failure on the SECOND bindings call. With
+    // the duplicate-fetch bug, cron sync succeeds on call 1 and commits
+    // DO state; the queue fetch on call 2 then fails and the transaction
+    // aborts — leaving cron partial. With the fix (single hoisted fetch),
+    // the whole rollback succeeds on one healthy call.
+    let bindingsCalls = 0;
+    mockCfApi({
+      listWorkerBindings: () => {
+        bindingsCalls++;
+        if (bindingsCalls === 1) {
+          return cfSuccess([
+            { type: 'plain_text', name: '__VOID_PROXY_TOKEN', text: 'baked-d1-token' },
+          ]);
+        }
+        return new Response(
+          JSON.stringify({
+            success: false,
+            errors: [{ code: 10013, message: 'rate limited' }],
+          }),
+          { status: 429 },
+        );
+      },
+    });
+
+    const doCalls: { url: string; body: string | null }[] = [];
+    const originalGet = env.CRON_SCHEDULER.get.bind(env.CRON_SCHEDULER);
+    vi.spyOn(env.CRON_SCHEDULER, 'get').mockImplementation((id) => {
+      const stub = originalGet(id);
+      return {
+        ...stub,
+        fetch: async (req: Request) => {
+          const url = new URL(req.url);
+          doCalls.push({ url: url.pathname, body: req.body ? await req.text() : null });
+          return new Response('{}', { status: 200 });
+        },
+      } as unknown as DurableObjectStub;
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ deploymentId: d1.id }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    // Exactly one CF bindings fetch for the rollback — the second call
+    // is the one that used to introduce the extra failure point.
+    expect(bindingsCalls).toBe(1);
+
+    const sync = doCalls.find((c) => c.url === '/sync');
+    expect(sync).toBeDefined();
+    const payload = JSON.parse(sync!.body!) as { proxyToken: string };
+    expect(payload.proxyToken).toBe('baked-d1-token');
+
+    const queueRouting = (await env.ROUTING.get(queueRoutingKey, 'json')) as {
+      proxyToken: string;
+    };
+    expect(queueRouting.proxyToken).toBe('baked-d1-token');
+  });
+
+  it('rollback cron sync uses the baked __VOID_PROXY_TOKEN from the target worker', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'cron-roll');
+
+    const manifest = JSON.stringify({
+      version: 3,
+      bindings: {},
+      schedules: [{ cron: '*/5 * * * *', filePath: 'crons/tick.ts' }],
+    });
+
+    const d1 = await createDeployment(env.db, project.id, manifest);
+    await updateDeploymentStatus(env.db, d1.id, 'live');
+    await markDeploymentRetained(env.db, d1.id, true);
+
+    const d2 = await createDeployment(env.db, project.id, manifest);
+    await updateDeploymentStatus(env.db, d2.id, 'live');
+    await markDeploymentRetained(env.db, d2.id, true);
+    await setActiveDeployment(env.db, project.id, d2.id);
+
+    // Return the exact token baked into d1's worker, so we can assert
+    // rollback uses THIS value rather than re-deriving from JWT_SECRET.
+    mockCfApi({
+      listWorkerBindings: () =>
+        cfSuccess([{ type: 'plain_text', name: '__VOID_PROXY_TOKEN', text: 'baked-into-d1-cron' }]),
+    });
+
+    const doCalls: { url: string; body: string | null }[] = [];
+    const originalGet = env.CRON_SCHEDULER.get.bind(env.CRON_SCHEDULER);
+    vi.spyOn(env.CRON_SCHEDULER, 'get').mockImplementation((id) => {
+      const stub = originalGet(id);
+      return {
+        ...stub,
+        fetch: async (req: Request) => {
+          const url = new URL(req.url);
+          doCalls.push({ url: url.pathname, body: req.body ? await req.text() : null });
+          return new Response('{}', { status: 200 });
+        },
+      } as unknown as DurableObjectStub;
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ deploymentId: d1.id }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const sync = doCalls.find((c) => c.url === '/sync');
+    expect(sync).toBeDefined();
+    const payload = JSON.parse(sync!.body!) as { proxyToken: string; workerName: string };
+    expect(payload.workerName).toBe(`user-cron-roll-${d1.id}`);
+    expect(payload.proxyToken).toBe('baked-into-d1-cron');
+  });
+
   it('updates queue KV entries on rollback using deterministic queue names', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'queue-roll');
@@ -592,6 +749,18 @@ describe('POST /projects/:id/rollback', () => {
     await markDeploymentRetained(env.db, d2.id, true);
     await setActiveDeployment(env.db, project.id, d2.id);
 
+    // Worker bindings stored at deploy time include the exact
+    // __VOID_PROXY_TOKEN that d1 expects — rollback must read THIS value
+    // from CF rather than re-derive from the current JWT_SECRET, which
+    // would 401 the worker if the secret has rotated since d1 was
+    // deployed.
+    mockCfApi({
+      listWorkerBindings: () =>
+        cfSuccess([
+          { type: 'plain_text', name: '__VOID_PROXY_TOKEN', text: 'token-baked-into-d1' },
+        ]),
+    });
+
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/rollback`, {
         method: 'POST',
@@ -609,11 +778,15 @@ describe('POST /projects/:id/rollback', () => {
       workerName: string;
       projectId: string;
       queueName: string;
+      proxyToken: string;
     };
     expect(queueRouting).toEqual({
       workerName: `user-queue-roll-${d1.id}`,
       projectId: project.id,
       queueName: 'emails',
+      // The EXACT value from d1's worker bindings — not a freshly
+      // hmacSignState(projectId, currentSecret) value.
+      proxyToken: 'token-baked-into-d1',
     });
   });
 });

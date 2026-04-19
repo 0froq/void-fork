@@ -179,6 +179,19 @@ interface QueueConsumerInfo {
 }
 
 /**
+ * Result of a queue consumer upsert. `created` = a new consumer was
+ * registered. `updated` = our script already owned the consumer (settings
+ * may have been PUT). `conflict` = a different script owns the consumer;
+ * caller must decide whether to fail or surface a warning. Queue names are
+ * derived from projectId so the conflict path is only reachable when a
+ * rogue consumer was registered out-of-band.
+ */
+export type AddQueueConsumerResult =
+  | { status: 'created' }
+  | { status: 'updated' }
+  | { status: 'conflict'; ownerScript: string };
+
+/**
  * Create or update a queue consumer. POST creates on first deploy; on
  * subsequent deploys the POST fails with "already exists" and we PUT
  * to update settings instead.
@@ -189,7 +202,7 @@ export async function addQueueConsumer(
   queueId: string,
   scriptName: string,
   settings?: QueueConsumerSettings,
-): Promise<void> {
+): Promise<AddQueueConsumerResult> {
   const consumersUrl = `${CF_API_BASE}/${accountId}/queues/${queueId}/consumers`;
   const consumerBody = {
     script_name: scriptName,
@@ -203,7 +216,7 @@ export async function addQueueConsumer(
       method: 'POST',
       body: JSON.stringify(consumerBody),
     });
-    return;
+    return { status: 'created' };
   } catch (err) {
     if (
       !(err instanceof Error) ||
@@ -219,13 +232,11 @@ export async function addQueueConsumer(
   const ours = consumers.find((c) => c.script_name === scriptName);
 
   if (!ours) {
-    // A different script owns this consumer — log and continue.
-    // Queue names are derived from projectId so this is effectively
-    // unreachable, but if it happens the deploy should not fail.
-    console.warn(
-      `[queue] consumer for "${scriptName}" not found on queue ${queueId} — a different script may own it`,
-    );
-    return;
+    // A different script owns this consumer. Surface the owner so the
+    // caller can emit a deploy warning; do not throw — the deploy should
+    // still complete so other queues in the same manifest can succeed.
+    const ownerScript = consumers[0]?.script_name ?? 'unknown';
+    return { status: 'conflict', ownerScript };
   }
 
   if (settings) {
@@ -234,6 +245,7 @@ export async function addQueueConsumer(
       body: JSON.stringify(consumerBody),
     });
   }
+  return { status: 'updated' };
 }
 
 export async function deleteQueue(
@@ -244,6 +256,57 @@ export async function deleteQueue(
   await cfFetch(`${CF_API_BASE}/${accountId}/queues/${queueId}`, apiToken, {
     method: 'DELETE',
   });
+}
+
+interface DispatchWorkerBinding {
+  type: string;
+  name: string;
+  text?: string;
+}
+
+export type ProxyTokenLookup =
+  | { kind: 'found'; token: string }
+  | { kind: 'missing' }
+  | { kind: 'error'; error: Error };
+
+/**
+ * Read the `__VOID_PROXY_TOKEN` plain-text binding that was baked into a
+ * user worker at deploy time. Used on rollback/backfill so we hand
+ * dispatch the EXACT token the target worker expects, rather than
+ * re-deriving from the current `JWT_SECRET` — which would 401 if the
+ * secret had rotated since that deployment was live.
+ *
+ * Returns a typed result so callers can distinguish:
+ *   - `found`: use the baked token as-is.
+ *   - `missing`: bindings list returned but no `__VOID_PROXY_TOKEN` —
+ *     a legacy worker. Callers may fall back to re-derivation with a
+ *     visible warning.
+ *   - `error`: CF API failure (rate limit, transport, auth, 5xx).
+ *     Callers MUST NOT fall back silently — a transient error must
+ *     not end up writing a mismatched token that 401s after a
+ *     `JWT_SECRET` rotation.
+ */
+export async function getDispatchWorkerProxyToken(
+  accountId: string,
+  apiToken: string,
+  dispatchNamespace: string,
+  scriptName: string,
+): Promise<ProxyTokenLookup> {
+  const url = `${CF_API_BASE}/${accountId}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${scriptName}/bindings`;
+  let bindings: DispatchWorkerBinding[];
+  try {
+    bindings = await cfFetch<DispatchWorkerBinding[]>(url, apiToken);
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    return { kind: 'error', error };
+  }
+  const token = bindings.find(
+    (b) => b.type === 'plain_text' && b.name === '__VOID_PROXY_TOKEN',
+  )?.text;
+  if (!token) {
+    return { kind: 'missing' };
+  }
+  return { kind: 'found', token };
 }
 
 // --- Custom Hostnames (CF for SaaS) ---

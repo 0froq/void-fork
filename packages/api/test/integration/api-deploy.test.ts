@@ -944,14 +944,126 @@ describe('POST /projects/:id/deploy', () => {
     expect(res.status).toBe(200);
     await res.text();
 
-    // Verify queue routing KV entry (key uses deterministic queue name)
+    // Verify queue routing KV entry (key uses deterministic queue name).
+    // proxyToken must be present so void-dispatch can authenticate the relay
+    // against the user worker's framework-generated /__void/queue endpoint.
     const expectedQueueName = `${project.id}-emails`.toLowerCase().replaceAll('_', '-');
-    const queueRouting = await env.ROUTING.get(`queue:${expectedQueueName}`, 'json');
+    const queueRouting = (await env.ROUTING.get(`queue:${expectedQueueName}`, 'json')) as {
+      workerName: string;
+      projectId: string;
+      queueName: string;
+      proxyToken: string;
+    } | null;
     expect(queueRouting).toEqual({
       workerName: expect.stringMatching(/^user-queue-kv-app-dpl_/),
       projectId: project.id,
       queueName: 'emails',
+      proxyToken: expect.any(String),
     });
+    expect(queueRouting?.proxyToken.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it('does not overwrite live queue KV when a conflicting deploy fails', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'queue-conflict-noclobber');
+    const expectedQueueName = `${project.id}-emails`.toLowerCase().replaceAll('_', '-');
+    const routingKey = `queue:${expectedQueueName}`;
+
+    // Seed: a previously-successful deploy already owns this route.
+    await env.ROUTING.put(
+      routingKey,
+      JSON.stringify({
+        workerName: 'user-queue-conflict-noclobber-dpl_live',
+        projectId: project.id,
+        queueName: 'emails',
+        proxyToken: 'live-token',
+      }),
+    );
+
+    mockCfApi({
+      addQueueConsumer: () =>
+        Response.json(
+          { success: false, errors: [{ code: 100, message: 'queue already has a consumer' }] },
+          { status: 400 },
+        ),
+      listQueueConsumers: () =>
+        cfSuccess([{ consumer_id: 'c_other', script_name: 'other-dispatch', settings: {} }]),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            version: 3,
+            bindings: {},
+            queues: [{ name: 'emails', bindingName: 'QUEUE_EMAILS' }],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    expect(events.some((e: unknown) => (e as { event: string }).event === 'error')).toBe(true);
+
+    // The live queue route must still point at the previously-live worker —
+    // the failed deploy must not overwrite it with a pointer to a new
+    // worker that is about to be torn down.
+    const routing = (await env.ROUTING.get(routingKey, 'json')) as {
+      workerName: string;
+      proxyToken: string;
+    };
+    expect(routing.workerName).toBe('user-queue-conflict-noclobber-dpl_live');
+    expect(routing.proxyToken).toBe('live-token');
+  });
+
+  it('emits queue_consumer_conflict and fails the deploy when a different script owns the consumer', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'queue-conflict-app');
+    mockCfApi({
+      addQueueConsumer: () =>
+        Response.json(
+          { success: false, errors: [{ code: 100, message: 'queue already has a consumer' }] },
+          { status: 400 },
+        ),
+      listQueueConsumers: () =>
+        cfSuccess([{ consumer_id: 'c_other', script_name: 'other-dispatch', settings: {} }]),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            version: 3,
+            bindings: {},
+            queues: [{ name: 'emails', bindingName: 'QUEUE_EMAILS' }],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const events = await readAllEvents(res);
+    const conflict = events.find(
+      (e: unknown) => (e as { event: string }).event === 'queue_consumer_conflict',
+    ) as { event: string; queue: string; ownerScript: string } | undefined;
+    expect(conflict).toBeDefined();
+    expect(conflict!.queue).toBe('emails');
+    expect(conflict!.ownerScript).toBe('other-dispatch');
+    // Conflict is fatal: CI/automation clients must see a non-success
+    // signal instead of a `done` event, otherwise a partially broken
+    // deploy is indistinguishable from a healthy one.
+    expect(events.some((e: unknown) => (e as { event: string }).event === 'done')).toBe(false);
+    const errorEvent = events.find((e: unknown) => (e as { event: string }).event === 'error') as
+      | { event: string; message: string }
+      | undefined;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent!.message).toMatch(/queue.*emails.*other-dispatch/i);
   });
 
   it('streams events in pipeline order', async () => {

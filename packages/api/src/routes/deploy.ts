@@ -2320,38 +2320,72 @@ app.post('/:id/deploy', async (c) => {
         }
 
         const dispatchWorkerName = c.env.DISPATCH_WORKER_NAME ?? 'void-dispatch';
-        await Promise.all(
+        const queueProxyToken = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN')?.text;
+        const queueConflicts: { queue: string; ownerScript: string }[] = [];
+        // Pass 1: register consumer subscriptions at CF and collect any
+        // conflicts. Do NOT touch ROUTING KV yet — if a sibling queue
+        // conflicts we throw, and the live KV route for every other queue
+        // must stay pointing at the previously-live worker. Otherwise a
+        // failed deploy would flip routing to a worker we are about to
+        // tear down in the error cleanup.
+        const consumerOutcomes = await Promise.all(
           (manifest.queues ?? []).map(async (q) => {
             const queueBinding = workerBindings.find(
               (b) => b.type === 'queue' && b.name === q.bindingName,
             );
-            if (queueBinding?.queue_id) {
-              await addQueueConsumer(
-                c.env.CF_ACCOUNT_ID,
-                c.env.CF_API_TOKEN,
-                queueBinding.queue_id,
-                dispatchWorkerName,
-                {
-                  ...(q.maxBatchSize != null && { batch_size: q.maxBatchSize }),
-                  ...(q.maxBatchTimeout != null && {
-                    max_wait_time_ms: q.maxBatchTimeout * 1000,
-                  }),
-                  ...(q.maxRetries != null && { max_retries: q.maxRetries }),
-                  ...(q.retryDelay != null && { retry_delay: q.retryDelay }),
-                },
-              );
-              // Store queue→worker mapping for relay routing
-              await c.env.ROUTING.put(
-                `queue:${queueBinding.queue_name}`,
-                JSON.stringify({
-                  workerName,
-                  projectId,
-                  queueName: q.name,
-                }),
-              );
+            if (!queueBinding?.queue_id) {
+              return null;
             }
+            const consumerResult = await addQueueConsumer(
+              c.env.CF_ACCOUNT_ID,
+              c.env.CF_API_TOKEN,
+              queueBinding.queue_id,
+              dispatchWorkerName,
+              {
+                ...(q.maxBatchSize != null && { batch_size: q.maxBatchSize }),
+                ...(q.maxBatchTimeout != null && {
+                  max_wait_time_ms: q.maxBatchTimeout * 1000,
+                }),
+                ...(q.maxRetries != null && { max_retries: q.maxRetries }),
+                ...(q.retryDelay != null && { retry_delay: q.retryDelay }),
+              },
+            );
+            if (consumerResult.status === 'conflict') {
+              emit({
+                event: 'queue_consumer_conflict',
+                queue: q.name,
+                ownerScript: consumerResult.ownerScript,
+              });
+              queueConflicts.push({ queue: q.name, ownerScript: consumerResult.ownerScript });
+            }
+            return { q, queueBinding, status: consumerResult.status };
           }),
         );
+        if (queueConflicts.length > 0) {
+          const details = queueConflicts
+            .map((conflict) => `${conflict.queue} owned by ${conflict.ownerScript}`)
+            .join('; ');
+          throw new Error(`queue consumer conflict: ${details}`);
+        }
+        // Pass 2: flip KV routes only after we know every queue is claimable
+        // by this deployment. proxyToken is included so void-dispatch can
+        // set `x-void-internal` on the relay; without it the user worker's
+        // framework-generated /__void/queue handler rejects with 401 and
+        // messages silently exhaust retries.
+        for (const outcome of consumerOutcomes) {
+          if (!outcome) {
+            continue;
+          }
+          await c.env.ROUTING.put(
+            `queue:${outcome.queueBinding.queue_name}`,
+            JSON.stringify({
+              workerName,
+              projectId,
+              queueName: outcome.q.name,
+              proxyToken: queueProxyToken,
+            }),
+          );
+        }
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
         // 2c. Sync cron schedules to CronScheduler DO

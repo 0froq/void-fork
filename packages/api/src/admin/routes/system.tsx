@@ -1,10 +1,11 @@
 import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { Handler } from 'hono';
-import { SITE_DOMAIN } from '../../constants';
+import { DEFAULT_DISPATCH_NAMESPACE, SITE_DOMAIN } from '../../constants';
 import type { Db } from '../../db';
 import { getSystemStats, getAllProjectsWithOwner, getAllDeploymentsWithProject } from '../../db';
 import { type ApiEnv, isDevBypass } from '../../env';
+import { backfillQueueTokens } from '../backfill-queue-tokens';
 import { DashboardPage } from '../views/dashboard';
 
 /** Derive the base cloud domain from the API request hostname.
@@ -96,6 +97,20 @@ adminSystem.get('/health', async (c) => {
   ];
 
   return c.json({ checks, allOk: checks.every((ch) => ch.ok) } satisfies HealthResult);
+});
+
+// One-shot migration endpoint for the queue relay token rollout:
+// stamps `proxyToken` on any legacy `queue:*` KV entry written before
+// dispatch started forwarding `x-void-internal`. Idempotent — re-running
+// only touches entries missing a token.
+adminSystem.post('/backfill-queue-tokens', async (c) => {
+  const result = await backfillQueueTokens(c.env.ROUTING, {
+    accountId: c.env.CF_ACCOUNT_ID,
+    apiToken: c.env.CF_API_TOKEN,
+    dispatchNamespace: c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE,
+    jwtSecret: c.env.JWT_SECRET,
+  });
+  return c.json(result);
 });
 
 export const dashboardHandler: Handler<ApiEnv> = async (c) => {

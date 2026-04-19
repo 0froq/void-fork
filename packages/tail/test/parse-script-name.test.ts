@@ -23,8 +23,23 @@ describe('parseScriptName', () => {
     });
   });
 
-  it('filters out non-user scripts', () => {
+  it('filters out non-user, non-platform scripts', () => {
     expect(parseScriptName('void-api')).toBeNull();
-    expect(parseScriptName('void-dispatch')).toBeNull();
+    expect(parseScriptName('void-tail')).toBeNull();
+    expect(parseScriptName('void-proxy')).toBeNull();
+  });
+
+  it('accepts void-dispatch under __platform-dispatch project key', () => {
+    expect(parseScriptName('void-dispatch')).toEqual({
+      projectKey: '__platform-dispatch',
+      deployId: '',
+    });
+  });
+
+  it('accepts void-dispatch-staging under __platform-dispatch-staging project key', () => {
+    expect(parseScriptName('void-dispatch-staging')).toEqual({
+      projectKey: '__platform-dispatch-staging',
+      deployId: '',
+    });
   });
 });
