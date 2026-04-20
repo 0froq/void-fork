@@ -45,6 +45,7 @@ jobs:
         run: npx void deploy --project kitchen-sink
         env:
           VOID_TOKEN: ${{ secrets.VOID_TOKEN_STAGING }}
+          VOID_API_URL: https://api.staging.void.cloud
           STAGING: '1'
 
       # Install Chromium for Playwright
