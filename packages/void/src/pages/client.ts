@@ -1,8 +1,6 @@
 /// <reference lib="dom" />
 
-import { initClientHead, applyClientHead } from './head-client';
 import { createPageNavigationEngine as createNavigationEngine } from './navigation-engine';
-import { PrefetchCache, parseCacheFor } from './prefetch';
 import type { CacheForResult, CacheForInput } from './prefetch';
 
 export { createPageNavigationEngine } from './navigation-engine';
