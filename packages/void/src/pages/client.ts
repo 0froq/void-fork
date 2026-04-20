@@ -11,6 +11,7 @@ export {
   isCallSiteActionError,
 } from './action-result';
 export type { ActionErrorHandlingScope, ActionResult } from './action-result';
+export { isEqualFormValue } from './form-value-equality';
 export { createPageNavigationEngine } from './navigation-engine';
 export type {
   PageNavigationEngine,

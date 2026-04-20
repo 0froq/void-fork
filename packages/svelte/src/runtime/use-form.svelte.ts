@@ -1,5 +1,5 @@
 import { getContext } from 'svelte';
-import { VoidActionError, isAbortError, submitAction } from 'void/pages-client';
+import { VoidActionError, isAbortError, isEqualFormValue, submitAction } from 'void/pages-client';
 import type { ActionUrl, ResolveActionBody, ActionFormOptions } from 'void/routes';
 
 function getValidationErrors(error: VoidActionError): Record<string, string> | null {
@@ -75,9 +75,7 @@ export function useForm(
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const isDirty = $derived(
-    Object.keys(defaults_).some(
-      (key) => JSON.stringify(data[key]) !== JSON.stringify(defaults_[key]),
-    ),
+    Object.keys(defaults_).some((key) => !isEqualFormValue(data[key], defaults_[key])),
   );
 
   function reset(...fields: string[]) {

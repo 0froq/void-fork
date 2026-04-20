@@ -1,4 +1,4 @@
-import { VoidActionError, categorizeActionError } from 'void/pages-client';
+import { VoidActionError, categorizeActionError, isEqualFormValue } from 'void/pages-client';
 import { reactive, ref, watch } from 'vue';
 
 function getValidationErrors(body: unknown): Record<string, string> | null {
@@ -48,7 +48,7 @@ export function useIslandForm(defaults: Record<string, unknown>): any {
     () => ({ ...data }),
     (val) => {
       isDirty.value = Object.keys(defaults_).some(
-        (key) => JSON.stringify(val[key]) !== JSON.stringify(defaults_[key]),
+        (key) => !isEqualFormValue(val[key], defaults_[key]),
       );
     },
     { deep: true },

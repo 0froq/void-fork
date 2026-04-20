@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
-import { VoidActionError, categorizeActionError } from 'void/pages-client';
+import { VoidActionError, categorizeActionError, isEqualFormValue } from 'void/pages-client';
 
 function getValidationErrors(body: unknown): Record<string, string> | null {
   if (
@@ -63,7 +63,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
 
   const isDirty = useMemo(() => {
     return Object.keys(defaultsState).some(
-      (key) => JSON.stringify(data[key]) !== JSON.stringify(defaultsState[key as keyof T]),
+      (key) => !isEqualFormValue(data[key], defaultsState[key as keyof T]),
     );
   }, [data, defaultsState]);
 

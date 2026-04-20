@@ -1,4 +1,4 @@
-import { VoidActionError, isAbortError, submitAction } from 'void/pages-client';
+import { VoidActionError, isAbortError, isEqualFormValue, submitAction } from 'void/pages-client';
 import type { ActionUrl, ResolveActionBody, ActionFormOptions } from 'void/routes';
 import { reactive, ref, inject, watch } from 'vue';
 
@@ -79,7 +79,7 @@ export function useForm(
     () => ({ ...data }),
     (val) => {
       isDirty.value = Object.keys(defaults_).some(
-        (key) => JSON.stringify(val[key]) !== JSON.stringify(defaults_[key]),
+        (key) => !isEqualFormValue(val[key], defaults_[key]),
       );
     },
     { deep: true },

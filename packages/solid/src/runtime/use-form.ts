@@ -1,6 +1,6 @@
 import { createSignal, createMemo, useContext } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
-import { VoidActionError, isAbortError, submitAction } from 'void/pages-client';
+import { VoidActionError, isAbortError, isEqualFormValue, submitAction } from 'void/pages-client';
 import type { ActionUrl, ResolveActionBody, ActionFormOptions } from 'void/routes';
 import { RouterContext, ErrorsContext } from './context';
 
@@ -100,9 +100,7 @@ export function useForm(
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const isDirty = createMemo(() => {
-    return Object.keys(defaults_).some(
-      (key) => JSON.stringify(data[key]) !== JSON.stringify(defaults_[key]),
-    );
+    return Object.keys(defaults_).some((key) => !isEqualFormValue(data[key], defaults_[key]));
   });
 
   function setData(field: string, value: unknown) {

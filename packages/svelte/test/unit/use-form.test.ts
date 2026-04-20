@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { isEqualFormValue } from 'void/pages-client';
 
 // Test the core logic of useForm directly (without Svelte rendering context).
 // We re-implement the non-runes logic inline since useForm uses getContext/$state
@@ -28,9 +29,7 @@ describe('useForm core logic', () => {
     const defaults_ = { ...formDefaults };
 
     function isDirty() {
-      return Object.keys(defaults_).some(
-        (key) => JSON.stringify(data[key]) !== JSON.stringify(defaults_[key]),
-      );
+      return Object.keys(defaults_).some((key) => !isEqualFormValue(data[key], defaults_[key]));
     }
 
     function setData(field: string, value: unknown) {
@@ -114,6 +113,40 @@ describe('useForm core logic', () => {
 
     form.setData('name', 'default');
     expect(form.isDirty()).toBe(false);
+  });
+
+  it('isDirty treats equal arrays and plain objects as clean', () => {
+    const form = createForm('/test', {
+      meta: { enabled: true, nested: { count: 1 } },
+      tags: ['one'],
+    });
+
+    form.setData('tags', ['one', 'two']);
+    form.setData('meta', { enabled: false, nested: { count: 2 } });
+    expect(form.isDirty()).toBe(true);
+
+    form.setData('tags', ['one']);
+    form.setData('meta', { nested: { count: 1 }, enabled: true });
+    expect(form.isDirty()).toBe(false);
+  });
+
+  it('isDirty keeps Object.is semantics for primitive edge cases', () => {
+    const form = createForm('/test', { count: NaN, zero: -0 });
+
+    form.setData('count', NaN);
+    expect(form.isDirty()).toBe(false);
+
+    form.setData('zero', 0);
+    expect(form.isDirty()).toBe(true);
+  });
+
+  it('isDirty compares non-plain objects by reference', () => {
+    const startedAt = new Date(0);
+    const form = createForm('/test', { startedAt });
+
+    form.setData('startedAt', new Date(0));
+
+    expect(form.isDirty()).toBe(true);
   });
 
   it('reset() reverts all fields to defaults', () => {

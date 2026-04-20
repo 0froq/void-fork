@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { VoidActionError, isAbortError, submitAction } from 'void/pages-client';
+import { VoidActionError, isAbortError, isEqualFormValue, submitAction } from 'void/pages-client';
 import type { ActionUrl, ResolveActionBody, ActionFormOptions } from 'void/routes';
 import { RouterContext } from './context';
 
@@ -93,7 +93,7 @@ export function useForm(
 
   const isDirty = useMemo(() => {
     return Object.keys(defaultsState).some(
-      (key) => JSON.stringify(data[key]) !== JSON.stringify(defaultsState[key]),
+      (key) => !isEqualFormValue(data[key], defaultsState[key]),
     );
   }, [data, defaultsState]);
 

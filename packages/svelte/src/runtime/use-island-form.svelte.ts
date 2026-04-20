@@ -1,4 +1,4 @@
-import { VoidActionError, categorizeActionError } from 'void/pages-client';
+import { VoidActionError, categorizeActionError, isEqualFormValue } from 'void/pages-client';
 
 function getValidationErrors(body: unknown): Record<string, string> | null {
   if (
@@ -43,9 +43,7 @@ export function useIslandForm(defaults: Record<string, unknown>): any {
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const isDirty = $derived(
-    Object.keys(defaults_).some(
-      (key) => JSON.stringify(data[key]) !== JSON.stringify(defaults_[key]),
-    ),
+    Object.keys(defaults_).some((key) => !isEqualFormValue(data[key], defaults_[key])),
   );
 
   function reset(...fields: string[]) {

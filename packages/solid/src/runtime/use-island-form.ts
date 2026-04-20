@@ -1,6 +1,6 @@
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
-import { VoidActionError, categorizeActionError } from 'void/pages-client';
+import { VoidActionError, categorizeActionError, isEqualFormValue } from 'void/pages-client';
 
 function getValidationErrors(body: unknown): Record<string, string> | null {
   if (
@@ -63,9 +63,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const isDirty = createMemo(() => {
-    return Object.keys(defaults_).some(
-      (key) => JSON.stringify(data[key]) !== JSON.stringify(defaults_[key]),
-    );
+    return Object.keys(defaults_).some((key) => !isEqualFormValue(data[key], defaults_[key]));
   });
 
   function setData(field: string, value: unknown) {
