@@ -109,6 +109,46 @@ describe('createPageRouter prefetch', () => {
     expect(documentStub.head.appendChild).not.toHaveBeenCalled();
   });
 
+  it('returns a promise that resolves when page data is prefetched', async () => {
+    stubClientGlobals();
+    const pageData = {
+      component: 'users',
+      props: { users: [] },
+    };
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(Response.json(pageData, { headers: { 'X-VoidPages': 'true' } })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { router } = await createPageRouter({
+      adapter: {
+        applyUpdate: vi.fn(),
+        createDeferred: vi.fn(() => ({})),
+        isLoading: vi.fn(() => false),
+        rejectDeferred: vi.fn((_ref, error) => error),
+        resolveDeferred: vi.fn((_ref, value) => value),
+      },
+      components: {
+        home: vi.fn(async () => ({ default: {} })),
+        users: vi.fn(async () => ({ default: {} })),
+      },
+      layoutTree: {},
+      matchRoute: vi.fn((url) => (url === '/users' ? 'users' : 'home')),
+      prefetchDefaultCacheFor: parseCacheFor('30s'),
+      prefetchHoverDelay: 75,
+      routeMeta: {
+        users: {},
+      },
+      viewTransitions: false,
+    });
+
+    await expect(router.prefetch('/users')).resolves.toEqual(pageData);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await expect(router.prefetch('/users')).resolves.toEqual(pageData);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('does not resolve disposed initial deferred props into a later page', async () => {
     stubClientGlobals();
     const initialPayload = {

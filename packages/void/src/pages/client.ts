@@ -57,7 +57,7 @@ export interface VoidRouter {
   readonly query: URLSearchParams;
   visit(url: string | URL, options?: VisitOptions): Promise<any>;
   refresh(options?: VisitOptions): Promise<any>;
-  prefetch(url: string | URL, options?: PrefetchOptions): void;
+  prefetch(url: string | URL, options?: PrefetchOptions): Promise<unknown>;
   flush(url: string | URL, method?: string): void;
   flushAll(): void;
 }
@@ -163,7 +163,7 @@ export function createRouterFacade(router: VoidRouter, getCurrentUrl: () => stri
     },
 
     prefetch(url, options = {}) {
-      router.prefetch(url, options);
+      return router.prefetch(url, options);
     },
 
     flush(url, method = 'GET') {
@@ -381,7 +381,7 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
       },
 
       prefetch(url, options = {}) {
-        engine.prefetch(normalizeUrl(url), options);
+        return engine.prefetch(normalizeUrl(url), options);
       },
 
       flush(url, method = 'GET') {

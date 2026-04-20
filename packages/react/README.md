@@ -137,6 +137,11 @@ actions. Use `action()` for the awaitable imperative escape hatch; it returns
 while boundary-class failures are thrown. `action()` uses `POST` by default and
 accepts `{ data, method, params }`.
 
+### `useRouter`
+
+`useRouter()` returns the Pages router. `visit()`, `refresh()`, and `prefetch()`
+are awaitable; `prefetch()` resolves when the page data has been cached.
+
 ### `Link`
 
 `Link` is the React Pages navigation component. GET links render an `<a>` and

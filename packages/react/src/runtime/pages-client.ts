@@ -233,7 +233,7 @@ function createRouter(engine: Awaited<ReturnType<typeof createPageNavigationEngi
       });
     },
     prefetch(url, options = {}) {
-      engine.prefetch(normalizeUrl(url), options);
+      return engine.prefetch(normalizeUrl(url), options);
     },
     flush(url, method = 'GET') {
       engine.flush(normalizeUrl(url), method);

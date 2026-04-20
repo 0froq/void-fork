@@ -72,7 +72,7 @@ export interface PageNavigationEngine {
   initialComponent: any;
   initialLayouts: any[];
   prepareVisit(url: string, options?: VisitOptions): PageNavigationResource;
-  prefetch(url: string, options?: PrefetchOptions): void;
+  prefetch(url: string, options?: PrefetchOptions): Promise<unknown>;
   flush(url: string, method?: string): void;
   flushAll(): void;
   setPopStateHandler(handler: (url: string, options: VisitOptions) => void): void;
@@ -1009,7 +1009,7 @@ export async function createPageNavigationEngine(
 
       const id = matchRoute(url);
       if (!id) {
-        return;
+        return Promise.resolve(undefined);
       }
 
       if (routeMeta[id]?.island) {
@@ -1020,7 +1020,7 @@ export async function createPageNavigationEngine(
           link.as = 'document';
           document.head.appendChild(link);
         }
-        return;
+        return Promise.resolve(undefined);
       }
 
       if (components[id]) {
@@ -1035,8 +1035,9 @@ export async function createPageNavigationEngine(
 
       const hashIdx = url.indexOf('#');
       const prefetchUrl = hashIdx !== -1 ? url.slice(0, hashIdx) : url;
-      if (_prefetchCache.has(prefetchUrl, method)) {
-        return;
+      const existing = _prefetchCache.get(prefetchUrl, method);
+      if (existing) {
+        return existing.response;
       }
       const ttl = options.cacheFor ? parseCacheFor(options.cacheFor) : PREFETCH_DEFAULT_CACHE_FOR;
       const headers = {
@@ -1068,6 +1069,7 @@ export async function createPageNavigationEngine(
         });
       });
       _prefetchCache.set(prefetchUrl, method, fetchPromise, ttl);
+      return fetchPromise;
     },
 
     flush(url, method = 'GET') {
