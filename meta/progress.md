@@ -59,13 +59,13 @@
 - [x] Meta-framework adapters (TanStack Start, React Router, SvelteKit, Nuxt, Astro)
 - [x] Pre-rendering / SSG (`output: "static"` and deploy-time prerendering)
 - [x] Drizzle integration
+- [x] AI binding (`void/ai` with metered proxy)
+- [x] Remote bindings (`remote: true` — D1/KV/R2 via proxy for local dev)
+- [x] Better Auth integration
 
 ### Remaining
 
 - [ ] Pages mode: update agent prompts for pages
-- [x] AI binding (`void/ai` with metered proxy)
-- [x] Remote bindings (`remote: true` — D1/KV/R2 via proxy for local dev)
-- [x] Better-auth integration
 - [ ] More framework adapters (SolidStart)
   - [ ] Make backend features (queues, crons, ISR) work alongside framework adapters
 
@@ -83,12 +83,11 @@
 - [x] Sign-up allowlist / whitelist controls (private beta)
 - [x] Platform worker rollback admin page (per-worker version history + rollback)
 - [x] Platform rollback audit log (`platform_events` table), unified "Rollback All" with orchestration
+- [x] Move platform DB to PlanetScale Postgres via Hyperdrive
 
 ### Remaining
 
-- [x] Move platform DB to PlanetScale Postgres via Hyperdrive
 - [ ] System monitoring / health pings
-- [ ] User dashboard
 - [ ] Improve sign-up page
 - [ ] User token management (CF Secret Store?)
 - [ ] Terms of Service
@@ -102,6 +101,7 @@
 - [ ] GitHub App for webhook-based deploys
 - [ ] Build infrastructure (CF containers)
 - [ ] Preview deployments per PR (paid)
+- [ ] User dashboard
 
 **Milestone:** Vercel / Netlify core DX parity.
 
