@@ -228,7 +228,7 @@ Internal-only toggle for pointing the CLI at staging. Not documented in public d
 - `void staging on` — sets `"staging": true` in `~/.void/config.json`
 - Reads/writes `stagingToken` instead of `token`
 - Defaults API URL to `https://api.staging.void.cloud`
-- Can also be activated via `STAGING=1` env var or `VOID_API_URL` env var
+- Can also be activated via `VOID_API_URL=https://api.staging.void.cloud`. The CLI does **not** read `STAGING=1` (`framework/packages/void/src/cli/project.ts:isVoidInternalStaging` only checks `.void/project.json`), so CI workflows must set `VOID_API_URL` explicitly.
 
 ## Deploy Process
 
