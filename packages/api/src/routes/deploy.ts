@@ -22,6 +22,7 @@ import {
   type AssetManifestEntry,
 } from '../assets';
 import { deleteDispatchScript, retryWithBackoff } from '../cf-api';
+import { R2_CONCURRENCY, uploadPool } from '../concurrency';
 import { SITE_DOMAIN } from '../constants';
 import { DEFAULT_DASHBOARD_URL } from '../constants';
 import {
@@ -48,6 +49,7 @@ import {
 } from '../db';
 import { sendDeployFailedEmail } from '../email';
 import type { ApiEnv } from '../env';
+import { isrCacheKey, isrCachePrefix } from '../isr-cache';
 import {
   MultipartParseError,
   parseBoundary,
@@ -69,7 +71,6 @@ import { SUPPORTED_MANIFEST_VERSIONS, type DeployManifest, type DeployEvent } fr
 import type { WebSocketMigrationMeta } from '../types';
 
 const DEFAULT_DISPATCH_NAMESPACE = 'void-users';
-const R2_CONCURRENCY = 6; // Workers allow 6 simultaneous open connections
 
 // Per-part byte caps for buffered text fields. The Cloudflare Workers request
 // budget is 128 MiB, and these parts are fully buffered in memory before
@@ -2526,10 +2527,10 @@ app.post('/:id/deploy', async (c) => {
         }
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
-        // 3. Clear previous ISR cache on deploy.
-        // Always clear — handles both "new deploy has ISR" and "previous deploy had ISR
-        // but new one doesn't" (avoids orphaned KV entries). No-op for empty prefixes.
-        await clearIsrCache(c.env.ISR_CACHE, projectId);
+        // 3. Clear this deployment's ISR namespace before warming it.
+        // ISR keys are deployment-scoped so a new deployment never reads HTML
+        // produced by an older deployment with different hashed assets.
+        await clearIsrCache(c.env.ISR_CACHE, projectId, deployment.id);
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
         // 3b. Prerender pages (write ISR cache entries before going live)
@@ -2553,7 +2554,7 @@ app.post('/:id/deploy', async (c) => {
               const response = await userWorker.fetch(new Request(url));
 
               if (response.ok) {
-                const key = isrCacheKey(projectId, pathname);
+                const key = isrCacheKey(projectId, deployment.id, pathname);
                 const headers = serializePrerenderHeaders(response);
                 const body = await response.arrayBuffer();
                 const packed = packIsrValue(headers, body);
@@ -2654,6 +2655,9 @@ app.post('/:id/deploy', async (c) => {
               oldWorkerName,
             );
             await markDeploymentRetained(c.get('db'), old.id, false);
+            await clearIsrCache(c.env.ISR_CACHE, projectId, old.id).catch((e) =>
+              console.error(`[deploy] failed to clear ISR cache for evicted ${old.id}:`, e),
+            );
           }
         }
 
@@ -2748,6 +2752,9 @@ app.post('/:id/deploy', async (c) => {
             latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status);
           await deleteDispatchScript(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, dn, wn).catch((e) =>
             console.error(`[deploy] failed to clean up worker script ${wn}:`, e),
+          );
+          await clearIsrCache(c.env.ISR_CACHE, projectId, dep.id).catch((e) =>
+            console.error(`[deploy] failed to clear ISR cache for ${dep.id}:`, e),
           );
           // Clear cron DO if we synced it before the failure (step 2c runs before routing switch)
           if (cronSynced) {
@@ -2868,23 +2875,14 @@ app.post('/:id/deploy/preflight', async (c) => {
   return c.json({ needed, total, skipped: total - needed.length });
 });
 
-async function uploadPool<T>(
-  items: T[],
-  concurrency: number,
-  fn: (item: T) => Promise<unknown>,
+export async function clearIsrCache(
+  kv: KVNamespace,
+  projectId: string,
+  deploymentId: string,
 ): Promise<void> {
-  let i = 0;
-  async function worker() {
-    while (i < items.length) {
-      const item = items[i++];
-      await fn(item);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
-}
-
-export async function clearIsrCache(kv: KVNamespace, projectId: string): Promise<void> {
-  const prefix = `${projectId}/isr/`;
+  // `deploymentId` is required so a bare call cannot fall through to the
+  // project-wide prefix and wipe every deployment's ISR namespace.
+  const prefix = isrCachePrefix(projectId, deploymentId);
   let cursor: string | undefined;
 
   do {
@@ -2910,23 +2908,6 @@ function packIsrValue(headers: Record<string, string>, body: ArrayBuffer): Array
   new Uint8Array(buffer, 4, headerJson.byteLength).set(headerJson);
   new Uint8Array(buffer, 4 + headerJson.byteLength).set(new Uint8Array(body));
   return buffer;
-}
-
-/**
- * Build the cache key for an ISR-cached page.
- * Root path `/` maps to `__index__` to avoid trailing-slash ambiguity.
- */
-function isrCacheKey(projectId: string, pathname: string): string {
-  let normalized = pathname;
-  if (normalized === '/') {
-    normalized = '__index__';
-  } else {
-    normalized = normalized.startsWith('/') ? normalized.slice(1) : normalized;
-    if (normalized.endsWith('/')) {
-      normalized = normalized.slice(0, -1);
-    }
-  }
-  return `${projectId}/isr/${normalized}`;
 }
 
 /**

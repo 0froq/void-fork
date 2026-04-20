@@ -35,6 +35,7 @@ interface RoutingEntry {
   limits?: Record<string, number>;
   suspended?: string;
   hashedAssetsPrefix?: string;
+  staticDeploymentId?: string;
   headerRules?: { pattern: string; headers: [string, string][] }[];
   redirectRules?: { source: string; destination: string; status: number }[];
 }
@@ -304,7 +305,7 @@ describe('ISR (stale-while-revalidate)', () => {
 
     // Wait for background write
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
-    expect(kvStore.has('proj_1/isr/dashboard')).toBe(true);
+    expect(kvStore.has('proj_1/isr/v2/legacy/dashboard')).toBe(true);
   });
 
   it('serves from ISR cache on second request (no worker call)', async () => {
@@ -316,7 +317,7 @@ describe('ISR (stale-while-revalidate)', () => {
         revalidate: 60,
       },
       assets: {
-        'proj_1/isr/dashboard': {
+        'proj_1/isr/v2/legacy/dashboard': {
           body: '<html>cached</html>',
           createdAt: Date.now(),
           ttl: 60,
@@ -346,7 +347,7 @@ describe('ISR (stale-while-revalidate)', () => {
         revalidate: 60,
       },
       assets: {
-        'proj_1/isr/dashboard': {
+        'proj_1/isr/v2/legacy/dashboard': {
           body: '<html>cached</html>',
           createdAt: Date.now(),
           ttl: 60,
@@ -389,7 +390,7 @@ describe('ISR (stale-while-revalidate)', () => {
     expect(await response.text()).toBe('<html>no-cache</html>');
     // No waitUntil calls — analytics is sync, no userId for queue, no ISR cache write
     expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
-    expect(kvStore.has('proj_1/isr/dashboard')).toBe(false);
+    expect(kvStore.has('proj_1/isr/v2/legacy/dashboard')).toBe(false);
   });
 
   it('SSR without revalidate works unchanged', async () => {
@@ -429,15 +430,16 @@ describe('ISR (stale-while-revalidate)', () => {
       }),
     });
 
-    const response = await app.fetch(
-      new Request('https://my-app.void.app/dashboard'),
-      env,
-      createCtx(),
-    );
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
 
     expect(response.status).toBe(200);
     expect(response.headers.get('x-isr-cache')).toBe('MISS');
-    expect(response.headers.get('Cache-Control')).toBe(
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    const edgeCached = edgeCacheStore.get('https://my-app.void.app/dashboard?__void_isr=legacy');
+    expect(edgeCached?.headers.get('Cache-Control')).toBe(
       'public, s-maxage=60, max-age=0, must-revalidate',
     );
   });
@@ -451,7 +453,7 @@ describe('ISR (stale-while-revalidate)', () => {
         revalidate: 60,
       },
       assets: {
-        'proj_1/isr/dashboard': {
+        'proj_1/isr/v2/legacy/dashboard': {
           body: '<html>stale</html>',
           createdAt: Date.now() - 120 * 1000,
           ttl: 60,
@@ -472,7 +474,7 @@ describe('ISR (stale-while-revalidate)', () => {
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
     expect(workerFetch).toHaveBeenCalledOnce();
     // KV entry should be deleted after x-revalidate: 0
-    expect(kvStore.has('proj_1/isr/dashboard')).toBe(false);
+    expect(kvStore.has('proj_1/isr/v2/legacy/dashboard')).toBe(false);
   });
 
   it('revalidates stale entry in background and returns stale content', async () => {
@@ -484,7 +486,7 @@ describe('ISR (stale-while-revalidate)', () => {
         revalidate: 60,
       },
       assets: {
-        'proj_1/isr/dashboard': {
+        'proj_1/isr/v2/legacy/dashboard': {
           body: '<html>stale</html>',
           createdAt: Date.now() - 120 * 1000, // 2 minutes ago, TTL is 60s
           ttl: 60,
@@ -514,7 +516,7 @@ describe('ISR (stale-while-revalidate)', () => {
   it('serves from edge cache on repeat ISR request (no KV read)', async () => {
     // Pre-populate edge cache
     edgeCacheStore.set(
-      'https://my-app.void.app/dashboard',
+      'https://my-app.void.app/dashboard?__void_isr=legacy',
       new Response('<html>edge</html>', {
         headers: { 'x-isr-cache': 'HIT', 'Content-Type': 'text/html' },
       }),
@@ -538,7 +540,61 @@ describe('ISR (stale-while-revalidate)', () => {
     expect(workerFetch).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
     expect(response.headers.get('x-isr-cache')).toBe('HIT');
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
     expect(await response.text()).toBe('<html>edge</html>');
+  });
+
+  it('ignores ISR entries from other deployment namespaces', async () => {
+    edgeCacheStore.set(
+      'https://my-app.void.app/dashboard',
+      new Response('<html>old-unversioned-edge</html>', {
+        headers: { 'x-isr-cache': 'HIT', 'Content-Type': 'text/html' },
+      }),
+    );
+    edgeCacheStore.set(
+      'https://my-app.void.app/dashboard?__void_isr=dpl_old',
+      new Response('<html>old-versioned-edge</html>', {
+        headers: { 'x-isr-cache': 'HIT', 'Content-Type': 'text/html' },
+      }),
+    );
+
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+        version: 'dpl_new',
+      },
+      assets: {
+        'proj_1/isr/dashboard': {
+          body: '<html>old-unversioned-kv</html>',
+          createdAt: Date.now(),
+          ttl: 60,
+          headers: { 'Content-Type': 'text/html' },
+        },
+        'proj_1/isr/v2/dpl_old/dashboard': {
+          body: '<html>old-versioned-kv</html>',
+          createdAt: Date.now(),
+          ttl: 60,
+          headers: { 'Content-Type': 'text/html' },
+        },
+      },
+      workerResponse: new Response('<html>fresh</html>', {
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(response.headers.get('x-isr-cache')).toBe('MISS');
+    expect(await response.text()).toBe('<html>fresh</html>');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(kvStore.has('proj_1/isr/v2/dpl_new/dashboard')).toBe(true);
+    expect(edgeCacheStore.has('https://my-app.void.app/dashboard?__void_isr=dpl_new')).toBe(true);
   });
 
   it('populates edge cache after KV hit', async () => {
@@ -550,7 +606,7 @@ describe('ISR (stale-while-revalidate)', () => {
         revalidate: 60,
       },
       assets: {
-        'proj_1/isr/dashboard': {
+        'proj_1/isr/v2/legacy/dashboard': {
           body: '<html>r2-cached</html>',
           createdAt: Date.now(),
           ttl: 60,
@@ -564,11 +620,14 @@ describe('ISR (stale-while-revalidate)', () => {
 
     expect(workerFetch).not.toHaveBeenCalled();
     expect(response.headers.get('x-isr-cache')).toBe('HIT');
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
     expect(await response.text()).toBe('<html>r2-cached</html>');
 
     // Wait for edge cache population
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
-    expect(edgeCacheStore.has('https://my-app.void.app/dashboard')).toBe(true);
+    const edgeCached = edgeCacheStore.get('https://my-app.void.app/dashboard?__void_isr=legacy');
+    expect(edgeCached).toBeDefined();
+    expect(edgeCached!.headers.get('Cache-Control')).toContain('s-maxage=');
   });
 });
 
@@ -592,7 +651,7 @@ describe('ISR JSON edge cache (pages protocol)', () => {
   it('pages request serves from JSON edge cache when populated', async () => {
     // Pre-populate JSON edge cache
     edgeCacheStore.set(
-      'https://my-app.void.app/dashboard?__void=json',
+      'https://my-app.void.app/dashboard?__void=json&__void_isr=legacy',
       new Response(pageData, {
         headers: { 'content-type': 'application/json', 'x-isr-cache': 'HIT' },
       }),
@@ -610,6 +669,7 @@ describe('ISR JSON edge cache (pages protocol)', () => {
 
     expect(workerFetch).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
     expect(await response.json()).toEqual(JSON.parse(pageData));
   });
 
@@ -649,6 +709,7 @@ describe('ISR JSON edge cache (pages protocol)', () => {
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(response.status).toBe(200);
     expect(response.headers.get('x-isr-cache')).toBe('MISS');
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
     // Internal transport header should not leak to the client response
     expect(response.headers.has('x-void-page-data')).toBe(false);
     expect(await response.text()).toBe(pageHtml());
@@ -657,9 +718,15 @@ describe('ISR JSON edge cache (pages protocol)', () => {
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
 
     // HTML edge cache populated
-    expect(edgeCacheStore.has('https://my-app.void.app/dashboard')).toBe(true);
+    const htmlCached = edgeCacheStore.get('https://my-app.void.app/dashboard?__void_isr=legacy');
+    expect(htmlCached).toBeDefined();
+    expect(htmlCached!.headers.get('Cache-Control')).toBe(
+      'public, s-maxage=60, max-age=0, must-revalidate',
+    );
     // JSON edge cache populated
-    const jsonCached = edgeCacheStore.get('https://my-app.void.app/dashboard?__void=json');
+    const jsonCached = edgeCacheStore.get(
+      'https://my-app.void.app/dashboard?__void=json&__void_isr=legacy',
+    );
     expect(jsonCached).toBeDefined();
     expect(await jsonCached!.text()).toBe(pageData);
   });
@@ -668,7 +735,7 @@ describe('ISR JSON edge cache (pages protocol)', () => {
     const { env, workerFetch } = createEnv({
       routing: isrRouting,
       assets: {
-        'proj_1/isr/dashboard': {
+        'proj_1/isr/v2/legacy/dashboard': {
           body: '<html>stale</html>',
           createdAt: Date.now() - 120 * 1000,
           ttl: 60,
@@ -691,7 +758,9 @@ describe('ISR JSON edge cache (pages protocol)', () => {
     expect(workerFetch).toHaveBeenCalledOnce();
 
     // JSON edge cache populated from revalidation
-    const jsonCached = edgeCacheStore.get('https://my-app.void.app/dashboard?__void=json');
+    const jsonCached = edgeCacheStore.get(
+      'https://my-app.void.app/dashboard?__void=json&__void_isr=legacy',
+    );
     expect(jsonCached).toBeDefined();
     expect(await jsonCached!.text()).toBe(pageData);
     expect(jsonCached!.headers.get('x-isr-cache')).toBe('HIT');
@@ -701,7 +770,7 @@ describe('ISR JSON edge cache (pages protocol)', () => {
     const { env, workerFetch } = createEnv({
       routing: isrRouting,
       assets: {
-        'proj_1/isr/dashboard': {
+        'proj_1/isr/v2/legacy/dashboard': {
           body: '<html>stale</html>',
           createdAt: Date.now() - 120 * 1000,
           ttl: 60,
@@ -728,7 +797,7 @@ describe('ISR JSON edge cache (pages protocol)', () => {
   it('opt-out (ttl=0) deletes JSON edge cache too', async () => {
     // Pre-populate JSON edge cache
     edgeCacheStore.set(
-      'https://my-app.void.app/dashboard?__void=json',
+      'https://my-app.void.app/dashboard?__void=json&__void_isr=legacy',
       new Response(pageData, {
         headers: { 'content-type': 'application/json' },
       }),
@@ -737,7 +806,7 @@ describe('ISR JSON edge cache (pages protocol)', () => {
     const { env, workerFetch } = createEnv({
       routing: isrRouting,
       assets: {
-        'proj_1/isr/dashboard': {
+        'proj_1/isr/v2/legacy/dashboard': {
           body: '<html>stale</html>',
           createdAt: Date.now() - 120 * 1000,
           ttl: 60,
@@ -757,7 +826,9 @@ describe('ISR JSON edge cache (pages protocol)', () => {
     expect(workerFetch).toHaveBeenCalledOnce();
 
     // JSON edge cache should be deleted
-    expect(edgeCacheStore.has('https://my-app.void.app/dashboard?__void=json')).toBe(false);
+    expect(
+      edgeCacheStore.has('https://my-app.void.app/dashboard?__void=json&__void_isr=legacy'),
+    ).toBe(false);
   });
 
   it('write-behind populates JSON edge cache from embedded page data', async () => {
@@ -800,8 +871,10 @@ describe('ISR JSON edge cache (pages protocol)', () => {
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
 
     // HTML cache is populated, but no JSON cache
-    expect(edgeCacheStore.has('https://my-app.void.app/dashboard')).toBe(true);
-    expect(edgeCacheStore.has('https://my-app.void.app/dashboard?__void=json')).toBe(false);
+    expect(edgeCacheStore.has('https://my-app.void.app/dashboard?__void_isr=legacy')).toBe(true);
+    expect(
+      edgeCacheStore.has('https://my-app.void.app/dashboard?__void=json&__void_isr=legacy'),
+    ).toBe(false);
   });
 
   it('HTML response with deferred page data does not populate JSON cache', async () => {
@@ -819,7 +892,9 @@ describe('ISR JSON edge cache (pages protocol)', () => {
 
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
 
-    expect(edgeCacheStore.has('https://my-app.void.app/dashboard?__void=json')).toBe(false);
+    expect(
+      edgeCacheStore.has('https://my-app.void.app/dashboard?__void=json&__void_isr=legacy'),
+    ).toBe(false);
   });
 });
 
@@ -1629,6 +1704,53 @@ describe('static asset caching', () => {
     expect(workerFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('client response omits s-maxage on static cache miss', async () => {
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      version: 'deploy-1',
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response('favicon') });
+
+    const res = await app.fetch(new Request('https://test.void.app/favicon.ico'), env, createCtx());
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+  });
+
+  it('client response omits s-maxage on static cache hit', async () => {
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      version: 'deploy-1',
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response('favicon') });
+    const ctx = createCtx();
+
+    await app.fetch(new Request('https://test.void.app/favicon.ico'), env, ctx);
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    const res = await app.fetch(new Request('https://test.void.app/favicon.ico'), env, createCtx());
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+  });
+
+  it('static edge cache entry retains s-maxage for TTL', async () => {
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      version: 'deploy-1',
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response('favicon') });
+    const ctx = createCtx();
+
+    await app.fetch(new Request('https://test.void.app/favicon.ico'), env, ctx);
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    const cacheEntry = edgeCacheStore.get('https://test.void.app/favicon.ico?_v=deploy-1');
+    expect(cacheEntry).toBeDefined();
+    expect(cacheEntry!.headers.get('Cache-Control')).toBe(
+      'public, s-maxage=31536000, max-age=0, must-revalidate',
+    );
+  });
+
   it('invalidates cache on version change', async () => {
     const routing1: RoutingEntry = {
       workerName: 'test-worker',
@@ -1826,5 +1948,83 @@ describe('static asset caching', () => {
 
     const res = await app.fetch(new Request('https://test.void.app/favicon.ico'), env, ctx);
     expect(res.headers.get('X-Custom')).toBe('from-rules');
+  });
+});
+
+describe('static deployment caching (KV/R2)', () => {
+  function createStaticDeployEnv(options: {
+    routing: RoutingEntry;
+    manifest: Record<string, string>;
+    assets: Record<string, { body: string; contentType?: string }>;
+  }): { env: Env } {
+    const env = {
+      ROUTING: {
+        get: async (key: string) => {
+          if (key.startsWith('manifest:')) {
+            return JSON.stringify(options.manifest);
+          }
+          return JSON.stringify(options.routing);
+        },
+      },
+      DISPATCH: { get: vi.fn(() => ({ fetch: vi.fn() })) },
+      ISR_CACHE: { getWithMetadata: async () => ({ value: null, metadata: null }) },
+      STATIC_ASSETS: {
+        getWithMetadata: async (key: string) => {
+          const hash = key.replace(/^assets\/[^/]+\//, '');
+          const asset = options.assets[hash];
+          if (!asset) {
+            return { value: null, metadata: null };
+          }
+          return {
+            value: new TextEncoder().encode(asset.body).buffer,
+            metadata: { ct: asset.contentType ?? 'text/html' },
+          };
+        },
+      },
+      STATIC_ASSETS_R2: { get: async () => null },
+      ANALYTICS: { writeDataPoint: () => {} },
+    } as unknown as Env;
+
+    return { env };
+  }
+
+  it('client response omits s-maxage for static deployment', async () => {
+    const { env } = createStaticDeployEnv({
+      routing: {
+        workerName: '',
+        projectId: 'proj-1',
+        staticDeploymentId: 'deploy-abc',
+        version: 'deploy-abc',
+      },
+      manifest: { '/index.html': 'hash1' },
+      assets: { hash1: { body: '<html>hello</html>', contentType: 'text/html' } },
+    });
+
+    const res = await app.fetch(new Request('https://test.void.app/'), env, createCtx());
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+  });
+
+  it('edge cache entry retains s-maxage for static deployment', async () => {
+    const { env } = createStaticDeployEnv({
+      routing: {
+        workerName: '',
+        projectId: 'proj-1',
+        staticDeploymentId: 'deploy-abc',
+        version: 'deploy-abc',
+      },
+      manifest: { '/index.html': 'hash1' },
+      assets: { hash1: { body: '<html>hello</html>', contentType: 'text/html' } },
+    });
+
+    const ctx = createCtx();
+    await app.fetch(new Request('https://test.void.app/'), env, ctx);
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    const cacheEntry = edgeCacheStore.get('https://test.void.app/?_v=deploy-abc');
+    expect(cacheEntry).toBeDefined();
+    expect(cacheEntry!.headers.get('Cache-Control')).toBe(
+      'public, s-maxage=31536000, max-age=0, must-revalidate',
+    );
   });
 });

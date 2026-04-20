@@ -5673,12 +5673,18 @@ describe('Deploy with prerendering', () => {
     expect(res.status).toBe(200);
     await res.text();
 
+    const [deployment] = await env.db
+      .select({ id: deployments.id, status: deployments.status })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id));
+    expect(deployment).toBeDefined();
+
     // Verify ISR cache entries were written to KV (packed binary format)
     const { value: homeValue, metadata: homeMeta } = await env.ISR_CACHE.getWithMetadata<{
       s: number;
       c: number;
       t: number;
-    }>(`${project.id}/isr/__index__`, 'arrayBuffer');
+    }>(`${project.id}/isr/v2/${deployment!.id}/__index__`, 'arrayBuffer');
     expect(homeValue).not.toBeNull();
     // Unpack: [4-byte header len][headers JSON][body]
     const homeView = new DataView(homeValue!);
@@ -5689,17 +5695,62 @@ describe('Deploy with prerendering', () => {
     expect(homeMeta?.t).toBe(3600);
 
     const { value: aboutValue } = await env.ISR_CACHE.getWithMetadata(
-      `${project.id}/isr/about`,
+      `${project.id}/isr/v2/${deployment!.id}/about`,
       'arrayBuffer',
     );
     expect(aboutValue).not.toBeNull();
 
     // Verify deployment is live
-    const [dpl] = await env.db
-      .select({ status: deployments.status })
+    expect(deployment?.status).toBe('live');
+  });
+
+  it('preserves other deployments v2 ISR namespaces on redeploy', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'v2-isr-isolation');
+
+    await env.ISR_CACHE.put(`${project.id}/isr/v2/previous/about`, 'previous-v2');
+
+    const dispatchGet = vi.fn().mockReturnValue({
+      fetch: vi.fn().mockImplementation(
+        () =>
+          new Response('<html>Prerendered</html>', {
+            status: 200,
+            headers: { 'content-type': 'text/html' },
+          }),
+      ),
+    });
+    env.DISPATCH = { get: dispatchGet } as unknown as DispatchNamespace;
+
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            version: 3,
+            bindings: {},
+            revalidate: 3600,
+            prerender: ['/about'],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+
+    const [deployment] = await env.db
+      .select({ id: deployments.id })
       .from(deployments)
       .where(eq(deployments.project_id, project.id));
-    expect(dpl?.status).toBe('live');
+    expect(deployment).toBeDefined();
+
+    // A new deploy clears only its own deployment-scoped namespace; other
+    // deployments' v2 entries remain intact.
+    expect(await env.ISR_CACHE.get(`${project.id}/isr/v2/previous/about`)).toBe('previous-v2');
+    expect(await env.ISR_CACHE.get(`${project.id}/isr/v2/${deployment!.id}/about`)).not.toBeNull();
   });
 
   it('skips prerender paths with TTL <= 0', async () => {
@@ -5739,16 +5790,22 @@ describe('Deploy with prerendering', () => {
     // Only /about should have been fetched (TTL > 0)
     expect(dispatchFetch).toHaveBeenCalledTimes(1);
 
+    const [deployment] = await env.db
+      .select({ id: deployments.id })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id));
+    expect(deployment).toBeDefined();
+
     // /about should have ISR entry
     const { value: aboutValue } = await env.ISR_CACHE.getWithMetadata(
-      `${project.id}/isr/about`,
+      `${project.id}/isr/v2/${deployment!.id}/about`,
       'arrayBuffer',
     );
     expect(aboutValue).not.toBeNull();
 
     // /private should NOT have ISR entry
     const { value: privateValue } = await env.ISR_CACHE.getWithMetadata(
-      `${project.id}/isr/private`,
+      `${project.id}/isr/v2/${deployment!.id}/private`,
       'arrayBuffer',
     );
     expect(privateValue).toBeNull();

@@ -54,6 +54,9 @@ importers:
 
   packages/api:
     dependencies:
+      '@voidcloud/isr-shared':
+        specifier: workspace:*
+        version: link:../isr-shared
       blake3-jit:
         specifier: ^1.0.0
         version: 1.0.0
@@ -146,6 +149,10 @@ importers:
         version: 4.82.2(@cloudflare/workers-types@4.20260414.1)
 
   packages/dispatch:
+    dependencies:
+      '@voidcloud/isr-shared':
+        specifier: workspace:*
+        version: link:../isr-shared
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
@@ -156,6 +163,15 @@ importers:
       wrangler:
         specifier: 'catalog:'
         version: 4.82.2(@cloudflare/workers-types@4.20260414.1)
+
+  packages/isr-shared:
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 4.20260414.1
+      '@typescript/native-preview':
+        specifier: 'catalog:'
+        version: 7.0.0-dev.20260414.1
 
   packages/proxy:
     dependencies:

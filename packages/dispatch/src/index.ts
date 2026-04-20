@@ -48,6 +48,14 @@ interface QueueRoutingEntry {
   proxyToken?: string;
 }
 
+const CLIENT_REVALIDATE_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
+
+function clientRevalidateResponse(response: Response): Response {
+  const res = new Response(response.body, response);
+  res.headers.set('Cache-Control', CLIENT_REVALIDATE_CACHE_CONTROL);
+  return res;
+}
+
 function jsonCacheResponse(pageData: string, ttl: number, state: 'HIT' | 'MISS'): Response {
   return new Response(pageData, {
     headers: {
@@ -218,31 +226,32 @@ export default {
       const isrTtl = resolvePathTtl(routing.revalidate, pathname);
       if (isrTtl > 0 && request.method === 'GET' && !shouldBypassIsr(request)) {
         const isPagesRequest = request.headers.has('X-VoidPages');
+        const isrDeploymentId = routing.version ?? 'legacy';
         const cache = caches.default;
 
         // Pages protocol: check JSON edge cache, fall through on miss
         if (isPagesRequest) {
-          const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname);
+          const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname, isrDeploymentId);
           const jsonCached = await cache.match(jsonCacheKey);
           if (jsonCached) {
             requestType = 'isr';
-            return meter(jsonCached);
+            return meter(clientRevalidateResponse(jsonCached));
           }
           // Miss — fall through to general dispatch (worker returns JSON for X-VoidPages)
         } else {
           // HTML path: Edge → R2 → Worker
-          const cacheKey = isrEdgeCacheKey(request, pathname);
-          const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname);
+          const cacheKey = isrEdgeCacheKey(request, pathname, isrDeploymentId);
+          const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname, isrDeploymentId);
 
           // L1: Edge cache (per-colo)
           const edgeCached = await cache.match(cacheKey);
           if (edgeCached) {
             requestType = 'isr';
-            return meter(edgeCached);
+            return meter(clientRevalidateResponse(edgeCached));
           }
 
           // L2: R2 (global)
-          const cached = await readIsrCache(env, routing.projectId, pathname);
+          const cached = await readIsrCache(env, routing.projectId, isrDeploymentId, pathname);
           if (cached) {
             const stale = isStale(cached);
             if (stale) {
@@ -259,9 +268,9 @@ export default {
               );
             }
             requestType = 'isr';
-            const response = isrCacheResponse(cached, stale);
-            ctx.waitUntil(cache.put(cacheKey, response.clone()));
-            return meter(response);
+            const cacheResponse = isrCacheResponse(cached, stale);
+            ctx.waitUntil(cache.put(cacheKey, cacheResponse.clone()));
+            return meter(clientRevalidateResponse(cacheResponse));
           }
 
           // Cache miss: render via worker, cache in background
@@ -270,19 +279,31 @@ export default {
           const workerResponse = await worker.fetch(request);
           const ttl = resolveRevalidateTtl(workerResponse, isrTtl);
           if (ttl > 0 && workerResponse.ok) {
-            ctx.waitUntil(writeIsrCache(env, routing.projectId, pathname, workerResponse, ttl));
+            ctx.waitUntil(
+              writeIsrCache(env, routing.projectId, isrDeploymentId, pathname, workerResponse, ttl),
+            );
             ctx.waitUntil(populateJsonEdgeCache(cache, jsonCacheKey, workerResponse, ttl, 'MISS'));
-            const headers = new Headers(workerResponse.headers);
-            headers.set('Cache-Control', `public, s-maxage=${ttl}, max-age=0, must-revalidate`);
-            headers.set('x-isr-cache', 'MISS');
-            headers.delete('x-void-page-data');
-            headers.delete('set-cookie');
-            const response = new Response(workerResponse.body, {
+            const cacheHeaders = new Headers(workerResponse.headers);
+            cacheHeaders.set(
+              'Cache-Control',
+              `public, s-maxage=${ttl}, max-age=0, must-revalidate`,
+            );
+            cacheHeaders.set('x-isr-cache', 'MISS');
+            cacheHeaders.delete('x-void-page-data');
+            cacheHeaders.delete('set-cookie');
+            const cacheResponse = new Response(workerResponse.clone().body, {
               status: workerResponse.status,
-              headers,
+              headers: cacheHeaders,
             });
-            ctx.waitUntil(cache.put(cacheKey, response.clone()));
-            return meter(response);
+            ctx.waitUntil(cache.put(cacheKey, cacheResponse.clone()));
+
+            const clientHeaders = new Headers(cacheHeaders);
+            clientHeaders.set('Cache-Control', CLIENT_REVALIDATE_CACHE_CONTROL);
+            const clientResponse = new Response(workerResponse.body, {
+              status: workerResponse.status,
+              headers: clientHeaders,
+            });
+            return meter(clientResponse);
           }
           return meter(workerResponse);
         }
@@ -304,7 +325,7 @@ export default {
       const cached = await caches.default.match(staticCacheKey);
       if (cached) {
         requestType = 'static';
-        return meter(cached);
+        return meter(clientRevalidateResponse(cached));
       }
     }
 
@@ -365,7 +386,7 @@ export default {
         ctx.waitUntil(caches.default.put(edgeCacheKey, cached.clone()));
       }
 
-      return meter(finalRes);
+      return meter(clientRevalidateResponse(finalRes));
     }
 
     // Dispatch to user worker — CF handles static assets transparently
@@ -385,12 +406,13 @@ export default {
         const res = new Response(response.body, response);
         res.headers.delete('x-void-page-data');
         const finalRes = applyHeaderRules(res, pathname, routing.headerRules);
-        finalRes.headers.set(
+        const cacheRes = new Response(finalRes.clone().body, finalRes);
+        cacheRes.headers.set(
           'Cache-Control',
           'public, s-maxage=31536000, max-age=0, must-revalidate',
         );
-        ctx.waitUntil(caches.default.put(staticCacheKey, finalRes.clone()));
-        return meter(finalRes);
+        ctx.waitUntil(caches.default.put(staticCacheKey, cacheRes.clone()));
+        return meter(clientRevalidateResponse(finalRes));
       }
 
       // Classify for metering
@@ -412,8 +434,11 @@ export default {
         // Config TTL is the gatekeeper — worker x-revalidate can reduce but not enable ISR
         const isrTtl = configTtl > 0 ? resolveRevalidateTtl(response, configTtl) : 0;
         if (isrTtl > 0 && response.ok && requestType === 'ssr') {
-          ctx.waitUntil(writeIsrCache(env, routing.projectId, pathname, response, isrTtl));
-          const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname);
+          const isrDeploymentId = routing.version ?? 'legacy';
+          ctx.waitUntil(
+            writeIsrCache(env, routing.projectId, isrDeploymentId, pathname, response, isrTtl),
+          );
+          const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname, isrDeploymentId);
           ctx.waitUntil(
             populateJsonEdgeCache(caches.default, jsonCacheKey, response, isrTtl, 'MISS'),
           );
@@ -661,7 +686,14 @@ async function revalidateInBackground(
     const ttl = resolveRevalidateTtl(response, defaultTtl);
     const cache = caches.default;
     if (ttl > 0 && response.ok) {
-      await writeIsrCache(env, routing.projectId, pathname, response, ttl);
+      await writeIsrCache(
+        env,
+        routing.projectId,
+        routing.version ?? 'legacy',
+        pathname,
+        response,
+        ttl,
+      );
       // Update HTML edge cache with fresh response
       const headers = new Headers(response.headers);
       headers.set('x-isr-cache', 'HIT');
@@ -678,7 +710,7 @@ async function revalidateInBackground(
       await populateJsonEdgeCache(cache, jsonCacheKey, response, ttl, 'HIT');
     } else if (ttl === 0) {
       // Worker permanently opted out — remove stale R2 + edge entries + JSON edge
-      await deleteIsrCache(env, routing.projectId, pathname);
+      await deleteIsrCache(env, routing.projectId, routing.version ?? 'legacy', pathname);
       await cache.delete(cacheKey);
       await cache.delete(jsonCacheKey);
     }

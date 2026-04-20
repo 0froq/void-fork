@@ -7,6 +7,9 @@
     "dev": "wrangler dev",
     "typecheck": "tsgo --noEmit"
   },
+  "dependencies": {
+    "@voidcloud/isr-shared": "workspace:*"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
     "@typescript/native-preview": "catalog:",

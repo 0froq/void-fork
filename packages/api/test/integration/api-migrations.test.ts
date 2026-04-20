@@ -5173,15 +5173,11 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(await env.ROUTING.get(queueKey('q4'))).not.toBeNull();
   });
 
-  it('rollback purges project-scoped ISR cache', async () => {
-    // ISR keys are project-scoped (`${projectId}/isr/${pathname}`, see
-    // packages/dispatch/src/isr.ts:isrCacheKey), so the replaced
-    // deployment's prerendered pages would continue to be served by the
-    // rollback target until each path expired or was re-revalidated.
-    //
-    // Contract: rollback MUST purge every `${projectId}/isr/*` entry
-    // inside the cutover transaction so a rolled-back-to deployment
-    // never serves stale HTML warmed by the now-replaced deployment.
+  it('rollback leaves deployment-scoped ISR caches untouched', async () => {
+    // ISR keys include the deployment id, so switching routing to the rollback
+    // target automatically switches cache namespaces. The replaced deployment's
+    // warmed HTML can remain in KV because dispatch cannot select it while a
+    // different deployment id is active.
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'r15f2-isr-purge');
     await insertD1Resource(env.db, project.id);
@@ -5205,10 +5201,10 @@ describe('POST /projects/:id/migrations/rename', () => {
       })
       .where(eq(deployments.id, depB.id));
 
-    // Pre-seed a project-scoped ISR entry representing a page warmed by
-    // the currently-active deployment. Rollback must delete it.
-    const isrKey = `${project.id}/isr/page1`;
-    await env.ISR_CACHE.put(isrKey, 'stale-prerendered-html');
+    // Pre-seed an ISR entry representing a page warmed by the currently-active
+    // deployment. Rollback no longer needs to delete it.
+    const isrKey = `${project.id}/isr/v2/${depA.id}/page1`;
+    await env.ISR_CACHE.put(isrKey, 'previous-deployment-html');
 
     const isrDeleteSpy = vi.spyOn(env.ISR_CACHE, 'delete');
 
@@ -5221,13 +5217,10 @@ describe('POST /projects/:id/migrations/rename', () => {
     );
     expect(rollbackRes.status).toBe(200);
 
-    // Load-bearing: rollback must delete the project-scoped ISR entry
-    // so the rollback target does not serve the replaced deployment's
-    // cached HTML.
-    expect(isrDeleteSpy).toHaveBeenCalledWith(isrKey);
+    expect(isrDeleteSpy).not.toHaveBeenCalledWith(isrKey);
 
     const afterIsr = await env.ISR_CACHE.get(isrKey);
-    expect(afterIsr).toBeNull();
+    expect(afterIsr).toBe('previous-deployment-html');
   });
 
   it('rollback unconditionally clears cron DO when target has no schedules', async () => {

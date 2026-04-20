@@ -32,7 +32,6 @@ import { buildRoutingJson, buildStaticRoutingJson } from '../routing';
 import { tokenizeSql } from '../sql/tokenize';
 import { getPlanLimits } from '../tiers';
 import type { DeployManifest } from '../types';
-import { clearIsrCache } from './deploy';
 
 export const RESERVED_SLUGS = new Set([
   'admin',
@@ -775,12 +774,6 @@ const app = new Hono<ApiEnv>()
           }
           await c.env.ROUTING.delete(`queue:${getProjectQueueName(projectId, name)}`);
         }
-
-        // Purge prerendered pages the now-replaced deployment warmed.
-        // ISR keys are project-scoped (`<projectId>/isr/...`), so the
-        // rollback target would otherwise serve the old deployment's cached
-        // content until each path expired or was re-revalidated.
-        await clearIsrCache(c.env.ISR_CACHE, projectId);
 
         return { migrationDiff: diff };
       });

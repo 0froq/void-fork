@@ -6,6 +6,7 @@ import {
   resolvePathTtl,
   shouldBypassIsr,
   isrCacheResponse,
+  isrEdgeCacheKey,
   isrEdgeCacheKeyJson,
   serializeHeaders,
   packIsrValue,
@@ -17,23 +18,25 @@ import {
 
 describe('isrCacheKey', () => {
   it('maps root path to __index__', () => {
-    expect(isrCacheKey('proj_1', '/')).toBe('proj_1/isr/__index__');
+    expect(isrCacheKey('proj_1', 'dpl_1', '/')).toBe('proj_1/isr/v2/dpl_1/__index__');
   });
 
   it('strips leading slash', () => {
-    expect(isrCacheKey('proj_1', '/about')).toBe('proj_1/isr/about');
+    expect(isrCacheKey('proj_1', 'dpl_1', '/about')).toBe('proj_1/isr/v2/dpl_1/about');
   });
 
   it('strips trailing slash', () => {
-    expect(isrCacheKey('proj_1', '/about/')).toBe('proj_1/isr/about');
+    expect(isrCacheKey('proj_1', 'dpl_1', '/about/')).toBe('proj_1/isr/v2/dpl_1/about');
   });
 
   it('handles nested paths', () => {
-    expect(isrCacheKey('proj_1', '/blog/hello-world')).toBe('proj_1/isr/blog/hello-world');
+    expect(isrCacheKey('proj_1', 'dpl_1', '/blog/hello-world')).toBe(
+      'proj_1/isr/v2/dpl_1/blog/hello-world',
+    );
   });
 
   it('handles path without leading slash', () => {
-    expect(isrCacheKey('proj_1', 'about')).toBe('proj_1/isr/about');
+    expect(isrCacheKey('proj_1', 'dpl_1', 'about')).toBe('proj_1/isr/v2/dpl_1/about');
   });
 });
 
@@ -226,18 +229,31 @@ describe('isrCacheResponse', () => {
   });
 });
 
-describe('isrEdgeCacheKeyJson', () => {
-  it('appends ?__void=json suffix', () => {
+describe('ISR edge cache keys', () => {
+  it('adds the deployment id to HTML edge cache keys', () => {
     const request = new Request('https://app.void.app/about?q=1');
-    const key = isrEdgeCacheKeyJson(request, '/about');
-    expect(key.url).toBe('https://app.void.app/about?__void=json');
+    const key = isrEdgeCacheKey(request, '/about', 'dpl_1');
+    expect(key.url).toBe('https://app.void.app/about?__void_isr=dpl_1');
+    expect(key.method).toBe('GET');
+  });
+
+  it('canonicalizes trailing slashes for edge cache keys', () => {
+    const request = new Request('https://app.void.app/about/');
+    const key = isrEdgeCacheKey(request, '/about/', 'dpl_1');
+    expect(key.url).toBe('https://app.void.app/about?__void_isr=dpl_1');
+  });
+
+  it('adds JSON and deployment parameters to JSON edge cache keys', () => {
+    const request = new Request('https://app.void.app/about?q=1');
+    const key = isrEdgeCacheKeyJson(request, '/about', 'dpl_1');
+    expect(key.url).toBe('https://app.void.app/about?__void=json&__void_isr=dpl_1');
     expect(key.method).toBe('GET');
   });
 
   it('handles root path', () => {
     const request = new Request('https://app.void.app/');
-    const key = isrEdgeCacheKeyJson(request, '/');
-    expect(key.url).toBe('https://app.void.app/?__void=json');
+    const key = isrEdgeCacheKeyJson(request, '/', 'dpl_1');
+    expect(key.url).toBe('https://app.void.app/?__void=json&__void_isr=dpl_1');
   });
 });
 

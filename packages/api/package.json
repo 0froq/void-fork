@@ -27,6 +27,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@voidcloud/isr-shared": "workspace:*",
     "blake3-jit": "^1.0.0",
     "cron-parser": "5.5.0",
     "drizzle-orm": "^0.45.2",
