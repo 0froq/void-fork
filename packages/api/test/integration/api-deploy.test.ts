@@ -20,6 +20,7 @@ import {
 } from './helpers';
 
 const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
+const enc = new TextEncoder();
 
 let env: TestEnv;
 
@@ -1122,6 +1123,74 @@ describe('POST /projects/:id/deploy', () => {
     expect(raw).not.toContain('Assets have already been uploaded');
     const events = parseDeployStream(raw);
     expect(events.at(-1)).toMatchObject({ event: 'done' });
+  });
+
+  it('fails when asset upload session omits an uncorroborated uploaded hash', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'asset-session-gap-test');
+    const assets = {
+      'assets/layout-MsZayE09.js': 'export const layout = "ok";',
+      'assets/pages-DydbLA60.js': 'export const page = "missing";',
+    };
+    const assetManifest = Object.fromEntries(
+      Object.entries(assets).map(([path, content]) => {
+        const bytes = enc.encode(content);
+        return [
+          `/${path}`,
+          {
+            hash: computeAssetHash(
+              bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+              path,
+            ),
+            size: bytes.byteLength,
+          },
+        ];
+      }),
+    );
+    const omittedHash = assetManifest['/assets/pages-DydbLA60.js']!.hash;
+    const keptHash = assetManifest['/assets/layout-MsZayE09.js']!.hash;
+
+    let assetUploadCalls = 0;
+    let workerUploadCalls = 0;
+    mockCfApi({
+      assetUploadSession: async (_url: string, init?: RequestInit) => {
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+        expect(body?.manifest).toMatchObject(assetManifest);
+        return cfSuccess({ jwt: 'test-asset-jwt', buckets: [[keptHash]] });
+      },
+      assetUpload: () => {
+        assetUploadCalls++;
+        return cfSuccess({ jwt: 'test-completion-jwt' });
+      },
+      uploadWorker: () => {
+        workerUploadCalls++;
+        return new Response('ok', { status: 200 });
+      },
+    });
+
+    const form = buildDeployForm({ assets });
+    form.append('assetManifest', JSON.stringify(assetManifest));
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      step?: string;
+      message?: string;
+    }>;
+    expect(events.at(-1)).toMatchObject({ event: 'error', step: 'asset_upload' });
+    expect(events.at(-1)?.message).toContain(omittedHash);
+    expect(events.at(-1)?.message).toContain('cannot corroborate');
+    expect(assetUploadCalls).toBe(0);
+    expect(workerUploadCalls).toBe(0);
   });
 
   describe('retry-path behavior', () => {
@@ -5930,9 +5999,14 @@ describe('POST /projects/:id/deploy/preflight', () => {
     expect(res.status).toBe(200);
     await res.text();
 
-    // CF session should have received the COMPLETE manifest (merged)
+    // CF session should have received the COMPLETE manifest (merged) — plus a
+    // per-deploy `.void-deploy/*` cache-buster injected to work around
+    // cloudflare/workers-sdk#12586.
     expect(sessionManifest).toBeDefined();
-    expect(Object.keys(sessionManifest!).sort()).toEqual(['/app.js', '/index.html']);
+    const manifestPaths = Object.keys(sessionManifest!).filter(
+      (p) => !p.startsWith('/.void-deploy/'),
+    );
+    expect(manifestPaths.sort()).toEqual(['/app.js', '/index.html']);
   });
 
   it('includes observability metadata in worker upload', async () => {

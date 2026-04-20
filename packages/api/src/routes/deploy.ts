@@ -5,6 +5,7 @@ import {
   AssetHashMismatchError,
   cleanupStreamedStaticAssets,
   collectBufferedAsset,
+  computeAssetHash,
   createAssetUploadSession,
   KV_THRESHOLD,
   readStaticAssetPart,
@@ -598,6 +599,60 @@ async function buildComparableAssetManifestForDedupe(
   }
 
   return result;
+}
+
+function collectManifestHashes(raw: string | null | undefined, hashes: Set<string>): void {
+  const manifest = parseAssetManifest(raw ?? null);
+  if (!manifest) {
+    return;
+  }
+  for (const entry of Object.values(manifest)) {
+    if (entry && typeof entry.hash === 'string') {
+      hashes.add(entry.hash);
+    }
+  }
+}
+
+async function getProjectCorroboratedWfpAssetHashes(
+  db: Db,
+  projectId: string,
+): Promise<Set<string>> {
+  const hashes = new Set<string>();
+  const retained = await getRetainedDeployments(db, projectId);
+  for (const dep of retained) {
+    collectManifestHashes(dep.asset_hashes, hashes);
+  }
+
+  const project = await getProject(db, projectId);
+  if (project?.active_deployment_id) {
+    const alreadyCollected = retained.some((dep) => dep.id === project.active_deployment_id);
+    if (!alreadyCollected) {
+      const active = await getDeployment(db, project.active_deployment_id);
+      if (active) {
+        collectManifestHashes(active.asset_hashes, hashes);
+      }
+    }
+  }
+
+  return hashes;
+}
+
+function collectSessionBucketHashes(buckets: string[][]): Set<string> {
+  const hashes = new Set<string>();
+  for (const bucket of buckets) {
+    for (const hash of bucket) {
+      hashes.add(hash);
+    }
+  }
+  return hashes;
+}
+
+function formatHashPreview(hashes: string[], limit = 5): string {
+  const shown = hashes.slice(0, limit).join(', ');
+  if (hashes.length <= limit) {
+    return shown;
+  }
+  return `${shown}, +${hashes.length - limit} more`;
 }
 
 function sanitizeDeployErrorMessage(message: string): string {
@@ -1728,10 +1783,35 @@ app.post('/:id/deploy', async (c) => {
           }
         }
 
-        const assetCount = Object.keys(assetManifest).length;
-
         // Determine if this is a static-only deploy (no worker files in FormData)
         const isStaticOnly = !hasWorkerFiles;
+
+        // CF's `assets-upload-session` API can return empty/incomplete buckets
+        // when its dedupe index is in a bad state for some hashes — entries get
+        // claimed in the index without actual bytes backing them, then later
+        // requests serve a 36-byte "Assets have not yet been deployed..." stub.
+        // Tracked in cloudflare/workers-sdk#12586 (CF internal WC-4511).
+        // Workaround: inject a deterministic-but-unique-per-deploy asset so the
+        // session always sees at least one novel hash, forcing CF to re-validate
+        // the full manifest. Only needed for the WfP path; static-only deploys
+        // upload directly to KV/R2 and don't hit this API.
+        if (!isStaticOnly && Object.keys(assetManifest).length > 0) {
+          const bustPath = `/.void-deploy/${deployment.id}.txt`;
+          const bustContent = `${deployment.id}\n${Date.now()}\n`;
+          const bustBytes = new TextEncoder().encode(bustContent);
+          const bustBuffer = bustBytes.buffer.slice(
+            bustBytes.byteOffset,
+            bustBytes.byteOffset + bustBytes.byteLength,
+          );
+          const bustHash = computeAssetHash(bustBuffer, bustPath);
+          assetManifest[bustPath] = { hash: bustHash, size: bustBytes.byteLength };
+          assetsByHash.set(bustHash, {
+            bytes: bustBytes,
+            contentType: 'text/plain; charset=utf-8',
+          });
+        }
+
+        const assetCount = Object.keys(assetManifest).length;
 
         // Fetch domains once — used in both static-only and full deploy paths
         const projectDomains = await getDomainsByProjectId(c.get('db'), projectId);
@@ -2041,6 +2121,33 @@ app.post('/:id/deploy', async (c) => {
           console.log(
             `[deploy] ${projectId}: asset session created, ${Object.keys(assetManifest).length} manifest entries, ${session.buckets.length} bucket(s), ${assetsByHash.size} blobs available`,
           );
+
+          // CF's session response decides which buffered hashes we upload next.
+          // If it silently omits a hash from THIS request, `uploadAssetBuckets`
+          // will never send those bytes and the worker upload can still appear
+          // successful. Only trust such omissions when this project can
+          // corroborate the hash from an existing live/retained WfP manifest.
+          const sessionBucketHashes = collectSessionBucketHashes(session.buckets);
+          const omittedBufferedHashes = [...assetsByHash.keys()].filter(
+            (hash) => !sessionBucketHashes.has(hash),
+          );
+          if (omittedBufferedHashes.length > 0) {
+            const corroboratedHashes = await getProjectCorroboratedWfpAssetHashes(
+              c.get('db'),
+              projectId,
+            );
+            const uncorroboratedHashes = omittedBufferedHashes.filter(
+              (hash) => !corroboratedHashes.has(hash),
+            );
+            if (uncorroboratedHashes.length > 0) {
+              throw new Error(
+                `asset upload session omitted ${uncorroboratedHashes.length} uploaded hash(es) ` +
+                  `that this project cannot corroborate as already stored ` +
+                  `(${formatHashPreview(uncorroboratedHashes)}). Refusing to deploy because ` +
+                  `Cloudflare may later serve asset stubs for those hashes.`,
+              );
+            }
+          }
 
           // Upload asset buckets to CF. When all assets are cached (empty buckets),
           // the session JWT is already the completion token — no exchange needed.
