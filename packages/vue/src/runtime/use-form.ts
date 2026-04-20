@@ -26,7 +26,7 @@ export function useForm<U extends ActionUrl & string>(
   errors: Partial<Record<keyof ResolveActionBody<U> & string, string>>;
   error: VoidActionError | null;
   pending: boolean;
-  isDirty: boolean;
+  hasChanges: boolean;
   wasSuccessful: boolean;
   recentlySuccessful: boolean;
   post(opts?: any): Promise<void>;
@@ -73,12 +73,12 @@ export function useForm(
   let defaults_ = { ...formDefaults };
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  // isDirty computed via deep watch
-  const isDirty = ref(false);
+  // hasChanges computed via deep watch
+  const hasChanges = ref(false);
   watch(
     () => ({ ...data }),
     (val) => {
-      isDirty.value = Object.keys(defaults_).some(
+      hasChanges.value = Object.keys(defaults_).some(
         (key) => !isEqualFormValue(val[key], defaults_[key]),
       );
     },
@@ -159,7 +159,7 @@ export function useForm(
     errors,
     error,
     pending,
-    isDirty,
+    hasChanges,
     wasSuccessful,
     recentlySuccessful,
     reset,

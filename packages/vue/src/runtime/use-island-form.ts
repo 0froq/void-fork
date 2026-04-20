@@ -43,11 +43,11 @@ export function useIslandForm(defaults: Record<string, unknown>): any {
   let defaults_ = { ...defaults };
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  const isDirty = ref(false);
+  const hasChanges = ref(false);
   watch(
     () => ({ ...data }),
     (val) => {
-      isDirty.value = Object.keys(defaults_).some(
+      hasChanges.value = Object.keys(defaults_).some(
         (key) => !isEqualFormValue(val[key], defaults_[key]),
       );
     },
@@ -138,7 +138,7 @@ export function useIslandForm(defaults: Record<string, unknown>): any {
     errors,
     error,
     pending,
-    isDirty,
+    hasChanges,
     wasSuccessful,
     recentlySuccessful,
     reset,

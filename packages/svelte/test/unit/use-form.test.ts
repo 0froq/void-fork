@@ -28,7 +28,7 @@ describe('useForm core logic', () => {
 
     const defaults_ = { ...formDefaults };
 
-    function isDirty() {
+    function hasChanges() {
       return Object.keys(defaults_).some((key) => !isEqualFormValue(data[key], defaults_[key]));
     }
 
@@ -77,7 +77,7 @@ describe('useForm core logic', () => {
       get recentlySuccessful() {
         return recentlySuccessful;
       },
-      isDirty,
+      hasChanges,
       setData,
       reset,
       clearErrors,
@@ -98,24 +98,24 @@ describe('useForm core logic', () => {
     expect(form.data.email).toBe('');
   });
 
-  it('isDirty returns true when data changes', () => {
+  it('hasChanges returns true when data changes', () => {
     const form = createForm('/test', { name: 'default' });
-    expect(form.isDirty()).toBe(false);
+    expect(form.hasChanges()).toBe(false);
 
     form.setData('name', 'changed');
-    expect(form.isDirty()).toBe(true);
+    expect(form.hasChanges()).toBe(true);
   });
 
-  it('isDirty returns false when data reverts to defaults', () => {
+  it('hasChanges returns false when data reverts to defaults', () => {
     const form = createForm('/test', { name: 'default' });
     form.setData('name', 'changed');
-    expect(form.isDirty()).toBe(true);
+    expect(form.hasChanges()).toBe(true);
 
     form.setData('name', 'default');
-    expect(form.isDirty()).toBe(false);
+    expect(form.hasChanges()).toBe(false);
   });
 
-  it('isDirty treats equal arrays and plain objects as clean', () => {
+  it('hasChanges treats equal arrays and plain objects as clean', () => {
     const form = createForm('/test', {
       meta: { enabled: true, nested: { count: 1 } },
       tags: ['one'],
@@ -123,30 +123,30 @@ describe('useForm core logic', () => {
 
     form.setData('tags', ['one', 'two']);
     form.setData('meta', { enabled: false, nested: { count: 2 } });
-    expect(form.isDirty()).toBe(true);
+    expect(form.hasChanges()).toBe(true);
 
     form.setData('tags', ['one']);
     form.setData('meta', { nested: { count: 1 }, enabled: true });
-    expect(form.isDirty()).toBe(false);
+    expect(form.hasChanges()).toBe(false);
   });
 
-  it('isDirty keeps Object.is semantics for primitive edge cases', () => {
+  it('hasChanges keeps Object.is semantics for primitive edge cases', () => {
     const form = createForm('/test', { count: NaN, zero: -0 });
 
     form.setData('count', NaN);
-    expect(form.isDirty()).toBe(false);
+    expect(form.hasChanges()).toBe(false);
 
     form.setData('zero', 0);
-    expect(form.isDirty()).toBe(true);
+    expect(form.hasChanges()).toBe(true);
   });
 
-  it('isDirty compares non-plain objects by reference', () => {
+  it('hasChanges compares non-plain objects by reference', () => {
     const startedAt = new Date(0);
     const form = createForm('/test', { startedAt });
 
     form.setData('startedAt', new Date(0));
 
-    expect(form.isDirty()).toBe(true);
+    expect(form.hasChanges()).toBe(true);
   });
 
   it('reset() reverts all fields to defaults', () => {
@@ -158,7 +158,7 @@ describe('useForm core logic', () => {
 
     expect(form.data.name).toBe('default');
     expect(form.data.email).toBe('default@test.com');
-    expect(form.isDirty()).toBe(false);
+    expect(form.hasChanges()).toBe(false);
   });
 
   it('reset(field) reverts specific fields only', () => {

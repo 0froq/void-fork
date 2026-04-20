@@ -33,7 +33,7 @@ export function useForm<U extends ActionUrl & string>(
   errors: Partial<Record<keyof ResolveActionBody<U> & string, string>>;
   error: VoidActionError | null;
   pending: boolean;
-  isDirty: boolean;
+  hasChanges: boolean;
   wasSuccessful: boolean;
   recentlySuccessful: boolean;
   post(opts?: any): Promise<void>;
@@ -99,7 +99,7 @@ export function useForm(
   let defaults_ = { ...defaults };
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  const isDirty = createMemo(() => {
+  const hasChanges = createMemo(() => {
     return Object.keys(defaults_).some((key) => !isEqualFormValue(data[key], defaults_[key]));
   });
 
@@ -196,8 +196,8 @@ export function useForm(
     get pending() {
       return pending();
     },
-    get isDirty() {
-      return isDirty();
+    get hasChanges() {
+      return hasChanges();
     },
     get wasSuccessful() {
       return wasSuccessful();

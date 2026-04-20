@@ -362,7 +362,7 @@ export default function PostForm() {
 | `errors`                  | `Record<string, string>`  | Validation errors from 422 responses       |
 | `error`                   | `VoidActionError \| null` | Non-validation call-site action error      |
 | `pending`                 | `boolean`                 | Submission in progress                     |
-| `isDirty`                 | `boolean`                 | Form has unsaved changes                   |
+| `hasChanges`              | `boolean`                 | Form has unsaved changes                   |
 | `wasSuccessful`           | `boolean`                 | Last submission succeeded                  |
 | `recentlySuccessful`      | `boolean`                 | Success within last 2 seconds              |
 | `reset(...fields?)`       | Function                  | Reset to defaults (all or specific fields) |

@@ -29,11 +29,11 @@ describe('useForm reactive logic', () => {
 
     const defaults_ = { ...formDefaults };
 
-    const isDirty = ref(false);
+    const hasChanges = ref(false);
     watch(
       () => ({ ...data }),
       (val) => {
-        isDirty.value = Object.keys(defaults_).some(
+        hasChanges.value = Object.keys(defaults_).some(
           (key) => !isEqualFormValue(val[key], defaults_[key]),
         );
       },
@@ -66,7 +66,7 @@ describe('useForm reactive logic', () => {
       data,
       errors,
       pending,
-      isDirty,
+      hasChanges,
       wasSuccessful,
       recentlySuccessful,
       reset,
@@ -92,28 +92,28 @@ describe('useForm reactive logic', () => {
     expect(form.data.name).toBe('John');
   });
 
-  it('isDirty becomes true when data changes', async () => {
+  it('hasChanges becomes true when data changes', async () => {
     const form = createForm('/test', { name: 'default' });
-    expect(form.isDirty.value).toBe(false);
+    expect(form.hasChanges.value).toBe(false);
 
     (form.data as any).name = 'changed';
     await nextTick();
 
-    expect(form.isDirty.value).toBe(true);
+    expect(form.hasChanges.value).toBe(true);
   });
 
-  it('isDirty becomes false when data reverts to defaults', async () => {
+  it('hasChanges becomes false when data reverts to defaults', async () => {
     const form = createForm('/test', { name: 'default' });
     (form.data as any).name = 'changed';
     await nextTick();
-    expect(form.isDirty.value).toBe(true);
+    expect(form.hasChanges.value).toBe(true);
 
     (form.data as any).name = 'default';
     await nextTick();
-    expect(form.isDirty.value).toBe(false);
+    expect(form.hasChanges.value).toBe(false);
   });
 
-  it('isDirty treats equal arrays and plain objects as clean', async () => {
+  it('hasChanges treats equal arrays and plain objects as clean', async () => {
     const form = createForm('/test', {
       meta: { enabled: true, nested: { count: 1 } },
       tags: ['one'],
@@ -122,34 +122,34 @@ describe('useForm reactive logic', () => {
     (form.data as any).tags = ['one', 'two'];
     (form.data as any).meta = { enabled: false, nested: { count: 2 } };
     await nextTick();
-    expect(form.isDirty.value).toBe(true);
+    expect(form.hasChanges.value).toBe(true);
 
     (form.data as any).tags = ['one'];
     (form.data as any).meta = { nested: { count: 1 }, enabled: true };
     await nextTick();
-    expect(form.isDirty.value).toBe(false);
+    expect(form.hasChanges.value).toBe(false);
   });
 
-  it('isDirty keeps Object.is semantics for primitive edge cases', async () => {
+  it('hasChanges keeps Object.is semantics for primitive edge cases', async () => {
     const form = createForm('/test', { count: NaN, zero: -0 });
 
     (form.data as any).count = NaN;
     await nextTick();
-    expect(form.isDirty.value).toBe(false);
+    expect(form.hasChanges.value).toBe(false);
 
     (form.data as any).zero = 0;
     await nextTick();
-    expect(form.isDirty.value).toBe(true);
+    expect(form.hasChanges.value).toBe(true);
   });
 
-  it('isDirty compares non-plain objects by reference', async () => {
+  it('hasChanges compares non-plain objects by reference', async () => {
     const startedAt = new Date(0);
     const form = createForm('/test', { startedAt });
 
     (form.data as any).startedAt = new Date(0);
     await nextTick();
 
-    expect(form.isDirty.value).toBe(true);
+    expect(form.hasChanges.value).toBe(true);
   });
 
   it('reset() reverts all fields to defaults', async () => {
@@ -162,7 +162,7 @@ describe('useForm reactive logic', () => {
     expect(form.data.name).toBe('default');
     expect(form.data.email).toBe('default@test.com');
     await nextTick();
-    expect(form.isDirty.value).toBe(false);
+    expect(form.hasChanges.value).toBe(false);
   });
 
   it('reset(field) reverts specific fields only', () => {

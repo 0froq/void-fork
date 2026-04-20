@@ -42,7 +42,7 @@ export function useIslandForm(defaults: Record<string, unknown>): any {
   let defaults_ = { ...defaults };
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  const isDirty = $derived(
+  const hasChanges = $derived(
     Object.keys(defaults_).some((key) => !isEqualFormValue(data[key], defaults_[key])),
   );
 
@@ -136,8 +136,8 @@ export function useIslandForm(defaults: Record<string, unknown>): any {
     get pending() {
       return pending;
     },
-    get isDirty() {
-      return isDirty;
+    get hasChanges() {
+      return hasChanges;
     },
     get wasSuccessful() {
       return wasSuccessful;

@@ -227,7 +227,7 @@ The types are inferred from your action's `withValidator()` schema in the compan
 | `error`                          | Non-validation call-site action error, or `null`.                                             |
 | `post`, `put`, `patch`, `delete` | Submit the form with that method. In React these are native form action callbacks.            |
 | `pending`                        | `true` while the submission is in flight.                                                     |
-| `isDirty`                        | `true` if form data differs from initial values.                                              |
+| `hasChanges`                     | `true` if form data differs from initial values.                                              |
 | `wasSuccessful`                  | `true` after a successful submission. Stays `true` until the next submission.                 |
 | `recentlySuccessful`             | `true` for 2 seconds after a successful submission. Useful for flash messages.                |
 | `reset(...fields)`               | Reset form data to initial values. Field names autocomplete.                                  |

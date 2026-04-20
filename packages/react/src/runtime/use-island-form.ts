@@ -34,7 +34,7 @@ export interface IslandFormReturn<T extends Record<string, unknown>> {
   errors: Record<string, string>;
   error: VoidActionError | null;
   pending: boolean;
-  isDirty: boolean;
+  hasChanges: boolean;
   wasSuccessful: boolean;
   recentlySuccessful: boolean;
   reset: (...fields: (keyof T & string)[]) => void;
@@ -61,7 +61,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
   const defaultsRef = useRef(defaultsState);
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isDirty = useMemo(() => {
+  const hasChanges = useMemo(() => {
     return Object.keys(defaultsState).some(
       (key) => !isEqualFormValue(data[key], defaultsState[key as keyof T]),
     );
@@ -165,7 +165,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     errors,
     error,
     pending,
-    isDirty,
+    hasChanges,
     wasSuccessful,
     recentlySuccessful,
     reset,

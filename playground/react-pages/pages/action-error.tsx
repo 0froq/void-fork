@@ -127,7 +127,7 @@ export default function ActionErrorPage({ successfulSubmissions, lastMessage }: 
           <p style={{ color: 'crimson' }}>{successForm.errors.message}</p>
         )}
         <p>
-          Dirty: <strong>{String(successForm.isDirty)}</strong> Pending:{' '}
+          Changes: <strong>{String(successForm.hasChanges)}</strong> Pending:{' '}
           <strong>{String(successForm.pending)}</strong> Successful:{' '}
           <strong>{String(successForm.wasSuccessful)}</strong> Recently successful:{' '}
           <strong>{String(successForm.recentlySuccessful)}</strong>

@@ -27,7 +27,7 @@ export function useForm<U extends ActionUrl & string>(
   readonly errors: Partial<Record<keyof ResolveActionBody<U> & string, string>>;
   readonly error: VoidActionError | null;
   readonly pending: boolean;
-  readonly isDirty: boolean;
+  readonly hasChanges: boolean;
   readonly wasSuccessful: boolean;
   readonly recentlySuccessful: boolean;
   post(opts?: any): Promise<void>;
@@ -74,7 +74,7 @@ export function useForm(
   let defaults_ = { ...defaults };
   let successTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  const isDirty = $derived(
+  const hasChanges = $derived(
     Object.keys(defaults_).some((key) => !isEqualFormValue(data[key], defaults_[key])),
   );
 
@@ -158,8 +158,8 @@ export function useForm(
     get pending() {
       return pending;
     },
-    get isDirty() {
-      return isDirty;
+    get hasChanges() {
+      return hasChanges;
     },
     get wasSuccessful() {
       return wasSuccessful;
