@@ -9,6 +9,7 @@ import { asciiArts } from './ascii';
 import { authSubcommands, parseAuthArgs } from './auth-args';
 import { dbSubcommands, parseDbArgs } from './db-args';
 import { domainSubcommands, parseDomainArgs } from './domain-args';
+import { envSubcommands, parseEnvArgs } from './env-args';
 import { genSubcommands, parseGenArgs } from './gen-args';
 import { categoryTitle, helpLine, pc, sectionTitle } from './output';
 import { projectSubcommands, parseProjectArgs } from './project-args';
@@ -73,6 +74,13 @@ function printHelp() {
       helpLine('  --no-schema', 'Data only (no CREATE TABLE)'),
       helpLine('  --table <name>', 'Export a single table'),
       helpLine('void db rename-migrations', 'Rename to timestamp-based format'),
+      '',
+      categoryTitle('env'),
+      helpLine('void env check', 'Validate env.ts against .env files'),
+      helpLine('  --remote', 'Also check that required keys exist as remote secrets'),
+      helpLine('void env types', 'Regenerate .void/env.d.ts from env.ts'),
+      helpLine('void env example', 'Generate .env.example from env.ts schema'),
+      helpLine('  --force', 'Overwrite .env.example without confirmation'),
       '',
       categoryTitle('codegen'),
       helpLine('void gen model <name> [cols...]', 'Generate migration + CRUD routes + db types'),
@@ -196,6 +204,10 @@ if (command === 'deploy') {
   runSubcommandGroup('db', dbSubcommands, parseDbArgs, (root, parsed) =>
     import('./db').then(({ runDbCommand }) => runDbCommand(root, parsed)),
   );
+} else if (command === 'env') {
+  runSubcommandGroup('env', envSubcommands, parseEnvArgs, (root, parsed) =>
+    import('./env').then(({ runEnvCommand }) => runEnvCommand(root, parsed)),
+  );
 } else if (command === 'gen') {
   runSubcommandGroup('gen', genSubcommands, parseGenArgs, (root, parsed) =>
     import('./gen').then(({ runGenCommand }) => runGenCommand(root, parsed)),
@@ -250,6 +262,11 @@ if (command === 'deploy') {
       name: 'db',
       hint: 'status | reset | seed | execute | migrate | studio | export | rename-migrations',
       description: 'Database migrations and management',
+    },
+    {
+      name: 'env',
+      hint: 'check | types | example',
+      description: 'Validate env.ts, generate types, or scaffold .env.example',
     },
     {
       name: 'gen',
@@ -311,6 +328,10 @@ if (command === 'deploy') {
       case 'db':
         return runSubcommandGroup('db', dbSubcommands, parseDbArgs, (r, p) =>
           import('./db').then(({ runDbCommand }) => runDbCommand(r, p)),
+        );
+      case 'env':
+        return runSubcommandGroup('env', envSubcommands, parseEnvArgs, (r, p) =>
+          import('./env').then(({ runEnvCommand }) => runEnvCommand(r, p)),
         );
       case 'gen':
         return runSubcommandGroup('gen', genSubcommands, parseGenArgs, (r, p) =>

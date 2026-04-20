@@ -5,6 +5,7 @@ import { dirname, join, relative } from 'pathe';
 import { loadEnv, type Plugin } from 'vite';
 import { findVoidAuthConfig, loadVoidAuthConfig } from './auth/config';
 import { generateVoidAuthDatabaseModule, generateVoidAuthDrizzleSchema } from './auth/drizzle';
+import { findEnvFile } from './codegen/env-types';
 import { generateQueueTypes } from './codegen/queue-types';
 import { generateRouteTypes } from './codegen/route-types';
 import { readConfig, getDatabaseDialect } from './config';
@@ -117,6 +118,19 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         envPath: resolveFile('#self/_env'),
       }
     : undefined;
+  // If the project has env.ts, splice boot-time validation into the worker
+  // entry. The user file path is absolute so generated entry's import resolves
+  // regardless of bundler cwd; the validator helper resolves to void/env.
+  function getEnvSchemaModule(): { importPath: string; helperPath: string } | undefined {
+    const envFile = findEnvFile(root);
+    if (!envFile) {
+      return undefined;
+    }
+    return {
+      importPath: envFile,
+      helperPath: resolveFile('#self/env'),
+    };
+  }
   const compileOptions: CompileOptions = {
     honoPath: resolveFile('hono'),
     responsePath: resolveFile('#self/response'),
@@ -241,12 +255,22 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   mkdirSync(outDir, { recursive: true });
   // Write initial entry — will be re-written with hasQueues once scan completes
   if (options.target) {
-    writeFileSync(join(outDir, 'app.ts'), compileNodeApp(options.target, compileOptions.honoPath));
+    writeFileSync(
+      join(outDir, 'app.ts'),
+      compileNodeApp(options.target, compileOptions.honoPath, getEnvSchemaModule()),
+    );
     writeFileSync(join(outDir, 'index.ts'), compileNodeServer(options.target));
   } else {
     writeFileSync(
       join(outDir, 'entry.ts'),
-      compileWorkerEntry(false, remote, undefined, undefined, compileOptions.runtimeEnvPath),
+      compileWorkerEntry(
+        false,
+        remote,
+        undefined,
+        undefined,
+        compileOptions.runtimeEnvPath,
+        getEnvSchemaModule(),
+      ),
     );
   }
 
@@ -328,7 +352,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       if (options.target) {
         writeFileSync(
           join(outDir, 'app.ts'),
-          compileNodeApp(options.target, compileOptions.honoPath),
+          compileNodeApp(options.target, compileOptions.honoPath, getEnvSchemaModule()),
         );
         writeFileSync(join(outDir, 'index.ts'), compileNodeServer(options.target));
       } else {
@@ -340,6 +364,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
             resolvedConfig?.build.assetsDir,
             (scan!.websockets ?? []).map((route) => route.className),
             compileOptions.runtimeEnvPath,
+            getEnvSchemaModule(),
           ),
         );
       }
@@ -437,7 +462,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         if (options.target) {
           writeFileSync(
             join(outDir, 'app.ts'),
-            compileNodeApp(options.target, compileOptions.honoPath),
+            compileNodeApp(options.target, compileOptions.honoPath, getEnvSchemaModule()),
           );
           writeFileSync(join(outDir, 'index.ts'), compileNodeServer(options.target));
         } else {
@@ -449,6 +474,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
               resolvedConfig?.build.assetsDir,
               (scan!.websockets ?? []).map((route) => route.className),
               compileOptions.runtimeEnvPath,
+              getEnvSchemaModule(),
             ),
           );
         }

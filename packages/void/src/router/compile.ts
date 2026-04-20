@@ -1792,12 +1792,20 @@ export function compileWorkerEntry(
   assetsDir = 'assets',
   webSocketClasses: string[] = [],
   runtimeEnvPath = 'void/_env',
+  envSchemaModule?: { importPath: string; helperPath: string },
 ): string {
   const remotePath = remote?.remotePath;
   const runtimeEnvImport = `import { withRuntimeEnv } from ${JSON.stringify(runtimeEnvPath)};\n`;
   const remoteImport = remote
     ? `import { createRemoteEnv } from ${JSON.stringify(remote.remotePath)};\n`
     : '';
+  // Boot-time env validation: import the user's env.ts so the schema is
+  // registered, plus the validator helper. The helper short-circuits after
+  // the first call per isolate and throws EnvValidationError on bad values.
+  const envSchemaImport = envSchemaModule
+    ? `import ${JSON.stringify(envSchemaModule.importPath)};\nimport { _validateEnvOnce } from ${JSON.stringify(envSchemaModule.helperPath)};\n`
+    : '';
+  const envValidateCall = envSchemaModule ? '  await _validateEnvOnce(env);\n' : '';
 
   // Filter internal platform bindings so user code cannot access them via c.env.
   // The original env is preserved for framework internals (withRuntimeEnv, etc.).
@@ -1853,7 +1861,7 @@ async function serveWithAssets(request, env, response) {
 
   const fetchHandler = remotePath
     ? `async (request, env, ctx) => {
-  const ws = await __voidHandleWebSocket(request, env);
+${envValidateCall}  const ws = await __voidHandleWebSocket(request, env);
   if (ws) return ws;
   if (env.__VOID_REMOTE === "1") env = createRemoteEnv(env);
   return __withRawEnv(env, () => {
@@ -1866,7 +1874,7 @@ async function serveWithAssets(request, env, response) {
   });
 }`
     : `async (request, env, ctx) => {
-  const ws = await __voidHandleWebSocket(request, env);
+${envValidateCall}  const ws = await __voidHandleWebSocket(request, env);
   if (ws) return ws;
   return __withRawEnv(env, () => {
     const userEnv = __filterInternalBindings(env);
@@ -1899,22 +1907,22 @@ async function serveWithAssets(request, env, response) {
 
   const scheduledHandler = remotePath
     ? `async function handleScheduled(controller, env, ctx) {
-  if (env.__VOID_REMOTE === "1") env = createRemoteEnv(env);
+${envValidateCall}  if (env.__VOID_REMOTE === "1") env = createRemoteEnv(env);
   const userEnv = __filterInternalBindings(env);
   return withRuntimeEnv(env, () => scheduled(controller, userEnv, ctx));
 }`
     : `async function handleScheduled(controller, env, ctx) {
-  const userEnv = __filterInternalBindings(env);
+${envValidateCall}  const userEnv = __filterInternalBindings(env);
   return withRuntimeEnv(env, () => scheduled(controller, userEnv, ctx));
 }`;
 
   if (hasQueues) {
     return `import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket, __withRawEnv, __processQueue${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''} } from 'virtual:void-routes';
-${runtimeEnvImport}${remoteImport}${filterBindingsHelper}${assetHelper}
+${runtimeEnvImport}${envSchemaImport}${remoteImport}${filterBindingsHelper}${assetHelper}
 ${internalRouteHelper}
 ${scheduledHandler}
-async function queue(batch, env, ctx) {${remotePath ? `\n  if (env.__VOID_REMOTE === "1") env = createRemoteEnv(env);` : ''}
-  const userEnv = __filterInternalBindings(env);
+async function queue(batch, env, ctx) {
+${envValidateCall}${remotePath ? `  if (env.__VOID_REMOTE === "1") env = createRemoteEnv(env);\n` : ''}  const userEnv = __filterInternalBindings(env);
   const messages = [...batch.messages].map(m => ({
     id: m.id, timestamp: m.timestamp.toISOString(),
     body: m.body, attempts: m.attempts,
@@ -1938,7 +1946,7 @@ ${webSocketClasses.map((name) => `export { ${name} };`).join('\n')}
 export default { fetch: ${fetchHandler}, scheduled: handleScheduled, queue };`;
   }
   return `import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket, __withRawEnv${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''} } from 'virtual:void-routes';
-${runtimeEnvImport}${remoteImport}${filterBindingsHelper}${assetHelper}
+${runtimeEnvImport}${envSchemaImport}${remoteImport}${filterBindingsHelper}${assetHelper}
 ${internalRouteHelper}
 ${scheduledHandler}
 ${webSocketClasses.map((name) => `export { ${name} };`).join('\n')}
@@ -1948,8 +1956,19 @@ export default { fetch: ${fetchHandler}, scheduled: handleScheduled };`;
 /**
  * Generate the app module — exports the Hono app with static asset serving.
  * This is the entry imported by `vite preview` and can be used programmatically.
+ *
+ * When `envSchemaModule` is provided, splices boot-time env validation so it
+ * runs on the first request (including the prerender child process spawned
+ * by `prerenderPagesNode`). Mirrors `compileWorkerEntry`: a side-effect import
+ * registers the schema, and `_validateEnvOnce` throws `EnvValidationError` on
+ * bad values. Env source on Node/Bun is `process.env`; on Deno it's
+ * `Deno.env.toObject()`.
  */
-export function compileNodeApp(target: 'node' | 'bun' | 'deno', honoPath: string): string {
+export function compileNodeApp(
+  target: 'node' | 'bun' | 'deno',
+  honoPath: string,
+  envSchemaModule?: { importPath: string; helperPath: string },
+): string {
   const staticImport =
     target === 'bun'
       ? `import { serveStatic } from "hono/bun";`
@@ -1957,12 +1976,24 @@ export function compileNodeApp(target: 'node' | 'bun' | 'deno', honoPath: string
         ? `import { serveStatic } from "hono/deno";`
         : `import { serveStatic } from "@hono/node-server/serve-static";`;
 
+  // Boot-time env validation: side-effect import so defineEnv() registers the
+  // schema, plus the validator helper. Helper short-circuits after the first
+  // call per process and throws EnvValidationError on bad values. Node/Bun
+  // read env from `process.env`; Deno from `Deno.env.toObject()`.
+  const envSchemaImport = envSchemaModule
+    ? `import ${JSON.stringify(envSchemaModule.importPath)};\nimport { _validateEnvOnce } from ${JSON.stringify(envSchemaModule.helperPath)};\n`
+    : '';
+  const envSource = target === 'deno' ? 'Deno.env.toObject()' : 'process.env';
+  const envMiddleware = envSchemaModule
+    ? `app.use("*", async (c, next) => { await _validateEnvOnce(${envSource}); return next(); });\n`
+    : '';
+
   return `${staticImport}
 import { Hono } from ${JSON.stringify(honoPath)};
 import innerApp, { __voidCollectPrerenderPaths } from "virtual:void-routes";
-
+${envSchemaImport}
 const app = new Hono();
-app.post("/__void/prerender-paths", async (c) => {
+${envMiddleware}app.post("/__void/prerender-paths", async (c) => {
   const __expected = c.env?.__VOID_PROXY_TOKEN;
   if (__expected) {
     const __token = c.req.header("x-void-internal");

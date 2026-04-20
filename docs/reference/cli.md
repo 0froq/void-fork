@@ -21,6 +21,9 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void db studio`                  | Open Drizzle Studio for local database              |
 | `void secret put <name=value>`    | Set a production secret                             |
 | `void secret sync .env.local`     | Bulk upload secrets from dotenv file                |
+| `void env check [--remote]`       | Validate env.ts schema                |
+| `void env types`                  | Regenerate .void/env.d.ts from env.ts               |
+| `void env example`                | Refresh the void-managed block in .env.example      |
 | `void auth login`                 | Authenticate with Void                              |
 | `void project link`               | Link directory to a project                         |
 | `void project logs`               | Show runtime logs from deployed project             |
@@ -59,7 +62,8 @@ After that, the full interactive flow walks through:
 5. **MCP config:** writes MCP server config using that same agent context.
 6. **Demo code:** for existing non-Pages projects, optionally scaffolds a `db/migrations/` directory plus an API route and typed fetch example.
 7. **GitHub Actions:** optionally creates `.github/workflows/deploy.yml` with the right package manager commands.
-8. **Project setup:** optionally logs you in, lets you select or create a project, and writes `.void/project.json` so your first deploy can just be `void deploy`.
+8. **`env.ts` scaffold:** if the project has no `env.ts` but has `.env` / `.env.example` / `.env.local` / `.env.development*` files on disk, generates an `env.ts` pre-populated with their keys. Values get conservative type inference (`boolean`/`url`/`number`/`string`) — the file carries a banner nudging you to tighten anything the heuristic got wrong.
+9. **Project setup:** optionally logs you in, lets you select or create a project, and writes `.void/project.json` so your first deploy can just be `void deploy`.
 
 If no agent is detected, `void init` asks you to choose one from a short list (Claude, Cursor, Codex, Gemini CLI, Generic). That single choice is reused across all agent steps.
 
@@ -403,6 +407,64 @@ void secret delete <name> [--project <name>]
 ```
 
 Project resolution for secrets follows the same order as deploy (`--project`, env var, linked project).
+
+## Env Schema
+
+### `void env check`
+
+```
+void env check [--remote]
+```
+
+Validate `env.ts` against `.env` + `.env.production` (and, with `--remote`, also against the remote secret list). Exits non-zero if any required key is missing or invalid. Use in CI before deploy.
+
+### `void env types`
+
+```
+void env types
+```
+
+Regenerate `.void/env.d.ts` from `env.ts`. Normally happens automatically on dev server start and HMR; use this command after a fresh clone or to refresh stale types in non-dev contexts.
+
+### `void env example`
+
+```
+void env example [--force]
+```
+
+Generate or refresh a marker-delimited "void env" block inside `.env.example` at the project root, sourced from the registered `env.ts` schema. The block is grouped into `required`, `with defaults`, and `optional` sections, with enum members emitted as inline comments. Prefilled values are used for keys with a `.default(...)`.
+
+The command never overwrites the whole file — anything above or below the markers (custom CI tokens, build flags, etc.) is preserved verbatim:
+
+| State of `.env.example`                     | Behavior                                                                                                               |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| File doesn't exist                          | Writes a fresh file containing only the marker block.                                                                  |
+| Exists, contains both markers               | Replaces only the lines between (and including) the markers; everything else is preserved.                             |
+| Exists, no markers                          | Appends the block at the end (one blank line separator) and prints `appended void env block to existing .env.example`. |
+| Exists, only one of the two markers present | Hard error — fix the file (restore the missing marker or delete the file) and rerun.                                   |
+
+Pass `--force` to suppress the "appended block" notice for scripted runs.
+
+Example output:
+
+```ini
+# >>> void env: managed block — do not edit between markers <<<
+# Run `void env example` to refresh.
+# required
+STRIPE_KEY=
+# enum: development | production
+NODE_ENV=
+
+# with defaults
+PORT=3000
+# >>> end void env <<<
+```
+
+::: tip Deploy validation
+`void deploy` runs the same schema validation automatically (with remote secrets) and refuses to upload if any required key is missing — no need to call `env check` separately when deploying.
+:::
+
+See [Environment Variables](../guide/env-vars.md) for the full guide.
 
 ## Custom Domains
 

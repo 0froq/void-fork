@@ -23,6 +23,9 @@ import { scanJobsSync } from './crons/scan';
 import { inferBindingsFromSource } from './inference/walk';
 import { voidLog, voidWarn, voidError } from './log';
 import { drizzlePlugin } from './plugin-drizzle';
+import { envClientFoldPlugin } from './plugin-env-client-fold';
+import { envClientGuardPlugin } from './plugin-env-client-guard';
+import { envSchemaPlugin } from './plugin-env-schema';
 import {
   inferProjectBindings,
   detectFramework,
@@ -429,6 +432,14 @@ export function voidPlugin(options?: {
       wranglerSyncPlugin,
       svelteKitHooksInjectPlugin,
       clientStubsPlugin,
+      // Framework-agnostic env DX: typegen, client leak guard, and build-time
+      // folding all operate on env.ts + the Vite client module graph, so they
+      // apply equally to SvelteKit/Nuxt/Analog/Astro. We intentionally omit
+      // envPlugin itself — it mutates workerConfig.vars for Void's own CF
+      // build, which Class B/C frameworks don't go through.
+      envSchemaPlugin(root),
+      envClientGuardPlugin(root),
+      envClientFoldPlugin(),
       drizzlePlugin(root, false, dialect, { forceVirtualDb: authEnabled }),
       migrationPlugin(root, dialect, 'local', frameworkPersistRoot, {
         enabled: false,
@@ -593,21 +604,42 @@ export function voidPlugin(options?: {
     return result as Partial<WorkerConfig>;
   }
 
+  // Merge schema defaults from env.ts into workerConfig.vars without
+  // shadowing values already provided by .env files / shell. Wired into
+  // envSchemaPlugin's onDefaults callback for CF targets only (the node
+  // target reads from process.env at runtime).
+  function applySchemaDefaultsToWorkerVars(defaults: Record<string, string>): void {
+    const vars = (workerConfig.vars as Record<string, string> | undefined) ?? {};
+    for (const [key, value] of Object.entries(defaults)) {
+      if (vars[key] === undefined) {
+        vars[key] = value;
+      }
+    }
+    workerConfig.vars = vars;
+  }
+
   // Plugin that loads .env files and merges them into workerConfig.vars.
   // Runs before the Cloudflare plugin so vars are available as worker bindings.
   const envPlugin: Plugin = {
     name: 'void:env',
-    config(_, { mode, command }) {
+    config(userConfig, { mode, command }) {
       viteCommand = command;
       // Exclude the .void cache directory from the file watcher so that
       // miniflare SQLite writes don't trigger infinite HMR refreshes.
       const ignored = ['**/.void/**'];
+      // Honour the user's `envDir` config — projects that keep .env files
+      // in `config/` or similar would otherwise be silently ignored. Falls
+      // back to the project root, matching Vite's own default.
+      const envDir =
+        typeof userConfig.envDir === 'string' && userConfig.envDir.length > 0
+          ? join(root, userConfig.envDir)
+          : root;
       // loadEnv with prefix "" returns .env file vars AND all process.env vars.
       // filterLoadedEnv strips shell pollution (PATH, HOME, etc.) so only
       // .env-file vars reach worker bindings. stripInternalEnvKeys then
       // removes any internal Void keys a user may have set in their .env
       // files, so they can't hijack credential-shaped worker bindings.
-      const filtered = filterLoadedEnv(loadEnv(mode, root, ''));
+      const filtered = filterLoadedEnv(loadEnv(mode, envDir, ''));
       const { sanitized: env, stripped } = stripInternalEnvKeys(filtered);
       if (stripped.length > 0) {
         voidWarn(
@@ -826,6 +858,9 @@ export function voidPlugin(options?: {
       restartPlugin(),
       bindingWatchPlugin,
       envPlugin,
+      envSchemaPlugin(root, { onDefaults: applySchemaDefaultsToWorkerVars }),
+      envClientGuardPlugin(root),
+      envClientFoldPlugin(),
       clientStubsPlugin,
       drizzlePlugin(root, false, getDatabaseDialect(config), {
         forceVirtualDb: authEnabled,
@@ -872,6 +907,7 @@ export function voidPlugin(options?: {
     return [
       restartPlugin(),
       envPlugin,
+      envSchemaPlugin(root),
       routingPlugin(root, {
         isAuthEnabled: () => false,
         headConfig: config.head,
@@ -929,6 +965,9 @@ export function voidPlugin(options?: {
     restartPlugin(),
     bindingWatchPlugin,
     envPlugin,
+    envSchemaPlugin(root, { onDefaults: applySchemaDefaultsToWorkerVars }),
+    envClientGuardPlugin(root),
+    envClientFoldPlugin(),
     clientStubsPlugin,
     routingPlugin(root, {
       isAuthEnabled: () => authEnabled,

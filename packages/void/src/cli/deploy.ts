@@ -16,6 +16,7 @@ const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '.
 const deployDriftCheckDir = join('.void', 'deploy-drift-check');
 import { intro, outro, log, note, confirm, isCancel, type SpinnerResult } from '@clack/prompts';
 import { findVoidAuthConfig } from '../auth/config';
+import { findEnvFile } from '../codegen/env-types';
 import {
   readConfig,
   resolveBindingNames,
@@ -51,6 +52,12 @@ import {
   formatDeployFailureMessage,
   formatStreamDeployError,
 } from './deploy-errors';
+import {
+  fetchRemoteSecretNames,
+  formatEnvReport,
+  getDeployEnvDefaults,
+  validateProdEnv,
+} from './env-validation';
 import { parseHeadersFile, parseRedirectsFile } from './headers';
 import { promptForLoginToken } from './login';
 import { cliTitle, createSpinner } from './output';
@@ -656,6 +663,14 @@ async function runFrameworkDeploy(
   // 10. Load .env vars for production (excludes .local files)
   const envVars = loadDeployEnv(root);
 
+  // 10a. Validate against env.ts schema if present.
+  await assertEnvSchemaValid(root, client, config.projectId);
+
+  // 10b. Overlay schema `.default(value)` entries for keys not set in
+  //     .env files so the deployed worker sees the same fallback as the
+  //     typed `env.X` proxy.
+  await applySchemaDefaultsToVars(root, envVars);
+
   // 11. Package & deploy
   const s = createSpinner();
   const onProgress = (msg: string) => s.message(msg);
@@ -988,6 +1003,14 @@ async function runFullDeploy(
   // 9. Load .env vars for production (excludes .local files)
   const envVars = loadDeployEnv(root);
 
+  // 9a. Validate against env.ts schema if present.
+  await assertEnvSchemaValid(root, client, config.projectId);
+
+  // 9b. Overlay schema `.default(value)` entries for keys not set in
+  //     .env files so the deployed worker sees the same fallback as the
+  //     typed `env.X` proxy.
+  await applySchemaDefaultsToVars(root, envVars);
+
   // 10. Package & Upload
   const s = createSpinner();
   const onProgress = (msg: string) => s.message(msg);
@@ -1301,6 +1324,58 @@ function migrationSnapshotsEqual(
     const [rightPath, rightContent] = rightEntries[index] ?? [];
     return leftPath === rightPath && leftContent === rightContent;
   });
+}
+
+/**
+ * Overlay schema `.default(value)` entries onto the deploy manifest vars so
+ * the deployed worker sees the same fallback as the typed `env.X` proxy at
+ * runtime. User-provided `.env*` values always win — defaults only fill
+ * gaps. No-op when the project has no `env.ts`.
+ */
+async function applySchemaDefaultsToVars(
+  root: string,
+  envVars: Record<string, string>,
+): Promise<void> {
+  const defaults = await getDeployEnvDefaults(root);
+  for (const [key, value] of Object.entries(defaults)) {
+    if (envVars[key] === undefined) {
+      envVars[key] = value;
+    }
+  }
+}
+
+/**
+ * If the project has an `env.ts`, validate its schema against the union of
+ * production env files and remote secret names. Hard-error before upload so
+ * deploys never ship missing required env vars.
+ */
+async function assertEnvSchemaValid(
+  root: string,
+  client: PlatformClient,
+  projectId: string,
+): Promise<void> {
+  // Skip the remote secret round-trip when the project has no typed env schema.
+  if (findEnvFile(root) == null) {
+    return;
+  }
+
+  const remoteSecrets = await fetchRemoteSecretNames(client, projectId);
+  const { hasSchema, report } = await validateProdEnv(root, {
+    productionOnly: true,
+    remoteSecrets,
+  });
+  if (!hasSchema || report.valid) {
+    return;
+  }
+
+  const formatted = formatEnvReport(report);
+  log.error(`Env validation failed:\n${formatted}`);
+  if (report.missing.length > 0) {
+    log.info(
+      `Add the missing values to .env / .env.production, or upload them with \`void secret put <NAME>\`.`,
+    );
+  }
+  throw new DeployEventError('Aborting deploy — env.ts schema is not satisfied.');
 }
 
 /**
