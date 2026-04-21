@@ -179,6 +179,28 @@ export async function getProjectsByUserId(db: Db, userId: string): Promise<Proje
     .orderBy(desc(projects.created_at));
 }
 
+export async function getProjectsWithOwnerByIds(
+  db: Db,
+  ids: string[],
+): Promise<
+  (Project & {
+    owner_login: string | null;
+  })[]
+> {
+  if (ids.length === 0) {
+    return [];
+  }
+
+  return db
+    .select({
+      ...getTableColumns(projects),
+      owner_login: users.login,
+    })
+    .from(projects)
+    .leftJoin(users, eq(projects.user_id, users.id))
+    .where(inArray(projects.id, ids));
+}
+
 export async function updateProjectType(db: Db, id: string, type: Project['type']): Promise<void> {
   await db.update(projects).set({ type }).where(eq(projects.id, id));
 }

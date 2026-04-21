@@ -5224,15 +5224,34 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     // ability to observe back-pressure on the upstream reader.
     const CHUNK = 32;
     let offset = 0;
+    let closed = false;
     const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        closed = true;
+      },
       pull(ctrl) {
-        if (offset >= bodyBytes.length) {
-          ctrl.close();
+        if (closed) {
           return;
         }
+        if (offset >= bodyBytes.length) {
+          closed = true;
+          try {
+            ctrl.close();
+          } catch {
+            // Node/undici can cancel the request body before the final pull
+            // runs; in that case the stream is already closed and this test
+            // only cares about exercising multipart back-pressure.
+          }
+          return;
+        }
+        const start = offset;
         const end = Math.min(offset + CHUNK, bodyBytes.length);
-        ctrl.enqueue(bodyBytes.slice(offset, end));
         offset = end;
+        try {
+          ctrl.enqueue(bodyBytes.slice(start, end));
+        } catch {
+          closed = true;
+        }
       },
     });
 

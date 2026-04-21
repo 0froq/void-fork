@@ -3,8 +3,14 @@ import { Hono } from 'hono';
 import type { Handler } from 'hono';
 import { DEFAULT_DISPATCH_NAMESPACE, SITE_DOMAIN } from '../../constants';
 import type { Db } from '../../db';
-import { getSystemStats, getAllProjectsWithOwner, getAllDeploymentsWithProject } from '../../db';
+import {
+  getSystemStats,
+  getAllProjectsWithOwner,
+  getAllDeploymentsWithProject,
+  getProjectsWithOwnerByIds,
+} from '../../db';
 import { type ApiEnv, isDevBypass } from '../../env';
+import { queryTopProjectTraffic } from '../../routes/usage';
 import { backfillQueueTokens } from '../backfill-queue-tokens';
 import { DashboardPage } from '../views/dashboard';
 
@@ -72,6 +78,45 @@ function mockHealthResult(): HealthResult {
 }
 
 export const adminSystem = new Hono<ApiEnv>();
+const TOP_PROJECT_LIMIT = 10;
+const TOP_PROJECT_WINDOW_MS = 60 * 60 * 1000;
+
+async function getTopProjectsLastHour(c: Parameters<Handler<ApiEnv>>[0]) {
+  if (isDevBypass(c.env)) {
+    return [];
+  }
+
+  const topTraffic = await queryTopProjectTraffic(
+    c.env.CF_ACCOUNT_ID,
+    c.env.CF_API_TOKEN,
+    new Date(Date.now() - TOP_PROJECT_WINDOW_MS),
+    TOP_PROJECT_LIMIT,
+  );
+  if (topTraffic.length === 0) {
+    return [];
+  }
+
+  const projects = await getProjectsWithOwnerByIds(
+    c.get('db'),
+    topTraffic.map((row) => row.projectId),
+  );
+  const projectMap = new Map(projects.map((project) => [project.id, project]));
+
+  return topTraffic
+    .map((row) => {
+      const project = projectMap.get(row.projectId);
+      if (!project) {
+        return null;
+      }
+      return {
+        ...project,
+        requests: row.requests,
+        bandwidthBytes: row.bandwidthBytes,
+        lastSeen: row.lastSeen,
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null);
+}
 
 adminSystem.get('/health', async (c) => {
   if (isDevBypass(c.env)) {
@@ -114,10 +159,11 @@ adminSystem.post('/backfill-queue-tokens', async (c) => {
 });
 
 export const dashboardHandler: Handler<ApiEnv> = async (c) => {
-  const [stats, projects, deployments] = await Promise.all([
+  const [stats, projects, deployments, topProjects] = await Promise.all([
     getSystemStats(c.get('db')),
     getAllProjectsWithOwner(c.get('db'), 5, 0),
     getAllDeploymentsWithProject(c.get('db'), 5, 0),
+    getTopProjectsLastHour(c),
   ]);
   const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
   return c.html(
@@ -125,6 +171,7 @@ export const dashboardHandler: Handler<ApiEnv> = async (c) => {
       stats={stats}
       projects={projects}
       deployments={deployments}
+      topProjects={topProjects}
       siteDomain={siteDomain}
       username={c.get('user').login}
     />,

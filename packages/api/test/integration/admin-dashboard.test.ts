@@ -71,6 +71,7 @@ describe('GET /admin/ (dashboard)', () => {
     const admin = await createTestUser(env.db, 'admin1', 'github', undefined, 'free', 'admin');
     await createTestUser(env.db, 'user1');
     await createTestProject(env.db, admin.id, 'dash-proj');
+    mockCfApi();
 
     const res = await req('/admin/', admin.adminJwt);
     expect(res.status).toBe(200);
@@ -79,15 +80,60 @@ describe('GET /admin/ (dashboard)', () => {
     expect(html).toContain('Users');
     expect(html).toContain('Projects');
     expect(html).toContain('dash-proj');
+    expect(html).toContain('Top 10 Projects');
+    vi.restoreAllMocks();
   });
 
   test('stat cards link to views', async () => {
     const admin = await createTestUser(env.db, 'admin1b', 'github', undefined, 'free', 'admin');
+    mockCfApi();
     const res = await req('/admin/', admin.adminJwt);
     const html = await res.text();
     expect(html).toContain('href="/admin/users"');
     expect(html).toContain('href="/admin/projects"');
     expect(html).toContain('href="/admin/deployments"');
+    vi.restoreAllMocks();
+  });
+
+  test('renders top projects sorted by recent site traffic', async () => {
+    const admin = await createTestUser(env.db, 'admin1c', 'github', undefined, 'free', 'admin');
+    const ownerA = await createTestUser(env.db, 'owner-a');
+    const ownerB = await createTestUser(env.db, 'owner-b');
+    const alpha = await createTestProject(env.db, ownerA.id, 'alpha');
+    const beta = await createTestProject(env.db, ownerB.id, 'beta');
+
+    mockCfApi({
+      analyticsQuery: () =>
+        Response.json({
+          data: [
+            {
+              blob1: beta.id,
+              requests: 420,
+              bandwidth_bytes: 8192,
+              last_seen: '2026-04-21 10:59:00',
+            },
+            {
+              blob1: alpha.id,
+              requests: 120,
+              bandwidth_bytes: 2048,
+              last_seen: '2026-04-21 10:58:00',
+            },
+          ],
+        }),
+    });
+
+    const res = await req('/admin/', admin.adminJwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    const betaIndex = html.indexOf('>beta<');
+    const alphaIndex = html.indexOf('>alpha<');
+    expect(betaIndex).toBeGreaterThan(-1);
+    expect(alphaIndex).toBeGreaterThan(-1);
+    expect(betaIndex).toBeLessThan(alphaIndex);
+    expect(html).toContain('420');
+    expect(html).toContain('owner-b');
+
+    vi.restoreAllMocks();
   });
 });
 

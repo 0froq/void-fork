@@ -4,6 +4,17 @@ import { Layout } from './layout';
 import type { ProjectRow } from './projects-table';
 import { ProjectsTable } from './projects-table';
 
+export interface TopProjectRow {
+  id: string;
+  user_id: string;
+  slug: string;
+  type: string;
+  owner_login: string | null;
+  requests: number;
+  bandwidthBytes: number;
+  lastSeen: string;
+}
+
 interface DashboardProps {
   stats: {
     users: number;
@@ -12,8 +23,27 @@ interface DashboardProps {
   };
   projects: ProjectRow[];
   deployments: (Deployment & { project_slug: string | null })[];
+  topProjects: TopProjectRow[];
   siteDomain: string;
   username?: string;
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat('en-US').format(value);
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unitIndex = -1;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 function HealthStatusBanner() {
@@ -65,10 +95,78 @@ function HealthStatusBanner() {
   );
 }
 
+function TopProjectsWidget({
+  projects,
+  siteDomain,
+}: {
+  projects: TopProjectRow[];
+  siteDomain: string;
+}) {
+  return (
+    <div style="margin-top: 24px; padding: 12px; border: 1px solid #ccc">
+      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px">
+        <strong>Top 10 Projects</strong>
+        <span style="font-size: 0.8rem; color: #666">
+          Last hour, site traffic only (static / ssr / isr)
+        </span>
+      </div>
+      {projects.length > 0 ? (
+        <table style="margin-top: 10px">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Project</th>
+              <th>Owner</th>
+              <th>Requests</th>
+              <th>Bandwidth</th>
+              <th>Last Seen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {projects.map((project, index) => (
+              <tr key={project.id}>
+                <td>{index + 1}</td>
+                <td>
+                  <div>
+                    <a href={`/admin/projects/${project.id}`}>{project.slug}</a>
+                  </div>
+                  <div style="font-size: 0.75rem; color: #666">
+                    <a
+                      href={`https://${project.slug}.${siteDomain}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {project.slug}.{siteDomain}
+                    </a>{' '}
+                    · {project.type}
+                  </div>
+                </td>
+                <td>
+                  {project.owner_login ? (
+                    <a href={`/admin/users/${project.user_id}`}>{project.owner_login}</a>
+                  ) : (
+                    '-'
+                  )}
+                </td>
+                <td>{formatNumber(project.requests)}</td>
+                <td>{formatBytes(project.bandwidthBytes)}</td>
+                <td>{new Date(project.lastSeen).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p style="margin-top: 10px; color: #666">No recent project traffic in the last hour.</p>
+      )}
+    </div>
+  );
+}
+
 export function DashboardPage({
   stats,
   projects,
   deployments,
+  topProjects,
   siteDomain,
   username,
 }: DashboardProps) {
@@ -99,6 +197,7 @@ export function DashboardPage({
           <div>deployments</div>
         </a>
       </div>
+      <TopProjectsWidget projects={topProjects} siteDomain={siteDomain} />
 
       <h2>Latest Projects</h2>
       <ProjectsTable projects={projects} siteDomain={siteDomain} />

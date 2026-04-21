@@ -165,6 +165,24 @@ async function readPartText(
   return new TextDecoder().decode(await readPartBytes(body, partName, maxBytes));
 }
 
+async function discardPartBody(body: ReadableStream<Uint8Array>): Promise<void> {
+  const reader = body.getReader();
+  try {
+    while (true) {
+      const { done } = await reader.read();
+      if (done) {
+        break;
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Reader may already be in a terminal state; nothing to release.
+    }
+  }
+}
+
 /**
  * Read a multipart part body directly into a `Blob` with the given content
  * type. Same per-part cap semantics as `readPartBytes`, but never exposes a
@@ -931,6 +949,7 @@ app.post('/:id/deploy', async (c) => {
   let manifestSeen = false;
   let streamedStaticAssets = false;
   let newStaticAssetCount = 0;
+  let deferredParseErrorMessage: string | null = null;
   let cleanupExcludeDeploymentId: string | null = null;
   const streamedAssetClaimToken = crypto.randomUUID();
   const claimedStreamedHashes = new Set<string>();
@@ -1183,49 +1202,39 @@ app.post('/:id/deploy', async (c) => {
     try {
       try {
         for await (const part of parseMultipart(c.req.raw.body, multipartBoundary)) {
+          if (deferredParseErrorMessage) {
+            await discardPartBody(part.body);
+            continue;
+          }
           if (part.name === 'manifest') {
             if (manifestSeen) {
-              emit({ event: 'error', message: 'duplicate manifest part', step: currentStep });
-              await cleanupStreamedAssetsOnAbort();
-              await cleanupOwnStreamedAssetClaims();
-              return;
+              deferredParseErrorMessage = 'duplicate manifest part';
+              await discardPartBody(part.body);
+              continue;
             }
             manifestRaw = await readPartText(part.body, 'manifest', MAX_MANIFEST_BYTES);
             let parsedManifest: unknown;
             try {
               parsedManifest = JSON.parse(manifestRaw);
             } catch (parseErr) {
-              emit({
-                event: 'error',
-                message:
-                  'invalid manifest JSON: ' +
-                  (parseErr instanceof Error ? parseErr.message : String(parseErr)),
-                step: currentStep,
-              });
-              await cleanupStreamedAssetsOnAbort();
-              await cleanupOwnStreamedAssetClaims();
-              return;
+              deferredParseErrorMessage =
+                'invalid manifest JSON: ' +
+                (parseErr instanceof Error ? parseErr.message : String(parseErr));
+              continue;
             }
             const shapeError = validateManifestShape(parsedManifest);
             if (shapeError) {
-              emit({ event: 'error', message: shapeError, step: currentStep });
-              await cleanupStreamedAssetsOnAbort();
-              await cleanupOwnStreamedAssetClaims();
-              return;
+              deferredParseErrorMessage = shapeError;
+              continue;
             }
             incomingManifest = parsedManifest as DeployManifest;
             if (
               incomingManifest.version == null ||
               !SUPPORTED_MANIFEST_VERSIONS.includes(incomingManifest.version)
             ) {
-              emit({
-                event: 'error',
-                message: 'Unsupported deploy manifest version. Please update void.',
-                step: currentStep,
-              });
-              await cleanupStreamedAssetsOnAbort();
-              await cleanupOwnStreamedAssetClaims();
-              return;
+              deferredParseErrorMessage =
+                'Unsupported deploy manifest version. Please update void.';
+              continue;
             }
             manifestSeen = true;
             streamedStaticAssets =
@@ -1245,10 +1254,8 @@ app.post('/:id/deploy', async (c) => {
             if (streamedStaticAssets && planLimits.deploysPerDay > 0) {
               const todayCount = await countUserDeploymentsToday(c.get('db'), c.get('user').id);
               if (!isWithinLimit(planLimits.deploysPerDay, todayCount)) {
-                emit({ event: 'error', message: 'deploy limit exceeded', step: currentStep });
-                await cleanupStreamedAssetsOnAbort();
-                await cleanupOwnStreamedAssetClaims();
-                return;
+                deferredParseErrorMessage = 'deploy limit exceeded';
+                continue;
               }
             }
             continue;
@@ -1302,14 +1309,10 @@ app.post('/:id/deploy', async (c) => {
             // streamed assets when a malformed payload mixes a static manifest with
             // worker parts.
             if (streamedStaticAssets) {
-              emit({
-                event: 'error',
-                message: 'worker parts are not allowed when manifest.type is spa or static',
-                step: currentStep,
-              });
-              await cleanupStreamedAssetsOnAbort();
-              await cleanupOwnStreamedAssetClaims();
-              return;
+              deferredParseErrorMessage =
+                'worker parts are not allowed when manifest.type is spa or static';
+              await discardPartBody(part.body);
+              continue;
             }
             hasWorkerFiles = true;
             const filePath = part.name.slice('worker:'.length);
@@ -1598,6 +1601,12 @@ app.post('/:id/deploy', async (c) => {
         // below routes it through the same cleanup path as a parse error.
         if (staticUploadPromises.length > 0) {
           await Promise.all(staticUploadPromises);
+        }
+        if (deferredParseErrorMessage) {
+          await cleanupStreamedAssetsOnAbort();
+          await cleanupOwnStreamedAssetClaims();
+          emit({ event: 'error', message: deferredParseErrorMessage, step: currentStep });
+          return;
         }
       } catch (err) {
         // Both cleanup helpers drain `inFlightStaticUploads` internally

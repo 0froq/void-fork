@@ -108,6 +108,17 @@ interface BatchAnalyticsRow extends AnalyticsRow {
   blob1: string;
 }
 
+interface TopProjectTrafficRow extends BatchAnalyticsRow {
+  last_seen: string;
+}
+
+interface TopProjectTrafficEntry {
+  projectId: string;
+  requests: number;
+  bandwidthBytes: number;
+  lastSeen: string;
+}
+
 async function queryProjectUsage(
   accountId: string,
   apiToken: string,
@@ -201,6 +212,57 @@ async function queryBatchProjectUsage(
   return result;
 }
 
+async function queryTopProjectTraffic(
+  accountId: string,
+  apiToken: string,
+  since: Date,
+  limit: number,
+): Promise<TopProjectTrafficEntry[]> {
+  if (limit <= 0) {
+    return [];
+  }
+
+  const sinceStr = since.toISOString().replace('T', ' ').slice(0, 19);
+  const query = `
+    SELECT
+      blob1,
+      MAX(timestamp) as last_seen,
+      SUM(_sample_interval * double1) as requests,
+      SUM(_sample_interval * double2) as bandwidth_bytes
+    FROM vite_cloud_requests
+    WHERE timestamp >= toDateTime('${sinceStr}')
+      AND blob2 IN ('static', 'ssr', 'isr')
+      AND blob3 IN ('GET', 'HEAD')
+    GROUP BY blob1
+    ORDER BY requests DESC
+    LIMIT ${limit}
+  `;
+
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'text/plain',
+      },
+      body: query,
+    },
+  );
+
+  if (!response.ok) {
+    return [];
+  }
+
+  const json = (await response.json()) as { data: TopProjectTrafficRow[] };
+  return (json.data ?? []).map((row) => ({
+    projectId: row.blob1,
+    requests: Math.round(row.requests ?? 0),
+    bandwidthBytes: Math.round(row.bandwidth_bytes ?? 0),
+    lastSeen: row.last_seen,
+  }));
+}
+
 interface AiGatewayResponse {
   data: {
     viewer: {
@@ -257,6 +319,7 @@ async function queryProjectAiUsage(
 export {
   queryProjectUsage,
   queryBatchProjectUsage,
+  queryTopProjectTraffic,
   queryProjectAiUsage,
   projectUsage,
   accountUsage,
