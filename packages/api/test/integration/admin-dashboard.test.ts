@@ -25,6 +25,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await clearTables(env.db);
+  env.REQUESTS_DATASET = 'void_requests';
 });
 
 function req(path: string, cookie?: string, init?: RequestInit): Response | Promise<Response> {
@@ -132,6 +133,31 @@ describe('GET /admin/ (dashboard)', () => {
     expect(betaIndex).toBeLessThan(alphaIndex);
     expect(html).toContain('420');
     expect(html).toContain('owner-b');
+
+    vi.restoreAllMocks();
+  });
+
+  test('queries the configured requests dataset for top projects', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'admin-dataset',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    env.REQUESTS_DATASET = 'void_requests_staging';
+
+    const fetchMock = mockCfApi({
+      analyticsQuery: (_url, init) => {
+        expect(init?.body).toContain('FROM void_requests_staging');
+        return Response.json({ data: [] });
+      },
+    });
+
+    const res = await req('/admin/', admin.adminJwt);
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalled();
 
     vi.restoreAllMocks();
   });

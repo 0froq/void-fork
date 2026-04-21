@@ -10,7 +10,7 @@ import {
   getProjectsWithOwnerByIds,
 } from '../../db';
 import { type ApiEnv, isDevBypass } from '../../env';
-import { queryTopProjectTraffic } from '../../routes/usage';
+import { getRequestsDataset, queryTopProjectTraffic } from '../../routes/usage';
 import { backfillQueueTokens } from '../backfill-queue-tokens';
 import { DashboardPage } from '../views/dashboard';
 
@@ -89,6 +89,7 @@ async function getTopProjectsLastHour(c: Parameters<Handler<ApiEnv>>[0]) {
   const topTraffic = await queryTopProjectTraffic(
     c.env.CF_ACCOUNT_ID,
     c.env.CF_API_TOKEN,
+    getRequestsDataset(c.env),
     new Date(Date.now() - TOP_PROJECT_WINDOW_MS),
     TOP_PROJECT_LIMIT,
   );

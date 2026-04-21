@@ -28,8 +28,9 @@ const projectUsage = new Hono<ApiEnv>()
     }
 
     const since = getCurrentBillingPeriodStart(c.get('user').billing_cycle_start);
+    const requestsDataset = getRequestsDataset(c.env);
     const [usage, aiUsage] = await Promise.all([
-      queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since),
+      queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, requestsDataset, projectId, since),
       queryProjectAiUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since),
     ]);
 
@@ -68,11 +69,13 @@ const accountUsage = new Hono<ApiEnv>()
     }
 
     const since = getCurrentBillingPeriodStart(c.get('user').billing_cycle_start);
+    const requestsDataset = getRequestsDataset(c.env);
 
     const [usageMap, ...aiUsages] = await Promise.all([
       queryBatchProjectUsage(
         c.env.CF_ACCOUNT_ID,
         c.env.CF_API_TOKEN,
+        requestsDataset,
         projects.map((p) => p.id),
         since,
       ),
@@ -119,9 +122,17 @@ interface TopProjectTrafficEntry {
   lastSeen: string;
 }
 
+function getRequestsDataset(env: { REQUESTS_DATASET?: string; PLATFORM_ENV?: string }): string {
+  if (env.REQUESTS_DATASET) {
+    return env.REQUESTS_DATASET;
+  }
+  return env.PLATFORM_ENV === 'staging' ? 'void_requests_staging' : 'void_requests';
+}
+
 async function queryProjectUsage(
   accountId: string,
   apiToken: string,
+  requestsDataset: string,
   projectId: string,
   since: Date,
 ): Promise<{ requests: number; bandwidthBytes: number }> {
@@ -130,7 +141,7 @@ async function queryProjectUsage(
     SELECT
       SUM(_sample_interval * double1) as requests,
       SUM(_sample_interval * double2) as bandwidth_bytes
-    FROM vite_cloud_requests
+    FROM ${requestsDataset}
     WHERE blob1 = '${projectId}'
       AND timestamp >= toDateTime('${sinceStr}')
   `;
@@ -165,6 +176,7 @@ const ZERO_USAGE: UsageEntry = { requests: 0, bandwidthBytes: 0 };
 async function queryBatchProjectUsage(
   accountId: string,
   apiToken: string,
+  requestsDataset: string,
   projectIds: string[],
   since: Date,
 ): Promise<Map<string, UsageEntry>> {
@@ -179,7 +191,7 @@ async function queryBatchProjectUsage(
       blob1,
       SUM(_sample_interval * double1) as requests,
       SUM(_sample_interval * double2) as bandwidth_bytes
-    FROM vite_cloud_requests
+    FROM ${requestsDataset}
     WHERE blob1 IN (${inList})
       AND timestamp >= toDateTime('${sinceStr}')
     GROUP BY blob1
@@ -215,6 +227,7 @@ async function queryBatchProjectUsage(
 async function queryTopProjectTraffic(
   accountId: string,
   apiToken: string,
+  requestsDataset: string,
   since: Date,
   limit: number,
 ): Promise<TopProjectTrafficEntry[]> {
@@ -229,7 +242,7 @@ async function queryTopProjectTraffic(
       MAX(timestamp) as last_seen,
       SUM(_sample_interval * double1) as requests,
       SUM(_sample_interval * double2) as bandwidth_bytes
-    FROM vite_cloud_requests
+    FROM ${requestsDataset}
     WHERE timestamp >= toDateTime('${sinceStr}')
       AND blob2 IN ('static', 'ssr', 'isr')
       AND blob3 IN ('GET', 'HEAD')
@@ -317,6 +330,7 @@ async function queryProjectAiUsage(
 }
 
 export {
+  getRequestsDataset,
   queryProjectUsage,
   queryBatchProjectUsage,
   queryTopProjectTraffic,

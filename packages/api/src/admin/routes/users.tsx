@@ -14,7 +14,7 @@ import {
 } from '../../db';
 import type { ApiEnv } from '../../env';
 import { cleanupProjectResources } from '../../provisioning/cleanup';
-import { queryBatchProjectUsage, ZERO_USAGE } from '../../routes/usage';
+import { getRequestsDataset, queryBatchProjectUsage, ZERO_USAGE } from '../../routes/usage';
 import { PLAN_LIMITS, getCurrentBillingPeriodStart, type PlanId } from '../../tiers';
 import { UserDetailPage } from '../views/user-detail';
 import { UsersListPage } from '../views/users-list';
@@ -63,6 +63,7 @@ app.get('/:id', async (c) => {
   const usageMap = await queryBatchProjectUsage(
     c.env.CF_ACCOUNT_ID,
     c.env.CF_API_TOKEN,
+    getRequestsDataset(c.env),
     projects.map((p) => p.id),
     since,
   );

@@ -56,6 +56,7 @@ export type TestEnv = {
   GOOGLE_CLIENT_SECRET: string;
   DEV_AUTH_BYPASS?: string;
   SITE_DOMAIN?: string;
+  REQUESTS_DATASET?: string;
   USAGE_COUNTER: DurableObjectNamespace;
   CRON_SCHEDULER: DurableObjectNamespace;
   ERROR_ALERT_MONITOR: DurableObjectNamespace;
@@ -384,6 +385,7 @@ export async function setupEnv(): Promise<TestEnv> {
     GITHUB_CLIENT_SECRET: 'test-github-client-secret',
     GOOGLE_CLIENT_ID: 'test-google-client-id',
     GOOGLE_CLIENT_SECRET: 'test-google-client-secret',
+    REQUESTS_DATASET: 'void_requests',
     USAGE_COUNTER: createMockDoNamespace(),
     CRON_SCHEDULER: createMockDoNamespace(),
     ERROR_ALERT_MONITOR: createMockDoNamespace(),

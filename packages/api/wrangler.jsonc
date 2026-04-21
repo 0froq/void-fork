@@ -94,6 +94,7 @@
   "routes": [{ "pattern": "api.void.cloud", "custom_domain": true }],
   "vars": {
     "PLATFORM_ENV": "production",
+    "REQUESTS_DATASET": "void_requests",
   },
   // Secrets (via `wrangler secret put`): CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID, JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
   // Optional env var: AUTH_REDIRECT_URI (defaults to https://api.void.cloud/auth/callback)
@@ -169,6 +170,7 @@
         "DASHBOARD_URL": "https://dash.staging.void.cloud",
         "AUTH_REDIRECT_URI": "https://api.staging.void.cloud/auth/callback",
         "LOGS_DATASET": "void_logs_staging",
+        "REQUESTS_DATASET": "void_requests_staging",
         "PLATFORM_ENV": "staging",
       },
     },

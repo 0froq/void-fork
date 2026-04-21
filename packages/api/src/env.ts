@@ -44,6 +44,7 @@ export interface ApiEnv extends Env {
     CRON_SCHEDULER: DurableObjectNamespace;
     ERROR_ALERT_MONITOR: DurableObjectNamespace;
     LOGS_DATASET?: string;
+    REQUESTS_DATASET?: string;
     PLATFORM_ENV?: string;
     PROJECT_SECRET_KEYS_JSON: string;
     PROJECT_SECRET_ACTIVE_KEY_VERSION: string;
