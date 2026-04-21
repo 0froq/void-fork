@@ -42,6 +42,7 @@ import {
   setAppliedMigrations,
   getRetainedDeployments,
   getRetainedDeploymentsExcluding,
+  getDeploymentsWithAssetHashes,
   getProjectSecrets,
   upsertProjectSecret,
   CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES,
@@ -632,27 +633,61 @@ function collectManifestHashes(raw: string | null | undefined, hashes: Set<strin
   }
 }
 
+// Backend a deployment's `asset_hashes` row attests to. WfP = CF's per-account
+// asset cache (reached via `createAssetUploadSession` + `uploadAssetBuckets`).
+// KV/R2 = platform-owned STATIC_ASSETS / STATIC_ASSETS_R2. The two are
+// cryptographically identical in `asset_hashes` (same `computeAssetHash`) but
+// physically disjoint; a KV-resident hash tells us nothing about whether CF
+// holds the bytes. Cross-backend corroboration is the WC-4511 trap Codex
+// flagged (see also the backend-switch discriminator in the preflight route
+// further down this file).
+function deploymentBackendKindFromManifest(raw: string | null): 'wfp' | 'kv' | null {
+  if (!raw) {
+    return null;
+  }
+  try {
+    const m = JSON.parse(raw) as { type?: unknown; framework?: unknown };
+    if (m?.type === 'void' || m?.type === 'framework') {
+      return 'wfp';
+    }
+    if (m?.type === 'spa' || m?.type === 'static') {
+      return 'kv';
+    }
+    // Pre-`type` CLIs omitted the discriminator. We classify these as WfP
+    // because the common case by far is a legacy worker-backed Void build,
+    // and blanket-skipping them would silently regress corroboration for
+    // any project whose retained history predates the field.
+    //
+    // Known gap: the server still supports legacy static uploads whose
+    // manifest lacks `type` (the `isStaticOnly` branch derives mode from
+    // `assetConfig.not_found_handling` further down this file). Such rows
+    // would be mis-classified as WfP here. In practice the overlap of
+    // "legacy static deploy still in corroboration window AND same project
+    // now deploying WfP AND a shared hash value AND CF claims it cached"
+    // is vanishingly small, so we accept the imprecision rather than
+    // re-derive the mode from `assetConfig` on every read. If this ever
+    // bites a real project, add a `deployments.mode` column and backfill.
+    if (m?.type === undefined) {
+      return 'wfp';
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function getProjectCorroboratedWfpAssetHashes(
   db: Db,
   projectId: string,
 ): Promise<Set<string>> {
   const hashes = new Set<string>();
-  const retained = await getRetainedDeployments(db, projectId);
-  for (const dep of retained) {
-    collectManifestHashes(dep.asset_hashes, hashes);
-  }
-
-  const project = await getProject(db, projectId);
-  if (project?.active_deployment_id) {
-    const alreadyCollected = retained.some((dep) => dep.id === project.active_deployment_id);
-    if (!alreadyCollected) {
-      const active = await getDeployment(db, project.active_deployment_id);
-      if (active) {
-        collectManifestHashes(active.asset_hashes, hashes);
-      }
+  const rows = await getDeploymentsWithAssetHashes(db, projectId);
+  for (const row of rows) {
+    if (deploymentBackendKindFromManifest(row.manifest) !== 'wfp') {
+      continue;
     }
+    collectManifestHashes(row.asset_hashes, hashes);
   }
-
   return hashes;
 }
 
@@ -2135,8 +2170,10 @@ app.post('/:id/deploy', async (c) => {
           // CF's session response decides which buffered hashes we upload next.
           // If it silently omits a hash from THIS request, `uploadAssetBuckets`
           // will never send those bytes and the worker upload can still appear
-          // successful. Only trust such omissions when this project can
-          // corroborate the hash from an existing live/retained WfP manifest.
+          // successful (WC-4511 — CF claims a hash is cached when it is not).
+          // Only trust such omissions when this project can corroborate the
+          // hash from its own WfP upload history — i.e. a prior deployment on
+          // the same backend whose `asset_hashes` already includes it.
           const sessionBucketHashes = collectSessionBucketHashes(session.buckets);
           const omittedBufferedHashes = [...assetsByHash.keys()].filter(
             (hash) => !sessionBucketHashes.has(hash),
@@ -2172,6 +2209,18 @@ app.post('/:id/deploy', async (c) => {
             `[deploy] ${projectId}: asset upload complete, got completion JWT: ${completionJwt ? 'yes' : 'no'}`,
           );
           emit({ event: 'asset_upload_done' });
+
+          // Persist the asset manifest as soon as CF acknowledges the bytes.
+          // Writing this here — before worker upload, migrations, retention,
+          // and routing — means any later-step failure (migrations especially)
+          // still leaves a row the next deploy's corroboration can read. This
+          // is the minimal fix for the "first deploy fails at migration →
+          // project permanently deadlocked" class of incident.
+          await c
+            .get('db')
+            .update(deployments)
+            .set({ asset_hashes: JSON.stringify(assetManifest) })
+            .where(eq(deployments.id, deployment.id));
         }
 
         // 1. Upload worker to dispatch namespace via CF API
@@ -2668,15 +2717,6 @@ app.post('/:id/deploy', async (c) => {
               console.error(`[deploy] failed to clear ISR cache for evicted ${old.id}:`, e),
             );
           }
-        }
-
-        // Store asset manifest for future preflight dedup
-        if (assetCount > 0) {
-          await c
-            .get('db')
-            .update(deployments)
-            .set({ asset_hashes: JSON.stringify(assetManifest) })
-            .where(eq(deployments.id, deployment.id));
         }
 
         const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;

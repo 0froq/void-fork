@@ -1193,6 +1193,220 @@ describe('POST /projects/:id/deploy', () => {
     expect(workerUploadCalls).toBe(0);
   });
 
+  it('does not trust static/SPA asset_hashes rows when corroborating a WfP deploy', async () => {
+    // Cross-backend safety: a KV/R2-resident hash (bytes in platform
+    // STATIC_ASSETS) tells us nothing about whether CF's WfP asset cache
+    // holds those bytes. A project that switched from static → WfP must
+    // not corroborate against old SPA deployment rows that happen to
+    // share a hash value.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'cross-backend-no-trust');
+
+    const sharedContent = 'export const shared = "same-bytes";';
+    const sharedBytes = enc.encode(sharedContent);
+    const sharedHash = computeAssetHash(
+      sharedBytes.buffer.slice(
+        sharedBytes.byteOffset,
+        sharedBytes.byteOffset + sharedBytes.byteLength,
+      ),
+      'assets/shared.js',
+    );
+    // Seed a prior STATIC deployment row whose asset_hashes includes the
+    // shared hash. Its bytes live in KV/R2, not CF's WfP store.
+    await env.db.insert(deployments).values({
+      id: 'dpl_prior_spa',
+      project_id: project.id,
+      status: 'live',
+      retained: true,
+      manifest: JSON.stringify({ version: 3, type: 'spa', bindings: {} }),
+      asset_hashes: JSON.stringify({
+        '/assets/shared.js': { hash: sharedHash, size: sharedBytes.byteLength },
+      }),
+    });
+
+    // The new WfP deploy uploads the same asset content. CF's session
+    // omits the shared hash (claims it's cached) — forcing the guard to
+    // look at corroboration history. The SPA row must NOT count.
+    mockCfApi({
+      assetUploadSession: async (_url: string, init?: RequestInit) => {
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+        const manifest = body?.manifest ?? {};
+        const hashes = [
+          ...new Set(
+            Object.values(manifest)
+              .map((e: any) => e.hash as string)
+              .filter((h) => h !== sharedHash),
+          ),
+        ];
+        return cfSuccess({ jwt: 'test-asset-jwt', buckets: [hashes] });
+      },
+    });
+
+    const form = buildDeployForm({ assets: { 'assets/shared.js': sharedContent } });
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      step?: string;
+      message?: string;
+    }>;
+    const last = events.at(-1)!;
+    expect(last.event).toBe('error');
+    expect(last.step).toBe('asset_upload');
+    expect(last.message).toContain(sharedHash);
+    expect(last.message).toContain('cannot corroborate');
+  });
+
+  it('corroborates WfP deploys against legacy pre-`type` manifests', async () => {
+    // Before the DeployManifest `type` discriminator existed, worker-backed
+    // Void deploys landed manifests that had neither `type` nor `framework`.
+    // The static CLI path has always set `type` explicitly, so a manifest
+    // with no `type` is necessarily a legacy WfP row and must still
+    // corroborate — otherwise any project with pre-type retained history
+    // would fail the guard after upgrading the CLI.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'legacy-manifest-corroboration');
+
+    const content = 'export const legacy = "bytes";';
+    const bytes = enc.encode(content);
+    const legacyHash = computeAssetHash(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      'assets/legacy.js',
+    );
+    // Seed a pre-`type` WfP deployment row — manifest has bindings but
+    // neither `type` nor `framework`. asset_hashes covers the hash CF
+    // will claim cached on the retry.
+    await env.db.insert(deployments).values({
+      id: 'dpl_legacy_wfp',
+      project_id: project.id,
+      status: 'live',
+      retained: true,
+      manifest: JSON.stringify({ version: 3, bindings: {} }),
+      asset_hashes: JSON.stringify({
+        '/assets/legacy.js': { hash: legacyHash, size: bytes.byteLength },
+      }),
+    });
+
+    mockCfApi({
+      // CF omits `legacyHash` from buckets — claims it already has it.
+      // With the pre-type manifest classified as 'wfp', corroboration
+      // should pick up the seeded row and the deploy should proceed.
+      assetUploadSession: async (_url: string, init?: RequestInit) => {
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+        const manifest = body?.manifest ?? {};
+        const hashes = [
+          ...new Set(
+            Object.values(manifest)
+              .map((e: any) => e.hash as string)
+              .filter((h) => h !== legacyHash),
+          ),
+        ];
+        return cfSuccess({ jwt: 'test-asset-jwt', buckets: [hashes] });
+      },
+      assetUpload: () => cfSuccess({ jwt: 'test-completion-jwt' }),
+      uploadWorker: () => new Response('ok', { status: 200 }),
+    });
+
+    const form = buildDeployForm({ assets: { 'assets/legacy.js': content } });
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{ event: string }>;
+    expect(events.at(-1)?.event).toBe('done');
+  });
+
+  it('bounds the corroboration query so historical blobs do not accumulate in memory', async () => {
+    // `getDeploymentsWithAssetHashes` applies LIMIT ASSET_HASH_CORROBORATION_LIMIT
+    // ordered by created_at DESC, so rows older than the most recent N do
+    // not contribute to corroboration. Without the bound, an active
+    // CI/CD project would materialize every historical `asset_hashes`
+    // blob on every deploy — lesson 30 territory for the Worker isolate.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'corroboration-bound');
+
+    const content = 'export const x = "old";';
+    const bytes = enc.encode(content);
+    const oldestHash = computeAssetHash(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      'assets/old.js',
+    );
+    // Seed 101 historical WfP deploys. The oldest (row #1) carries
+    // `oldestHash`. Rows #2-#101 carry unique filler hashes. With the
+    // LIMIT-100 bound ordered newest-first, the oldest row is pushed
+    // out of the corroboration window.
+    const filler = Array.from({ length: 101 }, (_, i) => ({
+      id: `dpl_bound_${i.toString().padStart(3, '0')}`,
+      project_id: project.id,
+      status: 'live' as const,
+      retained: i === 0,
+      manifest: JSON.stringify({ version: 3, type: 'void', bindings: {} }),
+      asset_hashes: JSON.stringify({
+        [`/assets/fill-${i}.js`]: {
+          hash: i === 0 ? oldestHash : `fillerhash${i.toString().padStart(22, '0')}`,
+          size: bytes.byteLength,
+        },
+      }),
+      // Spread 101 days into the past so the rows do not count against
+      // the user's per-day deploy limit (they are seed history, not
+      // today's attempts).
+      created_at: new Date(Date.now() - (101 - i) * 86_400_000).toISOString(),
+    }));
+    await env.db.insert(deployments).values(filler);
+
+    mockCfApi({
+      // CF claims `oldestHash` is cached — a session-omission that would
+      // be corroborated by an unbounded scan but must NOT be corroborated
+      // by the bounded query (oldest row is past the LIMIT window).
+      assetUploadSession: async (_url: string, init?: RequestInit) => {
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+        const manifest = body?.manifest ?? {};
+        const hashes = [
+          ...new Set(
+            Object.values(manifest)
+              .map((e: any) => e.hash as string)
+              .filter((h) => h !== oldestHash),
+          ),
+        ];
+        return cfSuccess({ jwt: 'test-asset-jwt', buckets: [hashes] });
+      },
+    });
+
+    const form = buildDeployForm({ assets: { 'assets/old.js': content } });
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      step?: string;
+      message?: string;
+    }>;
+    const last = events.at(-1)!;
+    expect(last.event).toBe('error');
+    expect(last.step).toBe('asset_upload');
+    expect(last.message).toContain(oldestHash);
+    expect(last.message).toContain('cannot corroborate');
+  });
+
   describe('retry-path behavior', () => {
     beforeEach(() => {
       mockSetTimeout();
@@ -5939,6 +6153,73 @@ describe('asset_hashes storage', () => {
     expect(hashes['/index.html']).toBeDefined();
     expect(hashes['/index.html'].hash).toHaveLength(32);
     expect(hashes['/index.html'].size).toBeGreaterThan(0);
+  });
+
+  it('persists asset_hashes on a failed deployment when the failure is past asset upload', async () => {
+    // Repro of the recappi deadlock: first-ever deploy fails at migrations
+    // AFTER assets were accepted by CF. Pre-fix, the late `asset_hashes`
+    // write at the end of the pipeline never ran, so the next deploy had
+    // no corroboration source and the session-dedupe guard locked the
+    // project out permanently. With the fix, asset_hashes is persisted as
+    // soon as CF accepts the bytes, so the deployment row left behind by
+    // a migration failure is a valid corroboration baseline for retries.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'first-deploy-migrate-fail');
+    mockCfApi({ createD1: () => cfSuccess({ uuid: 'd1-recovery-uuid', name: 'fail-db' }) });
+    mockSetTimeout();
+
+    const originalDispatch = env.DISPATCH;
+    env.DISPATCH = {
+      get: () => ({
+        fetch: async (req: Request) => {
+          const url = new URL(req.url);
+          if (url.pathname === '/__void/ready') {
+            return Response.json({ ready: true });
+          }
+          return Response.json({ ok: false, error: 'simulated SQL error', migrations: [] });
+        },
+      }),
+    } as unknown as DispatchNamespace;
+
+    try {
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${user.jwt}` },
+          body: buildDeployForm({
+            manifest: {
+              version: 3,
+              bindings: { d1: ['DB'] },
+              migrations: { dialect: 'sqlite', pending: 1 },
+            },
+            assets: { 'index.html': '<h1>recappi</h1>' },
+          }),
+        }),
+        env,
+      );
+      expect(res.status).toBe(200);
+      const events = (await readAllEvents(res)) as Array<{ event: string; message?: string }>;
+      expect(events.find((e) => e.event === 'error')?.message).toMatch(/migration failed/);
+
+      const [dpl] = await env.db
+        .select({
+          status: deployments.status,
+          asset_hashes: deployments.asset_hashes,
+          retained: deployments.retained,
+        })
+        .from(deployments)
+        .where(eq(deployments.project_id, project.id));
+      expect(dpl?.status).toBe('failed');
+      // Retention claim happens after migrations succeed, so retained stays
+      // false — but asset_hashes MUST survive so the next deploy can
+      // corroborate against it.
+      expect(dpl?.retained).toBe(false);
+      expect(dpl?.asset_hashes).toBeTruthy();
+      const persisted = JSON.parse(dpl!.asset_hashes!);
+      expect(persisted['/index.html']).toBeDefined();
+    } finally {
+      env.DISPATCH = originalDispatch;
+    }
   });
 });
 
