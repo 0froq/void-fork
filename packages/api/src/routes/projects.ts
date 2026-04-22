@@ -1411,15 +1411,22 @@ const app = new Hono<ApiEnv>()
       },
     );
 
+    const responseText = await response.text();
     if (!response.ok) {
-      const detail = await response.text();
       console.error(
-        `[logs] query failed for project ${project.id} (${response.status}): ${detail.slice(0, 500)}`,
+        `[logs] query failed for project ${project.id} (${response.status}): ${responseText.slice(0, 500)}`,
       );
-      return c.json({ error: 'log query failed', status: response.status, detail }, 502);
+      return c.json(
+        { error: 'log query failed', status: response.status, detail: responseText.slice(0, 500) },
+        502,
+      );
     }
 
-    const result = (await response.json()) as {
+    // CF's Analytics Engine API normally returns JSON, but a 2xx response can
+    // carry an HTML error page during edge incidents (status pages, DDoS
+    // interstitials). Parse defensively so the handler returns a clean 502
+    // instead of throwing an uncaught SyntaxError that Hono maps to a 500.
+    let result: {
       data: Array<{
         outcome: string;
         logData: string;
@@ -1430,6 +1437,21 @@ const app = new Hono<ApiEnv>()
         ts: number;
       }>;
     };
+    try {
+      result = JSON.parse(responseText) as typeof result;
+    } catch {
+      console.error(
+        `[logs] non-JSON response for project ${project.id} (${response.status} ${response.headers.get('content-type') ?? 'unknown'}): ${responseText.slice(0, 500)}`,
+      );
+      return c.json(
+        {
+          error: 'log query returned non-JSON response',
+          status: response.status,
+          detail: responseText.slice(0, 500),
+        },
+        502,
+      );
+    }
 
     // Query newest-first to match the working admin path, then return entries
     // in chronological order for CLI readability.
