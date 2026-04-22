@@ -949,11 +949,16 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.devDependencies.void).toBeDefined();
       expect(pkg.devDependencies.typescript).toBeDefined();
       expect(pkg.devDependencies['@void/react']).toBeDefined();
+      expect(pkg.devDependencies['@rolldown/plugin-babel']).toBeDefined();
       expect(pkg.devDependencies['@types/react']).toBeDefined();
       expect(pkg.devDependencies['@types/react-dom']).toBeDefined();
+      expect(pkg.devDependencies['@vitejs/plugin-react']).toBeDefined();
+      expect(pkg.devDependencies['babel-plugin-react-compiler']).toBeDefined();
 
       const reactViteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
+      expect(reactViteConfig).toContain('from "@rolldown/plugin-babel"');
       expect(reactViteConfig).toContain('from "@void/react/plugin"');
+      expect(reactViteConfig).toContain('reactCompilerPreset()');
       expect(reactViteConfig).toContain('voidReact()');
       expect(readFileSync(join(root, 'pages', 'index.tsx'), 'utf-8')).toContain('Welcome to Void');
       expect(readFileSync(join(root, 'pages', 'index.server.ts'), 'utf-8')).toContain(
@@ -1207,12 +1212,17 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.scripts.dev).toBe('vite');
       expect(pkg.devDependencies.void).toBe('npm:@void-sdk/void@^0.2.3');
       expect(pkg.devDependencies['@void/react']).toBe('npm:@void-sdk/react@^0.2.3');
+      expect(pkg.devDependencies['@rolldown/plugin-babel']).toBe('^0.2.3');
+      expect(pkg.devDependencies['@vitejs/plugin-react']).toBe('^6.0.1');
+      expect(pkg.devDependencies['babel-plugin-react-compiler']).toBe('^1.0.0');
       expect(pkg.pnpm.onlyBuiltDependencies).toEqual(
         expect.arrayContaining(['better-sqlite3', 'esbuild', 'workerd']),
       );
 
       const reactViteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
+      expect(reactViteConfig).toContain('from "@rolldown/plugin-babel"');
       expect(reactViteConfig).toContain('from "@void/react/plugin"');
+      expect(reactViteConfig).toContain('reactCompilerPreset()');
       expect(reactViteConfig).toContain('voidReact()');
 
       expect(mockSelect.mock.calls[0]?.[0].message).toBe('Choose a Pages starter:');

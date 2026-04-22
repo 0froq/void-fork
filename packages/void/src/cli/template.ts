@@ -19,6 +19,12 @@ export const SCAFFOLD_BASE_DEV_DEPENDENCIES = {
   typescript: '^5.9.3',
 } as const;
 
+const REACT_SCAFFOLD_COMPILER_DEV_DEPENDENCIES = {
+  '@rolldown/plugin-babel': '^0.2.3',
+  '@vitejs/plugin-react': '^6.0.1',
+  'babel-plugin-react-compiler': '^1.0.0',
+} as const;
+
 export const SCAFFOLD_FRAMEWORK_OPTIONS = [
   { value: 'react', label: 'React', hint: 'TSX Pages starter with the React adapter.' },
   { value: 'vue', label: 'Vue', hint: 'Vue SFC Pages starter with the Vue adapter.' },
@@ -53,6 +59,7 @@ export const SCAFFOLD_FRAMEWORKS: Record<ScaffoldFramework, ScaffoldFrameworkCon
       'react-dom': '^19.2.4',
     },
     devDependencies: {
+      ...REACT_SCAFFOLD_COMPILER_DEV_DEPENDENCIES,
       '@types/react': '^19.2.14',
       '@types/react-dom': '^19.2.3',
     },
@@ -148,7 +155,7 @@ export function createPagesStarterTemplate(options: {
   const { framework, starterMode, voidPackageSpec, adapterPackageSpec } = options;
   const config = SCAFFOLD_FRAMEWORKS[framework];
   const files: Record<string, string> = {
-    'vite.config.ts': getViteConfig(config),
+    'vite.config.ts': getViteConfig(framework, config),
     [`pages/index.${config.pageExtension}`]: getIndexPage(framework, starterMode),
   };
 
@@ -179,7 +186,26 @@ export function createPagesStarterTemplate(options: {
   };
 }
 
-function getViteConfig(config: ScaffoldFrameworkConfig): string {
+function getViteConfig(framework: ScaffoldFramework, config: ScaffoldFrameworkConfig): string {
+  if (framework === 'react') {
+    return `import babel from "@rolldown/plugin-babel";
+import { reactCompilerPreset } from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+import { voidPlugin } from "void";
+import { ${config.adapterImport} } from "${config.adapterPlugin}";
+
+export default defineConfig({
+  plugins: [
+    babel({
+      presets: [reactCompilerPreset()],
+    }),
+    voidPlugin(),
+    ${config.adapterImport}(),
+  ],
+});
+`;
+  }
+
   return `import { defineConfig } from "vite";
 import { voidPlugin } from "void";
 import { ${config.adapterImport} } from "${config.adapterPlugin}";
