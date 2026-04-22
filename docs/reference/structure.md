@@ -157,6 +157,8 @@ Static assets served as-is at the root path. Files here are not processed by Vit
 
 Auto-generated directory (gitignored). Contains:
 
+Generate or refresh it with `void prepare`, or let `vite dev` / `vite build` populate it during normal app workflows.
+
 <FileTree :items="voidItems" default-expanded />
 
 ## Config Files

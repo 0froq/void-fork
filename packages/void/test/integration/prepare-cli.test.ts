@@ -1,0 +1,112 @@
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { afterEach, describe, expect, it } from 'vitest';
+
+const PACKAGE_ROOT = join(import.meta.dirname, '..', '..');
+const CLI_ENTRY = join(PACKAGE_ROOT, 'dist', 'cli', 'cli.mjs');
+const ENV_PUBLIC_DIST = join(PACKAGE_ROOT, 'dist', 'runtime', 'env-public.mjs');
+
+const roots: Array<string> = [];
+
+function createProject(options: { withSources?: boolean } = {}): string {
+  const root = mkdtempSync(join(tmpdir(), 'void-prepare-cli-'));
+  roots.push(root);
+
+  if (options.withSources) {
+    const envPublicUrl = pathToFileURL(ENV_PUBLIC_DIST).href;
+    mkdirSync(join(root, 'routes', 'api'), { recursive: true });
+    mkdirSync(join(root, 'db'), { recursive: true });
+    writeFileSync(
+      join(root, 'env.ts'),
+      `import { defineEnv, string } from "${envPublicUrl}";\n` +
+        'export default defineEnv({ API_KEY: string() });\n',
+    );
+    writeFileSync(
+      join(root, 'routes', 'api', 'hello.ts'),
+      'export const GET = { __validators: {}, __output: {} };\n',
+      { encoding: 'utf8' },
+    );
+    writeFileSync(join(root, 'db', 'schema.ts'), 'export const users = {};\n', {
+      encoding: 'utf8',
+    });
+  }
+
+  return root;
+}
+
+function runVoid(
+  root: string,
+  args: Array<string>,
+): { stdout: string; stderr: string; status: number } {
+  const res = spawnSync('node', [CLI_ENTRY, ...args], {
+    cwd: root,
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      HOME: root,
+      USERPROFILE: root,
+      NODE_OPTIONS: process.env.NODE_OPTIONS,
+    },
+  });
+  return {
+    stdout: res.stdout ?? '',
+    stderr: res.stderr ?? '',
+    status: res.status ?? 1,
+  };
+}
+
+afterEach(() => {
+  for (const root of roots.splice(0, roots.length)) {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+describe('void prepare (subprocess)', () => {
+  it('generates project-local .void files without starting Vite', () => {
+    const root = createProject({ withSources: true });
+    const { stdout, status } = runVoid(root, ['prepare']);
+
+    expect(status).toBe(0);
+    expect(stdout).toContain('Project codegen is ready');
+
+    const outDir = join(root, '.void');
+    const routesDts = join(outDir, 'routes.d.ts');
+    const dbDts = join(outDir, 'db.d.ts');
+    const envDts = join(outDir, 'env.d.ts');
+    const tsconfig = join(outDir, 'tsconfig.json');
+
+    expect(existsSync(routesDts)).toBe(true);
+    expect(existsSync(dbDts)).toBe(true);
+    expect(existsSync(envDts)).toBe(true);
+    expect(existsSync(tsconfig)).toBe(true);
+
+    expect(readFileSync(routesDts, 'utf8')).toContain('typeof import("../routes/api/hello")');
+    expect(readFileSync(dbDts, 'utf8')).toContain('import type * as schema from "@schema"');
+    expect(readFileSync(envDts, 'utf8')).toContain('declare module "void/env"');
+
+    const parsedTsconfig = JSON.parse(readFileSync(tsconfig, 'utf8')) as {
+      files: Array<string>;
+      compilerOptions?: { paths?: Record<string, Array<string>> };
+    };
+    expect(parsedTsconfig.files).toEqual(
+      expect.arrayContaining(['routes.d.ts', 'db.d.ts', 'env.d.ts']),
+    );
+    expect(parsedTsconfig.compilerOptions?.paths?.['void/routes']).toEqual(['./routes.d.ts']);
+    expect(parsedTsconfig.compilerOptions?.paths?.['void/db']).toEqual(['./db.d.ts']);
+  });
+
+  it('still prepares tsconfig when no generated source inputs exist', () => {
+    const root = createProject();
+    const { stdout, status } = runVoid(root, ['prepare']);
+
+    expect(status).toBe(0);
+    expect(stdout).toContain('.void/tsconfig.json');
+    expect(existsSync(join(root, '.void', 'tsconfig.json'))).toBe(true);
+    expect(existsSync(join(root, '.void', 'routes.d.ts'))).toBe(false);
+    expect(existsSync(join(root, '.void', 'db.d.ts'))).toBe(false);
+    expect(existsSync(join(root, '.void', 'env.d.ts'))).toBe(false);
+  });
+});

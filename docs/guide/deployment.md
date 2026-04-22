@@ -51,6 +51,10 @@ The CLI resolves which project to deploy to in this order:
 
 If none match, the CLI prompts interactively.
 
+### CI preparation
+
+If your CI pipeline runs typechecking or other static analysis before deploy, run `void prepare` after install to generate the `.void/` artifacts without booting Vite.
+
 ### Environment variables
 
 | Variable       | Purpose                          |

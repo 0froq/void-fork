@@ -56,6 +56,7 @@ export default defineConfig({
 ## Core Surfaces
 
 - `voidPlugin()` — Vite integration, routing, pages mode, codegen, migrations, packaging
+- `void prepare` — generate `.void` artifacts for CI, editors, and fresh clones
 - `void auth login` — platform auth
 - `void deploy` — build and deploy
 - `void db *` — local DB and migration commands

@@ -163,4 +163,4 @@ Extend the generated tsconfig in your project:
 }
 ```
 
-The `.void/tsconfig.json` uses `"files"` to include `routes.d.ts` and `db.d.ts`, which TypeScript inherits automatically. Run `vite dev` or `vite build` at least once to generate them.
+The `.void/tsconfig.json` uses `"files"` to include `routes.d.ts` and `db.d.ts`, which TypeScript inherits automatically. Run `void prepare` in CI or after a fresh clone, or let `vite dev` / `vite build` generate them during normal app workflows.

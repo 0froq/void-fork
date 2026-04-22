@@ -12,6 +12,7 @@ import { domainSubcommands, parseDomainArgs } from './domain-args';
 import { envSubcommands, parseEnvArgs } from './env-args';
 import { genSubcommands, parseGenArgs } from './gen-args';
 import { categoryTitle, helpLine, pc, sectionTitle } from './output';
+import { parsePrepareArgs } from './prepare-args';
 import { projectSubcommands, parseProjectArgs } from './project-args';
 import { secretSubcommands, parseSecretArgs } from './secret-args';
 import type { SubcommandDef, SubcommandResult } from './subcommand-prompt';
@@ -83,6 +84,7 @@ function printHelp() {
       helpLine('  --force', 'Overwrite .env.example without confirmation'),
       '',
       categoryTitle('codegen'),
+      helpLine('void prepare', 'Generate .void artifacts without starting Vite'),
       helpLine('void gen model <name> [cols...]', 'Generate migration + CRUD routes + db types'),
       helpLine('void gen migration <name>', 'Generate an empty migration file'),
       helpLine('void gen route <path> [--methods]', 'Generate a route with handler exports'),
@@ -212,6 +214,22 @@ if (command === 'deploy') {
   runSubcommandGroup('gen', genSubcommands, parseGenArgs, (root, parsed) =>
     import('./gen').then(({ runGenCommand }) => runGenCommand(root, parsed)),
   );
+} else if (command === 'prepare') {
+  const root = process.cwd();
+  let prepareArgs;
+  try {
+    prepareArgs = parsePrepareArgs(args.slice(1));
+  } catch (err) {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+
+  import('./prepare').then(({ runPrepareCommand }) => {
+    runPrepareCommand(root, prepareArgs).catch((err) => {
+      log.error(err.message ?? err);
+      process.exit(1);
+    });
+  });
 } else if (command === 'init') {
   const root = process.cwd();
   import('./init').then(({ runInitCommand, parseInitArgs }) => {
@@ -272,6 +290,10 @@ if (command === 'deploy') {
       name: 'gen',
       hint: 'model | migration | route | middleware | ssr | cron | queue',
       description: 'Scaffold routes, models, and more',
+    },
+    {
+      name: 'prepare',
+      description: 'Generate .void artifacts without starting Vite',
     },
     { name: 'mcp', description: 'Start MCP server (for AI agents)' },
     { name: 'help', description: 'Show help message' },
@@ -337,6 +359,11 @@ if (command === 'deploy') {
         return runSubcommandGroup('gen', genSubcommands, parseGenArgs, (r, p) =>
           import('./gen').then(({ runGenCommand }) => runGenCommand(r, p)),
         );
+      case 'prepare': {
+        const { runPrepareCommand } = await import('./prepare');
+        await runPrepareCommand(root, parsePrepareArgs([]));
+        return;
+      }
       case 'help':
         printHelp();
         return;

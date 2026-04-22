@@ -13,6 +13,7 @@ Use this page as a command reference. If you are setting up a project for the fi
 | Command                           | Purpose                                             |
 | --------------------------------- | --------------------------------------------------- |
 | `void deploy`                     | Build and deploy to Void                            |
+| `void prepare`                    | Generate `.void` artifacts without starting Vite    |
 | `void gen model <name> [cols...]` | Scaffold migration + CRUD routes                    |
 | `void gen route <path>`           | Create an API route                                 |
 | `void db status`                  | Show local/remote migration status                  |
@@ -21,7 +22,7 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void db studio`                  | Open Drizzle Studio for local database              |
 | `void secret put <name=value>`    | Set a production secret                             |
 | `void secret sync .env.local`     | Bulk upload secrets from dotenv file                |
-| `void env check [--remote]`       | Validate env.ts schema                |
+| `void env check [--remote]`       | Validate env.ts schema                              |
 | `void env types`                  | Regenerate .void/env.d.ts from env.ts               |
 | `void env example`                | Refresh the void-managed block in .env.example      |
 | `void auth login`                 | Authenticate with Void                              |
@@ -76,6 +77,16 @@ Use flags to run individual steps without prompts:
 | `--github`   | Only create GitHub Actions workflow               |
 
 Flags can be combined. When any flag is provided, only the specified steps run and interactive prompts are skipped.
+
+### `void prepare`
+
+```
+void prepare
+```
+
+Generates the project-local `.void/` artifacts used by TypeScript and runtime codegen without starting `vite dev` or running a full `vite build`.
+
+This is the intended command for CI, fresh clones, editor bootstrap, and any workflow that needs `routes.d.ts`, `db.d.ts`, `queues.d.ts`, `env.d.ts`, and `.void/tsconfig.json` in place before typechecking.
 
 ## Auth
 

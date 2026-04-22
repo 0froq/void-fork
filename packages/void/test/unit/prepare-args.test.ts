@@ -1,0 +1,14 @@
+import { describe, expect, it } from 'vitest';
+import { parsePrepareArgs } from '../../src/cli/prepare-args';
+
+describe('parsePrepareArgs', () => {
+  it('accepts no arguments', () => {
+    expect(parsePrepareArgs([])).toEqual({});
+  });
+
+  it('rejects unexpected positional arguments', () => {
+    expect(() => parsePrepareArgs(['extra'])).toThrow(
+      'Error: Unexpected argument for prepare: extra',
+    );
+  });
+});
