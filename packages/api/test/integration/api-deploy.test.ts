@@ -75,6 +75,50 @@ function parseDeployStream(text: string): Array<unknown> {
     .map((line) => JSON.parse(line));
 }
 
+type DeployEvent = { event: string } & Record<string, unknown>;
+type DoneEvent = DeployEvent & {
+  deployment: string;
+  url?: string;
+  urls?: Array<string>;
+  assets?: number;
+  workers?: number;
+  migrations?: number;
+};
+type ErrorEvent = DeployEvent & { message?: string; step?: string };
+type MigrationStartEvent = DeployEvent & { pending: number };
+type MigrationEvent = DeployEvent & { name: string };
+type AssetUploadEvent = DeployEvent & { total: number; new: number; cached: number };
+
+function isDeployEvent(value: unknown): value is DeployEvent {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'event' in value &&
+    typeof (value as { event?: unknown }).event === 'string'
+  );
+}
+
+function requireEvent<T extends DeployEvent>(events: Array<unknown>, name: string): T {
+  const event = events.find(
+    (candidate): candidate is T => isDeployEvent(candidate) && candidate.event === name,
+  );
+  expect(event).toBeDefined();
+  return event!;
+}
+
+function manifestHashes(manifest: unknown): Array<string> {
+  if (typeof manifest !== 'object' || manifest === null) {
+    return [];
+  }
+  return Object.values(manifest as Record<string, unknown>).flatMap((entry) => {
+    if (typeof entry === 'object' && entry !== null && 'hash' in entry) {
+      const hash = (entry as { hash?: unknown }).hash;
+      return typeof hash === 'string' ? [hash] : [];
+    }
+    return [];
+  });
+}
+
 // Round 7 fix: validator regression tests used to `toEqual` the full error
 // string, so any wording tweak would cascade through dozens of tests. Assert
 // only the shape-validator prefix + a stable fragment (field name / enum key)
@@ -166,7 +210,7 @@ describe('POST /projects/:id/deploy', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const done = events.find((e: any) => e.event === 'done') as any;
+    const done = requireEvent<DoneEvent>(events, 'done');
     expect(done.deployment).toMatch(/^dpl_/);
     expect(done.url).toBe('https://minimal-app.void.app');
 
@@ -497,13 +541,13 @@ describe('POST /projects/:id/deploy', () => {
       expect(res.status).toBe(200);
       const events = await readAllEvents(res);
 
-      const migrationStart = events.find((e: any) => e.event === 'migration_start') as any;
+      const migrationStart = requireEvent<MigrationStartEvent>(events, 'migration_start');
       expect(migrationStart.pending).toBe(1);
 
-      const migration = events.find((e: any) => e.event === 'migration') as any;
+      const migration = requireEvent<MigrationEvent>(events, 'migration');
       expect(migration.name).toBe('001_create_table.sql');
 
-      const done = events.find((e: any) => e.event === 'done') as any;
+      const done = requireEvent<DoneEvent>(events, 'done');
       expect(done.migrations).toBe(1);
     } finally {
       env.DISPATCH = originalDispatch;
@@ -543,7 +587,7 @@ describe('POST /projects/:id/deploy', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const done = events.find((e: any) => e.event === 'done') as any;
+    const done = requireEvent<DoneEvent>(events, 'done');
     expect(done.url).toBe('https://deploy.example.com');
     expect(done.urls).toContain('https://deploy.example.com');
     expect(done.urls).toContain('https://domain-deploy.void.app');
@@ -588,11 +632,8 @@ describe('POST /projects/:id/deploy', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toBe('deploy limit exceeded');
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message).toBe('deploy limit exceeded');
   });
 
   it('allows deploy when under plan limit', async () => {
@@ -799,7 +840,7 @@ describe('POST /projects/:id/deploy', () => {
     expect(res.status).toBe(200);
 
     const events = await readAllEvents(res);
-    const error = events.find((event: any) => event.event === 'error') as any;
+    const error = requireEvent<ErrorEvent>(events, 'error');
     expect(error.message).toContain(
       'BETTER_AUTH_SECRET must be configured via project secrets, not manifest.vars',
     );
@@ -822,7 +863,7 @@ describe('POST /projects/:id/deploy', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const error = events.find((e: any) => e.event === 'error') as any;
+    const error = requireEvent<ErrorEvent>(events, 'error');
     expect(error.message).toContain('worker upload failed');
     expect(error.step).toBe('worker_upload');
 
@@ -1087,7 +1128,7 @@ describe('POST /projects/:id/deploy', () => {
 
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const eventNames = events.map((e: any) => e.event);
+    const eventNames = events.filter(isDeployEvent).map((event) => event.event);
 
     expect(eventNames[0]).toBe('start');
     expect(eventNames[eventNames.length - 1]).toBe('done');
@@ -1233,13 +1274,7 @@ describe('POST /projects/:id/deploy', () => {
       assetUploadSession: async (_url: string, init?: RequestInit) => {
         const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
         const manifest = body?.manifest ?? {};
-        const hashes = [
-          ...new Set(
-            Object.values(manifest)
-              .map((e: any) => e.hash as string)
-              .filter((h) => h !== sharedHash),
-          ),
-        ];
+        const hashes = [...new Set(manifestHashes(manifest).filter((hash) => hash !== sharedHash))];
         return cfSuccess({ jwt: 'test-asset-jwt', buckets: [hashes] });
       },
     });
@@ -1304,13 +1339,7 @@ describe('POST /projects/:id/deploy', () => {
       assetUploadSession: async (_url: string, init?: RequestInit) => {
         const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
         const manifest = body?.manifest ?? {};
-        const hashes = [
-          ...new Set(
-            Object.values(manifest)
-              .map((e: any) => e.hash as string)
-              .filter((h) => h !== legacyHash),
-          ),
-        ];
+        const hashes = [...new Set(manifestHashes(manifest).filter((hash) => hash !== legacyHash))];
         return cfSuccess({ jwt: 'test-asset-jwt', buckets: [hashes] });
       },
       assetUpload: () => cfSuccess({ jwt: 'test-completion-jwt' }),
@@ -1376,13 +1405,7 @@ describe('POST /projects/:id/deploy', () => {
       assetUploadSession: async (_url: string, init?: RequestInit) => {
         const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
         const manifest = body?.manifest ?? {};
-        const hashes = [
-          ...new Set(
-            Object.values(manifest)
-              .map((e: any) => e.hash as string)
-              .filter((h) => h !== oldestHash),
-          ),
-        ];
+        const hashes = [...new Set(manifestHashes(manifest).filter((hash) => hash !== oldestHash))];
         return cfSuccess({ jwt: 'test-asset-jwt', buckets: [hashes] });
       },
     });
@@ -2306,7 +2329,7 @@ describe('POST /projects/:id/deploy (static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const done = events.find((e: any) => e.event === 'done') as any;
+    const done = requireEvent<DoneEvent>(events, 'done');
     expect(done.deployment).toMatch(/^dpl_/);
     expect(done.url).toBe('https://spa-site.void.app');
     expect(done.assets).toBe(2);
@@ -2388,13 +2411,13 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const done = events.find((e: any) => e.event === 'done') as any;
+    const done = requireEvent<DoneEvent>(events, 'done');
     expect(done).toBeDefined();
     expect(done.deployment).toMatch(/^dpl_/);
     expect(done.assets).toBe(2);
     expect(done.workers).toBe(0);
 
-    const assetUploadEvent = events.find((e: any) => e.event === 'asset_upload') as any;
+    const assetUploadEvent = requireEvent<AssetUploadEvent>(events, 'asset_upload');
     expect(assetUploadEvent).toEqual({ event: 'asset_upload', total: 2, new: 2, cached: 0 });
 
     const htmlHash = computeAssetHash(new TextEncoder().encode(htmlBody).buffer, '/index.html');
@@ -2448,7 +2471,7 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const done = events.find((e: any) => e.event === 'done') as any;
+    const done = requireEvent<DoneEvent>(events, 'done');
     expect(done.assets).toBe(2);
 
     const htmlHash = computeAssetHash(new TextEncoder().encode(htmlBody).buffer, '/index.html');
@@ -2495,11 +2518,8 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toMatch(/Unsupported deploy manifest version/);
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message).toMatch(/Unsupported deploy manifest version/);
 
     // The rejection must fire before any `asset:*` part is uploaded, so
     // STATIC_ASSETS KV must contain nothing under this project's prefix.
@@ -2530,7 +2550,7 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const assetUploadEvent = events.find((e: any) => e.event === 'asset_upload') as any;
+    const assetUploadEvent = requireEvent<AssetUploadEvent>(events, 'asset_upload');
     // Two paths, one unique content hash — only one upload counts as "new".
     expect(assetUploadEvent).toEqual({ event: 'asset_upload', total: 2, new: 1, cached: 1 });
 
@@ -2565,11 +2585,8 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toMatch(/manifest part must precede/);
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message).toMatch(/manifest part must precede/);
 
     const listed = await env.STATIC_ASSETS.list({ prefix: `assets/${project.id}/` });
     expect(listed.keys).toEqual([]);
@@ -2599,11 +2616,8 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toMatch(/worker parts are not allowed/);
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message).toMatch(/worker parts are not allowed/);
 
     // Orphaned streamed assets must be swept — nothing should remain under the
     // project prefix because no retained deployment references these hashes.
@@ -2736,11 +2750,8 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toBe('deploy limit exceeded');
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message).toBe('deploy limit exceeded');
 
     // Nothing was written under this project's asset prefix. If the check
     // still ran after `collectAndUploadStaticAsset`, the new hash would be
@@ -2785,11 +2796,8 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toBe('deploy limit exceeded');
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message).toBe('deploy limit exceeded');
   });
 
   it('protects the current live-but-not-retained deployment from cleanup sweep (R18 F3)', async () => {
@@ -2871,11 +2879,8 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toMatch(/duplicate manifest part/);
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message).toMatch(/duplicate manifest part/);
 
     // The live deployment's hash must still be readable — it is referenced
     // by the current active_deployment_id and therefore protected.
@@ -2945,11 +2950,8 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toMatch(/duplicate manifest part/);
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message).toMatch(/duplicate manifest part/);
 
     const kept = await env.STATIC_ASSETS.get(`assets/${project.id}/${hash}`, 'arrayBuffer');
     expect(kept).not.toBeNull();
@@ -3017,7 +3019,7 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    const errEvent = requireEvent<ErrorEvent>(events, 'error');
     expect(errEvent?.message).toMatch(/asset hash mismatch/);
 
     const kept = await env.STATIC_ASSETS.get(`assets/${project.id}/${hash}`, 'arrayBuffer');
@@ -3075,7 +3077,7 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    const errEvent = requireEvent<ErrorEvent>(events, 'error');
     expect(errEvent?.message).toMatch(/asset hash mismatch/);
 
     const kept = await env.STATIC_ASSETS.get(`assets/${project.id}/${hash}`, 'arrayBuffer');
@@ -3129,7 +3131,7 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    const errEvent = requireEvent<ErrorEvent>(events, 'error');
     expect(errEvent).toBeDefined();
     expect(errEvent.message).toMatch(/asset hash mismatch/);
 
@@ -3210,12 +3212,12 @@ describe('POST /projects/:id/deploy (streaming static direct-to-R2)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const done = events.find((e: any) => e.event === 'done') as any;
+    const done = requireEvent<DoneEvent>(events, 'done');
     expect(done).toBeDefined();
     expect(done.assets).toBe(3);
     expect(done.workers).toBe(0);
 
-    const assetUploadEvent = events.find((e: any) => e.event === 'asset_upload') as any;
+    const assetUploadEvent = requireEvent<AssetUploadEvent>(events, 'asset_upload');
     expect(assetUploadEvent).toEqual({ event: 'asset_upload', total: 3, new: 3, cached: 0 });
 
     // Both large assets landed in R2 under their content-addressed keys.
@@ -3304,7 +3306,7 @@ describe('POST /projects/:id/deploy (streaming static direct-to-R2)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    const errEvent = requireEvent<ErrorEvent>(events, 'error');
     expect(errEvent).toBeDefined();
     expect(errEvent.message).toMatch(/asset hash mismatch|declared hash/);
 
@@ -3361,7 +3363,7 @@ describe('POST /projects/:id/deploy (streaming static direct-to-R2)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    const errEvent = requireEvent<ErrorEvent>(events, 'error');
     expect(errEvent).toBeDefined();
     // Deploy must surface an error (exact message is best-effort — a
     // short-body TypeError from FixedLengthStream propagates through the
@@ -3372,7 +3374,7 @@ describe('POST /projects/:id/deploy (streaming static direct-to-R2)', () => {
     // counter-case). The LOAD-BEARING invariant is that no deployment
     // row and no stranded R2 blob survive — the cleanup paths fire
     // regardless of which error channel surfaced the failure.
-    expect(errEvent.message.length).toBeGreaterThan(0);
+    expect((errEvent.message ?? '').length).toBeGreaterThan(0);
 
     // No R2 blob must have survived under the declared hash.
     const stranded = await env.STATIC_ASSETS_R2.head(`assets/${project.id}/${bogusHash}`);
@@ -3418,7 +3420,7 @@ describe('POST /projects/:id/deploy (streaming static direct-to-R2)', () => {
     );
     expect(firstRes.status).toBe(200);
     const firstEvents = await readAllEvents(firstRes);
-    const firstDone = firstEvents.find((e: any) => e.event === 'done') as any;
+    const firstDone = requireEvent<DoneEvent>(firstEvents, 'done');
     expect(firstDone).toBeDefined();
     const firstBlob = await env.STATIC_ASSETS_R2.head(`assets/${project.id}/${hash}`);
     expect(firstBlob).not.toBeNull();
@@ -3437,7 +3439,7 @@ describe('POST /projects/:id/deploy (streaming static direct-to-R2)', () => {
     );
     expect(secondRes.status).toBe(200);
     const secondEvents = await readAllEvents(secondRes);
-    const secondDone = secondEvents.find((e: any) => e.event === 'done') as any;
+    const secondDone = requireEvent<DoneEvent>(secondEvents, 'done');
     expect(secondDone).toBeDefined();
 
     // The R2 object is unchanged — same etag, same size.
@@ -3522,7 +3524,7 @@ describe('POST /projects/:id/deploy (streaming static direct-to-R2)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    const errEvent = requireEvent<ErrorEvent>(events, 'error');
     expect(errEvent).toBeDefined();
     expect(errEvent.message).toMatch(/hash mismatch|declared hash/);
 
@@ -3609,7 +3611,7 @@ describe('POST /projects/:id/deploy (streaming static direct-to-R2)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    const errEvent = requireEvent<ErrorEvent>(events, 'error');
     expect(errEvent).toBeDefined();
     expect(errEvent.message).toMatch(/hash mismatch|declared hash/);
 
@@ -3677,7 +3679,7 @@ describe('POST /projects/:id/deploy (streaming static direct-to-R2)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    const errEvent = requireEvent<ErrorEvent>(events, 'error');
     expect(errEvent).toBeDefined();
     // Load-bearing: R2 put failures used to get rewritten as
     // `MultipartParseError('body size X does not match declared Y')`
@@ -3753,7 +3755,7 @@ describe('POST /projects/:id/deploy (streaming static direct-to-R2)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errEvent = events.find((e: any) => e.event === 'error') as any;
+    const errEvent = requireEvent<ErrorEvent>(events, 'error');
     expect(errEvent).toBeDefined();
     // LOAD-BEARING: the client must NOT see a "body size does not match
     // declared" message when the real failure is on the server storage
@@ -3996,13 +3998,8 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toBe(
-      'multipart parse error: end of stream while reading part body',
-    );
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message).toBe('multipart parse error: end of stream while reading part body');
   });
 
   it('returns 400 when a part is missing Content-Disposition', async () => {
@@ -4027,11 +4024,8 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toBe('multipart parse error: part missing Content-Disposition');
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message).toBe('multipart parse error: part missing Content-Disposition');
   });
 
   it('returns 400 when the request contains a duplicate manifest part', async () => {
@@ -4059,11 +4053,8 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toBe('duplicate manifest part');
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message).toBe('duplicate manifest part');
   });
 
   // ---- Manifest / ordering ----
@@ -4090,11 +4081,8 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     // user sees a clear "invalid manifest JSON: ..." message, not a generic 500.
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message ?? '').toMatch(/^invalid manifest JSON:/);
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message ?? '').toMatch(/^invalid manifest JSON:/);
 
     // Manifest arrives before any asset part, so nothing should have streamed
     // into KV — but assert it anyway to guard against ordering regressions.
@@ -4886,11 +4874,8 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message ?? '').toContain('manifest part exceeds');
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message ?? '').toContain('manifest part exceeds');
 
     // No deployment row should exist — the parse loop aborted before any
     // createDeployment call.
@@ -4925,11 +4910,8 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message ?? '').toMatch(/worker:index\.js.* exceeds/);
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message ?? '').toMatch(/worker:index\.js.* exceeds/);
 
     const dpls = await env.db
       .select({ id: deployments.id })
@@ -5135,9 +5117,9 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     // rejected AS invalid shape; it may still fail for unrelated reasons.
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
+    const errorEvent = events.find(
+      (event): event is ErrorEvent => isDeployEvent(event) && event.event === 'error',
+    );
     if (errorEvent) {
       expect(errorEvent.message ?? '').not.toMatch(/^invalid manifest shape:/);
     }
@@ -5165,11 +5147,8 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toBe('manifest part is required');
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message).toBe('manifest part is required');
 
     // No deployment row, no worker script, no KV residue.
     const dpls = await env.db
@@ -5200,11 +5179,8 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     );
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toBe('manifest part must precede worker and asset parts');
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
+    expect(errorEvent.message).toBe('manifest part must precede worker and asset parts');
   });
 
   // ---- KV / R2 streaming-put failures ----
@@ -5261,10 +5237,7 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     // NDJSON stream; the HTTP status is 200 (headers flushed before parse).
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
 
     // 1 real put for the first asset + (MAX_RETRIES + 1) failing puts for the
     // second asset = 1 + 4 = 5. This pins the retry loop contract so a
@@ -5327,10 +5300,7 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     // NDJSON stream; the HTTP status is 200 (headers flushed before parse).
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
 
     // Retry contract: MAX_RETRIES + 1 = 4 attempts for the single large asset.
     expect(r2PutCount).toBe(4);
@@ -5575,10 +5545,7 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     // NDJSON stream; the HTTP status is 200 (headers flushed before parse).
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const errorEvent = events.find((e: any) => e.event === 'error') as
-      | { event: string; message?: string }
-      | undefined;
-    expect(errorEvent).toBeDefined();
+    const errorEvent = requireEvent<ErrorEvent>(events, 'error');
 
     // The outer try/finally guards post-parse work — the asset streamed into
     // KV during parsing must be swept before the response is returned.
@@ -6143,7 +6110,7 @@ describe('asset_hashes storage', () => {
 
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const data = events.find((e: any) => e.event === 'done') as any;
+    const data = requireEvent<DoneEvent>(events, 'done');
 
     const [row] = await env.db
       .select({ asset_hashes: deployments.asset_hashes })
@@ -6591,7 +6558,9 @@ describe('POST /projects/:id/deploy/preflight', () => {
       );
       expect(staticRes.status).toBe(200);
       const staticEvents = await readAllEvents(staticRes);
-      const staticDone = staticEvents.find((e: any) => e.event === 'done');
+      const staticDone = staticEvents.find(
+        (event): event is DoneEvent => isDeployEvent(event) && event.event === 'done',
+      );
       expect(staticDone).toBeDefined();
 
       // 2. Now convert to a WfP deploy with preflight
@@ -6638,10 +6607,14 @@ describe('POST /projects/:id/deploy/preflight', () => {
       );
       expect(deployRes.status).toBe(200);
       const events = await readAllEvents(deployRes);
-      const done = events.find((e: any) => e.event === 'done');
+      const done = events.find(
+        (event): event is DoneEvent => isDeployEvent(event) && event.event === 'done',
+      );
       expect(done).toBeDefined();
       // Should not have errored with AssetHashMissError
-      const error = events.find((e: any) => e.event === 'error');
+      const error = events.find(
+        (event): event is ErrorEvent => isDeployEvent(event) && event.event === 'error',
+      );
       expect(error).toBeUndefined();
     });
   });

@@ -82,8 +82,10 @@ const DEFAULT_OWNERSHIP: Record<string, Array<string>> = {
   user_1: ['proj_1', 'proj_42', 'proj_99', 'p'],
 };
 
+type ApiFetchHandler = (input: string | Request, init?: RequestInit) => Promise<Response>;
+
 function createMockApi(
-  handler?: (...args: Array<any>) => Promise<Response>,
+  handler?: ApiFetchHandler,
   ownership: Record<string, Array<string>> = DEFAULT_OWNERSHIP,
 ) {
   // Fetcher.fetch() is called as (url: string, init: RequestInit), not (Request).

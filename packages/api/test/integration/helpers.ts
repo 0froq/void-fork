@@ -599,7 +599,17 @@ const defaultMocks: CfApiMocks = {
     try {
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
       if (body?.manifest) {
-        const hashes = [...new Set(Object.values(body.manifest).map((e: any) => e.hash))];
+        const hashes = [
+          ...new Set(
+            Object.values(body.manifest as Record<string, unknown>).flatMap((entry) => {
+              if (typeof entry === 'object' && entry !== null && 'hash' in entry) {
+                const hash = (entry as { hash?: unknown }).hash;
+                return typeof hash === 'string' ? [hash] : [];
+              }
+              return [];
+            }),
+          ),
+        ];
         return cfSuccess({ jwt: 'test-asset-jwt', buckets: [hashes] });
       }
     } catch {

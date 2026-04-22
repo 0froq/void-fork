@@ -14,6 +14,13 @@ import {
 
 let env: TestEnv;
 
+type MeResponse = {
+  login: string;
+  plan: string;
+  provider: string;
+  limits: { requestsPerMonth: number };
+};
+
 beforeAll(async () => {
   env = await setupEnv();
 });
@@ -117,7 +124,7 @@ describe('GET /me', () => {
       env,
     );
     expect(res.status).toBe(200);
-    const body: any = await res.json();
+    const body = (await res.json()) as MeResponse;
     expect(body.login).toBe('usage-limited');
   });
 
@@ -131,7 +138,7 @@ describe('GET /me', () => {
       env,
     );
     expect(res.status).toBe(200);
-    const body: any = await res.json();
+    const body = (await res.json()) as MeResponse;
     expect(body.login).toBe('alice');
     expect(body.plan).toBe('free');
     expect(body.provider).toBe('github');

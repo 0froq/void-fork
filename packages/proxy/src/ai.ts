@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { asRecord, asString } from './body';
 import type { ProxyEnv } from './types';
 
 const GATEWAY_ID = 'void';
@@ -8,18 +9,19 @@ const ai = new Hono<ProxyEnv>();
 ai.post('/run', async (c) => {
   const body = c.get('body');
   const projectId = c.get('projectId');
+  const model = asString(body.model);
 
-  if (!body.model) {
+  if (!model) {
     return c.json({ error: 'model required' }, 400);
   }
 
   const options = {
-    ...(body.options ?? {}),
+    ...asRecord(body.options),
     gateway: { id: GATEWAY_ID, metadata: { projectId } },
   };
 
   try {
-    const result = await (c.env.AI as any).run(body.model, body.inputs, options);
+    const result = await c.env.AI.run(model, body.inputs, options);
 
     if (result instanceof ReadableStream) {
       return new Response(result, {
@@ -40,20 +42,22 @@ ai.post('/run', async (c) => {
 ai.post('/gateway', async (c) => {
   const body = c.get('body');
   const projectId = c.get('projectId');
+  const modelPath = asString(body.model);
+  const providerKey = asString(body.providerKey);
 
-  if (!body.model) {
+  if (!modelPath) {
     return c.json({ error: 'model required' }, 400);
   }
-  if (!body.providerKey) {
+  if (!providerKey) {
     return c.json({ error: 'providerKey required' }, 400);
   }
 
   // Parse "provider/model" format (e.g. "openai/gpt-4o")
-  const slashIdx = (body.model as string).indexOf('/');
-  const provider = (body.model as string).slice(0, slashIdx);
-  const model = (body.model as string).slice(slashIdx + 1);
+  const slashIdx = modelPath.indexOf('/');
+  const provider = modelPath.slice(0, slashIdx);
+  const model = modelPath.slice(slashIdx + 1);
 
-  const { stream, ...rest } = (body.inputs ?? {}) as Record<string, unknown>;
+  const { stream, ...rest } = asRecord(body.inputs);
   const query: Record<string, unknown> = {
     model,
     ...rest,
@@ -61,12 +65,12 @@ ai.post('/gateway', async (c) => {
   };
 
   try {
-    const gateway = (c.env.AI as any).gateway(GATEWAY_ID);
+    const gateway = c.env.AI.gateway(GATEWAY_ID);
     const response: Response = await gateway.run({
       provider,
       endpoint: 'chat/completions',
       headers: {
-        authorization: `Bearer ${body.providerKey}`,
+        authorization: `Bearer ${providerKey}`,
         'cf-aig-metadata-projectId': projectId,
       },
       query,
@@ -106,7 +110,7 @@ ai.post('/gateway', async (c) => {
 ai.post('/models', async (c) => {
   const body = c.get('body');
   try {
-    const result = await (c.env.AI as any).models(body.inputs);
+    const result = await c.env.AI.models(body.inputs);
     return c.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -118,7 +122,7 @@ ai.post('/models', async (c) => {
 ai.post('/toMarkdown', async (c) => {
   const body = c.get('body');
   try {
-    const result = await (c.env.AI as any).toMarkdown(body.inputs, body.options);
+    const result = await c.env.AI.toMarkdown(body.inputs, body.options);
     return c.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

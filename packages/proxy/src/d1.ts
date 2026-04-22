@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { asString } from './body';
 import { dispatchToWorker } from './dispatch';
 import { resolveResource } from './resolve';
 import type { ProxyEnv } from './types';
@@ -10,8 +11,10 @@ const d1 = new Hono<ProxyEnv>();
 d1.post('/query', async (c) => {
   const body = c.get('body');
   const projectId = c.get('projectId');
+  const binding = asString(body.binding);
+  const sql = asString(body.sql);
 
-  if (!body.binding || !body.sql) {
+  if (!binding || !sql) {
     return c.json({ error: 'binding and sql required' }, 400);
   }
 
@@ -24,9 +27,9 @@ d1.post('/query', async (c) => {
   // Fallback: CF REST API (for old deploys without /__void handler)
   let dbId: string;
   try {
-    dbId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'd1', body.binding);
+    dbId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'd1', binding);
   } catch {
-    return c.json({ error: `unknown binding "${body.binding}"` }, 404);
+    return c.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   const cfRes = await fetch(`${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/d1/database/${dbId}/query`, {
@@ -35,7 +38,7 @@ d1.post('/query', async (c) => {
       Authorization: `Bearer ${c.env.CF_API_TOKEN}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ sql: body.sql, params: body.params ?? [] }),
+    body: JSON.stringify({ sql, params: body.params ?? [] }),
   });
 
   if (!cfRes.ok) {
@@ -70,8 +73,9 @@ d1.post('/query', async (c) => {
 d1.post('/batch', async (c) => {
   const body = c.get('body');
   const projectId = c.get('projectId');
+  const binding = asString(body.binding);
 
-  if (!body.binding || !Array.isArray(body.statements)) {
+  if (!binding || !Array.isArray(body.statements)) {
     return c.json({ error: 'binding and statements required' }, 400);
   }
 
@@ -84,9 +88,9 @@ d1.post('/batch', async (c) => {
   // Fallback: CF REST API (sequential, no transaction)
   let dbId: string;
   try {
-    dbId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'd1', body.binding);
+    dbId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'd1', binding);
   } catch {
-    return c.json({ error: `unknown binding "${body.binding}"` }, 404);
+    return c.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   const results = [];

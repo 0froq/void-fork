@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { asString, isQueryValue } from './body';
 import { dispatchToWorker } from './dispatch';
 import { resolveResource } from './resolve';
 import type { ProxyEnv } from './types';
@@ -14,8 +15,10 @@ function cfHeaders(token: string) {
 r2.post('/get', async (c) => {
   const body = c.get('body');
   const projectId = c.get('projectId');
+  const binding = asString(body.binding);
+  const key = asString(body.key);
 
-  if (!body.binding || !body.key) {
+  if (!binding || !key) {
     return c.json({ error: 'binding and key required' }, 400);
   }
 
@@ -28,13 +31,13 @@ r2.post('/get', async (c) => {
   // Fallback: CF REST API
   let bucket: string;
   try {
-    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'r2', body.binding);
+    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'r2', binding);
   } catch {
-    return c.json({ error: `unknown binding "${body.binding}"` }, 404);
+    return c.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   const cfRes = await fetch(
-    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/r2/buckets/${bucket}/objects/${encodeURIComponent(body.key as string)}`,
+    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/r2/buckets/${bucket}/objects/${encodeURIComponent(key)}`,
     { headers: cfHeaders(c.env.CF_API_TOKEN) },
   );
 
@@ -65,8 +68,11 @@ r2.post('/get', async (c) => {
 r2.post('/put', async (c) => {
   const body = c.get('body');
   const projectId = c.get('projectId');
+  const binding = asString(body.binding);
+  const key = asString(body.key);
+  const base64 = asString(body.base64);
 
-  if (!body.binding || !body.key) {
+  if (!binding || !key) {
     return c.json({ error: 'binding and key required' }, 400);
   }
 
@@ -79,23 +85,23 @@ r2.post('/put', async (c) => {
   // Fallback: CF REST API
   let bucket: string;
   try {
-    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'r2', body.binding);
+    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'r2', binding);
   } catch {
-    return c.json({ error: `unknown binding "${body.binding}"` }, 404);
+    return c.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   // Decode base64 value from JSON body, or use text value
-  const data = body.base64
-    ? Uint8Array.from(atob(body.base64 as string), (ch) => ch.charCodeAt(0))
+  const data = base64
+    ? Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0))
     : new TextEncoder().encode((body.value as string) ?? '');
 
   const cfRes = await fetch(
-    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/r2/buckets/${bucket}/objects/${encodeURIComponent(body.key as string)}`,
+    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/r2/buckets/${bucket}/objects/${encodeURIComponent(key)}`,
     {
       method: 'PUT',
       headers: {
         ...cfHeaders(c.env.CF_API_TOKEN),
-        'Content-Type': (body.contentType as string) ?? 'application/octet-stream',
+        'Content-Type': asString(body.contentType) ?? 'application/octet-stream',
       },
       body: data,
     },
@@ -111,16 +117,18 @@ r2.post('/put', async (c) => {
 r2.post('/delete', async (c) => {
   const body = c.get('body');
   const projectId = c.get('projectId');
+  const binding = asString(body.binding);
 
-  if (!body.binding) {
+  if (!binding) {
     return c.json({ error: 'binding required' }, 400);
   }
 
-  const keys: Array<string> = body.keys
-    ? (body.keys as Array<string>)
-    : body.key
-      ? [body.key as string]
-      : [];
+  const keys =
+    Array.isArray(body.keys) && body.keys.every((key): key is string => typeof key === 'string')
+      ? body.keys
+      : typeof body.key === 'string'
+        ? [body.key]
+        : [];
 
   if (keys.length === 0) {
     return c.json({ error: 'key or keys required' }, 400);
@@ -135,9 +143,9 @@ r2.post('/delete', async (c) => {
   // Fallback: CF REST API
   let bucket: string;
   try {
-    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'r2', body.binding);
+    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'r2', binding);
   } catch {
-    return c.json({ error: `unknown binding "${body.binding}"` }, 404);
+    return c.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   for (const key of keys) {
@@ -159,8 +167,9 @@ r2.post('/delete', async (c) => {
 r2.post('/list', async (c) => {
   const body = c.get('body');
   const projectId = c.get('projectId');
+  const binding = asString(body.binding);
 
-  if (!body.binding) {
+  if (!binding) {
     return c.json({ error: 'binding required' }, 400);
   }
 
@@ -173,23 +182,26 @@ r2.post('/list', async (c) => {
   // Fallback: CF REST API
   let bucket: string;
   try {
-    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'r2', body.binding);
+    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'r2', binding);
   } catch {
-    return c.json({ error: `unknown binding "${body.binding}"` }, 404);
+    return c.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   const params = new URLSearchParams();
-  if (body.prefix) {
-    params.set('prefix', body.prefix as string);
+  const prefix = asString(body.prefix);
+  if (prefix) {
+    params.set('prefix', prefix);
   }
-  if (body.limit) {
+  if (isQueryValue(body.limit)) {
     params.set('per_page', String(body.limit));
   }
-  if (body.cursor) {
-    params.set('cursor', body.cursor as string);
+  const cursor = asString(body.cursor);
+  if (cursor) {
+    params.set('cursor', cursor);
   }
-  if (body.delimiter) {
-    params.set('delimiter', body.delimiter as string);
+  const delimiter = asString(body.delimiter);
+  if (delimiter) {
+    params.set('delimiter', delimiter);
   }
   const qs = params.toString() ? `?${params.toString()}` : '';
 
@@ -221,8 +233,10 @@ r2.post('/list', async (c) => {
 r2.post('/head', async (c) => {
   const body = c.get('body');
   const projectId = c.get('projectId');
+  const binding = asString(body.binding);
+  const key = asString(body.key);
 
-  if (!body.binding || !body.key) {
+  if (!binding || !key) {
     return c.json({ error: 'binding and key required' }, 400);
   }
 
@@ -235,13 +249,13 @@ r2.post('/head', async (c) => {
   // Fallback: CF REST API
   let bucket: string;
   try {
-    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'r2', body.binding);
+    bucket = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'r2', binding);
   } catch {
-    return c.json({ error: `unknown binding "${body.binding}"` }, 404);
+    return c.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   const cfRes = await fetch(
-    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/r2/buckets/${bucket}/objects/${encodeURIComponent(body.key as string)}`,
+    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/r2/buckets/${bucket}/objects/${encodeURIComponent(key)}`,
     {
       method: 'HEAD',
       headers: cfHeaders(c.env.CF_API_TOKEN),
@@ -257,7 +271,7 @@ r2.post('/head', async (c) => {
   }
 
   return c.json({
-    key: body.key,
+    key,
     size: parseInt(cfRes.headers.get('content-length') ?? '0'),
     etag: cfRes.headers.get('etag') ?? '',
     lastModified: cfRes.headers.get('last-modified') ?? '',

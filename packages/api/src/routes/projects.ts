@@ -1483,8 +1483,8 @@ const app = new Hono<ApiEnv>()
         connectionString,
       );
       hyperdriveId = hd.id;
-    } catch (err: any) {
-      if (err.message?.toLowerCase().includes('already exists')) {
+    } catch (err: unknown) {
+      if (isAlreadyExistsError(err)) {
         const hd = await getHyperdriveByName(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resourceName);
         hyperdriveId = hd.id;
       } else {
@@ -1536,8 +1536,8 @@ const app = new Hono<ApiEnv>()
           connectionString,
         );
         hyperdriveId = hd.id;
-      } catch (err: any) {
-        if (err.message?.toLowerCase().includes('already exists')) {
+      } catch (err: unknown) {
+        if (isAlreadyExistsError(err)) {
           const hd = await getHyperdriveByName(
             c.env.CF_ACCOUNT_ID,
             c.env.CF_API_TOKEN,
@@ -1567,6 +1567,10 @@ function parseDuration(input: string): number | null {
     return null;
   } // cap at 7d
   return ms;
+}
+
+function isAlreadyExistsError(error: unknown): boolean {
+  return error instanceof Error && error.message.toLowerCase().includes('already exists');
 }
 
 function tryParse(json: string): Array<unknown> {

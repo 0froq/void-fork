@@ -76,6 +76,10 @@ function post(path: string, body: unknown): Request {
   });
 }
 
+function asFetchMock(mock: unknown): typeof fetch {
+  return mock as typeof fetch;
+}
+
 // --- Tests ---
 
 describe('R2 proxy endpoints', () => {
@@ -94,16 +98,18 @@ describe('R2 proxy endpoints', () => {
 
   describe('POST /r2/get', () => {
     it('streams object body from CF R2 API', async () => {
-      globalThis.fetch = vi.fn(
-        async () =>
-          new Response('file-content', {
-            headers: {
-              'content-type': 'image/png',
-              'content-length': '12',
-              etag: '"abc123"',
-            },
-          }),
-      ) as any;
+      globalThis.fetch = asFetchMock(
+        vi.fn(
+          async () =>
+            new Response('file-content', {
+              headers: {
+                'content-type': 'image/png',
+                'content-length': '12',
+                etag: '"abc123"',
+              },
+            }),
+        ),
+      );
 
       const env = createEnv({ 'proj_1:r2:STORAGE': 'my-bucket' });
       const res = await worker.fetch(
@@ -130,7 +136,7 @@ describe('R2 proxy endpoints', () => {
     });
 
     it('returns null for missing object (404)', async () => {
-      globalThis.fetch = vi.fn(async () => new Response('Not Found', { status: 404 })) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => new Response('Not Found', { status: 404 })));
 
       const env = createEnv({ 'proj_1:r2:STORAGE': 'my-bucket' });
       const res = await worker.fetch(
@@ -175,7 +181,7 @@ describe('R2 proxy endpoints', () => {
 
   describe('POST /r2/put', () => {
     it('writes base64-encoded data via CF R2 API', async () => {
-      globalThis.fetch = vi.fn(async () => Response.json({ success: true })) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => Response.json({ success: true })));
 
       const env = createEnv({ 'proj_1:r2:STORAGE': 'my-bucket' });
       const base64 = btoa('hello world');
@@ -201,7 +207,7 @@ describe('R2 proxy endpoints', () => {
     });
 
     it('writes text value when no base64', async () => {
-      globalThis.fetch = vi.fn(async () => Response.json({ success: true })) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => Response.json({ success: true })));
 
       const env = createEnv({ 'proj_1:r2:STORAGE': 'my-bucket' });
       const res = await worker.fetch(
@@ -238,7 +244,7 @@ describe('R2 proxy endpoints', () => {
 
   describe('POST /r2/delete', () => {
     it('deletes single key', async () => {
-      globalThis.fetch = vi.fn(async () => Response.json({ success: true })) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => Response.json({ success: true })));
 
       const env = createEnv({ 'proj_1:r2:STORAGE': 'my-bucket' });
       const res = await worker.fetch(
@@ -261,7 +267,7 @@ describe('R2 proxy endpoints', () => {
     });
 
     it('deletes multiple keys', async () => {
-      globalThis.fetch = vi.fn(async () => Response.json({ success: true })) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => Response.json({ success: true })));
 
       const env = createEnv({ 'proj_1:r2:STORAGE': 'my-bucket' });
       const res = await worker.fetch(
@@ -296,16 +302,18 @@ describe('R2 proxy endpoints', () => {
 
   describe('POST /r2/list', () => {
     it('lists objects via CF R2 API', async () => {
-      globalThis.fetch = vi.fn(async () =>
-        Response.json({
-          success: true,
-          result: [
-            { key: 'file1.txt', size: 100, last_modified: '2026-01-01T00:00:00Z' },
-            { key: 'file2.txt', size: 200, last_modified: '2026-01-02T00:00:00Z' },
-          ],
-          result_info: {},
-        }),
-      ) as any;
+      globalThis.fetch = asFetchMock(
+        vi.fn(async () =>
+          Response.json({
+            success: true,
+            result: [
+              { key: 'file1.txt', size: 100, last_modified: '2026-01-01T00:00:00Z' },
+              { key: 'file2.txt', size: 200, last_modified: '2026-01-02T00:00:00Z' },
+            ],
+            result_info: {},
+          }),
+        ),
+      );
 
       const env = createEnv({ 'proj_1:r2:STORAGE': 'my-bucket' });
       const res = await worker.fetch(
@@ -328,13 +336,15 @@ describe('R2 proxy endpoints', () => {
     });
 
     it('returns cursor when truncated', async () => {
-      globalThis.fetch = vi.fn(async () =>
-        Response.json({
-          success: true,
-          result: [{ key: 'a.txt', size: 1, last_modified: '2026-01-01T00:00:00Z' }],
-          result_info: { cursor: 'next-page' },
-        }),
-      ) as any;
+      globalThis.fetch = asFetchMock(
+        vi.fn(async () =>
+          Response.json({
+            success: true,
+            result: [{ key: 'a.txt', size: 1, last_modified: '2026-01-01T00:00:00Z' }],
+            result_info: { cursor: 'next-page' },
+          }),
+        ),
+      );
 
       const env = createEnv({ 'proj_1:r2:STORAGE': 'my-bucket' });
       const res = await worker.fetch(
@@ -376,18 +386,20 @@ describe('R2 proxy endpoints', () => {
 
   describe('POST /r2/head', () => {
     it('returns object metadata', async () => {
-      globalThis.fetch = vi.fn(
-        async () =>
-          new Response(null, {
-            status: 200,
-            headers: {
-              'content-type': 'image/png',
-              'content-length': '12345',
-              etag: '"abc"',
-              'last-modified': 'Mon, 01 Jan 2026 00:00:00 GMT',
-            },
-          }),
-      ) as any;
+      globalThis.fetch = asFetchMock(
+        vi.fn(
+          async () =>
+            new Response(null, {
+              status: 200,
+              headers: {
+                'content-type': 'image/png',
+                'content-length': '12345',
+                etag: '"abc"',
+                'last-modified': 'Mon, 01 Jan 2026 00:00:00 GMT',
+              },
+            }),
+        ),
+      );
 
       const env = createEnv({ 'proj_1:r2:STORAGE': 'my-bucket' });
       const res = await worker.fetch(
@@ -414,7 +426,7 @@ describe('R2 proxy endpoints', () => {
     });
 
     it('returns null for missing object', async () => {
-      globalThis.fetch = vi.fn(async () => new Response(null, { status: 404 })) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => new Response(null, { status: 404 })));
 
       const env = createEnv({ 'proj_1:r2:STORAGE': 'my-bucket' });
       const res = await worker.fetch(

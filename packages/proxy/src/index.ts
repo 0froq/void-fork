@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { ai } from './ai';
+import { asString, isProxyBody } from './body';
 import { d1 } from './d1';
 import { kv } from './kv';
 import { r2 } from './r2';
 import { verifyProjectOwner } from './resolve';
 import { revalidate } from './revalidate';
-import type { JwtPayload, ProxyEnv } from './types';
+import type { JwtPayload, ProxyBody, ProxyEnv } from './types';
 
 const app = new Hono<ProxyEnv>();
 
@@ -43,9 +44,13 @@ app.all('/*', async (c, next) => {
 
 // Auth middleware — parses body, authenticates, sets projectId
 app.post('/*', async (c, next) => {
-  let body: Record<string, any>;
+  let body: ProxyBody;
   try {
-    body = await c.req.json();
+    const json = await c.req.json<unknown>();
+    if (!isProxyBody(json)) {
+      return c.json({ error: 'invalid JSON body' }, 400);
+    }
+    body = json;
   } catch {
     return c.json({ error: 'invalid JSON body' }, 400);
   }
@@ -59,29 +64,27 @@ app.post('/*', async (c, next) => {
     if (!payload) {
       return c.json({ error: 'invalid or expired token' }, 401);
     }
-    if (!body.projectId) {
+    const projectId = asString(body.projectId);
+    if (!projectId) {
       return c.json({ error: 'projectId required' }, 400);
     }
     // Verify the authenticated user owns this project
-    const owns = await verifyProjectOwner(
-      c.env.API,
-      c.env.JWT_SECRET,
-      body.projectId as string,
-      payload.sub,
-    );
+    const owns = await verifyProjectOwner(c.env.API, c.env.JWT_SECRET, projectId, payload.sub);
     if (!owns) {
       return c.json({ error: 'forbidden' }, 403);
     }
-    c.set('projectId', body.projectId as string);
+    c.set('projectId', projectId);
   } else {
     // Service binding path (production) — verify HMAC-signed project token
-    if (!body.projectId || !body.aiToken) {
+    const projectId = asString(body.projectId);
+    const aiToken = asString(body.aiToken);
+    if (!projectId || !aiToken) {
       return c.json({ error: 'projectId and aiToken required' }, 400);
     }
-    if (!(await verifyHmac(body.projectId as string, body.aiToken as string, c.env.JWT_SECRET))) {
+    if (!(await verifyHmac(projectId, aiToken, c.env.JWT_SECRET))) {
       return c.json({ error: 'invalid project token' }, 403);
     }
-    c.set('projectId', body.projectId as string);
+    c.set('projectId', projectId);
   }
 
   await next();

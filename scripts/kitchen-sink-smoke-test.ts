@@ -17,6 +17,9 @@ const BASE = (process.env.SMOKE_URL || 'https://kitchen-sink.staging.void.app').
 const TIMEOUT = 15_000;
 const uid = Date.now().toString(36);
 
+type MarkerWindow = Window & { __SPA_MARKER?: boolean };
+type StampedNav = HTMLElement & { __stamp?: number };
+
 let browser: Browser;
 
 // ---------------------------------------------------------------------------
@@ -145,7 +148,7 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
 
       // Set a marker on window — survives SPA nav, lost on full reload
       await p.evaluate(() => {
-        (window as any).__SPA_MARKER = true;
+        (window as MarkerWindow).__SPA_MARKER = true;
       });
 
       // Click "DB" link
@@ -156,7 +159,7 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
       assert.ok(p.url().endsWith('/db'), `URL is /db (got: ${p.url()})`);
 
       // Marker must still be present (no full reload)
-      const marker = await p.evaluate(() => (window as any).__SPA_MARKER);
+      const marker = await p.evaluate(() => (window as MarkerWindow).__SPA_MARKER);
       assert.strictEqual(marker, true, 'SPA marker survived navigation');
 
       // Click "KV" link
@@ -180,7 +183,10 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
 
       // Stamp the nav element
       await p.evaluate(() => {
-        (document.querySelector('nav') as any).__stamp = 1;
+        const nav = document.querySelector('nav') as StampedNav | null;
+        if (nav) {
+          nav.__stamp = 1;
+        }
       });
 
       // Navigate to /env
@@ -190,7 +196,10 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
       });
 
       // Nav stamp must survive (layout DOM not recreated)
-      const stamp = await p.evaluate(() => (document.querySelector('nav') as any).__stamp);
+      const stamp = await p.evaluate(() => {
+        const nav = document.querySelector('nav') as StampedNav | null;
+        return nav?.__stamp;
+      });
       assert.strictEqual(stamp, 1, 'nav stamp survived navigation');
     } finally {
       await ctx.close();

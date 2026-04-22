@@ -1,5 +1,29 @@
+export interface AiGatewayRequest {
+  provider: string;
+  endpoint: string;
+  headers: Record<string, string>;
+  query: Record<string, unknown>;
+}
+
+export interface AiGateway {
+  run(request: AiGatewayRequest): Promise<Response>;
+}
+
+export interface AiBinding {
+  run(
+    model: string,
+    inputs?: unknown,
+    options?: Record<string, unknown>,
+  ): Promise<ReadableStream | unknown>;
+  gateway(id: string): AiGateway;
+  models(inputs?: unknown): Promise<unknown>;
+  toMarkdown(inputs?: unknown, options?: unknown): Promise<unknown>;
+}
+
+export type ProxyBody = Record<string, unknown>;
+
 export interface Env {
-  AI: Ai;
+  AI: AiBinding;
   JWT_SECRET: string;
   ROUTING: KVNamespace;
 
@@ -19,5 +43,5 @@ export interface JwtPayload {
 
 export type ProxyEnv = {
   Bindings: Env;
-  Variables: { projectId: string; body: Record<string, any> };
+  Variables: { projectId: string; body: ProxyBody };
 };

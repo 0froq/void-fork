@@ -154,7 +154,7 @@ describe('getCurrentBillingPeriodStart', () => {
 
   it('falls back to current date for null input', () => {
     const before = Date.now();
-    const result = getCurrentBillingPeriodStart(null as any);
+    const result = getCurrentBillingPeriodStart(null as unknown as string);
     expect(result.getTime()).toBeGreaterThanOrEqual(before);
     expect(result.getTime()).toBeLessThanOrEqual(Date.now());
   });

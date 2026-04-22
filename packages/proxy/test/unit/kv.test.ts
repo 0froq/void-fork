@@ -76,6 +76,10 @@ function post(path: string, body: unknown): Request {
   });
 }
 
+function asFetchMock(mock: unknown): typeof fetch {
+  return mock as typeof fetch;
+}
+
 // --- Tests ---
 
 describe('KV proxy endpoints', () => {
@@ -94,7 +98,7 @@ describe('KV proxy endpoints', () => {
 
   describe('POST /kv/get', () => {
     it('returns text value', async () => {
-      globalThis.fetch = vi.fn(async () => new Response('hello world')) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => new Response('hello world')));
 
       const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(
@@ -120,7 +124,7 @@ describe('KV proxy endpoints', () => {
     });
 
     it('returns JSON value', async () => {
-      globalThis.fetch = vi.fn(async () => Response.json({ count: 42 })) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => Response.json({ count: 42 })));
 
       const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(
@@ -139,7 +143,7 @@ describe('KV proxy endpoints', () => {
     });
 
     it('returns null for missing key (404)', async () => {
-      globalThis.fetch = vi.fn(async () => new Response('Not Found', { status: 404 })) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => new Response('Not Found', { status: 404 })));
 
       const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(
@@ -158,7 +162,7 @@ describe('KV proxy endpoints', () => {
     });
 
     it('URL-encodes the key', async () => {
-      globalThis.fetch = vi.fn(async () => new Response('val')) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => new Response('val')));
 
       const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       await worker.fetch(
@@ -206,7 +210,7 @@ describe('KV proxy endpoints', () => {
 
   describe('POST /kv/put', () => {
     it('writes value to CF KV API', async () => {
-      globalThis.fetch = vi.fn(async () => Response.json({ success: true })) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => Response.json({ success: true })));
 
       const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(
@@ -230,7 +234,7 @@ describe('KV proxy endpoints', () => {
     });
 
     it('includes expiration query params', async () => {
-      globalThis.fetch = vi.fn(async () => Response.json({ success: true })) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => Response.json({ success: true })));
 
       const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       await worker.fetch(
@@ -252,7 +256,7 @@ describe('KV proxy endpoints', () => {
     });
 
     it('serializes non-string values as JSON', async () => {
-      globalThis.fetch = vi.fn(async () => Response.json({ success: true })) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => Response.json({ success: true })));
 
       const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       await worker.fetch(
@@ -291,7 +295,7 @@ describe('KV proxy endpoints', () => {
 
   describe('POST /kv/delete', () => {
     it('deletes key via CF KV API', async () => {
-      globalThis.fetch = vi.fn(async () => Response.json({ success: true })) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => Response.json({ success: true })));
 
       const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(
@@ -326,13 +330,15 @@ describe('KV proxy endpoints', () => {
 
   describe('POST /kv/list', () => {
     it('lists keys via CF KV API', async () => {
-      globalThis.fetch = vi.fn(async () =>
-        Response.json({
-          success: true,
-          result: [{ name: 'key1' }, { name: 'key2' }],
-          result_info: {},
-        }),
-      ) as any;
+      globalThis.fetch = asFetchMock(
+        vi.fn(async () =>
+          Response.json({
+            success: true,
+            result: [{ name: 'key1' }, { name: 'key2' }],
+            result_info: {},
+          }),
+        ),
+      );
 
       const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(
@@ -351,9 +357,11 @@ describe('KV proxy endpoints', () => {
     });
 
     it('passes prefix, limit, and cursor params', async () => {
-      globalThis.fetch = vi.fn(async () =>
-        Response.json({ success: true, result: [], result_info: { cursor: 'next-cursor' } }),
-      ) as any;
+      globalThis.fetch = asFetchMock(
+        vi.fn(async () =>
+          Response.json({ success: true, result: [], result_info: { cursor: 'next-cursor' } }),
+        ),
+      );
 
       const env = createEnv({ 'proj_1:kv:CACHE': 'kv-ns-123' });
       const res = await worker.fetch(

@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { asString, isQueryValue } from './body';
 import { dispatchToWorker } from './dispatch';
 import { resolveResource } from './resolve';
 import type { ProxyEnv } from './types';
@@ -10,8 +11,10 @@ const kv = new Hono<ProxyEnv>();
 kv.post('/get', async (c) => {
   const body = c.get('body');
   const projectId = c.get('projectId');
+  const binding = asString(body.binding);
+  const key = asString(body.key);
 
-  if (!body.binding || !body.key) {
+  if (!binding || !key) {
     return c.json({ error: 'binding and key required' }, 400);
   }
 
@@ -24,13 +27,13 @@ kv.post('/get', async (c) => {
   // Fallback: CF REST API
   let nsId: string;
   try {
-    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'kv', body.binding);
+    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'kv', binding);
   } catch {
-    return c.json({ error: `unknown binding "${body.binding}"` }, 404);
+    return c.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   const cfRes = await fetch(
-    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/values/${encodeURIComponent(body.key)}`,
+    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/values/${encodeURIComponent(key)}`,
     { headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` } },
   );
 
@@ -42,7 +45,7 @@ kv.post('/get', async (c) => {
     return c.json({ error: 'KV get failed', status: cfRes.status }, 502);
   }
 
-  const type = (body.type as string) ?? 'text';
+  const type = asString(body.type) ?? 'text';
   if (type === 'json') {
     return c.json(await cfRes.json());
   }
@@ -63,8 +66,10 @@ kv.post('/get', async (c) => {
 kv.post('/put', async (c) => {
   const body = c.get('body');
   const projectId = c.get('projectId');
+  const binding = asString(body.binding);
+  const key = asString(body.key);
 
-  if (!body.binding || !body.key) {
+  if (!binding || !key) {
     return c.json({ error: 'binding and key required' }, 400);
   }
 
@@ -77,23 +82,23 @@ kv.post('/put', async (c) => {
   // Fallback: CF REST API
   let nsId: string;
   try {
-    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'kv', body.binding);
+    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'kv', binding);
   } catch {
-    return c.json({ error: `unknown binding "${body.binding}"` }, 404);
+    return c.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   const params = new URLSearchParams();
-  if (body.expiration) {
+  if (isQueryValue(body.expiration)) {
     params.set('expiration', String(body.expiration));
   }
-  if (body.expiration_ttl) {
+  if (isQueryValue(body.expiration_ttl)) {
     params.set('expiration_ttl', String(body.expiration_ttl));
   }
   const qs = params.toString() ? `?${params.toString()}` : '';
 
   let value: string | ArrayBuffer;
   let contentType = 'text/plain';
-  if (body.base64 && typeof body.value === 'string') {
+  if (body.base64 === true && typeof body.value === 'string') {
     // Decode base64-encoded binary data from the client
     const binary = atob(body.value);
     const bytes = new Uint8Array(binary.length);
@@ -107,7 +112,7 @@ kv.post('/put', async (c) => {
   }
 
   const cfRes = await fetch(
-    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/values/${encodeURIComponent(body.key)}${qs}`,
+    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/values/${encodeURIComponent(key)}${qs}`,
     {
       method: 'PUT',
       headers: {
@@ -128,8 +133,10 @@ kv.post('/put', async (c) => {
 kv.post('/delete', async (c) => {
   const body = c.get('body');
   const projectId = c.get('projectId');
+  const binding = asString(body.binding);
+  const key = asString(body.key);
 
-  if (!body.binding || !body.key) {
+  if (!binding || !key) {
     return c.json({ error: 'binding and key required' }, 400);
   }
 
@@ -142,13 +149,13 @@ kv.post('/delete', async (c) => {
   // Fallback: CF REST API
   let nsId: string;
   try {
-    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'kv', body.binding);
+    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'kv', binding);
   } catch {
-    return c.json({ error: `unknown binding "${body.binding}"` }, 404);
+    return c.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   const cfRes = await fetch(
-    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/values/${encodeURIComponent(body.key)}`,
+    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/values/${encodeURIComponent(key)}`,
     {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
@@ -166,8 +173,9 @@ kv.post('/delete', async (c) => {
 kv.post('/list', async (c) => {
   const body = c.get('body');
   const projectId = c.get('projectId');
+  const binding = asString(body.binding);
 
-  if (!body.binding) {
+  if (!binding) {
     return c.json({ error: 'binding required' }, 400);
   }
 
@@ -180,20 +188,22 @@ kv.post('/list', async (c) => {
   // Fallback: CF REST API
   let nsId: string;
   try {
-    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'kv', body.binding);
+    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'kv', binding);
   } catch {
-    return c.json({ error: `unknown binding "${body.binding}"` }, 404);
+    return c.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   const params = new URLSearchParams();
-  if (body.prefix) {
-    params.set('prefix', body.prefix as string);
+  const prefix = asString(body.prefix);
+  if (prefix) {
+    params.set('prefix', prefix);
   }
-  if (body.limit) {
+  if (isQueryValue(body.limit)) {
     params.set('limit', String(body.limit));
   }
-  if (body.cursor) {
-    params.set('cursor', body.cursor as string);
+  const cursor = asString(body.cursor);
+  if (cursor) {
+    params.set('cursor', cursor);
   }
   const qs = params.toString() ? `?${params.toString()}` : '';
 

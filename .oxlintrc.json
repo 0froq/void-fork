@@ -18,6 +18,7 @@
       }
     ],
     "@typescript-eslint/no-duplicate-enum-values": "error",
+    "@typescript-eslint/no-explicit-any": "error",
     "@typescript-eslint/no-extra-non-null-assertion": "error",
     "@typescript-eslint/no-misused-new": "error",
     "@typescript-eslint/no-non-null-asserted-optional-chain": "error",

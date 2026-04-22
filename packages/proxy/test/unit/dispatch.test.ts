@@ -85,6 +85,10 @@ function post(path: string, body: unknown): Request {
   });
 }
 
+function asFetchMock(mock: unknown): typeof fetch {
+  return mock as typeof fetch;
+}
+
 // --- Tests ---
 
 describe('WfP dispatch path', () => {
@@ -122,7 +126,10 @@ describe('WfP dispatch path', () => {
       );
 
       expect(res.status).toBe(200);
-      const data = (await res.json()) as any;
+      const data = (await res.json()) as {
+        results: Array<{ id: number; name: string }>;
+        success: boolean;
+      };
       expect(data.results).toEqual([{ id: 1, name: 'Alice' }]);
       expect(data.success).toBe(true);
 
@@ -152,7 +159,11 @@ describe('WfP dispatch path', () => {
       );
 
       expect(res.status).toBe(200);
-      const data = (await res.json()) as Array<any>;
+      const data = (await res.json()) as Array<{
+        results: Array<{ count: number }>;
+        success: boolean;
+        meta: Record<string, unknown>;
+      }>;
       expect(data).toHaveLength(2);
     });
   });
@@ -217,7 +228,11 @@ describe('WfP dispatch path', () => {
       );
 
       expect(res.status).toBe(200);
-      const data = (await res.json()) as any;
+      const data = (await res.json()) as {
+        objects: Array<{ key: string; size: number; lastModified: string }>;
+        truncated: boolean;
+        cursor: string | null;
+      };
       expect(data.objects).toHaveLength(1);
     });
   });
@@ -229,12 +244,14 @@ describe('WfP dispatch path', () => {
       // Need globalThis.fetch for the REST API fallback
       const rows = [{ id: 1, name: 'Alice' }];
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = vi.fn(async () =>
-        Response.json({
-          success: true,
-          result: [{ results: rows, success: true, meta: { duration: 0.001 } }],
-        }),
-      ) as any;
+      globalThis.fetch = asFetchMock(
+        vi.fn(async () =>
+          Response.json({
+            success: true,
+            result: [{ results: rows, success: true, meta: { duration: 0.001 } }],
+          }),
+        ),
+      );
 
       // Also need resource resolution to succeed
       env.API.fetch = vi.fn(async (url: string, init?: RequestInit) => {
@@ -243,12 +260,12 @@ describe('WfP dispatch path', () => {
           return Response.json({ error: 'not found' }, { status: 404 });
         }
         // resolve-resource
-        const body = JSON.parse(init?.body as string);
+        const body = JSON.parse(init?.body as string) as { type?: string; binding?: string };
         if (body.type === 'd1' && body.binding === 'DB') {
           return Response.json({ cf_id: 'd1-uuid-abc' });
         }
         return Response.json({ error: 'not found' }, { status: 404 });
-      }) as any;
+      }) as unknown as typeof env.API.fetch;
 
       const res = await worker.fetch(
         post('/d1/query', {
@@ -263,7 +280,10 @@ describe('WfP dispatch path', () => {
       );
 
       expect(res.status).toBe(200);
-      const data = (await res.json()) as any;
+      const data = (await res.json()) as {
+        results: Array<{ id: number; name: string }>;
+        success: boolean;
+      };
       expect(data.results).toEqual(rows);
 
       // Verify CF REST API was called
@@ -283,24 +303,26 @@ describe('WfP dispatch path', () => {
       );
 
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = vi.fn(async () =>
-        Response.json({
-          success: true,
-          result: [{ results: [{ id: 1 }], success: true, meta: {} }],
-        }),
-      ) as any;
+      globalThis.fetch = asFetchMock(
+        vi.fn(async () =>
+          Response.json({
+            success: true,
+            result: [{ results: [{ id: 1 }], success: true, meta: {} }],
+          }),
+        ),
+      );
 
       env.API.fetch = vi.fn(async (url: string, init?: RequestInit) => {
         const path = new URL(url).pathname;
         if (path.includes('/internal/resolve-worker/')) {
           return Response.json({ workerName: 'user-my-app' });
         }
-        const body = JSON.parse(init?.body as string);
+        const body = JSON.parse(init?.body as string) as { type?: string; binding?: string };
         if (body.type === 'd1' && body.binding === 'DB') {
           return Response.json({ cf_id: 'd1-uuid-abc' });
         }
         return Response.json({ error: 'not found' }, { status: 404 });
-      }) as any;
+      }) as unknown as typeof env.API.fetch;
 
       const res = await worker.fetch(
         post('/d1/query', {
@@ -351,7 +373,7 @@ describe('WfP dispatch path', () => {
       );
 
       // API should only be called once for resolve-worker (cached after first call)
-      const resolveWorkerCalls = env.API.fetch.mock.calls.filter((call: Array<any>) =>
+      const resolveWorkerCalls = env.API.fetch.mock.calls.filter((call: Array<unknown>) =>
         new URL(call[0]).pathname.includes('/internal/resolve-worker/'),
       );
       expect(resolveWorkerCalls).toHaveLength(1);

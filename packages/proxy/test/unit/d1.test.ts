@@ -87,6 +87,10 @@ function cfD1Response(results: Array<unknown>, meta?: Record<string, unknown>) {
   });
 }
 
+function asFetchMock(mock: unknown): typeof fetch {
+  return mock as typeof fetch;
+}
+
 // --- Tests ---
 
 describe('D1 proxy endpoints', () => {
@@ -109,7 +113,7 @@ describe('D1 proxy endpoints', () => {
         { id: 1, name: 'Alice' },
         { id: 2, name: 'Bob' },
       ];
-      globalThis.fetch = vi.fn(async () => cfD1Response(rows)) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => cfD1Response(rows)));
 
       const env = createEnv({ 'proj_1:d1:DB': 'd1-uuid-abc' });
       const res = await worker.fetch(
@@ -140,7 +144,7 @@ describe('D1 proxy endpoints', () => {
 
     it('returns first row for method=first', async () => {
       const rows = [{ id: 1, name: 'Alice' }];
-      globalThis.fetch = vi.fn(async () => cfD1Response(rows)) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => cfD1Response(rows)));
 
       const env = createEnv({ 'proj_1:d1:DB': 'd1-uuid-abc' });
       const res = await worker.fetch(
@@ -160,7 +164,7 @@ describe('D1 proxy endpoints', () => {
     });
 
     it('returns null for method=first with no results', async () => {
-      globalThis.fetch = vi.fn(async () => cfD1Response([])) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => cfD1Response([])));
 
       const env = createEnv({ 'proj_1:d1:DB': 'd1-uuid-abc' });
       const res = await worker.fetch(
@@ -184,7 +188,7 @@ describe('D1 proxy endpoints', () => {
         { id: 1, name: 'Alice' },
         { id: 2, name: 'Bob' },
       ];
-      globalThis.fetch = vi.fn(async () => cfD1Response(rows)) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => cfD1Response(rows)));
 
       const env = createEnv({ 'proj_1:d1:DB': 'd1-uuid-abc' });
       const res = await worker.fetch(
@@ -209,7 +213,7 @@ describe('D1 proxy endpoints', () => {
 
     it('returns success+meta for method=run', async () => {
       const meta = { duration: 0.002, changes: 1 };
-      globalThis.fetch = vi.fn(async () => cfD1Response([], meta)) as any;
+      globalThis.fetch = asFetchMock(vi.fn(async () => cfD1Response([], meta)));
 
       const env = createEnv({ 'proj_1:d1:DB': 'd1-uuid-abc' });
       const res = await worker.fetch(
@@ -259,9 +263,9 @@ describe('D1 proxy endpoints', () => {
     });
 
     it('returns 502 when CF API fails', async () => {
-      globalThis.fetch = vi.fn(
-        async () => new Response('Internal Server Error', { status: 500 }),
-      ) as any;
+      globalThis.fetch = asFetchMock(
+        vi.fn(async () => new Response('Internal Server Error', { status: 500 })),
+      );
 
       const env = createEnv({ 'proj_1:d1:DB': 'd1-uuid-abc' });
       const res = await worker.fetch(
@@ -282,10 +286,12 @@ describe('D1 proxy endpoints', () => {
   describe('POST /d1/batch', () => {
     it('executes multiple statements and returns array of results', async () => {
       const callCount = { n: 0 };
-      globalThis.fetch = vi.fn(async () => {
-        callCount.n++;
-        return cfD1Response([{ count: callCount.n }]);
-      }) as any;
+      globalThis.fetch = asFetchMock(
+        vi.fn(async () => {
+          callCount.n++;
+          return cfD1Response([{ count: callCount.n }]);
+        }),
+      );
 
       const env = createEnv({ 'proj_1:d1:DB': 'd1-uuid-abc' });
       const res = await worker.fetch(
