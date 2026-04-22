@@ -705,6 +705,30 @@ export async function getDeploymentsWithAssetHashes(
     .limit(ASSET_HASH_CORROBORATION_LIMIT);
 }
 
+// Platform-wide fallback for the WfP corroboration guard. WC-4511 is an
+// account-level CF asset-cache inconsistency — any prior WfP upload on THIS
+// CF account (= any project on this platform) is evidence that CF has the
+// bytes, regardless of which project uploaded them. Per-project corroboration
+// is the fast path; this wider scan catches common cross-project chunks
+// (Vite runtime, Vue, Shiki, UnoCSS) that would otherwise trip the guard
+// for any fresh project.
+//
+// Bounded at 500 rows to cap the fully-materialized JSON blobs (~15 MiB
+// worst-case) inside the Worker isolate budget. Common chunks appear in
+// recent deploys by definition, so a moderate window catches 99%+ of them.
+export const PLATFORM_ASSET_HASH_CORROBORATION_LIMIT = 500;
+export async function getPlatformDeploymentsWithAssetHashes(
+  db: Db,
+  limit: number = PLATFORM_ASSET_HASH_CORROBORATION_LIMIT,
+): Promise<Array<{ asset_hashes: string | null; manifest: string | null }>> {
+  return db
+    .select({ asset_hashes: deployments.asset_hashes, manifest: deployments.manifest })
+    .from(deployments)
+    .where(isNotNull(deployments.asset_hashes))
+    .orderBy(desc(deployments.created_at))
+    .limit(limit);
+}
+
 export async function getInFlightDeploymentsExcluding(
   db: Db,
   projectId: string,

@@ -43,6 +43,7 @@ import {
   getRetainedDeployments,
   getRetainedDeploymentsExcluding,
   getDeploymentsWithAssetHashes,
+  getPlatformDeploymentsWithAssetHashes,
   getProjectSecrets,
   upsertProjectSecret,
   CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES,
@@ -691,6 +692,25 @@ async function getProjectCorroboratedWfpAssetHashes(
   return hashes;
 }
 
+// Widen corroboration to every WfP upload on the account. WC-4511 is
+// account-level poisoning, so any project's prior successful WfP upload of a
+// given hash proves CF holds the bytes. Called only as a fallback when the
+// per-project set misses — a fresh or migrating-from-static project has an
+// empty per-project WfP history, and common cross-project chunks (Vite
+// runtime, framework bundles) are exactly the hashes CF tends to dedupe
+// aggressively.
+async function getPlatformCorroboratedWfpAssetHashes(db: Db): Promise<Set<string>> {
+  const hashes = new Set<string>();
+  const rows = await getPlatformDeploymentsWithAssetHashes(db);
+  for (const row of rows) {
+    if (deploymentBackendKindFromManifest(row.manifest) !== 'wfp') {
+      continue;
+    }
+    collectManifestHashes(row.asset_hashes, hashes);
+  }
+  return hashes;
+}
+
 function collectSessionBucketHashes(buckets: Array<Array<string>>): Set<string> {
   const hashes = new Set<string>();
   for (const bucket of buckets) {
@@ -699,6 +719,102 @@ function collectSessionBucketHashes(buckets: Array<Array<string>>): Set<string> 
     }
   }
   return hashes;
+}
+
+// Content types where prepending a single-line marker is syntactically inert
+// under the parser every consumer of that MIME uses. JS/CSS both honor
+// `/* ... */` unconditionally in script/stylesheet contexts, so callers can
+// treat a non-null return as "safe to rewrite; clients see identical
+// observable behavior." Everything else — JSON (no comment syntax), HTML (a
+// leading comment before `<!DOCTYPE>` forces quirks mode), SVG/XML (the XML
+// prolog must stay first), `text/plain` (catch-all MIME with no universal
+// comment convention — e.g. robots.txt treats `#` as a comment but
+// sitemap.txt parses `#` as a URL character, CSVs as a field value,
+// `.properties` files as a non-leading literal, Markdown-as-text/plain as
+// an H1 heading), and everything binary — falls through to the
+// uncorroborated-hash refusal so the user sees an explicit error rather
+// than silent content corruption.
+function saltBytesForContentType(contentType: string, deploymentId: string): Uint8Array | null {
+  const ct = contentType.toLowerCase().split(';')[0]!.trim();
+  const marker = `__void:${deploymentId}`;
+  switch (ct) {
+    case 'text/javascript':
+    case 'application/javascript':
+    case 'text/css':
+      return new TextEncoder().encode(`/* ${marker} */\n`);
+    default:
+      return null;
+  }
+}
+
+interface SaltOnCollisionResult {
+  /** New hashes written back into the manifest, paired with their old hash. */
+  rewrites: Array<{ oldHash: string; newHash: string }>;
+  /** Hashes we could not safely salt (binary content or unsupported type). */
+  unsaltable: Array<string>;
+}
+
+// When CF's session poisoning leaves uncorroborated omissions that neither
+// per-project nor platform corroboration can vouch for, we bypass CF's
+// dedupe by changing the *content* of the affected assets — prepending a
+// deploy-id marker — which changes their hash and forces CF to request the
+// bytes. Side effects: mutates `assetManifest` (every path that referenced
+// a salted hash gets the new hash+size) and `assetsByHash` (old-hash entry
+// removed, new-hash entry added). Only called when corroboration fails.
+function saltUncorroboratedAssets(
+  assetsByHash: Map<string, AssetEntry>,
+  assetManifest: Record<string, AssetManifestEntry>,
+  uncorroboratedHashes: ReadonlyArray<string>,
+  deploymentId: string,
+): SaltOnCollisionResult {
+  // Paths sharing a hash share bytes by definition — salt them together so
+  // the manifest stays consistent (same bytes ⇒ same post-salt hash).
+  const hashToPaths = new Map<string, Array<string>>();
+  for (const [path, entry] of Object.entries(assetManifest)) {
+    const list = hashToPaths.get(entry.hash);
+    if (list) {
+      list.push(path);
+    } else {
+      hashToPaths.set(entry.hash, [path]);
+    }
+  }
+
+  const rewrites: Array<{ oldHash: string; newHash: string }> = [];
+  const unsaltable: Array<string> = [];
+
+  for (const oldHash of uncorroboratedHashes) {
+    const blob = assetsByHash.get(oldHash);
+    const paths = hashToPaths.get(oldHash);
+    if (!blob || !paths || paths.length === 0) {
+      unsaltable.push(oldHash);
+      continue;
+    }
+    const salt = saltBytesForContentType(blob.contentType, deploymentId);
+    if (!salt) {
+      unsaltable.push(oldHash);
+      continue;
+    }
+    const saltedBytes = new Uint8Array(salt.length + blob.bytes.length);
+    saltedBytes.set(salt, 0);
+    saltedBytes.set(blob.bytes, salt.length);
+    // All paths sharing `oldHash` must also share ext (ext is part of the
+    // hash formula), so any of them produces the same new hash.
+    const newHash = computeAssetHash(
+      saltedBytes.buffer.slice(
+        saltedBytes.byteOffset,
+        saltedBytes.byteOffset + saltedBytes.byteLength,
+      ),
+      paths[0]!,
+    );
+    for (const p of paths) {
+      assetManifest[p] = { hash: newHash, size: saltedBytes.byteLength };
+    }
+    assetsByHash.delete(oldHash);
+    assetsByHash.set(newHash, { bytes: saltedBytes, contentType: blob.contentType });
+    rewrites.push({ oldHash, newHash });
+  }
+
+  return { rewrites, unsaltable };
 }
 
 function formatHashPreview(hashes: Array<string>, limit = 5): string {
@@ -2158,7 +2274,7 @@ app.post('/:id/deploy', async (c) => {
             cached: assetCount - newAssets,
           });
 
-          const session = await createAssetUploadSession(
+          let session = await createAssetUploadSession(
             c.env.CF_ACCOUNT_ID,
             c.env.CF_API_TOKEN,
             dispatchNamespace,
@@ -2173,28 +2289,93 @@ app.post('/:id/deploy', async (c) => {
           // If it silently omits a hash from THIS request, `uploadAssetBuckets`
           // will never send those bytes and the worker upload can still appear
           // successful (WC-4511 — CF claims a hash is cached when it is not).
-          // Only trust such omissions when this project can corroborate the
-          // hash from its own WfP upload history — i.e. a prior deployment on
-          // the same backend whose `asset_hashes` already includes it.
+          // Three recovery layers, in order of cost:
+          //   1. Per-project corroboration: trust the omission if a prior WfP
+          //      deploy of THIS project already recorded the hash.
+          //   2. Platform corroboration: trust the omission if any prior WfP
+          //      deploy on the account recorded the hash (WC-4511 is an
+          //      account-level cache, so another project's successful upload
+          //      proves CF has the bytes).
+          //   3. Salt-on-collision: for hashes neither set corroborates, bypass
+          //      CF's dedupe by prepending a deploy-id marker to the content,
+          //      which changes the hash and forces CF to request the bytes on
+          //      a re-issued session. Only works for text content types; binary
+          //      content that lands here falls through to the hard refusal.
           const sessionBucketHashes = collectSessionBucketHashes(session.buckets);
           const omittedBufferedHashes = [...assetsByHash.keys()].filter(
             (hash) => !sessionBucketHashes.has(hash),
           );
           if (omittedBufferedHashes.length > 0) {
-            const corroboratedHashes = await getProjectCorroboratedWfpAssetHashes(
+            const projectCorroborated = await getProjectCorroboratedWfpAssetHashes(
               c.get('db'),
               projectId,
             );
-            const uncorroboratedHashes = omittedBufferedHashes.filter(
-              (hash) => !corroboratedHashes.has(hash),
+            let uncorroboratedHashes = omittedBufferedHashes.filter(
+              (hash) => !projectCorroborated.has(hash),
             );
+            let platformCorroborated: Set<string> = new Set();
             if (uncorroboratedHashes.length > 0) {
-              throw new Error(
-                `asset upload session omitted ${uncorroboratedHashes.length} uploaded hash(es) ` +
-                  `that this project cannot corroborate as already stored ` +
-                  `(${formatHashPreview(uncorroboratedHashes)}). Refusing to deploy because ` +
-                  `Cloudflare may later serve asset stubs for those hashes.`,
+              platformCorroborated = await getPlatformCorroboratedWfpAssetHashes(c.get('db'));
+              uncorroboratedHashes = uncorroboratedHashes.filter(
+                (hash) => !platformCorroborated.has(hash),
               );
+            }
+            if (uncorroboratedHashes.length > 0) {
+              const { rewrites, unsaltable } = saltUncorroboratedAssets(
+                assetsByHash,
+                assetManifest,
+                uncorroboratedHashes,
+                deployment.id,
+              );
+              if (unsaltable.length > 0) {
+                throw new Error(
+                  `asset upload session omitted ${unsaltable.length} uploaded hash(es) ` +
+                    `that this project cannot corroborate as already stored ` +
+                    `(${formatHashPreview(unsaltable)}). The content cannot be salted ` +
+                    `to bypass Cloudflare's dedupe (binary or unsupported content type). ` +
+                    `Refusing to deploy because Cloudflare may later serve asset stubs ` +
+                    `for those hashes.`,
+                );
+              }
+              // All uncorroborated hashes were salted. Re-issue the upload
+              // session so CF sees the new hashes as fresh bytes and asks us
+              // to upload them.
+              console.log(
+                `[deploy] ${projectId}: salted ${rewrites.length} asset(s) to bypass CF dedupe poisoning, re-issuing session`,
+              );
+              session = await createAssetUploadSession(
+                c.env.CF_ACCOUNT_ID,
+                c.env.CF_API_TOKEN,
+                dispatchNamespace,
+                workerName,
+                assetManifest,
+              );
+              // The retry session is a fresh roll of CF's dedupe and can
+              // omit hashes that session 1 included — not just the salted
+              // ones. `uploadAssetBuckets` uploads only what CF asks for,
+              // so any retry omission we fail to vouch for will ship a
+              // worker whose asset bundle serves 36-byte stubs for those
+              // paths. Re-run the full omission → corroboration check
+              // against the retry response, reusing the already-fetched
+              // corroboration sets. A retry omission of a salted hash is
+              // necessarily uncorroborated (the hash is fresh — CF has
+              // never seen those bytes), which means CF's dedupe is
+              // poisoned even for brand-new content and we cannot bypass
+              // it from the client side; refuse.
+              const retryBucketHashes = collectSessionBucketHashes(session.buckets);
+              const retryOmitted = [...assetsByHash.keys()].filter(
+                (hash) => !retryBucketHashes.has(hash),
+              );
+              const retryUncorroborated = retryOmitted.filter(
+                (hash) => !projectCorroborated.has(hash) && !platformCorroborated.has(hash),
+              );
+              if (retryUncorroborated.length > 0) {
+                throw new Error(
+                  `asset upload session still omits ${retryUncorroborated.length} uncorroborated ` +
+                    `hash(es) on retry (${formatHashPreview(retryUncorroborated)}). Cloudflare's ` +
+                    `dedupe is in a state we cannot bypass; refusing to deploy.`,
+                );
+              }
             }
           }
 

@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { computeAssetHash } from '../../src/assets';
 import { updateDeploymentStatus } from '../../src/db';
@@ -1168,12 +1168,17 @@ describe('POST /projects/:id/deploy', () => {
     expect(events.at(-1)).toMatchObject({ event: 'done' });
   });
 
-  it('fails when asset upload session omits an uncorroborated uploaded hash', async () => {
+  it('refuses when an uncorroborated omitted hash is unsaltable (binary content)', async () => {
+    // Unsaltable content (e.g. .wasm) has no comment syntax we can safely
+    // prepend to bypass CF's dedupe. A fresh project with no corroboration
+    // history falls through the per-project + platform-wide + salt layers
+    // and hits the hard refusal — the only path that should still ship a
+    // hard error under the new recovery flow.
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'asset-session-gap-test');
     const assets = {
       'assets/layout-MsZayE09.js': 'export const layout = "ok";',
-      'assets/pages-DydbLA60.js': 'export const page = "missing";',
+      'assets/pages-DydbLA60.wasm': 'fake wasm bytes',
     };
     const assetManifest = Object.fromEntries(
       Object.entries(assets).map(([path, content]) => {
@@ -1190,13 +1195,15 @@ describe('POST /projects/:id/deploy', () => {
         ];
       }),
     );
-    const omittedHash = assetManifest['/assets/pages-DydbLA60.js']!.hash;
+    const omittedHash = assetManifest['/assets/pages-DydbLA60.wasm']!.hash;
     const keptHash = assetManifest['/assets/layout-MsZayE09.js']!.hash;
 
     let assetUploadCalls = 0;
     let workerUploadCalls = 0;
+    let sessionCalls = 0;
     mockCfApi({
       assetUploadSession: async (_url: string, init?: RequestInit) => {
+        sessionCalls++;
         const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
         expect(body?.manifest).toMatchObject(assetManifest);
         return cfSuccess({ jwt: 'test-asset-jwt', buckets: [[keptHash]] });
@@ -1231,19 +1238,23 @@ describe('POST /projects/:id/deploy', () => {
     }>;
     expect(events.at(-1)).toMatchObject({ event: 'error', step: 'asset_upload' });
     expect(events.at(-1)?.message).toContain(omittedHash);
-    expect(events.at(-1)?.message).toContain('cannot corroborate');
+    expect(events.at(-1)?.message).toContain('cannot be salted');
+    // No retry session because salting failed before we got there.
+    expect(sessionCalls).toBe(1);
     expect(assetUploadCalls).toBe(0);
     expect(workerUploadCalls).toBe(0);
   });
 
-  it('does not trust static/SPA asset_hashes rows when corroborating a WfP deploy', async () => {
-    // Cross-backend safety: a KV/R2-resident hash (bytes in platform
-    // STATIC_ASSETS) tells us nothing about whether CF's WfP asset cache
-    // holds those bytes. A project that switched from static → WfP must
-    // not corroborate against old SPA deployment rows that happen to
-    // share a hash value.
+  it('salts-and-recovers when migrating static→server (source-map-viewer case)', async () => {
+    // Cross-backend: the project's prior SPA rows do not corroborate WfP
+    // deploys (KV/R2 bytes are platform-owned; CF's WfP asset cache is
+    // independent). On a static→server migration CF may still claim the
+    // shared-hash bytes are cached — it is the exact scenario that blocked
+    // `source-map-viewer` in prod (2026-04-21). The new salt-on-collision
+    // layer must bypass CF's poisoned dedupe by rewriting the asset bytes
+    // on retry, so the deploy can actually proceed instead of deadlocking.
     const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'cross-backend-no-trust');
+    const project = await createTestProject(env.db, user.id, 'cross-backend-salt-recovery');
 
     const sharedContent = 'export const shared = "same-bytes";';
     const sharedBytes = enc.encode(sharedContent);
@@ -1255,7 +1266,8 @@ describe('POST /projects/:id/deploy', () => {
       'assets/shared.js',
     );
     // Seed a prior STATIC deployment row whose asset_hashes includes the
-    // shared hash. Its bytes live in KV/R2, not CF's WfP store.
+    // shared hash. Its bytes live in KV/R2, not CF's WfP store — so this
+    // row MUST NOT vouch for the WfP deploy's corroboration.
     await env.db.insert(deployments).values({
       id: 'dpl_prior_spa',
       project_id: project.id,
@@ -1267,15 +1279,26 @@ describe('POST /projects/:id/deploy', () => {
       }),
     });
 
-    // The new WfP deploy uploads the same asset content. CF's session
-    // omits the shared hash (claims it's cached) — forcing the guard to
-    // look at corroboration history. The SPA row must NOT count.
+    // Simulate CF poisoning: first session omits sharedHash (claims cached).
+    // After the route salts the asset and re-issues the session, the bytes
+    // have a NEW hash, which CF has never seen — so the retry must not
+    // omit it (we include all manifest hashes in the retry buckets).
+    let sessionCalls = 0;
+    const sessionManifests: Array<Record<string, { hash: string; size: number }>> = [];
     mockCfApi({
       assetUploadSession: async (_url: string, init?: RequestInit) => {
+        sessionCalls++;
         const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
         const manifest = body?.manifest ?? {};
-        const hashes = [...new Set(manifestHashes(manifest).filter((hash) => hash !== sharedHash))];
-        return cfSuccess({ jwt: 'test-asset-jwt', buckets: [hashes] });
+        sessionManifests.push(manifest);
+        const hashes = [...new Set(manifestHashes(manifest))];
+        if (sessionCalls === 1) {
+          return cfSuccess({
+            jwt: 'test-asset-jwt',
+            buckets: [hashes.filter((hash) => hash !== sharedHash)],
+          });
+        }
+        return cfSuccess({ jwt: 'test-asset-jwt-retry', buckets: [hashes] });
       },
     });
 
@@ -1290,16 +1313,26 @@ describe('POST /projects/:id/deploy', () => {
     );
 
     expect(res.status).toBe(200);
-    const events = parseDeployStream(await res.text()) as Array<{
-      event: string;
-      step?: string;
-      message?: string;
-    }>;
-    const last = events.at(-1)!;
-    expect(last.event).toBe('error');
-    expect(last.step).toBe('asset_upload');
-    expect(last.message).toContain(sharedHash);
-    expect(last.message).toContain('cannot corroborate');
+    const events = parseDeployStream(await res.text()) as Array<{ event: string }>;
+    expect(events.at(-1)?.event).toBe('done');
+    // Sanity: CF session was called twice (initial + salt-retry), and the
+    // shared asset's hash changed between calls (salt prepended a marker,
+    // recompute produced a fresh hash CF had never seen).
+    expect(sessionCalls).toBe(2);
+    expect(sessionManifests[0]!['/assets/shared.js']!.hash).toBe(sharedHash);
+    expect(sessionManifests[1]!['/assets/shared.js']!.hash).not.toBe(sharedHash);
+    // The persisted asset_hashes row must reflect the salted hash, so the
+    // next deploy's corroboration matches the bytes CF actually stored.
+    const persisted = await env.db
+      .select()
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id))
+      .orderBy(desc(deployments.created_at))
+      .limit(1);
+    const live = persisted[0]!;
+    expect(live.status).toBe('live');
+    const ah = JSON.parse(live.asset_hashes!) as Record<string, { hash: string }>;
+    expect(ah['/assets/shared.js']!.hash).not.toBe(sharedHash);
   });
 
   it('corroborates WfP deploys against legacy pre-`type` manifests', async () => {
@@ -1361,26 +1394,32 @@ describe('POST /projects/:id/deploy', () => {
   });
 
   it('bounds the corroboration query so historical blobs do not accumulate in memory', async () => {
-    // `getDeploymentsWithAssetHashes` applies LIMIT ASSET_HASH_CORROBORATION_LIMIT
-    // ordered by created_at DESC, so rows older than the most recent N do
-    // not contribute to corroboration. Without the bound, an active
-    // CI/CD project would materialize every historical `asset_hashes`
-    // blob on every deploy — lesson 30 territory for the Worker isolate.
+    // Both corroboration queries apply a LIMIT bound ordered by
+    // created_at DESC, so rows older than the most recent-N do not
+    // contribute. Without the bounds, an active CI/CD platform would
+    // materialize every historical `asset_hashes` blob on every deploy
+    // — lesson 30 territory for the 128 MiB Worker isolate.
+    //
+    // Per-project: LIMIT 100. Platform-wide: LIMIT 500. We seed 501
+    // rows in one project so the oldest is outside BOTH windows, and
+    // use `.wasm` content so salt-on-collision also has nothing to do.
+    // Only the hard refusal path can produce the error we assert on.
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'corroboration-bound');
 
-    const content = 'export const x = "old";';
+    const content = 'fake wasm bytes';
     const bytes = enc.encode(content);
     const oldestHash = computeAssetHash(
       bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-      'assets/old.js',
+      'assets/old.wasm',
     );
-    // Seed 101 historical WfP deploys. The oldest (row #1) carries
-    // `oldestHash`. Rows #2-#101 carry unique filler hashes. With the
-    // LIMIT-100 bound ordered newest-first, the oldest row is pushed
-    // out of the corroboration window.
-    const filler = Array.from({ length: 101 }, (_, i) => ({
-      id: `dpl_bound_${i.toString().padStart(3, '0')}`,
+    // Seed 501 historical WfP deploys. The oldest (index 0) carries
+    // `oldestHash`. All other rows carry unique filler hashes. With
+    // LIMIT 100 (per-project) and LIMIT 500 (platform), the oldest row
+    // is pushed out of both corroboration windows.
+    const seedCount = 501;
+    const filler = Array.from({ length: seedCount }, (_, i) => ({
+      id: `dpl_bound_${i.toString().padStart(4, '0')}`,
       project_id: project.id,
       status: 'live' as const,
       retained: i === 0,
@@ -1391,17 +1430,18 @@ describe('POST /projects/:id/deploy', () => {
           size: bytes.byteLength,
         },
       }),
-      // Spread 101 days into the past so the rows do not count against
-      // the user's per-day deploy limit (they are seed history, not
-      // today's attempts).
-      created_at: new Date(Date.now() - (101 - i) * 86_400_000).toISOString(),
+      // Spread rows into the past so the seed does not count against
+      // the user's per-day deploy limit (they are history, not today's
+      // attempts). Newer rows have higher i.
+      created_at: new Date(Date.now() - (seedCount - i) * 86_400_000).toISOString(),
     }));
     await env.db.insert(deployments).values(filler);
 
     mockCfApi({
-      // CF claims `oldestHash` is cached — a session-omission that would
-      // be corroborated by an unbounded scan but must NOT be corroborated
-      // by the bounded query (oldest row is past the LIMIT window).
+      // CF claims `oldestHash` is cached — a session-omission that
+      // would be corroborated by an unbounded scan but must NOT be
+      // corroborated by either bounded query (oldest row past both
+      // LIMIT windows).
       assetUploadSession: async (_url: string, init?: RequestInit) => {
         const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
         const manifest = body?.manifest ?? {};
@@ -1410,7 +1450,7 @@ describe('POST /projects/:id/deploy', () => {
       },
     });
 
-    const form = buildDeployForm({ assets: { 'assets/old.js': content } });
+    const form = buildDeployForm({ assets: { 'assets/old.wasm': content } });
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
         method: 'POST',
@@ -1430,6 +1470,352 @@ describe('POST /projects/:id/deploy', () => {
     expect(last.step).toBe('asset_upload');
     expect(last.message).toContain(oldestHash);
     expect(last.message).toContain('cannot corroborate');
+  });
+
+  it('platform-wide fallback corroborates a WfP hash from another project', async () => {
+    // The fresh-project case: `source-map-viewer` and every new WfP
+    // project on the platform has no per-project history to corroborate
+    // CF's omitted hashes. But shared chunks (Vite runtime, framework
+    // bundles) appear in MANY other projects' WfP manifests, and any one
+    // of those is sufficient evidence CF actually holds the bytes
+    // (WC-4511 is per-account, not per-project). The platform-wide
+    // fallback must pick them up without salting.
+    const user = await createTestUser(env.db);
+    const otherProject = await createTestProject(env.db, user.id, 'platform-corroboration-seed');
+    const freshProject = await createTestProject(env.db, user.id, 'platform-corroboration-fresh');
+
+    const sharedContent = 'export const runtime = "shared";';
+    const sharedBytes = enc.encode(sharedContent);
+    const sharedHash = computeAssetHash(
+      sharedBytes.buffer.slice(
+        sharedBytes.byteOffset,
+        sharedBytes.byteOffset + sharedBytes.byteLength,
+      ),
+      'assets/runtime.js',
+    );
+    // Seed a successful WfP deploy on ANOTHER project with the hash.
+    // Per-project query for freshProject will return empty, forcing the
+    // platform-wide fallback to run and find this row.
+    await env.db.insert(deployments).values({
+      id: 'dpl_other_wfp_live',
+      project_id: otherProject.id,
+      status: 'live',
+      retained: true,
+      manifest: JSON.stringify({ version: 3, type: 'void', bindings: {} }),
+      asset_hashes: JSON.stringify({
+        '/assets/runtime.js': { hash: sharedHash, size: sharedBytes.byteLength },
+      }),
+    });
+
+    let sessionCalls = 0;
+    mockCfApi({
+      assetUploadSession: async (_url: string, init?: RequestInit) => {
+        sessionCalls++;
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+        const manifest = body?.manifest ?? {};
+        const hashes = [...new Set(manifestHashes(manifest).filter((hash) => hash !== sharedHash))];
+        return cfSuccess({ jwt: 'test-asset-jwt', buckets: [hashes] });
+      },
+    });
+
+    const form = buildDeployForm({ assets: { 'assets/runtime.js': sharedContent } });
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${freshProject.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{ event: string }>;
+    expect(events.at(-1)?.event).toBe('done');
+    // Only ONE session call — platform corroboration short-circuits the
+    // salt retry path when another project's prior WfP upload covers
+    // the omitted hash.
+    expect(sessionCalls).toBe(1);
+    // The freshProject's asset_hashes must NOT be a salted rewrite — if
+    // salting ran here, corroboration was broken and the test would
+    // have produced a DIFFERENT hash on the live row.
+    const liveRows = await env.db
+      .select()
+      .from(deployments)
+      .where(eq(deployments.project_id, freshProject.id))
+      .orderBy(desc(deployments.created_at))
+      .limit(1);
+    const ah = JSON.parse(liveRows[0]!.asset_hashes!) as Record<string, { hash: string }>;
+    expect(ah['/assets/runtime.js']!.hash).toBe(sharedHash);
+  });
+
+  it('salts uncorroborated CSS on collision (text asset bypass)', async () => {
+    // Salting must work for CSS too — text/css is the other dominant
+    // Vite output. `source-map-viewer` has Shiki + UnoCSS chunks which
+    // include CSS; a binary-only carveout would miss this scenario.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'salt-css');
+    const cssContent = '.body{color:red}';
+    const cssBytes = enc.encode(cssContent);
+    const cssHash = computeAssetHash(
+      cssBytes.buffer.slice(cssBytes.byteOffset, cssBytes.byteOffset + cssBytes.byteLength),
+      'assets/style.css',
+    );
+
+    let sessionCalls = 0;
+    const seenManifests: Array<Record<string, { hash: string; size: number }>> = [];
+    mockCfApi({
+      assetUploadSession: async (_url: string, init?: RequestInit) => {
+        sessionCalls++;
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+        const manifest = body?.manifest ?? {};
+        seenManifests.push(manifest);
+        const hashes = [...new Set(manifestHashes(manifest))];
+        if (sessionCalls === 1) {
+          return cfSuccess({
+            jwt: 'test-asset-jwt',
+            buckets: [hashes.filter((hash) => hash !== cssHash)],
+          });
+        }
+        return cfSuccess({ jwt: 'test-asset-jwt-retry', buckets: [hashes] });
+      },
+    });
+
+    const form = buildDeployForm({ assets: { 'assets/style.css': cssContent } });
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{ event: string }>;
+    expect(events.at(-1)?.event).toBe('done');
+    expect(sessionCalls).toBe(2);
+    expect(seenManifests[1]!['/assets/style.css']!.hash).not.toBe(cssHash);
+  });
+
+  it('refuses when the salt-retry session still omits a salted hash', async () => {
+    // Extreme recovery failure: even after salting, CF still claims to
+    // have the new (freshly-hashed) bytes it has never seen. That means
+    // CF's dedupe is in a state we cannot bypass, and shipping the
+    // worker anyway would still serve stubs. Refuse, don't upload.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'salt-retry-poisoned');
+    const content = 'export const x = 1;';
+    const bytes = enc.encode(content);
+    const jsHash = computeAssetHash(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      'assets/x.js',
+    );
+
+    let sessionCalls = 0;
+    let workerUploadCalls = 0;
+    mockCfApi({
+      // Session 1: omit the JS asset's hash (forces salting). Session 2:
+      // omit the JS asset's new hash after salting (forces the hard
+      // refusal). The bust file and any other manifest entries remain in
+      // the buckets so this test is not conflated with the unsaltable-
+      // bust-file case (text/plain is intentionally not salt-safe).
+      assetUploadSession: async (_url: string, init?: RequestInit) => {
+        sessionCalls++;
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+        const manifest = (body?.manifest ?? {}) as Record<string, { hash: string }>;
+        const jsAssetHash = manifest['/assets/x.js']?.hash;
+        const hashes = [...new Set(manifestHashes(manifest))];
+        return cfSuccess({
+          jwt: `test-asset-jwt-${sessionCalls}`,
+          buckets: [jsAssetHash ? hashes.filter((h) => h !== jsAssetHash) : hashes],
+        });
+      },
+      uploadWorker: () => {
+        workerUploadCalls++;
+        return new Response('ok', { status: 200 });
+      },
+    });
+
+    const form = buildDeployForm({ assets: { 'assets/x.js': content } });
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      step?: string;
+      message?: string;
+    }>;
+    const last = events.at(-1)!;
+    expect(last.event).toBe('error');
+    expect(last.step).toBe('asset_upload');
+    expect(last.message).toContain('still omits');
+    // We want the sessions-called assertion to prove the retry was
+    // actually issued (sessionCalls === 2) — i.e. we tried to salt and
+    // re-ask CF, not just gave up. Worker upload must never happen.
+    expect(sessionCalls).toBe(2);
+    expect(workerUploadCalls).toBe(0);
+    // Defense-in-depth: jsHash is what the original asset hashes to;
+    // assert the failure is associated with a DIFFERENT (salted) hash
+    // to confirm the retry was what failed, not the initial session.
+    expect(last.message).not.toContain(jsHash);
+  });
+
+  it('re-checks the retry session for new uncorroborated omissions beyond the salted set', async () => {
+    // Reviewer-flagged gap: the retry session is a fresh roll of CF's
+    // dedupe. It can omit hashes that session 1 included in its buckets
+    // — not just the salted ones. `uploadAssetBuckets` uploads only
+    // what CF asks for, so a hash that falls out of the retry bucket
+    // without having been corroborated would ship a worker whose bundle
+    // serves stubs for those paths. The guard must re-run the full
+    // omission → corroboration check against the retry response.
+    //
+    // Setup: two saltable JS assets A and B on a fresh project.
+    //   Session 1: omits A only (B in buckets; A uncorroborated).
+    //   Salt A → A'. Retry manifest = {A', B, bust}.
+    //   Session 2: omits B (A' in buckets). B is a fresh hash with no
+    //     corroboration source, so the retry guard must refuse.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'salt-retry-newomit');
+    const aContent = 'export const a = 1;';
+    const bContent = 'export const b = 2;';
+    const aBytes = enc.encode(aContent);
+    const bBytes = enc.encode(bContent);
+    const aHash = computeAssetHash(
+      aBytes.buffer.slice(aBytes.byteOffset, aBytes.byteOffset + aBytes.byteLength),
+      'assets/a.js',
+    );
+    const bHash = computeAssetHash(
+      bBytes.buffer.slice(bBytes.byteOffset, bBytes.byteOffset + bBytes.byteLength),
+      'assets/b.js',
+    );
+
+    let sessionCalls = 0;
+    let workerUploadCalls = 0;
+    mockCfApi({
+      assetUploadSession: async (_url: string, init?: RequestInit) => {
+        sessionCalls++;
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+        const manifest = body?.manifest ?? {};
+        const allHashes = [...new Set(manifestHashes(manifest))];
+        if (sessionCalls === 1) {
+          // Omit A only — it is uncorroborated and will be salted.
+          return cfSuccess({
+            jwt: 'jwt1',
+            buckets: [allHashes.filter((h) => h !== aHash)],
+          });
+        }
+        // Retry. Salted A' is now in the manifest; omit B (which was
+        // fine in session 1 but is a brand new roll of CF's dedupe).
+        return cfSuccess({
+          jwt: 'jwt2',
+          buckets: [allHashes.filter((h) => h !== bHash)],
+        });
+      },
+      uploadWorker: () => {
+        workerUploadCalls++;
+        return new Response('ok', { status: 200 });
+      },
+    });
+
+    const form = buildDeployForm({
+      assets: { 'assets/a.js': aContent, 'assets/b.js': bContent },
+    });
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      step?: string;
+      message?: string;
+    }>;
+    const last = events.at(-1)!;
+    expect(last.event).toBe('error');
+    expect(last.step).toBe('asset_upload');
+    // The newly-omitted hash is B (original hash — B was not salted).
+    // The old guard (which only checked rewrites.map(r.newHash)) would
+    // have missed this and proceeded to worker upload.
+    expect(last.message).toContain(bHash);
+    expect(last.message).toContain('still omits');
+    // Both sessions were called (proves we retried), but worker upload
+    // must NOT run — that was the silent-stub-shipping bug.
+    expect(sessionCalls).toBe(2);
+    expect(workerUploadCalls).toBe(0);
+  });
+
+  it('refuses when any uncorroborated hash is unsaltable, even with saltable siblings', async () => {
+    // Mixed bundles (text chunks + binary assets like fonts/images) are
+    // common. Salting the text ones but leaving the binary unsaltable
+    // still risks stubs for the binaries, so the deploy must refuse and
+    // not partially salt. This is the conservative choice: an error the
+    // user can act on (ship without the binary, or wait for CF to
+    // recover) beats a silently half-broken deploy.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'salt-mixed-refuse');
+    const jsContent = 'export const j = 1;';
+    const jsBytes = enc.encode(jsContent);
+    const jsHash = computeAssetHash(
+      jsBytes.buffer.slice(jsBytes.byteOffset, jsBytes.byteOffset + jsBytes.byteLength),
+      'assets/code.js',
+    );
+    const wasmContent = 'fake wasm';
+    const wasmBytes = enc.encode(wasmContent);
+    const wasmHash = computeAssetHash(
+      wasmBytes.buffer.slice(wasmBytes.byteOffset, wasmBytes.byteOffset + wasmBytes.byteLength),
+      'assets/module.wasm',
+    );
+
+    let sessionCalls = 0;
+    let workerUploadCalls = 0;
+    mockCfApi({
+      assetUploadSession: async () => {
+        sessionCalls++;
+        return cfSuccess({ jwt: 'test-asset-jwt', buckets: [] });
+      },
+      uploadWorker: () => {
+        workerUploadCalls++;
+        return new Response('ok', { status: 200 });
+      },
+    });
+
+    const form = buildDeployForm({
+      assets: { 'assets/code.js': jsContent, 'assets/module.wasm': wasmContent },
+    });
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      step?: string;
+      message?: string;
+    }>;
+    const last = events.at(-1)!;
+    expect(last.event).toBe('error');
+    expect(last.step).toBe('asset_upload');
+    expect(last.message).toContain('cannot be salted');
+    // The wasm hash is the one that should be named as unsaltable,
+    // never the js (js is saltable — the js hash would recover fine).
+    expect(last.message).toContain(wasmHash);
+    expect(last.message).not.toContain(jsHash);
+    // No retry session because unsaltable was detected before retrying.
+    expect(sessionCalls).toBe(1);
+    expect(workerUploadCalls).toBe(0);
   });
 
   describe('retry-path behavior', () => {
