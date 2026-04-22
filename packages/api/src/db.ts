@@ -674,61 +674,6 @@ export async function getRetainedDeploymentsExcluding(
     .orderBy(desc(deployments.created_at));
 }
 
-// Every deployment for this project that persisted an asset manifest. Used by
-// WfP asset-session corroboration: a row with non-null asset_hashes reached
-// successful `uploadAssetBuckets` for its backend. The caller also needs
-// `manifest` to re-derive the storage backend — static/SPA and WfP both land
-// `asset_hashes` in this column, but the bytes live in different stores
-// (platform KV/R2 vs Cloudflare's WfP asset cache). Cross-backend hashes must
-// not corroborate each other. `retained` is a lifecycle/retention signal and
-// is intentionally not filtered — a deploy that died in migrations still
-// carries a valid corroboration baseline for its own backend.
-//
-// Bounded by `ASSET_HASH_CORROBORATION_LIMIT` to keep the fully-materialized
-// result set out of the 128 MiB Worker isolate budget. Deployment rows are
-// never deleted outside of project deletion and `asset_hashes` is never
-// cleared on retention eviction, so an unbounded query on an active
-// CI/CD project would grow without limit. Recent rows are sufficient for
-// corroboration — an omitted hash that is NOT present in the last N rows is
-// almost certainly an asset the user hasn't touched in a long time, and
-// refusing to corroborate it is the safer default.
-export const ASSET_HASH_CORROBORATION_LIMIT = 100;
-export async function getDeploymentsWithAssetHashes(
-  db: Db,
-  projectId: string,
-): Promise<Array<{ asset_hashes: string | null; manifest: string | null }>> {
-  return db
-    .select({ asset_hashes: deployments.asset_hashes, manifest: deployments.manifest })
-    .from(deployments)
-    .where(and(eq(deployments.project_id, projectId), isNotNull(deployments.asset_hashes)))
-    .orderBy(desc(deployments.created_at))
-    .limit(ASSET_HASH_CORROBORATION_LIMIT);
-}
-
-// Platform-wide fallback for the WfP corroboration guard. WC-4511 is an
-// account-level CF asset-cache inconsistency — any prior WfP upload on THIS
-// CF account (= any project on this platform) is evidence that CF has the
-// bytes, regardless of which project uploaded them. Per-project corroboration
-// is the fast path; this wider scan catches common cross-project chunks
-// (Vite runtime, Vue, Shiki, UnoCSS) that would otherwise trip the guard
-// for any fresh project.
-//
-// Bounded at 500 rows to cap the fully-materialized JSON blobs (~15 MiB
-// worst-case) inside the Worker isolate budget. Common chunks appear in
-// recent deploys by definition, so a moderate window catches 99%+ of them.
-export const PLATFORM_ASSET_HASH_CORROBORATION_LIMIT = 500;
-export async function getPlatformDeploymentsWithAssetHashes(
-  db: Db,
-  limit: number = PLATFORM_ASSET_HASH_CORROBORATION_LIMIT,
-): Promise<Array<{ asset_hashes: string | null; manifest: string | null }>> {
-  return db
-    .select({ asset_hashes: deployments.asset_hashes, manifest: deployments.manifest })
-    .from(deployments)
-    .where(isNotNull(deployments.asset_hashes))
-    .orderBy(desc(deployments.created_at))
-    .limit(limit);
-}
-
 export async function getInFlightDeploymentsExcluding(
   db: Db,
   projectId: string,
