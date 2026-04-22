@@ -10,25 +10,25 @@ const API_TOKEN = 'test-token';
 const DATABASE_ID = 'd1-uuid-123';
 
 // Track all queries made to D1
-let queries: { sql: string; params?: unknown[] }[] = [];
+let queries: Array<{ sql: string; params?: Array<unknown> }> = [];
 
 // Applied migrations state (simulates _void_migrations table)
-let appliedMigrations: string[] = [];
+let appliedMigrations: Array<string> = [];
 
 // Whether the legacy `_migrations` table exists (for upgrade tests)
 let hasLegacyTable = false;
-let legacyMigrations: string[] = [];
+let legacyMigrations: Array<string> = [];
 
 // SQL strings that should trigger a failure response. Map from a substring
 // match (or regex) to the error message to return. `beforeFail` is an optional
 // side-effect hook fired once per match — used to simulate state changes (e.g.
 // a concurrent winner inserting a tracking row) before the loser's request is
 // rejected.
-let failingSql: {
+let failingSql: Array<{
   match: string | RegExp;
   message: string;
   beforeFail?: () => void;
-}[] = [];
+}> = [];
 
 beforeEach(() => {
   queries = [];
@@ -41,7 +41,7 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (_url: string, init: RequestInit) => {
-      const body = JSON.parse(init.body as string) as { sql: string; params?: unknown[] };
+      const body = JSON.parse(init.body as string) as { sql: string; params?: Array<unknown> };
       queries.push(body);
 
       const failure = failingSql.find((f) =>
@@ -549,7 +549,7 @@ describe('runRemoteMigrations', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init: RequestInit) => {
-        const body = JSON.parse(init.body as string) as { sql: string; params?: unknown[] };
+        const body = JSON.parse(init.body as string) as { sql: string; params?: Array<unknown> };
         if (body.sql === 'SELECT name FROM _void_migrations WHERE name = ?') {
           recheckCount++;
           // Land the winner's tracking row right before the loser's second

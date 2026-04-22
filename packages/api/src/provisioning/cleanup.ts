@@ -26,8 +26,8 @@ export async function cleanupProjectResources(
   c: Context<ApiEnv>,
   projectId: string,
   project: Pick<Project, 'slug'>,
-): Promise<string[]> {
-  const warnings: string[] = [];
+): Promise<Array<string>> {
+  const warnings: Array<string> = [];
   const warn = (msg: string) => (err: unknown) => {
     warnings.push(`${msg}: ${err instanceof Error ? err.message : String(err)}`);
   };
@@ -62,7 +62,7 @@ export async function cleanupProjectResources(
     ),
   );
 
-  const cleanup: Promise<void>[] = [];
+  const cleanup: Array<Promise<void>> = [];
 
   // CF resource cleanup (D1, KV, R2, Queue — user-provisioned resources)
   for (const resource of resources) {

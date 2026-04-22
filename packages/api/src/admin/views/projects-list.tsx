@@ -11,7 +11,7 @@ export function ProjectsListPage({
   siteDomain,
   username,
 }: {
-  projects: ProjectRow[];
+  projects: Array<ProjectRow>;
   search?: string;
   page?: number;
   totalPages?: number;

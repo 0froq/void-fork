@@ -158,7 +158,7 @@ async function processUserRollover(
   env: ApiEnv['Bindings'],
   db: Db,
   user: { id: string; plan: string; billing_cycle_start: string; suspended_reason: string | null },
-  userProjects: { id: string; slug: string }[],
+  userProjects: Array<{ id: string; slug: string }>,
 ): Promise<void> {
   // Backfill userId into old KV routing entries (all plans, before early return).
   // Wrapped in try/catch so a malformed KV entry doesn't block rollover/unsuspension.

@@ -10,7 +10,7 @@ import { groupEventsByUser } from '../../src/usage-queue';
 
 describe('groupEventsByUser', () => {
   it('groups events by userId', () => {
-    const events: UsageEvent[] = [
+    const events: Array<UsageEvent> = [
       { projectId: 'p1', userId: 'u1', slug: 's1', requests: 1, responseBytes: 100 },
       { projectId: 'p2', userId: 'u2', slug: 's2', requests: 1, responseBytes: 200 },
       { projectId: 'p3', userId: 'u1', slug: 's3', requests: 1, responseBytes: 300 },
@@ -28,7 +28,7 @@ describe('groupEventsByUser', () => {
   });
 
   it('handles single user with multiple events', () => {
-    const events: UsageEvent[] = [
+    const events: Array<UsageEvent> = [
       { projectId: 'p1', userId: 'u1', slug: 's1', requests: 1, responseBytes: 100 },
       { projectId: 'p2', userId: 'u1', slug: 's2', requests: 1, responseBytes: 200 },
     ];

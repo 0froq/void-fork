@@ -19,17 +19,17 @@ export function UserDetailPage({
   username,
 }: {
   user: User;
-  projects: Project[];
+  projects: Array<Project>;
   deploysToday: number;
   usage: {
     billingPeriodStart: string;
     totalRequests: number;
     totalBandwidth: number;
-    projects: ProjectUsage[];
+    projects: Array<ProjectUsage>;
   };
   username?: string;
 }) {
-  const plans = Object.keys(PLAN_LIMITS) as PlanId[];
+  const plans = Object.keys(PLAN_LIMITS) as Array<PlanId>;
   const limits = getPlanLimits(user.plan);
 
   return (

@@ -76,11 +76,11 @@ export async function getGitHubUser(accessToken: string): Promise<GitHubUser> {
   let email = user.email;
   let emailVerified = false;
   if (emailsRes.ok) {
-    const emails = (await emailsRes.json()) as {
+    const emails = (await emailsRes.json()) as Array<{
       email: string;
       primary: boolean;
       verified: boolean;
-    }[];
+    }>;
     const primary = emails.find((e) => e.primary);
     if (primary) {
       email = primary.email;

@@ -95,7 +95,7 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
 
   private async handleRecord(request: Request): Promise<Response> {
     const body = (await request.json()) as {
-      events: UsageEvent[];
+      events: Array<UsageEvent>;
       plan?: string;
       userId: string;
     };

@@ -35,7 +35,7 @@ export function parseScriptName(
 }
 
 export default {
-  async tail(events: TraceItem[], env: Env) {
+  async tail(events: Array<TraceItem>, env: Env) {
     for (const event of events) {
       const scriptName = event.scriptName;
       if (!scriptName) {

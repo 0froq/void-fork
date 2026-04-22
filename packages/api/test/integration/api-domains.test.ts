@@ -218,7 +218,7 @@ describe('GET /projects/:id/domains', () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { hostname: string; status: string }[];
+    const body = (await res.json()) as Array<{ hostname: string; status: string }>;
     expect(body).toHaveLength(2);
     expect(body[0].hostname).toBe('a.example.com');
     expect(body[1].hostname).toBe('b.example.com');
@@ -356,7 +356,7 @@ describe('DELETE /projects/:id/domains/:domainId', () => {
     expect(domainRouting).toBeNull();
 
     // Verify CF API was called
-    const deleteCall = fetchMock.mock.calls.find((call: unknown[]) => {
+    const deleteCall = fetchMock.mock.calls.find((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       return (
         url.includes('/custom_hostnames/ch-remove') && (call[1] as RequestInit)?.method === 'DELETE'
@@ -393,7 +393,7 @@ describe('DELETE /projects/:id/domains/:domainId', () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean; warnings: string[] };
+    const body = (await res.json()) as { ok: boolean; warnings: Array<string> };
     expect(body.ok).toBe(true);
     expect(body.warnings).toHaveLength(1);
     expect(body.warnings[0]).toContain('CF API down');

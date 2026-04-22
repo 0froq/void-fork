@@ -140,12 +140,12 @@ describe('POST /projects/:id/revalidate', () => {
 
     // Verify edge cache purge was called with correct URLs
     const purgeCalls = fetchMock.mock.calls.filter(
-      (call: unknown[]) =>
+      (call: Array<unknown>) =>
         (call[1] as RequestInit | undefined)?.method === 'POST' &&
         (call[0] as string).includes('/purge_cache'),
     );
     expect(purgeCalls.length).toBe(1);
-    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as string[];
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
     expect(purgedFiles).toContain(`https://${project.slug}.void.app/?__void_isr=${deployment.id}`);
     expect(purgedFiles).toContain(
       `https://${project.slug}.void.app/?__void=json&__void_isr=${deployment.id}`,
@@ -191,12 +191,12 @@ describe('POST /projects/:id/revalidate', () => {
     expect(await env.ISR_CACHE.get(isrKey(project.id, previousDeployment.id, 'about'))).toBeNull();
 
     const purgeCalls = fetchMock.mock.calls.filter(
-      (call: unknown[]) =>
+      (call: Array<unknown>) =>
         (call[1] as RequestInit | undefined)?.method === 'POST' &&
         (call[0] as string).includes('/purge_cache'),
     );
     expect(purgeCalls.length).toBe(1);
-    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as string[];
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
     expect(purgedFiles).toContain(
       `https://${project.slug}.void.app/about?__void_isr=${activeDeployment.id}`,
     );
@@ -245,12 +245,12 @@ describe('POST /projects/:id/revalidate', () => {
     expect(await env.ISR_CACHE.get(isrKey(project.id, routingDeployment.id, 'about'))).toBeNull();
 
     const purgeCalls = fetchMock.mock.calls.filter(
-      (call: unknown[]) =>
+      (call: Array<unknown>) =>
         (call[1] as RequestInit | undefined)?.method === 'POST' &&
         (call[0] as string).includes('/purge_cache'),
     );
     expect(purgeCalls.length).toBe(1);
-    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as string[];
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
     expect(purgedFiles).toContain(
       `https://${project.slug}.void.app/about?__void_isr=${databaseActiveDeployment.id}`,
     );
@@ -293,12 +293,12 @@ describe('POST /projects/:id/revalidate', () => {
 
     // Verify edge cache purge with correct pathnames derived from KV keys
     const purgeCalls = fetchMock.mock.calls.filter(
-      (call: unknown[]) =>
+      (call: Array<unknown>) =>
         (call[1] as RequestInit | undefined)?.method === 'POST' &&
         (call[0] as string).includes('/purge_cache'),
     );
     expect(purgeCalls.length).toBe(1);
-    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as string[];
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
     expect(purgedFiles).toContain(`https://${project.slug}.void.app/?__void_isr=${deployment.id}`);
     expect(purgedFiles).toContain(
       `https://${project.slug}.void.app/?__void=json&__void_isr=${deployment.id}`,
@@ -343,12 +343,12 @@ describe('POST /projects/:id/revalidate', () => {
     expect(res.status).toBe(200);
 
     const purgeCalls = fetchMock.mock.calls.filter(
-      (call: unknown[]) =>
+      (call: Array<unknown>) =>
         (call[1] as RequestInit | undefined)?.method === 'POST' &&
         (call[0] as string).includes('/purge_cache'),
     );
     expect(purgeCalls.length).toBe(1);
-    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as string[];
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
     // slug domain + custom domain, HTML + JSON each = 4 URLs
     expect(purgedFiles).toContain(
       `https://${project.slug}.void.app/about?__void_isr=${deployment.id}`,
@@ -370,7 +370,7 @@ describe('POST /projects/:id/revalidate', () => {
     const fetchMock = mockCfApi();
 
     // Create 51 paths × 2 variants (HTML+JSON) = 102 URLs → needs 2 batches
-    const paths: string[] = [];
+    const paths: Array<string> = [];
     for (let i = 0; i < 51; i++) {
       const path = `/page-${i}`;
       paths.push(path);
@@ -392,15 +392,15 @@ describe('POST /projects/:id/revalidate', () => {
     expect(res.status).toBe(200);
 
     const purgeCalls = fetchMock.mock.calls.filter(
-      (call: unknown[]) =>
+      (call: Array<unknown>) =>
         (call[1] as RequestInit | undefined)?.method === 'POST' &&
         (call[0] as string).includes('/purge_cache'),
     );
     // 51 paths × 2 variants = 102 URLs → 2 batches (100 + 2)
     expect(purgeCalls.length).toBe(2);
 
-    const batch1 = JSON.parse(purgeCalls[0][1]!.body as string).files as string[];
-    const batch2 = JSON.parse(purgeCalls[1][1]!.body as string).files as string[];
+    const batch1 = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
+    const batch2 = JSON.parse(purgeCalls[1][1]!.body as string).files as Array<string>;
     expect(batch1).toHaveLength(100);
     expect(batch2).toHaveLength(2);
   });
@@ -484,12 +484,12 @@ describe('POST /projects/:id/revalidate', () => {
     expect(await env.ISR_CACHE.get(isrKey(project.id, oldDeployment.id, 'about'))).toBeNull();
 
     const purgeCalls = fetchMock.mock.calls.filter(
-      (call: unknown[]) =>
+      (call: Array<unknown>) =>
         (call[1] as RequestInit | undefined)?.method === 'POST' &&
         (call[0] as string).includes('/purge_cache'),
     );
     expect(purgeCalls.length).toBe(1);
-    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as string[];
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
 
     // Slug hostname uses NEW version (both HTML + JSON variants)
     expect(purgedFiles).toContain(
@@ -540,12 +540,12 @@ describe('POST /projects/:id/revalidate', () => {
     expect(await env.ISR_CACHE.get(isrKey(project.id, activeDeployment.id, 'about'))).toBeNull();
 
     const purgeCalls = fetchMock.mock.calls.filter(
-      (call: unknown[]) =>
+      (call: Array<unknown>) =>
         (call[1] as RequestInit | undefined)?.method === 'POST' &&
         (call[0] as string).includes('/purge_cache'),
     );
     expect(purgeCalls.length).toBe(1);
-    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as string[];
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
     expect(purgedFiles).toContain(`https://${project.slug}.void.app/about?__void_isr=legacy`);
     expect(purgedFiles).toContain(
       `https://${project.slug}.void.app/about?__void_isr=${activeDeployment.id}`,
@@ -584,12 +584,12 @@ describe('POST /projects/:id/revalidate', () => {
     expect(await env.ISR_CACHE.get(isrKey(project.id, '', 'about'))).toBeNull();
 
     const purgeCalls = fetchMock.mock.calls.filter(
-      (call: unknown[]) =>
+      (call: Array<unknown>) =>
         (call[1] as RequestInit | undefined)?.method === 'POST' &&
         (call[0] as string).includes('/purge_cache'),
     );
     expect(purgeCalls.length).toBe(1);
-    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as string[];
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
     // Edge cache purge uses `__void_isr=` (empty value) for the empty-id set,
     // matching the cache key dispatch would have used when serving.
     expect(purgedFiles).toContain(`https://${project.slug}.void.app/about?__void_isr=`);
@@ -638,12 +638,12 @@ describe('POST /internal/revalidate/:id', () => {
     expect(await env.ISR_CACHE.get(isrKey(project.id, oldDeployment.id, 'about'))).toBeNull();
 
     const purgeCalls = fetchMock.mock.calls.filter(
-      (call: unknown[]) =>
+      (call: Array<unknown>) =>
         (call[1] as RequestInit | undefined)?.method === 'POST' &&
         (call[0] as string).includes('/purge_cache'),
     );
     expect(purgeCalls.length).toBe(1);
-    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as string[];
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
     expect(purgedFiles).toContain(
       `https://${project.slug}.void.app/about?__void_isr=${newDeployment.id}`,
     );

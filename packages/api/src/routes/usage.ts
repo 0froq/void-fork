@@ -162,7 +162,7 @@ async function queryProjectUsage(
     return { requests: 0, bandwidthBytes: 0 };
   }
 
-  const result = (await response.json()) as { data: AnalyticsRow[] };
+  const result = (await response.json()) as { data: Array<AnalyticsRow> };
   const row = result.data?.[0];
   return {
     requests: Math.round(row?.requests ?? 0),
@@ -177,7 +177,7 @@ async function queryBatchProjectUsage(
   accountId: string,
   apiToken: string,
   requestsDataset: string,
-  projectIds: string[],
+  projectIds: Array<string>,
   since: Date,
 ): Promise<Map<string, UsageEntry>> {
   if (projectIds.length === 0) {
@@ -213,7 +213,7 @@ async function queryBatchProjectUsage(
     return new Map();
   }
 
-  const json = (await response.json()) as { data: BatchAnalyticsRow[] };
+  const json = (await response.json()) as { data: Array<BatchAnalyticsRow> };
   const result = new Map<string, UsageEntry>();
   for (const row of json.data ?? []) {
     result.set(row.blob1, {
@@ -230,7 +230,7 @@ async function queryTopProjectTraffic(
   requestsDataset: string,
   since: Date,
   limit: number,
-): Promise<TopProjectTrafficEntry[]> {
+): Promise<Array<TopProjectTrafficEntry>> {
   if (limit <= 0) {
     return [];
   }
@@ -267,7 +267,7 @@ async function queryTopProjectTraffic(
     return [];
   }
 
-  const json = (await response.json()) as { data: TopProjectTrafficRow[] };
+  const json = (await response.json()) as { data: Array<TopProjectTrafficRow> };
   return (json.data ?? []).map((row) => ({
     projectId: row.blob1,
     requests: Math.round(row.requests ?? 0),
@@ -279,9 +279,9 @@ async function queryTopProjectTraffic(
 interface AiGatewayResponse {
   data: {
     viewer: {
-      accounts: {
-        aiGatewayRequests: { sum: { cost: number } }[];
-      }[];
+      accounts: Array<{
+        aiGatewayRequests: Array<{ sum: { cost: number } }>;
+      }>;
     };
   };
 }

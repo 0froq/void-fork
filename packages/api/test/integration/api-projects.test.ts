@@ -116,7 +116,7 @@ describe('GET /projects', () => {
       env,
     );
     expect(res.status).toBe(200);
-    const projects = (await res.json()) as { slug: string }[];
+    const projects = (await res.json()) as Array<{ slug: string }>;
     expect(projects).toHaveLength(1);
     expect(projects[0].slug).toBe('alice-app');
   });
@@ -334,7 +334,7 @@ describe('GET /projects/:id/deployments', () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      deployments: unknown[];
+      deployments: Array<unknown>;
       activeDeploymentId: string | null;
     };
     expect(body.deployments).toEqual([]);
@@ -357,7 +357,7 @@ describe('GET /projects/:id/deployments', () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      deployments: { id: string; source: string | null; status: string }[];
+      deployments: Array<{ id: string; source: string | null; status: string }>;
       activeDeploymentId: string | null;
     };
     expect(body.deployments).toHaveLength(2);
@@ -408,7 +408,7 @@ describe('POST /projects/:id/rollback', () => {
     const body = (await res.json()) as {
       ok: boolean;
       deploymentId: string;
-      migrationDiff: string[];
+      migrationDiff: Array<string>;
     };
     expect(body.ok).toBe(true);
     expect(body.deploymentId).toBe(d1.id);
@@ -513,7 +513,7 @@ describe('POST /projects/:id/rollback', () => {
       env,
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { migrationDiff: string[] };
+    const body = (await res.json()) as { migrationDiff: Array<string> };
     expect(body.migrationDiff).toEqual(['002_add_email.sql', '003_add_roles.sql']);
   });
 
@@ -620,7 +620,7 @@ describe('POST /projects/:id/rollback', () => {
       },
     });
 
-    const doCalls: { url: string; body: string | null }[] = [];
+    const doCalls: Array<{ url: string; body: string | null }> = [];
     const originalGet = env.CRON_SCHEDULER.get.bind(env.CRON_SCHEDULER);
     vi.spyOn(env.CRON_SCHEDULER, 'get').mockImplementation((id) => {
       const stub = originalGet(id);
@@ -687,7 +687,7 @@ describe('POST /projects/:id/rollback', () => {
         cfSuccess([{ type: 'plain_text', name: '__VOID_PROXY_TOKEN', text: 'baked-into-d1-cron' }]),
     });
 
-    const doCalls: { url: string; body: string | null }[] = [];
+    const doCalls: Array<{ url: string; body: string | null }> = [];
     const originalGet = env.CRON_SCHEDULER.get.bind(env.CRON_SCHEDULER);
     vi.spyOn(env.CRON_SCHEDULER, 'get').mockImplementation((id) => {
       const stub = originalGet(id);
@@ -856,7 +856,7 @@ describe('GET /projects/:id/logs', () => {
       env,
     );
     expect(res.status).toBe(200);
-    const json = (await res.json()) as { data: { outcome: string; url: string }[] };
+    const json = (await res.json()) as { data: Array<{ outcome: string; url: string }> };
     expect(json.data).toHaveLength(1);
     expect(json.data[0]).toMatchObject({
       outcome: 'ok',

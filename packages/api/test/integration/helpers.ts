@@ -189,7 +189,7 @@ export class MemoryKVNamespace {
   async list(options?: {
     prefix?: string;
     cursor?: string;
-  }): Promise<{ keys: { name: string }[]; list_complete: boolean; cursor: string }> {
+  }): Promise<{ keys: Array<{ name: string }>; list_complete: boolean; cursor: string }> {
     const prefix = options?.prefix ?? '';
     const offset = options?.cursor ? Number(options.cursor) : 0;
     const keys = Array.from(this.store.keys())
@@ -222,7 +222,7 @@ let memoryR2EtagCounter = 0;
 
 async function readStreamToBytes(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
   const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
+  const chunks: Array<Uint8Array> = [];
   let total = 0;
   try {
     while (true) {
@@ -325,7 +325,7 @@ class MemoryR2Bucket {
 
   async list(options?: {
     prefix?: string;
-  }): Promise<{ objects: { key: string; size: number }[]; truncated: boolean }> {
+  }): Promise<{ objects: Array<{ key: string; size: number }>; truncated: boolean }> {
     const prefix = options?.prefix ?? '';
     const objects = Array.from(this.store.entries())
       .filter(([key]) => key.startsWith(prefix))
@@ -334,7 +334,7 @@ class MemoryR2Bucket {
     return { objects, truncated: false };
   }
 
-  async delete(keys: string | string[]): Promise<void> {
+  async delete(keys: string | Array<string>): Promise<void> {
     const list = Array.isArray(keys) ? keys : [keys];
     for (const key of list) {
       this.store.delete(key);
@@ -722,7 +722,7 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
   return fn;
 }
 
-export async function readAllEvents(res: Response): Promise<unknown[]> {
+export async function readAllEvents(res: Response): Promise<Array<unknown>> {
   const text = await res.text();
   return text
     .split('\n')

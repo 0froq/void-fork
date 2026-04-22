@@ -116,7 +116,11 @@ r2.post('/delete', async (c) => {
     return c.json({ error: 'binding required' }, 400);
   }
 
-  const keys: string[] = body.keys ? (body.keys as string[]) : body.key ? [body.key as string] : [];
+  const keys: Array<string> = body.keys
+    ? (body.keys as Array<string>)
+    : body.key
+      ? [body.key as string]
+      : [];
 
   if (keys.length === 0) {
     return c.json({ error: 'key or keys required' }, 400);
@@ -199,7 +203,7 @@ r2.post('/list', async (c) => {
   }
 
   const data = (await cfRes.json()) as {
-    result?: { key: string; size: number; last_modified?: string }[];
+    result?: Array<{ key: string; size: number; last_modified?: string }>;
     result_info?: { cursor?: string };
   };
 

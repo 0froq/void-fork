@@ -46,7 +46,7 @@ function createMockR2() {
     put: vi.fn(async (key: string, value: ArrayBuffer, _opts?: unknown) => {
       store.set(key, value);
     }),
-    delete: vi.fn(async (keys: string | string[]) => {
+    delete: vi.fn(async (keys: string | Array<string>) => {
       const arr = Array.isArray(keys) ? keys : [keys];
       for (const k of arr) {
         store.delete(k);
@@ -86,7 +86,7 @@ function toArrayBuffer(value: unknown): ArrayBuffer {
 async function readBodyText(body: unknown): Promise<string> {
   if (body instanceof ReadableStream) {
     const reader = body.getReader();
-    const chunks: Uint8Array[] = [];
+    const chunks: Array<Uint8Array> = [];
     while (true) {
       const { done, value } = await reader.read();
       if (done) {

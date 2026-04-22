@@ -31,10 +31,10 @@ function toErrorMessage(err: unknown): string {
 
 export type ActivityEntry =
   | { kind: 'single'; event: PlatformEvent }
-  | { kind: 'batch'; batchId: string; events: PlatformEvent[] };
+  | { kind: 'batch'; batchId: string; events: Array<PlatformEvent> };
 
-function collapseEvents(events: PlatformEvent[]): ActivityEntry[] {
-  const batchMap = new Map<string, PlatformEvent[]>();
+function collapseEvents(events: Array<PlatformEvent>): Array<ActivityEntry> {
+  const batchMap = new Map<string, Array<PlatformEvent>>();
   for (const event of events) {
     if (event.batch_id) {
       const list = batchMap.get(event.batch_id);
@@ -46,7 +46,7 @@ function collapseEvents(events: PlatformEvent[]): ActivityEntry[] {
     }
   }
 
-  const entries: ActivityEntry[] = [];
+  const entries: Array<ActivityEntry> = [];
   const seenBatches = new Set<string>();
 
   for (const event of events) {
@@ -69,7 +69,7 @@ async function fetchWorkerDetail(
   accountId: string,
   apiToken: string,
   scriptName: string,
-): Promise<{ versions: WorkerVersion[]; deployment?: WorkerDeployment; error?: string }> {
+): Promise<{ versions: Array<WorkerVersion>; deployment?: WorkerDeployment; error?: string }> {
   const [versionsResult, deploymentsResult] = await Promise.allSettled([
     listWorkerVersions(accountId, apiToken, scriptName),
     listWorkerDeployments(accountId, apiToken, scriptName),
@@ -79,7 +79,7 @@ async function fetchWorkerDetail(
   const deployment =
     deploymentsResult.status === 'fulfilled' ? deploymentsResult.value.deployments[0] : undefined;
 
-  const errors: string[] = [];
+  const errors: Array<string> = [];
   if (versionsResult.status === 'rejected') {
     errors.push(toErrorMessage(versionsResult.reason));
   }

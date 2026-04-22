@@ -12,11 +12,11 @@ type P = Client['projects'][':id'];
 
 export type Props = {
   project: Project & { custom_domain: string | null };
-  deployments: Deployment[];
+  deployments: Array<Deployment>;
   usage: API<'usage', P>;
-  domains: Domain[];
+  domains: Array<Domain>;
   secrets: API<'secrets', P>;
-  resources: Resource[];
+  resources: Array<Resource>;
   siteDomain: string;
 };
 

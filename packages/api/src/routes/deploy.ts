@@ -128,7 +128,7 @@ async function readPartBytes(
   maxBytes: number,
 ): Promise<Uint8Array> {
   const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
+  const chunks: Array<Uint8Array> = [];
   let total = 0;
   try {
     while (true) {
@@ -208,7 +208,7 @@ async function readPartAsBlob(
   contentType: string,
 ): Promise<Blob> {
   const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
+  const chunks: Array<Uint8Array> = [];
   let total = 0;
   try {
     while (true) {
@@ -237,14 +237,14 @@ async function readPartAsBlob(
   // buffer to `ArrayBufferLike`, which includes `SharedArrayBuffer` and is
   // not directly assignable to `BlobPart`. Our chunks come from a
   // `ReadableStream<Uint8Array>` reader — never shared memory.
-  return new Blob(chunks as unknown as BlobPart[], { type: contentType });
+  return new Blob(chunks as unknown as Array<BlobPart>, { type: contentType });
 }
 
-function sameClassSet(a: string[], b: string[]): boolean {
+function sameClassSet(a: Array<string>, b: Array<string>): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
-function sortUnique(values: string[] | undefined): string[] {
+function sortUnique(values: Array<string> | undefined): Array<string> {
   return [...new Set(values ?? [])].sort((a, b) => a.localeCompare(b));
 }
 
@@ -691,7 +691,7 @@ async function getProjectCorroboratedWfpAssetHashes(
   return hashes;
 }
 
-function collectSessionBucketHashes(buckets: string[][]): Set<string> {
+function collectSessionBucketHashes(buckets: Array<Array<string>>): Set<string> {
   const hashes = new Set<string>();
   for (const bucket of buckets) {
     for (const hash of bucket) {
@@ -701,7 +701,7 @@ function collectSessionBucketHashes(buckets: string[][]): Set<string> {
   return hashes;
 }
 
-function formatHashPreview(hashes: string[], limit = 5): string {
+function formatHashPreview(hashes: Array<string>, limit = 5): string {
   const shown = hashes.slice(0, limit).join(', ');
   if (hashes.length <= limit) {
     return shown;
@@ -733,12 +733,14 @@ async function assertDeploymentNotCanceled(db: Db, deploymentId: string): Promis
   }
 }
 
-export function buildWebSocketUploadMigrations(migrations: WebSocketMigrationMeta[] | undefined):
+export function buildWebSocketUploadMigrations(
+  migrations: Array<WebSocketMigrationMeta> | undefined,
+):
   | {
       new_tag: string;
       steps: Array<{
-        new_classes?: string[];
-        deleted_classes?: string[];
+        new_classes?: Array<string>;
+        deleted_classes?: Array<string>;
       }>;
     }
   | undefined {
@@ -955,7 +957,7 @@ app.post('/:id/deploy', async (c) => {
   // full-size byte copy inside its `Blob`, rather than doubling to ~2x during
   // the upload step (the exact per-request OOM class this branch hardens
   // against).
-  const workerFiles: { name: string; content: Blob }[] = [];
+  const workerFiles: Array<{ name: string; content: Blob }> = [];
   const assetsByHash = new Map<string, AssetEntry>();
   const builtAssetManifest: Record<string, AssetManifestEntry> = {};
   const streamedHashStores = new Map<string, 'kv' | 'r2'>();
@@ -971,7 +973,7 @@ app.post('/:id/deploy', async (c) => {
   // are in flight — the bug that previously caused "Connection lost during
   // deploy" on asset-heavy payloads.
   const inFlightStaticUploads = new Set<Promise<void>>();
-  const staticUploadPromises: Promise<void>[] = [];
+  const staticUploadPromises: Array<Promise<void>> = [];
   // Per-hash in-flight dedupe for the upload pool. Keyed by content hash,
   // value is the outstanding KV/R2 PUT promise for that hash. Without this
   // map two concurrent pool tasks with identical content would both miss
@@ -2073,7 +2075,7 @@ app.post('/:id/deploy', async (c) => {
 
         // Derive binding labels from the manifest upfront so we can show the
         // spinner BEFORE the (potentially slow) CF API provisioning calls.
-        const bindingLabels: string[] = [];
+        const bindingLabels: Array<string> = [];
         for (const name of manifest.bindings.d1 ?? []) {
           bindingLabels.push(`d1:${name}`);
         }
@@ -2416,12 +2418,12 @@ app.post('/:id/deploy', async (c) => {
           // Dispatch migration
           type MigrationResult = {
             ok: boolean;
-            migrations: {
+            migrations: Array<{
               name: string;
               applied: boolean;
               durationMs: number;
               error?: string;
-            }[];
+            }>;
             error?: string;
           };
           const result = await retryWithBackoff<MigrationResult>(
@@ -2487,7 +2489,7 @@ app.post('/:id/deploy', async (c) => {
 
         const dispatchWorkerName = c.env.DISPATCH_WORKER_NAME ?? 'void-dispatch';
         const queueProxyToken = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN')?.text;
-        const queueConflicts: { queue: string; ownerScript: string }[] = [];
+        const queueConflicts: Array<{ queue: string; ownerScript: string }> = [];
         // Pass 1: register consumer subscriptions at CF and collect any
         // conflicts. Do NOT touch ROUTING KV yet — if a sibling queue
         // conflicts we throw, and the live KV route for every other queue
@@ -2913,7 +2915,7 @@ app.post('/:id/deploy/preflight', async (c) => {
     }
   }
 
-  const needed: string[] = [];
+  const needed: Array<string> = [];
   for (const [path, entry] of Object.entries(assetManifest)) {
     const prev = prevManifest[path];
     if (!prev || prev.hash !== entry.hash) {

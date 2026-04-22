@@ -680,7 +680,7 @@ describe('GET /admin/deployments/:id/logs', () => {
 
     const res = await req(`/admin/deployments/${deployment.id}/logs`, admin.adminJwt);
     expect(res.status).toBe(200);
-    const json = (await res.json()) as { data: { outcome: string; logs: unknown[] }[] };
+    const json = (await res.json()) as { data: Array<{ outcome: string; logs: Array<unknown> }> };
     expect(json.data).toHaveLength(1);
     expect(json.data[0].outcome).toBe('ok');
     expect(json.data[0].logs).toHaveLength(1);

@@ -12,11 +12,11 @@ import * as schema from '../../src/schema';
 const MIGRATIONS_DIR = fileURLToPath(new URL('../../drizzle', import.meta.url));
 const TEMPLATE_VERSION = '2';
 
-function walkFiles(dir: string): string[] {
+function walkFiles(dir: string): Array<string> {
   const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
     a.name.localeCompare(b.name),
   );
-  const files: string[] = [];
+  const files: Array<string> = [];
 
   for (const entry of entries) {
     const path = join(dir, entry.name);

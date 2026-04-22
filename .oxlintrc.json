@@ -11,6 +11,12 @@
     "node": true
   },
   "rules": {
+    "@typescript-eslint/array-type": [
+      "error",
+      {
+        "default": "generic"
+      }
+    ],
     "@typescript-eslint/no-duplicate-enum-values": "error",
     "@typescript-eslint/no-extra-non-null-assertion": "error",
     "@typescript-eslint/no-misused-new": "error",

@@ -21,9 +21,9 @@ interface DashboardProps {
     projects: number;
     deployments: number;
   };
-  projects: ProjectRow[];
-  deployments: (Deployment & { project_slug: string | null })[];
-  topProjects: TopProjectRow[];
+  projects: Array<ProjectRow>;
+  deployments: Array<Deployment & { project_slug: string | null }>;
+  topProjects: Array<TopProjectRow>;
   siteDomain: string;
   username?: string;
 }
@@ -99,7 +99,7 @@ function TopProjectsWidget({
   projects,
   siteDomain,
 }: {
-  projects: TopProjectRow[];
+  projects: Array<TopProjectRow>;
   siteDomain: string;
 }) {
   return (

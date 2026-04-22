@@ -45,7 +45,7 @@ export interface AssetEntry {
 interface UploadSessionResponse {
   result: {
     jwt: string;
-    buckets: string[][];
+    buckets: Array<Array<string>>;
   };
 }
 
@@ -97,7 +97,7 @@ export async function createAssetUploadSession(
   workerName: string,
   manifest: Record<string, AssetManifestEntry>,
   { retryDelayMs = ASSET_SESSION_RETRY_DELAY_MS }: { retryDelayMs?: number } = {},
-): Promise<{ jwt: string; buckets: string[][] }> {
+): Promise<{ jwt: string; buckets: Array<Array<string>> }> {
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${workerName}/assets-upload-session`;
   const headers = {
     Authorization: `Bearer ${apiToken}`,
@@ -152,7 +152,7 @@ export async function createAssetUploadSession(
 export async function uploadAssetBuckets(
   accountId: string,
   jwt: string,
-  buckets: string[][],
+  buckets: Array<Array<string>>,
   assetsByHash: Map<string, AssetEntry>,
   {
     retryDelayMs = ASSET_BUCKET_UPLOAD_RETRY_DELAY_MS,
@@ -169,7 +169,7 @@ export async function uploadAssetBuckets(
   // Adaptive concurrency — shared across bucket tasks, drops to 1 on 524
   let concurrency = UPLOAD_CONCURRENCY;
   let activeCount = 0;
-  const waiters: (() => void)[] = [];
+  const waiters: Array<() => void> = [];
 
   async function acquireSlot(): Promise<void> {
     while (activeCount >= concurrency) {
@@ -186,7 +186,7 @@ export async function uploadAssetBuckets(
     }
   }
 
-  async function uploadBucket(bucket: string[], bucketIndex: number): Promise<void> {
+  async function uploadBucket(bucket: Array<string>, bucketIndex: number): Promise<void> {
     console.log(
       `[assets] uploading bucket ${bucketIndex + 1}/${buckets.length}: ${bucket.length} file(s)`,
     );
@@ -262,7 +262,7 @@ export async function uploadAssetBuckets(
     throw lastErr;
   }
 
-  const tasks: Promise<void>[] = [];
+  const tasks: Array<Promise<void>> = [];
   for (let i = 0; i < buckets.length; i++) {
     if (buckets[i].length === 0) {
       continue;
@@ -353,10 +353,10 @@ interface AssetUploadPart {
 }
 
 function resolveAssetUploadParts(
-  bucket: string[],
+  bucket: Array<string>,
   bucketIndex: number,
   assetsByHash: Map<string, AssetEntry>,
-): AssetUploadPart[] {
+): Array<AssetUploadPart> {
   return bucket.map((hash) => {
     const entry = assetsByHash.get(hash);
     if (!entry) {
@@ -370,7 +370,7 @@ function resolveAssetUploadParts(
   });
 }
 
-function createBase64MultipartBody(parts: AssetUploadPart[]): {
+function createBase64MultipartBody(parts: Array<AssetUploadPart>): {
   body: ReadableStream<Uint8Array>;
   contentType: string;
 } {
@@ -458,7 +458,7 @@ async function readAssetBody(
 ): Promise<{ bytes: Uint8Array; hash: string; size: number }> {
   const hasher = createHasher();
   const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
+  const chunks: Array<Uint8Array> = [];
   let total = 0;
   let carry = new Uint8Array(0);
 
@@ -1188,7 +1188,7 @@ export async function cleanupStreamedStaticAssets(
 export async function deleteUnreferencedAssets(
   kv: KVNamespace,
   r2: R2Bucket,
-  evictedHashes: string[],
+  evictedHashes: Array<string>,
   retainedHashes: Set<string>,
   projectId: string,
 ): Promise<void> {

@@ -49,7 +49,7 @@ export interface IsrDeploymentResolution {
  */
 export async function resolveCurrentIsrDeployments(
   routing: KVNamespace,
-  targets: IsrRoutingTarget[],
+  targets: Array<IsrRoutingTarget>,
   activeDeploymentId: string | null,
 ): Promise<IsrDeploymentResolution> {
   const perHostname = new Map<string, Set<string>>();

@@ -70,8 +70,8 @@ interface FailingRule {
 interface D1MockState {
   trackingRows: Map<string, string>;
   legacyRows?: Map<string, string>;
-  failingSqlPatterns: FailingRule[];
-  queries: { sql: string; params?: unknown[] }[];
+  failingSqlPatterns: Array<FailingRule>;
+  queries: Array<{ sql: string; params?: Array<unknown> }>;
   /**
    * Models whether `_void_migrations` actually exists on the remote DB. Any
    * SELECT / INSERT / UPDATE targeting `_void_migrations` while this is false
@@ -236,7 +236,7 @@ function makeQueryD1(state: D1MockState) {
       if (!state.voidTableExists) {
         return noVoidTable();
       }
-      const results: { name: string }[] = [];
+      const results: Array<{ name: string }> = [];
       if (Array.isArray(params)) {
         for (const p of params) {
           if (typeof p === 'string' && state.trackingRows.has(p)) {
@@ -382,7 +382,7 @@ describe('GET /projects/:id/migrations', () => {
     const res = await app.fetch(authedReq(`/projects/${project.id}/migrations`, user.jwt), env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      applied: { name: string; applied_at: string }[];
+      applied: Array<{ name: string; applied_at: string }>;
     };
     // Sorted by name; _void_migrations is primary so duplicate keeps its timestamp
     expect(body.applied).toEqual([
@@ -2393,8 +2393,8 @@ describe('POST /projects/:id/migrations/apply', () => {
 
     // Union of both responses: one applied, the other skipped. Order
     // is racy so sort before comparing.
-    const bodyA = (await resA.json()) as { applied: string[]; skipped: string[] };
-    const bodyB = (await resB.json()) as { applied: string[]; skipped: string[] };
+    const bodyA = (await resA.json()) as { applied: Array<string>; skipped: Array<string> };
+    const bodyB = (await resB.json()) as { applied: Array<string>; skipped: Array<string> };
     expect([...bodyA.applied, ...bodyB.applied].sort()).toEqual(['001_init.sql']);
     expect([...bodyA.skipped, ...bodyB.skipped].sort()).toEqual(['001_init.sql']);
   });
@@ -2446,8 +2446,8 @@ describe('POST /projects/:id/migrations/apply', () => {
 
     // Exactly one of the responses applied the migration; the other
     // skipped it. Order is racy, so check the union.
-    const bodyA = (await resA.json()) as { applied: string[]; skipped: string[] };
-    const bodyB = (await resB.json()) as { applied: string[]; skipped: string[] };
+    const bodyA = (await resA.json()) as { applied: Array<string>; skipped: Array<string> };
+    const bodyB = (await resB.json()) as { applied: Array<string>; skipped: Array<string> };
     expect([...bodyA.applied, ...bodyB.applied]).toEqual(['001_init.sql']);
     expect([...bodyA.skipped, ...bodyB.skipped]).toEqual(['001_init.sql']);
 
@@ -2608,7 +2608,7 @@ describe('POST /projects/:id/migrations/apply', () => {
       .select()
       .from(deployments)
       .where(eq(deployments.id, deployment.id));
-    const merged: string[] = JSON.parse(updated[0]!.applied_migrations!);
+    const merged: Array<string> = JSON.parse(updated[0]!.applied_migrations!);
     expect(merged.slice().sort()).toEqual(['001_a.sql', '002_b.sql']);
   });
 
@@ -2712,8 +2712,8 @@ describe('POST /projects/:id/migrations/apply', () => {
     const body = (await res.json()) as {
       ok: boolean;
       error: string;
-      applied: string[];
-      skipped: string[];
+      applied: Array<string>;
+      skipped: Array<string>;
       failed?: { name: string; error: string };
     };
     expect(body.ok).toBe(false);
@@ -2749,8 +2749,8 @@ describe('POST /projects/:id/migrations/apply', () => {
     expect(retry.status).toBe(500);
     const retryBody = (await retry.json()) as {
       ok: boolean;
-      applied: string[];
-      skipped: string[];
+      applied: Array<string>;
+      skipped: Array<string>;
       failed?: { name: string };
     };
     // 001 is classified as skipped on the retry (already in applied set).
@@ -3488,7 +3488,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     const body = (await res.json()) as {
       ok: boolean;
       error: string;
-      committed: { from: string; to: string }[];
+      committed: Array<{ from: string; to: string }>;
     };
     expect(body.ok).toBe(false);
     expect(body.error).toContain('rename conflict');
@@ -3594,7 +3594,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     const firstBody = (await firstRes.json()) as {
       ok: boolean;
       error: string;
-      committed: { from: string; to: string }[];
+      committed: Array<{ from: string; to: string }>;
     };
     expect(firstBody.ok).toBe(false);
     expect(firstBody.committed).toEqual([{ from: 'a.sql', to: 'a1.sql' }]);
@@ -4160,8 +4160,8 @@ describe('POST /projects/:id/migrations/rename', () => {
     // One of the two deployments MUST have the new name appended, and
     // it MUST be the one the project now points at — the lock guarantees
     // this consistency.
-    const targetMigrations: string[] = JSON.parse(targetRow[0]!.applied_migrations!);
-    const oldActiveMigrations: string[] = JSON.parse(oldActiveRow[0]!.applied_migrations!);
+    const targetMigrations: Array<string> = JSON.parse(targetRow[0]!.applied_migrations!);
+    const oldActiveMigrations: Array<string> = JSON.parse(oldActiveRow[0]!.applied_migrations!);
 
     // The new migration landed on the current active deployment (target),
     // which matches the post-rollback project.active_deployment_id.
@@ -4254,7 +4254,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     const rollbackBody = (await rollbackRes.json()) as {
       ok: boolean;
       deploymentId: string;
-      migrationDiff: string[];
+      migrationDiff: Array<string>;
     };
     expect(rollbackBody.ok).toBe(true);
     expect(rollbackBody.deploymentId).toBe(target.id);
@@ -4380,12 +4380,12 @@ describe('POST /projects/:id/migrations/rename', () => {
     const bodyA = (await resA.json()) as {
       ok: boolean;
       deploymentId: string;
-      migrationDiff: string[];
+      migrationDiff: Array<string>;
     };
     const bodyB = (await resB.json()) as {
       ok: boolean;
       deploymentId: string;
-      migrationDiff: string[];
+      migrationDiff: Array<string>;
     };
     // A: current was A[m1,m2,m3], target B[m1,m2] → diff=[m3]
     expect(bodyA.deploymentId).toBe(depB.id);
@@ -4524,7 +4524,7 @@ describe('POST /projects/:id/migrations/rename', () => {
       const body = (await rollbackRes.json()) as {
         ok: boolean;
         deploymentId: string;
-        migrationDiff: string[];
+        migrationDiff: Array<string>;
       };
       expect(body.ok).toBe(true);
       expect(body.deploymentId).toBe(depB.id);
@@ -4720,7 +4720,7 @@ describe('POST /projects/:id/migrations/rename', () => {
 
     // Intercept the CRON_SCHEDULER DO fetch so we can observe which
     // path (sync vs clear) rollback took.
-    const doCalls: { url: string; method: string; body: string | null }[] = [];
+    const doCalls: Array<{ url: string; method: string; body: string | null }> = [];
     const originalGet = env.CRON_SCHEDULER.get.bind(env.CRON_SCHEDULER);
     vi.spyOn(env.CRON_SCHEDULER, 'get').mockImplementation((id) => {
       const stub = originalGet(id);
@@ -5259,7 +5259,7 @@ describe('POST /projects/:id/migrations/rename', () => {
 
     // Intercept CRON_SCHEDULER DO fetches to observe which calls
     // (sync / clear / neither) rollback actually made.
-    const doCalls: { url: string; method: string }[] = [];
+    const doCalls: Array<{ url: string; method: string }> = [];
     const originalGet = env.CRON_SCHEDULER.get.bind(env.CRON_SCHEDULER);
     vi.spyOn(env.CRON_SCHEDULER, 'get').mockImplementation((id) => {
       const stub = originalGet(id);
@@ -5369,7 +5369,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(rollbackRes.status).toBe(400);
     const body = (await rollbackRes.json()) as {
       error?: string;
-      destructiveMigrations?: string[];
+      destructiveMigrations?: Array<string>;
     };
     // 2. Error message names the destructive migration(s) and tells the
     //    caller how to override.
@@ -5442,7 +5442,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     const body = (await rollbackRes.json()) as {
       ok: boolean;
       deploymentId: string;
-      migrationDiff: string[];
+      migrationDiff: Array<string>;
     };
     expect(body.ok).toBe(true);
     expect(body.deploymentId).toBe(depB.id);
@@ -5517,7 +5517,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(rollbackRes.status).toBe(400);
     const body = (await rollbackRes.json()) as {
       error?: string;
-      destructiveMigrations?: string[];
+      destructiveMigrations?: Array<string>;
     };
     // 2. Error message names the full server-computed diff (both m2 and
     //    m3) and tells the caller how to override.
@@ -5597,7 +5597,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(rollbackRes.status).toBe(400);
     const body = (await rollbackRes.json()) as {
       error?: string;
-      destructiveMigrations?: string[];
+      destructiveMigrations?: Array<string>;
     };
 
     // The structured diff must round-trip the exotic name byte-for-byte.
@@ -5613,7 +5613,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(body.error).toBeTruthy();
     const match = body.error!.match(/allowDestructive:\s*(\[[^\]]*\])/);
     expect(match).not.toBeNull();
-    const parsed = JSON.parse(match![1]) as string[];
+    const parsed = JSON.parse(match![1]) as Array<string>;
     expect(parsed).toEqual([exoticName]);
   });
 

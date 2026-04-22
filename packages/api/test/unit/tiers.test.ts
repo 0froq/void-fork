@@ -10,7 +10,7 @@ import {
 
 describe('PLAN_LIMITS', () => {
   it('defines all five tiers', () => {
-    const tiers: PlanId[] = ['free', 'solo', 'pro', 'sponsored', 'custom'];
+    const tiers: Array<PlanId> = ['free', 'solo', 'pro', 'sponsored', 'custom'];
     for (const tier of tiers) {
       expect(PLAN_LIMITS[tier]).toBeDefined();
     }

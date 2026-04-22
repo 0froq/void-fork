@@ -137,7 +137,7 @@ class RollbackError extends Error {
      * non-empty string), so human-readable hints built via string
      * concatenation are not safe to copy-paste.
      */
-    public readonly destructiveMigrations?: string[],
+    public readonly destructiveMigrations?: Array<string>,
   ) {
     super(message);
     this.name = 'RollbackError';
@@ -240,9 +240,12 @@ interface LineComment {
  * escape, `"..."` / `` `...` `` / `[...]` identifier quotes with doubled
  * closing-quote escape, `-- line` comments, and `/* block *​/` comments.
  */
-function stripSqlStringsAndComments(sql: string): { code: string; lineComments: LineComment[] } {
+function stripSqlStringsAndComments(sql: string): {
+  code: string;
+  lineComments: Array<LineComment>;
+} {
   let code = '';
-  const lineComments: LineComment[] = [];
+  const lineComments: Array<LineComment> = [];
 
   for (const seg of tokenizeSql(sql)) {
     switch (seg.kind) {
@@ -309,8 +312,10 @@ function stripSqlStringsAndComments(sql: string): { code: string; lineComments: 
   return { code, lineComments };
 }
 
-function hasUnauthorizedDestructive(migrations: { name: string; sql: string }[]): string[] {
-  const violations: string[] = [];
+function hasUnauthorizedDestructive(
+  migrations: Array<{ name: string; sql: string }>,
+): Array<string> {
+  const violations: Array<string> = [];
   for (const m of migrations) {
     const { code, lineComments } = stripSqlStringsAndComments(m.sql);
     const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(code));
@@ -470,7 +475,7 @@ const app = new Hono<ApiEnv>()
 
     const { deploymentId, allowDestructive } = await c.req.json<{
       deploymentId: string;
-      allowDestructive?: string[];
+      allowDestructive?: Array<string>;
     }>();
     if (!deploymentId) {
       return c.json({ error: 'deploymentId is required' }, 400);
@@ -524,7 +529,7 @@ const app = new Hono<ApiEnv>()
     // inside the lock because a concurrent /rename can rewrite every
     // deployment's applied_migrations via
     // renameAppliedMigrationsForProject.
-    let rollbackResult: { migrationDiff: string[] };
+    let rollbackResult: { migrationDiff: Array<string> };
     try {
       rollbackResult = await c.get('db').transaction(async (tx) => {
         // Lock the project row via `SELECT … FOR UPDATE` — per-project,
@@ -556,14 +561,14 @@ const app = new Hono<ApiEnv>()
           throw new RollbackError(404, 'project not found');
         }
 
-        const targetMigrations: string[] = target.applied_migrations
+        const targetMigrations: Array<string> = target.applied_migrations
           ? JSON.parse(target.applied_migrations)
           : [];
 
         const currentActive = lockedProject.active_deployment_id
           ? await getDeployment(txDb, lockedProject.active_deployment_id)
           : null;
-        const currentMigrations: string[] = currentActive?.applied_migrations
+        const currentMigrations: Array<string> = currentActive?.applied_migrations
           ? JSON.parse(currentActive.applied_migrations)
           : [];
         const diff = currentMigrations.filter((m) => !targetMigrations.includes(m));
@@ -882,7 +887,7 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: 'forbidden' }, 403);
     }
 
-    const body = await c.req.json<{ migrations: { name: string; sql: string }[] }>();
+    const body = await c.req.json<{ migrations: Array<{ name: string; sql: string }> }>();
     if (!body.migrations || !Array.isArray(body.migrations)) {
       return c.json({ error: 'migrations array required' }, 400);
     }
@@ -1020,7 +1025,7 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: 'forbidden' }, 403);
     }
 
-    const body = await c.req.json<{ renames: { from: string; to: string }[] }>();
+    const body = await c.req.json<{ renames: Array<{ from: string; to: string }> }>();
     if (!body.renames || !Array.isArray(body.renames) || body.renames.length === 0) {
       return c.json({ error: 'renames array required' }, 400);
     }
@@ -1107,10 +1112,10 @@ const app = new Hono<ApiEnv>()
         //     but batch-level validation already rejects chains, so that case
         //     cannot occur here)
         //   - known   `from` AND unknown `to`  → proceed (normal case)
-        const missingFrom: string[] = [];
-        const collidingTo: string[] = [];
-        const effective: { from: string; to: string }[] = [];
-        const alreadyLanded: { from: string; to: string }[] = [];
+        const missingFrom: Array<string> = [];
+        const collidingTo: Array<string> = [];
+        const effective: Array<{ from: string; to: string }> = [];
+        const alreadyLanded: Array<{ from: string; to: string }> = [];
         for (const { from, to } of body.renames) {
           const fromExists = existing.has(from);
           const toExists = existing.has(to);
@@ -1221,7 +1226,7 @@ const app = new Hono<ApiEnv>()
         // `renameAppliedMigrationsForProject` inside the same locked tx,
         // and then `return` a 409/500 outcome. A `return` commits the tx
         // (preserving the heal); a `throw` would roll it back.
-        const committed: { from: string; to: string }[] = [...alreadyLanded];
+        const committed: Array<{ from: string; to: string }> = [...alreadyLanded];
         type PairFailure =
           | { kind: 'conflict'; from: string; to: string }
           | { kind: 'error'; from: string; to: string; error: string };
@@ -1415,7 +1420,7 @@ const app = new Hono<ApiEnv>()
     }
 
     const result = (await response.json()) as {
-      data: {
+      data: Array<{
         outcome: string;
         logData: string;
         exceptionData: string;
@@ -1423,7 +1428,7 @@ const app = new Hono<ApiEnv>()
         method: string;
         statusCode: string;
         ts: number;
-      }[];
+      }>;
     };
 
     // Query newest-first to match the working admin path, then return entries
@@ -1564,7 +1569,7 @@ function parseDuration(input: string): number | null {
   return ms;
 }
 
-function tryParse(json: string): unknown[] {
+function tryParse(json: string): Array<unknown> {
   try {
     return JSON.parse(json);
   } catch {

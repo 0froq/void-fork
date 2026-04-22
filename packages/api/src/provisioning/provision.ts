@@ -34,11 +34,11 @@ export async function provisionBindings(
   manifest: DeployManifest,
   jwtSecret: string,
   aiProxyService: string,
-): Promise<WorkerBinding[]> {
+): Promise<Array<WorkerBinding>> {
   const existing = await getProjectResources(db, projectId);
 
   // Run all CF API provisioning calls in parallel
-  const tasks: Promise<WorkerBinding>[] = [];
+  const tasks: Array<Promise<WorkerBinding>> = [];
 
   for (const name of manifest.bindings.d1 ?? []) {
     tasks.push(
@@ -109,7 +109,7 @@ async function ensureResource(
   projectId: string,
   type: Resource['type'],
   bindingName: string,
-  existing: Resource[],
+  existing: Array<Resource>,
 ): Promise<Resource> {
   // Normalize: R2 bucket names only allow lowercase alphanumeric + hyphens
   const resourceName = `${projectId}-${bindingName}`.toLowerCase().replaceAll('_', '-');

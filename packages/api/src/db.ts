@@ -51,8 +51,8 @@ export function createDb(connectionString: string) {
 }
 export type Db = ReturnType<typeof createDb>;
 
-export const TERMINAL_DEPLOYMENT_STATUSES: DeploymentStatus[] = ['live', 'failed', 'canceled'];
-export const CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES: DeploymentStatus[] = [
+export const TERMINAL_DEPLOYMENT_STATUSES: Array<DeploymentStatus> = ['live', 'failed', 'canceled'];
+export const CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES: Array<DeploymentStatus> = [
   'canceling',
   'canceled',
 ];
@@ -171,7 +171,7 @@ export async function getProjectBySlug(db: Db, slug: string): Promise<Project | 
   return row ?? null;
 }
 
-export async function getProjectsByUserId(db: Db, userId: string): Promise<Project[]> {
+export async function getProjectsByUserId(db: Db, userId: string): Promise<Array<Project>> {
   return db
     .select()
     .from(projects)
@@ -181,11 +181,13 @@ export async function getProjectsByUserId(db: Db, userId: string): Promise<Proje
 
 export async function getProjectsWithOwnerByIds(
   db: Db,
-  ids: string[],
+  ids: Array<string>,
 ): Promise<
-  (Project & {
-    owner_login: string | null;
-  })[]
+  Array<
+    Project & {
+      owner_login: string | null;
+    }
+  >
 > {
   if (ids.length === 0) {
     return [];
@@ -273,7 +275,7 @@ export async function getProjectDeployments(
   db: Db,
   projectId: string,
   limit = 5,
-): Promise<Deployment[]> {
+): Promise<Array<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -282,7 +284,10 @@ export async function getProjectDeployments(
     .limit(limit);
 }
 
-export async function getAllProjectDeployments(db: Db, projectId: string): Promise<Deployment[]> {
+export async function getAllProjectDeployments(
+  db: Db,
+  projectId: string,
+): Promise<Array<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -294,7 +299,9 @@ export async function getAllDeploymentsWithProject(
   db: Db,
   limit: number,
   offset: number,
-): Promise<(Deployment & { project_slug: string | null; active_deployment_id: string | null })[]> {
+): Promise<
+  Array<Deployment & { project_slug: string | null; active_deployment_id: string | null }>
+> {
   return db
     .select({
       ...getTableColumns(deployments),
@@ -406,7 +413,7 @@ export async function markDeploymentRetained(
 export async function setAppliedMigrations(
   db: Db,
   deploymentId: string,
-  migrations: string[],
+  migrations: Array<string>,
 ): Promise<void> {
   await db
     .update(deployments)
@@ -430,7 +437,7 @@ export async function setAppliedMigrations(
 export async function appendAppliedMigrations(
   db: Db,
   deploymentId: string,
-  newMigrations: string[],
+  newMigrations: Array<string>,
 ): Promise<void> {
   if (newMigrations.length === 0) {
     return;
@@ -444,7 +451,7 @@ export async function appendAppliedMigrations(
     if (rows.length === 0) {
       return;
     }
-    const existing: string[] = rows[0]!.applied_migrations
+    const existing: Array<string> = rows[0]!.applied_migrations
       ? JSON.parse(rows[0]!.applied_migrations)
       : [];
     const existingSet = new Set(existing);
@@ -492,7 +499,7 @@ export async function activeDeploymentContainsMigration(
       AND ${deployments.applied_migrations} IS NOT NULL
       AND (${deployments.applied_migrations})::jsonb ? ${migrationName}
     LIMIT 1
-  `)) as { rows: unknown[] };
+  `)) as { rows: Array<unknown> };
   return result.rows.length > 0;
 }
 
@@ -509,7 +516,7 @@ export async function activeDeploymentContainsMigration(
 export async function renameAppliedMigrationsForProject(
   db: Db,
   projectId: string,
-  renames: { from: string; to: string }[],
+  renames: Array<{ from: string; to: string }>,
 ): Promise<void> {
   if (renames.length === 0) {
     return;
@@ -525,7 +532,7 @@ export async function renameAppliedMigrationsForProject(
       if (!row.applied_migrations) {
         continue;
       }
-      const parsed: string[] = JSON.parse(row.applied_migrations);
+      const parsed: Array<string> = JSON.parse(row.applied_migrations);
       let changed = false;
       const next = parsed.map((m) => {
         const to = fromToMap.get(m);
@@ -567,7 +574,7 @@ export async function renameAppliedMigrationsForProject(
 export async function recordMigrationRenames(
   db: Db,
   projectId: string,
-  pairs: { from: string; to: string }[],
+  pairs: Array<{ from: string; to: string }>,
 ): Promise<void> {
   if (pairs.length === 0) {
     return;
@@ -638,7 +645,10 @@ export async function invalidateMigrationRenamesForOldName(
     .where(and(eq(migrationRenames.project_id, projectId), eq(migrationRenames.to_name, oldName)));
 }
 
-export async function getRetainedDeployments(db: Db, projectId: string): Promise<Deployment[]> {
+export async function getRetainedDeployments(
+  db: Db,
+  projectId: string,
+): Promise<Array<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -650,7 +660,7 @@ export async function getRetainedDeploymentsExcluding(
   db: Db,
   projectId: string,
   excludeId: string,
-): Promise<Deployment[]> {
+): Promise<Array<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -686,7 +696,7 @@ export const ASSET_HASH_CORROBORATION_LIMIT = 100;
 export async function getDeploymentsWithAssetHashes(
   db: Db,
   projectId: string,
-): Promise<{ asset_hashes: string | null; manifest: string | null }[]> {
+): Promise<Array<{ asset_hashes: string | null; manifest: string | null }>> {
   return db
     .select({ asset_hashes: deployments.asset_hashes, manifest: deployments.manifest })
     .from(deployments)
@@ -699,7 +709,7 @@ export async function getInFlightDeploymentsExcluding(
   db: Db,
   projectId: string,
   excludeId?: string | null,
-): Promise<Deployment[]> {
+): Promise<Array<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -718,7 +728,10 @@ export async function getInFlightDeploymentsExcluding(
  * regardless of current retention. Used by the rollback queue sweep to
  * union every queue that was ever owned by an activated deployment.
  */
-export async function getActivatedDeployments(db: Db, projectId: string): Promise<Deployment[]> {
+export async function getActivatedDeployments(
+  db: Db,
+  projectId: string,
+): Promise<Array<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -735,7 +748,7 @@ export async function getActivatedDeployments(db: Db, projectId: string): Promis
 export async function getTerminalFailedDeployments(
   db: Db,
   projectId: string,
-): Promise<Deployment[]> {
+): Promise<Array<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -775,7 +788,7 @@ export async function getProjectSecret(
   return row ?? null;
 }
 
-export async function getProjectSecrets(db: Db, projectId: string): Promise<ProjectSecret[]> {
+export async function getProjectSecrets(db: Db, projectId: string): Promise<Array<ProjectSecret>> {
   return db
     .select()
     .from(projectSecrets)
@@ -840,7 +853,7 @@ export async function createResource(
   return row;
 }
 
-export async function getProjectResources(db: Db, projectId: string): Promise<Resource[]> {
+export async function getProjectResources(db: Db, projectId: string): Promise<Array<Resource>> {
   return db.select().from(resources).where(eq(resources.project_id, projectId));
 }
 
@@ -879,7 +892,7 @@ export async function createDomain(
   return row;
 }
 
-export async function getDomainsByProjectId(db: Db, projectId: string): Promise<Domain[]> {
+export async function getDomainsByProjectId(db: Db, projectId: string): Promise<Array<Domain>> {
   return db
     .select()
     .from(domains)
@@ -889,15 +902,15 @@ export async function getDomainsByProjectId(db: Db, projectId: string): Promise<
 
 export async function getDomainsByProjectIds(
   db: Db,
-  projectIds: string[],
-): Promise<Map<string, Domain[]>> {
+  projectIds: Array<string>,
+): Promise<Map<string, Array<Domain>>> {
   const allDomains = await db
     .select()
     .from(domains)
     .where(inArray(domains.project_id, projectIds))
     .orderBy(asc(domains.created_at));
 
-  const map = new Map<string, Domain[]>();
+  const map = new Map<string, Array<Domain>>();
   for (const d of allDomains) {
     const list = map.get(d.project_id) ?? [];
     list.push(d);
@@ -970,11 +983,11 @@ export async function countProjects(db: Db): Promise<number> {
 
 // --- Admin ---
 
-export async function getAllUsers(db: Db, limit: number, offset: number): Promise<User[]> {
+export async function getAllUsers(db: Db, limit: number, offset: number): Promise<Array<User>> {
   return db.select().from(users).orderBy(desc(users.created_at)).limit(limit).offset(offset);
 }
 
-export async function searchUsers(db: Db, query: string): Promise<User[]> {
+export async function searchUsers(db: Db, query: string): Promise<Array<User>> {
   const pattern = `%${query}%`;
   return db
     .select()
@@ -1015,7 +1028,11 @@ export async function deleteUser(db: Db, id: string): Promise<void> {
   await db.delete(users).where(eq(users.id, id));
 }
 
-export async function getAllProjects(db: Db, limit: number, offset: number): Promise<Project[]> {
+export async function getAllProjects(
+  db: Db,
+  limit: number,
+  offset: number,
+): Promise<Array<Project>> {
   return db.select().from(projects).orderBy(desc(projects.created_at)).limit(limit).offset(offset);
 }
 
@@ -1023,12 +1040,14 @@ export async function searchProjects(
   db: Db,
   query: string,
 ): Promise<
-  (Project & {
-    owner_login: string | null;
-    last_deploy: string | null;
-    last_deploy_id: string | null;
-    last_deploy_status: string | null;
-  })[]
+  Array<
+    Project & {
+      owner_login: string | null;
+      last_deploy: string | null;
+      last_deploy_id: string | null;
+      last_deploy_status: string | null;
+    }
+  >
 > {
   const pattern = `%${query}%`;
   const lastDeploy = db
@@ -1069,7 +1088,9 @@ export async function searchProjects(
 export async function searchDeployments(
   db: Db,
   query: string,
-): Promise<(Deployment & { project_slug: string | null; active_deployment_id: string | null })[]> {
+): Promise<
+  Array<Deployment & { project_slug: string | null; active_deployment_id: string | null }>
+> {
   const pattern = `%${query}%`;
   return db
     .select({
@@ -1097,12 +1118,14 @@ export async function getAllProjectsWithOwner(
   limit: number,
   offset: number,
 ): Promise<
-  (Project & {
-    owner_login: string | null;
-    last_deploy: string | null;
-    last_deploy_id: string | null;
-    last_deploy_status: string | null;
-  })[]
+  Array<
+    Project & {
+      owner_login: string | null;
+      last_deploy: string | null;
+      last_deploy_id: string | null;
+      last_deploy_status: string | null;
+    }
+  >
 > {
   const lastDeploy = db
     .select({
@@ -1237,7 +1260,7 @@ export async function skipPendingBatchEvents(db: Db, batchId: string): Promise<v
 export async function getPlatformEventsByBatchId(
   db: Db,
   batchId: string,
-): Promise<PlatformEvent[]> {
+): Promise<Array<PlatformEvent>> {
   return db
     .select()
     .from(platformEvents)
@@ -1249,7 +1272,7 @@ export async function getRecentPlatformEvents(
   db: Db,
   environment: PlatformEvent['environment'],
   limit = 20,
-): Promise<PlatformEvent[]> {
+): Promise<Array<PlatformEvent>> {
   return db
     .select()
     .from(platformEvents)
@@ -1297,7 +1320,9 @@ export async function getAllInvitations(
   db: Db,
   limit: number,
   offset: number,
-): Promise<(Invitation & { invited_by_login: string | null; revoked_by_login: string | null })[]> {
+): Promise<
+  Array<Invitation & { invited_by_login: string | null; revoked_by_login: string | null }>
+> {
   const invitedByUser = alias(users, 'invited_by_user');
   const revokedByUser = alias(users, 'revoked_by_user');
   return db

@@ -1,6 +1,6 @@
 export interface HeaderRule {
   pattern: string;
-  headers: [string, string][];
+  headers: Array<[string, string]>;
 }
 
 /**
@@ -48,13 +48,13 @@ export function matchPattern(pattern: string, pathname: string): boolean {
 export function applyHeaderRules(
   response: Response,
   pathname: string,
-  rules?: HeaderRule[],
+  rules?: Array<HeaderRule>,
 ): Response {
   if (!rules || rules.length === 0) {
     return response;
   }
 
-  const matched: [string, string][] = [];
+  const matched: Array<[string, string]> = [];
   for (const rule of rules) {
     if (matchPattern(rule.pattern, pathname)) {
       matched.push(...rule.headers);

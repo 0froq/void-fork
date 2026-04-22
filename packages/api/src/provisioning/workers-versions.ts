@@ -16,7 +16,7 @@ export interface DeploymentVersionEntry {
 
 export interface WorkerDeployment {
   id: string;
-  versions: DeploymentVersionEntry[];
+  versions: Array<DeploymentVersionEntry>;
   created_on: string;
   author_email: string;
 }
@@ -25,8 +25,8 @@ export async function listWorkerVersions(
   accountId: string,
   apiToken: string,
   scriptName: string,
-): Promise<{ items: WorkerVersion[] }> {
-  return cfFetch<{ items: WorkerVersion[] }>(
+): Promise<{ items: Array<WorkerVersion> }> {
+  return cfFetch<{ items: Array<WorkerVersion> }>(
     `${CF_API_BASE}/${accountId}/workers/scripts/${scriptName}/versions`,
     apiToken,
   );
@@ -36,8 +36,8 @@ export async function listWorkerDeployments(
   accountId: string,
   apiToken: string,
   scriptName: string,
-): Promise<{ deployments: WorkerDeployment[] }> {
-  return cfFetch<{ deployments: WorkerDeployment[] }>(
+): Promise<{ deployments: Array<WorkerDeployment> }> {
+  return cfFetch<{ deployments: Array<WorkerDeployment> }>(
     `${CF_API_BASE}/${accountId}/workers/scripts/${scriptName}/deployments`,
     apiToken,
   );

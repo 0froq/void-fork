@@ -345,7 +345,7 @@ describe('KV proxy endpoints', () => {
       );
 
       expect(res.status).toBe(200);
-      const data = (await res.json()) as { keys: { name: string }[]; list_complete: boolean };
+      const data = (await res.json()) as { keys: Array<{ name: string }>; list_complete: boolean };
       expect(data.keys).toEqual([{ name: 'key1' }, { name: 'key2' }]);
       expect(data.list_complete).toBe(true);
     });

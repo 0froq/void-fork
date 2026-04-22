@@ -152,7 +152,7 @@ describe('WfP dispatch path', () => {
       );
 
       expect(res.status).toBe(200);
-      const data = (await res.json()) as any[];
+      const data = (await res.json()) as Array<any>;
       expect(data).toHaveLength(2);
     });
   });
@@ -351,7 +351,7 @@ describe('WfP dispatch path', () => {
       );
 
       // API should only be called once for resolve-worker (cached after first call)
-      const resolveWorkerCalls = env.API.fetch.mock.calls.filter((call: any[]) =>
+      const resolveWorkerCalls = env.API.fetch.mock.calls.filter((call: Array<any>) =>
         new URL(call[0]).pathname.includes('/internal/resolve-worker/'),
       );
       expect(resolveWorkerCalls).toHaveLength(1);

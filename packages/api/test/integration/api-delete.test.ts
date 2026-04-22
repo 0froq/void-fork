@@ -182,7 +182,7 @@ describe('DELETE /projects/:id', () => {
       env,
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean; warnings?: string[] };
+    const body = (await res.json()) as { ok: boolean; warnings?: Array<string> };
     expect(body.ok).toBe(true);
     expect(body.warnings).toBeDefined();
     expect(body.warnings!.length).toBeGreaterThan(0);
@@ -210,7 +210,7 @@ describe('DELETE /projects/:id', () => {
       env,
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean; warnings?: string[] };
+    const body = (await res.json()) as { ok: boolean; warnings?: Array<string> };
     expect(body).toEqual({ ok: true, id: project.id, slug: 'static-app' });
     expect(body.warnings).toBeUndefined();
   });
@@ -260,7 +260,7 @@ describe('DELETE /projects/:id', () => {
     expect(res.status).toBe(200);
 
     // Verify deleteQueue CF API was called
-    const deleteQueueCall = fetchMock.mock.calls.find((call: unknown[]) => {
+    const deleteQueueCall = fetchMock.mock.calls.find((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       return (
         url.includes('/queues/25832cb0ce3d4f60b1e538911a4629f4') &&
@@ -269,11 +269,11 @@ describe('DELETE /projects/:id', () => {
     });
     expect(deleteQueueCall).toBeDefined();
 
-    const workerDeleteCalls = fetchMock.mock.calls.filter((call: unknown[]) => {
+    const workerDeleteCalls = fetchMock.mock.calls.filter((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       return url.includes('/workers/dispatch/') && (call[1] as RequestInit)?.method === 'DELETE';
     });
-    const deletedWorkers = workerDeleteCalls.map((call: unknown[]) => {
+    const deletedWorkers = workerDeleteCalls.map((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       return url.split('/scripts/')[1];
     });
@@ -285,7 +285,7 @@ describe('DELETE /projects/:id', () => {
       ]),
     );
 
-    const queueDeleteIndex = fetchMock.mock.calls.findIndex((call: unknown[]) => {
+    const queueDeleteIndex = fetchMock.mock.calls.findIndex((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       return (
         url.includes('/queues/25832cb0ce3d4f60b1e538911a4629f4') &&
@@ -293,7 +293,7 @@ describe('DELETE /projects/:id', () => {
       );
     });
     for (const workerName of ['user-queue-app-dpl_active', 'user-queue-app-dpl_failed']) {
-      const workerDeleteIndex = fetchMock.mock.calls.findIndex((call: unknown[]) => {
+      const workerDeleteIndex = fetchMock.mock.calls.findIndex((call: Array<unknown>) => {
         const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
         return (
           url.includes(`/scripts/${workerName}`) && (call[1] as RequestInit)?.method === 'DELETE'
@@ -330,7 +330,7 @@ describe('DELETE /projects/:id', () => {
     expect(res.status).toBe(200);
 
     // Find the legacy worker delete call
-    const deleteWorkerCall = fetchMock.mock.calls.find((call: unknown[]) => {
+    const deleteWorkerCall = fetchMock.mock.calls.find((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       return (
         url.includes('/workers/dispatch/') &&

@@ -11,7 +11,7 @@ export function ProjectsTable({
   projects,
   siteDomain,
 }: {
-  projects: ProjectRow[];
+  projects: Array<ProjectRow>;
   siteDomain: string;
 }) {
   return (

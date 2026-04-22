@@ -7,7 +7,7 @@ export function SignupControlPage({
   username,
 }: {
   enabled: boolean;
-  entries: AllowlistEntry[];
+  entries: Array<AllowlistEntry>;
   username?: string;
 }) {
   return (

@@ -80,7 +80,7 @@ function post(path: string, body: unknown): Request {
 
 // --- CF D1 API mock response ---
 
-function cfD1Response(results: unknown[], meta?: Record<string, unknown>) {
+function cfD1Response(results: Array<unknown>, meta?: Record<string, unknown>) {
   return Response.json({
     success: true,
     result: [{ results, success: true, meta: meta ?? { duration: 0.001 } }],
@@ -125,7 +125,7 @@ describe('D1 proxy endpoints', () => {
       );
 
       expect(res.status).toBe(200);
-      const data = (await res.json()) as { results: unknown[]; success: boolean };
+      const data = (await res.json()) as { results: Array<unknown>; success: boolean };
       expect(data.results).toEqual(rows);
       expect(data.success).toBe(true);
 
@@ -199,7 +199,7 @@ describe('D1 proxy endpoints', () => {
       );
 
       expect(res.status).toBe(200);
-      const data = (await res.json()) as { columns: string[]; results: unknown[][] };
+      const data = (await res.json()) as { columns: Array<string>; results: Array<Array<unknown>> };
       expect(data.columns).toEqual(['id', 'name']);
       expect(data.results).toEqual([
         [1, 'Alice'],
@@ -302,7 +302,7 @@ describe('D1 proxy endpoints', () => {
       );
 
       expect(res.status).toBe(200);
-      const data = (await res.json()) as { results: unknown[]; success: boolean }[];
+      const data = (await res.json()) as Array<{ results: Array<unknown>; success: boolean }>;
       expect(data).toHaveLength(2);
       expect(data[0].results).toEqual([{ count: 1 }]);
       expect(data[1].results).toEqual([{ count: 2 }]);

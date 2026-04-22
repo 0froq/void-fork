@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import type { Env } from '../../src/env';
 import { recordRequest } from '../../src/metering';
 
-function createMockEnv(): { env: Env; writes: unknown[] } {
-  const writes: unknown[] = [];
+function createMockEnv(): { env: Env; writes: Array<unknown> } {
+  const writes: Array<unknown> = [];
   const env = {
     ANALYTICS: {
       writeDataPoint: (data: unknown) => writes.push(data),
@@ -28,9 +28,9 @@ describe('recordRequest', () => {
 
     expect(writes).toHaveLength(1);
     const dp = writes[0] as {
-      indexes: string[];
-      blobs: string[];
-      doubles: number[];
+      indexes: Array<string>;
+      blobs: Array<string>;
+      doubles: Array<number>;
     };
 
     expect(dp.indexes).toEqual(['proj_abc']);
@@ -51,7 +51,7 @@ describe('recordRequest', () => {
       slug: 'other-app',
     });
 
-    const dp = writes[0] as { indexes: string[] };
+    const dp = writes[0] as { indexes: Array<string> };
     expect(dp.indexes[0]).toBe('proj_xyz');
   });
 
@@ -68,7 +68,7 @@ describe('recordRequest', () => {
       slug: 'ssr-app',
     });
 
-    const dp = writes[0] as { blobs: string[] };
+    const dp = writes[0] as { blobs: Array<string> };
     expect(dp.blobs[3]).toBe('500');
   });
 
@@ -85,7 +85,7 @@ describe('recordRequest', () => {
       slug: 'isr-app',
     });
 
-    const dp = writes[0] as { doubles: number[] };
+    const dp = writes[0] as { doubles: Array<number> };
     expect(dp.doubles[0]).toBe(1);
     expect(dp.doubles[1]).toBe(5000);
     expect(dp.doubles[2]).toBe(100);
@@ -108,7 +108,7 @@ describe('recordRequest', () => {
     }
 
     expect(writes).toHaveLength(5);
-    const recordedTypes = (writes as { blobs: string[] }[]).map((w) => w.blobs[1]);
+    const recordedTypes = (writes as Array<{ blobs: Array<string> }>).map((w) => w.blobs[1]);
     expect(recordedTypes).toEqual(['api', 'static', 'ssr', 'isr', 'websocket']);
   });
 });

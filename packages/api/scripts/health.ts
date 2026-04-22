@@ -56,7 +56,7 @@ const platformSrc = resolve(import.meta.dirname, '..', 'src');
  *  - app.get/post/...("/path", ...) → inline routes
  *  - import importedName from "./routes/file" → file map
  */
-function parseIndex(): { mounts: Map<string, string[]>; inlineRoutes: Route[] } {
+function parseIndex(): { mounts: Map<string, Array<string>>; inlineRoutes: Array<Route> } {
   const src = readFileSync(join(platformSrc, 'index.ts'), 'utf-8');
 
   // Build import-name → file map
@@ -75,7 +75,7 @@ function parseIndex(): { mounts: Map<string, string[]>; inlineRoutes: Route[] } 
 
   // Mounts: `app.route("/projects", projects)` or `.route("/projects", projects)` (chained)
   // A file can be mounted at multiple bases (e.g. usage at /projects + /usage)
-  const mounts = new Map<string, string[]>();
+  const mounts = new Map<string, Array<string>>();
   for (const m of src.matchAll(/\.route\(["']([^"']+)["'],\s*(\w+)\)/g)) {
     const base = m[1];
     const name = m[2];
@@ -88,7 +88,7 @@ function parseIndex(): { mounts: Map<string, string[]>; inlineRoutes: Route[] } 
   }
 
   // Inline routes: `app.get("/health", ...)` or `.get("/health", ...)` (chained)
-  const inlineRoutes: Route[] = [];
+  const inlineRoutes: Array<Route> = [];
   for (const m of src.matchAll(/\.(get|post|put|delete|patch)\(["'](\/[^"']*)["']/g)) {
     inlineRoutes.push({ method: m[1].toUpperCase(), path: m[2] });
   }
@@ -99,18 +99,18 @@ function parseIndex(): { mounts: Map<string, string[]>; inlineRoutes: Route[] } 
 /**
  * Scan a route file for `app.get("/path", ...)` etc.
  */
-function parseRouteFile(filePath: string): { method: string; subPath: string }[] {
+function parseRouteFile(filePath: string): Array<{ method: string; subPath: string }> {
   const src = readFileSync(filePath, 'utf-8');
-  const routes: { method: string; subPath: string }[] = [];
+  const routes: Array<{ method: string; subPath: string }> = [];
   for (const m of src.matchAll(/\.(get|post|put|delete|patch)\(["'](\/[^"']*)["']/g)) {
     routes.push({ method: m[1].toUpperCase(), subPath: m[2] });
   }
   return routes;
 }
 
-function discoverRoutes(): Route[] {
+function discoverRoutes(): Array<Route> {
   const { mounts, inlineRoutes } = parseIndex();
-  const routes: Route[] = [...inlineRoutes];
+  const routes: Array<Route> = [...inlineRoutes];
 
   const routesDir = join(platformSrc, 'routes');
   for (const entry of readdirSync(routesDir)) {
@@ -180,7 +180,7 @@ async function run() {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (res.ok) {
-      const projects = (await res.json()) as { id: string }[];
+      const projects = (await res.json()) as Array<{ id: string }>;
       if (projects.length > 0) {
         projectId = projects[0].id;
       }

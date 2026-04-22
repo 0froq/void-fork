@@ -36,8 +36,8 @@ interface RoutingEntry {
   suspended?: string;
   hashedAssetsPrefix?: string;
   staticDeploymentId?: string;
-  headerRules?: { pattern: string; headers: [string, string][] }[];
-  redirectRules?: { source: string; destination: string; status: number }[];
+  headerRules?: Array<{ pattern: string; headers: Array<[string, string]> }>;
+  redirectRules?: Array<{ source: string; destination: string; status: number }>;
 }
 
 function createCtx(): ExecutionContext {
@@ -80,7 +80,7 @@ function createEnv(options: {
   workerFetch: ReturnType<typeof vi.fn>;
   dispatchGet: ReturnType<typeof vi.fn>;
   kvStore: Map<string, { value: ArrayBuffer; metadata: { s: number; c: number; t: number } }>;
-  analyticsWrites: unknown[];
+  analyticsWrites: Array<unknown>;
 } {
   const workerFetch = vi.fn(
     async () => options.workerFetchImpl?.() ?? options.workerResponse ?? new Response('worker'),
@@ -89,7 +89,7 @@ function createEnv(options: {
     string,
     { value: ArrayBuffer; metadata: { s: number; c: number; t: number } }
   >();
-  const analyticsWrites: unknown[] = [];
+  const analyticsWrites: Array<unknown> = [];
 
   // Seed initial ISR cache entries
   if (options.assets) {
@@ -163,7 +163,7 @@ describe('dispatch fetch handler', () => {
 
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(workerFetch.mock.calls[0]?.[0].headers.get('upgrade')).toBe('websocket');
-    expect((analyticsWrites[0] as { blobs: string[] }).blobs[1]).toBe('websocket');
+    expect((analyticsWrites[0] as { blobs: Array<string> }).blobs[1]).toBe('websocket');
     expect(response.headers.get('X-Hosted-By')).toBe('void.cloud');
   });
 
@@ -1280,9 +1280,9 @@ describe('queue relay', () => {
 
   function createMockBatch(
     queue: string,
-    messages: { id: string; body: unknown; attempts?: number }[],
+    messages: Array<{ id: string; body: unknown; attempts?: number }>,
   ) {
-    const msgs: MockMessage[] = messages.map((m) => ({
+    const msgs: Array<MockMessage> = messages.map((m) => ({
       id: m.id,
       timestamp: new Date('2026-01-15T12:00:00Z'),
       body: m.body,
@@ -1298,7 +1298,7 @@ describe('queue relay', () => {
     } as unknown as MessageBatch & {
       ackAll: ReturnType<typeof vi.fn>;
       retryAll: ReturnType<typeof vi.fn>;
-      messages: MockMessage[];
+      messages: Array<MockMessage>;
     };
   }
 
@@ -1599,7 +1599,7 @@ describe('queue relay', () => {
       proxyToken: 'legacy-token',
     });
     const batch = createMockBatch('test-queue', [{ id: 'm1', body: 'hello' }]);
-    const calls: { path: string; header: string | null }[] = [];
+    const calls: Array<{ path: string; header: string | null }> = [];
     const workerFetch = vi.fn(async (req: Request) => {
       const url = new URL(req.url);
       calls.push({ path: url.pathname, header: req.headers.get('x-void-internal') });

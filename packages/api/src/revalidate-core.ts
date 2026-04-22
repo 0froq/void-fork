@@ -19,7 +19,7 @@ interface RevalidateProject {
 }
 
 interface RevalidateRequestBody {
-  paths?: string[];
+  paths?: Array<string>;
   all?: boolean;
 }
 
@@ -53,7 +53,7 @@ export async function runRevalidate(
   // `deploy.ts` — `if (domain.status === 'active')` gates the KV write).
   const activeCustomDomains = customDomains.filter((d) => d.status === 'active');
 
-  const targets: IsrRoutingTarget[] = [
+  const targets: Array<IsrRoutingTarget> = [
     { hostname: `${project.slug}.${siteDomain}`, routingKey: project.slug },
     ...activeCustomDomains.map((d) => ({
       hostname: d.hostname,
@@ -117,14 +117,14 @@ export async function runRevalidate(
 async function purgeEdgeCache(
   c: Context<ApiEnv>,
   perHostname: Map<string, Set<string>>,
-  pathnames: string[],
+  pathnames: Array<string>,
 ): Promise<void> {
   if (pathnames.length === 0 || perHostname.size === 0) {
     return;
   }
 
   try {
-    const urls: string[] = [];
+    const urls: Array<string> = [];
     for (const [hostname, ids] of perHostname) {
       for (const id of ids) {
         for (const pathname of pathnames) {

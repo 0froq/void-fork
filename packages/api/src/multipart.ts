@@ -165,7 +165,7 @@ export async function* parseMultipart(
   // the drain-first / carve-second / read-third structure of fill()
   // guarantees it never grows past one entry before being partially
   // consumed.
-  const pendingQueue: Uint8Array[] = [];
+  const pendingQueue: Array<Uint8Array> = [];
   // When a single reader.read() value exceeds MAX_PENDING_RETENTION_BYTES
   // we cannot queue it zero-copy (a subarray leftover of even one byte
   // would pin the full backing ArrayBuffer alive against the 128 MiB

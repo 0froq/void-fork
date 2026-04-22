@@ -319,7 +319,7 @@ describe('R2 proxy endpoints', () => {
 
       expect(res.status).toBe(200);
       const data = (await res.json()) as {
-        objects: { key: string; size: number }[];
+        objects: Array<{ key: string; size: number }>;
         truncated: boolean;
       };
       expect(data.objects).toHaveLength(2);

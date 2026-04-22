@@ -11,7 +11,7 @@ export interface RedirectRule {
  * Last match wins (consistent with header rules).
  * Returns a redirect Response, or null if no rule matches.
  */
-export function applyRedirectRules(pathname: string, rules?: RedirectRule[]): Response | null {
+export function applyRedirectRules(pathname: string, rules?: Array<RedirectRule>): Response | null {
   if (!rules?.length) {
     return null;
   }

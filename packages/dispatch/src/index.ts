@@ -31,8 +31,8 @@ interface RoutingEntry {
   limits?: Record<string, number>;
   suspended?: string;
   hashedAssetsPrefix?: string;
-  headerRules?: HeaderRule[];
-  redirectRules?: RedirectRule[];
+  headerRules?: Array<HeaderRule>;
+  redirectRules?: Array<RedirectRule>;
   staticDeploymentId?: string;
   assetConfig?: AssetConfig;
 }

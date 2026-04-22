@@ -147,7 +147,7 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: 'domain not found' }, 404);
     }
 
-    const warnings: string[] = [];
+    const warnings: Array<string> = [];
 
     // Best-effort CF + KV cleanup (always proceed to DB delete)
     await Promise.all([

@@ -68,7 +68,7 @@ function buildDeployForm(opts?: {
   return form;
 }
 
-function parseDeployStream(text: string): unknown[] {
+function parseDeployStream(text: string): Array<unknown> {
   return text
     .split('\n')
     .filter((line) => line.trim())
@@ -99,8 +99,10 @@ async function expectInvalidManifestShape(res: Response, fragment: string | RegE
 }
 
 function mockSetTimeout() {
-  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: TimerHandler, ...args: unknown[]) =>
-    nativeSetTimeout(fn, 0, ...args)) as typeof setTimeout);
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+    fn: TimerHandler,
+    ...args: Array<unknown>
+  ) => nativeSetTimeout(fn, 0, ...args)) as typeof setTimeout);
 }
 
 describe('POST /projects/:id/deploy', () => {
@@ -248,7 +250,7 @@ describe('POST /projects/:id/deploy', () => {
     await res.text();
 
     // Find the worker upload call
-    const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
+    const uploadCall = fetchMock.mock.calls.find((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       return url.includes('/workers/dispatch/') && (call[1] as RequestInit)?.method === 'PUT';
     });
@@ -266,7 +268,7 @@ describe('POST /projects/:id/deploy', () => {
     mockCfApi();
 
     // Track DO fetch calls
-    const cronDoFetches: { url: string; body: string }[] = [];
+    const cronDoFetches: Array<{ url: string; body: string }> = [];
     const cronSchedulerMock = {
       idFromName: (name: string) => ({ toString: () => name }),
       get: (_id: unknown) => ({
@@ -318,7 +320,7 @@ describe('POST /projects/:id/deploy', () => {
       JSON.stringify({ workerName: `user-${project.slug}`, hasCrons: true }),
     );
 
-    const cronDoFetches: { url: string }[] = [];
+    const cronDoFetches: Array<{ url: string }> = [];
     const cronSchedulerMock = {
       idFromName: (name: string) => ({ toString: () => name }),
       get: (_id: unknown) => ({
@@ -440,7 +442,7 @@ describe('POST /projects/:id/deploy', () => {
     await res.text();
 
     // Verify no D1 creation call was made
-    const createD1Call = fetchMock.mock.calls.find((call: unknown[]) => {
+    const createD1Call = fetchMock.mock.calls.find((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       return (
         url.includes('/d1/database') &&
@@ -686,7 +688,7 @@ describe('POST /projects/:id/deploy', () => {
     expect(res.status).toBe(200);
     await res.text();
 
-    const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
+    const uploadCall = fetchMock.mock.calls.find((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       return url.includes('/workers/dispatch/') && (call[1] as RequestInit)?.method === 'PUT';
     });
@@ -696,7 +698,7 @@ describe('POST /projects/:id/deploy', () => {
     const metadataBlob = workerFormData.get('metadata');
     expect(metadataBlob).toBeInstanceOf(Blob);
     const metadata = JSON.parse(await (metadataBlob as Blob).text()) as {
-      bindings?: { type: string; name: string; text?: string }[];
+      bindings?: Array<{ type: string; name: string; text?: string }>;
     };
 
     const plainTextBindings = (metadata.bindings ?? []).filter((b) => b.type === 'plain_text');
@@ -727,13 +729,13 @@ describe('POST /projects/:id/deploy', () => {
     expect(res.status).toBe(200);
     await res.text();
 
-    const setSecretCall = fetchMock.mock.calls.find((call: unknown[]) => {
+    const setSecretCall = fetchMock.mock.calls.find((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       return url.includes('/workers/dispatch/') && url.includes('/secrets');
     });
     expect(setSecretCall).toBeUndefined();
 
-    const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
+    const uploadCall = fetchMock.mock.calls.find((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       return (
         url.includes('/workers/dispatch/') &&
@@ -747,7 +749,7 @@ describe('POST /projects/:id/deploy', () => {
     const metadataBlob = workerFormData.get('metadata');
     expect(metadataBlob).toBeInstanceOf(Blob);
     const metadata = JSON.parse(await (metadataBlob as Blob).text()) as {
-      bindings?: { type: string; name: string; text?: string }[];
+      bindings?: Array<{ type: string; name: string; text?: string }>;
     };
 
     const secretBindings = (metadata.bindings ?? []).filter((b) => b.type === 'secret_text');
@@ -865,7 +867,7 @@ describe('POST /projects/:id/deploy', () => {
     expect(resource!.binding_name).toBe('emails');
 
     // Verify addQueueConsumer was called with queue_id (UUID), not queue_name
-    const consumerCall = fetchMock.mock.calls.find((call: unknown[]) => {
+    const consumerCall = fetchMock.mock.calls.find((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       return url.includes('/queues/') && url.includes('/consumers');
     });
@@ -897,7 +899,7 @@ describe('POST /projects/:id/deploy', () => {
     expect(res.status).toBe(200);
     await res.text();
 
-    const uploadCall = fetchMock.mock.calls.find((call: unknown[]) => {
+    const uploadCall = fetchMock.mock.calls.find((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       return url.includes('/workers/dispatch/') && (call[1] as RequestInit)?.method === 'PUT';
     });
@@ -907,7 +909,7 @@ describe('POST /projects/:id/deploy', () => {
     const metadataBlob = workerFormData.get('metadata');
     expect(metadataBlob).toBeInstanceOf(Blob);
     const metadata = JSON.parse(await (metadataBlob as Blob).text()) as {
-      bindings?: { type: string; name: string; queue_name?: string; queue_id?: string }[];
+      bindings?: Array<{ type: string; name: string; queue_name?: string; queue_id?: string }>;
     };
 
     // queue_name is the deterministic name (for CF producer binding), queue_id is the UUID
@@ -1470,7 +1472,7 @@ describe('POST /projects/:id/deploy', () => {
         await res.text();
 
         // The outer catch should have called deleteDispatchScript (DELETE to workers/dispatch/...scripts/)
-        const deleteCalls = fetchMock.mock.calls.filter((args: unknown[]) => {
+        const deleteCalls = fetchMock.mock.calls.filter((args: Array<unknown>) => {
           const url = typeof args[0] === 'string' ? args[0] : '';
           const init = args[1] as RequestInit | undefined;
           return (
@@ -1481,7 +1483,7 @@ describe('POST /projects/:id/deploy', () => {
         });
         expect(deleteCalls.length).toBeGreaterThanOrEqual(1);
         // At least one delete should target the new worker name
-        const targetedNewWorker = deleteCalls.some((args: unknown[]) => {
+        const targetedNewWorker = deleteCalls.some((args: Array<unknown>) => {
           const url = args[0] as string;
           return url.includes(`user-${project.slug}-`);
         });
@@ -1802,7 +1804,7 @@ describe('POST /projects/:id/deploy', () => {
 
     // Check DELETEs to dispatch scripts — the newly deployed versioned worker
     // (user-{slug}-{deploymentId}) must NOT be deleted
-    const deleteCalls = fetchMock.mock.calls.filter((args: unknown[]) => {
+    const deleteCalls = fetchMock.mock.calls.filter((args: Array<unknown>) => {
       const url = typeof args[0] === 'string' ? args[0] : '';
       const init = args[1] as RequestInit | undefined;
       return (
@@ -3573,7 +3575,7 @@ describe('POST /projects/:id/deploy (streaming static direct-to-R2)', () => {
     let deleteCallCount = 0;
     const deleteSpy = vi
       .spyOn(env.STATIC_ASSETS_R2, 'delete')
-      .mockImplementation(async (keys: string | string[]) => {
+      .mockImplementation(async (keys: string | Array<string>) => {
         deleteCallCount++;
         if (deleteCallCount === 1) {
           throw new Error('simulated transient R2 delete failure');
@@ -5402,7 +5404,7 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     // live ReadableStream instead of a pre-serialized FormData buffer.
     const boundary = `-----void-test-${Math.random().toString(36).slice(2)}`;
     const enc = new TextEncoder();
-    const frags: Uint8Array[] = [];
+    const frags: Array<Uint8Array> = [];
     const addPart = (name: string, body: string): void => {
       frags.push(
         enc.encode(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n`),
@@ -5829,7 +5831,7 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       event: string;
       deployment?: string;
       url?: string;
-      urls?: string[];
+      urls?: Array<string>;
       assets?: number;
       workers?: number;
       message?: string;
@@ -6258,7 +6260,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
     );
 
     expect(res.status).toBe(200);
-    const data = (await res.json()) as { needed: string[]; total: number; skipped: number };
+    const data = (await res.json()) as { needed: Array<string>; total: number; skipped: number };
     expect(data.needed.sort()).toEqual(['/app.js', '/index.html']);
     expect(data.total).toBe(2);
     expect(data.skipped).toBe(0);
@@ -6307,7 +6309,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
     );
 
     expect(res.status).toBe(200);
-    const data = (await res.json()) as { needed: string[]; total: number; skipped: number };
+    const data = (await res.json()) as { needed: Array<string>; total: number; skipped: number };
     expect(data.needed.sort()).toEqual(['/app.js', '/new.js']);
     expect(data.total).toBe(3);
     expect(data.skipped).toBe(1);
@@ -6516,7 +6518,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
       );
 
       expect(res.status).toBe(200);
-      const data = (await res.json()) as { needed: string[]; total: number; skipped: number };
+      const data = (await res.json()) as { needed: Array<string>; total: number; skipped: number };
       // All assets must be re-uploaded — they're in KV/R2, not CF's asset store
       expect(data.needed.sort()).toEqual(['/app.js', '/index.html', '/style.css']);
       expect(data.total).toBe(3);
@@ -6562,7 +6564,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
       );
 
       expect(res.status).toBe(200);
-      const data = (await res.json()) as { needed: string[]; total: number; skipped: number };
+      const data = (await res.json()) as { needed: Array<string>; total: number; skipped: number };
       // static→static should still dedup
       expect(data.needed.sort()).toEqual(['/app.js']);
       expect(data.total).toBe(2);
@@ -6613,7 +6615,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
       );
       expect(preflightRes.status).toBe(200);
       const pfData = (await preflightRes.json()) as {
-        needed: string[];
+        needed: Array<string>;
         total: number;
         skipped: number;
       };

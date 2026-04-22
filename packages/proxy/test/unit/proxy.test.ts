@@ -78,13 +78,13 @@ function createMockKv(data: Record<string, string> = {}) {
  * User-to-project ownership map used by the mock API for verify-owner checks.
  * Default: user_1 owns proj_1, proj_42, proj_99, and p.
  */
-const DEFAULT_OWNERSHIP: Record<string, string[]> = {
+const DEFAULT_OWNERSHIP: Record<string, Array<string>> = {
   user_1: ['proj_1', 'proj_42', 'proj_99', 'p'],
 };
 
 function createMockApi(
-  handler?: (...args: any[]) => Promise<Response>,
-  ownership: Record<string, string[]> = DEFAULT_OWNERSHIP,
+  handler?: (...args: Array<any>) => Promise<Response>,
+  ownership: Record<string, Array<string>> = DEFAULT_OWNERSHIP,
 ) {
   // Fetcher.fetch() is called as (url: string, init: RequestInit), not (Request).
   const defaultHandler = async (input: string | Request, init?: RequestInit) => {
@@ -611,7 +611,7 @@ describe('proxy worker', () => {
       return { runMock, gateway: vi.fn(() => ({ run: runMock })) };
     }
 
-    function mockGatewayStream(chunks: string[]) {
+    function mockGatewayStream(chunks: Array<string>) {
       const body = new ReadableStream({
         start(controller) {
           const encoder = new TextEncoder();

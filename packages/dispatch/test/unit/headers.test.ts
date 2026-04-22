@@ -60,7 +60,7 @@ describe('applyHeaderRules', () => {
   });
 
   it('returns original response when no rules match', () => {
-    const rules: HeaderRule[] = [
+    const rules: Array<HeaderRule> = [
       { pattern: '/assets/*', headers: [['Cache-Control', 'immutable']] },
     ];
     const original = new Response('body');
@@ -69,7 +69,7 @@ describe('applyHeaderRules', () => {
   });
 
   it('applies matching rule headers', () => {
-    const rules: HeaderRule[] = [{ pattern: '/*', headers: [['X-Frame-Options', 'DENY']] }];
+    const rules: Array<HeaderRule> = [{ pattern: '/*', headers: [['X-Frame-Options', 'DENY']] }];
     const original = new Response('body', {
       headers: { 'Content-Type': 'text/html' },
     });
@@ -80,7 +80,7 @@ describe('applyHeaderRules', () => {
   });
 
   it('overrides existing headers from matching rules', () => {
-    const rules: HeaderRule[] = [
+    const rules: Array<HeaderRule> = [
       { pattern: '/assets/*', headers: [['Cache-Control', 'public, max-age=31536000, immutable']] },
     ];
     const original = new Response('body', {
@@ -91,7 +91,7 @@ describe('applyHeaderRules', () => {
   });
 
   it('merges headers from multiple matching rules', () => {
-    const rules: HeaderRule[] = [
+    const rules: Array<HeaderRule> = [
       { pattern: '/*', headers: [['X-Frame-Options', 'DENY']] },
       { pattern: '/assets/*', headers: [['Cache-Control', 'immutable']] },
     ];
@@ -101,7 +101,7 @@ describe('applyHeaderRules', () => {
   });
 
   it('last matching rule wins for same header name', () => {
-    const rules: HeaderRule[] = [
+    const rules: Array<HeaderRule> = [
       { pattern: '/*', headers: [['Cache-Control', 'no-cache']] },
       { pattern: '/assets/*', headers: [['Cache-Control', 'immutable']] },
     ];
@@ -110,7 +110,7 @@ describe('applyHeaderRules', () => {
   });
 
   it('preserves response body and status', async () => {
-    const rules: HeaderRule[] = [{ pattern: '/*', headers: [['X-Custom', 'value']] }];
+    const rules: Array<HeaderRule> = [{ pattern: '/*', headers: [['X-Custom', 'value']] }];
     const original = new Response('hello', { status: 201 });
     const result = applyHeaderRules(original, '/test', rules);
     expect(result.status).toBe(201);
@@ -118,19 +118,23 @@ describe('applyHeaderRules', () => {
   });
 
   it('blocks Set-Cookie header', () => {
-    const rules: HeaderRule[] = [{ pattern: '/*', headers: [['Set-Cookie', 'session=abc123']] }];
+    const rules: Array<HeaderRule> = [
+      { pattern: '/*', headers: [['Set-Cookie', 'session=abc123']] },
+    ];
     const result = applyHeaderRules(new Response('body'), '/index.html', rules);
     expect(result.headers.get('Set-Cookie')).toBeNull();
   });
 
   it('blocks set-cookie header (lowercase)', () => {
-    const rules: HeaderRule[] = [{ pattern: '/*', headers: [['set-cookie', 'session=abc123']] }];
+    const rules: Array<HeaderRule> = [
+      { pattern: '/*', headers: [['set-cookie', 'session=abc123']] },
+    ];
     const result = applyHeaderRules(new Response('body'), '/index.html', rules);
     expect(result.headers.get('set-cookie')).toBeNull();
   });
 
   it('allows Strict-Transport-Security header (per-domain, safe)', () => {
-    const rules: HeaderRule[] = [
+    const rules: Array<HeaderRule> = [
       { pattern: '/*', headers: [['Strict-Transport-Security', 'max-age=31536000']] },
     ];
     const result = applyHeaderRules(new Response('body'), '/index.html', rules);
@@ -138,13 +142,13 @@ describe('applyHeaderRules', () => {
   });
 
   it('allows normal headers like X-Custom-Header', () => {
-    const rules: HeaderRule[] = [{ pattern: '/*', headers: [['X-Custom-Header', 'hello']] }];
+    const rules: Array<HeaderRule> = [{ pattern: '/*', headers: [['X-Custom-Header', 'hello']] }];
     const result = applyHeaderRules(new Response('body'), '/index.html', rules);
     expect(result.headers.get('X-Custom-Header')).toBe('hello');
   });
 
   it('allows Cache-Control and Content-Type headers', () => {
-    const rules: HeaderRule[] = [
+    const rules: Array<HeaderRule> = [
       {
         pattern: '/*',
         headers: [
@@ -159,7 +163,7 @@ describe('applyHeaderRules', () => {
   });
 
   it('blocks only blocked headers while allowing others in same rule', () => {
-    const rules: HeaderRule[] = [
+    const rules: Array<HeaderRule> = [
       {
         pattern: '/*',
         headers: [

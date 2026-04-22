@@ -4,7 +4,7 @@ import type { ApiEnv } from './env';
 
 interface CronState {
   workerName: string;
-  schedules: { name: string; cron: string }[];
+  schedules: Array<{ name: string; cron: string }>;
   proxyToken?: string;
 }
 
@@ -78,7 +78,7 @@ export function cronMatchesMinute(cronExpr: string, now: number): boolean {
 }
 
 /** Compute the earliest next fire time across all schedules. Returns null if none. */
-export function getNextFireTime(schedules: { cron: string }[], now: number): number | null {
+export function getNextFireTime(schedules: Array<{ cron: string }>, now: number): number | null {
   let earliest = Infinity;
   for (const s of schedules) {
     try {

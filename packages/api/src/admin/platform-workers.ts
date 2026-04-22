@@ -4,16 +4,16 @@ interface PlatformWorkerDef {
   name: PlatformWorkerName;
   prodScript: string;
   stagingScript: string;
-  dependsOn: PlatformWorkerName[];
+  dependsOn: Array<PlatformWorkerName>;
   deployOrder: number;
   rollbackWarning?: string;
 }
 
 export interface PlatformWorker extends PlatformWorkerDef {
-  dependedBy: PlatformWorkerName[];
+  dependedBy: Array<PlatformWorkerName>;
 }
 
-const WORKER_DEFS: PlatformWorkerDef[] = [
+const WORKER_DEFS: Array<PlatformWorkerDef> = [
   {
     name: 'proxy',
     prodScript: 'void-proxy',
@@ -54,7 +54,7 @@ const WORKER_DEFS: PlatformWorkerDef[] = [
 ];
 
 // Derive dependedBy from dependsOn (single source of truth for the dependency graph)
-export const PLATFORM_WORKERS: PlatformWorker[] = WORKER_DEFS.map((def) => ({
+export const PLATFORM_WORKERS: Array<PlatformWorker> = WORKER_DEFS.map((def) => ({
   ...def,
   dependedBy: WORKER_DEFS.filter((other) => other.dependsOn.includes(def.name)).map(
     (other) => other.name,

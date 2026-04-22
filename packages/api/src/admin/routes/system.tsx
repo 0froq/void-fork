@@ -28,7 +28,7 @@ export interface HealthCheck {
 }
 
 export interface HealthResult {
-  checks: HealthCheck[];
+  checks: Array<HealthCheck>;
   allOk: boolean;
 }
 

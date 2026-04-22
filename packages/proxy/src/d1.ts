@@ -43,7 +43,7 @@ d1.post('/query', async (c) => {
   }
 
   const cfData = (await cfRes.json()) as {
-    result?: { results?: Record<string, unknown>[]; meta?: Record<string, unknown> }[];
+    result?: Array<{ results?: Array<Record<string, unknown>>; meta?: Record<string, unknown> }>;
   };
   const qr = cfData.result?.[0];
 
@@ -90,7 +90,7 @@ d1.post('/batch', async (c) => {
   }
 
   const results = [];
-  for (const stmt of body.statements as { sql: string; params?: unknown[] }[]) {
+  for (const stmt of body.statements as Array<{ sql: string; params?: Array<unknown> }>) {
     const cfRes = await fetch(
       `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/d1/database/${dbId}/query`,
       {
@@ -108,7 +108,7 @@ d1.post('/batch', async (c) => {
     }
 
     const cfData = (await cfRes.json()) as {
-      result?: { results?: unknown[]; meta?: Record<string, unknown> }[];
+      result?: Array<{ results?: Array<unknown>; meta?: Record<string, unknown> }>;
     };
     const qr = cfData.result?.[0];
     results.push({ results: qr?.results ?? [], success: true, meta: qr?.meta });

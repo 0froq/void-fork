@@ -3,7 +3,7 @@ const CF_ZONE_API_BASE = 'https://api.cloudflare.com/client/v4/zones';
 
 interface CfApiResult<T> {
   success: boolean;
-  errors: { code: number; message: string }[];
+  errors: Array<{ code: number; message: string }>;
   result: T;
 }
 
@@ -76,7 +76,7 @@ export async function getD1DatabaseByName(
   apiToken: string,
   name: string,
 ): Promise<D1DatabaseInfo> {
-  const result = await cfFetch<D1DatabaseInfo[]>(
+  const result = await cfFetch<Array<D1DatabaseInfo>>(
     `${CF_API_BASE}/${accountId}/d1/database?name=${encodeURIComponent(name)}`,
     apiToken,
   );
@@ -91,7 +91,7 @@ export async function getKVNamespaceByTitle(
   apiToken: string,
   title: string,
 ): Promise<KVNamespaceInfo> {
-  const result = await cfFetch<KVNamespaceInfo[]>(
+  const result = await cfFetch<Array<KVNamespaceInfo>>(
     `${CF_API_BASE}/${accountId}/storage/kv/namespaces?title=${encodeURIComponent(title)}`,
     apiToken,
   );
@@ -106,7 +106,7 @@ export async function getQueueByName(
   apiToken: string,
   name: string,
 ): Promise<QueueInfo> {
-  const result = await cfFetch<QueueInfo[]>(
+  const result = await cfFetch<Array<QueueInfo>>(
     `${CF_API_BASE}/${accountId}/queues?name=${encodeURIComponent(name)}`,
     apiToken,
   );
@@ -235,7 +235,7 @@ export async function addQueueConsumer(
   }
 
   // Consumer exists — find ours and update settings
-  const consumers = await cfFetch<QueueConsumerInfo[]>(consumersUrl, apiToken);
+  const consumers = await cfFetch<Array<QueueConsumerInfo>>(consumersUrl, apiToken);
   const ours = consumers.find((c) => c.script === scriptName);
 
   if (!ours) {
@@ -300,9 +300,9 @@ export async function getDispatchWorkerProxyToken(
   scriptName: string,
 ): Promise<ProxyTokenLookup> {
   const url = `${CF_API_BASE}/${accountId}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${scriptName}/bindings`;
-  let bindings: DispatchWorkerBinding[];
+  let bindings: Array<DispatchWorkerBinding>;
   try {
-    bindings = await cfFetch<DispatchWorkerBinding[]>(url, apiToken);
+    bindings = await cfFetch<Array<DispatchWorkerBinding>>(url, apiToken);
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
     return { kind: 'error', error };
@@ -323,7 +323,7 @@ export interface CustomHostnameInfo {
   hostname: string;
   status: string;
   ssl: { status: string };
-  verification_errors?: string[];
+  verification_errors?: Array<string>;
 }
 
 export async function createCustomHostname(
@@ -408,7 +408,7 @@ export async function getHyperdriveByName(
   apiToken: string,
   name: string,
 ): Promise<HyperdriveInfo> {
-  const result = await cfFetch<HyperdriveInfo[]>(
+  const result = await cfFetch<Array<HyperdriveInfo>>(
     `${CF_API_BASE}/${accountId}/hyperdrive/configs`,
     apiToken,
   );
@@ -424,7 +424,7 @@ export async function getHyperdriveByName(
 export async function purgeZoneCache(
   zoneId: string,
   apiToken: string,
-  files: string[],
+  files: Array<string>,
 ): Promise<void> {
   // CF API allows max 100 URLs per purge request (Free/Pro/Business)
   for (let i = 0; i < files.length; i += 100) {

@@ -44,10 +44,12 @@ export function DeploymentTable({
   showProject,
   tz,
 }: {
-  deployments: (Deployment & {
-    project_slug?: string | null;
-    active_deployment_id?: string | null;
-  })[];
+  deployments: Array<
+    Deployment & {
+      project_slug?: string | null;
+      active_deployment_id?: string | null;
+    }
+  >;
   activeDeploymentId?: string | null;
   showProject?: boolean;
   tz?: string;

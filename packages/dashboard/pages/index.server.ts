@@ -4,7 +4,7 @@ import { defineHandler } from 'void';
 import { createClient, type API } from '../lib/api';
 
 export type Props = {
-  projects: (Project & { custom_domain: string | null })[];
+  projects: Array<Project & { custom_domain: string | null }>;
   usage: API<'usage'>;
   siteDomain: string;
 };

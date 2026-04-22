@@ -16,7 +16,7 @@ export function PlatformWorkerDetailPage({
   worker: PlatformWorker;
   env: PlatformEnv;
   scriptName: string;
-  versions: WorkerVersion[];
+  versions: Array<WorkerVersion>;
   deployment?: WorkerDeployment;
   error?: string;
   username: string;

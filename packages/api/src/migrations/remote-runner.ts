@@ -13,8 +13,8 @@ export interface MigrationFailure {
 }
 
 export interface MigrationResult {
-  applied: string[];
-  skipped: string[];
+  applied: Array<string>;
+  skipped: Array<string>;
   /**
    * If a migration mid-batch fails with a hard D1 / SQL error, the runner
    * records the failure here and stops. The runner does NOT throw for
@@ -262,7 +262,7 @@ export async function runRemoteMigrations(
   accountId: string,
   apiToken: string,
   databaseId: string,
-  migrations: RemoteMigration[],
+  migrations: Array<RemoteMigration>,
   appliedSet?: Set<string>,
 ): Promise<MigrationResult> {
   const applied = appliedSet ?? (await ensureTrackingTable(accountId, apiToken, databaseId));
@@ -399,7 +399,7 @@ export async function runRemoteMigrations(
 
 interface D1Query {
   sql: string;
-  params?: unknown[];
+  params?: Array<unknown>;
 }
 
 /**
@@ -419,7 +419,7 @@ interface D1QueryResponseMeta {
 }
 
 interface D1QueryResponse {
-  results: Record<string, unknown>[];
+  results: Array<Record<string, unknown>>;
   meta?: D1QueryResponseMeta;
 }
 
@@ -456,8 +456,8 @@ export async function queryD1(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let json: {
     success: boolean;
-    errors: { code: number; message: string }[];
-    result: (D1QueryResponse & { meta?: D1QueryResponseMeta })[];
+    errors: Array<{ code: number; message: string }>;
+    result: Array<D1QueryResponse & { meta?: D1QueryResponseMeta }>;
   };
   try {
     const response = await fetch(url, {

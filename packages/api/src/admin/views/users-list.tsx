@@ -9,7 +9,7 @@ export function UsersListPage({
   totalPages,
   username,
 }: {
-  users: User[];
+  users: Array<User>;
   search?: string;
   page?: number;
   totalPages?: number;

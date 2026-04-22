@@ -158,7 +158,7 @@ describe('provisionBindings', () => {
   });
 
   it('skips provisioning when resources already exist', async () => {
-    const existingResources: Resource[] = [
+    const existingResources: Array<Resource> = [
       {
         id: 'res_existing',
         project_id: PROJECT_ID,
@@ -284,7 +284,7 @@ describe('provisionBindings', () => {
   });
 
   it('provisions only missing resources when some already exist', async () => {
-    const existingResources: Resource[] = [
+    const existingResources: Array<Resource> = [
       {
         id: 'res_existing',
         project_id: PROJECT_ID,

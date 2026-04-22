@@ -74,7 +74,7 @@ export async function ensureGitHubPreviewRepoAccess(
     );
   }
 
-  const invitations = (await invitationsRes.json()) as RepositoryInvitation[];
+  const invitations = (await invitationsRes.json()) as Array<RepositoryInvitation>;
   const hasPendingInvite = invitations.some(
     (invitation) => invitation.invitee?.login?.toLowerCase() === login.toLowerCase(),
   );

@@ -300,7 +300,7 @@ app.get('/:id/logs', async (c) => {
     return c.json({ error: 'log query failed', status: response.status, detail: body, query }, 502);
   }
 
-  const result = (await response.json()) as { data: LogRow[] };
+  const result = (await response.json()) as { data: Array<LogRow> };
   const data = (result.data ?? []).map((row) => ({
     timestamp: row.ts,
     outcome: row.outcome,
@@ -324,7 +324,7 @@ interface LogRow {
   ts: number;
 }
 
-function tryParse(json: string): unknown[] {
+function tryParse(json: string): Array<unknown> {
   try {
     return JSON.parse(json);
   } catch {

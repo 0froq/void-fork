@@ -46,7 +46,7 @@ function buildMultipart(
   }>,
 ): Uint8Array {
   const enc = new TextEncoder();
-  const chunks: Uint8Array[] = [];
+  const chunks: Array<Uint8Array> = [];
   for (const p of parts) {
     chunks.push(enc.encode(`--${boundary}\r\n`));
     let disp = `Content-Disposition: form-data; name="${p.name}"`;
@@ -151,7 +151,7 @@ describe('parseMultipart', () => {
     const withPreamble = new Uint8Array(inner.length + 24);
     withPreamble.set(enc.encode('This is a preamble.\r\n\r\n'));
     withPreamble.set(inner, 24);
-    const parts: string[] = [];
+    const parts: Array<string> = [];
     for await (const part of parseMultipart(bodyFromBytes(withPreamble), BOUNDARY)) {
       parts.push(`${part.name}=${await readText(part.body)}`);
     }
@@ -217,7 +217,7 @@ describe('parseMultipart', () => {
       { name: 'partial', body: 'abcdefghij' },
       { name: 'next', body: 'hello' },
     ]);
-    const seen: string[] = [];
+    const seen: Array<string> = [];
     for await (const part of parseMultipart(bodyInChunks(body, 3), BOUNDARY)) {
       if (part.name === 'partial') {
         const reader = part.body.getReader();
@@ -357,7 +357,7 @@ describe('parseMultipart', () => {
       { name: 'big', body: payload },
       { name: 'next', body: 'ok' },
     ]);
-    const sizes: number[] = [];
+    const sizes: Array<number> = [];
     for await (const part of parseMultipart(bodyFromBytes(body), BOUNDARY)) {
       if (part.name !== 'big') {
         await readText(part.body);
@@ -431,9 +431,9 @@ describe('parseMultipart', () => {
       },
     });
 
-    const seen: Record<string, { total: number; chunks: number[] }> = {};
+    const seen: Record<string, { total: number; chunks: Array<number> }> = {};
     for await (const part of parseMultipart(source, BOUNDARY)) {
-      const chunks: number[] = [];
+      const chunks: Array<number> = [];
       let total = 0;
       const reader = part.body.getReader();
       while (true) {

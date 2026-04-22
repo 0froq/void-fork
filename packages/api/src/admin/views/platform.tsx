@@ -21,11 +21,11 @@ export function PlatformPage({
   page,
   totalPages,
 }: {
-  workers: WorkerStatus[];
+  workers: Array<WorkerStatus>;
   env: PlatformEnv;
   username: string;
   tz?: string;
-  entries: ActivityEntry[];
+  entries: Array<ActivityEntry>;
   page: number;
   totalPages: number;
 }) {
@@ -258,7 +258,7 @@ document.getElementById('rollback-all-form').addEventListener('submit', function
                 const succeeded = entry.events.filter((e) => e.status === 'success').length;
                 const failed = entry.events.filter((e) => e.status === 'failed').length;
                 const skipped = entry.events.filter((e) => e.status === 'skipped').length;
-                const statusParts: string[] = [];
+                const statusParts: Array<string> = [];
                 if (succeeded > 0) {
                   statusParts.push(`${succeeded} success`);
                 }

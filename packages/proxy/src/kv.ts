@@ -207,7 +207,7 @@ kv.post('/list', async (c) => {
   }
 
   const data = (await cfRes.json()) as {
-    result?: { name: string }[];
+    result?: Array<{ name: string }>;
     result_info?: { cursor?: string };
   };
   return c.json({

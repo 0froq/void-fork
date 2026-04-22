@@ -6,12 +6,12 @@ export type AllowlistEntry = {
 
 const KV_KEY = 'signup:allowlist';
 
-export async function getAllowlist(kv: KVNamespace): Promise<AllowlistEntry[]> {
+export async function getAllowlist(kv: KVNamespace): Promise<Array<AllowlistEntry>> {
   const raw = await kv.get(KV_KEY);
   return raw ? JSON.parse(raw) : [];
 }
 
-export async function putAllowlist(kv: KVNamespace, entries: AllowlistEntry[]): Promise<void> {
+export async function putAllowlist(kv: KVNamespace, entries: Array<AllowlistEntry>): Promise<void> {
   await kv.put(KV_KEY, JSON.stringify(entries));
 }
 
@@ -23,7 +23,7 @@ export function isSignupAllowed(
   provider: string,
   login: string,
   email: string | null,
-  entries: AllowlistEntry[],
+  entries: Array<AllowlistEntry>,
 ): boolean {
   if (entries.length === 0) {
     return false;
