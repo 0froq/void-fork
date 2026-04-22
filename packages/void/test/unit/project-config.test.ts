@@ -9,7 +9,7 @@ import {
   writeProjectConfig,
 } from '../../src/cli/project';
 
-const roots: string[] = [];
+const roots: Array<string> = [];
 
 function makeRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'void-project-config-'));

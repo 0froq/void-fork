@@ -38,8 +38,8 @@ export interface IslandFormReturn<T extends Record<string, unknown>> {
   hasChanges: boolean;
   wasSuccessful: boolean;
   recentlySuccessful: boolean;
-  reset: (...fields: (keyof T & string)[]) => void;
-  clearErrors: (...fields: string[]) => void;
+  reset: (...fields: Array<keyof T & string>) => void;
+  clearErrors: (...fields: Array<string>) => void;
   clearError: () => void;
   post: (url: string) => Promise<void>;
   put: (url: string) => Promise<void>;
@@ -70,7 +70,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     setDataStore(field, value);
   }
 
-  function reset(...fields: string[]) {
+  function reset(...fields: Array<string>) {
     if (fields.length === 0) {
       setDataStore(reconcile({ ...defaults_ }));
     } else {
@@ -80,7 +80,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     }
   }
 
-  function clearErrors(...fields: string[]) {
+  function clearErrors(...fields: Array<string>) {
     if (fields.length === 0) {
       setErrors({});
     } else {

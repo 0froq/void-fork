@@ -21,42 +21,42 @@ const mockWhoami = vi.fn();
 const mockIsExpiredTokenError = vi.fn();
 
 vi.mock('@clack/prompts', () => ({
-  intro: (...args: unknown[]) => mockIntro(...args),
-  outro: (...args: unknown[]) => mockOutro(...args),
+  intro: (...args: Array<unknown>) => mockIntro(...args),
+  outro: (...args: Array<unknown>) => mockOutro(...args),
   log: {
-    warn: (...args: unknown[]) => mockWarn(...args),
-    error: (...args: unknown[]) => mockError(...args),
-    info: (...args: unknown[]) => mockInfo(...args),
-    success: (...args: unknown[]) => mockSuccess(...args),
-    step: (...args: unknown[]) => mockStep(...args),
+    warn: (...args: Array<unknown>) => mockWarn(...args),
+    error: (...args: Array<unknown>) => mockError(...args),
+    info: (...args: Array<unknown>) => mockInfo(...args),
+    success: (...args: Array<unknown>) => mockSuccess(...args),
+    step: (...args: Array<unknown>) => mockStep(...args),
   },
   spinner: () => ({
-    start: (...args: unknown[]) => mockSpinnerStart(...args),
-    stop: (...args: unknown[]) => mockSpinnerStop(...args),
-    message: (...args: unknown[]) => mockSpinnerMessage(...args),
+    start: (...args: Array<unknown>) => mockSpinnerStart(...args),
+    stop: (...args: Array<unknown>) => mockSpinnerStop(...args),
+    message: (...args: Array<unknown>) => mockSpinnerMessage(...args),
   }),
   isCI: () => false,
-  select: (...args: unknown[]) => mockSelect(...args),
+  select: (...args: Array<unknown>) => mockSelect(...args),
   isCancel: () => false,
   cancel: vi.fn(),
 }));
 
 vi.mock('../../src/cli/auth', () => ({
-  getToken: (...args: unknown[]) => mockGetToken(...args),
-  getTokenSource: (...args: unknown[]) => mockGetTokenSource(...args),
-  removeToken: (...args: unknown[]) => mockRemoveToken(...args),
-  runLogin: (...args: unknown[]) => mockRunLogin(...args),
-  saveToken: (...args: unknown[]) => mockSaveToken(...args),
+  getToken: (...args: Array<unknown>) => mockGetToken(...args),
+  getTokenSource: (...args: Array<unknown>) => mockGetTokenSource(...args),
+  removeToken: (...args: Array<unknown>) => mockRemoveToken(...args),
+  runLogin: (...args: Array<unknown>) => mockRunLogin(...args),
+  saveToken: (...args: Array<unknown>) => mockSaveToken(...args),
   isStagingMode: () => false,
 }));
 
 vi.mock('../../src/cli/client', () => ({
   PlatformClient: class {
-    whoami(...args: unknown[]) {
+    whoami(...args: Array<unknown>) {
       return mockWhoami(...args);
     }
   },
-  isExpiredTokenError: (...args: unknown[]) => mockIsExpiredTokenError(...args),
+  isExpiredTokenError: (...args: Array<unknown>) => mockIsExpiredTokenError(...args),
 }));
 
 beforeEach(() => {

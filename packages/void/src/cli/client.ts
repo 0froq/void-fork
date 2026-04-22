@@ -63,7 +63,7 @@ export interface DeleteProjectResponse {
   ok: boolean;
   id: string;
   slug: string;
-  warnings?: string[];
+  warnings?: Array<string>;
 }
 
 export interface DeploymentResponse {
@@ -80,7 +80,7 @@ export interface DeploymentResponse {
 }
 
 export interface DeploymentListResponse {
-  deployments: DeploymentResponse[];
+  deployments: Array<DeploymentResponse>;
   activeDeploymentId: string | null;
 }
 
@@ -92,8 +92,8 @@ export interface SecretResponse {
 export interface LogEntry {
   timestamp: number;
   outcome: string;
-  logs: { level: string; message: unknown[]; timestamp: number }[];
-  exceptions: { name: string; message: string; timestamp: number }[];
+  logs: Array<{ level: string; message: Array<unknown>; timestamp: number }>;
+  exceptions: Array<{ name: string; message: string; timestamp: number }>;
   url: string;
   method: string;
   status: string;
@@ -111,7 +111,7 @@ export interface DomainResponse {
 
 export interface DomainStatusResponse extends DomainResponse {
   ssl_status: string;
-  verification_errors?: string[];
+  verification_errors?: Array<string>;
 }
 
 /**
@@ -144,7 +144,7 @@ export class PlatformClient {
     return res.json();
   }
 
-  async listProjects(): Promise<ProjectResponse[]> {
+  async listProjects(): Promise<Array<ProjectResponse>> {
     const res = await fetch(`${this.baseUrl}/projects`, {
       headers: {
         Authorization: `Bearer ${this.token}`,
@@ -175,9 +175,14 @@ export class PlatformClient {
   async rollback(
     projectId: string,
     deploymentId: string,
-    options?: { allowDestructive?: string[] },
-  ): Promise<{ ok: boolean; deploymentId?: string; migrationDiff?: string[]; error?: string }> {
-    const body: { deploymentId: string; allowDestructive?: string[] } = { deploymentId };
+    options?: { allowDestructive?: Array<string> },
+  ): Promise<{
+    ok: boolean;
+    deploymentId?: string;
+    migrationDiff?: Array<string>;
+    error?: string;
+  }> {
+    const body: { deploymentId: string; allowDestructive?: Array<string> } = { deploymentId };
     if (options?.allowDestructive && options.allowDestructive.length > 0) {
       body.allowDestructive = options.allowDestructive;
     }
@@ -239,7 +244,7 @@ export class PlatformClient {
     projectId: string,
     assetManifest: Record<string, { hash: string; size: number }>,
     hasWorker?: boolean,
-  ): Promise<{ needed: string[]; total: number; skipped: number }> {
+  ): Promise<{ needed: Array<string>; total: number; skipped: number }> {
     const total = Object.keys(assetManifest).length;
     try {
       const res = await fetch(`${this.baseUrl}/projects/${projectId}/deploy/preflight`, {
@@ -305,7 +310,7 @@ export class PlatformClient {
     }
   }
 
-  async listSecrets(projectId: string): Promise<{ name: string }[]> {
+  async listSecrets(projectId: string): Promise<Array<{ name: string }>> {
     const res = await fetch(`${this.baseUrl}/projects/${projectId}/secrets`, {
       headers: {
         Authorization: `Bearer ${this.token}`,
@@ -356,7 +361,7 @@ export class PlatformClient {
 
   async getMigrationStatus(
     projectId: string,
-  ): Promise<{ applied: { name: string; applied_at: string }[] }> {
+  ): Promise<{ applied: Array<{ name: string; applied_at: string }> }> {
     const res = await fetch(`${this.baseUrl}/projects/${projectId}/migrations`, {
       headers: {
         Authorization: `Bearer ${this.token}`,
@@ -372,8 +377,8 @@ export class PlatformClient {
 
   async applyRemoteMigrations(
     projectId: string,
-    migrations: { name: string; sql: string }[],
-  ): Promise<{ ok: boolean; applied: string[]; skipped: string[]; error?: string }> {
+    migrations: Array<{ name: string; sql: string }>,
+  ): Promise<{ ok: boolean; applied: Array<string>; skipped: Array<string>; error?: string }> {
     const res = await fetch(`${this.baseUrl}/projects/${projectId}/migrations/apply`, {
       method: 'POST',
       headers: {
@@ -392,7 +397,7 @@ export class PlatformClient {
 
   async renameMigrations(
     projectId: string,
-    renames: { from: string; to: string }[],
+    renames: Array<{ from: string; to: string }>,
   ): Promise<{ ok: boolean }> {
     const res = await fetch(`${this.baseUrl}/projects/${projectId}/migrations/rename`, {
       method: 'POST',
@@ -427,7 +432,7 @@ export class PlatformClient {
     return res.json();
   }
 
-  async listDomains(projectId: string): Promise<DomainResponse[]> {
+  async listDomains(projectId: string): Promise<Array<DomainResponse>> {
     const res = await fetch(`${this.baseUrl}/projects/${projectId}/domains`, {
       headers: {
         Authorization: `Bearer ${this.token}`,
@@ -488,7 +493,7 @@ export class PlatformClient {
     return res.json();
   }
 
-  async getResources(projectId: string): Promise<{ type: string; binding_name: string }[]> {
+  async getResources(projectId: string): Promise<Array<{ type: string; binding_name: string }>> {
     const res = await fetch(`${this.baseUrl}/projects/${projectId}/resources`, {
       headers: {
         Authorization: `Bearer ${this.token}`,
@@ -558,7 +563,7 @@ export class PlatformClient {
     since: string,
     limit = 200,
     deploymentId?: string,
-  ): Promise<LogEntry[]> {
+  ): Promise<Array<LogEntry>> {
     const params = new URLSearchParams({
       since,
       limit: String(limit),
@@ -577,7 +582,7 @@ export class PlatformClient {
       await throwPlatformApiError('Failed to fetch logs', res);
     }
 
-    const json = (await res.json()) as { data: LogEntry[] };
+    const json = (await res.json()) as { data: Array<LogEntry> };
     return json.data;
   }
 }

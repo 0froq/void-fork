@@ -35,7 +35,7 @@ export function ensureProjectTsconfig(
   const tsconfig: Record<string, unknown> = { files };
 
   if (hasDb) {
-    const paths: Record<string, string[]> = {};
+    const paths: Record<string, Array<string>> = {};
 
     if (options.redirectDbModule !== false) {
       // Redirect void/db to the generated db.d.ts so TypeScript uses
@@ -60,7 +60,7 @@ export function ensureProjectTsconfig(
 
   if (includeRoutes) {
     const compilerOptions = (tsconfig.compilerOptions ??= {}) as {
-      paths?: Record<string, string[]>;
+      paths?: Record<string, Array<string>>;
     };
     const paths = (compilerOptions.paths ??= {});
 
@@ -71,7 +71,7 @@ export function ensureProjectTsconfig(
 
   if (includeQueues) {
     const compilerOptions = (tsconfig.compilerOptions ??= {}) as {
-      paths?: Record<string, string[]>;
+      paths?: Record<string, Array<string>>;
     };
     const paths = (compilerOptions.paths ??= {});
 
@@ -83,7 +83,7 @@ export function ensureProjectTsconfig(
 
   if (includeMd) {
     const compilerOptions = (tsconfig.compilerOptions ??= {}) as {
-      paths?: Record<string, string[]>;
+      paths?: Record<string, Array<string>>;
     };
     const paths = (compilerOptions.paths ??= {});
 

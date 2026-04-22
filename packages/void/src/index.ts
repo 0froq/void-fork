@@ -114,7 +114,7 @@ export default {
 }
 
 /** Check whether a binding name already exists in a resolved bindings array. */
-function hasBinding(list: readonly { binding: string }[] | undefined, name: string): boolean {
+function hasBinding(list: ReadonlyArray<{ binding: string }> | undefined, name: string): boolean {
   return Array.isArray(list) && list.some((b) => b.binding === name);
 }
 
@@ -186,7 +186,7 @@ async function runAiSetupPrompt(
   const apiUrl = staging ? STAGING_API_URL : DEFAULT_API_URL;
   const client = new PlatformClient(token, apiUrl);
 
-  let projects: import('./cli/client').ProjectResponse[];
+  let projects: Array<import('./cli/client').ProjectResponse>;
   try {
     projects = await client.listProjects();
   } catch {
@@ -279,7 +279,7 @@ async function runAiSetupPrompt(
 export function voidPlugin(options?: {
   persistTo?: string;
   auxiliaryWorkers?: PluginConfig['auxiliaryWorkers'];
-}): Plugin[] {
+}): Array<Plugin> {
   // Resolve root relative to CWD — this runs at config time
   const root = process.cwd();
   const config = readConfig(root);
@@ -494,7 +494,7 @@ export function voidPlugin(options?: {
     const result: Record<string, unknown> = { ...workerConfig };
 
     // D1 — auth requires the app DB only for sqlite apps
-    const d1: Record<string, unknown>[] = [];
+    const d1: Array<Record<string, unknown>> = [];
     if (
       (bindings.needsD1 || (authEnabled && dialect === 'sqlite')) &&
       !hasBinding(resolved.d1_databases, 'DB')
@@ -505,7 +505,7 @@ export function voidPlugin(options?: {
       result.d1_databases = [...(resolved.d1_databases ?? []), ...d1];
     }
 
-    const kv: { binding: string; id: string }[] = [];
+    const kv: Array<{ binding: string; id: string }> = [];
     if (bindings.needsKV && !hasBinding(resolved.kv_namespaces, 'KV')) {
       kv.push({ binding: 'KV', id: 'local' });
     }
@@ -538,12 +538,12 @@ export function voidPlugin(options?: {
     if (websocketRoutes.length > 0) {
       type DurableObjectBindingsConfig = {
         durable_objects?: {
-          bindings?: { name: string; class_name: string }[];
+          bindings?: Array<{ name: string; class_name: string }>;
         };
       };
       const existingDurableObjectBindings =
         ((resolved as DurableObjectBindingsConfig).durable_objects?.bindings as
-          | { name: string; class_name: string }[]
+          | Array<{ name: string; class_name: string }>
           | undefined) ?? [];
       const missingDurableObjectBindings = websocketRoutes
         .filter(
@@ -657,7 +657,7 @@ export function voidPlugin(options?: {
       // virtual modules (/@vite/*, /__uno.css, etc.) before the CF plugin's
       // final handler routes unmatched requests to workerd.
       // run_worker_first is only needed in production for CF edge routing.
-      const assets = workerConfig.assets as { run_worker_first?: string[] } | undefined;
+      const assets = workerConfig.assets as { run_worker_first?: Array<string> } | undefined;
       if (command === 'serve' && assets) {
         delete (assets as Record<string, unknown>).run_worker_first;
       }
@@ -772,7 +772,7 @@ export function voidPlugin(options?: {
         try {
           const code = readFileSync(path, 'utf-8');
           const fileBindings = inferBindingsFromSource(code, path.split('/').pop()!);
-          const newBindings: string[] = [];
+          const newBindings: Array<string> = [];
           if (autoDetectBindings) {
             if (fileBindings.needsD1 && !bindings.needsD1) {
               newBindings.push('D1 (void/db)');
@@ -822,14 +822,14 @@ export function voidPlugin(options?: {
 
   if (framework) {
     workerConfig.main = getFrameworkEntry(framework, root);
-    const existingFlags = (workerConfig.compatibility_flags as string[] | undefined) ?? [];
+    const existingFlags = (workerConfig.compatibility_flags as Array<string> | undefined) ?? [];
     if (!existingFlags.includes('nodejs_compat')) {
       workerConfig.compatibility_flags = [...existingFlags, 'nodejs_compat'];
     }
 
     // vinext App Router uses RSC with SSR as child environment;
     // all other Class A frameworks and vinext Pages Router use plain SSR.
-    const viteEnvironment: { name: string; childEnvironments?: string[] } =
+    const viteEnvironment: { name: string; childEnvironments?: Array<string> } =
       framework === 'vinext-app' ? { name: 'rsc', childEnvironments: ['ssr'] } : { name: 'ssr' };
     const redirectDbTypePaths = framework !== 'vinext-app' && framework !== 'vinext-pages';
 
@@ -937,7 +937,7 @@ export function voidPlugin(options?: {
 
   // PostgreSQL needs nodejs_compat for the `pg` driver (events, net, tls, dns, etc.)
   // Other apps only need nodejs_als for AsyncLocalStorage (isomorphic fetch context threading)
-  const existingFlags = (workerConfig.compatibility_flags as string[] | undefined) ?? [];
+  const existingFlags = (workerConfig.compatibility_flags as Array<string> | undefined) ?? [];
   const needsNodejsCompat = dialect === 'postgresql';
   if (needsNodejsCompat && !existingFlags.includes('nodejs_compat')) {
     workerConfig.compatibility_flags = [

@@ -92,8 +92,8 @@ type FoldHit = {
  * ignored — the Proxy still serves them at runtime, and we can't prove
  * they'd be folded the same way Vite folds `import.meta.env.FOO`.
  */
-function findFoldHits(program: AstProgram, bindings: ImportBindings): FoldHit[] {
-  const hits: FoldHit[] = [];
+function findFoldHits(program: AstProgram, bindings: ImportBindings): Array<FoldHit> {
+  const hits: Array<FoldHit> = [];
 
   walk(program as unknown as Parameters<typeof walk>[0], {
     enter(node) {
@@ -127,7 +127,7 @@ function findFoldHits(program: AstProgram, bindings: ImportBindings): FoldHit[] 
   return hits;
 }
 
-function pushHit(node: AstMemberExpression, hits: FoldHit[]): void {
+function pushHit(node: AstMemberExpression, hits: Array<FoldHit>): void {
   // Static dot access: `env.FOO`
   if (!node.computed && isIdentifier(node.property)) {
     hits.push({ start: node.start!, end: node.end!, property: node.property.name });
@@ -173,7 +173,7 @@ const DEFAULT_ENV_PREFIXES = ['VITE_'] as const;
  *     and editing `.env.local` take effect without a full rebuild.
  */
 export function envClientFoldPlugin(): Plugin {
-  let envPrefixes: readonly string[] = DEFAULT_ENV_PREFIXES;
+  let envPrefixes: ReadonlyArray<string> = DEFAULT_ENV_PREFIXES;
   let loadedEnv: Record<string, string> = {};
   const schemaDefaults: Record<string, string> = {};
 

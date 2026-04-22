@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import type { SubcommandDef } from './subcommand-prompt';
 
-export const secretSubcommands: SubcommandDef[] = [
+export const secretSubcommands: Array<SubcommandDef> = [
   { name: 'list', description: 'List project secrets' },
   { name: 'put', arg: '<name>', description: 'Set a project secret' },
   { name: 'delete', arg: '<name>', description: 'Delete a project secret' },
@@ -14,7 +14,7 @@ export type SecretArgs =
   | { action: 'delete'; name: string; projectName?: string }
   | { action: 'sync'; file: string; projectName?: string };
 
-export function parseSecretArgs(args: string[]): SecretArgs {
+export function parseSecretArgs(args: Array<string>): SecretArgs {
   const parsed = parseArgs({
     args,
     options: {

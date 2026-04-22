@@ -4,7 +4,9 @@ import { string } from '../../src/runtime/env-helpers';
 import { defineEnv } from '../../src/runtime/env-public';
 
 const ROOT = '/project';
-type MessagePayload = string | { message: string; loc?: { line: number; column: number; file: string } };
+type MessagePayload =
+  | string
+  | { message: string; loc?: { line: number; column: number; file: string } };
 type TransformHandler = (
   this: ReturnType<typeof makeContext>,
   code: string,
@@ -12,13 +14,13 @@ type TransformHandler = (
 ) => unknown | Promise<unknown>;
 type ConfigResolvedHandler = (
   this: ReturnType<typeof makeContext>,
-  config: { envPrefix?: string | string[] },
+  config: { envPrefix?: string | Array<string> },
 ) => unknown | Promise<unknown>;
 type HookWithHandler<T> = { handler: T };
 
 interface ContextHooks {
-  errors: { message: string; loc?: { line: number; column: number; file: string } }[];
-  warnings: { message: string; loc?: { line: number; column: number; file: string } }[];
+  errors: Array<{ message: string; loc?: { line: number; column: number; file: string } }>;
+  warnings: Array<{ message: string; loc?: { line: number; column: number; file: string } }>;
   environmentName: string;
 }
 
@@ -50,9 +52,7 @@ function makeContext(environmentName = 'client'): ContextHooks & {
   return ctx;
 }
 
-function getTransformHandler(
-  plugin: ReturnType<typeof envClientGuardPlugin>,
-): TransformHandler {
+function getTransformHandler(plugin: ReturnType<typeof envClientGuardPlugin>): TransformHandler {
   const t = plugin.transform;
   if (typeof t === 'function') {
     return t as unknown as TransformHandler;
@@ -77,7 +77,7 @@ function getConfigResolvedHandler(
 }
 
 interface RunTransformOptions {
-  envPrefix?: string | string[];
+  envPrefix?: string | Array<string>;
 }
 
 async function runTransform(

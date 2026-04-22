@@ -2,7 +2,7 @@ import type { ProxyClient } from './client';
 
 type ProxyPreparedStatement = D1PreparedStatement & {
   _sql: string;
-  _params: unknown[];
+  _params: Array<unknown>;
 };
 
 /**
@@ -19,7 +19,7 @@ export class ProxyD1Database {
     return new ProxyD1PreparedStatement(this.client, this.binding, sql);
   }
 
-  async batch<T = unknown>(stmts: D1PreparedStatement[]): Promise<D1Result<T>[]> {
+  async batch<T = unknown>(stmts: Array<D1PreparedStatement>): Promise<Array<D1Result<T>>> {
     const statements = stmts.map((s) => ({
       sql: (s as ProxyPreparedStatement)._sql,
       params: (s as ProxyPreparedStatement)._params,
@@ -28,7 +28,7 @@ export class ProxyD1Database {
       binding: this.binding,
       statements,
     });
-    return (await res.json()) as D1Result<T>[];
+    return (await res.json()) as Array<D1Result<T>>;
   }
 
   async exec(sql: string): Promise<D1ExecResult> {
@@ -57,7 +57,7 @@ export class ProxyD1PreparedStatement {
   /** @internal */
   _sql: string;
   /** @internal */
-  _params: unknown[];
+  _params: Array<unknown>;
 
   constructor(
     private client: ProxyClient,
@@ -68,7 +68,7 @@ export class ProxyD1PreparedStatement {
     this._params = [];
   }
 
-  bind(...values: unknown[]): ProxyD1PreparedStatement {
+  bind(...values: Array<unknown>): ProxyD1PreparedStatement {
     this._params = values;
     return this;
   }
@@ -112,17 +112,17 @@ export class ProxyD1PreparedStatement {
     return (await res.json()) as D1Result<T>;
   }
 
-  async raw<T = unknown[]>(options?: { columnNames?: boolean }): Promise<T[]> {
+  async raw<T = Array<unknown>>(options?: { columnNames?: boolean }): Promise<Array<T>> {
     const res = await this.client.fetch('/d1/query', {
       binding: this.binding,
       sql: this._sql,
       params: this._params,
       method: 'raw',
     });
-    const data = (await res.json()) as { columns: string[]; results: unknown[][] };
+    const data = (await res.json()) as { columns: Array<string>; results: Array<Array<unknown>> };
     if (options?.columnNames) {
-      return [data.columns, ...data.results] as T[];
+      return [data.columns, ...data.results] as Array<T>;
     }
-    return data.results as T[];
+    return data.results as Array<T>;
   }
 }

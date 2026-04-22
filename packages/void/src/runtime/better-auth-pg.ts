@@ -62,11 +62,11 @@ async function runPostgresAuthMigrations(
   try {
     await applyPgAuthMigrations(
       {
-        async all<T extends Record<string, unknown>>(sql: string, params?: unknown[]) {
+        async all<T extends Record<string, unknown>>(sql: string, params?: Array<unknown>) {
           const result = await client.query(sql, params);
-          return result.rows as T[];
+          return result.rows as Array<T>;
         },
-        async run(sql: string, params?: unknown[]) {
+        async run(sql: string, params?: Array<unknown>) {
           await client.query(sql, params);
         },
       },

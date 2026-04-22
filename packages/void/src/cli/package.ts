@@ -189,11 +189,11 @@ export interface PackageOptions {
   /** Cloudflare compatibility_date from framework's wrangler config. */
   compatibilityDate?: string;
   /** Cloudflare compatibility_flags from framework's wrangler config. */
-  compatibilityFlags?: string[];
+  compatibilityFlags?: Array<string>;
 }
 
 function toWebSocketManifest(
-  routes: WebSocketRouteDefinition[] | undefined,
+  routes: Array<WebSocketRouteDefinition> | undefined,
 ): WebSocketManifestMeta | undefined {
   if (!routes || routes.length === 0) {
     return undefined;
@@ -214,22 +214,22 @@ export async function packageBuild(
   distDir: string,
   workerDirName: string,
   bindings: InferredBindings,
-  migrations?: MigrationFile[],
-  schedules?: ScheduleMeta[],
+  migrations?: Array<MigrationFile>,
+  schedules?: Array<ScheduleMeta>,
   ssr?: boolean,
   framework?: string,
   revalidate?: number | Record<string, number>,
   vars?: Record<string, string>,
-  queues?: QueueMeta[],
-  prerender?: string[],
+  queues?: Array<QueueMeta>,
+  prerender?: Array<string>,
   assetConfig?: AssetConfig,
   options?: PackageOptions,
   neededAssets?: Set<string> | null,
   hashedAssetsPrefix?: string,
-  headerRules?: HeaderRule[],
-  redirectRules?: RedirectRule[],
+  headerRules?: Array<HeaderRule>,
+  redirectRules?: Array<RedirectRule>,
   dialect?: 'sqlite' | 'postgresql',
-  webSockets?: WebSocketRouteDefinition[],
+  webSockets?: Array<WebSocketRouteDefinition>,
   onProgress?: ProgressCallback,
 ): Promise<FormData> {
   const formData = new FormData();
@@ -390,8 +390,8 @@ export async function packageStaticBuild(
   appType: 'spa' | 'static',
   neededAssets?: Set<string> | null,
   hashedAssetsPrefix?: string,
-  headerRules?: HeaderRule[],
-  redirectRules?: RedirectRule[],
+  headerRules?: Array<HeaderRule>,
+  redirectRules?: Array<RedirectRule>,
   onProgress?: ProgressCallback,
 ): Promise<FormData> {
   const formData = new FormData();
@@ -458,20 +458,20 @@ export async function packageFrameworkBuild(opts: {
   workerMain: string;
   assetsDir: string;
   bindings: InferredBindings;
-  migrations?: MigrationFile[];
-  schedules?: ScheduleMeta[];
-  queues?: QueueMeta[];
+  migrations?: Array<MigrationFile>;
+  schedules?: Array<ScheduleMeta>;
+  queues?: Array<QueueMeta>;
   revalidate?: number | Record<string, number>;
-  prerender?: string[];
+  prerender?: Array<string>;
   assetConfig?: AssetConfig;
   vars?: Record<string, string>;
   packageOptions?: PackageOptions;
   neededAssets?: Set<string> | null;
   hashedAssetsPrefix?: string;
-  headerRules?: HeaderRule[];
-  redirectRules?: RedirectRule[];
+  headerRules?: Array<HeaderRule>;
+  redirectRules?: Array<RedirectRule>;
   dialect?: 'sqlite' | 'postgresql';
-  webSockets?: WebSocketRouteDefinition[];
+  webSockets?: Array<WebSocketRouteDefinition>;
   onProgress?: ProgressCallback;
 }): Promise<FormData> {
   const formData = new FormData();
@@ -636,8 +636,8 @@ function isWorkerModule(relativePath: string): boolean {
 /**
  * Recursively collect all file paths in a directory.
  */
-function collectFiles(dir: string): string[] {
-  const files: string[] = [];
+function collectFiles(dir: string): Array<string> {
+  const files: Array<string> = [];
   const entries = readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = join(dir, entry.name);

@@ -27,7 +27,7 @@ async function waitForBodyText(page: Page, text: string) {
 }
 
 function collectUnexpectedBrowserErrors(page: Page) {
-  const errors: string[] = [];
+  const errors: Array<string> = [];
 
   page.on('console', (message) => {
     if (message.type() !== 'error' && message.type() !== 'warning') {

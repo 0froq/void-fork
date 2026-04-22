@@ -13,17 +13,17 @@ const mockLog = {
 };
 
 vi.mock('@clack/prompts', () => ({
-  intro: (...args: unknown[]) => mockIntro(...args),
-  outro: (...args: unknown[]) => mockOutro(...args),
+  intro: (...args: Array<unknown>) => mockIntro(...args),
+  outro: (...args: Array<unknown>) => mockOutro(...args),
   log: {
-    error: (...args: unknown[]) => mockLog.error(...args),
-    info: (...args: unknown[]) => mockLog.info(...args),
-    step: (...args: unknown[]) => mockLog.step(...args),
-    success: (...args: unknown[]) => mockLog.success(...args),
+    error: (...args: Array<unknown>) => mockLog.error(...args),
+    info: (...args: Array<unknown>) => mockLog.info(...args),
+    step: (...args: Array<unknown>) => mockLog.step(...args),
+    success: (...args: Array<unknown>) => mockLog.success(...args),
   },
 }));
 
-const roots: string[] = [];
+const roots: Array<string> = [];
 
 function createProjectRoot(options: {
   seedFile: { name: string; content: string };
@@ -67,15 +67,15 @@ function createProjectRoot(options: {
   return root;
 }
 
-async function readMessages(root: string): Promise<{ id: number; text: string }[]> {
+async function readMessages(root: string): Promise<Array<{ id: number; text: string }>> {
   const dbPath = getMiniflareDatabasePath(join(root, '.void'), 'local');
   const Database = (await import('better-sqlite3')).default;
   const db = new Database(dbPath, { readonly: true });
   try {
-    return db.prepare('SELECT id, text FROM messages ORDER BY id').all() as {
+    return db.prepare('SELECT id, text FROM messages ORDER BY id').all() as Array<{
       id: number;
       text: string;
-    }[];
+    }>;
   } finally {
     db.close();
   }

@@ -28,7 +28,7 @@ export function createBindingHandler(env: Record<string, unknown>): Hono {
     const body = await c.req.json<{
       binding: string;
       sql: string;
-      params?: unknown[];
+      params?: Array<unknown>;
       method?: string;
     }>();
 
@@ -50,8 +50,8 @@ export function createBindingHandler(env: Record<string, unknown>): Hono {
       }
       case 'raw': {
         const raw = await stmt.raw({ columnNames: true });
-        const columns = raw.length > 0 ? (raw[0] as string[]) : [];
-        const results = raw.slice(1) as unknown[][];
+        const columns = raw.length > 0 ? (raw[0] as Array<string>) : [];
+        const results = raw.slice(1) as Array<Array<unknown>>;
         return c.json({ columns, results, meta: {} });
       }
       case 'run': {
@@ -73,7 +73,7 @@ export function createBindingHandler(env: Record<string, unknown>): Hono {
   app.post('/d1/batch', async (c) => {
     const body = await c.req.json<{
       binding: string;
-      statements: { sql: string; params?: unknown[] }[];
+      statements: Array<{ sql: string; params?: Array<unknown> }>;
     }>();
 
     if (!body.binding || !Array.isArray(body.statements)) {
@@ -304,14 +304,14 @@ export function createBindingHandler(env: Record<string, unknown>): Hono {
     const body = await c.req.json<{
       binding: string;
       key?: string;
-      keys?: string[];
+      keys?: Array<string>;
     }>();
 
     if (!body.binding) {
       return c.json({ error: 'binding required' }, 400);
     }
 
-    const keys: string[] = body.keys ? body.keys : body.key ? [body.key] : [];
+    const keys: Array<string> = body.keys ? body.keys : body.key ? [body.key] : [];
     if (keys.length === 0) {
       return c.json({ error: 'key or keys required' }, 400);
     }

@@ -32,7 +32,7 @@ export async function runLogsCommand(
 
   const client = new PlatformClient(token, { root });
 
-  let entries: LogEntry[];
+  let entries: Array<LogEntry>;
   try {
     entries = await client.getLogs(linked.projectId, range, 200, deployment || undefined);
   } catch (err) {

@@ -16,7 +16,7 @@ import { writeDrizzleConfig } from '../../src/drizzle/config';
 
 const packageRoot = fileURLToPath(new URL('../..', import.meta.url));
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
-const tempDirs: string[] = [];
+const tempDirs: Array<string> = [];
 
 describe('hasDeploySchemaDrift', () => {
   afterEach(() => {

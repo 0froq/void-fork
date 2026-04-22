@@ -107,7 +107,7 @@ describe('assertJournalCoherence', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  function writeJournal(tags: string[]): void {
+  function writeJournal(tags: Array<string>): void {
     const entries = tags.map((tag, idx) => ({
       idx,
       version: '7',

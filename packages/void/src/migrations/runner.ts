@@ -4,9 +4,9 @@ import { join, dirname } from 'node:path';
 import { collectMigrations } from './collect';
 
 interface SqliteStatement<T = unknown> {
-  get(...params: unknown[]): T | undefined;
-  all(...params: unknown[]): T[];
-  run(...params: unknown[]): unknown;
+  get(...params: Array<unknown>): T | undefined;
+  all(...params: Array<unknown>): Array<T>;
+  run(...params: Array<unknown>): unknown;
 }
 
 interface SqliteTransaction<T = unknown> {
@@ -54,7 +54,7 @@ export async function openSqliteDatabase(
  * Read the list of applied migrations from the local SQLite database.
  * Returns [] if the DB file or tracking table doesn't exist.
  */
-export async function getAppliedMigrations(dbPath: string): Promise<AppliedMigration[]> {
+export async function getAppliedMigrations(dbPath: string): Promise<Array<AppliedMigration>> {
   if (!existsSync(dbPath)) {
     return [];
   }
@@ -81,7 +81,7 @@ export async function getAppliedMigrations(dbPath: string): Promise<AppliedMigra
 
     return db
       .prepare(`SELECT name, applied_at FROM ${tableName} ORDER BY name`)
-      .all() as AppliedMigration[];
+      .all() as Array<AppliedMigration>;
   } finally {
     db.close();
   }
@@ -161,7 +161,7 @@ function upgradeTrackingTable(db: SqliteDatabase): void {
  * SQLite write lock — the loser sees the winner's insert and skips, instead
  * of re-running the DDL.
  */
-export async function runMigrations(migrationsDir: string, dbPath: string): Promise<string[]> {
+export async function runMigrations(migrationsDir: string, dbPath: string): Promise<Array<string>> {
   const allMigrations = collectMigrations(migrationsDir);
   if (allMigrations.length === 0) {
     return [];
@@ -183,7 +183,7 @@ export async function runMigrations(migrationsDir: string, dbPath: string): Prom
     `);
 
     const appliedSet = new Set(
-      (db.prepare('SELECT name FROM _void_migrations').all() as { name: string }[]).map(
+      (db.prepare('SELECT name FROM _void_migrations').all() as Array<{ name: string }>).map(
         (r) => r.name,
       ),
     );
@@ -195,7 +195,7 @@ export async function runMigrations(migrationsDir: string, dbPath: string): Prom
 
     const insertStmt = db.prepare('INSERT INTO _void_migrations (name) VALUES (?)');
     const checkStmt = db.prepare('SELECT 1 FROM _void_migrations WHERE name = ?');
-    const appliedNames: string[] = [];
+    const appliedNames: Array<string> = [];
 
     for (const migration of pending) {
       const tx = db.transaction(() => {

@@ -37,7 +37,7 @@ export function gitHubAlertsPlugin(md: MarkdownExit, options?: GitHubAlertsOptio
   };
 
   const rule: RuleCore = (state) => {
-    const tokens = state.tokens as AlertToken[];
+    const tokens = state.tokens as Array<AlertToken>;
     for (let i = 0; i < tokens.length; i++) {
       if (tokens[i].type === 'blockquote_open') {
         const startIndex = i;
@@ -77,7 +77,7 @@ export function gitHubAlertsPlugin(md: MarkdownExit, options?: GitHubAlertsOptio
 
   md.core.ruler.after('block', 'github-alerts', rule);
 
-  md.renderer.rules.github_alert_open = function (tokens: AlertToken[], idx: number) {
+  md.renderer.rules.github_alert_open = function (tokens: Array<AlertToken>, idx: number) {
     const { title, type } = tokens[idx].meta!;
     return `<div class="${type} custom-block github-alert"><p class="custom-block-title">${title}</p>\n`;
   };

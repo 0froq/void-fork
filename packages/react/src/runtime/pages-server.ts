@@ -15,7 +15,7 @@ export interface ReactPagesServerConfig {
   pageObj: PageObject;
   assetTags: { css: string; preloads: string; body: string };
   components: Record<string, () => Promise<ComponentModule>>;
-  layoutTree: Record<string, string[]>;
+  layoutTree: Record<string, Array<string>>;
   preambleScript?: string;
 }
 
@@ -50,7 +50,7 @@ function textStream(text: string): ReadableStream<Uint8Array> {
   });
 }
 
-function concatStreams(streams: ReadableStream<Uint8Array>[]): ReadableStream<Uint8Array> {
+function concatStreams(streams: Array<ReadableStream<Uint8Array>>): ReadableStream<Uint8Array> {
   return new ReadableStream({
     async start(controller) {
       try {

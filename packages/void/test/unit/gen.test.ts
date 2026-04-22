@@ -10,7 +10,7 @@ vi.mock('@clack/prompts', () => ({
   intro: vi.fn(),
   outro: vi.fn(),
   log: { success: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn(), step: vi.fn() },
-  select: (...args: unknown[]) => mockSelect(...args),
+  select: (...args: Array<unknown>) => mockSelect(...args),
   isCancel: (v: unknown) => v === Symbol.for('cancel'),
   cancel: vi.fn(),
 }));
@@ -25,7 +25,7 @@ const spawnMockState = vi.hoisted(() => ({
   handler: null as
     | ((
         command: string,
-        args: string[],
+        args: Array<string>,
         options: { cwd?: string },
       ) => {
         status: number;
@@ -34,14 +34,14 @@ const spawnMockState = vi.hoisted(() => ({
         error?: Error;
       })
     | null,
-  calls: [] as Array<{ command: string; args: string[]; options: { cwd?: string } }>,
+  calls: [] as Array<{ command: string; args: Array<string>; options: { cwd?: string } }>,
 }));
 
 vi.mock('node:child_process', async () => {
   const nodeFs = await vi.importActual<typeof import('node:fs')>('node:fs');
   const nodePath = await vi.importActual<typeof import('node:path')>('node:path');
   return {
-    spawnSync: (command: string, args: string[], options: { cwd?: string }) => {
+    spawnSync: (command: string, args: Array<string>, options: { cwd?: string }) => {
       spawnMockState.calls.push({ command, args, options });
 
       // Per-test handler wins.

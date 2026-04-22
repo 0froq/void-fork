@@ -14,7 +14,7 @@ import { envSchemaPlugin } from '../../src/plugin-env-schema';
  * though `env.ts` exists.
  */
 
-const roots: string[] = [];
+const roots: Array<string> = [];
 
 function createTempRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'void-plugin-env-'));

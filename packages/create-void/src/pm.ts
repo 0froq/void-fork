@@ -18,11 +18,11 @@ export function detectPM(): PM {
   return 'npm';
 }
 
-export function pmInstall(pm: PM): string[] {
+export function pmInstall(pm: PM): Array<string> {
   return [pm, 'install'];
 }
 
-export function pmExec(pm: PM): string[] {
+export function pmExec(pm: PM): Array<string> {
   switch (pm) {
     case 'npm':
       return ['npx'];
@@ -35,7 +35,7 @@ export function pmExec(pm: PM): string[] {
   }
 }
 
-export function run(argv: string[], cwd?: string): Promise<void> {
+export function run(argv: Array<string>, cwd?: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const [cmd, ...args] = argv;
     const child = spawn(cmd, args, { stdio: 'inherit', cwd });

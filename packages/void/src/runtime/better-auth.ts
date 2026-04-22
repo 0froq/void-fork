@@ -41,7 +41,7 @@ async function runSqliteAuthMigrations(
     {
       async all<T extends Record<string, unknown>>(sql: string) {
         const result = await env.DB!.prepare(sql).all();
-        return (result.results ?? []) as T[];
+        return (result.results ?? []) as Array<T>;
       },
       async run(sql: string) {
         await env.DB!.prepare(sql).run();

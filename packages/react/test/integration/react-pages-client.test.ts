@@ -63,7 +63,7 @@ function defineClientTests(getBase: () => string) {
 
   it('hydrates without React errors', async () => {
     const page = await newPage();
-    const errors: string[] = [];
+    const errors: Array<string> = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error' || msg.text().includes('Hydration')) {
         errors.push(msg.text());
@@ -141,7 +141,7 @@ function defineClientTests(getBase: () => string) {
 
   it('router.visit works from an initial layout effect', async () => {
     const page = await newPage();
-    const errors: string[] = [];
+    const errors: Array<string> = [];
     page.on('pageerror', (error) => {
       errors.push(error.message);
     });
@@ -198,7 +198,9 @@ function defineClientTests(getBase: () => string) {
         document.querySelector('h1')?.textContent?.includes('Users'),
       );
 
-      const stamp = await page.evaluate(() => (document.querySelector('nav') as NavElement | null)?.__stamp);
+      const stamp = await page.evaluate(
+        () => (document.querySelector('nav') as NavElement | null)?.__stamp,
+      );
       expect(stamp).toBe(1);
 
       const navText = await page.textContent('nav');
@@ -272,7 +274,7 @@ function defineClientTests(getBase: () => string) {
 
   it('form call-site action errors stay in form state', async () => {
     const page = await newPage();
-    const errors: string[] = [];
+    const errors: Array<string> = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error' && !msg.text().includes('Failed to load resource')) {
         errors.push(msg.text());
@@ -568,7 +570,7 @@ function defineClientTests(getBase: () => string) {
 
   it('plain hash anchor navigation does not fetch or replace managed head links', async () => {
     const page = await newPage();
-    const requests: string[] = [];
+    const requests: Array<string> = [];
 
     try {
       await page.goto(BASE + '/link-behavior');

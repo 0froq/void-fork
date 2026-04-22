@@ -6,15 +6,15 @@ import { collectMigrations } from './collect';
 export interface PgClient {
   query<T extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
-    params?: unknown[],
-  ): Promise<{ rows: T[] }>;
+    params?: Array<unknown>,
+  ): Promise<{ rows: Array<T> }>;
 }
 
 /**
  * Apply unapplied SQL migrations via a connected PostgreSQL client.
  * Each migration runs in its own transaction (BEGIN/COMMIT).
  */
-export async function getPgAppliedMigrations(url: string): Promise<string[]> {
+export async function getPgAppliedMigrations(url: string): Promise<Array<string>> {
   const { Client } = await import('pg');
   const client = new Client({ connectionString: url });
   await client.connect();
@@ -33,8 +33,8 @@ export async function getPgAppliedMigrations(url: string): Promise<string[]> {
 
 export async function applyPgMigrations(
   client: PgClient,
-  migrations: { name: string; sql: string }[],
-): Promise<string[]> {
+  migrations: Array<{ name: string; sql: string }>,
+): Promise<Array<string>> {
   if (migrations.length === 0) {
     return [];
   }
@@ -73,7 +73,7 @@ export async function applyPgMigrations(
  * Apply unapplied SQL migrations to a PostgreSQL database.
  * Each migration runs in its own transaction (BEGIN/COMMIT).
  */
-export async function runPgMigrations(migrationsDir: string, url: string): Promise<string[]> {
+export async function runPgMigrations(migrationsDir: string, url: string): Promise<Array<string>> {
   const allMigrations = collectMigrations(migrationsDir);
   if (allMigrations.length === 0) {
     return [];

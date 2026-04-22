@@ -2,7 +2,7 @@ export interface PageDefinition {
   /** URL pattern, e.g. "/users/:id" */
   pattern: string;
   /** Route params, e.g. ["id"] */
-  params: string[];
+  params: Array<string>;
   /** Whether this is a catch-all route */
   catchAll: boolean;
   /** Component file relative path, e.g. "users/[id].vue" */
@@ -10,7 +10,7 @@ export interface PageDefinition {
   /** Server handler file relative path, e.g. "users/[id].server.ts" */
   serverPath: string | null;
   /** HTTP methods exported by server handler */
-  methods: string[];
+  methods: Array<string>;
   /** Component ID used in page object, e.g. "users/[id]" */
   componentId: string;
   /** Edge caching revalidate TTL in seconds, from .server.ts export */
@@ -48,7 +48,7 @@ export interface NamedLayoutDefinition {
 }
 
 export interface PageScanResult {
-  pages: PageDefinition[];
-  layouts: LayoutDefinition[];
-  namedLayouts: NamedLayoutDefinition[];
+  pages: Array<PageDefinition>;
+  layouts: Array<LayoutDefinition>;
+  namedLayouts: Array<NamedLayoutDefinition>;
 }

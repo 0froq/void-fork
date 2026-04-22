@@ -3,8 +3,8 @@ import { join } from 'node:path';
 import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { handleRequest, type McpContext } from '../../src/cli/mcp';
 
-function findMdFiles(dir: string, prefix = ''): string[] {
-  const results: string[] = [];
+function findMdFiles(dir: string, prefix = ''): Array<string> {
+  const results: Array<string> = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.name === 'node_modules' || entry.name.startsWith('.')) {
       continue;
@@ -86,7 +86,7 @@ describe('mcp server handler', () => {
       id: 3,
       method: 'tools/list',
     }) as Record<string, unknown>;
-    const result = res.result as { tools: { name: string }[] };
+    const result = res.result as { tools: Array<{ name: string }> };
     expect(result.tools).toHaveLength(4);
     const names = result.tools.map((t) => t.name);
     expect(names).toContain('list_pages');
@@ -101,7 +101,7 @@ describe('mcp server handler', () => {
       method: 'tools/call',
       params: { name: 'list_pages', arguments: {} },
     }) as Record<string, unknown>;
-    const result = res.result as { content: { type: string; text: string }[] };
+    const result = res.result as { content: Array<{ type: string; text: string }> };
     const list = JSON.parse(result.content[0].text);
     expect(list.length).toBeGreaterThan(0);
     expect(list[0]).toHaveProperty('slug');
@@ -116,7 +116,7 @@ describe('mcp server handler', () => {
       method: 'tools/call',
       params: { name: 'get_page', arguments: { slug } },
     }) as Record<string, unknown>;
-    const result = res.result as { content: { type: string; text: string }[] };
+    const result = res.result as { content: Array<{ type: string; text: string }> };
     expect(result.content[0].type).toBe('text');
     expect(result.content[0].text.length).toBeGreaterThan(0);
   });
@@ -128,7 +128,7 @@ describe('mcp server handler', () => {
       method: 'tools/call',
       params: { name: 'get_page', arguments: { slug: 'nonexistent-page' } },
     }) as Record<string, unknown>;
-    const result = res.result as { content: { text: string }[]; isError: boolean };
+    const result = res.result as { content: Array<{ text: string }>; isError: boolean };
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('nonexistent-page');
   });
@@ -140,7 +140,7 @@ describe('mcp server handler', () => {
       method: 'tools/call',
       params: { name: 'search_docs', arguments: { query: 'routing' } },
     }) as Record<string, unknown>;
-    const result = res.result as { content: { text: string }[] };
+    const result = res.result as { content: Array<{ text: string }> };
     const results = JSON.parse(result.content[0].text);
     expect(results.length).toBeGreaterThan(0);
     expect(results[0]).toHaveProperty('slug');
@@ -212,7 +212,7 @@ describe('query tool', () => {
       id: 1,
       method: 'tools/list',
     }) as Record<string, unknown>;
-    const result = res.result as { tools: { name: string }[] };
+    const result = res.result as { tools: Array<{ name: string }> };
     const names = result.tools.map((t) => t.name);
     expect(names).toContain('query');
   });
@@ -242,7 +242,7 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: { text: string }[] };
+    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
     const data = JSON.parse(result.content[0].text);
     expect(data).toHaveLength(1);
     expect(data[0].slug).toBe('my-app');
@@ -299,7 +299,7 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: { text: string }[] };
+    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
     const data = JSON.parse(result.content[0].text);
     expect(data.deployments).toHaveLength(1);
     expect(data.deployments[0].status).toBe('active');
@@ -317,7 +317,7 @@ describe('query tool', () => {
     });
 
     const result = (res as Record<string, unknown>).result as {
-      content: { text: string }[];
+      content: Array<{ text: string }>;
       isError: boolean;
     };
     expect(result.isError).toBe(true);
@@ -337,7 +337,7 @@ describe('query tool', () => {
     });
 
     const result = (res as Record<string, unknown>).result as {
-      content: { text: string }[];
+      content: Array<{ text: string }>;
       isError: boolean;
     };
     expect(result.isError).toBe(true);
@@ -360,7 +360,7 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: { text: string }[] };
+    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
     const data = JSON.parse(result.content[0].text);
     expect(data.ok).toBe(true);
     expect(data.deploymentId).toBe('d2');
@@ -443,7 +443,7 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: { text: string }[] };
+    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
     const data = JSON.parse(result.content[0].text);
     expect(data.hostname).toBe('example.com');
     expect(data.cname_target).toBe('p1.void.app');
@@ -465,7 +465,7 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: { text: string }[] };
+    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
     const data = JSON.parse(result.content[0].text);
     expect(data.ok).toBe(true);
     expect(data.name).toBe('API_KEY');
@@ -489,7 +489,7 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: { text: string }[] };
+    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
     const data = JSON.parse(result.content[0].text);
     expect(data.applied).toHaveLength(1);
     expect(data.applied[0].name).toBe('001_init');
@@ -506,7 +506,7 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: { text: string }[] };
+    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
     const data = JSON.parse(result.content[0].text);
     expect(data.token).toBeUndefined();
     expect(data.baseUrl).toBeUndefined();

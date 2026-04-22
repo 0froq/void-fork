@@ -123,10 +123,9 @@ function toPreviewPackageName(publicPackageName: string): string {
 export function detectScaffoldFrameworkFromDependencies(
   deps: Record<string, unknown>,
 ): ScaffoldFramework | undefined {
-  for (const [framework, config] of Object.entries(SCAFFOLD_FRAMEWORKS) as [
-    ScaffoldFramework,
-    ScaffoldFrameworkConfig,
-  ][]) {
+  for (const [framework, config] of Object.entries(SCAFFOLD_FRAMEWORKS) as Array<
+    [ScaffoldFramework, ScaffoldFrameworkConfig]
+  >) {
     if (config.adapterPackage in deps || toPreviewPackageName(config.adapterPackage) in deps) {
       return framework;
     }

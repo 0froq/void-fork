@@ -12,7 +12,7 @@ interface MarkdownToken {
 }
 
 type ImageRenderRule = (
-  tokens: MarkdownToken[],
+  tokens: Array<MarkdownToken>,
   idx: number,
   mdOptions: unknown,
   env: unknown,
@@ -26,7 +26,7 @@ type ImageRenderRule = (
 export function imagePlugin(md: MarkdownExit, options?: ImageOptions): void {
   const imageRule = md.renderer.rules.image as ImageRenderRule;
   md.renderer.rules.image = (
-    tokens: MarkdownToken[],
+    tokens: Array<MarkdownToken>,
     idx: number,
     mdOptions: unknown,
     env: unknown,

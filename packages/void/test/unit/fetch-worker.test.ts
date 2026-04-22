@@ -70,11 +70,14 @@ describe('worker fetch runtime behavior', () => {
 
   const requestContext = new AsyncLocalStorage<{
     request: Request;
-    executionCtx: { waitUntil: (...args: unknown[]) => void; passThroughOnException: () => void };
+    executionCtx: {
+      waitUntil: (...args: Array<unknown>) => void;
+      passThroughOnException: () => void;
+    };
   }>();
 
   // Mock app.fetch — records calls and returns configurable responses
-  let mockAppFetch: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<Response>>>;
+  let mockAppFetch: ReturnType<typeof vi.fn<(...args: Array<unknown>) => Promise<Response>>>;
   let mockEnv: Record<string, unknown>;
 
   // Replicate the generated fetch function

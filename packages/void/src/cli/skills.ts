@@ -16,12 +16,12 @@ interface SkillInfo {
   description: string;
 }
 
-function parseSkills(skillsDir: string): SkillInfo[] {
+function parseSkills(skillsDir: string): Array<SkillInfo> {
   if (!existsSync(skillsDir)) {
     return [];
   }
   const entries = readdirSync(skillsDir, { withFileTypes: true });
-  const skills: SkillInfo[] = [];
+  const skills: Array<SkillInfo> = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) {
       continue;
@@ -49,7 +49,7 @@ function parseSkills(skillsDir: string): SkillInfo[] {
 function linkSkills(
   root: string,
   skillsDir: string,
-  skills: SkillInfo[],
+  skills: Array<SkillInfo>,
   agentSkillsDir: string,
 ): number {
   const targetDir = join(root, agentSkillsDir);
@@ -107,7 +107,7 @@ export function linkSkillsForAgents(root: string): number {
   return totalLinked;
 }
 
-export function linkSkillsForSpecificAgents(root: string, agents: AgentConfig[]): number {
+export function linkSkillsForSpecificAgents(root: string, agents: Array<AgentConfig>): number {
   const packageDir = getPackageDir();
   const skillsDir = join(packageDir, 'skills');
   const skills = parseSkills(skillsDir);

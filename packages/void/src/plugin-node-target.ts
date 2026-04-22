@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import type { Plugin } from 'vite';
 
 /** Imports that require CF bindings and are not available in Node.js mode. */
-export const CF_ONLY_IMPORTS: string[] = [
+export const CF_ONLY_IMPORTS: Array<string> = [
   'void/db',
   'void/kv',
   'void/auth',
@@ -108,7 +108,7 @@ function honoMiddleware(
  * 4. Build — dual-environment build (client + SSR) for pages apps,
  *    single SSR build for API-only apps
  */
-export function nodeTargetPlugin(target: NodeTarget): Plugin[] {
+export function nodeTargetPlugin(target: NodeTarget): Array<Plugin> {
   const guardPlugin: Plugin = {
     name: 'void:node-target',
     enforce: 'pre',

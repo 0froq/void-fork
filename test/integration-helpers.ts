@@ -112,7 +112,7 @@ function killTree(pid: number, signal: NodeJS.Signals): void {
   // Find direct children before killing the parent, because once the
   // parent dies its children are reparented to init and pgrep -P won't
   // find them anymore.
-  let childPids: number[] = [];
+  let childPids: Array<number> = [];
   try {
     childPids = execSync(`pgrep -P ${pid}`, { encoding: 'utf8' })
       .trim()

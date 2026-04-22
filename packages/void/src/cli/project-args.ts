@@ -1,6 +1,6 @@
 import type { SubcommandDef } from './subcommand-prompt';
 
-export const projectSubcommands: SubcommandDef[] = [
+export const projectSubcommands: Array<SubcommandDef> = [
   { name: 'status', arg: '[name]', description: 'Show deployments (omit name for linked project)' },
   { name: 'link', arg: '[name]', description: 'Link directory to a project' },
   { name: 'list', description: 'List your projects' },
@@ -25,7 +25,7 @@ export type ProjectArgs =
   | { subcommand: 'delete'; name: string; force: boolean }
   | { subcommand: 'purge-cache'; projectSlug: string };
 
-export function parseProjectArgs(args: string[]): ProjectArgs {
+export function parseProjectArgs(args: Array<string>): ProjectArgs {
   const [subcommand, ...rest] = args;
 
   if (subcommand === 'status') {

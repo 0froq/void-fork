@@ -151,7 +151,7 @@ describe('playground/static-pages build (output: static)', () => {
 
   it('wrangler.json has correct asset config', () => {
     const wranglerConfig = JSON.parse(readFileSync(join(DIST, 'ssr/wrangler.json'), 'utf-8')) as {
-      assets?: { run_worker_first?: boolean | string[]; directory?: string };
+      assets?: { run_worker_first?: boolean | Array<string>; directory?: string };
     };
     expect(wranglerConfig.assets?.directory).toBe('../client');
     expect(wranglerConfig.assets?.run_worker_first).toBeDefined();

@@ -2,7 +2,7 @@ import type { MigrationEntry, MigrationResponse, MigrationResult } from './migra
 
 export function createMigrationHandler(
   env: Record<string, unknown>,
-  migrations: MigrationEntry[],
+  migrations: Array<MigrationEntry>,
   _dialect: 'sqlite' | 'postgresql',
   runAuthMigrations?: () => Promise<void>,
 ) {
@@ -38,7 +38,7 @@ export function createMigrationHandler(
 
 async function runPgMigrations(
   env: Record<string, unknown>,
-  migrations: MigrationEntry[],
+  migrations: Array<MigrationEntry>,
 ): Promise<MigrationResponse> {
   const hyperdrive = env.HYPERDRIVE as { connectionString?: string } | undefined;
   if (!hyperdrive?.connectionString) {
@@ -60,7 +60,7 @@ async function runPgMigrations(
     const { rows } = await client.query<{ name: string }>('SELECT name FROM _void_migrations');
     const applied = new Set(rows.map((r) => r.name));
 
-    const migrationResults: MigrationResult[] = [];
+    const migrationResults: Array<MigrationResult> = [];
 
     for (const m of migrations) {
       if (applied.has(m.name)) {

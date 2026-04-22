@@ -14,14 +14,14 @@ export type DatabaseDialect = 'sqlite' | 'postgresql';
 /** Curated wrangler fields that can be set via void.json. */
 export interface WranglerConfig {
   compatibility_date?: string;
-  compatibility_flags?: string[];
+  compatibility_flags?: Array<string>;
 }
 
 /** Routing configuration — headers, redirects, revalidation, prerendering. */
 export interface RoutingConfig {
   revalidate?: number | Record<string, number>;
-  prerender?: string[];
-  headers?: Record<string, string[]>;
+  prerender?: Array<string>;
+  headers?: Record<string, Array<string>>;
   redirects?: Record<string, RedirectDestination>;
 }
 
@@ -33,7 +33,7 @@ export interface InferenceConfig {
     storage?: boolean | string;
     ai?: boolean;
   };
-  scanDirs?: string[];
+  scanDirs?: Array<string>;
   build?: string;
   outputDir?: string;
   appType?: 'spa' | 'static' | 'void' | 'framework';
@@ -41,7 +41,7 @@ export interface InferenceConfig {
 
 /** Auth configuration — high-level provider selection for Better Auth defaults. */
 export interface AuthConfig {
-  providers?: VoidAuthProvider[];
+  providers?: Array<VoidAuthProvider>;
 }
 
 /** Shape of the `void.json` config file. All fields optional. */
@@ -260,7 +260,7 @@ export function readConfig(root: string): VoidConfig {
       ) {
         throw new Error(`"routing.prerender" in ${CONFIG_FILE} must be an array of strings`);
       }
-      for (const p of routing.prerender as string[]) {
+      for (const p of routing.prerender as Array<string>) {
         if (!p.startsWith('/')) {
           throw new Error(`"routing.prerender" path "${p}" in ${CONFIG_FILE} must start with "/"`);
         }
@@ -377,7 +377,7 @@ export function readConfig(root: string): VoidConfig {
       if (!Array.isArray(inf.scanDirs) || !inf.scanDirs.every((d) => typeof d === 'string')) {
         throw new Error(`"inference.scanDirs" in ${CONFIG_FILE} must be an array of strings`);
       }
-      for (const d of inf.scanDirs as string[]) {
+      for (const d of inf.scanDirs as Array<string>) {
         if (d.startsWith('/') || d.startsWith('..')) {
           throw new Error(
             `"inference.scanDirs" path "${d}" in ${CONFIG_FILE} must be a relative directory`,
@@ -488,16 +488,16 @@ export function getDatabaseDialect(config: VoidConfig): DatabaseDialect {
  * "Name: value" strings. Returns undefined if the input is empty or undefined.
  */
 export function convertHeadersConfig(
-  headers: Record<string, string[]> | undefined,
-): HeaderRule[] | undefined {
+  headers: Record<string, Array<string>> | undefined,
+): Array<HeaderRule> | undefined {
   if (!headers) {
     return undefined;
   }
 
-  const rules: HeaderRule[] = [];
+  const rules: Array<HeaderRule> = [];
 
   for (const [pattern, values] of Object.entries(headers)) {
-    const parsed: [string, string][] = [];
+    const parsed: Array<[string, string]> = [];
     for (const entry of values) {
       const colonIdx = entry.indexOf(':');
       if (colonIdx === -1) {
@@ -526,12 +526,12 @@ export function convertHeadersConfig(
  */
 export function convertRedirectsConfig(
   redirects: Record<string, RedirectDestination> | undefined,
-): RedirectRule[] | undefined {
+): Array<RedirectRule> | undefined {
   if (!redirects) {
     return undefined;
   }
 
-  const rules: RedirectRule[] = [];
+  const rules: Array<RedirectRule> = [];
   for (const [source, dest] of Object.entries(redirects)) {
     if (typeof dest === 'string') {
       rules.push({ source, destination: dest, status: 302 });

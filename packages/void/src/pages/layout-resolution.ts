@@ -23,10 +23,10 @@ function toLayoutId(layout: LayoutDefinition | NamedLayoutDefinition): string {
 /** Resolve the layout chain for a component (innermost last) */
 export function resolveLayoutChain(
   componentId: string,
-  layouts: LayoutDefinition[],
-): LayoutDefinition[] {
+  layouts: Array<LayoutDefinition>,
+): Array<LayoutDefinition> {
   const parts = componentId.split('/');
-  const chain: LayoutDefinition[] = [];
+  const chain: Array<LayoutDefinition> = [];
 
   // Check root layout
   const root = layouts.find((l) => l.directory === '');
@@ -51,11 +51,11 @@ export function resolveLayoutChain(
 export function resolveNamedLayout(
   name: string,
   componentId: string,
-  namedLayouts: NamedLayoutDefinition[],
+  namedLayouts: Array<NamedLayoutDefinition>,
 ): NamedLayoutDefinition | null {
   const parts = componentId.split('/');
   // Build dirs from closest to root
-  const dirs: string[] = [];
+  const dirs: Array<string> = [];
   let dir = '';
   for (let i = 0; i < parts.length - 1; i++) {
     dir = dir ? `${dir}/${parts[i]}` : parts[i];
@@ -74,9 +74,9 @@ export function resolveNamedLayout(
 
 export function resolveEffectiveLayoutEntries(
   page: { componentId: string; layout?: string | false },
-  layouts: LayoutDefinition[],
-  namedLayouts: NamedLayoutDefinition[],
-): ResolvedLayoutEntry[] {
+  layouts: Array<LayoutDefinition>,
+  namedLayouts: Array<NamedLayoutDefinition>,
+): Array<ResolvedLayoutEntry> {
   if (page.layout === false) {
     return [];
   }
@@ -122,9 +122,9 @@ export function resolveEffectiveLayoutEntries(
 /** Resolve effective layout chain accounting for named layout selection */
 export function resolveEffectiveLayoutChain(
   page: { componentId: string; layout?: string | false },
-  layouts: LayoutDefinition[],
-  namedLayouts: NamedLayoutDefinition[],
-): (LayoutDefinition | NamedLayoutDefinition)[] {
+  layouts: Array<LayoutDefinition>,
+  namedLayouts: Array<NamedLayoutDefinition>,
+): Array<LayoutDefinition | NamedLayoutDefinition> {
   return resolveEffectiveLayoutEntries(page, layouts, namedLayouts).map(
     (layout) => layout.definition,
   );
@@ -132,8 +132,8 @@ export function resolveEffectiveLayoutChain(
 
 export function resolveLayoutIds(
   page: { componentId: string; layout?: string | false },
-  layouts: LayoutDefinition[],
-  namedLayouts: NamedLayoutDefinition[],
-): string[] {
+  layouts: Array<LayoutDefinition>,
+  namedLayouts: Array<NamedLayoutDefinition>,
+): Array<string> {
   return resolveEffectiveLayoutEntries(page, layouts, namedLayouts).map((layout) => layout.id);
 }

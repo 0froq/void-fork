@@ -24,8 +24,8 @@ export type HandlerInput<V extends ValidatorSlots> = {
 };
 
 function flattenIssues(
-  issues: readonly StandardSchemaV1.Issue[],
-): { message: string; path?: string }[] {
+  issues: ReadonlyArray<StandardSchemaV1.Issue>,
+): Array<{ message: string; path?: string }> {
   return Array.from(issues, (issue) => ({
     message: issue.message,
     path: issue.path?.map((p) => (typeof p === 'object' ? p.key : p)).join('.'),
@@ -36,7 +36,7 @@ async function validateSlot(
   schema: StandardSchemaV1,
   value: unknown,
 ): Promise<
-  { ok: true; value: unknown } | { ok: false; issues: readonly StandardSchemaV1.Issue[] }
+  { ok: true; value: unknown } | { ok: false; issues: ReadonlyArray<StandardSchemaV1.Issue> }
 > {
   const result = await schema['~standard'].validate(value);
   if (result.issues) {
@@ -50,7 +50,10 @@ export async function runValidation<V extends ValidatorSlots>(
   c: CloudContext,
 ): Promise<ValidationSuccess<V> | ValidationFailure> {
   const input: Record<string, unknown> = {};
-  const allIssues: { slot: string; issues: readonly { message: string; path?: string }[] }[] = [];
+  const allIssues: Array<{
+    slot: string;
+    issues: ReadonlyArray<{ message: string; path?: string }>;
+  }> = [];
 
   if (validators.params) {
     const raw = c.req.param() as Record<string, string>;

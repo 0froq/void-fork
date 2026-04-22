@@ -139,7 +139,7 @@ export async function _validateEnvOnce(envValues: unknown): Promise<void> {
     bootValidationState = { ok: true };
     return;
   }
-  const lines: string[] = ['Env validation failed at worker boot:'];
+  const lines: Array<string> = ['Env validation failed at worker boot:'];
   for (const key of report.missing) {
     lines.push(`  • ${key} is required but missing`);
   }
@@ -152,11 +152,11 @@ export async function _validateEnvOnce(envValues: unknown): Promise<void> {
   throw error;
 }
 
-function validatedCacheValues(): Map<string, unknown>[] {
+function validatedCacheValues(): Array<Map<string, unknown>> {
   // WeakMap doesn't expose values; we maintain a parallel list for clears.
   return cacheList;
 }
-const cacheList: Map<string, unknown>[] = [];
+const cacheList: Array<Map<string, unknown>> = [];
 
 /** Internal: framework-only access to the registered schema (for plugin/CLI). */
 export function _getRegisteredSchema(): AnySchema | null {
@@ -319,8 +319,8 @@ export const env = new Proxy({} as Record<string, unknown>, {
 /** Aggregate report from validating an entire env object against the schema. */
 export interface EnvValidationReport {
   valid: boolean;
-  missing: string[];
-  invalid: { key: string; messages: string[] }[];
+  missing: Array<string>;
+  invalid: Array<{ key: string; messages: Array<string> }>;
   /**
    * Resolved values for keys that validated successfully. Used to seed the
    * per-env cache after async pre-validation so sync `env.X` reads hit the

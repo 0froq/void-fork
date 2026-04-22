@@ -41,7 +41,7 @@ type MdPluginWithApi = Plugin & {
 };
 type ScannableEntry = { filePath: string; island: boolean | undefined };
 
-export function islandsPlugin(pagesDir: string): Plugin[] {
+export function islandsPlugin(pagesDir: string): Array<Plugin> {
   let pageScan: PageScanResult | null = null;
   let isDev = false;
   const root = dirname(pagesDir);
@@ -51,7 +51,7 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
   const wrapperMeta = new Map<string, WrapperMeta>();
   let wrapperId = 0;
   let viteRoot = '';
-  const islandCssMap = new Map<string, string[]>();
+  const islandCssMap = new Map<string, Array<string>>();
   let resolvedConfig: ResolvedConfig | null = null;
 
   /** Rebuild islandCssMap from current file contents (re-runs fileHasCssImports). */
@@ -100,7 +100,7 @@ export function islandsPlugin(pagesDir: string): Plugin[] {
           const importAttrRe =
             /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
           // Scan both pages AND layouts for island imports
-          const filesToScan: ScannableEntry[] = [
+          const filesToScan: Array<ScannableEntry> = [
             ...pageScan.pages.map((p) => ({ filePath: p.componentPath, island: p.island })),
             ...pageScan.layouts.map((l) => ({ filePath: l.filePath, island: l.island })),
             ...pageScan.namedLayouts.map((nl) => ({
@@ -331,7 +331,7 @@ function generateIslandRenderer(
   scan: PageScanResult,
   pagesDir: string,
   isDev: boolean,
-  islandCssMap: Map<string, string[]>,
+  islandCssMap: Map<string, Array<string>>,
   viteRoot: string,
   mdScriptIds: Set<string>,
   pagesNeedingClientJS: Set<string>,
@@ -339,7 +339,7 @@ function generateIslandRenderer(
   // Build CSS link map for dev FOUC prevention
   let cssMapCode = '';
   if (isDev && islandCssMap.size > 0) {
-    const cssMapObj: Record<string, string[]> = {};
+    const cssMapObj: Record<string, Array<string>> = {};
     for (const [compId, paths] of islandCssMap) {
       cssMapObj[compId] = paths.map((p) => '/' + normalizePath(relative(viteRoot, p)) + '.css');
     }
@@ -423,7 +423,7 @@ function generateIslandClientEntry(
     uniqueIslands.set(entry.islandId, entry.componentPath);
   }
 
-  const lines: string[] = [];
+  const lines: Array<string> = [];
   lines.push('import { initIslands } from "void/pages-client";');
 
   // In dev, page/layout CSS is served via render-blocking <link> tags

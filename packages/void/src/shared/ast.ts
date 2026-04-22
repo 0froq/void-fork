@@ -6,7 +6,7 @@ export type AstNode = {
 };
 
 export type AstProgram = AstNode & {
-  body?: AstNode[];
+  body?: Array<AstNode>;
 };
 
 export type AstIdentifier = AstNode & {
@@ -40,7 +40,7 @@ export type AstImportNamespaceSpecifier = AstNode & {
 export type AstImportDeclaration = AstNode & {
   type: 'ImportDeclaration';
   source: AstLiteral;
-  specifiers?: AstNode[];
+  specifiers?: Array<AstNode>;
 };
 
 export type AstVariableDeclarator = AstNode & {
@@ -50,7 +50,7 @@ export type AstVariableDeclarator = AstNode & {
 
 export type AstVariableDeclaration = AstNode & {
   type: 'VariableDeclaration';
-  declarations?: AstVariableDeclarator[];
+  declarations?: Array<AstVariableDeclarator>;
 };
 
 export type AstFunctionDeclaration = AstNode & {
@@ -66,7 +66,7 @@ export type AstExportSpecifier = AstNode & {
 export type AstExportNamedDeclaration = AstNode & {
   type: 'ExportNamedDeclaration';
   declaration?: AstNode;
-  specifiers?: AstExportSpecifier[];
+  specifiers?: Array<AstExportSpecifier>;
 };
 
 export type AstExportDefaultDeclaration = AstNode & {
@@ -77,12 +77,12 @@ export type AstExportDefaultDeclaration = AstNode & {
 export type AstCallExpression = AstNode & {
   type: 'CallExpression';
   callee?: AstNode;
-  arguments?: AstNode[];
+  arguments?: Array<AstNode>;
 };
 
 export type AstObjectExpression = AstNode & {
   type: 'ObjectExpression';
-  properties?: AstNode[];
+  properties?: Array<AstNode>;
 };
 
 export type AstProperty = AstNode & {

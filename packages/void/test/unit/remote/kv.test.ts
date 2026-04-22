@@ -136,8 +136,9 @@ describe('ProxyKVNamespace', () => {
       const kv = new ProxyKVNamespace(createClient(), 'KV');
       await kv.delete('my-key');
 
-      const call = (globalThis.fetch as typeof globalThis.fetch & { mock: { calls: unknown[][] } })
-        .mock.calls[0] as [string, { body: string }];
+      const call = (
+        globalThis.fetch as typeof globalThis.fetch & { mock: { calls: Array<Array<unknown>> } }
+      ).mock.calls[0] as [string, { body: string }];
       const body = JSON.parse(call[1].body);
       expect(body.key).toBe('my-key');
       expect(body.binding).toBe('KV');

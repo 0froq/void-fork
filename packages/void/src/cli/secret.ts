@@ -129,7 +129,7 @@ export function parseDotenvFile(filePath: string): Array<{ name: string; value: 
 
 async function readSecretValue(): Promise<string> {
   if (!process.stdin.isTTY) {
-    const chunks: Buffer[] = [];
+    const chunks: Array<Buffer> = [];
     for await (const chunk of process.stdin) {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
     }

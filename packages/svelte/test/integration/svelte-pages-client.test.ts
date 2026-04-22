@@ -53,7 +53,7 @@ function defineClientTests(getBase: () => string) {
 
   it('hydrates without errors', async () => {
     const page = await newPage();
-    const errors: string[] = [];
+    const errors: Array<string> = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
         errors.push(msg.text());
@@ -141,7 +141,9 @@ function defineClientTests(getBase: () => string) {
         document.querySelector('h1')?.textContent?.includes('Users'),
       );
 
-      const stamp = await page.evaluate(() => (document.querySelector('nav') as NavElement | null)?.__stamp);
+      const stamp = await page.evaluate(
+        () => (document.querySelector('nav') as NavElement | null)?.__stamp,
+      );
       expect(stamp).toBe(1);
 
       const navText = await page.textContent('nav');

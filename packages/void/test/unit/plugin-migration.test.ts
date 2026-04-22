@@ -5,9 +5,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { getMiniflareDatabasePath } from '../../src/migrations/runner';
 import { migrationPlugin } from '../../src/plugin-migration';
 
-const roots: string[] = [];
+const roots: Array<string> = [];
 type HookWithHandler<T> = { handler: T };
-type ConfigureServerHook = ((server: unknown) => Promise<void> | void) | HookWithHandler<(server: unknown) => Promise<void> | void>;
+type ConfigureServerHook =
+  | ((server: unknown) => Promise<void> | void)
+  | HookWithHandler<(server: unknown) => Promise<void> | void>;
 
 function createProjectRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'void-migrations-'));

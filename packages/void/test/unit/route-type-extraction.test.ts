@@ -168,7 +168,7 @@ describe('ExtractInput<handler.__validators>', () => {
     expectTypeOf<Input>().toEqualTypeOf<{
       params: { id: string };
       query: { format: string };
-      body: { data: number[] };
+      body: { data: Array<number> };
     }>();
   });
 });
@@ -188,7 +188,7 @@ describe('full extraction pipeline (input + output)', () => {
     type Output = Serialize<Awaited<(typeof handler)['__output']>>;
 
     expectTypeOf<Input>().toEqualTypeOf<{
-      body: { email: string; tags: string[] };
+      body: { email: string; tags: Array<string> };
     }>();
     expectTypeOf<Output>().toEqualTypeOf<{ email: string; tagCount: number }>();
   });

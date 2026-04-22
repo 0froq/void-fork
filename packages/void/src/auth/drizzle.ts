@@ -38,7 +38,7 @@ export interface VoidAuthMigrationTable {
 export interface VoidAuthMigrationSchema {
   dialect: 'sqlite' | 'postgresql';
   idStrategy: AuthIdStrategy;
-  tables: readonly VoidAuthMigrationTable[];
+  tables: ReadonlyArray<VoidAuthMigrationTable>;
 }
 
 interface GenerateVoidAuthDatabaseModuleOptions {
@@ -48,7 +48,7 @@ interface GenerateVoidAuthDatabaseModuleOptions {
 }
 
 function resolveEmailAndPassword(
-  configuredProviders: readonly VoidAuthProvider[] | null,
+  configuredProviders: ReadonlyArray<VoidAuthProvider> | null,
 ): BetterAuthOptions['emailAndPassword'] | undefined {
   if (!configuredProviders || configuredProviders.includes(VOID_EMAIL_AUTH_PROVIDER)) {
     return { enabled: true };
@@ -57,7 +57,7 @@ function resolveEmailAndPassword(
 }
 
 function resolvePlaceholderSocialProviders(
-  configuredProviders: readonly VoidAuthProvider[] | null,
+  configuredProviders: ReadonlyArray<VoidAuthProvider> | null,
 ): BetterAuthOptions['socialProviders'] | undefined {
   if (!configuredProviders) {
     return undefined;
@@ -140,7 +140,7 @@ function isJsonField(field: DBFieldAttribute): boolean {
   return field.type === 'json' || field.type === 'string[]' || field.type === 'number[]';
 }
 
-function renderEnumValues(values: readonly string[]): string {
+function renderEnumValues(values: ReadonlyArray<string>): string {
   return `[${values.map((value) => JSON.stringify(value)).join(', ')}] as const`;
 }
 
@@ -273,7 +273,7 @@ function collectCoreImports(
   dialect: 'sqlite' | 'postgresql',
   schema: BetterAuthDBSchema,
   idStrategy: AuthIdStrategy,
-): string[] {
+): Array<string> {
   const imports = new Set<string>([dialect === 'postgresql' ? 'pgTable' : 'sqliteTable', 'text']);
 
   if (idStrategy === 'serial') {

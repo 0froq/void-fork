@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import type { SubcommandDef } from './subcommand-prompt';
 
-export const genSubcommands: SubcommandDef[] = [
+export const genSubcommands: Array<SubcommandDef> = [
   {
     name: 'model',
     arg: '<name>',
@@ -44,10 +44,10 @@ export type GenArgs =
   | {
       subcommand: 'model';
       name: string;
-      columns: { name: string; type: string; nullable: boolean }[];
+      columns: Array<{ name: string; type: string; nullable: boolean }>;
     }
   | { subcommand: 'migration'; name: string }
-  | { subcommand: 'route'; path: string; methods: string[] }
+  | { subcommand: 'route'; path: string; methods: Array<string> }
   | { subcommand: 'middleware'; name: string }
   | { subcommand: 'ssr'; framework?: 'react' | 'vue' | 'svelte' | 'solid' }
   | { subcommand: 'cron'; name: string }
@@ -57,7 +57,7 @@ const COLUMN_TYPES = new Set(['string', 'text', 'datetime', 'integer', 'boolean'
 
 const VALID_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete']);
 
-function parseModelArgs(args: string[]): GenArgs {
+function parseModelArgs(args: Array<string>): GenArgs {
   const [name, ...rest] = args;
   if (!name) {
     throw new Error('Error: Usage: void gen model <name> [columns...]');
@@ -68,7 +68,7 @@ function parseModelArgs(args: string[]): GenArgs {
     );
   }
 
-  const columns: { name: string; type: string; nullable: boolean }[] = [];
+  const columns: Array<{ name: string; type: string; nullable: boolean }> = [];
   for (const col of rest) {
     const match = col.match(/^([a-z_][a-z0-9_]*):([a-z]+)(\?)?$/);
     if (!match) {
@@ -86,7 +86,7 @@ function parseModelArgs(args: string[]): GenArgs {
   return { subcommand: 'model', name, columns };
 }
 
-function parseMigrationArgs(args: string[]): GenArgs {
+function parseMigrationArgs(args: Array<string>): GenArgs {
   const [name, extra] = args;
   if (!name) {
     throw new Error('Error: Usage: void gen migration <name>');
@@ -102,7 +102,7 @@ function parseMigrationArgs(args: string[]): GenArgs {
   return { subcommand: 'migration', name };
 }
 
-function parseRouteArgs(args: string[]): GenArgs {
+function parseRouteArgs(args: Array<string>): GenArgs {
   const parsed = parseArgs({
     args,
     options: {
@@ -137,7 +137,7 @@ function parseRouteArgs(args: string[]): GenArgs {
   return { subcommand: 'route', path: cleanPath, methods };
 }
 
-function parseMiddlewareArgs(args: string[]): GenArgs {
+function parseMiddlewareArgs(args: Array<string>): GenArgs {
   const [name, extra] = args;
   if (!name) {
     throw new Error('Error: Usage: void gen middleware <name>');
@@ -148,7 +148,7 @@ function parseMiddlewareArgs(args: string[]): GenArgs {
   return { subcommand: 'middleware', name };
 }
 
-function parseSsrArgs(args: string[]): GenArgs {
+function parseSsrArgs(args: Array<string>): GenArgs {
   const parsed = parseArgs({
     args,
     options: {
@@ -173,7 +173,7 @@ function parseSsrArgs(args: string[]): GenArgs {
   return { subcommand: 'ssr', framework: frameworks[0] };
 }
 
-function parseCronArgs(args: string[]): GenArgs {
+function parseCronArgs(args: Array<string>): GenArgs {
   const [name, extra] = args;
   if (!name) {
     throw new Error('Error: Usage: void gen cron <name>');
@@ -189,7 +189,7 @@ function parseCronArgs(args: string[]): GenArgs {
   return { subcommand: 'cron', name };
 }
 
-function parseQueueArgs(args: string[]): GenArgs {
+function parseQueueArgs(args: Array<string>): GenArgs {
   const [name, extra] = args;
   if (!name) {
     throw new Error('Error: Usage: void gen queue <name>');
@@ -205,7 +205,7 @@ function parseQueueArgs(args: string[]): GenArgs {
   return { subcommand: 'queue', name };
 }
 
-export function parseGenArgs(args: string[]): GenArgs {
+export function parseGenArgs(args: Array<string>): GenArgs {
   const [subcommand, ...rest] = args;
 
   if (subcommand === 'model') {

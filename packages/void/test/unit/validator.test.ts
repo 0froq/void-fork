@@ -25,7 +25,7 @@ function mockSchema<T>(output: T): StandardSchemaV1<unknown, T> {
 }
 
 /** Create a mock Standard Schema that always fails with the given issues. */
-function failSchema(issues: StandardSchemaV1.Issue[]): StandardSchemaV1 {
+function failSchema(issues: Array<StandardSchemaV1.Issue>): StandardSchemaV1 {
   return {
     '~standard': {
       version: 1,

@@ -1,6 +1,6 @@
 import type { SubcommandDef } from './subcommand-prompt';
 
-export const authSubcommands: SubcommandDef[] = [
+export const authSubcommands: Array<SubcommandDef> = [
   { name: 'login', description: 'Log in with GitHub or Google' },
   { name: 'logout', description: 'Log out and remove credentials' },
   { name: 'whoami', description: 'Show the logged-in username' },
@@ -9,7 +9,7 @@ export const authSubcommands: SubcommandDef[] = [
 
 export type AuthArgs = { subcommand: 'login' | 'logout' | 'whoami' | 'token' };
 
-export function parseAuthArgs(args: string[]): AuthArgs {
+export function parseAuthArgs(args: Array<string>): AuthArgs {
   const [subcommand, extra] = args;
   if (!subcommand || !['login', 'logout', 'whoami', 'token'].includes(subcommand)) {
     throw new Error('Error: Usage: void auth <login|logout|whoami|token>');

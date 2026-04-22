@@ -3,7 +3,7 @@ import type { RenderOptions, Renderer, Token } from 'markdown-exit';
 
 type MarkdownEnv = { [key: string]: unknown };
 type FenceRender = (
-  tokens: Token[],
+  tokens: Array<Token>,
   idx: number,
   options: RenderOptions,
   env: MarkdownEnv,

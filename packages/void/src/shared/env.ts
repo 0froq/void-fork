@@ -75,7 +75,7 @@ const INTERNAL_ENV_KEY_SET: ReadonlySet<string> = new Set(INTERNAL_ENV_KEYS);
 
 export interface StripInternalEnvKeysResult<T> {
   sanitized: T;
-  stripped: string[];
+  stripped: Array<string>;
 }
 
 /**
@@ -95,7 +95,7 @@ export function stripInternalEnvKeys<T extends Record<string, unknown>>(
     return { sanitized: {} as T, stripped: [] };
   }
   const sanitized: Record<string, unknown> = {};
-  const stripped: string[] = [];
+  const stripped: Array<string> = [];
   for (const [key, value] of Object.entries(input)) {
     if (INTERNAL_ENV_KEY_SET.has(key)) {
       stripped.push(key);

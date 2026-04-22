@@ -7,7 +7,7 @@ const TMP = join(import.meta.dirname, '.tmp-preset');
 
 function setupProject(opts: {
   pkg?: Record<string, unknown>;
-  dirs?: string[];
+  dirs?: Array<string>;
   files?: Record<string, string>;
 }): string {
   mkdirSync(TMP, { recursive: true });

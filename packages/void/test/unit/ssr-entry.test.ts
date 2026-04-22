@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
 import { getSsrServerEntryPath, hasSsrEntry, validateSsrEntry } from '../../src/ssr/entry';
 
-const tempDirs: string[] = [];
+const tempDirs: Array<string> = [];
 
 function createTempRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'void-ssr-entry-'));

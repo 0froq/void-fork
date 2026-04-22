@@ -18,7 +18,7 @@ export function getRequestedProjectSlug(options?: { projectSlug?: string }): str
 }
 
 export function resolveProjectBySlug(
-  projects: ProjectResponse[],
+  projects: Array<ProjectResponse>,
   slug: string,
 ): ProjectConfig | null {
   const project = projects.find((candidate) => candidate.slug === slug);

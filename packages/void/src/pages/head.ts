@@ -45,7 +45,7 @@ export function resolveHead(
     string,
     { name?: string; property?: string; content?: string; charset?: string }
   >();
-  const metaOrder: string[] = [];
+  const metaOrder: Array<string> = [];
   for (const layer of [configHead, middlewareHead, pageHead]) {
     if (!layer?.meta) {
       continue;
@@ -139,7 +139,7 @@ function escapeHtml(s: string): string {
 
 /** Serialize a HeadDescriptor to HTML tags for injection into `<head>`. */
 export function renderHeadToString(head: HeadDescriptor): string {
-  const parts: string[] = [];
+  const parts: Array<string> = [];
 
   if (head.title !== undefined) {
     parts.push(`<title>${escapeHtml(head.title)}</title>`);
@@ -147,7 +147,7 @@ export function renderHeadToString(head: HeadDescriptor): string {
 
   if (head.meta) {
     for (const entry of head.meta) {
-      const attrs: string[] = [];
+      const attrs: Array<string> = [];
       if (entry.charset) {
         attrs.push(`charset="${escapeHtml(entry.charset)}"`);
       }

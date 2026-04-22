@@ -28,7 +28,7 @@ const DEFAULT_SEED_FILES = [
 ];
 const MODULE_SEED_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs']);
 
-function runDrizzleKit(root: string, args: string[]): void {
+function runDrizzleKit(root: string, args: Array<string>): void {
   execFileSync(process.execPath, [drizzleKitBin, ...args], {
     cwd: root,
     stdio: 'inherit',
@@ -46,8 +46,8 @@ type PgClient = {
   end(): Promise<void>;
   query<T extends Record<string, unknown> = Record<string, unknown>>(
     sql: string,
-    params?: unknown[],
-  ): Promise<{ rows: T[] }>;
+    params?: Array<unknown>,
+  ): Promise<{ rows: Array<T> }>;
 };
 
 function getErrorMessage(error: unknown): string {
@@ -107,7 +107,7 @@ async function withPgClient<T>(root: string, fn: (client: PgClient) => Promise<T
 }
 
 function validatePendingMigrations(
-  migrations: { name: string; sql: string }[],
+  migrations: Array<{ name: string; sql: string }>,
   appliedNames: Set<string>,
 ): void {
   const pending = migrations.filter((migration) => !appliedNames.has(migration.name));
@@ -206,7 +206,7 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
     return;
   }
 
-  let localApplied: { name: string }[];
+  let localApplied: Array<{ name: string }>;
   if (dialect === 'postgresql') {
     try {
       localApplied = await withPgClient(root, async (client) => {
@@ -231,7 +231,7 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
   const localSet = new Set(localApplied.map((m) => m.name));
 
   // Try to get remote status
-  let remoteApplied: { name: string; applied_at: string }[] | null = null;
+  let remoteApplied: Array<{ name: string; applied_at: string }> | null = null;
   const token = getToken(root);
   const config = readProjectConfig(root);
   if (token && config) {
@@ -246,7 +246,7 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
 
   const remoteSet = remoteApplied ? new Set(remoteApplied.map((m) => m.name)) : null;
 
-  const lines: string[] = [];
+  const lines: Array<string> = [];
   for (const migration of allMigrations) {
     const localStatus = localSet.has(migration.name) ? pc.green('applied') : pc.yellow('pending');
 
@@ -422,7 +422,7 @@ async function runExecute(
   try {
     const trimmed = sql.trimStart();
     if (/^SELECT\b/i.test(trimmed)) {
-      const rows = db.prepare(sql).all() as Record<string, unknown>[];
+      const rows = db.prepare(sql).all() as Array<Record<string, unknown>>;
       if (rows.length === 0) {
         log.info('No rows returned.');
       } else {
@@ -438,7 +438,7 @@ async function runExecute(
   outro('Done.');
 }
 
-function printTable(rows: Record<string, unknown>[]): void {
+function printTable(rows: Array<Record<string, unknown>>): void {
   const cols = Object.keys(rows[0]);
   const widths = cols.map((col) => {
     let max = col.length;
@@ -542,7 +542,7 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
   if (dialect === 'postgresql') {
     const { applyPgMigrations } = await import('../migrations/runner-pg');
     const applied = await withPgClient(root, async (client) => {
-      let existingRows: { name: string }[] = [];
+      let existingRows: Array<{ name: string }> = [];
       try {
         const result = await client.query<{ name: string }>('SELECT name FROM _void_migrations');
         existingRows = result.rows;
@@ -710,7 +710,7 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
     baseTime = new Date(Date.now() - oldStyleFiles.length * 1000);
   }
 
-  const renames: { from: string; to: string }[] = [];
+  const renames: Array<{ from: string; to: string }> = [];
   for (let i = 0; i < oldStyleFiles.length; i++) {
     const oldName = oldStyleFiles[i];
     const description = oldName.replace(/^\d+_/, '');
@@ -787,11 +787,11 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
     preRenameJournal !== null &&
     typeof preRenameJournal === 'object' &&
     Array.isArray((preRenameJournal as { entries?: unknown }).entries) &&
-    (preRenameJournal as { entries: unknown[] }).entries.length === 0 &&
+    (preRenameJournal as { entries: Array<unknown> }).entries.length === 0 &&
     drizzleArtifacts.length === 0;
 
   if (originalJournalBytes !== null && !isBareLegacyPlaceholder) {
-    const missingSnapshots: string[] = [];
+    const missingSnapshots: Array<string> = [];
     for (const { from } of renames) {
       const fromTag = stripSqlExt(from);
       const snapshotFrom = snapshotPathFor(fromTag);
@@ -881,10 +881,10 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
   };
 
   // Rename files — roll back completed renames (and remote) on any failure
-  const renamed: { from: string; to: string }[] = [];
+  const renamed: Array<{ from: string; to: string }> = [];
   // Parallel list tracking snapshot renames so rollback can reverse them
   // with the same best-effort semantics as the .sql file renames.
-  const renamedSnapshots: { from: string; to: string }[] = [];
+  const renamedSnapshots: Array<{ from: string; to: string }> = [];
 
   const reverseSnapshotRenames = () => {
     for (const { from, to } of renamedSnapshots) {
@@ -1088,9 +1088,9 @@ async function runExport(
   dialect: DatabaseDialect,
 ): Promise<void> {
   if (dialect === 'postgresql') {
-    const parts: string[] = [];
+    const parts: Array<string> = [];
     await withPgClient(root, async (client) => {
-      let tables: string[];
+      let tables: Array<string>;
       if (args.table) {
         const check = await client.query(
           "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = $1",
@@ -1171,7 +1171,7 @@ async function runExport(
 
   const db = await openSqliteDatabase(dbPath, { readonly: true });
   try {
-    let tables: string[];
+    let tables: Array<string>;
     if (args.table) {
       const exists = db
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?")
@@ -1190,7 +1190,7 @@ async function runExport(
         .map((row) => String(row.name));
     }
 
-    const parts: string[] = [];
+    const parts: Array<string> = [];
 
     for (const table of tables) {
       if (!args.noSchema) {
@@ -1201,7 +1201,7 @@ async function runExport(
       }
 
       if (!args.noData) {
-        const rows = db.prepare(`SELECT * FROM "${table}"`).all() as Record<string, unknown>[];
+        const rows = db.prepare(`SELECT * FROM "${table}"`).all() as Array<Record<string, unknown>>;
         for (const row of rows) {
           const cols = Object.keys(row);
           const vals = cols.map((c) => {
@@ -1397,8 +1397,8 @@ async function loadSeedSchema(root: string): Promise<Record<string, unknown>> {
   );
 }
 
-function collectSchemaModuleFiles(dir: string): string[] {
-  const files: string[] = [];
+function collectSchemaModuleFiles(dir: string): Array<string> {
+  const files: Array<string> = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {

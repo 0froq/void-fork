@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
  * Collect all .sql migration files from the migrations directory,
  * sorted by filename (lexicographic order).
  */
-export function collectMigrations(migrationsDir: string): { name: string; sql: string }[] {
+export function collectMigrations(migrationsDir: string): Array<{ name: string; sql: string }> {
   if (!existsSync(migrationsDir)) {
     return [];
   }
@@ -30,7 +30,7 @@ export interface DrizzleJournalEntry {
 export interface DrizzleJournal {
   version: string;
   dialect: string;
-  entries: DrizzleJournalEntry[];
+  entries: Array<DrizzleJournalEntry>;
 }
 
 /**

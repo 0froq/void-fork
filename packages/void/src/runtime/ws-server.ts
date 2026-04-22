@@ -12,7 +12,7 @@ import type {
 
 export interface WebSocketRouteMeta {
   pattern: string;
-  params: string[];
+  params: Array<string>;
   className: string;
   bindingName: string;
 }
@@ -113,7 +113,7 @@ async function validateSchema(
   schema: StandardSchemaV1,
   value: unknown,
 ): Promise<
-  { ok: true; value: unknown } | { ok: false; issues: readonly StandardSchemaV1.Issue[] }
+  { ok: true; value: unknown } | { ok: false; issues: ReadonlyArray<StandardSchemaV1.Issue> }
 > {
   const result = await schema['~standard'].validate(value);
   if (result.issues) {
@@ -510,7 +510,7 @@ function getStub(
 export async function handleWebSocketUpgrade(
   request: Request,
   env: Record<string, unknown>,
-  routes: WebSocketRouteMeta[],
+  routes: Array<WebSocketRouteMeta>,
 ): Promise<Response | null> {
   if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
     return null;

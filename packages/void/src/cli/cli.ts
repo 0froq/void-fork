@@ -109,7 +109,7 @@ function printHelp() {
   outro('https://void.cloud');
 }
 
-function buildArgs(result: SubcommandResult, trailingArgs: string[]): string[] {
+function buildArgs(result: SubcommandResult, trailingArgs: Array<string>): Array<string> {
   const out = [result.subcommand];
   if (result.arg) {
     out.push(result.arg);
@@ -135,8 +135,8 @@ function buildArgs(result: SubcommandResult, trailingArgs: string[]): string[] {
 
 async function runSubcommandGroup<T>(
   command: string,
-  subcommands: SubcommandDef[],
-  parse: (args: string[]) => T,
+  subcommands: Array<SubcommandDef>,
+  parse: (args: Array<string>) => T,
   run: (root: string, parsed: T) => Promise<void>,
 ) {
   const root = process.cwd();
@@ -239,7 +239,7 @@ if (command === 'deploy') {
   process.exit(1);
 } else if (!command && process.stdin.isTTY) {
   // Interactive top-level prompt
-  const topLevelCommands: SubcommandDef[] = [
+  const topLevelCommands: Array<SubcommandDef> = [
     { name: 'init', description: 'Set up void in a new or existing project' },
     { name: 'deploy', description: 'Build and deploy to Void' },
     {

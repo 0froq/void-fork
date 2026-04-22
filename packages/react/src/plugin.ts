@@ -15,7 +15,7 @@ export interface VoidReactOptions {
   prefetch?: PrefetchConfig;
 }
 
-export function voidReact(options?: VoidReactOptions): Plugin[] {
+export function voidReact(options?: VoidReactOptions): Array<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');
   return [
     ...react(options?.react),

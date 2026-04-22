@@ -16,7 +16,7 @@ type PageResponse = {
   url: string;
   errors: Record<string, string> | null;
   shared?: Record<string, unknown>;
-  deferred?: string[];
+  deferred?: Array<string>;
   deferredKeys?: Record<string, string>;
 };
 
@@ -247,7 +247,7 @@ describe('handlePageGet', () => {
     expect(response.headers.get('content-type')).not.toContain('ndjson');
     expect(response.headers.get('X-VoidPages')).toBe('true');
 
-    const body = (await json<PageResponse & { props: { usage: { requests: number } } }>(response));
+    const body = await json<PageResponse & { props: { usage: { requests: number } } }>(response);
     expect(body.props.usage).toEqual({ requests: 1200 });
     expect(body.deferred).toBeUndefined();
     // deferredKeys is preserved so clients can wrap resolved values

@@ -6,7 +6,7 @@ import type { PageScanResult } from './types';
  * Used by both SSR renderer and client entry virtual modules.
  */
 export function generateComponentManifest(scan: PageScanResult, pagesDir: string): string {
-  const lines: string[] = [];
+  const lines: Array<string> = [];
 
   // Component lazy imports
   lines.push('const components = {');

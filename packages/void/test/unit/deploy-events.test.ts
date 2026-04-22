@@ -16,7 +16,11 @@ import { applyDeployEvent } from '../../src/cli/deploy';
 import type { DeployEvent } from '../../src/cli/types';
 
 function createMockSpinner() {
-  const calls = { start: [] as unknown[], stop: [] as unknown[], message: [] as unknown[] };
+  const calls = {
+    start: [] as Array<unknown>,
+    stop: [] as Array<unknown>,
+    message: [] as Array<unknown>,
+  };
   return {
     spinner: {
       start: (m?: unknown) => {

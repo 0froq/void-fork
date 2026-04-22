@@ -73,7 +73,7 @@ export function parseDotenvFile(filePath: string): Record<string, string> {
 }
 
 /** Collect a deduped list of inferred entries from the dotenv files we find. */
-export function collectInferredEntries(root: string): InferredEntry[] {
+export function collectInferredEntries(root: string): Array<InferredEntry> {
   const seen = new Map<string, InferredEntry>();
   // Walk files in trust order (first wins). At each step we expand the
   // current file's values against the cumulative "earliest-wins" record so
@@ -122,7 +122,7 @@ export function collectInferredEntries(root: string): InferredEntry[] {
  * Render the scaffolded `env.ts` body. The imports are pulled in lazily
  * so only helpers we reference appear in the import statement.
  */
-export function renderEnvTs(entries: InferredEntry[]): string {
+export function renderEnvTs(entries: Array<InferredEntry>): string {
   if (entries.length === 0) {
     return [
       `import { defineEnv } from 'void/env';`,
@@ -141,7 +141,7 @@ export function renderEnvTs(entries: InferredEntry[]): string {
     helpers.has(h),
   );
 
-  const lines: string[] = [];
+  const lines: Array<string> = [];
   lines.push(`import { defineEnv, ${importList.join(', ')} } from 'void/env';`);
   lines.push('');
   lines.push(`// Scaffolded from your .env files. Inference is conservative — review each`);
@@ -161,7 +161,7 @@ export interface ScaffoldResult {
   written: string | null;
   /** Reason we skipped, when `written` is null. */
   skipReason?: 'env-ts-exists' | 'no-dotenv-files';
-  entries: InferredEntry[];
+  entries: Array<InferredEntry>;
 }
 
 /**

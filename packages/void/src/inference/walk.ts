@@ -167,7 +167,7 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
 /**
  * Merge multiple InferredBindings into a single result (union).
  */
-export function mergeBindings(bindings: InferredBindings[]): InferredBindings {
+export function mergeBindings(bindings: Array<InferredBindings>): InferredBindings {
   return {
     needsD1: bindings.some((b) => b.needsD1),
     needsKV: bindings.some((b) => b.needsKV),

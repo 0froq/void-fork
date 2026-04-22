@@ -198,7 +198,9 @@ describe('playground/node-static build (target: node, output: static)', () => {
 
       expect(page.url()).toBe(`${staticBase}/about`);
       expect(await page.evaluate(() => window.__SPA_MARKER)).toBe(true);
-      expect(await page.evaluate(() => (document.querySelector('nav') as NavElement | null)?.__STAMP)).toBe(1);
+      expect(
+        await page.evaluate(() => (document.querySelector('nav') as NavElement | null)?.__STAMP),
+      ).toBe(1);
     } finally {
       await page.close();
       await browser.close();
@@ -214,7 +216,7 @@ describe('playground/node-static build (target: node, output: static)', () => {
       await page.goto(`${staticBase}/`);
       await page.waitForSelector('#app[data-hydrated="true"]');
 
-      const requests: string[] = [];
+      const requests: Array<string> = [];
       page.on('request', (request) => {
         const url = request.url();
         if (url.startsWith(staticBase)) {
@@ -245,7 +247,7 @@ describe('playground/node-static build (target: node, output: static)', () => {
       await page.goto(`${staticBase}/`);
       await page.waitForSelector('#app[data-hydrated="true"]');
 
-      const requests: string[] = [];
+      const requests: Array<string> = [];
       page.on('request', (request) => {
         const url = request.url();
         if (url.startsWith(staticBase)) {
@@ -377,7 +379,7 @@ describe('playground/node-static redirects (target: node, output: static)', () =
       await page.goto(`${redirectedBase}/`);
       await page.waitForSelector('#app[data-hydrated="true"]');
 
-      const requests: string[] = [];
+      const requests: Array<string> = [];
       page.on('request', (request) => {
         const url = request.url();
         if (url.startsWith(redirectedBase)) {

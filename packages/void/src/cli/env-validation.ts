@@ -54,7 +54,7 @@ export interface ValidateProdEnvOptions {
   /** When true (deploy mode), only `.env` + `.env.production` are read. */
   productionOnly: boolean;
   /** Optional remote secret list (names only). Treated as "value present". */
-  remoteSecrets?: string[];
+  remoteSecrets?: Array<string>;
 }
 
 export interface ProdEnvValidationResult {
@@ -111,7 +111,7 @@ export async function validateProdEnv(
 
 /** Format an EnvValidationReport into a human-readable multi-line string. */
 export function formatEnvReport(report: EnvValidationReport): string {
-  const lines: string[] = [];
+  const lines: Array<string> = [];
   if (report.missing.length > 0) {
     lines.push('Missing required env vars:');
     for (const key of report.missing) {
@@ -134,7 +134,7 @@ export function formatEnvReport(report: EnvValidationReport): string {
 export async function fetchRemoteSecretNames(
   client: PlatformClient,
   projectId: string,
-): Promise<string[]> {
+): Promise<Array<string>> {
   try {
     const secrets = await client.listSecrets(projectId);
     return secrets.map((s) => s.name);

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildPrerenderBindings, collectPrerenderWorkerModules } from '../../src/prerender';
 import { INTERNAL_ENV_KEYS, stripInternalEnvKeys } from '../../src/shared/env';
 
-const tempDirs: string[] = [];
+const tempDirs: Array<string> = [];
 
 function createTempWorkerDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'void-prerender-'));

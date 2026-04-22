@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { FileTreeItem } from './FileTree.vue';
 
-function buildItems(ext: string): FileTreeItem[] {
+function buildItems(ext: string): Array<FileTreeItem> {
   return [
     {
       name: 'pages/',

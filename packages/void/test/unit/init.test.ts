@@ -38,12 +38,12 @@ const mockCreateProject = vi.fn();
 
 vi.mock('@clack/prompts', () => ({
   intro: vi.fn(),
-  outro: (...args: unknown[]) => mockOutro(...args),
-  note: (...args: unknown[]) => mockNote(...args),
+  outro: (...args: Array<unknown>) => mockOutro(...args),
+  note: (...args: Array<unknown>) => mockNote(...args),
   log: { success: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn(), step: vi.fn() },
-  confirm: (...args: unknown[]) => mockConfirm(...args),
-  select: (...args: unknown[]) => mockSelect(...args),
-  text: (...args: unknown[]) => mockText(...args),
+  confirm: (...args: Array<unknown>) => mockConfirm(...args),
+  select: (...args: Array<unknown>) => mockSelect(...args),
+  text: (...args: Array<unknown>) => mockText(...args),
   spinner: () => ({ start: vi.fn(), stop: vi.fn(), message: vi.fn() }),
   isCI: () => false,
   isCancel: (value: unknown) => value === Symbol.for('cancel'),
@@ -51,27 +51,27 @@ vi.mock('@clack/prompts', () => ({
 }));
 
 vi.mock('../../src/cli/auth', () => ({
-  getToken: (...args: unknown[]) => mockGetToken(...args),
-  runLogin: (...args: unknown[]) => mockRunLogin(...args),
-  saveToken: (...args: unknown[]) => mockSaveToken(...args),
-  isStagingMode: (...args: unknown[]) => mockIsStagingMode(...args),
+  getToken: (...args: Array<unknown>) => mockGetToken(...args),
+  runLogin: (...args: Array<unknown>) => mockRunLogin(...args),
+  saveToken: (...args: Array<unknown>) => mockSaveToken(...args),
+  isStagingMode: (...args: Array<unknown>) => mockIsStagingMode(...args),
   getSiteDomain: () => 'void.app',
 }));
 
 vi.mock('../../src/cli/client', () => ({
   PlatformClient: class {
-    listProjects(...args: unknown[]) {
+    listProjects(...args: Array<unknown>) {
       return mockListProjects(...args);
     }
 
-    createProject(...args: unknown[]) {
+    createProject(...args: Array<unknown>) {
       return mockCreateProject(...args);
     }
   },
 }));
 
 vi.mock('node:child_process', () => ({
-  spawnSync: (...args: unknown[]) => mockSpawnSync(...args),
+  spawnSync: (...args: Array<unknown>) => mockSpawnSync(...args),
 }));
 
 function withTempDir(run: (root: string) => void): void {
@@ -124,7 +124,7 @@ function writeMockGeneratedMigration(root: string): void {
   );
 }
 
-function listMigrationSqlFiles(root: string): string[] {
+function listMigrationSqlFiles(root: string): Array<string> {
   const migrationsDir = join(root, 'db', 'migrations');
   if (!existsSync(migrationsDir)) {
     return [];
@@ -456,8 +456,8 @@ describe('isVoidResolvableFrom', () => {
       const probeCalls = mockSpawnSync.mock.calls.filter(
         (call) =>
           Array.isArray(call[1]) &&
-          (call[1] as unknown[])[0] === '-e' &&
-          (call[1] as unknown[])[1] === "require.resolve('void')",
+          (call[1] as Array<unknown>)[0] === '-e' &&
+          (call[1] as Array<unknown>)[1] === "require.resolve('void')",
       );
       expect(probeCalls.length).toBe(1);
     } finally {
@@ -486,8 +486,8 @@ describe('isVoidResolvableFrom', () => {
       const probeCalls = mockSpawnSync.mock.calls.filter(
         (call) =>
           Array.isArray(call[1]) &&
-          (call[1] as unknown[])[0] === '-e' &&
-          (call[1] as unknown[])[1] === "require.resolve('void')",
+          (call[1] as Array<unknown>)[0] === '-e' &&
+          (call[1] as Array<unknown>)[1] === "require.resolve('void')",
       );
       expect(probeCalls.length).toBe(1);
     } finally {
@@ -524,16 +524,16 @@ describe('isVoidResolvableFrom', () => {
       const esmProbes = mockSpawnSync.mock.calls.filter(
         (call) =>
           Array.isArray(call[1]) &&
-          (call[1] as unknown[])[0] === '--input-type=module' &&
-          (call[1] as unknown[])[1] === '-e' &&
-          (call[1] as unknown[])[2] === "import.meta.resolve('void')",
+          (call[1] as Array<unknown>)[0] === '--input-type=module' &&
+          (call[1] as Array<unknown>)[1] === '-e' &&
+          (call[1] as Array<unknown>)[2] === "import.meta.resolve('void')",
       );
       expect(esmProbes.length).toBe(1);
       const cjsProbes = mockSpawnSync.mock.calls.filter(
         (call) =>
           Array.isArray(call[1]) &&
-          (call[1] as unknown[])[0] === '-e' &&
-          (call[1] as unknown[])[1] === "require.resolve('void')",
+          (call[1] as Array<unknown>)[0] === '-e' &&
+          (call[1] as Array<unknown>)[1] === "require.resolve('void')",
       );
       expect(cjsProbes.length).toBe(0);
     } finally {
@@ -561,9 +561,9 @@ describe('isVoidResolvableFrom', () => {
       const esmProbes = mockSpawnSync.mock.calls.filter(
         (call) =>
           Array.isArray(call[1]) &&
-          (call[1] as unknown[])[0] === '--input-type=module' &&
-          (call[1] as unknown[])[1] === '-e' &&
-          (call[1] as unknown[])[2] === "import.meta.resolve('void')",
+          (call[1] as Array<unknown>)[0] === '--input-type=module' &&
+          (call[1] as Array<unknown>)[1] === '-e' &&
+          (call[1] as Array<unknown>)[2] === "import.meta.resolve('void')",
       );
       expect(esmProbes.length).toBe(1);
     } finally {
@@ -596,12 +596,13 @@ describe('isVoidResolvableFrom', () => {
       const cjsProbes = mockSpawnSync.mock.calls.filter(
         (call) =>
           Array.isArray(call[1]) &&
-          (call[1] as unknown[])[0] === '-e' &&
-          (call[1] as unknown[])[1] === "require.resolve('void')",
+          (call[1] as Array<unknown>)[0] === '-e' &&
+          (call[1] as Array<unknown>)[1] === "require.resolve('void')",
       );
       expect(cjsProbes.length).toBe(1);
       const esmProbes = mockSpawnSync.mock.calls.filter(
-        (call) => Array.isArray(call[1]) && (call[1] as unknown[])[0] === '--input-type=module',
+        (call) =>
+          Array.isArray(call[1]) && (call[1] as Array<unknown>)[0] === '--input-type=module',
       );
       expect(esmProbes.length).toBe(0);
     } finally {
@@ -629,8 +630,8 @@ describe('isVoidResolvableFrom', () => {
       const probeCallsBefore = mockSpawnSync.mock.calls.filter(
         (call) =>
           Array.isArray(call[1]) &&
-          (call[1] as unknown[])[0] === '-e' &&
-          (call[1] as unknown[])[1] === "require.resolve('void')",
+          (call[1] as Array<unknown>)[0] === '-e' &&
+          (call[1] as Array<unknown>)[1] === "require.resolve('void')",
       ).length;
 
       expect(isVoidResolvableFrom(root)).toBe(true);
@@ -638,8 +639,8 @@ describe('isVoidResolvableFrom', () => {
       const probeCallsAfter = mockSpawnSync.mock.calls.filter(
         (call) =>
           Array.isArray(call[1]) &&
-          (call[1] as unknown[])[0] === '-e' &&
-          (call[1] as unknown[])[1] === "require.resolve('void')",
+          (call[1] as Array<unknown>)[0] === '-e' &&
+          (call[1] as Array<unknown>)[1] === "require.resolve('void')",
       ).length;
       expect(probeCallsAfter).toBe(probeCallsBefore);
     } finally {
@@ -714,8 +715,8 @@ describe('isVoidResolvableFrom', () => {
       const probeCalls = mockSpawnSync.mock.calls.filter(
         (call) =>
           Array.isArray(call[1]) &&
-          (call[1] as unknown[])[0] === '-e' &&
-          (call[1] as unknown[])[1] === "require.resolve('void')",
+          (call[1] as Array<unknown>)[0] === '-e' &&
+          (call[1] as Array<unknown>)[1] === "require.resolve('void')",
       );
       expect(probeCalls.length).toBe(1);
     } finally {

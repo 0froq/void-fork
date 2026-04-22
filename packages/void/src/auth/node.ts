@@ -31,7 +31,7 @@ export async function runLocalVoidAuthMigrations(
       await applySqliteAuthMigrations(
         {
           async all<T extends Record<string, unknown>>(sql: string) {
-            return db.prepare(sql).all() as T[];
+            return db.prepare(sql).all() as Array<T>;
           },
           async run(sql: string) {
             db.prepare(sql).run();
@@ -59,11 +59,11 @@ export async function runLocalVoidAuthMigrations(
   try {
     await applyPgAuthMigrations(
       {
-        async all<T extends Record<string, unknown>>(sql: string, params?: unknown[]) {
+        async all<T extends Record<string, unknown>>(sql: string, params?: Array<unknown>) {
           const result = await client.query(sql, params);
-          return result.rows as T[];
+          return result.rows as Array<T>;
         },
-        async run(sql: string, params?: unknown[]) {
+        async run(sql: string, params?: Array<unknown>) {
           await client.query(sql, params);
         },
       },

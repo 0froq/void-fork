@@ -230,7 +230,7 @@ function expandValue(value: string, resolve: (key: string) => string): string {
  * expansion sees every earlier file's keys at once.
  */
 export function mergeAndExpand(
-  records: Record<string, string>[],
+  records: Array<Record<string, string>>,
   options: { onWarn?: (message: string) => void } = {},
 ): Record<string, string> {
   const merged: Record<string, string> = {};

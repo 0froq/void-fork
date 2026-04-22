@@ -71,7 +71,7 @@ export class ProxyR2Bucket {
     } else {
       // ReadableStream — read it all
       const reader = value.getReader();
-      const chunks: Uint8Array[] = [];
+      const chunks: Array<Uint8Array> = [];
       while (true) {
         const { done, value: chunk } = await reader.read();
         if (done) {
@@ -122,7 +122,7 @@ export class ProxyR2Bucket {
     });
   }
 
-  async delete(keys: string | string[]): Promise<void> {
+  async delete(keys: string | Array<string>): Promise<void> {
     const body: Record<string, unknown> = { binding: this.binding };
     if (Array.isArray(keys)) {
       body.keys = keys;
@@ -141,7 +141,7 @@ export class ProxyR2Bucket {
       delimiter: options?.delimiter,
     });
     const data = (await res.json()) as {
-      objects: { key: string; size: number; lastModified: string }[];
+      objects: Array<{ key: string; size: number; lastModified: string }>;
       truncated: boolean;
       cursor: string | null;
     };

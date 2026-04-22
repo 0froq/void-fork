@@ -33,9 +33,9 @@ export async function scanPages(
   const pattern = `**/*.{${COMPONENT_EXTENSIONS.join(',')}}`;
   const files = await glob(pattern, { cwd: pagesDir, absolute: false });
 
-  const pages: PageDefinition[] = [];
-  const layouts: LayoutDefinition[] = [];
-  const namedLayouts: NamedLayoutDefinition[] = [];
+  const pages: Array<PageDefinition> = [];
+  const layouts: Array<LayoutDefinition> = [];
+  const namedLayouts: Array<NamedLayoutDefinition> = [];
 
   for (const file of files) {
     const segments = file.split('/');
@@ -103,7 +103,7 @@ export async function scanPages(
 
     // Check for companion .server.ts — server files never have .island suffix
     let serverPath: string | null = null;
-    const methods: string[] = [];
+    const methods: Array<string> = [];
     let revalidate: number | undefined;
     let prerender: boolean | undefined;
     let prerenderExplicitlyFalse = false;

@@ -15,7 +15,7 @@ const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'
  * Detect which HTTP method names are exported from a route file.
  * Scans top-level named exports for identifiers matching HTTP methods.
  */
-export function detectHttpExports(absPath: string): string[] {
+export function detectHttpExports(absPath: string): Array<string> {
   const code = readFileSync(absPath, 'utf-8');
   const filename = basename(absPath);
   let parsed: ReturnType<typeof parseSync>;
@@ -25,7 +25,7 @@ export function detectHttpExports(absPath: string): string[] {
     return [];
   }
 
-  const methods: string[] = [];
+  const methods: Array<string> = [];
   const program = parsed.program as unknown as AstProgram;
 
   for (const node of program.body ?? []) {

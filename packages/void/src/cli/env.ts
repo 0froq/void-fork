@@ -29,7 +29,7 @@ export async function runEnvCommand(root: string, args: EnvArgs): Promise<void> 
 }
 
 async function runCheck(root: string, useRemoteSecrets: boolean): Promise<void> {
-  let remoteSecrets: string[] | undefined;
+  let remoteSecrets: Array<string> | undefined;
   if (useRemoteSecrets) {
     const token = getToken(root);
     if (!token) {

@@ -32,7 +32,7 @@ export type SsrEntries = {
 
 function resolveSingleEntry(
   root: string,
-  entries: readonly string[],
+  entries: ReadonlyArray<string>,
   label: string,
 ): ResolvedEntry | null {
   const matches = entries

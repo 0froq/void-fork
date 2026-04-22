@@ -5,16 +5,16 @@ import type {
 } from '../auth/drizzle';
 
 export interface SqliteMigrationRunner {
-  all<T extends Record<string, unknown> = Record<string, unknown>>(sql: string): Promise<T[]>;
+  all<T extends Record<string, unknown> = Record<string, unknown>>(sql: string): Promise<Array<T>>;
   run(sql: string): Promise<void>;
 }
 
 export interface PgMigrationRunner {
   all<T extends Record<string, unknown> = Record<string, unknown>>(
     sql: string,
-    params?: unknown[],
-  ): Promise<T[]>;
-  run(sql: string, params?: unknown[]): Promise<void>;
+    params?: Array<unknown>,
+  ): Promise<Array<T>>;
+  run(sql: string, params?: Array<unknown>): Promise<void>;
 }
 
 function quoteIdentifier(name: string): string {

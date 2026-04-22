@@ -27,7 +27,7 @@ describe('packageStaticBuild', () => {
 
     const form = await packageStaticBuild(TMP, 'spa');
 
-    const assetKeys: string[] = [];
+    const assetKeys: Array<string> = [];
     for (const [key] of form.entries()) {
       if (key.startsWith('asset:')) {
         assetKeys.push(key.slice('asset:'.length));
@@ -91,7 +91,7 @@ describe('packageBuild', () => {
       needsAI: false,
     });
 
-    const workerKeys: string[] = [];
+    const workerKeys: Array<string> = [];
     for (const [key] of form.entries()) {
       if (key.startsWith('worker:')) {
         workerKeys.push(key.slice('worker:'.length));
@@ -266,7 +266,7 @@ describe('packageStaticBuild with neededAssets', () => {
     const needed = new Set(['/a.html', '/c.css']);
     const form = await packageStaticBuild(TMP, 'spa', needed);
 
-    const assetKeys: string[] = [];
+    const assetKeys: Array<string> = [];
     for (const [key] of form.entries()) {
       if (key.startsWith('asset:')) {
         assetKeys.push(key.slice('asset:'.length));
@@ -283,7 +283,7 @@ describe('packageStaticBuild with neededAssets', () => {
 
     const form = await packageStaticBuild(TMP, 'spa', null);
 
-    const assetKeys: string[] = [];
+    const assetKeys: Array<string> = [];
     for (const [key] of form.entries()) {
       if (key.startsWith('asset:')) {
         assetKeys.push(key.slice('asset:'.length));
@@ -304,7 +304,7 @@ describe('packageStaticBuild asset exclusion', () => {
 
     const form = await packageStaticBuild(TMP, 'static');
 
-    const assetKeys: string[] = [];
+    const assetKeys: Array<string> = [];
     for (const [key] of form.entries()) {
       if (key.startsWith('asset:')) {
         assetKeys.push(key.slice('asset:'.length));
@@ -342,7 +342,7 @@ describe('_worker.js safety guard', () => {
 
     // Does not throw — .assetsignore presence means the user is aware
     const form = await packageStaticBuild(TMP, 'static');
-    const assetKeys: string[] = [];
+    const assetKeys: Array<string> = [];
     for (const [key] of form.entries()) {
       if (key.startsWith('asset:')) {
         assetKeys.push(key.slice('asset:'.length));
@@ -358,7 +358,7 @@ describe('_worker.js safety guard', () => {
     writeFileSync(join(TMP, '.assetsignore'), '_worker.js');
 
     const form = await packageStaticBuild(TMP, 'static');
-    const assetKeys: string[] = [];
+    const assetKeys: Array<string> = [];
     for (const [key] of form.entries()) {
       if (key.startsWith('asset:')) {
         assetKeys.push(key.slice('asset:'.length));

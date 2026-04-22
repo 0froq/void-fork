@@ -35,8 +35,8 @@ interface IslandMatch {
   children: string;
 }
 
-function findIslandTags(html: string, names: Set<string>): IslandMatch[] {
-  const matches: IslandMatch[] = [];
+function findIslandTags(html: string, names: Set<string>): Array<IslandMatch> {
+  const matches: Array<IslandMatch> = [];
   let m;
   ISLAND_TAG_RE.lastIndex = 0;
   while ((m = ISLAND_TAG_RE.exec(html)) !== null) {
@@ -66,7 +66,7 @@ function parseAttrs(attrStr: string): Record<string, string> {
 
 export function emitVueComponentWithIslands(
   result: CompileResult,
-  islandImports: IslandImport[],
+  islandImports: Array<IslandImport>,
 ): string {
   const nameSet = new Set(islandImports.map((i) => i.name));
   const islandTags = findIslandTags(result.html, nameSet);
@@ -93,7 +93,7 @@ export function emitVueComponentWithIslands(
   }
 
   // Build render function that interleaves static segments and island vnodes
-  const vnodes: string[] = [];
+  const vnodes: Array<string> = [];
   let cursor = 0;
 
   for (const tag of islandTags) {

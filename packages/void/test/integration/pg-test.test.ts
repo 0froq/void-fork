@@ -13,8 +13,8 @@ type User = { id: number; name: string; email: string };
 type Post = { id: number; title: string; author: string };
 type PageData = {
   props: {
-    users: User[];
-    posts: Post[];
+    users: Array<User>;
+    posts: Array<Post>;
   };
 };
 
@@ -250,7 +250,7 @@ describe('playground/pg-test', () => {
     // List users via API
     const listRes = await fetch(BASE + '/api/users');
     expect(listRes.status).toBe(200);
-    const users = (await listRes.json()) as User[];
+    const users = (await listRes.json()) as Array<User>;
     expect(users).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'Bob', email: 'bob@test.com' })]),
     );

@@ -14,8 +14,8 @@ export interface IslandFormReturn<T extends Record<string, unknown>> {
   put(url: string): Promise<void>;
   patch(url: string): Promise<void>;
   delete(url: string): Promise<void>;
-  reset(...fields: (keyof T & string)[]): void;
-  clearErrors(...fields: string[]): void;
+  reset(...fields: Array<keyof T & string>): void;
+  clearErrors(...fields: Array<string>): void;
   clearError(): void;
 }
 
@@ -72,7 +72,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     { deep: true },
   );
 
-  function reset(...fields: (keyof T & string)[]) {
+  function reset(...fields: Array<keyof T & string>) {
     if (fields.length === 0) {
       Object.assign(data, { ...defaults_ });
     } else {
@@ -82,7 +82,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     }
   }
 
-  function clearErrors(...fields: string[]) {
+  function clearErrors(...fields: Array<string>) {
     if (fields.length === 0) {
       for (const key of Object.keys(errors)) {
         delete errors[key];

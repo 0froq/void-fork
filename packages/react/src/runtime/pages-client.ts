@@ -37,7 +37,7 @@ type ReactLayoutComponent = ComponentType<{ children?: React.ReactNode }>;
 
 export interface ReactPagesConfig {
   components: Record<string, () => Promise<ComponentModule>>;
-  layoutTree: Record<string, string[]>;
+  layoutTree: Record<string, Array<string>>;
   routeMeta: Record<string, { island?: boolean }>;
   matchRoute(url: string): string | null;
   staticPageData: boolean;

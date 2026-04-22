@@ -32,9 +32,11 @@ export function isDestructive(sql: string): boolean {
  * Validate migration files. Returns the validated list with destructive flags.
  * Throws if any destructive migration lacks the allow-destructive pragma.
  */
-export function validateMigrations(files: { name: string; sql: string }[]): MigrationFile[] {
-  const results: MigrationFile[] = [];
-  const errors: string[] = [];
+export function validateMigrations(
+  files: Array<{ name: string; sql: string }>,
+): Array<MigrationFile> {
+  const results: Array<MigrationFile> = [];
+  const errors: Array<string> = [];
 
   for (const file of files) {
     const destructive = isDestructive(file.sql);
@@ -64,13 +66,13 @@ export function validateMigrations(files: { name: string; sql: string }[]): Migr
  * `void db rename-migrations` so all three agree on what counts as a
  * "partial drizzle-kit state" (journal gone but other metadata lingering).
  */
-export function listDrizzleArtifacts(migrationsDir: string): string[] {
+export function listDrizzleArtifacts(migrationsDir: string): Array<string> {
   const metaDir = join(migrationsDir, 'meta');
   const snapshotFiles = existsSync(metaDir)
     ? readdirSync(metaDir).filter((f) => f.endsWith('_snapshot.json'))
     : [];
   const bundledPath = join(migrationsDir, 'migrations.js');
-  const out: string[] = [];
+  const out: Array<string> = [];
   for (const f of snapshotFiles) {
     out.push(`db/migrations/meta/${f}`);
   }
@@ -108,7 +110,7 @@ export function listDrizzleArtifacts(migrationsDir: string): string[] {
  */
 export function assertJournalCoherence(
   migrationsDir: string,
-  collected: { name: string; sql: string }[],
+  collected: Array<{ name: string; sql: string }>,
 ): void {
   const journal = readJournal(migrationsDir);
   const drizzleArtifacts = listDrizzleArtifacts(migrationsDir);
@@ -280,7 +282,7 @@ export function assertJournalCoherence(
     return;
   }
 
-  const lines: string[] = [
+  const lines: Array<string> = [
     'Migration drift detected between db/migrations/ and db/migrations/meta/_journal.json.',
   ];
   if (orphans.length > 0) {

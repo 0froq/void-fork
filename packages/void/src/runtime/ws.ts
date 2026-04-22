@@ -29,7 +29,7 @@ export interface WebSocketConnection<ServerEvent = unknown> {
 }
 
 export interface RoomController<ServerEvent = unknown> {
-  broadcast(event: ServerEvent, excludeIds?: string[]): Promise<void>;
+  broadcast(event: ServerEvent, excludeIds?: Array<string>): Promise<void>;
   getConnections(): Iterable<WebSocketConnection<ServerEvent>>;
   getConnection(id: string): WebSocketConnection<ServerEvent> | undefined;
 }
@@ -135,7 +135,7 @@ export interface ConnectCommonOptions {
   reconnect?: boolean;
   reconnectDelayMs?: number;
   maxReconnectAttempts?: number;
-  protocols?: string | string[];
+  protocols?: string | Array<string>;
 }
 
 type ConnectOptions<P extends keyof WebSocketRouteMap> = ConnectCommonOptions &
@@ -158,7 +158,7 @@ export class VoidSocket<P extends keyof WebSocketRouteMap & string> {
     close: new Set(),
     error: new Set(),
   };
-  private readonly buffer: ClientEventOf<P>[] = [];
+  private readonly buffer: Array<ClientEventOf<P>> = [];
   private reconnectAttempts = 0;
   private closedByUser = false;
 

@@ -11,7 +11,7 @@ import { loadUserEnvFile } from '../../src/host/load-user-env';
  * error with a pointer to the offending specifier.
  */
 
-const roots: string[] = [];
+const roots: Array<string> = [];
 
 function createTempProject(): string {
   const root = mkdtempSync(join(tmpdir(), 'void-load-user-env-'));

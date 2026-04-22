@@ -7,7 +7,7 @@ interface DocPage {
   content: string;
 }
 
-const pages: DocPage[] = [
+const pages: Array<DocPage> = [
   {
     slug: 'routing',
     title: 'File System Routing',
@@ -81,7 +81,7 @@ describe('searchDocs', () => {
   });
 
   it('returns at most 5 results', () => {
-    const manyPages: DocPage[] = Array.from({ length: 10 }, (_, i) => ({
+    const manyPages: Array<DocPage> = Array.from({ length: 10 }, (_, i) => ({
       slug: `page-${i}`,
       title: `Page ${i}`,
       content: `This page contains the common term.`,
@@ -103,7 +103,7 @@ describe('searchDocs', () => {
   });
 
   it('adds ellipsis prefix when snippet starts mid-content', () => {
-    const longPage: DocPage[] = [
+    const longPage: Array<DocPage> = [
       {
         slug: 'long',
         title: 'Long Page',
@@ -115,7 +115,7 @@ describe('searchDocs', () => {
   });
 
   it('adds ellipsis suffix when snippet ends before content end', () => {
-    const longPage: DocPage[] = [
+    const longPage: Array<DocPage> = [
       {
         slug: 'long',
         title: 'Long Page',
@@ -127,7 +127,7 @@ describe('searchDocs', () => {
   });
 
   it('counts multiple occurrences of a term', () => {
-    const repeatingPages: DocPage[] = [
+    const repeatingPages: Array<DocPage> = [
       { slug: 'few', title: 'Few', content: 'route' },
       { slug: 'many', title: 'Many', content: 'route route route route route' },
     ];

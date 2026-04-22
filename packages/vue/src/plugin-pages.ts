@@ -84,7 +84,7 @@ function hasNonIslandPages(dir: string): boolean {
   return false;
 }
 
-export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plugin[] {
+export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Array<Plugin> {
   let pageScan: PageScanResult | null = null;
   let viteConfig: ResolvedConfig | undefined;
   const root = dirname(pagesDir);

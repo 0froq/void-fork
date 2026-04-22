@@ -62,15 +62,13 @@ describe('ProxyClient', () => {
     });
 
     it('returns response for successful requests', async () => {
-      setFetchMock(async () =>
-        Response.json({ results: [{ id: 1 }], success: true }),
-      );
+      setFetchMock(async () => Response.json({ results: [{ id: 1 }], success: true }));
 
       const client = new ProxyClient(PROXY_URL, TOKEN, PROJECT_ID);
       const res = await client.fetch('/d1/query', { binding: 'DB', sql: 'SELECT 1' });
 
       expect(res.ok).toBe(true);
-      const data = (await res.json()) as { results: unknown[] };
+      const data = (await res.json()) as { results: Array<unknown> };
       expect(data.results).toEqual([{ id: 1 }]);
     });
   });

@@ -94,11 +94,11 @@ function extractEnvBindings(program: AstProgram): ImportBindings | null {
 
 type OffsetIndex = {
   /** Sorted array of byte offsets at which a new line starts (line N starts at lineStarts[N-1]). */
-  lineStarts: number[];
+  lineStarts: Array<number>;
 };
 
 function buildOffsetIndex(code: string): OffsetIndex {
-  const lineStarts: number[] = [0];
+  const lineStarts: Array<number> = [0];
   for (let i = 0; i < code.length; i++) {
     if (code.charCodeAt(i) === 10 /* \n */) {
       lineStarts.push(i + 1);
@@ -134,8 +134,8 @@ type Hit = {
  * is bound to the `void/env` proxy. Computed access produces a warning hit
  * with `property === null`; everything else carries the property name.
  */
-function findHits(program: AstProgram, bindings: ImportBindings): Hit[] {
-  const hits: Hit[] = [];
+function findHits(program: AstProgram, bindings: ImportBindings): Array<Hit> {
+  const hits: Array<Hit> = [];
 
   walk(program as unknown as Parameters<typeof walk>[0], {
     enter(node) {
@@ -169,7 +169,7 @@ function findHits(program: AstProgram, bindings: ImportBindings): Hit[] {
   return hits;
 }
 
-function recordHit(node: AstMemberExpression, hits: Hit[]): void {
+function recordHit(node: AstMemberExpression, hits: Array<Hit>): void {
   if (node.computed) {
     hits.push({ kind: 'warn', property: null, start: node.start! });
     return;
@@ -196,7 +196,7 @@ function recordHit(node: AstMemberExpression, hits: Hit[]): void {
 const DEFAULT_ENV_PREFIXES = ['VITE_'] as const;
 
 export function envClientGuardPlugin(root: string): Plugin {
-  let envPrefixes: readonly string[] = DEFAULT_ENV_PREFIXES;
+  let envPrefixes: ReadonlyArray<string> = DEFAULT_ENV_PREFIXES;
 
   return {
     name: 'void:env-client-guard',

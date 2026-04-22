@@ -37,8 +37,8 @@ export interface IslandFormReturn<T extends Record<string, unknown>> {
   hasChanges: boolean;
   wasSuccessful: boolean;
   recentlySuccessful: boolean;
-  reset: (...fields: (keyof T & string)[]) => void;
-  clearErrors: (...fields: string[]) => void;
+  reset: (...fields: Array<keyof T & string>) => void;
+  clearErrors: (...fields: Array<string>) => void;
   clearError: () => void;
   post: (url: string) => Promise<void>;
   put: (url: string) => Promise<void>;
@@ -71,7 +71,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     setDataState((prev) => ({ ...prev, [field]: value }));
   }, []);
 
-  const reset = useCallback((...fields: (keyof T & string)[]) => {
+  const reset = useCallback((...fields: Array<keyof T & string>) => {
     if (fields.length === 0) {
       setDataState({ ...defaultsRef.current } as T);
     } else {
@@ -85,7 +85,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     }
   }, []);
 
-  const clearErrors = useCallback((...fields: string[]) => {
+  const clearErrors = useCallback((...fields: Array<string>) => {
     if (fields.length === 0) {
       setErrors({});
     } else {

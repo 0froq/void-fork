@@ -1,6 +1,6 @@
 import type { SubcommandDef } from './subcommand-prompt';
 
-export const domainSubcommands: SubcommandDef[] = [
+export const domainSubcommands: Array<SubcommandDef> = [
   { name: 'add', arg: '<hostname>', description: 'Add a custom domain' },
   { name: 'delete', arg: '<hostname>', description: 'Remove a custom domain' },
   { name: 'list', description: 'List custom domains + status' },
@@ -13,7 +13,7 @@ export interface DomainArgs {
   projectSlug?: string;
 }
 
-export function parseDomainArgs(args: string[]): DomainArgs {
+export function parseDomainArgs(args: Array<string>): DomainArgs {
   const subcommand = args[0] as DomainArgs['subcommand'];
   if (!subcommand || !['add', 'delete', 'list', 'status'].includes(subcommand)) {
     throw new Error('Usage: void domain <add|delete|list|status> [hostname] [--project <name>]');

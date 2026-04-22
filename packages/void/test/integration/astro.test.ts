@@ -16,7 +16,7 @@ function removeWranglerConfig(root: string) {
 }
 
 function readWranglerConfig(root: string): {
-  compatibility_flags?: string[];
+  compatibility_flags?: Array<string>;
   d1_databases?: Array<{ binding: string }>;
   kv_namespaces?: Array<{ binding: string }>;
 } {
@@ -24,7 +24,7 @@ function readWranglerConfig(root: string): {
   const jsonPath = join(root, 'wrangler.json');
   const configPath = existsSync(jsoncPath) ? jsoncPath : jsonPath;
   return JSON.parse(readFileSync(configPath, 'utf-8')) as {
-    compatibility_flags?: string[];
+    compatibility_flags?: Array<string>;
     d1_databases?: Array<{ binding: string }>;
     kv_namespaces?: Array<{ binding: string }>;
   };

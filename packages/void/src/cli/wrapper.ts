@@ -12,11 +12,11 @@ import { build } from 'vite';
 
 export interface WrapperFeatures {
   /** Auth providers (kept for interface compat, no longer used by wrapper). */
-  auth: string[] | null;
+  auth: Array<string> | null;
   /** Cron job definitions (from scanJobsSync). */
-  crons: { name: string; filePath: string; crons: string[] }[];
+  crons: Array<{ name: string; filePath: string; crons: Array<string> }>;
   /** Queue consumer definitions (from scanQueuesSync). */
-  queues: { name: string; filePath: string; bindingName: string }[];
+  queues: Array<{ name: string; filePath: string; bindingName: string }>;
   /** Whether migrations are present (framework deploys need a /__void/migrate endpoint). */
   hasMigrations?: boolean;
   /** Database dialect for migration handler. */
@@ -95,7 +95,7 @@ export async function generateWrapper(
   }
 
   // Collect migrations and copy handler if needed
-  let migrations: { name: string; sql: string }[] | undefined;
+  let migrations: Array<{ name: string; sql: string }> | undefined;
   if (features.hasMigrations) {
     const { collectMigrations } = await import('../migrations/collect');
     const migrationsDir = join(root, 'db', 'migrations');
@@ -186,9 +186,9 @@ function generateWrapperSource(
   renamedEntry: string,
   handlersModule: string,
   features: WrapperFeatures,
-  migrations?: { name: string; sql: string }[],
+  migrations?: Array<{ name: string; sql: string }>,
 ): string {
-  const lines: string[] = [];
+  const lines: Array<string> = [];
 
   lines.push(`import original from "./${renamedEntry}";`);
 
@@ -279,7 +279,7 @@ function generateWrapperSource(
 }
 
 function generateHandlersSource(root: string, features: WrapperFeatures): string {
-  const lines: string[] = [];
+  const lines: Array<string> = [];
 
   // Scheduled handlers
   if (features.crons.length > 0) {

@@ -158,7 +158,7 @@ function buildWebSocketRoute(root: string, filePath: string): WebSocketRouteDefi
   };
 }
 
-function parseWebSocketFiles(root: string, files: string[]): WebSocketRouteDefinition[] {
+function parseWebSocketFiles(root: string, files: Array<string>): Array<WebSocketRouteDefinition> {
   return files
     .filter((f) => isWebSocketRouteFile(f))
     .filter((f) => !f.split('/').some((segment) => segment.startsWith('_')))
@@ -171,17 +171,17 @@ function parseWebSocketFiles(root: string, files: string[]): WebSocketRouteDefin
     });
 }
 
-export async function scanWebSocketRoutes(root: string): Promise<WebSocketRouteDefinition[]> {
+export async function scanWebSocketRoutes(root: string): Promise<Array<WebSocketRouteDefinition>> {
   const pattern = `**/*.{${HANDLER_EXTENSIONS.join(',')}}`;
   const files = await glob(pattern, { cwd: `${root}/routes`, absolute: false }).catch(
-    () => [] as string[],
+    () => [] as Array<string>,
   );
   return parseWebSocketFiles(root, files);
 }
 
-export function scanWebSocketRoutesSync(root: string): WebSocketRouteDefinition[] {
+export function scanWebSocketRoutesSync(root: string): Array<WebSocketRouteDefinition> {
   const pattern = `**/*.{${HANDLER_EXTENSIONS.join(',')}}`;
-  let files: string[];
+  let files: Array<string>;
   try {
     files = globSync(pattern, { cwd: `${root}/routes`, absolute: false });
   } catch {

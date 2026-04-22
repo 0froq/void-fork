@@ -47,11 +47,11 @@ interface RoutingPluginOptions {
   isAuthEnabled: () => boolean;
   headConfig?: import('./pages/head').HeadConfig;
   output?: 'server' | 'static';
-  prerenderPaths?: string[];
+  prerenderPaths?: Array<string>;
   remoteMode?: boolean;
   target?: 'node' | 'bun' | 'deno';
-  headerRules?: import('./cli/types').HeaderRule[];
-  redirectRules?: import('./cli/types').RedirectRule[];
+  headerRules?: Array<import('./cli/types').HeaderRule>;
+  redirectRules?: Array<import('./cli/types').RedirectRule>;
 }
 
 export function routingPlugin(root: string, options: RoutingPluginOptions): Plugin {

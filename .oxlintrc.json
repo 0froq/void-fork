@@ -103,6 +103,12 @@
     }
   ],
   "rules": {
+    "@typescript-eslint/array-type": [
+      "error",
+      {
+        "default": "generic"
+      }
+    ],
     "@typescript-eslint/no-duplicate-enum-values": "error",
     "@typescript-eslint/no-explicit-any": "error",
     "@typescript-eslint/no-extra-non-null-assertion": "error",

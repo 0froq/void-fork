@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import type { SubcommandDef } from './subcommand-prompt';
 
-export const envSubcommands: SubcommandDef[] = [
+export const envSubcommands: Array<SubcommandDef> = [
   {
     name: 'check',
     description: 'Validate env.ts schema against .env files (and optionally remote secrets)',
@@ -33,7 +33,7 @@ export type EnvArgs =
   | { subcommand: 'types' }
   | { subcommand: 'example'; force: boolean };
 
-export function parseEnvArgs(args: string[]): EnvArgs {
+export function parseEnvArgs(args: Array<string>): EnvArgs {
   const [subcommand, ...rest] = args;
   if (subcommand === 'check') {
     const parsed = parseArgs({

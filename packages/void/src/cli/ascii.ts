@@ -1,4 +1,4 @@
-export const asciiArts: string[] = [
+export const asciiArts: Array<string> = [
   `
 ▄   ▄  ▄▄▄  ▄    ▐▌
 █   █ █   █ ▄    ▐▌

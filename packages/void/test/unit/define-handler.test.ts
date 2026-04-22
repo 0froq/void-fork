@@ -72,7 +72,7 @@ describe('defineHandler', () => {
   });
 
   it('middleware + handler execution order', async () => {
-    const order: string[] = [];
+    const order: Array<string> = [];
 
     const m1 = defineMiddleware(async (c, next) => {
       order.push('m1-before');
@@ -152,7 +152,7 @@ describe('defineHandler', () => {
   });
 
   it('raw Hono middleware (not wrapped with defineMiddleware)', async () => {
-    const order: string[] = [];
+    const order: Array<string> = [];
 
     const rawMiddleware: MiddlewareHandler = async (c, next) => {
       order.push('raw-before');
@@ -175,7 +175,7 @@ describe('defineHandler', () => {
   });
 
   it('mixed raw Hono middleware and defineMiddleware', async () => {
-    const order: string[] = [];
+    const order: Array<string> = [];
 
     const rawMiddleware: MiddlewareHandler = async (_c, next) => {
       order.push('raw');
@@ -231,11 +231,7 @@ describe('defineHandler', () => {
 });
 
 describe('defineHandler.withValidator', () => {
-  function createValidatedApp(
-    method: 'get' | 'post',
-    path: string,
-    handler: TypedHandler,
-  ) {
+  function createValidatedApp(method: 'get' | 'post', path: string, handler: TypedHandler) {
     const app = new Hono();
     app[method](path, async (c) => {
       return convertReturnValue(await handler(c as unknown as CloudContext));

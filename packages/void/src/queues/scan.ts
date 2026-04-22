@@ -35,7 +35,11 @@ function extractConsumerOption(source: string, name: string): number | undefined
   return match ? Number(match[1]) : undefined;
 }
 
-function parseQueueFiles(root: string, queuesDir: string, files: string[]): QueueDefinition[] {
+function parseQueueFiles(
+  root: string,
+  queuesDir: string,
+  files: Array<string>,
+): Array<QueueDefinition> {
   return files
     .filter((f) => !f.split('/').some((segment) => segment.startsWith('_')))
     .sort((a, b) => a.localeCompare(b))
@@ -55,17 +59,20 @@ function parseQueueFiles(root: string, queuesDir: string, files: string[]): Queu
     });
 }
 
-export async function scanQueues(root: string, queuesDir = 'queues'): Promise<QueueDefinition[]> {
+export async function scanQueues(
+  root: string,
+  queuesDir = 'queues',
+): Promise<Array<QueueDefinition>> {
   const pattern = `**/*.{${QUEUE_EXTENSIONS.join(',')}}`;
   const files = await glob(pattern, { cwd: `${root}/${queuesDir}`, absolute: false }).catch(
-    () => [] as string[],
+    () => [] as Array<string>,
   );
   return parseQueueFiles(root, queuesDir, files);
 }
 
-export function scanQueuesSync(root: string, queuesDir = 'queues'): QueueDefinition[] {
+export function scanQueuesSync(root: string, queuesDir = 'queues'): Array<QueueDefinition> {
   const pattern = `**/*.{${QUEUE_EXTENSIONS.join(',')}}`;
-  let files: string[];
+  let files: Array<string>;
   try {
     files = globSync(pattern, { cwd: `${root}/${queuesDir}`, absolute: false });
   } catch {

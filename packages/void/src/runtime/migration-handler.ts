@@ -12,13 +12,13 @@ export interface MigrationResult {
 
 export interface MigrationResponse {
   ok: boolean;
-  migrations: MigrationResult[];
+  migrations: Array<MigrationResult>;
   error?: string;
 }
 
 export function createMigrationHandler(
   env: Record<string, unknown>,
-  migrations: MigrationEntry[] | undefined,
+  migrations: Array<MigrationEntry> | undefined,
   _dialect: 'sqlite' | 'postgresql',
   runAuthMigrations?: () => Promise<void>,
 ) {
@@ -86,7 +86,7 @@ async function upgradeTrackingTable(db: D1Database): Promise<void> {
 
 async function runD1Migrations(
   db: D1Database,
-  migrations: MigrationEntry[],
+  migrations: Array<MigrationEntry>,
 ): Promise<MigrationResponse> {
   await db
     .prepare(
@@ -103,7 +103,7 @@ async function runD1Migrations(
   const { results } = await db.prepare('SELECT name FROM _void_migrations').all();
   const applied = new Set((results ?? []).map((r) => r.name as string));
 
-  const migrationResults: MigrationResult[] = [];
+  const migrationResults: Array<MigrationResult> = [];
 
   for (const m of migrations) {
     if (applied.has(m.name)) {

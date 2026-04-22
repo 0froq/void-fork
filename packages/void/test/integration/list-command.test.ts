@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const tempHomes: string[] = [];
+const tempHomes: Array<string> = [];
 
 function setIsolatedHome(): void {
   const dir = mkdtempSync(join(tmpdir(), 'void-home-'));
@@ -19,17 +19,19 @@ async function importRunListCommand() {
 }
 
 function captureOutput(): { output: () => string; restore: () => void } {
-  const chunks: string[] = [];
-  const writeMock = vi.spyOn(process.stdout, 'write').mockImplementation((...args: unknown[]) => {
-    const chunk = args[0];
-    if (typeof chunk === 'string') {
-      chunks.push(chunk);
-    } else if (Buffer.isBuffer(chunk)) {
-      chunks.push(chunk.toString());
-    }
-    return true;
-  });
-  const logMock = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+  const chunks: Array<string> = [];
+  const writeMock = vi
+    .spyOn(process.stdout, 'write')
+    .mockImplementation((...args: Array<unknown>) => {
+      const chunk = args[0];
+      if (typeof chunk === 'string') {
+        chunks.push(chunk);
+      } else if (Buffer.isBuffer(chunk)) {
+        chunks.push(chunk.toString());
+      }
+      return true;
+    });
+  const logMock = vi.spyOn(console, 'log').mockImplementation((...args: Array<unknown>) => {
     chunks.push(args.map(String).join(' ') + '\n');
   });
   return {

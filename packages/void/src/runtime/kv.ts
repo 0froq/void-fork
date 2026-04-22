@@ -17,7 +17,7 @@ export interface ListKey<M = unknown> {
 }
 
 export interface ListResult<M = unknown> {
-  keys: ListKey<M>[];
+  keys: Array<ListKey<M>>;
   list_complete: boolean;
   cursor?: string;
 }
@@ -103,7 +103,7 @@ function createKVMap<T>(getNS: () => KVNamespace, prefix: string): KVMap<T> {
         keys: result.keys.map((k) => ({
           ...k,
           name: k.name.slice(stripLen),
-        })) as ListKey<M>[],
+        })) as Array<ListKey<M>>,
         list_complete: result.list_complete,
         cursor: getListCursor(result),
       };
@@ -152,7 +152,7 @@ function createKVClient(getNS: () => KVNamespace): KVClient {
         cursor: options?.cursor,
       });
       return {
-        keys: result.keys as ListKey<M>[],
+        keys: result.keys as Array<ListKey<M>>,
         list_complete: result.list_complete,
         cursor: getListCursor(result),
       };

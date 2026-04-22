@@ -16,7 +16,7 @@ let baseUrl: string;
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
+    const chunks: Array<Buffer> = [];
     req.on('data', (c: Buffer) => chunks.push(c));
     req.on('end', () => resolve(Buffer.concat(chunks).toString()));
   });
@@ -65,7 +65,7 @@ beforeAll(
 
         // D1 batch
         if (url === '/d1/batch') {
-          const statements = json.statements as { sql: string }[];
+          const statements = json.statements as Array<{ sql: string }>;
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(
             JSON.stringify(

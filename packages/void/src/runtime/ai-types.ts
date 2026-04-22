@@ -30,13 +30,13 @@ export interface ChatMessage {
 }
 
 export interface ChatCompletionInputs {
-  messages: ChatMessage[];
+  messages: Array<ChatMessage>;
   temperature?: number;
   max_tokens?: number;
   top_p?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
-  stop?: string | string[];
+  stop?: string | Array<string>;
   stream?: boolean;
 }
 
@@ -45,7 +45,7 @@ export interface ChatCompletionResponse {
   object: string;
   created: number;
   model: string;
-  choices: ChatCompletionChoice[];
+  choices: Array<ChatCompletionChoice>;
   usage: ChatCompletionUsage;
 }
 
@@ -63,11 +63,11 @@ export interface ChatCompletionUsage {
 
 export interface ChatCompletionChunk {
   id: string;
-  choices: {
+  choices: Array<{
     index: number;
     delta: { role?: string; content?: string };
     finish_reason: string | null;
-  }[];
+  }>;
 }
 
 /** Maps provider prefix to expected env var name for the API key */

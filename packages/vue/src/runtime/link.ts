@@ -66,7 +66,7 @@ function mergeDataIntoHref(href: string, data?: Record<string, unknown>): string
   return `${path}${query ? `?${query}` : ''}${hash}`;
 }
 
-function hasPrefetch(prefetch: boolean | PrefetchStrategy | PrefetchStrategy[]): boolean {
+function hasPrefetch(prefetch: boolean | PrefetchStrategy | Array<PrefetchStrategy>): boolean {
   return prefetch !== false;
 }
 
@@ -107,7 +107,9 @@ export const Link: Component = defineComponent({
     viewTransition: { type: Boolean, default: undefined },
     onNavigate: { type: Function as PropType<(event: NavigateEvent) => void>, default: undefined },
     prefetch: {
-      type: [Boolean, String, Array] as PropType<boolean | PrefetchStrategy | PrefetchStrategy[]>,
+      type: [Boolean, String, Array] as PropType<
+        boolean | PrefetchStrategy | Array<PrefetchStrategy>
+      >,
       default: false,
     },
     cacheFor: {
@@ -123,7 +125,7 @@ export const Link: Component = defineComponent({
     const hrefWithData = computed(() =>
       isGet.value ? mergeDataIntoHref(props.href, props.data) : props.href,
     );
-    const strategies = computed<PrefetchStrategy[]>(() => {
+    const strategies = computed<Array<PrefetchStrategy>>(() => {
       if (props.prefetch === false || props.reloadDocument) {
         return [];
       }

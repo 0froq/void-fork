@@ -24,7 +24,7 @@ const noBindings: InferredBindings = {
   needsAI: false,
 };
 
-const sampleMigrations: MigrationFile[] = [
+const sampleMigrations: Array<MigrationFile> = [
   {
     name: '0001_create_users.sql',
     sql: 'CREATE TABLE users (id INTEGER PRIMARY KEY);',
@@ -43,8 +43,8 @@ function getManifest(form: FormData): DeployManifest {
   return JSON.parse(form.get('manifest') as string);
 }
 
-function getMigrationEntries(form: FormData): string[] {
-  const keys: string[] = [];
+function getMigrationEntries(form: FormData): Array<string> {
+  const keys: Array<string> = [];
   for (const [key] of form.entries()) {
     if (key.startsWith('migration:')) {
       keys.push(key.slice('migration:'.length));
@@ -137,7 +137,7 @@ describe('packageBuild migration-binding consistency', () => {
 
   it('forces d1 binding when multiple migrations exist without D1 usage', async () => {
     setupWorkerDir();
-    const migrations: MigrationFile[] = [
+    const migrations: Array<MigrationFile> = [
       {
         name: '0001_create_users.sql',
         sql: 'CREATE TABLE users (id INTEGER PRIMARY KEY);',

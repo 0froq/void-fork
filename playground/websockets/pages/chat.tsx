@@ -42,7 +42,7 @@ export default function ChatPage({ initialRoom, initialName }: Props) {
   const [activeName, setActiveName] = useState(initialName);
   const [draft, setDraft] = useState('');
   const [status, setStatus] = useState('connecting');
-  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [timeline, setTimeline] = useState<Array<TimelineEntry>>([]);
   const socketRef = useRef<ChatSocket | null>(null);
 
   const appendEvent = useEffectEvent((event: ChatServerEvent) => {

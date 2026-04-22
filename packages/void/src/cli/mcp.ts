@@ -63,8 +63,8 @@ function resolveDocsDir(): string {
   throw new Error(`Void docs directory not found. Expected bundled docs at: ${bundledDocsDir}`);
 }
 
-function findMdFiles(dir: string, prefix = ''): string[] {
-  const results: string[] = [];
+function findMdFiles(dir: string, prefix = ''): Array<string> {
+  const results: Array<string> = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.name === 'node_modules' || entry.name.startsWith('.')) {
       continue;
@@ -79,7 +79,7 @@ function findMdFiles(dir: string, prefix = ''): string[] {
   return results;
 }
 
-function loadDocs(): DocPage[] {
+function loadDocs(): Array<DocPage> {
   const docsDir = resolveDocsDir();
 
   const files = findMdFiles(docsDir).sort();
@@ -102,7 +102,7 @@ function loadDocs(): DocPage[] {
 
 // --- Search ---
 
-export function searchDocs(pages: DocPage[], query: string): SearchResult[] {
+export function searchDocs(pages: Array<DocPage>, query: string): Array<SearchResult> {
   const terms = query
     .toLowerCase()
     .split(/\s+/)
@@ -112,7 +112,7 @@ export function searchDocs(pages: DocPage[], query: string): SearchResult[] {
     return [];
   }
 
-  const scored: SearchResult[] = [];
+  const scored: Array<SearchResult> = [];
 
   for (const page of pages) {
     const titleLower = page.title.toLowerCase();
@@ -170,7 +170,7 @@ function createQuerySdk(token: string) {
 
   // Auto-bind all PlatformClient methods without exposing private fields
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sdk: Record<string, (...args: any[]) => unknown> = {};
+  const sdk: Record<string, (...args: Array<any>) => unknown> = {};
   const proto = Object.getPrototypeOf(client) as Record<string, unknown>;
   for (const key of Object.getOwnPropertyNames(proto)) {
     if (key === 'constructor') {
@@ -295,7 +295,7 @@ Example: async () => { const ps = await void_.listProjects(); return ps.map(p =>
 // --- JSON-RPC dispatch ---
 
 export interface McpContext {
-  pages: DocPage[];
+  pages: Array<DocPage>;
   token: string | null;
 }
 
@@ -389,8 +389,8 @@ export function handleRequest(
 
       const sdk = createQuerySdk(ctx.token);
       const AsyncFunction = async function () {}.constructor as new (
-        ...args: string[]
-      ) => (...args: unknown[]) => Promise<unknown>;
+        ...args: Array<string>
+      ) => (...args: Array<unknown>) => Promise<unknown>;
 
       return (async () => {
         try {

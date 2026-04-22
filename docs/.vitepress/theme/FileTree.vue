@@ -8,12 +8,12 @@ export interface FileTreeItem {
   name: string;
   description?: string;
   link?: string;
-  children?: FileTreeItem[];
+  children?: Array<FileTreeItem>;
   collapsed?: boolean;
 }
 
 const props = defineProps<{
-  items: FileTreeItem[] | ((ext: string) => FileTreeItem[]);
+  items: Array<FileTreeItem> | ((ext: string) => Array<FileTreeItem>);
   defaultExpanded?: boolean;
   adapterTabs?: boolean;
 }>();
@@ -22,8 +22,8 @@ function isFolder(item: FileTreeItem): boolean {
   return !!item.children || item.name.endsWith('/');
 }
 
-function getAllFolderNames(items: FileTreeItem[]): string[] {
-  const names: string[] = [];
+function getAllFolderNames(items: Array<FileTreeItem>): Array<string> {
+  const names: Array<string> = [];
   for (const item of items) {
     if (isFolder(item)) {
       if (!item.collapsed) {
@@ -44,7 +44,9 @@ const resolvedItems = computed(() => {
   return props.items;
 });
 
-const expanded = ref<string[]>(props.defaultExpanded ? getAllFolderNames(resolvedItems.value) : []);
+const expanded = ref<Array<string>>(
+  props.defaultExpanded ? getAllFolderNames(resolvedItems.value) : [],
+);
 
 watch(resolvedItems, (items) => {
   if (props.defaultExpanded) {
@@ -149,7 +151,7 @@ export function installCodeGroupListener() {
       return;
     }
     const title = label.getAttribute('data-title');
-    if (title && (adapters as readonly string[]).includes(title)) {
+    if (title && (adapters as ReadonlyArray<string>).includes(title)) {
       selectedAdapter.value = title;
     }
   });
@@ -199,7 +201,7 @@ function getFileIcon(name: string, dark: boolean): string {
 const TreeNode = defineComponent({
   name: 'TreeNode',
   props: {
-    treeItems: { type: Array as () => FileTreeItem[], required: true },
+    treeItems: { type: Array as () => Array<FileTreeItem>, required: true },
     level: { type: Number, default: 0 },
     dark: { type: Boolean, default: false },
   },

@@ -22,7 +22,7 @@ import { defineEnv } from '../../src/runtime/env-public';
  * keeps the file-discovery contract honest.
  */
 
-const roots: string[] = [];
+const roots: Array<string> = [];
 
 function createTempProject(opts?: { withEnvTs?: boolean }): string {
   const root = mkdtempSync(join(tmpdir(), 'void-deploy-env-'));

@@ -25,8 +25,8 @@ interface IslandChunk {
 
 export type RenderChunk = HtmlChunk | IslandChunk;
 
-function findIslandTags(html: string, names: Set<string>): IslandMatch[] {
-  const matches: IslandMatch[] = [];
+function findIslandTags(html: string, names: Set<string>): Array<IslandMatch> {
+  const matches: Array<IslandMatch> = [];
   let match: RegExpExecArray | null;
   ISLAND_TAG_RE.lastIndex = 0;
   while ((match = ISLAND_TAG_RE.exec(html)) !== null) {
@@ -57,11 +57,14 @@ export function toIslandId(imp: IslandImport): string {
   return imp.islandId ?? imp.specifier.replace(/\.[^.]+$/, '');
 }
 
-export function buildRenderChunks(html: string, islandImports: IslandImport[]): RenderChunk[] {
+export function buildRenderChunks(
+  html: string,
+  islandImports: Array<IslandImport>,
+): Array<RenderChunk> {
   const islandByName = new Map(islandImports.map((item) => [item.name, item]));
   const tags = findIslandTags(html, new Set(islandByName.keys()));
 
-  const chunks: RenderChunk[] = [];
+  const chunks: Array<RenderChunk> = [];
   let cursor = 0;
 
   for (const tag of tags) {

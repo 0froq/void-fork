@@ -2,9 +2,9 @@ export interface RouteDefinition {
   /** URL pattern, e.g. "/api/users/:id" */
   pattern: string;
   /** HTTP methods detected from named exports (e.g. ["GET", "POST"]) */
-  methods: string[];
+  methods: Array<string>;
   /** Parameter names extracted from the pattern */
-  params: string[];
+  params: Array<string>;
   /** Whether this route has a catch-all parameter */
   catchAll: boolean;
   /** Environment restriction: "dev", "prod", or null */
@@ -61,7 +61,7 @@ function parsePath(relativePath: string, isWebSocketRoute: boolean): RouteDefini
   const filtered = segments.filter((s) => !s.startsWith('(') || !s.endsWith(')'));
 
   // 5. Convert dynamic segments
-  const params: string[] = [];
+  const params: Array<string> = [];
   let catchAll = false;
 
   const converted = filtered.map((segment) => {

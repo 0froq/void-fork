@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { FileTreeItem } from './FileTree.vue';
 
-const items: FileTreeItem[] = [
+const items: Array<FileTreeItem> = [
   {
     name: 'routes/',
     children: [

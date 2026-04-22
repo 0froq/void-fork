@@ -16,7 +16,7 @@ import {
   resolveProjectBySlug,
 } from '../../src/cli/resolve-project';
 
-const tempDirs: string[] = [];
+const tempDirs: Array<string> = [];
 
 describe('getRequestedProjectSlug', () => {
   afterEach(() => {
@@ -68,7 +68,7 @@ describe('resolveProjectBySlug', () => {
     const projects = [
       { id: 'proj_1', slug: 'app-one' },
       { id: 'proj_2', slug: 'app-two' },
-    ] as ProjectResponse[];
+    ] as Array<ProjectResponse>;
     expect(resolveProjectBySlug(projects, 'missing')).toBeNull();
   });
 });

@@ -15,7 +15,7 @@ export interface IslandImport {
 export interface ScriptExtraction {
   script: string | null;
   body: string;
-  islandImports: IslandImport[];
+  islandImports: Array<IslandImport>;
   clientCode: string | null;
 }
 
@@ -28,7 +28,7 @@ export function extractScript(source: string): ScriptExtraction {
   const script = match[1].trim();
   const body = source.slice(match[0].length);
 
-  const islandImports: IslandImport[] = [];
+  const islandImports: Array<IslandImport> = [];
   let m;
   while ((m = ISLAND_IMPORT_RE.exec(script)) !== null) {
     islandImports.push({

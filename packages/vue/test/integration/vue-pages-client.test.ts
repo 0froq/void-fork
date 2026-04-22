@@ -45,7 +45,7 @@ async function prepareForViteHmr(page: Page) {
     }
 
     const originalDebug = console.debug.bind(console);
-    console.debug = (...args: unknown[]) => {
+    console.debug = (...args: Array<unknown>) => {
       if (args.some((arg) => typeof arg === 'string' && arg.includes('[vite] connected.'))) {
         trackedWindow[marker] = true;
       }
@@ -81,7 +81,7 @@ function defineClientTests(getBase: () => string) {
 
   it('hydrates without Vue warnings', async () => {
     const page = await newPage();
-    const warnings: string[] = [];
+    const warnings: Array<string> = [];
     page.on('console', (msg) => {
       if (
         msg.type() === 'warning' ||
@@ -175,7 +175,9 @@ function defineClientTests(getBase: () => string) {
         document.querySelector('h1')?.textContent?.includes('Users'),
       );
 
-      const stamp = await page.evaluate(() => (document.querySelector('nav') as NavElement | null)?.__stamp);
+      const stamp = await page.evaluate(
+        () => (document.querySelector('nav') as NavElement | null)?.__stamp,
+      );
       expect(stamp).toBe(1);
 
       const navText = await page.textContent('nav');

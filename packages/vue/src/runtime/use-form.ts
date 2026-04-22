@@ -24,8 +24,8 @@ type UntypedForm = {
   put(opts?: FormSubmitOptions): Promise<void>;
   patch(opts?: FormSubmitOptions): Promise<void>;
   delete(opts?: FormSubmitOptions): Promise<void>;
-  reset(...fields: string[]): void;
-  clearErrors(...fields: string[]): void;
+  reset(...fields: Array<string>): void;
+  clearErrors(...fields: Array<string>): void;
   clearError(): void;
 };
 
@@ -60,8 +60,8 @@ export function useForm<U extends ActionUrl & string>(
   put(opts?: FormSubmitOptions): Promise<void>;
   patch(opts?: FormSubmitOptions): Promise<void>;
   delete(opts?: FormSubmitOptions): Promise<void>;
-  reset(...fields: (keyof ResolveActionBody<U> & string)[]): void;
-  clearErrors(...fields: (keyof ResolveActionBody<U> & string)[]): void;
+  reset(...fields: Array<keyof ResolveActionBody<U> & string>): void;
+  clearErrors(...fields: Array<keyof ResolveActionBody<U> & string>): void;
   clearError(): void;
 };
 
@@ -112,7 +112,7 @@ export function useForm(
     { deep: true },
   );
 
-  function reset(...fields: string[]) {
+  function reset(...fields: Array<string>) {
     if (fields.length === 0) {
       Object.assign(data, { ...defaults_ });
     } else {
@@ -122,7 +122,7 @@ export function useForm(
     }
   }
 
-  function clearErrors(...fields: string[]) {
+  function clearErrors(...fields: Array<string>) {
     if (fields.length === 0) {
       for (const key of Object.keys(errors)) {
         delete errors[key];

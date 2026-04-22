@@ -4,7 +4,7 @@ export type Props = InferProps<typeof loader>;
 
 export const loader = defineHandler((c) => {
   const env = c.env;
-  const bindings: { name: string; type: string }[] = [];
+  const bindings: Array<{ name: string; type: string }> = [];
 
   for (const [name, value] of Object.entries(env).filter(([n]) => !n.startsWith('__'))) {
     let type: string = typeof value;

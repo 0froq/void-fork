@@ -26,7 +26,7 @@ interface VoidMdPlugin {
 export function resolveSpecifier(
   specifier: string,
   importerDir: string,
-  extensions: string[],
+  extensions: Array<string>,
 ): string | null {
   const base = normalizePath(resolve(importerDir, specifier));
   for (const ext of extensions) {
@@ -119,7 +119,7 @@ export function extractCssImports(filePath: string): string {
   const code = readFileSync(filePath, 'utf-8');
   const re =
     /^\s*import\b[^"']*["']([^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss))["']/gm;
-  const imports: string[] = [];
+  const imports: Array<string> = [];
   let match;
   while ((match = re.exec(code)) !== null) {
     imports.push(`@import ${JSON.stringify(match[1])};`);
@@ -131,7 +131,7 @@ export function extractCssImports(filePath: string): string {
 export function rebuildIslandCssMap(
   pageScan: PageScanResult,
   pagesDir: string,
-  islandCssMap: Map<string, string[]>,
+  islandCssMap: Map<string, Array<string>>,
   fileHasCssFn: (filePath: string) => boolean,
 ): void {
   islandCssMap.clear();
@@ -139,7 +139,7 @@ export function rebuildIslandCssMap(
     if (!page.island) {
       continue;
     }
-    const cssPaths: string[] = [];
+    const cssPaths: Array<string> = [];
     const layoutChain = resolveEffectiveLayoutChain(page, pageScan.layouts, pageScan.namedLayouts);
     for (const layout of layoutChain) {
       const layoutPath = resolve(pagesDir, layout.filePath);

@@ -7,7 +7,7 @@ declare module 'void/routes' {
       GET: { input: {}; output: { ok: boolean } };
     };
     '/api/users': {
-      GET: { input: {}; output: { id: string; name: string }[] };
+      GET: { input: {}; output: Array<{ id: string; name: string }> };
       POST: { input: { body: { name: string } }; output: { created: boolean } };
     };
     '/api/users/:id': {

@@ -24,7 +24,7 @@ const PACKAGE_ROOT = join(import.meta.dirname, '..', '..');
 const CLI_ENTRY = join(PACKAGE_ROOT, 'dist', 'cli', 'cli.mjs');
 const ENV_PUBLIC_DIST = join(PACKAGE_ROOT, 'dist', 'runtime', 'env-public.mjs');
 
-const roots: string[] = [];
+const roots: Array<string> = [];
 
 function createProject(envSchemaBody?: string): string {
   const root = mkdtempSync(join(tmpdir(), 'void-env-cli-'));
@@ -40,7 +40,10 @@ function createProject(envSchemaBody?: string): string {
   return root;
 }
 
-function runVoid(root: string, args: string[]): { stdout: string; stderr: string; status: number } {
+function runVoid(
+  root: string,
+  args: Array<string>,
+): { stdout: string; stderr: string; status: number } {
   const res = spawnSync('node', [CLI_ENTRY, ...args], {
     cwd: root,
     encoding: 'utf8',

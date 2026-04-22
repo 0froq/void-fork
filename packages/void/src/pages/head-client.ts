@@ -37,8 +37,8 @@ function createHeadElement(descriptor: HeadElementDescriptor): Element {
   return el;
 }
 
-function collectDesiredHeadElements(head: HeadDescriptor): HeadElementDescriptor[] {
-  const desired: HeadElementDescriptor[] = [];
+function collectDesiredHeadElements(head: HeadDescriptor): Array<HeadElementDescriptor> {
+  const desired: Array<HeadElementDescriptor> = [];
 
   if (head.meta) {
     for (const entry of head.meta) {
@@ -117,7 +117,7 @@ export function initClientHead(head: HeadDescriptor | undefined): void {
  * Preserves existing managed tags when their final attributes are unchanged.
  */
 export function applyClientHead(head: HeadDescriptor | undefined): void {
-  const existing = new Map<string, Element[]>();
+  const existing = new Map<string, Array<Element>>();
   for (const el of document.head.querySelectorAll(`[${ATTR}]`)) {
     const signature = elementSignature(el);
     const elements = existing.get(signature);
@@ -128,7 +128,7 @@ export function applyClientHead(head: HeadDescriptor | undefined): void {
     }
   }
 
-  const desiredElements: Element[] = [];
+  const desiredElements: Array<Element> = [];
   for (const descriptor of head ? collectDesiredHeadElements(head) : []) {
     const signature = elementDescriptorSignature(descriptor);
     const elements = existing.get(signature);

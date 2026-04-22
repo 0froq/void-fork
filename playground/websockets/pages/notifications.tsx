@@ -27,8 +27,8 @@ export default function NotificationsPage({ defaultCount }: Props) {
   const [count, setCount] = useState(defaultCount);
   const [streaming, setStreaming] = useState(false);
   const [pending, setPending] = useState(0);
-  const [items, setItems] = useState<NotificationItemView[]>([]);
-  const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [items, setItems] = useState<Array<NotificationItemView>>([]);
+  const [activity, setActivity] = useState<Array<ActivityEntry>>([]);
   const socketRef = useRef<NotificationSocket | null>(null);
 
   const appendActivity = useEffectEvent((text: string) => {

@@ -46,9 +46,9 @@ async function loadRegisteredSchema(
 
 /** Classification of a single env key for display. */
 export type EntryKind =
-  | { kind: 'required'; enumValues?: string[] }
-  | { kind: 'default'; defaultValue: unknown; enumValues?: string[] }
-  | { kind: 'optional'; enumValues?: string[] };
+  | { kind: 'required'; enumValues?: Array<string> }
+  | { kind: 'default'; defaultValue: unknown; enumValues?: Array<string> }
+  | { kind: 'optional'; enumValues?: Array<string> };
 
 export interface EnvExampleEntry {
   key: string;
@@ -86,7 +86,9 @@ export function classifySchema(schema: StandardSchemaV1<unknown, unknown>): Entr
  * an invalid sentinel and parsing the error message. Returns undefined for
  * any schema that isn't a built-in `oneOf`.
  */
-function tryExtractEnumValues(schema: StandardSchemaV1<unknown, unknown>): string[] | undefined {
+function tryExtractEnumValues(
+  schema: StandardSchemaV1<unknown, unknown>,
+): Array<string> | undefined {
   const sentinel = '__void_env_example_probe__';
   const result = schema['~standard'].validate(sentinel);
   if (result instanceof Promise) {
@@ -134,7 +136,7 @@ function serializeDefault(value: unknown): string {
 export function formatEnvExample(
   schema: Record<string, StandardSchemaV1<unknown, unknown>>,
 ): string {
-  const entries: EnvExampleEntry[] = Object.entries(schema).map(([key, s]) => ({
+  const entries: Array<EnvExampleEntry> = Object.entries(schema).map(([key, s]) => ({
     key,
     classification: classifySchema(s),
   }));
@@ -143,9 +145,9 @@ export function formatEnvExample(
   const withDefault = entries.filter((e) => e.classification.kind === 'default');
   const optional = entries.filter((e) => e.classification.kind === 'optional');
 
-  const lines: string[] = [];
+  const lines: Array<string> = [];
 
-  const writeGroup = (label: string, group: EnvExampleEntry[]) => {
+  const writeGroup = (label: string, group: Array<EnvExampleEntry>) => {
     if (group.length === 0) {
       return;
     }

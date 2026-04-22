@@ -81,7 +81,7 @@ describe('mcp dist build', () => {
         params: { name: 'list_pages', arguments: {} },
       });
       const result = res.result as {
-        content: { type: string; text: string }[];
+        content: Array<{ type: string; text: string }>;
       };
       const pages = JSON.parse(result.content[0].text);
       expect(pages.length).toBeGreaterThan(0);

@@ -242,7 +242,7 @@ export function buildDrizzleKitSpawnEnv(root: string): NodeJS.ProcessEnv {
   if (!pnp) {
     return env;
   }
-  const flags: string[] = [];
+  const flags: Array<string> = [];
   if (pnp.pnpCjs) {
     // `JSON.stringify` double-quotes the path, which is how Node's
     // NODE_OPTIONS parser handles spaces (e.g. "My Project").

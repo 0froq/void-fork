@@ -30,14 +30,14 @@ export interface Heading {
 export interface CompileResult {
   html: string;
   frontmatter: Record<string, unknown>;
-  headings: Heading[];
+  headings: Array<Heading>;
   title: string;
 }
 
 export interface CompileOptions {
   shiki?: {
     themes?: { light: string; dark: string };
-    langs?: string[];
+    langs?: Array<string>;
   };
 }
 
@@ -71,7 +71,7 @@ async function createCompiler(options?: CompileOptions): Promise<MarkdownExit> {
     transformerNotationFocus(),
     transformerNotationErrorLevel(),
   ];
-  md.renderer.rules.fence = async (tokens: Token[], idx: number) => {
+  md.renderer.rules.fence = async (tokens: Array<Token>, idx: number) => {
     const token = tokens[idx];
     const code = token.content;
     let lang = token.info ? token.info.split(/\s+/g)[0] : 'text';
@@ -127,8 +127,8 @@ async function createCompiler(options?: CompileOptions): Promise<MarkdownExit> {
   return md;
 }
 
-function extractHeadings(tokens: Token[]): Heading[] {
-  const headings: Heading[] = [];
+function extractHeadings(tokens: Array<Token>): Array<Heading> {
+  const headings: Array<Heading> = [];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
     if (token.type === 'heading_open') {

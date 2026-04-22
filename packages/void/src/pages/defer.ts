@@ -40,7 +40,7 @@ export function defer(
 
 export interface ResolvedDeferredGroup {
   resolver: (c: CloudContext) => Promise<unknown>;
-  keys: string[];
+  keys: Array<string>;
 }
 
 /**

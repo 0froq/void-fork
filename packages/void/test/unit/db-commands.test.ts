@@ -19,7 +19,7 @@ const mockRunMigrations = vi.fn();
 const mockWriteJournal = vi.fn();
 
 vi.mock('node:child_process', () => ({
-  execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
+  execFileSync: (...args: Array<unknown>) => mockExecFileSync(...args),
 }));
 
 vi.mock('../../src/migrations/runner', async () => {
@@ -28,19 +28,19 @@ vi.mock('../../src/migrations/runner', async () => {
   );
   return {
     ...actual,
-    getMiniflareDatabasePath: (...args: unknown[]) =>
+    getMiniflareDatabasePath: (...args: Array<unknown>) =>
       mockGetMiniflareDatabasePath.getMockImplementation()
         ? mockGetMiniflareDatabasePath(...args)
         : actual.getMiniflareDatabasePath(...(args as [string, string])),
-    openSqliteDatabase: (...args: unknown[]) =>
+    openSqliteDatabase: (...args: Array<unknown>) =>
       mockOpenSqliteDatabase.getMockImplementation()
         ? mockOpenSqliteDatabase(...args)
         : actual.openSqliteDatabase(...(args as [string, Record<string, unknown> | undefined])),
-    getAppliedMigrations: (...args: unknown[]) =>
+    getAppliedMigrations: (...args: Array<unknown>) =>
       mockGetAppliedMigrations.getMockImplementation()
         ? mockGetAppliedMigrations(...args)
         : actual.getAppliedMigrations(...(args as [string])),
-    runMigrations: (...args: unknown[]) =>
+    runMigrations: (...args: Array<unknown>) =>
       mockRunMigrations.getMockImplementation()
         ? mockRunMigrations(...args)
         : actual.runMigrations(...(args as [string, string])),
@@ -53,7 +53,7 @@ vi.mock('../../src/migrations/collect', async () => {
   );
   return {
     ...actual,
-    writeJournal: (...args: unknown[]) =>
+    writeJournal: (...args: Array<unknown>) =>
       mockWriteJournal.getMockImplementation()
         ? mockWriteJournal(...args)
         : actual.writeJournal(
@@ -65,7 +65,9 @@ vi.mock('../../src/migrations/collect', async () => {
 const mockGetToken = vi.fn<() => string | null>(() => null);
 const mockReadProjectConfig = vi.fn<() => { projectId: string; slug: string } | null>(() => null);
 const mockRenameMigrations =
-  vi.fn<(projectId: string, renames: { from: string; to: string }[]) => Promise<{ ok: boolean }>>();
+  vi.fn<
+    (projectId: string, renames: Array<{ from: string; to: string }>) => Promise<{ ok: boolean }>
+  >();
 
 vi.mock('../../src/cli/auth', () => ({
   getToken: () => mockGetToken(),
@@ -79,7 +81,7 @@ vi.mock('../../src/cli/client', () => ({
   PlatformClient: class {
     renameMigrations(
       projectId: string,
-      renames: { from: string; to: string }[],
+      renames: Array<{ from: string; to: string }>,
     ): Promise<{ ok: boolean }> {
       return mockRenameMigrations(projectId, renames);
     }
@@ -98,11 +100,11 @@ vi.mock('@clack/prompts', () => ({
   intro: vi.fn(),
   outro: vi.fn(),
   log: {
-    error: (...args: unknown[]) => mockLog.error(...args),
-    info: (...args: unknown[]) => mockLog.info(...args),
-    step: (...args: unknown[]) => mockLog.step(...args),
-    success: (...args: unknown[]) => mockLog.success(...args),
-    warn: (...args: unknown[]) => mockLog.warn(...args),
+    error: (...args: Array<unknown>) => mockLog.error(...args),
+    info: (...args: Array<unknown>) => mockLog.info(...args),
+    step: (...args: Array<unknown>) => mockLog.step(...args),
+    success: (...args: Array<unknown>) => mockLog.success(...args),
+    warn: (...args: Array<unknown>) => mockLog.warn(...args),
   },
 }));
 
@@ -155,7 +157,7 @@ describe('getAppliedMigrations', () => {
   });
 });
 
-const rootsToClean: string[] = [];
+const rootsToClean: Array<string> = [];
 
 function createRenameProjectRoot(options: {
   files: Record<string, string>;

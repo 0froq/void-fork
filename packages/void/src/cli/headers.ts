@@ -16,14 +16,14 @@ import type { HeaderRule, RedirectRule } from './types';
  *
  * Returns `undefined` if the file doesn't exist or yields no valid rules.
  */
-export function parseHeadersFile(dir: string): HeaderRule[] | undefined {
+export function parseHeadersFile(dir: string): Array<HeaderRule> | undefined {
   const filePath = join(dir, '_headers');
   if (!existsSync(filePath)) {
     return undefined;
   }
 
   const content = readFileSync(filePath, 'utf-8');
-  const rules: HeaderRule[] = [];
+  const rules: Array<HeaderRule> = [];
   let current: HeaderRule | null = null;
 
   for (const line of content.split('\n')) {
@@ -82,14 +82,14 @@ export function parseHeadersFile(dir: string): HeaderRule[] | undefined {
  * Format: `source destination [status]` per line (status defaults to 302).
  * Lines starting with # are comments. Only 3xx redirects are included (200 rewrites skipped).
  */
-export function parseRedirectsFile(dir: string): RedirectRule[] | undefined {
+export function parseRedirectsFile(dir: string): Array<RedirectRule> | undefined {
   const filePath = join(dir, '_redirects');
   if (!existsSync(filePath)) {
     return undefined;
   }
 
   const content = readFileSync(filePath, 'utf-8');
-  const rules: RedirectRule[] = [];
+  const rules: Array<RedirectRule> = [];
 
   for (const line of content.split('\n')) {
     const trimmed = line.trim();

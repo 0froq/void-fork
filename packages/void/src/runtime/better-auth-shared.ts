@@ -14,7 +14,7 @@ export type VoidAuthDialect = 'sqlite' | 'postgresql';
 
 export interface VoidAuthRuntimeOptions {
   dialect: VoidAuthDialect;
-  providers: readonly VoidAuthProvider[] | null;
+  providers: ReadonlyArray<VoidAuthProvider> | null;
   userConfig?: VoidAuthConfig;
 }
 
@@ -100,7 +100,7 @@ function resolveSecret(request: Request, env: VoidAuthEnv): string {
   throw new Error('Missing Better Auth secret. Set BETTER_AUTH_SECRET.');
 }
 
-function readEnvString(env: VoidAuthEnv, ...keys: string[]): string | undefined {
+function readEnvString(env: VoidAuthEnv, ...keys: Array<string>): string | undefined {
   for (const key of keys) {
     const value = env[key];
     if (typeof value === 'string' && value.length > 0) {
@@ -111,7 +111,7 @@ function readEnvString(env: VoidAuthEnv, ...keys: string[]): string | undefined 
 }
 
 function resolveEmailAndPassword(
-  configuredProviders: readonly VoidAuthProvider[] | null,
+  configuredProviders: ReadonlyArray<VoidAuthProvider> | null,
 ): BetterAuthOptions['emailAndPassword'] | undefined {
   if (!configuredProviders || configuredProviders.includes(VOID_EMAIL_AUTH_PROVIDER)) {
     return { enabled: true };
@@ -146,7 +146,7 @@ function resolveSocialProviderCredentials(
 
 function resolveSocialProviders(
   env: VoidAuthEnv,
-  configuredProviders: readonly VoidAuthProvider[] | null,
+  configuredProviders: ReadonlyArray<VoidAuthProvider> | null,
 ): BetterAuthOptions['socialProviders'] | undefined {
   if (!configuredProviders) {
     return undefined;

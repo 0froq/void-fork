@@ -26,7 +26,7 @@ export default function MarkdownPage() {
 
 export function emitReactComponentWithIslands(
   result: CompileResult,
-  islandImports: IslandImport[],
+  islandImports: Array<IslandImport>,
 ): string {
   const chunks = buildRenderChunks(result.html, islandImports);
 
@@ -53,7 +53,7 @@ export function emitReactComponentWithIslands(
 }\n`;
   }
 
-  const children: string[] = [];
+  const children: Array<string> = [];
 
   for (const chunk of chunks) {
     if (chunk.type === 'html') {

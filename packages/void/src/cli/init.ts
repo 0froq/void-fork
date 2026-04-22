@@ -46,7 +46,7 @@ export interface InitArgs {
   agents: boolean;
 }
 
-export function parseInitArgs(args: string[]): InitArgs {
+export function parseInitArgs(args: Array<string>): InitArgs {
   let parsed: ReturnType<typeof parseArgs>;
   try {
     parsed = parseArgs({
@@ -479,7 +479,7 @@ function findWorkspaceRoot(start: string): string | undefined {
  * callers should treat that as "can't verify membership" and fall back
  * to the fresh-clone install path.
  */
-function readWorkspacePatterns(workspaceRoot: string): string[] {
+function readWorkspacePatterns(workspaceRoot: string): Array<string> {
   const pnpmWorkspacePath = join(workspaceRoot, 'pnpm-workspace.yaml');
   if (existsSync(pnpmWorkspacePath)) {
     try {
@@ -575,9 +575,9 @@ function stripYamlLineComment(line: string): string {
  * surface area we need is tiny and the real YAML we see in practice
  * uses one of these two shapes.
  */
-export function extractPnpmWorkspacePackages(yaml: string): string[] {
+export function extractPnpmWorkspacePackages(yaml: string): Array<string> {
   const lines = yaml.split(/\r?\n/);
-  const patterns: string[] = [];
+  const patterns: Array<string> = [];
   let inPackages = false;
   for (const rawLine of lines) {
     // Strip YAML comments while respecting quoted content. YAML only
@@ -636,7 +636,7 @@ export function extractPnpmWorkspacePackages(yaml: string): string[] {
  * contain `{...}`. Does not support escaped braces or nested braces
  * inside a group (neither appears in real workspace manifests).
  */
-function expandBraces(pattern: string): string[] {
+function expandBraces(pattern: string): Array<string> {
   const match = pattern.match(/^([^{}]*)\{([^{}]*)\}(.*)$/);
   if (!match) {
     return [pattern];
@@ -650,7 +650,7 @@ function expandBraces(pattern: string): string[] {
     // Empty group like `{}` — pass through unchanged.
     return [pattern];
   }
-  const results: string[] = [];
+  const results: Array<string> = [];
   for (const opt of options) {
     for (const sub of expandBraces(before + opt + after)) {
       results.push(sub);
@@ -725,7 +725,12 @@ function compilePatternSegment(seg: string): CompiledSegment {
   return { kind: 'regex', re };
 }
 
-function matchSegments(path: string[], pi: number, pat: CompiledSegment[], qi: number): boolean {
+function matchSegments(
+  path: Array<string>,
+  pi: number,
+  pat: Array<CompiledSegment>,
+  qi: number,
+): boolean {
   while (qi < pat.length) {
     const seg = pat[qi];
     if (seg.kind === 'globstar') {
@@ -1159,7 +1164,7 @@ function setupTsconfig(
     let tsconfig: JsonObject;
     try {
       const raw = readFileSync(tsconfigPath, 'utf-8');
-      const errors: ParseError[] = [];
+      const errors: Array<ParseError> = [];
       tsconfig = asRecord(parse(raw, errors)) ?? {};
       if (errors.length > 0) {
         throw new SyntaxError('Failed to parse tsconfig.json');
@@ -1284,7 +1289,7 @@ function readProjectWranglerCompatDate(root: string): string | undefined {
 
     try {
       const raw = readFileSync(configPath, 'utf-8');
-      const errors: ParseError[] = [];
+      const errors: Array<ParseError> = [];
       const parsed = parse(raw, errors);
       if (errors.length > 0) {
         throw new SyntaxError('Failed to parse JSONC');
@@ -1319,7 +1324,7 @@ function setupWranglerConfig(root: string, framework: DetectedFramework): void {
       configPath = p;
       try {
         const raw = readFileSync(p, 'utf-8');
-        const errors: ParseError[] = [];
+        const errors: Array<ParseError> = [];
         parsed = parse(raw, errors);
         if (errors.length > 0) {
           throw new SyntaxError('Failed to parse JSONC');
@@ -1347,7 +1352,7 @@ function setupWranglerConfig(root: string, framework: DetectedFramework): void {
 
   // Ensure nodejs_als flag
   const flags = Array.isArray(parsed.compatibility_flags)
-    ? (parsed.compatibility_flags as string[])
+    ? (parsed.compatibility_flags as Array<string>)
     : [];
   if (!flags.includes('nodejs_als')) {
     parsed.compatibility_flags = [...flags, 'nodejs_als'];
@@ -2208,10 +2213,13 @@ export function ensureVoidDependency(root: string): boolean {
 
 interface AgentSetupSelection {
   instructionFilePath: 'CLAUDE.md' | 'AGENTS.md';
-  agents: AgentConfig[];
+  agents: Array<AgentConfig>;
 }
 
-function detectInstructionFilePath(root: string, agents: AgentConfig[]): 'CLAUDE.md' | 'AGENTS.md' {
+function detectInstructionFilePath(
+  root: string,
+  agents: Array<AgentConfig>,
+): 'CLAUDE.md' | 'AGENTS.md' {
   if (agents.some((a) => a.skillsDir === '.claude/skills')) {
     return 'CLAUDE.md';
   }
@@ -2346,7 +2354,7 @@ function writeMcpConfigForTarget(root: string, target: McpConfigTarget): void {
   log.success(`Added void MCP server to ${target.filePath}`);
 }
 
-function pickMcpTarget(root: string, targets: McpConfigTarget[]): McpConfigTarget {
+function pickMcpTarget(root: string, targets: Array<McpConfigTarget>): McpConfigTarget {
   if (targets.length === 1) {
     return targets[0];
   }
@@ -2357,9 +2365,9 @@ function pickMcpTarget(root: string, targets: McpConfigTarget[]): McpConfigTarge
   return targets[0];
 }
 
-function setupMcpConfig(root: string, selectedAgents: AgentConfig[]): void {
-  const mcpAgents: { agent: AgentConfig; targets: McpConfigTarget[] }[] = [];
-  const hintAgents: { agent: AgentConfig; hint: string }[] = [];
+function setupMcpConfig(root: string, selectedAgents: Array<AgentConfig>): void {
+  const mcpAgents: Array<{ agent: AgentConfig; targets: Array<McpConfigTarget> }> = [];
+  const hintAgents: Array<{ agent: AgentConfig; hint: string }> = [];
 
   for (const agent of selectedAgents) {
     if (agent.mcpConfig) {

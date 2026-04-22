@@ -33,7 +33,7 @@ export interface AgentConfig {
   skillsDir: string;
   detect: (root: string) => boolean;
   /** Project-level config files where MCP server entries can be auto-written */
-  mcpConfig?: McpConfigTarget[];
+  mcpConfig?: Array<McpConfigTarget>;
   /** Fallback hint printed when the agent has no project-level config support */
   mcpHint?: string;
 }
@@ -171,6 +171,6 @@ export function getAgentById(id: string): AgentConfig | undefined {
   return agents[id];
 }
 
-export function detectAgents(root: string): AgentConfig[] {
+export function detectAgents(root: string): Array<AgentConfig> {
   return Object.values(agents).filter((a) => a.detect(root));
 }

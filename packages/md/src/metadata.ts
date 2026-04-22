@@ -19,8 +19,8 @@ function getMetadataCompiler(): MarkdownExit {
   return md;
 }
 
-function extractHeadings(tokens: Token[]): Heading[] {
-  const headings: Heading[] = [];
+function extractHeadings(tokens: Array<Token>): Array<Heading> {
+  const headings: Array<Heading> = [];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
     if (token.type === 'heading_open') {
@@ -41,7 +41,7 @@ function extractHeadings(tokens: Token[]): Heading[] {
 
 export interface MetadataResult {
   frontmatter: Record<string, unknown>;
-  headings: Heading[];
+  headings: Array<Heading>;
   title: string;
 }
 

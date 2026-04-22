@@ -8,18 +8,26 @@ const TMP = join(import.meta.dirname, '__tmp_islands_plugin__');
 const PAGES_DIR = join(TMP, 'pages');
 type HookWithHandler<T> = { handler: T };
 type IslandsPluginHooks = {
-  configResolved?: (config: { root: string; command: 'serve' | 'build'; plugins: unknown[] }) => void;
+  configResolved?: (config: {
+    root: string;
+    command: 'serve' | 'build';
+    plugins: Array<unknown>;
+  }) => void;
   buildStart?: (() => Promise<void>) | HookWithHandler<() => Promise<void>>;
   configureServer?:
     | ((server: {
         watcher: EventEmitter;
-        environments: { client: { moduleGraph: { getModuleById(): null; invalidateModule(): void } } };
+        environments: {
+          client: { moduleGraph: { getModuleById(): null; invalidateModule(): void } };
+        };
         middlewares: { use(): void };
       }) => void)
     | HookWithHandler<
         (server: {
           watcher: EventEmitter;
-          environments: { client: { moduleGraph: { getModuleById(): null; invalidateModule(): void } } };
+          environments: {
+            client: { moduleGraph: { getModuleById(): null; invalidateModule(): void } };
+          };
           middlewares: { use(): void };
         }) => void
       >;

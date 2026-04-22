@@ -82,7 +82,7 @@ export type QueueMessage<T = unknown> = {
 /** A batch of queue messages delivered to a consumer handler. */
 export type QueueBatch<T = unknown> = {
   readonly queue: string;
-  readonly messages: QueueMessage<T>[];
+  readonly messages: Array<QueueMessage<T>>;
   ackAll(): void;
   retryAll(options?: QueueRetryOptions): void;
 };
@@ -145,11 +145,11 @@ export function defineHandler(
   m5: MiddlewareFn,
   handler: HandlerFn,
 ): TypedHandler;
-export function defineHandler(...args: (MiddlewareFn | HandlerFn)[]): TypedHandler {
+export function defineHandler(...args: Array<MiddlewareFn | HandlerFn>): TypedHandler {
   if (args.length === 1) {
     return args[0] as TypedHandler;
   }
-  const middlewares = args.slice(0, -1) as MiddlewareFn[];
+  const middlewares = args.slice(0, -1) as Array<MiddlewareFn>;
   const handler = args[args.length - 1] as HandlerFn;
 
   return (async (c: CloudContext) => {

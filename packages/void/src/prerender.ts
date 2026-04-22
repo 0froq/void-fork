@@ -30,12 +30,12 @@ export interface PrerenderWorkerModule {
 }
 
 export interface PrerenderResult {
-  rendered: string[];
+  rendered: Array<string>;
   failed: Array<{ path: string; error: string }>;
 }
 
 export interface PrerenderRunResult extends PrerenderResult {
-  paths: string[];
+  paths: Array<string>;
 }
 
 function outputFileForPath(path: string): string {
@@ -48,7 +48,7 @@ function pageDataFileForPath(path: string): string {
     : `${STATIC_PAGE_DATA_DIR}/${path.slice(1)}.json`;
 }
 
-async function readPrerenderPathsResponse(response: Response): Promise<string[]> {
+async function readPrerenderPathsResponse(response: Response): Promise<Array<string>> {
   if (!response.ok) {
     throw new Error(`Failed to collect prerender paths: HTTP ${response.status}`);
   }
@@ -62,7 +62,7 @@ async function readPrerenderPathsResponse(response: Response): Promise<string[]>
 }
 
 async function renderPrerenderPaths(
-  paths: string[],
+  paths: Array<string>,
   clientDir: string,
   fetchPath: (path: string) => Promise<Response>,
   fetchPageData?: (path: string) => Promise<Response>,
@@ -140,8 +140,8 @@ function resolveWorkerModuleType(relativePath: string): PrerenderWorkerModuleTyp
   return null;
 }
 
-function collectFiles(dir: string): string[] {
-  const files: string[] = [];
+function collectFiles(dir: string): Array<string> {
+  const files: Array<string> = [];
   const entries = readdirSync(dir, { withFileTypes: true });
 
   for (const entry of entries) {
@@ -159,25 +159,27 @@ function collectFiles(dir: string): string[] {
 export function collectPrerenderWorkerModules(
   workerDir: string,
   workerMain: string,
-): PrerenderWorkerModule[] {
+): Array<PrerenderWorkerModule> {
   const normalizedEntry = normalizeWorkerModulePath(workerMain);
   type CollectedPrerenderWorkerModule = PrerenderWorkerModule & {
     relativePath: string;
   };
 
-  const modules: CollectedPrerenderWorkerModule[] = collectFiles(workerDir).flatMap((filePath) => {
-    const relativePath = normalizeWorkerModulePath(relative(workerDir, filePath));
-    const type = resolveWorkerModuleType(relativePath);
-    if (!type) {
-      return [];
-    }
+  const modules: Array<CollectedPrerenderWorkerModule> = collectFiles(workerDir).flatMap(
+    (filePath) => {
+      const relativePath = normalizeWorkerModulePath(relative(workerDir, filePath));
+      const type = resolveWorkerModuleType(relativePath);
+      if (!type) {
+        return [];
+      }
 
-    const file = readFileSync(filePath);
-    const contents: PrerenderWorkerModule['contents'] =
-      type === 'CompiledWasm' || type === 'Data' ? new Uint8Array(file) : file.toString('utf-8');
+      const file = readFileSync(filePath);
+      const contents: PrerenderWorkerModule['contents'] =
+        type === 'CompiledWasm' || type === 'Data' ? new Uint8Array(file) : file.toString('utf-8');
 
-    return [{ path: filePath, relativePath, type, contents }];
-  });
+      return [{ path: filePath, relativePath, type, contents }];
+    },
+  );
 
   modules.sort((a, b) => {
     if (a.relativePath === normalizedEntry) {
@@ -352,7 +354,7 @@ async function createCloudflarePrerenderRunner(options: {
   const proxyToken = allBindings?.__VOID_PROXY_TOKEN as string | undefined;
 
   return {
-    async collectPaths(): Promise<string[]> {
+    async collectPaths(): Promise<Array<string>> {
       const headers: Record<string, string> = {};
       if (proxyToken) {
         headers['x-void-internal'] = proxyToken;
@@ -385,7 +387,7 @@ export async function collectPrerenderPaths(options: {
   clientDir?: string;
   remoteMode?: boolean;
   projectId?: string;
-}): Promise<string[]> {
+}): Promise<Array<string>> {
   const runner = await createCloudflarePrerenderRunner(options);
   try {
     return await runner.collectPaths();
@@ -569,8 +571,8 @@ export async function collectPrerenderPathsNode(options: {
   root: string;
   ssrDir: string;
   clientDir?: string;
-}): Promise<string[]> {
-  const result = await runNodePrerenderRunner<{ paths: string[] }>(options.root, {
+}): Promise<Array<string>> {
+  const result = await runNodePrerenderRunner<{ paths: Array<string> }>(options.root, {
     mode: 'collect',
     ssrDir: options.ssrDir,
     clientDir: options.clientDir,

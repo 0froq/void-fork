@@ -8,7 +8,7 @@ export interface HeadingData {
 }
 
 interface MarkdownEnv extends Record<string, unknown> {
-  headings?: HeadingData[];
+  headings?: Array<HeadingData>;
 }
 
 /**
@@ -17,7 +17,7 @@ interface MarkdownEnv extends Record<string, unknown> {
  */
 export function headingExtractPlugin(md: MarkdownExit): void {
   const render = md.renderer.render.bind(md.renderer);
-  md.renderer.render = (tokens: Token[], options: RenderOptions, env: MarkdownEnv = {}) => {
+  md.renderer.render = (tokens: Array<Token>, options: RenderOptions, env: MarkdownEnv = {}) => {
     env.headings = [];
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i];

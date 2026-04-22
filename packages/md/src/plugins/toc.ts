@@ -1,15 +1,9 @@
-import type {
-  RenderOptions,
-  Renderer,
-  RuleBlock,
-  StateBlock,
-  Token,
-} from 'markdown-exit';
+import type { RenderOptions, Renderer, RuleBlock, StateBlock, Token } from 'markdown-exit';
 import type MarkdownExit from 'markdown-exit';
 
 export interface TocOptions {
   pattern?: RegExp;
-  level?: number[];
+  level?: Array<number>;
   containerTag?: string;
   containerClass?: string;
   listTag?: string;
@@ -21,7 +15,7 @@ interface Header {
   text: string;
 }
 
-function renderHeaders(headers: Header[], listTag: string): string {
+function renderHeaders(headers: Array<Header>, listTag: string): string {
   if (headers.length === 0) {
     return '';
   }
@@ -77,7 +71,7 @@ export function tocPlugin(md: MarkdownExit, options?: TocOptions): void {
   );
 
   md.renderer.rules.toc_open = (
-    tokens: Token[],
+    tokens: Array<Token>,
     idx: number,
     options: RenderOptions,
     _env: unknown,
@@ -86,9 +80,9 @@ export function tocPlugin(md: MarkdownExit, options?: TocOptions): void {
     return self.renderToken(tokens, idx, options);
   };
 
-  md.renderer.rules.toc_body = (tokens: Token[]) => {
+  md.renderer.rules.toc_body = (tokens: Array<Token>) => {
     // Walk all tokens to find headings at the specified levels
-    const headers: Header[] = [];
+    const headers: Array<Header> = [];
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i];
       if (token.type === 'heading_open') {
@@ -110,7 +104,7 @@ export function tocPlugin(md: MarkdownExit, options?: TocOptions): void {
   };
 
   md.renderer.rules.toc_close = (
-    tokens: Token[],
+    tokens: Array<Token>,
     idx: number,
     options: RenderOptions,
     _env: unknown,

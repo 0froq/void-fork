@@ -37,7 +37,7 @@ class HeadElement {
   }
 }
 
-function stubDocumentHead(initialChildren: HeadElement[] = []) {
+function stubDocumentHead(initialChildren: Array<HeadElement> = []) {
   const children = [...initialChildren];
   const syncSiblings = () => {
     for (let i = 0; i < children.length; i++) {

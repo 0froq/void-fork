@@ -13,11 +13,11 @@ import {
 } from './websocket';
 
 export interface ScanResult {
-  routes: RouteDefinition[];
-  websockets?: WebSocketRouteDefinition[];
-  middleware: MiddlewareDefinition[];
-  jobs: JobDefinition[];
-  queues: QueueDefinition[];
+  routes: Array<RouteDefinition>;
+  websockets?: Array<WebSocketRouteDefinition>;
+  middleware: Array<MiddlewareDefinition>;
+  jobs: Array<JobDefinition>;
+  queues: Array<QueueDefinition>;
   pages: PageScanResult;
 }
 
@@ -43,7 +43,7 @@ export async function scanRoutes(
   const [routeFiles, websockets, middlewareFiles, jobs, queues, pages] = await Promise.all([
     glob(pattern, { cwd: `${root}/routes`, absolute: false }),
     scanWebSocketRoutes(root),
-    glob(pattern, { cwd: `${root}/middleware`, absolute: false }).catch(() => [] as string[]),
+    glob(pattern, { cwd: `${root}/middleware`, absolute: false }).catch(() => [] as Array<string>),
     scanJobs(root),
     scanQueues(root),
     scanPages(root, { output: options?.output }),

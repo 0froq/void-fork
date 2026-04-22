@@ -9,7 +9,7 @@ export interface VoidVueOptions {
   viewTransitions?: boolean;
 }
 
-export function voidVue(options?: VoidVueOptions): Plugin[] {
+export function voidVue(options?: VoidVueOptions): Array<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');
   return [
     vue(options?.vue) as Plugin,

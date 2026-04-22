@@ -15,10 +15,10 @@ export interface VoidSvelteOptions {
   prefetch?: PrefetchConfig;
 }
 
-export function voidSvelte(options?: VoidSvelteOptions): Plugin[] {
+export function voidSvelte(options?: VoidSvelteOptions): Array<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');
   return [
-    ...(svelte(options?.svelte) as Plugin[]),
+    ...(svelte(options?.svelte) as Array<Plugin>),
     pagesPlugin(pagesDir, {
       viewTransitions: options?.viewTransitions,
       prefetch: options?.prefetch,

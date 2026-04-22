@@ -122,7 +122,7 @@ function drizzleColumnDef(col: ColumnSpec): string {
   }
 }
 
-function drizzleImportsForColumns(columns: ColumnSpec[]): string[] {
+function drizzleImportsForColumns(columns: Array<ColumnSpec>): Array<string> {
   const types = new Set<string>(['text', 'integer']);
   for (const col of columns) {
     switch (col.type) {
@@ -163,7 +163,7 @@ function drizzleColumnDefPg(col: ColumnSpec): string {
   }
 }
 
-function drizzleImportsForColumnsPg(columns: ColumnSpec[]): string[] {
+function drizzleImportsForColumnsPg(columns: Array<ColumnSpec>): Array<string> {
   const types = new Set<string>(['text', 'serial', 'timestamp']);
   for (const col of columns) {
     switch (col.type) {
@@ -339,7 +339,7 @@ function getImportLine(validator: Validator): string | null {
   }
 }
 
-function getBodySchema(validator: Validator, columns: ColumnSpec[]): string {
+function getBodySchema(validator: Validator, columns: Array<ColumnSpec>): string {
   if (validator === 'arktype') {
     const fields = columns.map((c) => `    ${c.name}: "${arktypeType(c)}",`).join('\n');
     return `type({\n${fields}\n  })`;
@@ -366,7 +366,11 @@ function getParamsSchema(validator: Validator): string {
 // Route templates
 // ---------------------------------------------------------------------------
 
-function generateIndexRoute(name: string, columns: ColumnSpec[], validator: Validator): string {
+function generateIndexRoute(
+  name: string,
+  columns: Array<ColumnSpec>,
+  validator: Validator,
+): string {
   const importLine = getImportLine(validator);
   const imports = [
     importLine,
@@ -471,7 +475,7 @@ export const GET = defineHandler.withValidator({
 // Subcommands
 // ---------------------------------------------------------------------------
 
-async function runModel(root: string, name: string, columns: ColumnSpec[]): Promise<void> {
+async function runModel(root: string, name: string, columns: Array<ColumnSpec>): Promise<void> {
   const validator = await resolveValidator(root);
 
   const dialect = getDatabaseDialect(readConfig(root));
@@ -868,7 +872,7 @@ function runMigration(root: string, name: string): void {
   outro('Migration created.');
 }
 
-function runRoute(root: string, routePath: string, methods: string[]): void {
+function runRoute(root: string, routePath: string, methods: Array<string>): void {
   const filePath = join(root, 'routes', routePath + '.ts');
   const exports = methods
     .map((m) => {

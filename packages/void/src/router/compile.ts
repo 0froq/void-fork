@@ -13,7 +13,7 @@ const BINDING_HINT_SCRIPT = `<script type="module" src="/@id/virtual:void/bindin
 const DEFAULT_ERROR_PAGE_FONT_STACK =
   'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
-function pushDefaultErrorPageHelpers(lines: string[], options: CompileOptions): void {
+function pushDefaultErrorPageHelpers(lines: Array<string>, options: CompileOptions): void {
   const dev = options.dev === true;
   lines.push(
     `const __VOID_ERROR_PAGE_FONT_STACK = ${JSON.stringify(DEFAULT_ERROR_PAGE_FONT_STACK)};`,
@@ -605,7 +605,7 @@ export interface AuthCompileOptions {
   authDatabasePath: string | null;
   authSchemaPath: string | null;
   dialect: 'sqlite' | 'postgresql';
-  providers: readonly VoidAuthProvider[] | null;
+  providers: ReadonlyArray<VoidAuthProvider> | null;
 }
 
 export interface CompileOptions {
@@ -632,15 +632,15 @@ export interface CompileOptions {
   /** Absolute path to the migration handler module */
   migrationHandlerPath?: string;
   /** Bundled migration SQL entries */
-  migrations?: { name: string; sql: string }[];
+  migrations?: Array<{ name: string; sql: string }>;
   /** Migration dialect (sqlite or postgresql) */
   migrationDialect?: 'sqlite' | 'postgresql';
   /** Header rules from routing.headers config (node targets only) */
-  headerRules?: HeaderRule[];
+  headerRules?: Array<HeaderRule>;
   /** Redirect rules from routing.redirects config (node targets only) */
-  redirectRules?: RedirectRule[];
+  redirectRules?: Array<RedirectRule>;
   /** Explicit prerender paths from void.json routing.prerender */
-  explicitPrerenderPaths?: string[];
+  explicitPrerenderPaths?: Array<string>;
   /** Absolute path to the internal WebSocket runtime module */
   webSocketRuntimePath?: string;
 }
@@ -687,7 +687,7 @@ export function compileRouteTable(
   options: CompileOptions,
   pages: PagesCompileOptions | null = null,
 ): string {
-  const lines: string[] = [];
+  const lines: Array<string> = [];
   const auth = options.auth;
   const webSockets = scan.websockets ?? [];
 
@@ -1213,7 +1213,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
 }
 
 function compilePrerenderCollector(
-  lines: string[],
+  lines: Array<string>,
   scan: ScanResult,
   ssr: SsrCompileOptions | null,
   options: CompileOptions,
@@ -1293,7 +1293,7 @@ function compilePrerenderCollector(
 }
 
 function compilePageRoutes(
-  lines: string[],
+  lines: Array<string>,
   scan: ScanResult,
   pages: PagesCompileOptions,
   options: CompileOptions,
@@ -1356,7 +1356,7 @@ function compilePageRoutes(
   // Build manifest-key mapping for each page and its layout chain
   // so CSS collection can be scoped to the active route only
   const relPagesDir = pages.pagesDirRelative;
-  const pageCssKeys: Record<string, string[]> = {};
+  const pageCssKeys: Record<string, Array<string>> = {};
   for (const page of scan.pages.pages) {
     const keys = [`${relPagesDir}/${page.componentPath}`];
     const layoutIds = resolveLayoutIds(page, scan.pages.layouts, scan.pages.namedLayouts);
@@ -1790,7 +1790,7 @@ export function compileWorkerEntry(
   hasQueues = false,
   remote?: { remotePath: string; envPath: string },
   assetsDir = 'assets',
-  webSocketClasses: string[] = [],
+  webSocketClasses: Array<string> = [],
   runtimeEnvPath = 'void/_env',
   envSchemaModule?: { importPath: string; helperPath: string },
 ): string {
@@ -2124,7 +2124,7 @@ export async function fetch(path, options) {
  * Emit inline `matchPattern()` — glob `*` → regex matching.
  * Mirrors the dispatch worker's `matchPattern()` from `packages/dispatch/src/headers.ts`.
  */
-function emitMatchPattern(lines: string[]): void {
+function emitMatchPattern(lines: Array<string>): void {
   lines.push('function __matchPattern(pattern, pathname) {');
   lines.push(
     '  const escaped = pattern.replace(/[.+?^${}()|[\\]\\\\]/g, "\\\\$&").replaceAll("*", ".*");',
@@ -2138,7 +2138,7 @@ function emitMatchPattern(lines: string[]): void {
  * Emit redirect middleware — short-circuits matching requests before route handlers.
  * Last match wins, consistent with dispatch worker behavior.
  */
-function compileRedirectMiddleware(lines: string[], rules: RedirectRule[]): void {
+function compileRedirectMiddleware(lines: Array<string>, rules: Array<RedirectRule>): void {
   emitMatchPattern(lines);
   lines.push('// Redirect rules (applied before route handlers)');
   lines.push(`const __redirectRules = ${JSON.stringify(rules)};`);
@@ -2166,7 +2166,7 @@ function compileRedirectMiddleware(lines: string[], rules: RedirectRule[]): void
  * Emit header middleware — applies matching header rules to every response.
  * All matching rules merge; last match wins for same header name.
  */
-function compileHeaderMiddleware(lines: string[], rules: HeaderRule[]): void {
+function compileHeaderMiddleware(lines: Array<string>, rules: Array<HeaderRule>): void {
   // matchPattern may already be emitted by redirect middleware
   if (!lines.some((l) => l.includes('function __matchPattern'))) {
     emitMatchPattern(lines);

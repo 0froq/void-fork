@@ -18,7 +18,7 @@ describe('auth migration runner', () => {
     try {
       const runner = {
         async all<T extends Record<string, unknown>>(sql: string) {
-          return db.prepare(sql).all() as T[];
+          return db.prepare(sql).all() as Array<T>;
         },
         async run(sql: string) {
           db.prepare(sql).run();
@@ -48,7 +48,7 @@ describe('auth migration runner', () => {
   });
 
   it('uses identity columns for postgres serial auth ids', async () => {
-    const statements: string[] = [];
+    const statements: Array<string> = [];
     const schema: VoidAuthMigrationSchema = {
       dialect: 'postgresql',
       idStrategy: 'serial',
@@ -73,18 +73,18 @@ describe('auth migration runner', () => {
       {
         async all<T extends Record<string, unknown>>(sql: string) {
           if (sql.includes('current_schema')) {
-            return [{ schema: 'public' }] as unknown as T[];
+            return [{ schema: 'public' }] as unknown as Array<T>;
           }
           if (sql.includes('information_schema.tables')) {
-            return [] as T[];
+            return [] as Array<T>;
           }
           if (sql.includes('information_schema.columns')) {
-            return [] as T[];
+            return [] as Array<T>;
           }
           if (sql.includes('pg_indexes')) {
-            return [] as T[];
+            return [] as Array<T>;
           }
-          return [] as T[];
+          return [] as Array<T>;
         },
         async run(sql: string) {
           statements.push(sql);
@@ -102,22 +102,22 @@ describe('auth migration runner', () => {
   });
 
   it('uses string-literal table names for sqlite PRAGMA introspection', async () => {
-    const reads: string[] = [];
+    const reads: Array<string> = [];
 
     await applySqliteAuthMigrations(
       {
         async all<T extends Record<string, unknown>>(sql: string) {
           reads.push(sql);
           if (sql === "SELECT name FROM sqlite_master WHERE type = 'table'") {
-            return [{ name: 'user' }] as unknown as T[];
+            return [{ name: 'user' }] as unknown as Array<T>;
           }
           if (sql === "PRAGMA table_info('user')") {
-            return [{ name: 'id' }] as unknown as T[];
+            return [{ name: 'id' }] as unknown as Array<T>;
           }
           if (sql === "PRAGMA index_list('user')") {
-            return [] as T[];
+            return [] as Array<T>;
           }
-          return [] as T[];
+          return [] as Array<T>;
         },
         async run() {},
       },

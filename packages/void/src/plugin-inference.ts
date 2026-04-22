@@ -101,7 +101,7 @@ function inferBindingsFromFile(file: string, code: string): InferredBindings {
 export function inferProjectBindings(
   root: string,
   options?: InferenceOptions,
-  scanDirs?: readonly string[],
+  scanDirs?: ReadonlyArray<string>,
 ): InferredBindings {
   // If user provided explicit overrides, use those
   if (options?.bindings) {
@@ -116,11 +116,11 @@ export function inferProjectBindings(
   }
 
   const dirs = scanDirs ?? ['routes', 'middleware', 'queues', 'pages', 'crons'];
-  const allBindings: InferredBindings[] = [];
+  const allBindings: Array<InferredBindings> = [];
 
   for (const dir of dirs) {
     const dirPath = join(root, dir);
-    let files: string[];
+    let files: Array<string>;
     try {
       files = globSync(SOURCE_GLOB, { cwd: dirPath, absolute: true });
     } catch {
@@ -144,7 +144,7 @@ export function inferProjectBindings(
   const dirsSet = new Set(dirs);
   if (!dirsSet.has('src')) {
     const srcPath = join(root, 'src');
-    let srcFiles: string[];
+    let srcFiles: Array<string>;
     try {
       srcFiles = globSync(SOURCE_GLOB, { cwd: srcPath, absolute: true });
     } catch {

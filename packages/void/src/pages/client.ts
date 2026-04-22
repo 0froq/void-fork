@@ -71,14 +71,18 @@ export interface PageRouterAdapter {
   resolveDeferred(ref: unknown, value: unknown): unknown;
   rejectDeferred(ref: unknown, error: string): unknown;
   isLoading(ref: unknown): boolean;
-  applyUpdate(pageData: PageData, component: unknown, layouts: unknown[]): void | Promise<void>;
+  applyUpdate(
+    pageData: PageData,
+    component: unknown,
+    layouts: Array<unknown>,
+  ): void | Promise<void>;
   onDeferredUpdate?(props: Record<string, unknown>): void;
 }
 
 export interface PageRouterConfig {
   adapter: PageRouterAdapter;
   components: Record<string, () => Promise<PageComponentModule>>;
-  layoutTree: Record<string, string[]>;
+  layoutTree: Record<string, Array<string>>;
   routeMeta: Record<string, { island?: boolean }>;
   matchRoute(url: string): string | null;
   staticPageData?: boolean;
@@ -312,7 +316,7 @@ export async function createPageRouter(config: PageRouterConfig): Promise<{
   router: VoidRouter;
   initialPageData: PageData;
   initialComponent: unknown;
-  initialLayouts: unknown[];
+  initialLayouts: Array<unknown>;
   start(): void;
 }> {
   {

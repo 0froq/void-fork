@@ -14,7 +14,7 @@ interface CreateResult {
 export type PromptResult = SelectResult | CreateResult;
 
 export async function promptProjectSelection(
-  projects: ProjectResponse[],
+  projects: Array<ProjectResponse>,
   message = 'Select a project:',
   root: string = process.cwd(),
 ): Promise<PromptResult> {

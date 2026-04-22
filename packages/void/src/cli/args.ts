@@ -7,7 +7,7 @@ export interface DeployArgs {
   skipBuild?: boolean;
 }
 
-export function parseDeployArgs(args: string[]): DeployArgs {
+export function parseDeployArgs(args: Array<string>): DeployArgs {
   let parsed: ReturnType<typeof parseArgs>;
   try {
     parsed = parseArgs({

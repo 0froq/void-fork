@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { voidPlugin } from '../../src/index';
 import { inferProjectBindings, detectFramework } from '../../src/plugin-inference';
 
-const tempDirs: string[] = [];
+const tempDirs: Array<string> = [];
 
 function createTempRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'void-inference-'));
@@ -271,7 +271,7 @@ describe('detectFramework', () => {
         },
       );
 
-      const rootExternal = result?.build?.rollupOptions?.external as unknown[];
+      const rootExternal = result?.build?.rollupOptions?.external as Array<unknown>;
       expect(rootExternal).toBeTruthy();
       expect(
         rootExternal.some((value) => value instanceof RegExp && value.test('cloudflare:workers')),
@@ -306,7 +306,7 @@ describe('detectFramework', () => {
       expect(externalPlugin).toBeTruthy();
 
       const result = config.call({} as never, {}, { command: 'build', mode: 'production' });
-      const rootExternal = result?.build?.rollupOptions?.external as unknown[];
+      const rootExternal = result?.build?.rollupOptions?.external as Array<unknown>;
       expect(rootExternal).toBeTruthy();
       expect(
         rootExternal.some((value) => value instanceof RegExp && value.test('cloudflare:workers')),
@@ -339,7 +339,7 @@ describe('detectFramework', () => {
 
       expect(externalPlugin).toBeTruthy();
       const result = config.call({} as never, {}, { command: 'build', mode: 'production' });
-      const rootExternal = result?.build?.rollupOptions?.external as unknown[];
+      const rootExternal = result?.build?.rollupOptions?.external as Array<unknown>;
       expect(rootExternal).toBeTruthy();
       expect(
         rootExternal.some((value) => value instanceof RegExp && value.test('cloudflare:workers')),

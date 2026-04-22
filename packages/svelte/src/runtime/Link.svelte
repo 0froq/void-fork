@@ -41,7 +41,7 @@
     replace?: boolean;
     reloadDocument?: boolean;
     viewTransition?: boolean;
-    prefetch?: boolean | PrefetchStrategy | PrefetchStrategy[];
+    prefetch?: boolean | PrefetchStrategy | Array<PrefetchStrategy>;
     cacheFor?: number | string | [string, string];
     onNavigate?: (event: NavigateEvent) => void;
     children?: Snippet;
@@ -107,7 +107,7 @@
     return `${path}${query ? `?${query}` : ""}${hash}`;
   }
 
-  function hasPrefetch(prefetch: boolean | PrefetchStrategy | PrefetchStrategy[]): boolean {
+  function hasPrefetch(prefetch: boolean | PrefetchStrategy | Array<PrefetchStrategy>): boolean {
     return prefetch !== false;
   }
 
@@ -123,7 +123,7 @@
     );
   }
 
-  function getStrategies(): PrefetchStrategy[] {
+  function getStrategies(): Array<PrefetchStrategy> {
     if (hasPrefetch(prefetchProp) && !isGet) {
       throw new Error(
         'Void Link prefetch only supports GET links. Remove `prefetch` or use method="GET".',

@@ -20,7 +20,7 @@ export type FollowUpDef =
   | {
       type: 'multi-select';
       flag: string;
-      options: { value: string; label: string; selected?: boolean }[];
+      options: Array<{ value: string; label: string; selected?: boolean }>;
     }
   | {
       type: 'repeat-input';
@@ -32,7 +32,7 @@ export interface SubcommandDef {
   description: string;
   arg?: string; // e.g. "<name>" — shown as dim hint, enables inline text input
   hint?: string; // e.g. "login | logout | whoami" — shown dim after name
-  flags?: FlagDef[];
+  flags?: Array<FlagDef>;
   followUp?: FollowUpDef;
 }
 
@@ -40,12 +40,12 @@ export interface SubcommandResult {
   subcommand: string;
   arg?: string;
   flags?: Record<string, string | true>;
-  extraArgs?: string[];
+  extraArgs?: Array<string>;
 }
 
 export function promptSubcommand(
   command: string,
-  subcommands: SubcommandDef[],
+  subcommands: Array<SubcommandDef>,
 ): Promise<SubcommandResult | null> {
   return new Promise((resolve) => {
     const { stdin, stdout } = process;
@@ -63,13 +63,13 @@ export function promptSubcommand(
     const selectedFlags: Record<string, string | true> = {};
 
     // Flags phase state
-    let flagStates: { enabled: boolean; value: string }[] = [];
+    let flagStates: Array<{ enabled: boolean; value: string }> = [];
 
     // Multi-select phase state
-    let multiSelectStates: boolean[] = [];
+    let multiSelectStates: Array<boolean> = [];
 
     // Repeat-input phase state
-    let repeatEntries: string[] = [];
+    let repeatEntries: Array<string> = [];
     let repeatInput = '';
 
     const wasRaw = stdin.isRaw;
@@ -107,7 +107,7 @@ export function promptSubcommand(
     // --- Renderers ---
 
     function renderSelect() {
-      const lines: string[] = [];
+      const lines: Array<string> = [];
       const focused = subcommands[cursor];
 
       lines.push(`${pc.cyan(S_STEP_ACTIVE)}  ${pc.cyan(title)}`);
@@ -150,7 +150,7 @@ export function promptSubcommand(
     function renderFlags() {
       const flags = selectedSub!.flags!;
       const focused = flags[cursor];
-      const lines: string[] = [];
+      const lines: Array<string> = [];
 
       lines.push(headerLine());
       lines.push(pc.gray(S_BAR));
@@ -196,7 +196,7 @@ export function promptSubcommand(
     function renderMultiSelect() {
       const followUp = selectedSub!.followUp as Extract<FollowUpDef, { type: 'multi-select' }>;
       const options = followUp.options;
-      const lines: string[] = [];
+      const lines: Array<string> = [];
 
       lines.push(headerLine());
       lines.push(pc.gray(S_BAR));
@@ -232,7 +232,7 @@ export function promptSubcommand(
 
     function renderRepeatInput() {
       const followUp = selectedSub!.followUp as Extract<FollowUpDef, { type: 'repeat-input' }>;
-      const lines: string[] = [];
+      const lines: Array<string> = [];
 
       lines.push(headerLine());
       lines.push(pc.gray(S_BAR));

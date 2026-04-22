@@ -16,23 +16,23 @@ const mockGetAppliedMigrations = vi.fn();
 const mockRunMigrations = vi.fn();
 
 vi.mock('@clack/prompts', () => ({
-  intro: (...args: unknown[]) => mockIntro(...args),
-  outro: (...args: unknown[]) => mockOutro(...args),
+  intro: (...args: Array<unknown>) => mockIntro(...args),
+  outro: (...args: Array<unknown>) => mockOutro(...args),
   log: {
-    error: (...args: unknown[]) => mockLog.error(...args),
-    info: (...args: unknown[]) => mockLog.info(...args),
-    step: (...args: unknown[]) => mockLog.step(...args),
-    success: (...args: unknown[]) => mockLog.success(...args),
+    error: (...args: Array<unknown>) => mockLog.error(...args),
+    info: (...args: Array<unknown>) => mockLog.info(...args),
+    step: (...args: Array<unknown>) => mockLog.step(...args),
+    success: (...args: Array<unknown>) => mockLog.success(...args),
   },
 }));
 
 vi.mock('../../src/migrations/runner', () => ({
-  getMiniflareDatabasePath: (...args: unknown[]) => mockGetMiniflareDatabasePath(...args),
-  getAppliedMigrations: (...args: unknown[]) => mockGetAppliedMigrations(...args),
-  runMigrations: (...args: unknown[]) => mockRunMigrations(...args),
+  getMiniflareDatabasePath: (...args: Array<unknown>) => mockGetMiniflareDatabasePath(...args),
+  getAppliedMigrations: (...args: Array<unknown>) => mockGetAppliedMigrations(...args),
+  runMigrations: (...args: Array<unknown>) => mockRunMigrations(...args),
 }));
 
-const roots: string[] = [];
+const roots: Array<string> = [];
 
 function createProjectRoot(migrations: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'void-db-migrate-'));

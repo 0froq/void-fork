@@ -127,7 +127,7 @@ export class ProxyKVNamespace {
     } else {
       // ReadableStream — read it all and base64-encode
       const reader = (value as ReadableStream).getReader();
-      const chunks: Uint8Array[] = [];
+      const chunks: Array<Uint8Array> = [];
       while (true) {
         const { done, value: chunk } = await reader.read();
         if (done) {

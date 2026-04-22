@@ -1,7 +1,7 @@
 import { getRawRuntimeEnv } from './env-raw';
 
 export interface RevalidateOptions {
-  paths?: string[];
+  paths?: Array<string>;
   all?: boolean;
 }
 

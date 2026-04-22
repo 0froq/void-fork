@@ -456,8 +456,8 @@ async function runStaticDeploy(
   skipBuild?: boolean,
   commit?: string | null,
   hashedAssetsPrefix?: string,
-  headerRules?: HeaderRule[],
-  redirectRules?: RedirectRule[],
+  headerRules?: Array<HeaderRule>,
+  redirectRules?: Array<RedirectRule>,
 ): Promise<void> {
   const typeLabel = preset.appType === 'spa' ? 'Static SPA' : 'Static Site';
   log.info(`${typeLabel} deploy`);
@@ -545,12 +545,15 @@ async function runFrameworkDeploy(
   // Collect header rules: parse framework-generated _headers file + void.json config
   const fwHeaderRules = existsSync(assetsDir) ? parseHeadersFile(assetsDir) : undefined;
   const cfgHeaderRules = convertHeadersConfig(voidConfig.routing?.headers);
-  const headerRules: HeaderRule[] = [...(fwHeaderRules ?? []), ...(cfgHeaderRules ?? [])];
+  const headerRules: Array<HeaderRule> = [...(fwHeaderRules ?? []), ...(cfgHeaderRules ?? [])];
 
   // Collect redirect rules: parse framework-generated _redirects file + void.json config
   const fwRedirectRules = existsSync(assetsDir) ? parseRedirectsFile(assetsDir) : undefined;
   const cfgRedirectRules = convertRedirectsConfig(voidConfig.routing?.redirects);
-  const redirectRules: RedirectRule[] = [...(fwRedirectRules ?? []), ...(cfgRedirectRules ?? [])];
+  const redirectRules: Array<RedirectRule> = [
+    ...(fwRedirectRules ?? []),
+    ...(cfgRedirectRules ?? []),
+  ];
 
   if (!existsSync(workerDir)) {
     log.error(`Worker output not found at "${fwPreset.workerDir}". Run "${buildCmd}" first.`);
@@ -851,12 +854,15 @@ async function runFullDeploy(
   const clientDir = join(distDir, 'client');
   const userHeaderRules = existsSync(clientDir) ? parseHeadersFile(clientDir) : undefined;
   const cfgHeaderRules = convertHeadersConfig(deployConfig.routing?.headers);
-  const headerRules: HeaderRule[] = [...(userHeaderRules ?? []), ...(cfgHeaderRules ?? [])];
+  const headerRules: Array<HeaderRule> = [...(userHeaderRules ?? []), ...(cfgHeaderRules ?? [])];
 
   // Collect redirect rules: parse user/framework _redirects file + void.json config
   const userRedirectRules = existsSync(clientDir) ? parseRedirectsFile(clientDir) : undefined;
   const cfgRedirectRules = convertRedirectsConfig(deployConfig.routing?.redirects);
-  const redirectRules: RedirectRule[] = [...(userRedirectRules ?? []), ...(cfgRedirectRules ?? [])];
+  const redirectRules: Array<RedirectRule> = [
+    ...(userRedirectRules ?? []),
+    ...(cfgRedirectRules ?? []),
+  ];
 
   const migrationsDir = join(root, 'db', 'migrations');
 

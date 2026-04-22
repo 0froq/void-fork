@@ -52,7 +52,7 @@ export interface PageRouterAdapter {
 export interface PageNavigationEngineConfig {
   adapter: PageRouterAdapter;
   components: Record<string, () => Promise<PageComponentModule>>;
-  layoutTree: Record<string, string[]>;
+  layoutTree: Record<string, Array<string>>;
   routeMeta: Record<string, { island?: boolean }>;
   matchRoute(url: string): string | null;
   staticPageData?: boolean;
@@ -65,7 +65,7 @@ export interface PageNavigationEngineConfig {
 export interface PageNavigationResult {
   pageData: PageData;
   component: unknown;
-  layouts: unknown[];
+  layouts: Array<unknown>;
 }
 
 export interface PageNavigationResource {
@@ -86,7 +86,7 @@ export interface PageNavigationEngine {
   _hoverDelay: number;
   initialPageData: PageData;
   initialComponent: unknown;
-  initialLayouts: unknown[];
+  initialLayouts: Array<unknown>;
   prepareVisit(url: string, options?: VisitOptions): PageNavigationResource;
   prefetch(url: string, options?: PrefetchOptions): Promise<unknown>;
   flush(url: string, method?: string): void;
@@ -255,7 +255,7 @@ export async function createPageNavigationEngine(
     return (await loader()).default;
   }
 
-  async function resolveLayouts(componentId: string): Promise<unknown[]> {
+  async function resolveLayouts(componentId: string): Promise<Array<unknown>> {
     const ids = layoutTree[componentId] || [];
     return Promise.all(ids.map(async (id: string) => (await components[id]()).default));
   }
@@ -286,7 +286,7 @@ export async function createPageNavigationEngine(
     private active = true;
     private keyRefs: Record<string, unknown> = {};
     private props: Record<string, unknown> = {};
-    private groups: Record<string, string[]> = {};
+    private groups: Record<string, Array<string>> = {};
     private preservedSource: DeferredRegistry | null = null;
     private preservedKeys: Set<string> | null = null;
 
@@ -299,7 +299,7 @@ export async function createPageNavigationEngine(
         return;
       }
 
-      for (const [key, group] of Object.entries(pageData.deferredKeys) as [string, string][]) {
+      for (const [key, group] of Object.entries(pageData.deferredKeys) as Array<[string, string]>) {
         const ref = adapter.createDeferred();
         this.keyRefs[key] = ref;
         this.props[key] = ref;
@@ -316,7 +316,7 @@ export async function createPageNavigationEngine(
         return;
       }
 
-      for (const [key, group] of Object.entries(pageData.deferredKeys) as [string, string][]) {
+      for (const [key, group] of Object.entries(pageData.deferredKeys) as Array<[string, string]>) {
         const ref = adapter.createDeferred();
         const updated = adapter.resolveDeferred(ref, pageData.props[key]);
         this.keyRefs[key] = updated;
@@ -412,7 +412,7 @@ export async function createPageNavigationEngine(
 
     private retainOnly(keys: Set<string>, props: Record<string, unknown>): void {
       const keyRefs: Record<string, unknown> = {};
-      const groups: Record<string, string[]> = {};
+      const groups: Record<string, Array<string>> = {};
       for (const [key, ref] of Object.entries(this.keyRefs)) {
         if (keys.has(key)) {
           keyRefs[key] = ref;

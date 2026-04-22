@@ -29,7 +29,7 @@ vi.mock('@clack/prompts', () => ({
 }));
 
 const packageRoot = fileURLToPath(new URL('../..', import.meta.url));
-const tempDirs: string[] = [];
+const tempDirs: Array<string> = [];
 
 afterEach(() => {
   while (tempDirs.length > 0) {
@@ -83,7 +83,7 @@ function createStarterApp(starterMode: Exclude<ScaffoldStarterMode, 'static'>): 
   return root;
 }
 
-function readSqlMigrations(root: string): string[] {
+function readSqlMigrations(root: string): Array<string> {
   const migrationsDir = join(root, 'db', 'migrations');
   if (!existsSync(migrationsDir)) {
     return [];

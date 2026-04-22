@@ -10,14 +10,14 @@ export interface JobDefinition {
   /** Deterministic job name (path without extension) */
   name: string;
   /** Cron expressions from `export const cron = "..."` or `export const cron = ["...", "..."]` */
-  crons: string[];
+  crons: Array<string>;
 }
 
 function extractJobName(filePath: string): string {
   return filePath.replace(/\.[^.]+$/, '');
 }
 
-function extractCronExpressions(source: string, filePath: string): string[] {
+function extractCronExpressions(source: string, filePath: string): Array<string> {
   // Try single string: export const cron = "..."
   const singleMatch = source.match(/export\s+const\s+cron\s*=\s*(['"`])([^'"`]+)\1/);
   if (singleMatch) {
@@ -46,7 +46,7 @@ function extractCronExpressions(source: string, filePath: string): string[] {
   );
 }
 
-function parseJobFiles(root: string, jobsDir: string, files: string[]): JobDefinition[] {
+function parseJobFiles(root: string, jobsDir: string, files: Array<string>): Array<JobDefinition> {
   return files
     .filter((f) => !f.split('/').some((segment) => segment.startsWith('_')))
     .sort((a, b) => a.localeCompare(b))
@@ -61,17 +61,17 @@ function parseJobFiles(root: string, jobsDir: string, files: string[]): JobDefin
     });
 }
 
-export async function scanJobs(root: string, jobsDir = 'crons'): Promise<JobDefinition[]> {
+export async function scanJobs(root: string, jobsDir = 'crons'): Promise<Array<JobDefinition>> {
   const pattern = `**/*.{${JOB_EXTENSIONS.join(',')}}`;
   const files = await glob(pattern, { cwd: `${root}/${jobsDir}`, absolute: false }).catch(
-    () => [] as string[],
+    () => [] as Array<string>,
   );
   return parseJobFiles(root, jobsDir, files);
 }
 
-export function scanJobsSync(root: string, jobsDir = 'crons'): JobDefinition[] {
+export function scanJobsSync(root: string, jobsDir = 'crons'): Array<JobDefinition> {
   const pattern = `**/*.{${JOB_EXTENSIONS.join(',')}}`;
-  let files: string[];
+  let files: Array<string>;
   try {
     files = globSync(pattern, { cwd: `${root}/${jobsDir}`, absolute: false });
   } catch {

@@ -235,7 +235,7 @@ describe('createPageRouter prefetch', () => {
     const matchRoute = vi.fn(() => 'home');
     vi.stubGlobal('fetch', vi.fn());
 
-    const events: string[] = [];
+    const events: Array<string> = [];
     const { router } = await createPageRouter({
       adapter: {
         applyUpdate,
@@ -272,7 +272,7 @@ describe('createPageRouter prefetch', () => {
   it('keeps pending navigation state when an older visit aborts', async () => {
     stubClientGlobals();
     let resolveFast!: (response: Response) => void;
-    const events: string[] = [];
+    const events: Array<string> = [];
     const applyUpdate = vi.fn();
 
     vi.stubGlobal(

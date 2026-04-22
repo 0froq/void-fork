@@ -22,7 +22,7 @@ import {
  * These are unit-level because they instantiate better-sqlite3 directly.
  */
 
-const roots: string[] = [];
+const roots: Array<string> = [];
 
 function createDir(): string {
   const root = mkdtempSync(join(tmpdir(), 'void-runner-sqlite-'));
@@ -83,7 +83,7 @@ describe('runMigrations (local SQLite)', () => {
     try {
       const rows = db
         .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-        .all() as { name: string }[];
+        .all() as Array<{ name: string }>;
       const names = rows.map((r) => r.name);
       expect(names).toContain('users');
       expect(names).toContain('posts');
@@ -188,9 +188,9 @@ describe('runMigrations (local SQLite)', () => {
         .get();
       expect(legacy).toBeUndefined();
       // _void_migrations has the expected rows
-      const rows = db2.prepare('SELECT name FROM _void_migrations ORDER BY name').all() as {
+      const rows = db2.prepare('SELECT name FROM _void_migrations ORDER BY name').all() as Array<{
         name: string;
-      }[];
+      }>;
       expect(rows.map((r) => r.name)).toEqual(['001_init.sql', '002_posts.sql']);
     } finally {
       db2.close();
@@ -273,7 +273,7 @@ describe('runMigrations (local SQLite)', () => {
 
     const db = await openSqliteDatabase(dbPath, { readonly: true });
     try {
-      const rows = db.prepare('SELECT saw FROM peek').all() as { saw: number }[];
+      const rows = db.prepare('SELECT saw FROM peek').all() as Array<{ saw: number }>;
       // saw === 0 proves the tracking INSERT happened AFTER db.exec.
       // saw === 1 would mean the INSERT ran first — this test regresses.
       expect(rows).toEqual([{ saw: 0 }]);
@@ -356,9 +356,9 @@ describe('runMigrations (local SQLite)', () => {
     db = await openSqliteDatabase(dbPath, { readonly: true });
     try {
       const rows = (
-        db.prepare('SELECT name FROM _void_migrations ORDER BY name').all() as {
+        db.prepare('SELECT name FROM _void_migrations ORDER BY name').all() as Array<{
           name: string;
-        }[]
+        }>
       ).map((r) => r.name);
       expect(rows).toEqual(['000_bootstrap.sql', '001.sql']);
       const legacy = db
@@ -396,7 +396,7 @@ describe('runMigrations (local SQLite)', () => {
 
     const db = await openSqliteDatabase(dbPath, { readonly: true });
     try {
-      const rows = db.prepare('SELECT msg FROM t').all() as { msg: string }[];
+      const rows = db.prepare('SELECT msg FROM t').all() as Array<{ msg: string }>;
       expect(rows).toEqual([{ msg: 'a;b' }]);
       // Exactly one tracking row.
       const tracked = db.prepare('SELECT name FROM _void_migrations').all();

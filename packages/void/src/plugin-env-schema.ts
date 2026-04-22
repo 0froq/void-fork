@@ -15,8 +15,8 @@ interface RegisteredSchemaModule {
   _getSchemaDefaults(): Record<string, string>;
   validateAllEnv(values: Record<string, unknown>): Promise<{
     valid: boolean;
-    missing: string[];
-    invalid: { key: string; messages: string[] }[];
+    missing: Array<string>;
+    invalid: Array<{ key: string; messages: Array<string> }>;
   }>;
 }
 
@@ -104,7 +104,7 @@ export function envSchemaPlugin(root: string, options: EnvSchemaPluginOptions = 
     if (!schema) {
       return;
     }
-    const overlaps: { defineKey: string; schemaKey: string }[] = [];
+    const overlaps: Array<{ defineKey: string; schemaKey: string }> = [];
     for (const defineKey of Object.keys(define)) {
       const match = DEFINE_ENV_PATTERN.exec(defineKey);
       if (!match) {
@@ -142,7 +142,7 @@ export function envSchemaPlugin(root: string, options: EnvSchemaPluginOptions = 
     if (report.valid) {
       return;
     }
-    const lines: string[] = ['Env validation issues:'];
+    const lines: Array<string> = ['Env validation issues:'];
     for (const key of report.missing) {
       lines.push(`  • ${key} is required but missing — add it to .env.local or set in your shell`);
     }

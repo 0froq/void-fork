@@ -6,14 +6,10 @@ import { defineEnv } from '../../src/runtime/env-public';
 const ROOT = '/project';
 type MessagePayload = string | { message: string };
 type FoldContext = ReturnType<typeof makeContext>;
-type TransformHandler = (
-  this: FoldContext,
-  code: string,
-  id: string,
-) => unknown | Promise<unknown>;
+type TransformHandler = (this: FoldContext, code: string, id: string) => unknown | Promise<unknown>;
 type ConfigResolvedHandler = (
   this: FoldContext,
-  config: { envPrefix?: string | string[]; env?: Record<string, string> },
+  config: { envPrefix?: string | Array<string>; env?: Record<string, string> },
 ) => unknown | Promise<unknown>;
 type HookWithHandler<T> = { handler: T };
 
@@ -25,8 +21,8 @@ interface TransformResult {
 function makeContext(environmentName = 'client') {
   return {
     environment: { name: environmentName },
-    errors: [] as { message: string }[],
-    warnings: [] as { message: string }[],
+    errors: [] as Array<{ message: string }>,
+    warnings: [] as Array<{ message: string }>,
     error(payload: MessagePayload) {
       this.errors.push(typeof payload === 'string' ? { message: payload } : payload);
       throw new Error(typeof payload === 'string' ? payload : payload.message);
@@ -60,7 +56,7 @@ function getConfigResolvedHandler(plugin: ReturnType<typeof envClientFoldPlugin>
 }
 
 interface RunOpts {
-  envPrefix?: string | string[];
+  envPrefix?: string | Array<string>;
   env?: Record<string, string>;
   environmentName?: string;
 }

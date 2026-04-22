@@ -53,7 +53,7 @@ function defineClientTests(getBase: () => string) {
 
   it('hydrates without console errors', async () => {
     const page = await newPage();
-    const errors: string[] = [];
+    const errors: Array<string> = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
         errors.push(msg.text());

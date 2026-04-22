@@ -3,7 +3,7 @@ import type { FileTreeItem } from './FileTree.vue';
 
 const props = defineProps<{ annotations?: boolean }>();
 
-function buildItems(ext: string): FileTreeItem[] {
+function buildItems(ext: string): Array<FileTreeItem> {
   const d = props.annotations;
   return [
     {

@@ -26,7 +26,7 @@ export interface PageObject {
   url: string;
   errors: Record<string, string> | null;
   head?: HeadDescriptor;
-  deferred?: string[];
+  deferred?: Array<string>;
   deferredKeys?: Record<string, string>;
 }
 
@@ -39,11 +39,11 @@ interface ValidationIssue {
 
 interface ValidationSlotIssue {
   slot?: string;
-  issues?: ValidationIssue[];
+  issues?: Array<ValidationIssue>;
 }
 
 interface ValidationErrorBody {
-  issues?: ValidationSlotIssue[];
+  issues?: Array<ValidationSlotIssue>;
 }
 
 type PageHandler = ((c: CloudContext) => unknown | Promise<unknown>) | undefined;

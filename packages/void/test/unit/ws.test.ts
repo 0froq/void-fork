@@ -17,16 +17,16 @@ declare module 'void/routes' {
 }
 
 class MockWebSocket {
-  static instances: MockWebSocket[] = [];
+  static instances: Array<MockWebSocket> = [];
   static OPEN = 1;
 
   readyState = 0;
-  sent: string[] = [];
+  sent: Array<string> = [];
   listeners = new Map<string, Set<(event: MockSocketEvent) => void>>();
 
   constructor(
     readonly url: string,
-    readonly protocols?: string | string[],
+    readonly protocols?: string | Array<string>,
   ) {
     MockWebSocket.instances.push(this);
   }

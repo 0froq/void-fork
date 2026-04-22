@@ -15,7 +15,7 @@ export interface VoidSolidOptions {
   prefetch?: PrefetchConfig;
 }
 
-export function voidSolid(options?: VoidSolidOptions): Plugin[] {
+export function voidSolid(options?: VoidSolidOptions): Array<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');
   return [
     solid({ ssr: true, ...options?.solid }),

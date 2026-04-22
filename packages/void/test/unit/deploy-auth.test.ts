@@ -23,30 +23,30 @@ vi.mock('@clack/prompts', () => ({
   confirm: vi.fn(),
   isCancel: () => false,
   log: {
-    error: (...args: unknown[]) => mockError(...args),
-    info: (...args: unknown[]) => mockInfo(...args),
-    step: (...args: unknown[]) => mockStep(...args),
-    warn: (...args: unknown[]) => mockWarn(...args),
-    success: (...args: unknown[]) => mockSuccess(...args),
+    error: (...args: Array<unknown>) => mockError(...args),
+    info: (...args: Array<unknown>) => mockInfo(...args),
+    step: (...args: Array<unknown>) => mockStep(...args),
+    warn: (...args: Array<unknown>) => mockWarn(...args),
+    success: (...args: Array<unknown>) => mockSuccess(...args),
   },
 }));
 
 vi.mock('../../src/cli/auth', () => ({
-  getToken: (...args: unknown[]) => mockGetToken(...args),
-  getTokenSource: (...args: unknown[]) => mockGetTokenSource(...args),
+  getToken: (...args: Array<unknown>) => mockGetToken(...args),
+  getTokenSource: (...args: Array<unknown>) => mockGetTokenSource(...args),
 }));
 
 vi.mock('../../src/cli/client', () => ({
   PlatformClient: class {
-    listProjects(...args: unknown[]) {
+    listProjects(...args: Array<unknown>) {
       return mockListProjects(...args);
     }
   },
-  isExpiredTokenError: (...args: unknown[]) => mockIsExpiredTokenError(...args),
+  isExpiredTokenError: (...args: Array<unknown>) => mockIsExpiredTokenError(...args),
 }));
 
 vi.mock('../../src/cli/login', () => ({
-  promptForLoginToken: (...args: unknown[]) => mockPromptForLoginToken(...args),
+  promptForLoginToken: (...args: Array<unknown>) => mockPromptForLoginToken(...args),
 }));
 
 beforeEach(() => {

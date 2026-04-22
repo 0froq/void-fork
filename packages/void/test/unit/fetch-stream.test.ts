@@ -18,7 +18,7 @@ vi.mock('ofetch', () => {
 declare module 'void/routes' {
   interface RouteMap {
     '/api/chat': {
-      POST: { input: { body: { messages: unknown[] } }; output: unknown };
+      POST: { input: { body: { messages: Array<unknown> } }; output: unknown };
     };
     '/api/stream': {
       POST: { input: {}; output: unknown };
@@ -29,7 +29,7 @@ declare module 'void/routes' {
 import { ofetch } from 'ofetch';
 import { fetchStream } from '../../src/runtime/fetch-stream';
 
-function makeSSEStream(chunks: string[]): ReadableStream<Uint8Array> {
+function makeSSEStream(chunks: Array<string>): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream({
     start(controller) {
@@ -59,7 +59,7 @@ describe('fetchStream', () => {
       headers: new Headers(),
     } as unknown as Awaited<ReturnType<typeof ofetch.raw>>);
 
-    const chunks: string[] = [];
+    const chunks: Array<string> = [];
     for await (const chunk of fetchStream('/api/chat', {
       method: 'POST',
       body: { messages: [] },
@@ -79,7 +79,7 @@ describe('fetchStream', () => {
       headers: new Headers(),
     } as unknown as Awaited<ReturnType<typeof ofetch.raw>>);
 
-    const chunks: string[] = [];
+    const chunks: Array<string> = [];
     for await (const chunk of fetchStream('/api/stream', { method: 'POST' })) {
       chunks.push(chunk);
     }
@@ -100,7 +100,7 @@ describe('fetchStream', () => {
       headers: new Headers(),
     } as unknown as Awaited<ReturnType<typeof ofetch.raw>>);
 
-    const chunks: string[] = [];
+    const chunks: Array<string> = [];
     for await (const chunk of fetchStream('/api/stream', { method: 'POST' })) {
       chunks.push(chunk);
     }
@@ -121,7 +121,7 @@ describe('fetchStream', () => {
       headers: new Headers(),
     } as unknown as Awaited<ReturnType<typeof ofetch.raw>>);
 
-    const chunks: string[] = [];
+    const chunks: Array<string> = [];
     for await (const chunk of fetchStream('/api/stream', { method: 'POST' })) {
       chunks.push(chunk);
     }
@@ -136,7 +136,7 @@ describe('fetchStream', () => {
       headers: new Headers(),
     } as unknown as Awaited<ReturnType<typeof ofetch.raw>>);
 
-    const chunks: string[] = [];
+    const chunks: Array<string> = [];
     for await (const chunk of fetchStream('/api/stream', { method: 'POST' })) {
       chunks.push(chunk);
     }

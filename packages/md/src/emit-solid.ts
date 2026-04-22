@@ -25,7 +25,7 @@ export default function MarkdownPage() {
 
 export function emitSolidComponentWithIslands(
   result: CompileResult,
-  islandImports: IslandImport[],
+  islandImports: Array<IslandImport>,
 ): string {
   const chunks = buildRenderChunks(result.html, islandImports);
   const importAliasByName = new Map<string, string>();
@@ -47,7 +47,7 @@ export const frontmatter = __frontmatter;
 export const headings = __headings;
 `;
 
-  const bodyLines: string[] = [];
+  const bodyLines: Array<string> = [];
   let index = 0;
 
   for (const chunk of chunks) {

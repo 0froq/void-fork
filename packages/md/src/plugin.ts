@@ -30,7 +30,7 @@ export interface MdPage {
   path: string;
   title: string;
   frontmatter: Record<string, unknown>;
-  headings: { depth: number; slug: string; text: string }[];
+  headings: Array<{ depth: number; slug: string; text: string }>;
 }
 
 export interface MarkdownOptions {
@@ -67,9 +67,9 @@ function hasIslandFiles(dir: string): boolean {
   return false;
 }
 
-export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
+export function voidMarkdown(options?: MarkdownOptions): Array<Plugin> {
   let adapter: FrameworkAdapter | null = null;
-  let mdPages: MdPage[] = [];
+  let mdPages: Array<MdPage> = [];
   let root = '';
   const svelteModules = new Map<string, string>();
   const solidModules = new Map<string, string>();
@@ -86,7 +86,7 @@ export function voidMarkdown(options?: MarkdownOptions): Plugin[] {
     return `${prefix}${encoded}.${hash}.${extension}`;
   }
 
-  async function scanMdPages(): Promise<MdPage[]> {
+  async function scanMdPages(): Promise<Array<MdPage>> {
     const pagesDir = join(root, 'pages');
     if (!existsSync(pagesDir)) {
       return [];
@@ -394,7 +394,7 @@ function generateMdClientEntry(scripts: Map<string, string>): string {
   if (scripts.size === 0) {
     return '';
   }
-  const lines: string[] = [];
+  const lines: Array<string> = [];
   lines.push('const mdScripts = {');
   for (const id of scripts.keys()) {
     lines.push(

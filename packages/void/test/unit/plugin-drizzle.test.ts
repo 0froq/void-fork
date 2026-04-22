@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { drizzlePlugin } from '../../src/plugin-drizzle';
 
-const roots: string[] = [];
+const roots: Array<string> = [];
 
 function createProjectRoot(options?: { schema?: boolean }): string {
   const root = mkdtempSync(join(tmpdir(), 'void-drizzle-'));

@@ -24,7 +24,7 @@ function createContainer(
     container,
     klass,
     {
-      render(tokens: Token[], idx: number, _options: unknown, env: MarkdownEnv) {
+      render(tokens: Array<Token>, idx: number, _options: unknown, env: MarkdownEnv) {
         const token = tokens[idx];
         if (token.nesting === 1) {
           token.attrJoin('class', `${klass} custom-block`);

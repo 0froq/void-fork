@@ -108,8 +108,8 @@ describe('playground/kitchen-sink build', () => {
   });
 });
 
-function collectFiles(dir: string): string[] {
-  const files: string[] = [];
+function collectFiles(dir: string): Array<string> {
+  const files: Array<string> = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const entryPath = toSlash(join(dir, entry.name));
     if (entry.isDirectory()) {

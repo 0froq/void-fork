@@ -19,7 +19,7 @@ export function linkPlugin(md: MarkdownExit, options?: LinkOptions): void {
   };
 
   md.renderer.rules.link_open = (
-    tokens: Token[],
+    tokens: Array<Token>,
     idx: number,
     mdOptions: RenderOptions,
     _env: unknown,

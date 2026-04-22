@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import type { SubcommandDef } from './subcommand-prompt';
 
-export const dbSubcommands: SubcommandDef[] = [
+export const dbSubcommands: Array<SubcommandDef> = [
   { name: 'push', description: 'Push schema to local D1 (no migration files)' },
   { name: 'generate', description: 'Generate SQL migrations from schema changes' },
   { name: 'status', description: 'Show migration status (local + remote)' },
@@ -45,7 +45,7 @@ export type DbArgs =
   | { action: 'set-url' }
   | { action: 'rename-migrations' };
 
-export function parseDbArgs(args: string[]): DbArgs {
+export function parseDbArgs(args: Array<string>): DbArgs {
   const parsed = parseArgs({
     args,
     options: {
