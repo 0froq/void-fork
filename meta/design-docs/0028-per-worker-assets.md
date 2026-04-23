@@ -5,6 +5,8 @@
 
 > **Note:** This design is partially superseded by [0055-kv-r2-static-deployments](./0055-kv-r2-static-deployments.md). Per-worker assets apply only to **worker-based deployments** (types `"void"` and `"framework"`). Static-only deployments (types `"static"` / `"spa"`) bypass WfP entirely and use KV/R2-based content-addressed storage instead. Sections affected: "Static-only deploys", "Dispatch Worker Changes" (dispatch retains static serving for KV/R2 path), "Simplified RoutingEntry" (`workerName` remains optional, `staticDeploymentId` added), and "Deletion Summary" (static serving code is rewritten, not deleted).
 
+> **Note (2026-04-23):** As of [0066-wfp-asset-r2-fallback](./0066-wfp-asset-r2-fallback.md), WfP deploys additionally mirror their assets to the same platform R2/KV that static-only deploys use. CF's per-worker asset binding remains primary; dispatch consults the mirror only when CF's asset dedupe returns the poisoning stub (see [0065](./0065-cloudflare-asset-dedupe-poisoning.md)).
+
 ---
 
 ## Summary

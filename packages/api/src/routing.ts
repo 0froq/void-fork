@@ -9,6 +9,8 @@ export function buildRoutingJson(opts: {
   dispatchLimits: { cpuMs?: number; subRequests?: number } | null;
   suspended?: string;
   hasCrons?: boolean;
+  assetManifestId?: string;
+  assetConfig?: AssetConfig;
 }): string {
   const { manifest } = opts;
   return JSON.stringify({
@@ -24,6 +26,8 @@ export function buildRoutingJson(opts: {
     ...(opts.dispatchLimits ? { limits: opts.dispatchLimits } : {}),
     ...(opts.suspended ? { suspended: opts.suspended } : {}),
     ...(opts.hasCrons ? { hasCrons: true } : {}),
+    ...(opts.assetManifestId ? { assetManifestId: opts.assetManifestId } : {}),
+    ...(opts.assetConfig ? { assetConfig: opts.assetConfig } : {}),
   });
 }
 

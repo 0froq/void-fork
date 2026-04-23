@@ -112,11 +112,12 @@ Dashboard auth uses the same JWT model, stored in the `void_token` cookie.
 
 1. validate ownership and deploy limits
 2. provision bindings and queues from the manifest
-3. upload worker modules and assets
-4. upload a versioned worker: `user-{slug}-{deploymentId}`
-5. call `POST /__void/migrate` on that new worker
-6. update routing KV and active domains only after migrations succeed
-7. mark the deployment live and run retention cleanup
+3. upload worker modules and assets to CF via `assets-upload-session`
+4. also mirror assets to platform `STATIC_ASSETS`/`STATIC_ASSETS_R2` and write a serving manifest to `ROUTING` (safety net for CF asset dedupe poisoning — see `meta/design-docs/0066`)
+5. upload a versioned worker: `user-{slug}-{deploymentId}`
+6. call `POST /__void/migrate` on that new worker
+7. update routing KV (with `assetManifestId`) and active domains only after migrations succeed
+8. mark the deployment live and run retention cleanup (evicts mirrored assets + serving manifests for deployments dropped from the retention window)
 
 ### Static/SPA deploys
 

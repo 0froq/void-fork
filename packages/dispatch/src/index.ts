@@ -34,6 +34,7 @@ interface RoutingEntry {
   headerRules?: Array<HeaderRule>;
   redirectRules?: Array<RedirectRule>;
   staticDeploymentId?: string;
+  assetManifestId?: string;
   assetConfig?: AssetConfig;
 }
 
@@ -81,6 +82,88 @@ async function populateJsonEdgeCache(
     return;
   }
   await cache.put(cacheKey, jsonCacheResponse(pageData, ttl, state));
+}
+
+// CF's error text for WC-4511 asset dedupe poisoning. Not guaranteed
+// stable — monitor fallback telemetry if CF's worker-runtime changes.
+const CF_ASSETS_STUB_MARKER = 'Assets have not yet been deployed to this script';
+
+function isLikelyCfAssetStub(response: Response): boolean {
+  if (response.status !== 200) {
+    return false;
+  }
+  const ct = response.headers.get('content-type')?.toLowerCase();
+  if (!ct?.startsWith('text/plain')) {
+    return false;
+  }
+  const clRaw = response.headers.get('content-length');
+  if (!clRaw) {
+    return false;
+  }
+  const cl = Number.parseInt(clRaw, 10);
+  return cl > 0 && cl < 200;
+}
+
+// Serve the requested asset from platform R2/KV using the mirror written
+// on deploy. Returns null if the routing entry lacks a manifest, the
+// manifest is missing from KV, or the path/hash cannot be resolved — in
+// which case the caller should pass through the original response.
+async function serveWfpAssetFallback(
+  env: Env,
+  routing: RoutingEntry,
+  pathname: string,
+): Promise<Response | null> {
+  if (!routing.assetManifestId) {
+    return null;
+  }
+  const manifestRaw = await env.ROUTING.get(`manifest:${routing.assetManifestId}`, {
+    cacheTtl: 86400,
+  });
+  if (!manifestRaw) {
+    return null;
+  }
+  const assetManifest: Record<string, string> = JSON.parse(manifestRaw);
+  const assetConfig: AssetConfig = routing.assetConfig ?? { not_found_handling: 'none' };
+  const resolved = resolveStaticPath(pathname, assetManifest, assetConfig);
+  if (!resolved) {
+    return null;
+  }
+  if (resolved.redirect) {
+    return new Response(null, {
+      status: 308,
+      headers: { Location: resolved.redirect },
+    });
+  }
+  const assetResponse = await fetchStaticAsset(
+    env,
+    resolved.hash,
+    resolved.path,
+    routing.projectId,
+  );
+  if (!assetResponse) {
+    return null;
+  }
+  return new Response(assetResponse.body, {
+    status: resolved.notFound ? 404 : 200,
+    headers: assetResponse.headers,
+  });
+}
+
+function logWfpAssetFallback(
+  routing: RoutingEntry,
+  pathname: string,
+  userAgent: string | null,
+): void {
+  console.log(
+    JSON.stringify({
+      event: 'wfp-asset-fallback',
+      projectId: routing.projectId,
+      deploymentId: routing.assetManifestId,
+      pathname,
+      userAgent,
+      ts: Date.now(),
+    }),
+  );
 }
 
 export default {
@@ -202,7 +285,20 @@ export default {
         }
         try {
           const worker = getWorker(env, routing);
-          const response = await worker.fetch(request);
+          let response = await worker.fetch(request);
+          // Safety net for CF asset dedupe poisoning (WC-4511). See
+          // meta/design-docs/0066. Detection only triggers on the CF
+          // stub's fingerprint; all other responses stream through.
+          if (routing.assetManifestId && isLikelyCfAssetStub(response)) {
+            const body = await response.clone().text();
+            if (body.includes(CF_ASSETS_STUB_MARKER)) {
+              const fallback = await serveWfpAssetFallback(env, routing, pathname);
+              if (fallback) {
+                logWfpAssetFallback(routing, pathname, request.headers.get('user-agent'));
+                response = fallback;
+              }
+            }
+          }
           if (response.ok) {
             const res = new Response(response.body, response);
             res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
@@ -399,7 +495,21 @@ export default {
         headers.delete('transfer-encoding');
         dispatchReq = new Request(request.url, { method: request.method, headers });
       }
-      const response = await worker.fetch(dispatchReq);
+      let response = await worker.fetch(dispatchReq);
+
+      // Safety net for CF asset dedupe poisoning (WC-4511). See
+      // meta/design-docs/0066. Pre-check gates body read so non-asset
+      // responses stream through untouched.
+      if (routing.assetManifestId && isLikelyCfAssetStub(response)) {
+        const body = await response.clone().text();
+        if (body.includes(CF_ASSETS_STUB_MARKER)) {
+          const fallback = await serveWfpAssetFallback(env, routing, pathname);
+          if (fallback) {
+            logWfpAssetFallback(routing, pathname, request.headers.get('user-agent'));
+            response = fallback;
+          }
+        }
+      }
 
       // Cache static asset at edge if eligible
       if (staticCacheKey && response.ok && !hasCacheOptOut(response)) {

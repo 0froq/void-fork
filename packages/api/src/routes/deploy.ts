@@ -873,6 +873,11 @@ app.post('/:id/deploy', async (c) => {
   const builtAssetManifest: Record<string, AssetManifestEntry> = {};
   const streamedHashStores = new Map<string, 'kv' | 'r2'>();
   const streamedLargeHashes = new Set<string>();
+  // Deployment id whose WfP safety-net serving manifest (`manifest:{id}` in
+  // ROUTING KV) was written by this request. Tracked so the abort path can
+  // delete it if the deploy fails before routing switches. See
+  // meta/design-docs/0066.
+  let wfpMirroredManifestDeploymentId: string | null = null;
   // Bounded-concurrency upload pool for streamed static assets. The parse
   // loop reads one part's bytes inline, then fans the KV/R2 PUT off into a
   // task tracked by both sets. `inFlightStaticUploads` gates the pool
@@ -963,6 +968,20 @@ app.post('/:id/deploy', async (c) => {
     // the edge case where the pool had tasks pending but none had reached
     // `streamedHashStores.set(...)` yet.
     await drainInFlightStaticUploads();
+    // Evict the WfP safety-net serving manifest regardless of whether any
+    // blobs were streamed — the manifest is written even when all assets
+    // were preflight-skipped (carry-forward serves them from the prior
+    // mirror), and it is deployment-scoped so deletion is safe.
+    if (wfpMirroredManifestDeploymentId) {
+      const id = wfpMirroredManifestDeploymentId;
+      wfpMirroredManifestDeploymentId = null;
+      await c.env.ROUTING.delete(`manifest:${id}`).catch((err) =>
+        console.warn(
+          `[deploy] failed to evict mirrored manifest for aborted ${id}`,
+          err instanceof Error ? err.message : err,
+        ),
+      );
+    }
     if (streamedHashStores.size === 0) {
       return;
     }
@@ -2105,6 +2124,65 @@ app.post('/:id/deploy', async (c) => {
             .update(deployments)
             .set({ asset_hashes: JSON.stringify(assetManifest) })
             .where(eq(deployments.id, deployment.id));
+
+          // Mirror assets to platform R2/KV as a safety net for CF asset
+          // dedupe poisoning (cloudflare/workers-sdk#12586). CF remains the
+          // primary serving path; dispatch consults this mirror only when
+          // CF returns the "Assets have not yet been deployed" stub. See
+          // meta/design-docs/0066.
+          //
+          // Register hashes with the abort-cleanup path BEFORE the upload
+          // so a partial failure — uploadStaticAssets runs concurrent
+          // workers and rejects on the first error, leaving already-settled
+          // writes on disk — still gets swept. Placement is a pure function
+          // of size, so we compute it up-front instead of relying on the
+          // return value (which is unreachable on rejection).
+          for (const [hash, entry] of assetsByHash) {
+            if (!streamedHashStores.has(hash)) {
+              streamedHashStores.set(hash, entry.bytes.byteLength >= KV_THRESHOLD ? 'r2' : 'kv');
+            }
+          }
+
+          const largeHashes = await uploadStaticAssets(
+            c.env.STATIC_ASSETS,
+            c.env.STATIC_ASSETS_R2,
+            assetsByHash,
+            projectId,
+          );
+
+          let prevServingManifest: Record<string, string> | null = null;
+          if (preflightUsed && project.active_deployment_id) {
+            const prev = await c.env.ROUTING.get(`manifest:${project.active_deployment_id}`);
+            if (prev) {
+              prevServingManifest = JSON.parse(prev) as Record<string, string>;
+            }
+          }
+
+          // Hash → prior serving-manifest entry, so preflight-skipped assets
+          // keep their R2-vs-KV placement without needing the bytes on hand.
+          const prevHashEntry = new Map<string, string>();
+          if (prevServingManifest) {
+            for (const v of Object.values(prevServingManifest)) {
+              const hash = v.startsWith('!') ? v.slice(1) : v;
+              prevHashEntry.set(hash, v);
+            }
+          }
+
+          const servingManifest: Record<string, string> = {};
+          for (const [path, entry] of Object.entries(assetManifest)) {
+            if (assetsByHash.has(entry.hash)) {
+              servingManifest[path] = largeHashes.has(entry.hash) ? `!${entry.hash}` : entry.hash;
+            } else if (prevHashEntry.has(entry.hash)) {
+              // Preflight-skipped but the previous mirror has the bytes.
+              servingManifest[path] = prevHashEntry.get(entry.hash)!;
+            }
+            // else: preflight-skipped with no prior mirror — bytes only live
+            // in CF's asset store. Omit from serving manifest; fallback
+            // cannot cover this path until a future deploy re-uploads it.
+          }
+
+          await c.env.ROUTING.put(`manifest:${deployment.id}`, JSON.stringify(servingManifest));
+          wfpMirroredManifestDeploymentId = deployment.id;
         }
 
         // 1. Upload worker to dispatch namespace via CF API
@@ -2540,6 +2618,8 @@ app.post('/:id/deploy', async (c) => {
           dispatchLimits,
           suspended: existingEntry?.suspended,
           hasCrons,
+          assetManifestId: assetCount > 0 ? deployment.id : undefined,
+          assetConfig: assetCount > 0 ? assetConfig : undefined,
         });
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
         await c.env.ROUTING.put(project.slug, routingJson);
@@ -2588,6 +2668,30 @@ app.post('/:id/deploy', async (c) => {
           );
           // retentionLimit includes the active deployment, so keep (limit - 1) others
           const toEvict = retained.slice(retentionLimit - 1);
+
+          // Build retained-hash set across current + kept deployments so the
+          // R2/KV mirror GC below doesn't evict hashes still referenced by
+          // a retained deployment. See meta/design-docs/0066.
+          let retainedHashes: Set<string> | null = null;
+          if (toEvict.length > 0) {
+            retainedHashes = new Set<string>();
+            for (const [, entry] of Object.entries(assetManifest)) {
+              retainedHashes.add(entry.hash);
+            }
+            const keptDeployments = retained.slice(0, retentionLimit - 1);
+            for (const kept of keptDeployments) {
+              if (kept.asset_hashes) {
+                const keptManifest = JSON.parse(kept.asset_hashes) as Record<
+                  string,
+                  { hash: string }
+                >;
+                for (const entry of Object.values(keptManifest)) {
+                  retainedHashes.add(entry.hash);
+                }
+              }
+            }
+          }
+
           for (const old of toEvict) {
             const oldWorkerName = `user-${project.slug}-${old.id}`;
             await deleteDispatchScript(
@@ -2596,6 +2700,23 @@ app.post('/:id/deploy', async (c) => {
               dispatchNamespace,
               oldWorkerName,
             );
+            // Evict mirrored assets + serving manifest written by prior
+            // WfP deploys under this plan (pre-mirror deploys have neither).
+            if (retainedHashes && old.asset_hashes) {
+              const evictedManifest = JSON.parse(old.asset_hashes) as Record<
+                string,
+                { hash: string }
+              >;
+              const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
+              await deleteUnreferencedAssets(
+                c.env.STATIC_ASSETS,
+                c.env.STATIC_ASSETS_R2,
+                evictedHashes,
+                retainedHashes,
+                projectId,
+              );
+              await c.env.ROUTING.delete(`manifest:${old.id}`);
+            }
             await markDeploymentRetained(c.get('db'), old.id, false);
             await clearIsrCache(c.env.ISR_CACHE, projectId, old.id).catch((e) =>
               console.error(`[deploy] failed to clear ISR cache for evicted ${old.id}:`, e),
@@ -2779,20 +2900,29 @@ app.post('/:id/deploy/preflight', async (c) => {
     return c.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
   }
 
-  // Detect storage mechanism changes between previous and current deploy.
-  // Static deploys store assets in KV/R2 (serving manifest in ROUTING KV).
-  // WfP deploys store assets via CF's asset upload API (ASSETS binding).
-  // Dedup is only safe when both deploys use the same storage mechanism.
+  // Preflight dedup is only safe when both the previous and current deploys
+  // use the same asset backend (KV/R2 for static, CF asset API for WfP).
+  // Read the live routing entry as the source of truth: it is what is
+  // actually serving traffic and survives post-routing recovery paths that
+  // silently swallow a failed `updateProjectType`. Presence of
+  // `staticDeploymentId` in the entry means the active backend is static
+  // (KV/R2); anything else — including a missing or malformed entry — is
+  // treated as non-static so we conservatively return all assets.
   if (project.active_deployment_id) {
-    const hasServingManifest = await c.env.ROUTING.get(`manifest:${project.active_deployment_id}`);
-    if (!hasServingManifest) {
-      // Previous was WfP — assets are in CF's store, not KV/R2.
-      // All assets must be uploaded fresh.
-      return c.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
+    const routingRaw = await c.env.ROUTING.get(project.slug);
+    let prevIsStatic = false;
+    if (routingRaw) {
+      try {
+        const parsed = JSON.parse(routingRaw) as { staticDeploymentId?: unknown };
+        prevIsStatic = typeof parsed.staticDeploymentId === 'string';
+      } catch {
+        // malformed routing entry — treat as non-static, safe default
+      }
     }
-    if (hasWorker) {
-      // Previous was static (KV/R2) but current is WfP — different storage.
-      // Assets must be re-uploaded to CF's asset API.
+    const currentIsStatic = !hasWorker;
+    if (!(prevIsStatic && currentIsStatic)) {
+      // Backend transition, or previous deploy was WfP whose bytes live
+      // in CF's asset store (preflight cannot safely dedup those).
       return c.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
     }
   }

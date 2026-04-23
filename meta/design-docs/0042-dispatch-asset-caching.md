@@ -3,6 +3,8 @@
 **Date:** 2026-03-01
 **Status:** Implemented
 
+> **Note (2026-04-23):** This caching layer now also fronts the WfP asset safety-net fallback introduced in [0066-wfp-asset-r2-fallback](./0066-wfp-asset-r2-fallback.md). When dispatch falls back to the platform R2/KV mirror for a poisoned asset, the successful response enters the same `caches.default` layer (versioned by `assetManifestId`) described below.
+
 ---
 
 ## Summary

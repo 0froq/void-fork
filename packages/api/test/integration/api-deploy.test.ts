@@ -5971,8 +5971,17 @@ describe('POST /projects/:id/deploy/preflight', () => {
       .update(deployments)
       .set({ asset_hashes: JSON.stringify(prevManifest) })
       .where(eq(deployments.id, prevDeploy.id));
-    // Simulate a KV/R2 deployment: store a serving manifest so preflight
-    // knows assets are in KV/R2 (not WfP)
+    // Simulate a live static KV/R2 deployment: the preflight handler
+    // reads the routing entry under `project.slug` and treats presence of
+    // `staticDeploymentId` as the static-backend signal.
+    await env.ROUTING.put(
+      project.slug,
+      JSON.stringify({
+        staticDeploymentId: prevDeploy.id,
+        projectId: project.id,
+        userId: user.id,
+      }),
+    );
     const servingManifest: Record<string, string> = {};
     for (const [path, entry] of Object.entries(prevManifest)) {
       servingManifest[path] = entry.hash;
@@ -6177,6 +6186,14 @@ describe('POST /projects/:id/deploy/preflight', () => {
         .update(deployments)
         .set({ asset_hashes: JSON.stringify(prevManifest) })
         .where(eq(deployments.id, prevDeploy.id));
+      await env.ROUTING.put(
+        project.slug,
+        JSON.stringify({
+          staticDeploymentId: prevDeploy.id,
+          projectId: project.id,
+          userId: user.id,
+        }),
+      );
 
       // Static deploys store a serving manifest in ROUTING KV
       const servingManifest: Record<string, string> = {};
@@ -6229,6 +6246,14 @@ describe('POST /projects/:id/deploy/preflight', () => {
         .update(deployments)
         .set({ asset_hashes: JSON.stringify(prevManifest) })
         .where(eq(deployments.id, prevDeploy.id));
+      await env.ROUTING.put(
+        project.slug,
+        JSON.stringify({
+          staticDeploymentId: prevDeploy.id,
+          projectId: project.id,
+          userId: user.id,
+        }),
+      );
       const servingManifest: Record<string, string> = {};
       for (const [path, entry] of Object.entries(prevManifest)) {
         servingManifest[path] = entry.hash;

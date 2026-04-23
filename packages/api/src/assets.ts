@@ -1090,14 +1090,27 @@ export async function uploadStaticAssets(
   const largeHashes = new Set<string>();
   const entries = Array.from(assetsByHash);
   let index = 0;
+  // Collected across all workers so that every in-flight put settles (or
+  // stops picking up new entries) before this function returns. Without
+  // this, Promise.all would reject on the first worker failure while the
+  // remaining workers keep writing bytes in the background, racing any
+  // abort-cleanup the caller triggers.
+  let firstError: unknown;
 
   async function worker(): Promise<void> {
-    while (index < entries.length) {
+    while (firstError === undefined && index < entries.length) {
       const [hash, entry] = entries[index++];
       const key = `assets/${projectId}/${hash}`;
-      const store = await uploadStaticAssetWithRetries(kv, r2, key, entry, retryDelayMs);
-      if (store === 'r2') {
-        largeHashes.add(hash);
+      try {
+        const store = await uploadStaticAssetWithRetries(kv, r2, key, entry, retryDelayMs);
+        if (store === 'r2') {
+          largeHashes.add(hash);
+        }
+      } catch (err) {
+        if (firstError === undefined) {
+          firstError = err;
+        }
+        return;
       }
     }
   }
@@ -1107,6 +1120,9 @@ export async function uploadStaticAssets(
       worker(),
     ),
   );
+  if (firstError !== undefined) {
+    throw firstError;
+  }
   return largeHashes;
 }
 

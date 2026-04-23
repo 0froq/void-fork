@@ -94,6 +94,10 @@ If this becomes a frequent user-visible pain point, the architectural fix is to 
 
 Out of scope for now. This document exists so the next engineer who triages a "broken assets on first deploy" report can find the cause quickly and knows we've already decided not to work around it.
 
+## Update (2026-04-23)
+
+Safety-net fallback implemented in [0066](./0066-wfp-asset-r2-fallback.md). CF remains the primary serving path and the workarounds documented above (`/.void-deploy/` cache-buster + early `asset_hashes` persistence) remain in place. When CF returns the 36-byte stub, `packages/dispatch` detects it and serves the real asset from a platform-owned R2/KV mirror written at deploy time. The CF bug itself is not fixed — we mask the user-visible symptom.
+
 ## References
 
 - Upstream: [`cloudflare/workers-sdk#12586`](https://github.com/cloudflare/workers-sdk/issues/12586)

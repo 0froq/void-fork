@@ -12,11 +12,13 @@ Edge router for deployed Void apps. It routes requests to user workers, serves s
 6. For static/SPA projects, serve files from `STATIC_ASSETS` KV with `STATIC_ASSETS_R2` overflow for large assets, using `assetConfig` path resolution.
 7. For `/api/*`, forward to the user worker in the dispatch namespace with plan-specific CPU/subrequest limits.
 8. For SSR with ISR enabled, use `caches.default` plus `ISR_CACHE` KV for stale-while-revalidate behavior.
-9. Apply header rules and record usage in Analytics Engine. If `userId` is present on the routing entry, enqueue usage events as well.
+9. For WfP deploys, inspect the worker response for the Cloudflare asset-dedupe-poisoning stub (`Assets have not yet been deployed to this script.`). On detection, if the routing entry has `assetManifestId`, re-serve from the platform-owned mirror (`STATIC_ASSETS`/`STATIC_ASSETS_R2`). See `meta/design-docs/0066` and `meta/design-docs/0065`.
+10. Apply header rules and record usage in Analytics Engine. If `userId` is present on the routing entry, enqueue usage events as well.
 
 ## Static and ISR Storage
 
 - **Static/SPA deploys**: manifest in `ROUTING`, assets in `STATIC_ASSETS` KV, overflow in `STATIC_ASSETS_R2`
+- **WfP deploys with asset mirror**: same stores as static (manifest at `manifest:{deploymentId}`, assets at `assets/{projectId}/{hash}`). `RoutingEntry.assetManifestId` points at the manifest. CF's `ASSETS` binding remains primary — this mirror is only consulted when the CF stub is detected.
 - **ISR cache**: packed HTML/headers stored in `ISR_CACHE` KV, with edge-cache copies in `caches.default`
 - **Hashed assets**: immutable edge-cache entries keyed by URL path
 
