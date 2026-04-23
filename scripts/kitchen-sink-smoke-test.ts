@@ -17,6 +17,16 @@ const BASE = (process.env.SMOKE_URL || 'https://kitchen-sink.staging.void.app').
 const TIMEOUT = 15_000;
 const uid = Date.now().toString(36);
 
+// CF Access service-token headers required when the target host (staging) is
+// gated by Cloudflare Access. Empty when either var is unset (prod runs).
+const CF_ACCESS: Record<string, string> =
+  process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET
+    ? {
+        'CF-Access-Client-Id': process.env.CF_ACCESS_CLIENT_ID,
+        'CF-Access-Client-Secret': process.env.CF_ACCESS_CLIENT_SECRET,
+      }
+    : {};
+
 type MarkerWindow = Window & { __SPA_MARKER?: boolean };
 type StampedNav = HTMLElement & { __stamp?: number };
 
@@ -87,7 +97,7 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
     browser = await chromium.launch();
 
     // Reset all app state for a clean slate
-    const res = await fetch(`${BASE}/api/reset`, { method: 'POST' });
+    const res = await fetch(`${BASE}/api/reset`, { method: 'POST', headers: CF_ACCESS });
     if (!res.ok) {
       console.warn(`  ⚠ Reset endpoint returned ${res.status} — tests may see stale data`);
     }
@@ -99,7 +109,7 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
 
   /** Create an isolated browser context + page. Caller must close ctx when done. */
   async function freshPage(): Promise<{ ctx: BrowserContext; page: Page }> {
-    const ctx = await browser.newContext();
+    const ctx = await browser.newContext({ extraHTTPHeaders: CF_ACCESS });
     const page = await ctx.newPage();
     return { ctx, page };
   }

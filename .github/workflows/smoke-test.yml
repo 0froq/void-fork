@@ -10,10 +10,15 @@ on:
         required: true
       VOID_TOKEN_STAGING:
         required: true
+      CF_ACCESS_CLIENT_ID_STAGING:
+        required: true
+      CF_ACCESS_CLIENT_SECRET_STAGING:
+        required: true
 
 jobs:
   smoke-test:
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    environment: Staging
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -47,14 +52,24 @@ jobs:
           VOID_TOKEN: ${{ secrets.VOID_TOKEN_STAGING }}
           VOID_API_URL: https://api.staging.void.cloud
           STAGING: '1'
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_STAGING }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_STAGING }}
 
       # Install Chromium for Playwright
       - run: npx playwright install chromium
 
       - name: Reset app state
-        run: curl -sf -X POST https://kitchen-sink.staging.void.app/api/reset
+        run: |
+          curl -sf -X POST https://kitchen-sink.staging.void.app/api/reset \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_STAGING }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_STAGING }}
 
       - name: Run smoke tests
         run: node --test-timeout=120000 --test scripts/kitchen-sink-smoke-test.ts
         env:
           SMOKE_URL: https://kitchen-sink.staging.void.app
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_STAGING }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_STAGING }}

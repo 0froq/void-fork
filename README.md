@@ -307,6 +307,8 @@ pnpm run deploy:staging:dashboard   # staging dashboard only
 
 See [`meta/operations.md`](./meta/operations.md) for the full operations reference — CF resources, secrets, environment variables, DNS setup, GitHub Actions, and fresh environment provisioning.
 
+Staging hostnames are gated by Cloudflare Access (GitHub organization `voidzero-dev` via GitHub). Programmatic callers (CLI, CI, remote bindings) must set `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` env vars. See [`meta/operations.md`](./meta/operations.md#staging-access-control) for full setup, rotation, and rollback.
+
 ## Pitfalls / Things That Broke
 
 - **Platform DB is PostgreSQL; user apps still default to D1** — Platform metadata lives in PostgreSQL via Hyperdrive (`packages/api/src/schema.ts` is the source of truth). User projects still default to D1 unless the app opts into `"database": "pg"`.

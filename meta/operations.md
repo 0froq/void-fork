@@ -194,12 +194,14 @@ Set via `vars` in `wrangler.jsonc` (production uses defaults, staging overrides)
 
 Two GitHub environments (`Prod` and `Staging`) share the same repo-level secrets plus environment-specific database URLs:
 
-| Secret                 | Environment | Purpose                                                         |
-| ---------------------- | ----------- | --------------------------------------------------------------- |
-| `CF_API_TOKEN`         | Both        | Cloudflare API token (see permissions below)                    |
-| `CF_ACCOUNT_ID`        | Both        | Cloudflare account ID (passed as `CLOUDFLARE_ACCOUNT_ID`)       |
-| `DATABASE_URL`         | Prod        | PlanetScale direct connection string for drizzle-kit migrations |
-| `STAGING_DATABASE_URL` | Staging     | PlanetScale direct connection string for drizzle-kit migrations |
+| Secret                            | Environment | Purpose                                                                             |
+| --------------------------------- | ----------- | ----------------------------------------------------------------------------------- |
+| `CF_API_TOKEN`                    | Both        | Cloudflare API token (see permissions below)                                        |
+| `CF_ACCOUNT_ID`                   | Both        | Cloudflare account ID (passed as `CLOUDFLARE_ACCOUNT_ID`)                           |
+| `DATABASE_URL`                    | Prod        | PlanetScale direct connection string for drizzle-kit migrations                     |
+| `STAGING_DATABASE_URL`            | Staging     | PlanetScale direct connection string for drizzle-kit migrations                     |
+| `CF_ACCESS_CLIENT_ID_STAGING`     | Staging     | CF Access service-token client id for reaching staging (see Staging Access Control) |
+| `CF_ACCESS_CLIENT_SECRET_STAGING` | Staging     | CF Access service-token client secret for reaching staging                          |
 
 `deploy.yml` (push to `prod`) uses the `Prod` environment; `deploy-staging.yml` (push to `main`) uses `Staging`.
 
@@ -229,6 +231,42 @@ Internal-only toggle for pointing the CLI at staging. Not documented in public d
 - Reads/writes `stagingToken` instead of `token`
 - Defaults API URL to `https://api.staging.void.cloud`
 - Can also be activated via `VOID_API_URL=https://api.staging.void.cloud`. The CLI does **not** read `STAGING=1` (`framework/packages/void/src/cli/project.ts:isVoidInternalStaging` only checks `.void/project.json`), so CI workflows must set `VOID_API_URL` explicitly.
+
+## Staging Access Control
+
+All four public staging hostnames sit behind Cloudflare Access:
+
+- `api.staging.void.cloud`
+- `dash.staging.void.cloud`
+- `proxy.staging.void.cloud`
+- `*.staging.void.app` (wildcard over dispatch)
+
+Production hostnames are **not** gated — this applies to staging only, even though staging and prod share the same CF account.
+
+**Identity policy:** each of the four Access Applications has one `Allow` rule: `GitHub organization = voidzero-dev` via GitHub as the IdP. Log into CF Zero Trust with any GitHub account that is a member of the `voidzero-dev` GitHub organization to pass. Email-based matching is avoided because GitHub does not reliably expose a primary email unless the user has made it public. Members whose org membership is private must click **Grant** on the OAuth consent screen the first time they sign in; if the org ever enforces SAML SSO, each member must also SSO-authorize the CF Access OAuth app via `github.com/orgs/voidzero-dev/sso`.
+
+**Bypass rules** (do not prompt for Access login — paths hit by third-party OAuth redirects):
+
+- `api.staging.void.cloud/auth/callback`
+- `api.staging.void.cloud/admin/callback`
+- `dash.staging.void.cloud/auth/callback`
+
+Each path is self-validating in application code via HMAC-signed `state` and nonce cookies, so bypassing Access does not weaken auth.
+
+**Service token** for programmatic callers: one shared token named `void-staging-programmatic` in CF Zero Trust → Access → Service Auth. Its Client ID and Client Secret are stored in 1Password under `void / staging / cf-access-service-token` and duplicated into the `Staging` GitHub environment as `CF_ACCESS_CLIENT_ID_STAGING` and `CF_ACCESS_CLIENT_SECRET_STAGING`.
+
+Callers that require these headers when hitting staging:
+
+| Caller                                   | How it reads the creds                                                                                                                                                    |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Void CLI (`void deploy`, `void whoami`…) | `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` env vars                                                                                                                |
+| Smoke-test CI workflow                   | `.github/workflows/smoke-test.yml` → `$CF_ACCESS_CLIENT_ID_STAGING` secret                                                                                                |
+| Remote D1/KV/R2 bindings in local dev    | env vars of the local process (Vite/wrangler) inherited by `ProxyClient`                                                                                                  |
+| Deployed staging user workers            | `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` set as worker env bindings (rare — only if the worker calls `proxy.staging.void.cloud` directly via `__VOID_PROXY_URL`) |
+
+**Rotating the service token:** rotate in the CF Zero Trust dashboard, update the 1Password entry and both `Staging` GitHub secrets, and notify anyone with the creds set in their shell. No code change required.
+
+**Rollback:** delete the four Access Applications in CF Zero Trust. Code changes are inert when the two env vars are unset, so no code rollback needed.
 
 ## Deploy Process
 
