@@ -76,7 +76,7 @@ import {
   type FrameworkPreset,
 } from './preset';
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from './project';
-import { promptProjectSelection } from './prompt';
+import { promptProjectSelection, promptProjectSetupAction } from './prompt';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project';
 import type { AssetConfig, DeployEvent, HeaderRule, RedirectRule } from './types';
 import { readWranglerCompat, type WranglerCompat } from './wrangler';
@@ -184,26 +184,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
       }
 
       if (!config) {
-        const projects = await client.listProjects();
-
-        if (projects.length > 0) {
-          // User has existing projects — let them choose
-          const result = await promptProjectSelection(
-            projects,
-            'Select a project to deploy to:',
-            root,
-          );
-
-          if (result.action === 'select') {
-            config = { projectId: result.project.id, slug: result.project.slug };
-            writeProjectConfig(root, config);
-            log.step(`Linked to ${config.slug}`);
-          } else {
-            config = await promptAndCreateProject(root, client);
-          }
-        } else {
-          config = await promptAndCreateProject(root, client);
-        }
+        config = await promptDeployProjectConfig(root, client);
       }
 
       // 3. Resolve deploy app type: void.json > CLI flags > auto-detection
@@ -315,6 +296,33 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
       throw error;
     }
   }
+}
+
+export async function promptDeployProjectConfig(
+  root: string,
+  client: PlatformClient,
+): Promise<ProjectConfig> {
+  const projects = await client.listProjects();
+  const action = await promptProjectSetupAction('Set up a Void project for deploy:', {
+    includeLink: projects.length > 0,
+  });
+
+  if (action === 'create') {
+    return promptAndCreateProject(root, client);
+  }
+
+  // Project names are only shown after the user opts into linking.
+  const result = await promptProjectSelection(projects, 'Select a project to deploy to:', root, {
+    includeCreate: false,
+  });
+
+  if (result.action === 'create') {
+    throw new Error('Unexpected project selection result.');
+  }
+  const config = { projectId: result.project.id, slug: result.project.slug };
+  writeProjectConfig(root, config);
+  log.step(`Linked to ${config.slug}`);
+  return config;
 }
 
 export function resolveStaticBuildCommand(
