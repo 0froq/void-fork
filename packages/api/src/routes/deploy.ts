@@ -44,6 +44,8 @@ import {
   getRetainedDeploymentsExcluding,
   getProjectSecrets,
   upsertProjectSecret,
+  createResource,
+  getProjectResources,
   CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES,
   type Db,
 } from '../db';
@@ -63,12 +65,21 @@ import {
   encryptProjectSecret,
 } from '../project-secrets';
 import { addQueueConsumer } from '../provisioning/cloudflare-api';
+import {
+  findDurableObjectNamespaceId,
+  upsertSandboxContainerApplication,
+} from '../provisioning/containers';
 import { provisionBindings } from '../provisioning/provision';
 import { buildRoutingJson, buildStaticRoutingJson } from '../routing';
 import { deployments } from '../schema';
 import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT } from '../tiers';
-import { SUPPORTED_MANIFEST_VERSIONS, type DeployManifest, type DeployEvent } from '../types';
-import type { WebSocketMigrationMeta } from '../types';
+import {
+  SUPPORTED_MANIFEST_VERSIONS,
+  type DeployManifest,
+  type DeployEvent,
+  type SandboxMigrationMeta,
+  type WebSocketMigrationMeta,
+} from '../types';
 
 const DEFAULT_DISPATCH_NAMESPACE = 'void-users';
 
@@ -519,7 +530,73 @@ function validateManifestShape(parsed: unknown): string | null {
     }
   }
 
+  if (m.sandbox !== undefined) {
+    if (m.sandbox == null || typeof m.sandbox !== 'object' || Array.isArray(m.sandbox)) {
+      return 'invalid manifest shape: sandbox must be an object';
+    }
+    const sandbox = m.sandbox as Record<string, unknown>;
+    for (const key of ['bindingName', 'className', 'containerName', 'image']) {
+      if (typeof sandbox[key] !== 'string' || sandbox[key].length === 0) {
+        return `invalid manifest shape: sandbox.${key} must be a non-empty string`;
+      }
+    }
+    if (isLocalImageReference(sandbox.image as string)) {
+      return 'invalid manifest shape: sandbox.image must be a registry image reference';
+    }
+    if (sandbox.instanceType !== undefined && typeof sandbox.instanceType !== 'string') {
+      return 'invalid manifest shape: sandbox.instanceType must be a string';
+    }
+    if (
+      sandbox.maxInstances !== undefined &&
+      (typeof sandbox.maxInstances !== 'number' ||
+        !Number.isInteger(sandbox.maxInstances) ||
+        sandbox.maxInstances < 1)
+    ) {
+      return 'invalid manifest shape: sandbox.maxInstances must be a positive integer';
+    }
+    if (sandbox.migrations !== undefined) {
+      if (!Array.isArray(sandbox.migrations)) {
+        return 'invalid manifest shape: sandbox.migrations must be an array';
+      }
+      for (const migration of sandbox.migrations) {
+        if (migration == null || typeof migration !== 'object' || Array.isArray(migration)) {
+          return 'invalid manifest shape: sandbox.migrations entries must be objects';
+        }
+        const mg = migration as Record<string, unknown>;
+        if (typeof mg.tag !== 'string') {
+          return 'invalid manifest shape: sandbox.migrations entries must have a string tag';
+        }
+        if (
+          mg.newSqliteClasses !== undefined &&
+          (!Array.isArray(mg.newSqliteClasses) ||
+            !mg.newSqliteClasses.every((x) => typeof x === 'string'))
+        ) {
+          return 'invalid manifest shape: sandbox.migrations newSqliteClasses must be an array of strings';
+        }
+        if (
+          mg.deletedClasses !== undefined &&
+          (!Array.isArray(mg.deletedClasses) ||
+            !mg.deletedClasses.every((x) => typeof x === 'string'))
+        ) {
+          return 'invalid manifest shape: sandbox.migrations deletedClasses must be an array of strings';
+        }
+      }
+    }
+  }
+
   return null;
+}
+
+function isLocalImageReference(image: string): boolean {
+  const lowerImage = image.toLowerCase();
+  return (
+    image.startsWith('.') ||
+    image.startsWith('/') ||
+    lowerImage === 'dockerfile' ||
+    lowerImage.includes('dockerfile') ||
+    lowerImage.endsWith('/dockerfile') ||
+    lowerImage.endsWith('\\dockerfile')
+  );
 }
 
 function parseManifest(raw: string | null | undefined): DeployManifest | null {
@@ -655,6 +732,90 @@ export function buildWebSocketUploadMigrations(
       }>;
     }
   | undefined {
+  return buildLegacyWebSocketUploadMigrations(migrations);
+}
+
+export function buildDurableObjectUploadMigrations(
+  websocketMigrations: Array<WebSocketMigrationMeta> | undefined,
+  sandboxMigrations: Array<SandboxMigrationMeta> | undefined,
+):
+  | {
+      new_tag: string;
+      steps: Array<{
+        new_classes?: Array<string>;
+        new_sqlite_classes?: Array<string>;
+        deleted_classes?: Array<string>;
+      }>;
+    }
+  | undefined {
+  const steps: Array<{
+    tag: string;
+    index: number;
+    new_classes?: Array<string>;
+    new_sqlite_classes?: Array<string>;
+    deleted_classes?: Array<string>;
+  }> = [];
+
+  for (const migration of websocketMigrations ?? []) {
+    steps.push({
+      tag: migration.tag,
+      index: steps.length,
+      ...(migration.newClasses?.length ? { new_classes: migration.newClasses } : {}),
+      ...(migration.deletedClasses?.length ? { deleted_classes: migration.deletedClasses } : {}),
+    });
+  }
+
+  for (const migration of sandboxMigrations ?? []) {
+    steps.push({
+      tag: migration.tag,
+      index: steps.length,
+      ...(migration.newSqliteClasses?.length
+        ? { new_sqlite_classes: migration.newSqliteClasses }
+        : {}),
+      ...(migration.deletedClasses?.length ? { deleted_classes: migration.deletedClasses } : {}),
+    });
+  }
+
+  if (steps.length === 0) {
+    return undefined;
+  }
+
+  const sortedSteps = [...steps].sort(compareDurableObjectMigrationSteps);
+
+  return {
+    new_tag: sortedSteps[sortedSteps.length - 1].tag,
+    steps: sortedSteps.map(({ tag: _tag, index: _index, ...step }) => step),
+  };
+}
+
+function compareDurableObjectMigrationSteps(
+  a: { tag: string; index: number },
+  b: { tag: string; index: number },
+): number {
+  const aVersion = parseMigrationTagVersion(a.tag);
+  const bVersion = parseMigrationTagVersion(b.tag);
+  if (aVersion !== null && bVersion !== null && aVersion !== bVersion) {
+    return aVersion - bVersion;
+  }
+  return a.index - b.index;
+}
+
+function parseMigrationTagVersion(tag: string): number | null {
+  const match = /-v(\d+)$/.exec(tag);
+  return match ? Number(match[1]) : null;
+}
+
+export function buildLegacyWebSocketUploadMigrations(
+  migrations: Array<WebSocketMigrationMeta> | undefined,
+):
+  | {
+      new_tag: string;
+      steps: Array<{
+        new_classes?: Array<string>;
+        deleted_classes?: Array<string>;
+      }>;
+    }
+  | undefined {
   if (!migrations || migrations.length === 0) {
     return undefined;
   }
@@ -697,6 +858,29 @@ export function buildWebSocketUploadBindings(
     name,
     class_name,
   }));
+}
+
+export function buildSandboxUploadBindings(sandbox: DeployManifest['sandbox'] | undefined): Array<{
+  type: 'durable_object_namespace';
+  name: string;
+  class_name: string;
+}> {
+  if (!sandbox) {
+    return [];
+  }
+  return [
+    {
+      type: 'durable_object_namespace',
+      name: sandbox.bindingName,
+      class_name: sandbox.className,
+    },
+  ];
+}
+
+export function buildSandboxUploadContainers(
+  sandbox: DeployManifest['sandbox'] | undefined,
+): Array<{ class_name: string }> | undefined {
+  return sandbox ? [{ class_name: sandbox.className }] : undefined;
 }
 
 export function enrichWebSocketManifest(
@@ -779,6 +963,130 @@ export function enrichWebSocketManifest(
     changed: true,
     nextVersion,
   };
+}
+
+export function enrichSandboxManifest(
+  manifest: DeployManifest,
+  previousManifest: DeployManifest | null,
+  currentVersion: number,
+): { manifest: DeployManifest; changed: boolean; nextVersion: number } {
+  if (!manifest.sandbox) {
+    return { manifest, changed: false, nextVersion: currentVersion };
+  }
+
+  const previousSandbox = previousManifest?.sandbox;
+  const previousMigrations = previousSandbox?.migrations ?? [];
+  const nextClass = manifest.sandbox.className;
+  const previousClass = previousSandbox?.className;
+
+  if (nextClass === previousClass && previousMigrations.length > 0) {
+    return {
+      manifest: {
+        ...manifest,
+        sandbox: {
+          ...manifest.sandbox,
+          migrations: previousMigrations,
+        },
+      },
+      changed: false,
+      nextVersion: currentVersion,
+    };
+  }
+
+  const existingClasses = new Set<string>();
+  if (previousClass) {
+    existingClasses.add(previousClass);
+  }
+  for (const migration of previousMigrations) {
+    for (const className of migration.newSqliteClasses ?? []) {
+      existingClasses.add(className);
+    }
+    for (const className of migration.deletedClasses ?? []) {
+      existingClasses.delete(className);
+    }
+  }
+
+  if (existingClasses.has(nextClass)) {
+    return {
+      manifest: {
+        ...manifest,
+        sandbox: {
+          ...manifest.sandbox,
+          migrations: previousMigrations,
+        },
+      },
+      changed: false,
+      nextVersion: currentVersion,
+    };
+  }
+
+  const nextVersion = currentVersion + 1;
+  const migration: SandboxMigrationMeta = {
+    tag: `sandbox-v${nextVersion}`,
+    newSqliteClasses: [nextClass],
+  };
+
+  return {
+    manifest: {
+      ...manifest,
+      sandbox: {
+        ...manifest.sandbox,
+        migrations: [...previousMigrations, migration],
+      },
+    },
+    changed: true,
+    nextVersion,
+  };
+}
+
+async function deploySandboxContainer(
+  db: Db,
+  accountId: string,
+  apiToken: string,
+  projectId: string,
+  workerName: string,
+  sandbox: NonNullable<DeployManifest['sandbox']>,
+): Promise<void> {
+  const namespaceId = await retryWithBackoff(
+    async () => {
+      try {
+        return await findDurableObjectNamespaceId(
+          accountId,
+          apiToken,
+          workerName,
+          sandbox.className,
+        );
+      } catch {
+        return undefined;
+      }
+    },
+    {
+      maxRetries: 8,
+      delayMs: 500,
+      errorMessage: 'sandbox Durable Object namespace was not created',
+    },
+  );
+  const application = await upsertSandboxContainerApplication(accountId, apiToken, {
+    name: getSandboxContainerApplicationName(projectId, sandbox.containerName),
+    image: sandbox.image,
+    namespaceId,
+    ...(sandbox.instanceType && { instanceType: sandbox.instanceType }),
+    ...(sandbox.maxInstances != null && { maxInstances: sandbox.maxInstances }),
+  });
+
+  const existing = await getProjectResources(db, projectId);
+  if (
+    !existing.some(
+      (resource) =>
+        resource.type === 'container' && resource.binding_name === sandbox.containerName,
+    )
+  ) {
+    await createResource(db, projectId, 'container', application.id, sandbox.containerName);
+  }
+}
+
+function getSandboxContainerApplicationName(projectId: string, containerName: string): string {
+  return `${projectId}-${containerName}`.toLowerCase().replaceAll('_', '-');
 }
 
 // Deploy to a project
@@ -1618,11 +1926,19 @@ app.post('/:id/deploy', async (c) => {
         return;
       }
 
-      const enrichedManifestResult = enrichWebSocketManifest(
+      const previousManifest = parseManifest(currentLiveDeployment?.manifest);
+      const websocketManifestResult = enrichWebSocketManifest(
         incomingManifest,
-        parseManifest(currentLiveDeployment?.manifest),
+        previousManifest,
         project.websocket_version,
       );
+      const enrichedManifestResult = enrichSandboxManifest(
+        websocketManifestResult.manifest,
+        previousManifest,
+        websocketManifestResult.nextVersion,
+      );
+      const manifestVersionChanged =
+        websocketManifestResult.changed || enrichedManifestResult.changed;
       manifest = enrichedManifestResult.manifest;
       const finalManifestRaw = JSON.stringify(manifest);
       const comparableAssetManifest = await buildComparableAssetManifestForDedupe(
@@ -1697,7 +2013,7 @@ app.post('/:id/deploy', async (c) => {
       deployment = await createDeployment(c.get('db'), projectId, finalManifestRaw, source, commit);
       currentDeploymentId = deployment.id;
       cleanupExcludeDeploymentId = deployment.id;
-      if (enrichedManifestResult.changed) {
+      if (manifestVersionChanged) {
         await updateProjectWebSocketVersion(
           c.get('db'),
           projectId,
@@ -2221,11 +2537,13 @@ app.post('/:id/deploy', async (c) => {
           text,
         }));
         const websocketBindings = buildWebSocketUploadBindings(manifest.websocket);
+        const sandboxBindings = buildSandboxUploadBindings(manifest.sandbox);
         const allBindings = [
           ...plainTextBindings,
           ...secretBindings,
           ...workerBindings,
           ...websocketBindings,
+          ...sandboxBindings,
           ...(completionJwt ? [{ name: 'ASSETS', type: 'assets' }] : []),
         ];
 
@@ -2237,13 +2555,18 @@ app.post('/:id/deploy', async (c) => {
         }
 
         const assetConfig = manifest.assetConfig ?? { not_found_handling: 'none' };
-        const websocketMigrations = buildWebSocketUploadMigrations(manifest.websocket?.migrations);
+        const durableObjectMigrations = buildDurableObjectUploadMigrations(
+          manifest.websocket?.migrations,
+          manifest.sandbox?.migrations,
+        );
+        const containers = buildSandboxUploadContainers(manifest.sandbox);
         const metadata: Record<string, unknown> = {
           main_module: manifest.workerMain ?? 'index.js',
           compatibility_date: manifest.compatibilityDate ?? '2026-02-12',
           compatibility_flags: manifest.compatibilityFlags ?? ['nodejs_compat'],
           bindings: allBindings,
-          ...(websocketMigrations ? { migrations: websocketMigrations } : {}),
+          ...(durableObjectMigrations ? { migrations: durableObjectMigrations } : {}),
+          ...(containers ? { containers } : {}),
           ...(completionJwt ? { assets: buildAssetMetadata(completionJwt, assetConfig) } : {}),
           observability: {
             enabled: true,
@@ -2299,6 +2622,19 @@ app.post('/:id/deploy', async (c) => {
           },
         );
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+
+        if (manifest.sandbox) {
+          currentStep = 'sandbox';
+          await deploySandboxContainer(
+            c.get('db'),
+            c.env.CF_ACCOUNT_ID,
+            c.env.CF_API_TOKEN,
+            projectId,
+            workerName,
+            manifest.sandbox,
+          );
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+        }
 
         emit({ event: 'worker_upload_done' });
 

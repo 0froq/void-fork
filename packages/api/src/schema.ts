@@ -155,7 +155,7 @@ export const resources = pgTable(
     project_id: text('project_id')
       .notNull()
       .references(() => projects.id),
-    type: text('type').notNull().$type<'d1' | 'kv' | 'r2' | 'queue' | 'hyperdrive'>(),
+    type: text('type').notNull().$type<'d1' | 'kv' | 'r2' | 'queue' | 'hyperdrive' | 'container'>(),
     cf_id: text('cf_id').notNull(),
     binding_name: text('binding_name').notNull(),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),

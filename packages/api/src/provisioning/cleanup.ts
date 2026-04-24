@@ -7,7 +7,7 @@ import {
   getProjectDeploymentWorkerName,
   getProjectQueueName,
 } from '../naming';
-import type { Project } from '../types';
+import type { Project, Resource } from '../types';
 import {
   deleteD1Database,
   deleteKVNamespace,
@@ -16,6 +16,33 @@ import {
   deleteCustomHostname,
   deleteHyperdrive,
 } from './cloudflare-api';
+import { deleteContainerApplication } from './containers';
+
+function deleteCloudflareResource(
+  accountId: string,
+  apiToken: string,
+  resource: Pick<Resource, 'type' | 'cf_id'>,
+): Promise<void> {
+  const resourceType = resource.type;
+
+  switch (resourceType) {
+    case 'd1':
+      return deleteD1Database(accountId, apiToken, resource.cf_id);
+    case 'kv':
+      return deleteKVNamespace(accountId, apiToken, resource.cf_id);
+    case 'r2':
+      return deleteR2Bucket(accountId, apiToken, resource.cf_id);
+    case 'queue':
+      return deleteQueue(accountId, apiToken, resource.cf_id);
+    case 'hyperdrive':
+      return deleteHyperdrive(accountId, apiToken, resource.cf_id);
+    case 'container':
+      return deleteContainerApplication(accountId, apiToken, resource.cf_id);
+    default:
+      resourceType satisfies never;
+      throw new Error(`Unsupported resource type: ${resourceType}`);
+  }
+}
 
 /**
  * Run best-effort Cloudflare resource cleanup for a project.
@@ -64,18 +91,9 @@ export async function cleanupProjectResources(
 
   const cleanup: Array<Promise<void>> = [];
 
-  // CF resource cleanup (D1, KV, R2, Queue — user-provisioned resources)
+  // CF resource cleanup (D1, KV, R2, Queue, Hyperdrive, Container — user-provisioned resources)
   for (const resource of resources) {
-    const del =
-      resource.type === 'd1'
-        ? deleteD1Database(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
-        : resource.type === 'kv'
-          ? deleteKVNamespace(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
-          : resource.type === 'r2'
-            ? deleteR2Bucket(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
-            : resource.type === 'hyperdrive'
-              ? deleteHyperdrive(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id)
-              : deleteQueue(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource.cf_id);
+    const del = deleteCloudflareResource(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource);
     cleanup.push(del.catch(warn(`Failed to delete ${resource.type} resource ${resource.cf_id}`)));
   }
 

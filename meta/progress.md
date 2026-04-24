@@ -62,6 +62,7 @@
 - [x] AI binding (`void/ai` with metered proxy)
 - [x] Remote bindings (`remote: true` — D1/KV/R2 via proxy for local dev)
 - [x] Better Auth integration
+- [x] Cloudflare Sandboxes (`void/sandbox` with platform container provisioning)
 
 ### Remaining
 
