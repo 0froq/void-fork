@@ -477,7 +477,7 @@ async function runStaticDeploy(
   }
 
   if (!existsSync(preset.outputDir)) {
-    log.error(`Output directory not found: ${preset.outputDir}`);
+    log.error(`deploy: Output directory '${preset.outputDir}' not found. Run the build first.`);
     process.exit(1);
   }
 
@@ -564,7 +564,7 @@ async function runFrameworkDeploy(
   ];
 
   if (!existsSync(workerDir)) {
-    log.error(`Worker output not found at "${fwPreset.workerDir}". Run "${buildCmd}" first.`);
+    log.error(`deploy: Worker output '${fwPreset.workerDir}' not found. Run '${buildCmd}' first.`);
     process.exit(1);
   }
 
@@ -579,7 +579,7 @@ async function runFrameworkDeploy(
 
   if (authEnabled) {
     log.error(
-      "Void-managed Better Auth is only supported in Void apps. Use Better Auth's official integration for this framework instead.",
+      "deploy: Void-managed Better Auth is only supported in Void apps. Use Better Auth's official integration for this framework instead.",
     );
     process.exit(1);
   }
@@ -1413,7 +1413,7 @@ async function assertEnvSchemaValid(
       `Add the missing values to .env / .env.production, or upload them with \`void secret put <NAME>\`.`,
     );
   }
-  throw new DeployEventError('Aborting deploy — env.ts schema is not satisfied.');
+  throw new DeployEventError('deploy: Aborting because env.ts schema is not satisfied.');
 }
 
 /**
@@ -1480,7 +1480,7 @@ export function resolveDistDir(
     const distDir = join(root, topDir);
     if (!existsSync(distDir)) {
       throw new Error(
-        `Build output directory "${topDir}" not found. Run "${buildCommand ?? fwPreset.buildCommand}" first.`,
+        `deploy: Build output directory '${topDir}' not found. Run '${buildCommand ?? fwPreset.buildCommand}' first.`,
       );
     }
     return distDir;
@@ -1508,7 +1508,7 @@ export function resolveWorkerDirName(
     const subDir = parts.slice(1).join('/');
     if (!existsSync(join(distDir, subDir))) {
       throw new Error(
-        `Worker output not found at "${fwPreset.workerDir}". Run "${buildCommand ?? fwPreset.buildCommand}" first.`,
+        `deploy: Worker output '${fwPreset.workerDir}' not found. Run '${buildCommand ?? fwPreset.buildCommand}' first.`,
       );
     }
     return subDir;
@@ -1520,5 +1520,5 @@ export function resolveWorkerDirName(
       return name;
     }
   }
-  throw new Error('Worker output not found: expected dist/ssr/ or dist/rsc/');
+  throw new Error('deploy: Worker output not found. Expected dist/ssr/ or dist/rsc/.');
 }

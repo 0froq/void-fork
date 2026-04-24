@@ -321,7 +321,7 @@ describe('_worker.js safety guard', () => {
     writeFileSync(join(TMP, '_worker.js'), 'export default {}');
 
     await expect(packageStaticBuild(TMP, 'static')).rejects.toThrow(
-      'Uploading _worker.js file as an asset',
+      'deploy: Refusing to upload _worker.js file as an asset',
     );
   });
 
@@ -331,7 +331,7 @@ describe('_worker.js safety guard', () => {
     writeFileSync(join(TMP, '_worker.js', 'index.js'), 'export default {}');
 
     await expect(packageStaticBuild(TMP, 'static')).rejects.toThrow(
-      'Uploading _worker.js directory as an asset',
+      'deploy: Refusing to upload _worker.js directory as an asset',
     );
   });
 
@@ -373,7 +373,7 @@ describe('_worker.js safety guard', () => {
     writeFileSync(join(TMP, '_worker.js'), 'export default {}');
 
     await expect(collectAndHashAssets(TMP)).rejects.toThrow(
-      'Uploading _worker.js file as an asset',
+      'deploy: Refusing to upload _worker.js file as an asset',
     );
   });
 
@@ -397,7 +397,7 @@ describe('_worker.js safety guard', () => {
         needsQueues: false,
         needsAI: false,
       }),
-    ).rejects.toThrow('Uploading _worker.js file as an asset');
+    ).rejects.toThrow('deploy: Refusing to upload _worker.js file as an asset');
   });
 
   it('guards packageFrameworkBuild assets against _worker.js', async () => {
@@ -424,6 +424,6 @@ describe('_worker.js safety guard', () => {
           needsAI: false,
         },
       }),
-    ).rejects.toThrow('Uploading _worker.js file as an asset');
+    ).rejects.toThrow('deploy: Refusing to upload _worker.js file as an asset');
   });
 });

@@ -170,7 +170,7 @@ if (helpPath) {
   const version = JSON.parse(readFileSync(join(getPackageDir(), 'package.json'), 'utf-8')).version;
   console.log(version);
 } else if (command && command !== 'help' && command !== '--help' && command !== '-h') {
-  log.error(`Unknown command: ${command}. Run \`void --help\` for usage.`);
+  log.error(`cli: Unknown command '${command}'. Run \`void --help\` for usage.`);
   process.exit(1);
 } else if (!command && process.stdin.isTTY) {
   // Interactive top-level prompt

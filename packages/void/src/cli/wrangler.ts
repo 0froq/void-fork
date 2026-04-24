@@ -110,7 +110,9 @@ export function readWranglerCompat(
 
 function validateCompatDate(value: string, source: string): void {
   if (!COMPAT_DATE_RE.test(value)) {
-    throw new Error(`"compatibility_date" in ${source} must be YYYY-MM-DD format, got "${value}"`);
+    throw new Error(
+      `config: "compatibility_date" in ${source} must use YYYY-MM-DD format, got '${value}'.`,
+    );
   }
 }
 
@@ -123,12 +125,12 @@ function readVoidConfigIfExists(root: string): VoidConfig | undefined {
   try {
     const parsed = JSON.parse(readFileSync(filePath, 'utf-8'));
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      throw new Error(`${VOID_CONFIG_FILE} must be a JSON object`);
+      throw new Error(`config: ${VOID_CONFIG_FILE} must be a JSON object.`);
     }
     return parsed as VoidConfig;
   } catch (error) {
     if (error instanceof SyntaxError) {
-      throw new Error(`Invalid JSON in ${VOID_CONFIG_FILE}`);
+      throw new Error(`config: Invalid JSON in ${VOID_CONFIG_FILE}.`);
     }
     throw error;
   }
@@ -142,12 +144,12 @@ function ensureVoidCompatibilityDate(root: string, config?: VoidConfig): string 
     try {
       const parsed = JSON.parse(readFileSync(filePath, 'utf-8'));
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        throw new Error(`${VOID_CONFIG_FILE} must be a JSON object`);
+        throw new Error(`config: ${VOID_CONFIG_FILE} must be a JSON object.`);
       }
       nextConfig = parsed as VoidConfig;
     } catch (error) {
       if (error instanceof SyntaxError) {
-        throw new Error(`Invalid JSON in ${VOID_CONFIG_FILE}`);
+        throw new Error(`config: Invalid JSON in ${VOID_CONFIG_FILE}.`);
       }
       throw error;
     }

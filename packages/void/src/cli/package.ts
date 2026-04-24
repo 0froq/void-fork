@@ -95,7 +95,7 @@ function checkWorkerJsAsset(relativePath: string, assetsIgnoreFilePresent: boole
   if (name === '_worker.js' || name.startsWith('_worker.js/')) {
     const type = name === '_worker.js' ? 'file' : 'directory';
     throw new Error(
-      `Uploading _worker.js ${type} as an asset. ` +
+      `deploy: Refusing to upload _worker.js ${type} as an asset. ` +
         `This could expose private server-side code to the public Internet. ` +
         `If this is unintended, remove it or add a .assetsignore file containing "_worker.js". ` +
         `If intentional, add an empty .assetsignore file to suppress this error.`,

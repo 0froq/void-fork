@@ -125,7 +125,7 @@ describe('readConfig', () => {
 
   it('rejects unknown top-level auth providers', () => {
     setup(JSON.stringify({ auth: { providers: ['email', 'patreon'] } }));
-    expect(() => readConfig(tmpDir)).toThrow('"auth.providers" value "patreon"');
+    expect(() => readConfig(tmpDir)).toThrow('"auth.providers" value \'patreon\'');
     cleanup();
   });
 
@@ -145,7 +145,7 @@ describe('readConfig', () => {
 
   it('throws on unknown binding key', () => {
     setup(JSON.stringify({ inference: { bindings: { db: true, queue: true } } }));
-    expect(() => readConfig(tmpDir)).toThrow('Unknown binding "queue"');
+    expect(() => readConfig(tmpDir)).toThrow("Unknown binding 'queue'");
     cleanup();
   });
 

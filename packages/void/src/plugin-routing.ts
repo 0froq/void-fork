@@ -325,7 +325,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     async buildStart() {
       await rescan();
       if (options.target && (scan?.websockets?.length ?? 0) > 0) {
-        throw new Error('WebSocket routes require the default Cloudflare target.');
+        throw new Error('routing: WebSocket routes require the default Cloudflare target.');
       }
       resolveAuthCompileOptions();
       await writeAuthDatabaseFiles();

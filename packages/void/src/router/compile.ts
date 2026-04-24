@@ -1030,9 +1030,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`async function renderSsrResponse(c, mod) {`);
     lines.push(`  const render = typeof mod.render === "function" ? mod.render : mod.default;`);
     lines.push(`  if (typeof render !== "function") {`);
-    lines.push(
-      `    throw new Error("Invalid SSR entry: expected exported render(c, assetTags) function.");`,
-    );
+    lines.push(`    throw new Error("ssr: Invalid entry. Export render(c, assetTags).");`);
     lines.push(`  }`);
     lines.push(`  const assetTags = await getClientAssetTags(c.req.raw, c.env);`);
     lines.push(`  return render(c, assetTags);`);
@@ -1952,7 +1950,7 @@ ${envValidateCall}${remotePath ? `  if (env.__VOID_REMOTE === "1") env = createR
       else if (d.action === "retry") m.retry(d.delaySeconds != null ? { delaySeconds: d.delaySeconds } : undefined);
     }
   }
-  if (!__qr.ok) throw new Error("Queue handler failed");
+  if (!__qr.ok) throw new Error("queue: Handler failed.");
 }
 
 ${webSocketClasses.map((name) => `export { ${name} };`).join('\n')}
@@ -2071,7 +2069,7 @@ export { auth, createAuthClient } from ${JSON.stringify(authClientPath)};
 
 export class FetchError extends Error {
   constructor(status, statusText, data) {
-    super(\`Request failed with status \${status}\`);
+    super(\`fetch: Request failed with status \${status}.\`);
     this.name = "FetchError";
     this.status = status;
     this.statusText = statusText;
@@ -2207,7 +2205,7 @@ export { auth, createAuthClient } from ${JSON.stringify(authClientPath)};
 
 export class FetchError extends Error {
   constructor(status, statusText, data) {
-    super(\`Request failed with status \${status}\`);
+    super(\`fetch: Request failed with status \${status}.\`);
     this.name = "FetchError";
     this.status = status;
     this.statusText = statusText;

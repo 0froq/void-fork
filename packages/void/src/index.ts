@@ -241,7 +241,9 @@ async function runAiSetupPrompt(
       projectId = created.id;
       slug = created.slug;
     } catch (err: unknown) {
-      voidError(`Failed to create project: ${err instanceof Error ? err.message : String(err)}`);
+      voidError(
+        `project: Failed to create project: '${err instanceof Error ? err.message : String(err)}'.`,
+      );
       return;
     }
     log.success(`Project created: ${slug}`);
@@ -298,7 +300,7 @@ export function voidPlugin(options?: {
 
   if (detected && authEnabled) {
     throw new Error(
-      "Void-managed Better Auth is only supported in Void apps. Use Better Auth's official integration for this framework instead.",
+      "auth: Void-managed Better Auth is only supported in Void apps. Use Better Auth's official integration for this framework instead.",
     );
   }
 
@@ -897,7 +899,7 @@ export function voidPlugin(options?: {
   if (isNodeTarget(config.target)) {
     if (authEnabled) {
       throw new Error(
-        'Void-managed Better Auth is only supported in Cloudflare Void apps. Use Better Auth directly for this target instead.',
+        'auth: Void-managed Better Auth is only supported in Cloudflare Void apps. Use Better Auth directly for this target instead.',
       );
     }
     if (config.inference?.bindings) {
