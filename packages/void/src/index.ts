@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { cloudflare, type PluginConfig, type WorkerConfig } from '@cloudflare/vite-plugin';
 import { loadEnv, type Plugin } from 'vite';
 import { findVoidAuthConfig } from './auth/config';
@@ -120,6 +121,12 @@ function hasBinding(list: ReadonlyArray<{ binding: string }> | undefined, name: 
 }
 
 const CLOUDFLARE_BUILTIN_IMPORT = /^cloudflare:/;
+const SANDBOX_SDK_IMPORT = '@cloudflare/sandbox';
+const SANDBOX_SDK_IMPORT_FILTER = /^@cloudflare\/sandbox$/;
+
+function resolveSandboxSdkEntry(): string {
+  return fileURLToPath(import.meta.resolve(SANDBOX_SDK_IMPORT));
+}
 
 function createCloudflareBuiltinsExternalPlugin(): Plugin {
   return {
@@ -136,6 +143,25 @@ function createCloudflareBuiltinsExternalPlugin(): Plugin {
           },
         },
       };
+    },
+  };
+}
+
+function createSandboxSdkResolvePlugin(): Plugin {
+  let resolved: string | undefined;
+
+  return {
+    name: 'void:sandbox-sdk-resolve',
+    enforce: 'pre',
+    resolveId: {
+      filter: { id: SANDBOX_SDK_IMPORT_FILTER },
+      handler(id) {
+        if (id !== SANDBOX_SDK_IMPORT) {
+          return;
+        }
+        resolved ??= resolveSandboxSdkEntry();
+        return resolved;
+      },
     },
   };
 }
@@ -298,7 +324,7 @@ export function voidPlugin(options?: {
   const inferredBindings = inferProjectBindings(root, inferenceOptions, scanDirs);
   const sandboxEnabled = isSandboxEnabled(config);
   const bindings = sandboxEnabled ? { ...inferredBindings, needsSandbox: true } : inferredBindings;
-  const sandboxConfig = sandboxEnabled ? resolveSandboxConfig(config, root) : undefined;
+  const sandboxConfig = bindings.needsSandbox ? resolveSandboxConfig(config, root) : undefined;
   const authConfigPath = findVoidAuthConfig(root);
   const authEnabled = bindings.needsAuth || authConfigPath !== null || config.auth !== undefined;
 
@@ -1036,10 +1062,11 @@ export function voidPlugin(options?: {
     ];
   }
 
-  // PostgreSQL needs nodejs_compat for the `pg` driver (events, net, tls, dns, etc.)
-  // Other apps only need nodejs_als for AsyncLocalStorage (isomorphic fetch context threading)
+  // PostgreSQL needs nodejs_compat for the `pg` driver (events, net, tls, dns, etc.).
+  // Cloudflare's Sandbox SDK also imports Node built-ins.
+  // Other apps only need nodejs_als for AsyncLocalStorage (isomorphic fetch context threading).
   const existingFlags = (workerConfig.compatibility_flags as Array<string> | undefined) ?? [];
-  const needsNodejsCompat = dialect === 'postgresql';
+  const needsNodejsCompat = dialect === 'postgresql' || bindings.needsSandbox;
   if (needsNodejsCompat && !existingFlags.includes('nodejs_compat')) {
     workerConfig.compatibility_flags = [
       ...existingFlags.filter((f) => f !== 'nodejs_als'),
@@ -1083,6 +1110,7 @@ export function voidPlugin(options?: {
     envClientGuardPlugin(root),
     envClientFoldPlugin(),
     clientStubsPlugin,
+    ...(bindings.needsSandbox ? [createSandboxSdkResolvePlugin()] : []),
     routingPlugin(root, {
       isAuthEnabled: () => authEnabled,
       headConfig: config.head,
