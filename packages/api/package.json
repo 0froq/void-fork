@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@voidcloud/isr-shared": "workspace:*",
-    "blake3-jit": "^1.0.0",
+    "blake3-jit": "^1.1.0",
     "cron-parser": "5.5.0",
     "drizzle-orm": "^0.45.2",
     "hono": "catalog:",
@@ -41,7 +41,7 @@
     "@types/pg": "8.20.0",
     "@typescript/native-preview": "catalog:",
     "drizzle-kit": "^0.31.10",
-    "miniflare": "^4.20260410.0",
+    "miniflare": "^4.20260421.0",
     "wrangler": "catalog:"
   },
   "optionalDependencies": {

@@ -21,7 +21,7 @@ export function recordRequest(
   });
 }
 
-export function sendUsageEvent(
+export async function sendUsageEvent(
   env: Env,
   data: {
     projectId: string;
@@ -32,5 +32,5 @@ export function sendUsageEvent(
     status?: number;
   },
 ): Promise<void> {
-  return env.USAGE_QUEUE.send(data);
+  await env.USAGE_QUEUE.send(data);
 }

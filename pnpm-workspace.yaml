@@ -2,7 +2,7 @@ packages:
   - packages/*
 
 catalog:
-  '@cloudflare/workers-types': ^4.20260414.1
-  '@typescript/native-preview': 7.0.0-dev.20260414.1
-  hono: 4.12.14
-  wrangler: ^4.82.2
+  '@cloudflare/workers-types': ^4.20260424.1
+  '@typescript/native-preview': 7.0.0-dev.20260424.1
+  hono: 4.12.15
+  wrangler: ^4.84.1
