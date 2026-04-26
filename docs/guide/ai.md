@@ -159,6 +159,23 @@ export const POST = defineHandler(async (c) => {
 });
 ```
 
+For image edits, pass the file-like input and select the edit endpoint. Void serializes the file through the proxy and forwards it to AI Gateway as multipart form data:
+
+```ts
+export const POST = defineHandler(async (c) => {
+  const body = await c.req.parseBody();
+
+  return ai.image(
+    'openai/gpt-image-1.5',
+    {
+      prompt: String(body.prompt),
+      image: body.image as Blob,
+    },
+    { endpoint: 'images/edits' },
+  );
+});
+```
+
 ### Provider Key Convention
 
 Each provider requires an API key set as a project secret. The env var name is automatically derived from the provider prefix:

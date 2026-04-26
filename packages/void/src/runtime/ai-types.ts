@@ -79,6 +79,16 @@ export interface ChatCompletionChunk {
 
 export type ImageGatewayEndpoint = 'images/generations' | 'images/edits';
 
+export type ImageFileInput =
+  | Blob
+  | ArrayBuffer
+  | ArrayBufferView
+  | {
+      data: string;
+      name?: string;
+      type?: string;
+    };
+
 export interface ImageGenerationInputs {
   prompt: string;
   n?: number;
@@ -103,7 +113,23 @@ export interface ImageGenerationResponse {
 }
 
 export interface ImageGenerationOptions {
-  endpoint?: ImageGatewayEndpoint;
+  endpoint?: 'images/generations';
+  [key: string]: unknown;
+}
+
+export interface ImageEditOptions {
+  endpoint: 'images/edits';
+  [key: string]: unknown;
+}
+
+export interface ImageEditInputs {
+  prompt: string;
+  image: ImageFileInput | Array<ImageFileInput>;
+  mask?: ImageFileInput;
+  n?: number;
+  size?: string;
+  response_format?: 'url' | 'b64_json';
+  user?: string;
   [key: string]: unknown;
 }
 
