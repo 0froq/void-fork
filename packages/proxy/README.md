@@ -33,14 +33,16 @@ All routes require `projectId` in the JSON body.
 
 ### AI
 
-| Endpoint              | Body                                                   | Notes                                 |
-| --------------------- | ------------------------------------------------------ | ------------------------------------- |
-| `POST /ai/run`        | `{ model, inputs?, options?, projectId, aiToken? }`    | Workers AI inference                  |
-| `POST /ai/gateway`    | `{ model, inputs?, providerKey, projectId, aiToken? }` | BYOK provider call through AI Gateway |
-| `POST /ai/models`     | `{ inputs?, projectId, aiToken? }`                     | List models                           |
-| `POST /ai/toMarkdown` | `{ inputs, options?, projectId, aiToken? }`            | `AI.toMarkdown()` passthrough         |
+| Endpoint              | Body                                                              | Notes                                 |
+| --------------------- | ----------------------------------------------------------------- | ------------------------------------- |
+| `POST /ai/run`        | `{ model, inputs?, options?, projectId, aiToken? }`               | Workers AI inference                  |
+| `POST /ai/gateway`    | `{ model, endpoint?, inputs?, providerKey, projectId, aiToken? }` | BYOK provider call through AI Gateway |
+| `POST /ai/models`     | `{ inputs?, projectId, aiToken? }`                                | List models                           |
+| `POST /ai/toMarkdown` | `{ inputs, options?, projectId, aiToken? }`                       | `AI.toMarkdown()` passthrough         |
 
 `/ai/*` also checks `ROUTING` for `ai-block:{projectId}` before forwarding.
+
+`/ai/gateway` defaults to `chat/completions`. Supported endpoint values are `chat/completions`, `images/generations`, and `images/edits`. Image edit inputs use a JSON file envelope from the SDK and are reconstructed as multipart form data before forwarding. Non-JSON responses are returned without JSON coercion so image-capable providers can return binary bodies.
 
 ### Remote bindings
 

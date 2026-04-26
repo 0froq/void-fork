@@ -2,10 +2,11 @@ export interface AiGatewayRequest {
   provider: string;
   endpoint: string;
   headers: Record<string, string>;
-  query: Record<string, unknown>;
+  query: unknown;
 }
 
 export interface AiGateway {
+  getUrl(provider?: string): string | Promise<string>;
   run(request: AiGatewayRequest): Promise<Response>;
 }
 

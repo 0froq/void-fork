@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import worker from '../../src/index';
 
 const JWT_SECRET = 'test-secret-key';
@@ -157,6 +157,10 @@ function post(path: string, body: unknown, headers?: Record<string, string>): Re
 describe('proxy worker', () => {
   let validToken: string;
   const aiTokens: Record<string, string> = {};
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   beforeAll(async () => {
     validToken = await signJwt({ sub: 'user_1', login: 'testuser' }, JWT_SECRET);
@@ -538,6 +542,48 @@ describe('proxy worker', () => {
       expect(await res.json()).toEqual({ response: 'world' });
     });
 
+    it('returns binary responses without forcing JSON', async () => {
+      const env = createEnv({
+        run: vi.fn(async () => new Blob(['png-bytes'], { type: 'image/png' })),
+      });
+
+      const res = await worker.fetch(
+        post('/ai/run', {
+          model: '@cf/black-forest-labs/flux-1-schnell',
+          inputs: { prompt: 'a red cube' },
+          projectId: 'p',
+          aiToken: aiTokens['p'],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('image/png');
+      expect(await res.text()).toBe('png-bytes');
+    });
+
+    it('uses response() from Workers AI result objects', async () => {
+      const env = createEnv({
+        run: vi.fn(async () => ({
+          response: () => new Response('jpeg-bytes', { headers: { 'content-type': 'image/jpeg' } }),
+        })),
+      });
+
+      const res = await worker.fetch(
+        post('/ai/run', {
+          model: '@cf/image-model',
+          inputs: { prompt: 'a blue cube' },
+          projectId: 'p',
+          aiToken: aiTokens['p'],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('image/jpeg');
+      expect(await res.text()).toBe('jpeg-bytes');
+    });
+
     it('injects gateway metadata even without user options', async () => {
       const env = createEnv();
       await worker.fetch(
@@ -672,6 +718,45 @@ describe('proxy worker', () => {
       expect(arg.query.messages).toEqual([{ role: 'user', content: 'Hello' }]);
     });
 
+    it('forwards multimodal chat content unchanged', async () => {
+      const { runMock, gateway } = mockGatewayResponse({
+        id: 'chatcmpl-vision',
+        choices: [],
+        usage: {},
+      });
+
+      const messages = [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'What is in this image?' },
+            {
+              type: 'image_url',
+              image_url: {
+                url: 'data:image/png;base64,iVBORw0KGgo=',
+                detail: 'high',
+              },
+            },
+          ],
+        },
+      ];
+
+      const env = createEnv({ gateway });
+      const res = await worker.fetch(
+        post('/ai/gateway', {
+          model: 'openai/gpt-4o',
+          inputs: { messages },
+          providerKey: 'sk-test-key',
+          projectId: 'proj_1',
+          aiToken: aiTokens['proj_1'],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(runMock.mock.calls[0][0].query.messages).toEqual(messages);
+    });
+
     it('requires providerKey', async () => {
       const env = createEnv();
       const res = await worker.fetch(
@@ -736,6 +821,216 @@ describe('proxy worker', () => {
 
       // Verify stream: true was forwarded in the query
       expect(runMock.mock.calls[0][0].query.stream).toBe(true);
+    });
+
+    it('routes image generation requests to the requested gateway endpoint', async () => {
+      const { runMock, gateway } = mockGatewayResponse({
+        created: 1,
+        data: [{ b64_json: 'abc123' }],
+      });
+
+      const env = createEnv({ gateway });
+      const res = await worker.fetch(
+        post('/ai/gateway', {
+          model: 'openai/gpt-image-1.5',
+          endpoint: 'images/generations',
+          inputs: {
+            model: 'attacker-model',
+            prompt: 'a small robot',
+            size: '1024x1024',
+          },
+          providerKey: 'sk-test-key',
+          projectId: 'proj_1',
+          aiToken: aiTokens['proj_1'],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ created: 1, data: [{ b64_json: 'abc123' }] });
+
+      const arg = runMock.mock.calls[0][0];
+      expect(arg.provider).toBe('openai');
+      expect(arg.endpoint).toBe('images/generations');
+      expect(arg.query.model).toBe('gpt-image-1.5');
+      expect(arg.query.prompt).toBe('a small robot');
+      expect(arg.query.size).toBe('1024x1024');
+      expect(arg.query.stream).toBeUndefined();
+    });
+
+    it('preserves non-JSON gateway responses', async () => {
+      const runMock = vi.fn(
+        async () => new Response('image-bytes', { headers: { 'content-type': 'image/png' } }),
+      );
+      const gateway = vi.fn(() => ({ run: runMock }));
+
+      const env = createEnv({ gateway });
+      const res = await worker.fetch(
+        post('/ai/gateway', {
+          model: 'fal/image-model',
+          endpoint: 'images/generations',
+          inputs: { prompt: 'a small robot' },
+          providerKey: 'fal-key',
+          projectId: 'proj_1',
+          aiToken: aiTokens['proj_1'],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('image/png');
+      expect(await res.text()).toBe('image-bytes');
+    });
+
+    it('rejects unsupported gateway endpoints', async () => {
+      const env = createEnv();
+      const res = await worker.fetch(
+        post('/ai/gateway', {
+          model: 'openai/gpt-4o',
+          endpoint: 'responses',
+          inputs: { input: 'Hello' },
+          providerKey: 'sk-test',
+          projectId: 'proj_1',
+          aiToken: aiTokens['proj_1'],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'unsupported endpoint' });
+    });
+
+    it('forwards image edit requests through provider-specific multipart fetch', async () => {
+      const runMock = vi.fn();
+      const getUrlMock = vi.fn(async () => 'https://gateway.test/v1/account/void/openai/');
+      const gateway = vi.fn(() => ({ getUrl: getUrlMock, run: runMock }));
+      const fetchMock = vi.fn(
+        async () =>
+          new Response(JSON.stringify({ created: 1, data: [{ b64_json: 'edited' }] }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const env = createEnv({ gateway });
+      const res = await worker.fetch(
+        post('/ai/gateway', {
+          model: 'openai/gpt-image-1.5',
+          endpoint: 'images/edits',
+          inputs: {
+            model: 'attacker-model',
+            prompt: 'change the background',
+            image: [
+              {
+                __voidFile: true,
+                data: btoa('png-bytes'),
+                name: 'source.png',
+                type: 'image/png',
+              },
+              {
+                __voidFile: true,
+                data: btoa('second-png'),
+                name: 'source-2.png',
+                type: 'image/png',
+              },
+            ],
+            mask: {
+              __voidFile: true,
+              data: btoa('mask-bytes'),
+              name: 'mask.png',
+              type: 'image/png',
+            },
+            size: '1024x1024',
+          },
+          providerKey: 'sk-test',
+          projectId: 'proj_1',
+          aiToken: aiTokens['proj_1'],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ created: 1, data: [{ b64_json: 'edited' }] });
+
+      expect(gateway).toHaveBeenCalledWith('void');
+      expect(getUrlMock).toHaveBeenCalledWith('openai');
+      expect(runMock).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        'https://gateway.test/v1/account/void/openai/images/edits',
+      );
+
+      const init = fetchMock.mock.calls[0][1]!;
+      expect(init.method).toBe('POST');
+      const headers = new Headers(init.headers);
+      expect(headers.get('authorization')).toBe('Bearer sk-test');
+      expect(headers.get('cf-aig-metadata-projectId')).toBe('proj_1');
+      expect(headers.get('content-type')).toBeNull();
+
+      const form = init.body as FormData;
+      expect(form).toBeInstanceOf(FormData);
+      expect(form.get('model')).toBe('gpt-image-1.5');
+      expect(form.getAll('model')).toEqual(['gpt-image-1.5']);
+      expect(form.get('prompt')).toBe('change the background');
+      expect(form.get('size')).toBe('1024x1024');
+
+      const images = form.getAll('image') as Array<Blob>;
+      expect(images).toHaveLength(2);
+      expect(images[0]).toBeInstanceOf(Blob);
+      expect(images[0].type).toBe('image/png');
+      expect(await images[0].text()).toBe('png-bytes');
+      expect(images[1]).toBeInstanceOf(Blob);
+      expect(images[1].type).toBe('image/png');
+      expect(await images[1].text()).toBe('second-png');
+
+      const mask = form.get('mask') as Blob;
+      expect(mask).toBeInstanceOf(Blob);
+      expect(mask.type).toBe('image/png');
+      expect(await mask.text()).toBe('mask-bytes');
+    });
+
+    it('rejects image edit string inputs before forwarding', async () => {
+      const env = createEnv();
+      const res = await worker.fetch(
+        post('/ai/gateway', {
+          model: 'openai/gpt-image-1.5',
+          endpoint: 'images/edits',
+          inputs: { prompt: 'change the background', image: 'not-a-real-file' },
+          providerKey: 'sk-test',
+          projectId: 'proj_1',
+          aiToken: aiTokens['proj_1'],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'image must be a file' });
+    });
+
+    it('rejects malformed image edit file envelopes before forwarding', async () => {
+      const env = createEnv();
+      const res = await worker.fetch(
+        post('/ai/gateway', {
+          model: 'openai/gpt-image-1.5',
+          endpoint: 'images/edits',
+          inputs: {
+            prompt: 'change the background',
+            image: {
+              __voidFile: true,
+              data: '%%%',
+              name: 'source.png',
+              type: 'image/png',
+            },
+          },
+          providerKey: 'sk-test',
+          projectId: 'proj_1',
+          aiToken: aiTokens['proj_1'],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'invalid file data' });
     });
 
     it('forwards provider error status and message', async () => {
