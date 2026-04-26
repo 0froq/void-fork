@@ -4,14 +4,18 @@ import {
   type ThirdPartyModel,
   type ChatCompletionInputs,
   type ChatCompletionResponse,
+  type ImageGenerationInputs,
+  type ImageGenerationOptions,
 } from './ai-types';
 import { getRawRuntimeEnv, type RuntimeEnv } from './env-raw';
 
 const PROXY_URL = 'https://proxy.void.cloud/ai';
 const STAGING_PROXY_URL = 'https://proxy.staging.void.cloud/ai';
+const JSON_CONTENT_RE = /\bapplication\/(?:[^;\s]+\+)?json\b/i;
 
 interface AiBackend {
   run(model: string, inputs: unknown, options?: unknown): Promise<unknown>;
+  image(model: string, inputs: unknown, options?: unknown): Promise<Response>;
   models(params?: unknown): Promise<unknown>;
   toMarkdown(items: unknown, options?: unknown): Promise<unknown>;
 }
@@ -23,6 +27,78 @@ function hasStreamFlag(value: unknown): value is { stream?: boolean } {
 function isThirdPartyModel(model: string): boolean {
   const provider = model.split('/')[0];
   return provider in PROVIDER_KEY_MAP;
+}
+
+function isJsonResponse(response: Response): boolean {
+  return JSON_CONTENT_RE.test(response.headers.get('content-type') ?? '');
+}
+
+async function readProxyResult(response: Response): Promise<unknown> {
+  if (isJsonResponse(response)) {
+    return response.json();
+  }
+  return response.blob();
+}
+
+function hasResponseMethod(value: unknown): value is { response(): Response | Promise<Response> } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'response' in value &&
+    typeof (value as { response?: unknown }).response === 'function'
+  );
+}
+
+function isBinaryView(value: unknown): value is ArrayBufferView {
+  return ArrayBuffer.isView(value);
+}
+
+function copyBinaryView(value: ArrayBufferView): ArrayBuffer {
+  const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer as ArrayBuffer;
+}
+
+async function responseFromResult(result: unknown): Promise<Response> {
+  if (result instanceof Response) {
+    return result;
+  }
+  if (hasResponseMethod(result)) {
+    return result.response();
+  }
+  if (result instanceof Blob) {
+    return new Response(result, {
+      headers: result.type ? { 'content-type': result.type } : undefined,
+    });
+  }
+  if (result instanceof ReadableStream) {
+    return new Response(result, { headers: { 'content-type': 'application/octet-stream' } });
+  }
+  if (result instanceof ArrayBuffer) {
+    return new Response(result, { headers: { 'content-type': 'application/octet-stream' } });
+  }
+  if (isBinaryView(result)) {
+    return new Response(copyBinaryView(result), {
+      headers: { 'content-type': 'application/octet-stream' },
+    });
+  }
+  return Response.json(result);
+}
+
+function splitImageOptions(options: unknown): {
+  endpoint: string;
+  runOptions: Record<string, unknown> | undefined;
+} {
+  if (typeof options !== 'object' || options === null) {
+    return { endpoint: 'images/generations', runOptions: undefined };
+  }
+
+  const { endpoint, ...runOptions } = options as Record<string, unknown>;
+  return {
+    endpoint: typeof endpoint === 'string' ? endpoint : 'images/generations',
+    runOptions: Object.keys(runOptions).length > 0 ? runOptions : undefined,
+  };
 }
 
 function resolveProviderKey(model: string, runtimeEnv: RuntimeEnv): string {
@@ -71,6 +147,12 @@ function resolveBackend(): AiBackend {
   if (directAi) {
     return {
       run: directAi.run.bind(directAi),
+      async image(model, inputs, options) {
+        const { runOptions } = splitImageOptions(options);
+        return responseFromResult(
+          await directAi.run(model as keyof AiModels, inputs as never, runOptions as AiOptions),
+        );
+      },
       models: directAi.models.bind(directAi),
       toMarkdown: directAi.toMarkdown?.bind(directAi) ?? unsupported('toMarkdown'),
     };
@@ -110,14 +192,33 @@ function makeServiceBindingBackend(proxy: Fetcher, runtimeEnv: RuntimeEnv): AiBa
         if (hasStreamFlag(inputs) && inputs.stream) {
           return res.body;
         }
-        return res.json();
+        return readProxyResult(res);
       }
 
       const res = await proxyFetch('run', { model, inputs, options, projectId, aiToken });
       if (hasStreamFlag(inputs) && inputs.stream) {
         return res.body;
       }
-      return res.json();
+      return readProxyResult(res);
+    },
+    async image(model, inputs, options) {
+      const projectId = runtimeEnv.__PROJECT_ID;
+      const aiToken = runtimeEnv.__VOID_PROXY_TOKEN;
+      const { endpoint, runOptions } = splitImageOptions(options);
+
+      if (isThirdPartyModel(model as string)) {
+        const providerKey = resolveProviderKey(model as string, runtimeEnv);
+        return proxyFetch('gateway', {
+          model,
+          endpoint,
+          inputs,
+          providerKey,
+          projectId,
+          aiToken,
+        });
+      }
+
+      return proxyFetch('run', { model, inputs, options: runOptions, projectId, aiToken });
     },
     async models(params) {
       const projectId = runtimeEnv.__PROJECT_ID;
@@ -163,14 +264,24 @@ function makeHttpBackend(token: string, projectId: string, runtimeEnv: RuntimeEn
         if (hasStreamFlag(inputs) && inputs.stream) {
           return res.body;
         }
-        return res.json();
+        return readProxyResult(res);
       }
 
       const res = await proxyFetch('run', { model, inputs, options });
       if (hasStreamFlag(inputs) && inputs.stream) {
         return res.body;
       }
-      return res.json();
+      return readProxyResult(res);
+    },
+    async image(model, inputs, options) {
+      const { endpoint, runOptions } = splitImageOptions(options);
+
+      if (isThirdPartyModel(model as string)) {
+        const providerKey = resolveProviderKey(model as string, runtimeEnv);
+        return proxyFetch('gateway', { model, endpoint, inputs, providerKey });
+      }
+
+      return proxyFetch('run', { model, inputs, options: runOptions });
     },
     async models(params) {
       const res = await proxyFetch('models', { inputs: params });
@@ -210,6 +321,20 @@ export interface VoidAi extends Omit<Ai, 'run'> {
     options?: AiOptions,
   ): Promise<ChatCompletionResponse>;
 
+  /** Image generation or editing. Returns the proxy response so callers can return or parse it. */
+  image<Name extends keyof AiModels>(
+    model: Name,
+    inputs: AiModels[Name]['inputs'],
+    options?: ImageGenerationOptions,
+  ): Promise<Response>;
+
+  /** Third-party image generation or editing through AI Gateway. */
+  image(
+    model: ThirdPartyModel,
+    inputs: ImageGenerationInputs,
+    options?: ImageGenerationOptions,
+  ): Promise<Response>;
+
   /** Stream Workers AI response as SSE */
   stream<Name extends keyof AiModels>(
     model: Name,
@@ -238,6 +363,9 @@ export const ai: VoidAi = new Proxy({} as VoidAi, {
     if (prop === 'run') {
       return backend().run;
     }
+    if (prop === 'image') {
+      return backend().image;
+    }
     if (prop === 'models') {
       return backend().models;
     }
@@ -257,4 +385,10 @@ export type {
   ChatCompletionUsage,
   ChatCompletionChunk,
   ChatMessage,
+  ChatContent,
+  ImageGatewayEndpoint,
+  ImageGenerationInputs,
+  ImageGenerationResponse,
+  ImageGenerationData,
+  ImageGenerationOptions,
 } from './ai-types';
