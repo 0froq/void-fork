@@ -11,7 +11,6 @@ import { getRawRuntimeEnv, type RuntimeEnv } from './env-raw';
 
 const PROXY_URL = 'https://proxy.void.cloud/ai';
 const STAGING_PROXY_URL = 'https://proxy.staging.void.cloud/ai';
-const JSON_CONTENT_RE = /\bapplication\/(?:[^;\s]+\+)?json\b/i;
 
 interface AiBackend {
   run(model: string, inputs: unknown, options?: unknown): Promise<unknown>;
@@ -29,12 +28,25 @@ function isThirdPartyModel(model: string): boolean {
   return provider in PROVIDER_KEY_MAP;
 }
 
-function isJsonResponse(response: Response): boolean {
-  return JSON_CONTENT_RE.test(response.headers.get('content-type') ?? '');
+function mediaTypeFromContentType(contentType: string | null): string | null {
+  if (!contentType) {
+    return null;
+  }
+  const [mediaType] = contentType.split(';', 1);
+  const normalized = mediaType?.trim().toLowerCase();
+  return normalized || null;
+}
+
+function isJsonMediaType(mediaType: string | null): boolean {
+  if (mediaType === 'application/json') {
+    return true;
+  }
+  const slash = mediaType?.indexOf('/') ?? -1;
+  return Boolean(mediaType && slash >= 0 && mediaType.slice(slash + 1).endsWith('+json'));
 }
 
 async function readProxyResult(response: Response): Promise<unknown> {
-  if (isJsonResponse(response)) {
+  if (isJsonMediaType(mediaTypeFromContentType(response.headers.get('content-type')))) {
     return response.json();
   }
   return response.blob();
