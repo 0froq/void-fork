@@ -253,20 +253,47 @@ Production hostnames are **not** gated — this applies to staging only, even th
 
 Each path is self-validating in application code via HMAC-signed `state` and nonce cookies, so bypassing Access does not weaken auth.
 
-**Service token** for programmatic callers: one shared token named `void-staging-programmatic` in CF Zero Trust → Access → Service Auth. Its Client ID and Client Secret are stored in 1Password under `void / staging / cf-access-service-token` and duplicated into the `Staging` GitHub environment as `CF_ACCESS_CLIENT_ID_STAGING` and `CF_ACCESS_CLIENT_SECRET_STAGING`.
+### Teammate dev setup (browser-based, no shared secret)
 
-Callers that require these headers when hitting staging:
+The Void CLI auto-authenticates against staging via `cloudflared`. One-time setup per machine:
 
-| Caller                                   | How it reads the creds                                                                                                                                                    |
+```
+brew install cloudflared
+```
+
+That's it. The first time you run any `void` command against staging (`void project status`, `void deploy`, etc.), the CLI shells out to `cloudflared access login` if no cached JWT exists — a browser tab opens, you sign in with GitHub (must be a `voidzero-dev` org member), and a 24-hour JWT lands in the local cloudflared cache. Subsequent runs within 24h are silent.
+
+No env vars, no 1Password dance, no shared secret. The JWT is tied to your GitHub identity — revoked the moment you leave the org.
+
+Manual `cloudflared` commands if you need to force re-auth or inspect the token:
+
+```
+cloudflared access login https://api.staging.void.cloud
+cloudflared access token -app=https://api.staging.void.cloud   # prints the cached JWT
+```
+
+### Service token (CI / non-interactive)
+
+For CI and any non-interactive automation, a shared service token `void-staging-programmatic` (CF Zero Trust → Access → Service Auth) is stored in 1Password under `void / staging / cf-access-service-token` and duplicated into the `Staging` GitHub environment as `CF_ACCESS_CLIENT_ID_STAGING` and `CF_ACCESS_CLIENT_SECRET_STAGING`.
+
+The framework's `cfAccessHeaders` helper resolves credentials in this priority order:
+
+1. **Service token pair** — `CF_ACCESS_CLIENT_ID` + `CF_ACCESS_CLIENT_SECRET` → sends `CF-Access-Client-Id` / `CF-Access-Client-Secret` (CI path)
+2. **User JWT** — `CF_ACCESS_TOKEN` → sends `cf-access-token` (dev path, usually populated by the CLI's `cloudflared` probe)
+3. **None** — no headers (prod, or unprotected hostnames)
+
+Callers:
+
+| Caller                                   | How credentials are resolved                                                                                                                                              |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Void CLI (`void deploy`, `void whoami`…) | `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` env vars                                                                                                                |
-| Smoke-test CI workflow                   | `.github/workflows/smoke-test.yml` → `$CF_ACCESS_CLIENT_ID_STAGING` secret                                                                                                |
-| Remote D1/KV/R2 bindings in local dev    | env vars of the local process (Vite/wrangler) inherited by `ProxyClient`                                                                                                  |
+| Void CLI (`void deploy`, `void whoami`…) | Eager `cloudflared` probe at client construction → sets `CF_ACCESS_TOKEN`. `CF_ACCESS_CLIENT_ID`/`SECRET` in env override the probe.                                      |
+| Smoke-test CI workflow                   | `.github/workflows/smoke-test.yml` → `$CF_ACCESS_CLIENT_ID_STAGING` / `$CF_ACCESS_CLIENT_SECRET_STAGING` (service token)                                                  |
+| Remote D1/KV/R2 bindings in local dev    | Whatever env vars the local process inherits; CLI's `CF_ACCESS_TOKEN` is forwarded to miniflare                                                                           |
 | Deployed staging user workers            | `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` set as worker env bindings (rare — only if the worker calls `proxy.staging.void.cloud` directly via `__VOID_PROXY_URL`) |
 
-**Rotating the service token:** rotate in the CF Zero Trust dashboard, update the 1Password entry and both `Staging` GitHub secrets, and notify anyone with the creds set in their shell. No code change required.
+**Rotating the service token:** rotate in the CF Zero Trust dashboard, update the 1Password entry and both `Staging` GitHub secrets, and notify anyone with the creds set in their shell. No code change required. Teammate JWTs (via `cloudflared`) are per-user and unaffected.
 
-**Rollback:** delete the four Access Applications in CF Zero Trust. Code changes are inert when the two env vars are unset, so no code rollback needed.
+**Rollback:** delete the four Access Applications in CF Zero Trust. Code changes are inert when neither credential path is populated, so no code rollback needed.
 
 ## Deploy Process
 

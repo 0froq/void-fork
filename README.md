@@ -307,7 +307,7 @@ pnpm run deploy:staging:dashboard   # staging dashboard only
 
 See [`meta/operations.md`](./meta/operations.md) for the full operations reference — CF resources, secrets, environment variables, DNS setup, GitHub Actions, and fresh environment provisioning.
 
-Staging hostnames are gated by Cloudflare Access (GitHub organization `voidzero-dev` via GitHub). Programmatic callers (CLI, CI, remote bindings) must set `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` env vars. See [`meta/operations.md`](./meta/operations.md#staging-access-control) for full setup, rotation, and rollback.
+Staging hostnames are gated by Cloudflare Access (GitHub organization `voidzero-dev` via GitHub). For local dev, install `cloudflared` (`brew install cloudflared`) — the Void CLI auto-authenticates you via a browser popup on first use and caches a 24h JWT. CI uses the shared `void-staging-programmatic` service token. See [`meta/operations.md`](./meta/operations.md#staging-access-control) for full setup, rotation, and rollback.
 
 ## Pitfalls / Things That Broke
 
