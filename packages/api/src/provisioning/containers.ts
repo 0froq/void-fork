@@ -123,9 +123,15 @@ export async function upsertSandboxContainerApplication(
     },
   );
 
+  // CF's rollout endpoint requires `strategy` and `description` (matches the
+  // shape wrangler sends — see workers-sdk/packages/wrangler container deploy).
   await cfFetch(`${containersUrl(accountId)}/applications/${existing.id}/rollouts`, apiToken, {
     method: 'POST',
-    body: JSON.stringify({ target_configuration: patchBody.configuration }),
+    body: JSON.stringify({
+      description: 'void platform sandbox config update',
+      strategy: 'rolling',
+      target_configuration: patchBody.configuration,
+    }),
   });
 
   return updated;
