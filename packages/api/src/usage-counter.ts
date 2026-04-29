@@ -1,9 +1,9 @@
 import { DurableObject } from 'cloudflare:workers';
-import { createDb, suspendUser } from './db';
-import type { ApiEnv } from './env';
-import { queryProjectAiUsage } from './routes/usage';
-import { REASON_REQUESTS_EXCEEDED } from './suspension';
-import { getPlanLimits, isWithinLimit } from './tiers';
+import { createDb, suspendUser } from './db.ts';
+import type { ApiEnv } from './env.ts';
+import { queryProjectAiUsage } from './routes/usage.ts';
+import { REASON_REQUESTS_EXCEEDED } from './suspension.ts';
+import { getPlanLimits, isWithinLimit } from './tiers.ts';
 
 // --- Exported types ---
 

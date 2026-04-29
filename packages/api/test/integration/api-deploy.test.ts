@@ -1,9 +1,16 @@
 import { desc, eq, sql } from 'drizzle-orm';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
-import { computeAssetHash } from '../../src/assets';
-import { updateDeploymentStatus } from '../../src/db';
-import app from '../../src/index';
-import { deployments, resources, domains, projects, projectSecrets, users } from '../../src/schema';
+import { computeAssetHash } from '../../src/assets.ts';
+import { updateDeploymentStatus } from '../../src/db.ts';
+import app from '../../src/index.ts';
+import {
+  deployments,
+  resources,
+  domains,
+  projects,
+  projectSecrets,
+  users,
+} from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -17,7 +24,7 @@ import {
   readAllEvents,
   CF_ACCOUNT_ID,
   type TestEnv,
-} from './helpers';
+} from './helpers.ts';
 
 const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
 const enc = new TextEncoder();

@@ -3,20 +3,20 @@ import {
   DEFAULT_DISPATCH_NAMESPACE,
   MAX_SECRET_NAME_LENGTH,
   MAX_SECRET_VALUE_BYTES,
-} from '../constants';
+} from '../constants.ts';
 import {
   deleteProjectSecret,
   getProject,
   listProjectSecretNames,
   upsertProjectSecret,
-} from '../db';
-import type { ApiEnv } from '../env';
+} from '../db.ts';
+import type { ApiEnv } from '../env.ts';
 import {
   deleteWorkerSecret,
   encryptProjectSecret,
   getVersionedWorkerName,
   putWorkerSecret,
-} from '../project-secrets';
+} from '../project-secrets.ts';
 
 function isValidSecretName(name: string): boolean {
   return /^[A-Z][A-Z0-9_]*$/.test(name);

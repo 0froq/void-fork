@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
-import app from '../../src/index';
-import { setupEnv, teardownEnv, clearTables, createTestUser, type TestEnv } from './helpers';
+import app from '../../src/index.ts';
+import { setupEnv, teardownEnv, clearTables, createTestUser, type TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 

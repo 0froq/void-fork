@@ -1,5 +1,5 @@
-import type { ApiEnv } from './env';
-import type { ProjectSecret } from './types';
+import type { ApiEnv } from './env.ts';
+import type { ProjectSecret } from './types.ts';
 
 export const BETTER_AUTH_SECRET_NAME = 'BETTER_AUTH_SECRET';
 

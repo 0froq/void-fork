@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   addQueueConsumer,
   getDispatchWorkerProxyToken,
-} from '../../src/provisioning/cloudflare-api';
+} from '../../src/provisioning/cloudflare-api.ts';
 
 const ACCOUNT = 'acc_test';
 const TOKEN = 'token_test';

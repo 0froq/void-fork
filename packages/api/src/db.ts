@@ -16,8 +16,8 @@ import {
 } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { alias } from 'drizzle-orm/pg-core';
-import { generateId } from './id';
-import * as schema from './schema';
+import { generateId } from './id.ts';
+import * as schema from './schema.ts';
 import {
   users,
   oauthAccounts,
@@ -31,8 +31,8 @@ import {
   oauthNonces,
   authCodes,
   migrationRenames,
-} from './schema';
-import type { PlanId } from './tiers';
+} from './schema.ts';
+import type { PlanId } from './tiers.ts';
 import type {
   Deployment,
   DeploymentStatus,
@@ -44,7 +44,7 @@ import type {
   Project,
   Resource,
   User,
-} from './types';
+} from './types.ts';
 
 export function createDb(connectionString: string) {
   return drizzle(connectionString, { schema });

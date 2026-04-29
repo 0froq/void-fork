@@ -1,4 +1,4 @@
-import { CF_API_BASE, cfFetch } from './cloudflare-api';
+import { CF_API_BASE, cfFetch } from './cloudflare-api.ts';
 
 export interface ContainerApplicationInfo {
   id: string;

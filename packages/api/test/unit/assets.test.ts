@@ -9,7 +9,7 @@ import {
   uploadAssetBuckets,
   uploadStaticAssets,
   type AssetEntry,
-} from '../../src/assets';
+} from '../../src/assets.ts';
 
 const enc = new TextEncoder();
 function entry(content: string | Uint8Array, contentType: string): AssetEntry {

@@ -1,7 +1,7 @@
 import { getProjectsByUserId, getDomainsByProjectId } from '@voidcloud/api/db';
 import type { Project } from '@voidcloud/api/types';
 import { defineHandler } from 'void';
-import { createClient, type API } from '../lib/api';
+import { createClient, type API } from '../lib/api.ts';
 
 export type Props = {
   projects: Array<Project & { custom_domain: string | null }>;

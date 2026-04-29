@@ -1,8 +1,8 @@
 import { hashOriginalUrl } from '@voidcloud/isr-shared';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
-import { hmacSignState } from '../../src/auth/hmac';
-import app from '../../src/index';
-import { domains } from '../../src/schema';
+import { hmacSignState } from '../../src/auth/hmac.ts';
+import app from '../../src/index.ts';
+import { domains } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -12,7 +12,7 @@ import {
   createTestDeployment,
   mockCfApi,
   type TestEnv,
-} from './helpers';
+} from './helpers.ts';
 
 let env: TestEnv;
 

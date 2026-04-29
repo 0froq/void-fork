@@ -1,6 +1,6 @@
-import type { Invitation } from '../../types';
-import { Layout } from './layout';
-import { Pagination } from './pagination';
+import type { Invitation } from '../../types.ts';
+import { Layout } from './layout.tsx';
+import { Pagination } from './pagination.tsx';
 
 type InvitationRow = Invitation & {
   invited_by_login: string | null;

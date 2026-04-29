@@ -1,4 +1,4 @@
-import { tokenizeSql } from '../sql/tokenize';
+import { tokenizeSql } from '../sql/tokenize.ts';
 
 const CF_API_BASE = 'https://api.cloudflare.com/client/v4/accounts';
 

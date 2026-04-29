@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { resolveStaticPath, getContentType } from '../../src/static';
-import type { AssetConfig } from '../../src/static';
+import { resolveStaticPath, getContentType } from '../../src/static.ts';
+import type { AssetConfig } from '../../src/static.ts';
 
 const manifest: Record<string, string> = {
   '/index.html': 'hash_index',

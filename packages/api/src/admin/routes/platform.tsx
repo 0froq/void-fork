@@ -5,21 +5,21 @@ import {
   skipPendingBatchEvents,
   getPlatformEventsByBatchId,
   getRecentPlatformEvents,
-} from '../../db';
-import type { ApiEnv } from '../../env';
-import { generateId } from '../../id';
+} from '../../db.ts';
+import type { ApiEnv } from '../../env.ts';
+import { generateId } from '../../id.ts';
 import {
   listWorkerVersions,
   listWorkerDeployments,
   createWorkerDeployment,
   type WorkerVersion,
   type WorkerDeployment,
-} from '../../provisioning/workers-versions';
-import type { PlatformEvent } from '../../types';
-import { PLATFORM_WORKERS, getScriptName, getWorkerByName, parseEnv } from '../platform-workers';
-import { PlatformPage } from '../views/platform';
-import { PlatformRollbackResultPage } from '../views/platform-rollback-result';
-import { PlatformWorkerDetailPage } from '../views/platform-worker-detail';
+} from '../../provisioning/workers-versions.ts';
+import type { PlatformEvent } from '../../types.ts';
+import { PLATFORM_WORKERS, getScriptName, getWorkerByName, parseEnv } from '../platform-workers.ts';
+import { PlatformRollbackResultPage } from '../views/platform-rollback-result.tsx';
+import { PlatformWorkerDetailPage } from '../views/platform-worker-detail.tsx';
+import { PlatformPage } from '../views/platform.tsx';
 
 const app = new Hono<ApiEnv>();
 

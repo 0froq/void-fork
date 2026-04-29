@@ -16,9 +16,9 @@
  */
 import { describe, it, expect } from 'vitest';
 // eslint-disable-next-line import/no-relative-packages -- intentional cross-submodule contract reference
-import type { RedirectRule as FrameworkRule } from '../../../../framework/packages/void/src/cli/types';
-import type { RedirectRule as ApiRule } from '../../../api/src/types';
-import type { RedirectRule as DispatchRule } from '../../src/routing-rules';
+import type { RedirectRule as FrameworkRule } from '../../../../framework/packages/void/src/cli/types.ts';
+import type { RedirectRule as ApiRule } from '../../../api/src/types.ts';
+import type { RedirectRule as DispatchRule } from '../../src/routing-rules.ts';
 
 // --- Compile-time assertions (evaluated by tsc; any mismatch breaks typecheck) ---
 

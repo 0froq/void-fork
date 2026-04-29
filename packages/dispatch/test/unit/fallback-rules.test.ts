@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Env } from '../../src/env';
-import app from '../../src/index';
-import type { AssetConfig } from '../../src/static';
+import type { Env } from '../../src/env.ts';
+import app from '../../src/index.ts';
+import type { AssetConfig } from '../../src/static.ts';
 
 // Mock caches.default (same pattern as index.test.ts).
 const edgeCacheStore = new Map<string, Response>();

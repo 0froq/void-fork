@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Link, useRouter } from '@void/vue';
 import { ref } from 'vue';
-import type { Props } from './[id].server';
+import type { Props } from './[id].server.ts';
 
 const { project, deployments, usage, domains, secrets, resources, siteDomain } =
   defineProps<Props>();

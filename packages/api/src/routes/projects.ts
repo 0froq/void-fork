@@ -1,8 +1,8 @@
 import { sql as drizzleSql } from 'drizzle-orm';
 import { Hono } from 'hono';
-import { hmacSignState } from '../auth/hmac';
-import { DEFAULT_DISPATCH_NAMESPACE } from '../constants';
-import type { Db } from '../db';
+import { hmacSignState } from '../auth/hmac.ts';
+import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
+import type { Db } from '../db.ts';
 import {
   createProject,
   getProject,
@@ -23,15 +23,15 @@ import {
   recordMigrationRenames,
   migrationRenameExists,
   invalidateMigrationRenamesForOldName,
-} from '../db';
-import type { ApiEnv } from '../env';
-import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations/remote-runner';
-import { getProjectDeploymentWorkerName, getProjectQueueName } from '../naming';
-import { getDispatchWorkerProxyToken } from '../provisioning/cloudflare-api';
-import { buildRoutingJson, buildStaticRoutingJson } from '../routing';
-import { tokenizeSql } from '../sql/tokenize';
-import { getPlanLimits } from '../tiers';
-import type { DeployManifest } from '../types';
+} from '../db.ts';
+import type { ApiEnv } from '../env.ts';
+import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations/remote-runner.ts';
+import { getProjectDeploymentWorkerName, getProjectQueueName } from '../naming.ts';
+import { getDispatchWorkerProxyToken } from '../provisioning/cloudflare-api.ts';
+import { buildRoutingJson, buildStaticRoutingJson } from '../routing.ts';
+import { tokenizeSql } from '../sql/tokenize.ts';
+import { getPlanLimits } from '../tiers.ts';
+import type { DeployManifest } from '../types.ts';
 
 export const RESERVED_SLUGS = new Set([
   'admin',
@@ -1489,8 +1489,8 @@ const app = new Hono<ApiEnv>()
     }
 
     const { createHyperdrive, getHyperdriveByName } =
-      await import('../provisioning/cloudflare-api');
-    const { createResource, getProjectResources } = await import('../db');
+      await import('../provisioning/cloudflare-api.ts');
+    const { createResource, getProjectResources } = await import('../db.ts');
 
     // Check if Hyperdrive already exists
     const existing = await getProjectResources(c.get('db'), projectId);
@@ -1539,8 +1539,8 @@ const app = new Hono<ApiEnv>()
     }
 
     const { createHyperdrive, updateHyperdrive, getHyperdriveByName } =
-      await import('../provisioning/cloudflare-api');
-    const { createResource, getProjectResources } = await import('../db');
+      await import('../provisioning/cloudflare-api.ts');
+    const { createResource, getProjectResources } = await import('../db.ts');
 
     const existing = await getProjectResources(c.get('db'), projectId);
     const found = existing.find((r) => r.type === 'hyperdrive');

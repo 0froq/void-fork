@@ -1,4 +1,4 @@
-import { compilePattern, substituteParams } from './pattern';
+import { compilePattern, substituteParams } from './pattern.ts';
 
 export interface RedirectRule {
   source: string;

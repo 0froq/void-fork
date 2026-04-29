@@ -6,7 +6,7 @@ import {
   isWithinLimit,
   getCurrentBillingPeriodStart,
   type PlanId,
-} from '../../src/tiers';
+} from '../../src/tiers.ts';
 
 describe('PLAN_LIMITS', () => {
   it('defines all five tiers', () => {

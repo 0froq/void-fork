@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { type CronFireMessage, processCronFiresBatch } from '../../src/cron-fires-queue';
-import type { ApiEnv } from '../../src/env';
+import { type CronFireMessage, processCronFiresBatch } from '../../src/cron-fires-queue.ts';
+import type { ApiEnv } from '../../src/env.ts';
 
 interface QueueMessageStub {
   body: CronFireMessage;

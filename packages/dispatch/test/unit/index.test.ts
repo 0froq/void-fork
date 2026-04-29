@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Env } from '../../src/env';
-import app, { rebuildRequest } from '../../src/index';
+import type { Env } from '../../src/env.ts';
+import app, { rebuildRequest } from '../../src/index.ts';
 
 // Mock caches.default (CF edge cache) with a Map-backed store.
 // Uses full URL as key — callers (isrEdgeCacheKey, hashed asset code) already normalize.

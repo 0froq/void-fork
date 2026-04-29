@@ -1,8 +1,8 @@
-import type { Deployment } from '../../types';
-import { DeploymentTable } from './deployment-table';
-import { Layout } from './layout';
-import type { ProjectRow } from './projects-table';
-import { ProjectsTable } from './projects-table';
+import type { Deployment } from '../../types.ts';
+import { DeploymentTable } from './deployment-table.tsx';
+import { Layout } from './layout.tsx';
+import type { ProjectRow } from './projects-table.tsx';
+import { ProjectsTable } from './projects-table.tsx';
 
 export interface TopProjectRow {
   id: string;

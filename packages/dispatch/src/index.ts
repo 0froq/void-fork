@@ -1,7 +1,7 @@
-import type { Env } from './env';
-import { createErrorResponse } from './error-page';
-import { applyHeaderRules, type HeaderRule } from './headers';
-import { extractSlug } from './hostname';
+import type { Env } from './env.ts';
+import { createErrorResponse } from './error-page.ts';
+import { applyHeaderRules, type HeaderRule } from './headers.ts';
+import { extractSlug } from './hostname.ts';
 import {
   readIsrCache,
   writeIsrCache,
@@ -15,12 +15,12 @@ import {
   shouldBypassIsr,
   extractPageDataFromHtml,
   normalizePageDataForJsonCache,
-} from './isr';
-import { recordRequest, sendUsageEvent, type RequestType } from './metering';
-import { applyRoutingRules, mergeQueryIntoLocation, type RedirectRule } from './routing-rules';
-import { resolveStaticPath, getContentType } from './static';
-import type { AssetConfig } from './static';
-import { buildVariantOriginalUrl, type QueryAllowlist } from './variant-key';
+} from './isr.ts';
+import { recordRequest, sendUsageEvent, type RequestType } from './metering.ts';
+import { applyRoutingRules, mergeQueryIntoLocation, type RedirectRule } from './routing-rules.ts';
+import { resolveStaticPath, getContentType } from './static.ts';
+import type { AssetConfig } from './static.ts';
+import { buildVariantOriginalUrl, type QueryAllowlist } from './variant-key.ts';
 
 interface RoutingEntry {
   workerName: string;

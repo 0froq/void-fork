@@ -5,7 +5,7 @@ import {
   isrEdgeCacheUrl,
   isrEdgeCacheUrlForToken,
   splitIsrCacheKey,
-} from '../../src/index';
+} from '../../src/index.ts';
 
 /**
  * Hashing the variant token (instead of base64url-encoding the original URL)

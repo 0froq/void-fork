@@ -1,7 +1,7 @@
-import type { Deployment } from '../../types';
-import { DeploymentTable } from './deployment-table';
-import { Layout } from './layout';
-import { Pagination } from './pagination';
+import type { Deployment } from '../../types.ts';
+import { DeploymentTable } from './deployment-table.tsx';
+import { Layout } from './layout.tsx';
+import { Pagination } from './pagination.tsx';
 
 export function DeploymentsListPage({
   deployments,

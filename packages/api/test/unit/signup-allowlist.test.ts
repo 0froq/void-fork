@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isSignupAllowed, type AllowlistEntry } from '../../src/signup-allowlist';
+import { isSignupAllowed, type AllowlistEntry } from '../../src/signup-allowlist.ts';
 
 describe('isSignupAllowed', () => {
   it('blocks all signups when entries list is empty', () => {

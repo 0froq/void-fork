@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
-import app from '../../src/index';
+import app from '../../src/index.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -9,7 +9,7 @@ import {
   createTestProjectSecret,
   mockCfApi,
   type TestEnv,
-} from './helpers';
+} from './helpers.ts';
 
 let env: TestEnv;
 

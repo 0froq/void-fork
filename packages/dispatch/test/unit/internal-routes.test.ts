@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Env } from '../../src/env';
-import app from '../../src/index';
+import type { Env } from '../../src/env.ts';
+import app from '../../src/index.ts';
 
 vi.stubGlobal('caches', {
   default: {

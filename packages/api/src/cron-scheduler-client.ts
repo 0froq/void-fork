@@ -1,4 +1,4 @@
-import type { ApiEnv } from './env';
+import type { ApiEnv } from './env.ts';
 
 interface CronSyncState {
   workerName: string;

@@ -7,8 +7,8 @@ import {
   buildWebSocketUploadMigrations,
   enrichSandboxManifest,
   enrichWebSocketManifest,
-} from '../../src/routes/deploy';
-import type { DeployManifest } from '../../src/types';
+} from '../../src/routes/deploy.ts';
+import type { DeployManifest } from '../../src/types.ts';
 
 describe('enrichWebSocketManifest', () => {
   it('reuses previous websocket migrations when class sets are unchanged', () => {

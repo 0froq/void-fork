@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { applyRoutingRules, mergeQueryIntoLocation } from '../../src/routing-rules';
+import { applyRoutingRules, mergeQueryIntoLocation } from '../../src/routing-rules.ts';
 
 describe('applyRoutingRules', () => {
   it('returns null when no rules', () => {

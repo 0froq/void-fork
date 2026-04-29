@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { isAdminSuspended, REASON_REQUESTS_EXCEEDED } from '../../src/suspension';
-import { evaluateRequestLimit, evaluateAiLimit, type CounterState } from '../../src/usage-counter';
+import { isAdminSuspended, REASON_REQUESTS_EXCEEDED } from '../../src/suspension.ts';
+import {
+  evaluateRequestLimit,
+  evaluateAiLimit,
+  type CounterState,
+} from '../../src/usage-counter.ts';
 
 describe('isAdminSuspended', () => {
   it('returns false for null (not suspended)', () => {

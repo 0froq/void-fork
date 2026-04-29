@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
-import { signJwt } from '../../src/auth/jwt';
-import app from '../../src/index';
-import { users } from '../../src/schema';
+import { signJwt } from '../../src/auth/jwt.ts';
+import app from '../../src/index.ts';
+import { users } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -10,7 +10,7 @@ import {
   createTestUser,
   JWT_SECRET,
   type TestEnv,
-} from './helpers';
+} from './helpers.ts';
 
 let env: TestEnv;
 

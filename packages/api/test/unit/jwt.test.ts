@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { signJwt, verifyJwt } from '../../src/auth/jwt';
+import { signJwt, verifyJwt } from '../../src/auth/jwt.ts';
 
 const SECRET = 'test-secret-key-for-jwt';
 

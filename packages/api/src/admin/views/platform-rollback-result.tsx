@@ -1,7 +1,7 @@
-import type { PlatformEvent } from '../../types';
-import { PLATFORM_WORKERS, type PlatformEnv } from '../platform-workers';
-import { formatDateTime, STATUS_COLORS } from './format';
-import { Layout } from './layout';
+import type { PlatformEvent } from '../../types.ts';
+import { PLATFORM_WORKERS, type PlatformEnv } from '../platform-workers.ts';
+import { formatDateTime, STATUS_COLORS } from './format.ts';
+import { Layout } from './layout.tsx';
 
 export function PlatformRollbackResultPage({
   events,

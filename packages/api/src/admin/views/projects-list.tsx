@@ -1,7 +1,7 @@
-import { Layout } from './layout';
-import { Pagination } from './pagination';
-import type { ProjectRow } from './projects-table';
-import { ProjectsTable } from './projects-table';
+import { Layout } from './layout.tsx';
+import { Pagination } from './pagination.tsx';
+import type { ProjectRow } from './projects-table.tsx';
+import { ProjectsTable } from './projects-table.tsx';
 
 export function ProjectsListPage({
   projects,

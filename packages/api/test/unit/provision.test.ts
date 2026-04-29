@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Db } from '../../src/db';
-import { provisionBindings } from '../../src/provisioning/provision';
-import type { DeployManifest, Resource } from '../../src/types';
+import type { Db } from '../../src/db.ts';
+import { provisionBindings } from '../../src/provisioning/provision.ts';
+import type { DeployManifest, Resource } from '../../src/types.ts';
 
 // Mock the CF API module
 vi.mock('../../src/provisioning/cloudflare-api', () => ({
@@ -32,7 +32,7 @@ vi.mock('../../src/db', () => ({
     ),
 }));
 
-import { getProjectResources, createResource } from '../../src/db';
+import { getProjectResources, createResource } from '../../src/db.ts';
 import {
   createD1Database,
   createKVNamespace,
@@ -41,7 +41,7 @@ import {
   getD1DatabaseByName,
   getKVNamespaceByTitle,
   getQueueByName,
-} from '../../src/provisioning/cloudflare-api';
+} from '../../src/provisioning/cloudflare-api.ts';
 
 const ACCOUNT_ID = 'test-account';
 const API_TOKEN = 'test-token';

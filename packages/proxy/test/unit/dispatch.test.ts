@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
-import { clearWorkerNameCache } from '../../src/dispatch';
-import worker from '../../src/index';
+import { clearWorkerNameCache } from '../../src/dispatch.ts';
+import worker from '../../src/index.ts';
 
 const JWT_SECRET = 'test-secret-key';
 

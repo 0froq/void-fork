@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import type { ApiEnv } from '../env';
-import { getPlanLimits } from '../tiers';
+import type { ApiEnv } from '../env.ts';
+import { getPlanLimits } from '../tiers.ts';
 
 const app = new Hono<ApiEnv>()
 

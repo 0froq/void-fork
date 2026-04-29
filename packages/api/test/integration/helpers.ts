@@ -4,11 +4,11 @@ import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
 import { drizzle } from 'drizzle-orm/pglite';
 import pg from 'pg';
 import { vi } from 'vitest';
-import { signJwt } from '../../src/auth/jwt';
-import type { Db } from '../../src/db';
-import { generateId } from '../../src/id';
-import { encryptProjectSecret } from '../../src/project-secrets';
-import * as schema from '../../src/schema';
+import { signJwt } from '../../src/auth/jwt.ts';
+import type { Db } from '../../src/db.ts';
+import { generateId } from '../../src/id.ts';
+import { encryptProjectSecret } from '../../src/project-secrets.ts';
+import * as schema from '../../src/schema.ts';
 import {
   users,
   oauthAccounts,
@@ -19,10 +19,10 @@ import {
   domains,
   invitations,
   oauthNonces,
-} from '../../src/schema';
-import type { PlanId } from '../../src/tiers';
-import { loadPGliteTemplateBundle } from './db-template';
-import { setTestDb, clearTestDb } from './setup';
+} from '../../src/schema.ts';
+import type { PlanId } from '../../src/tiers.ts';
+import { loadPGliteTemplateBundle } from './db-template.ts';
+import { setTestDb, clearTestDb } from './setup.ts';
 
 export const JWT_SECRET = 'test-jwt-secret';
 export const CF_API_TOKEN = 'test-cf-token';

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { hmacVerifyState } from '../auth/hmac';
-import { getResourceByBinding } from '../db';
-import type { ApiEnv } from '../env';
+import { hmacVerifyState } from '../auth/hmac.ts';
+import { getResourceByBinding } from '../db.ts';
+import type { ApiEnv } from '../env.ts';
 
 const app = new Hono<ApiEnv>();
 

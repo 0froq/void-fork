@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseBoundary, parseMultipart, MultipartParseError } from '../../src/multipart';
+import { parseBoundary, parseMultipart, MultipartParseError } from '../../src/multipart.ts';
 
 function bodyFromString(s: string): ReadableStream<Uint8Array> {
   const bytes = new TextEncoder().encode(s);

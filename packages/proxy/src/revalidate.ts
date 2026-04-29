@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { ProxyEnv } from './types';
+import type { ProxyEnv } from './types.ts';
 
 const app = new Hono<ProxyEnv>();
 

@@ -6,14 +6,14 @@ import {
   getDeployment,
   getProject,
   cancelDeployment,
-} from '../../db';
-import { type ApiEnv, isDevBypass } from '../../env';
-import type { DeployManifest } from '../../types';
-import { DeploymentLogs } from '../views/deployment-logs';
-import { displayStatus } from '../views/deployment-table';
-import { DeploymentsListPage } from '../views/deployments-list';
-import { formatDateTime } from '../views/format';
-import { Layout } from '../views/layout';
+} from '../../db.ts';
+import { type ApiEnv, isDevBypass } from '../../env.ts';
+import type { DeployManifest } from '../../types.ts';
+import { DeploymentLogs } from '../views/deployment-logs.tsx';
+import { displayStatus } from '../views/deployment-table.tsx';
+import { DeploymentsListPage } from '../views/deployments-list.tsx';
+import { formatDateTime } from '../views/format.ts';
+import { Layout } from '../views/layout.tsx';
 
 const PAGE_SIZE = 20;
 const app = new Hono<ApiEnv>();

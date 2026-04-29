@@ -1,8 +1,8 @@
-import type { WorkerDeployment } from '../../provisioning/workers-versions';
-import type { PlatformWorker, PlatformEnv } from '../platform-workers';
-import type { ActivityEntry } from '../routes/platform';
-import { formatDateTime, STATUS_COLORS } from './format';
-import { Layout } from './layout';
+import type { WorkerDeployment } from '../../provisioning/workers-versions.ts';
+import type { PlatformWorker, PlatformEnv } from '../platform-workers.ts';
+import type { ActivityEntry } from '../routes/platform.tsx';
+import { formatDateTime, STATUS_COLORS } from './format.ts';
+import { Layout } from './layout.tsx';
 
 interface WorkerStatus {
   worker: PlatformWorker;

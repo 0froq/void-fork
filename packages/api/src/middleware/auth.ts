@@ -1,9 +1,9 @@
 import type { MiddlewareHandler } from 'hono';
-import { verifyJwt } from '../auth/jwt';
-import { getUser } from '../db';
-import { type ApiEnv, isDevBypass } from '../env';
-import { users } from '../schema';
-import { isAdminSuspended } from '../suspension';
+import { verifyJwt } from '../auth/jwt.ts';
+import { getUser } from '../db.ts';
+import { type ApiEnv, isDevBypass } from '../env.ts';
+import { users } from '../schema.ts';
+import { isAdminSuspended } from '../suspension.ts';
 
 export const authMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) => {
   if (isDevBypass(c.env)) {

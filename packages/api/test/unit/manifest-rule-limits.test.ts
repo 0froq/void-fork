@@ -3,7 +3,7 @@ import {
   MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES,
   MAX_ROUTING_RULES,
   validateManifestShape,
-} from '../../src/routes/deploy';
+} from '../../src/routes/deploy.ts';
 
 /**
  * Each routing rule compiles a regex per request in dispatch. Without a cap,

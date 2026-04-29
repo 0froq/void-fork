@@ -5,7 +5,11 @@ vi.mock('cloudflare:workers', () => ({
   DurableObject: class {},
 }));
 
-import { evaluateRequestLimit, evaluateAiLimit, type CounterState } from '../../src/usage-counter';
+import {
+  evaluateRequestLimit,
+  evaluateAiLimit,
+  type CounterState,
+} from '../../src/usage-counter.ts';
 
 function makeState(overrides: Partial<CounterState> = {}): CounterState {
   return {

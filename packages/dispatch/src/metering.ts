@@ -1,4 +1,4 @@
-import type { Env } from './env';
+import type { Env } from './env.ts';
 
 export type RequestType = 'api' | 'static' | 'ssr' | 'isr' | 'websocket';
 

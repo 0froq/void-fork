@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { SUPPORTED_MANIFEST_VERSIONS } from '../../src/types';
-import type { DeployManifest } from '../../src/types';
+import { SUPPORTED_MANIFEST_VERSIONS } from '../../src/types.ts';
+import type { DeployManifest } from '../../src/types.ts';
 
 describe('DeployManifest contract', () => {
   it('has a version field', () => {

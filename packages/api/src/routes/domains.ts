@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { SITE_DOMAIN } from '../constants';
+import { SITE_DOMAIN } from '../constants.ts';
 import {
   getProject,
   createDomain,
@@ -8,13 +8,13 @@ import {
   getDomainByHostname,
   updateDomainStatus,
   deleteDomain,
-} from '../db';
-import type { ApiEnv } from '../env';
+} from '../db.ts';
+import type { ApiEnv } from '../env.ts';
 import {
   createCustomHostname,
   getCustomHostname,
   deleteCustomHostname,
-} from '../provisioning/cloudflare-api';
+} from '../provisioning/cloudflare-api.ts';
 
 const CNAME_TARGET = `cname.${SITE_DOMAIN}`;
 

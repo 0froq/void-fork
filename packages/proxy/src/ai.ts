@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { asRecord, asString } from './body';
-import type { AiGateway, ProxyEnv } from './types';
+import { asRecord, asString } from './body.ts';
+import type { AiGateway, ProxyEnv } from './types.ts';
 
 const GATEWAY_ID = 'void';
 const ALLOWED_GATEWAY_ENDPOINTS = new Set([

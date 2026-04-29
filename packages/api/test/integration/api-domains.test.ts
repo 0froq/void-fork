@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
-import app from '../../src/index';
-import { domains } from '../../src/schema';
+import app from '../../src/index.ts';
+import { domains } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -11,7 +11,7 @@ import {
   mockCfApi,
   cfSuccess,
   type TestEnv,
-} from './helpers';
+} from './helpers.ts';
 
 let env: TestEnv;
 

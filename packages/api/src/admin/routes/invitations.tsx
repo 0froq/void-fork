@@ -7,11 +7,11 @@ import {
   getAllInvitations,
   countInvitations,
   getUserByEmail,
-} from '../../db';
-import { sendInvitationEmail } from '../../email';
-import type { ApiEnv } from '../../env';
-import { getAllowlist, putAllowlist } from '../../signup-allowlist';
-import { InvitationsPage } from '../views/invitations';
+} from '../../db.ts';
+import { sendInvitationEmail } from '../../email.ts';
+import type { ApiEnv } from '../../env.ts';
+import { getAllowlist, putAllowlist } from '../../signup-allowlist.ts';
+import { InvitationsPage } from '../views/invitations.tsx';
 
 const PAGE_SIZE = 50;
 

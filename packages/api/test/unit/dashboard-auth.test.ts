@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { authenticateDashboardToken } from '../../src/auth/dashboard';
-import { signJwt } from '../../src/auth/jwt';
+import { authenticateDashboardToken } from '../../src/auth/dashboard.ts';
+import { signJwt } from '../../src/auth/jwt.ts';
 
 const SECRET = 'dashboard-test-secret';
 

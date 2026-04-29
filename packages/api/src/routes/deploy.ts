@@ -21,12 +21,12 @@ import {
   getContentType,
   type AssetEntry,
   type AssetManifestEntry,
-} from '../assets';
-import { deleteDispatchScript, retryWithBackoff } from '../cf-api';
-import { R2_CONCURRENCY, uploadPool } from '../concurrency';
-import { SITE_DOMAIN } from '../constants';
-import { DEFAULT_DASHBOARD_URL } from '../constants';
-import { clearCronScheduler, syncCronScheduler } from '../cron-scheduler-client';
+} from '../assets.ts';
+import { deleteDispatchScript, retryWithBackoff } from '../cf-api.ts';
+import { R2_CONCURRENCY, uploadPool } from '../concurrency.ts';
+import { SITE_DOMAIN } from '../constants.ts';
+import { DEFAULT_DASHBOARD_URL } from '../constants.ts';
+import { clearCronScheduler, syncCronScheduler } from '../cron-scheduler-client.ts';
 import {
   getProject,
   getDeployment,
@@ -50,30 +50,30 @@ import {
   getProjectResources,
   CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES,
   type Db,
-} from '../db';
-import { sendDeployFailedEmail } from '../email';
-import type { ApiEnv } from '../env';
+} from '../db.ts';
+import { sendDeployFailedEmail } from '../email.ts';
+import type { ApiEnv } from '../env.ts';
 import {
   MultipartParseError,
   parseBoundary,
   parseMultipart,
   PartTooLargeError,
-} from '../multipart';
+} from '../multipart.ts';
 import {
   BETTER_AUTH_SECRET_NAME,
   decryptProjectSecret,
   generateManagedAuthSecret,
   encryptProjectSecret,
-} from '../project-secrets';
-import { addQueueConsumer } from '../provisioning/cloudflare-api';
+} from '../project-secrets.ts';
+import { addQueueConsumer } from '../provisioning/cloudflare-api.ts';
 import {
   findDurableObjectNamespaceId,
   upsertSandboxContainerApplication,
-} from '../provisioning/containers';
-import { provisionBindings } from '../provisioning/provision';
-import { buildRoutingJson, buildStaticRoutingJson } from '../routing';
-import { deployments } from '../schema';
-import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT } from '../tiers';
+} from '../provisioning/containers.ts';
+import { provisionBindings } from '../provisioning/provision.ts';
+import { buildRoutingJson, buildStaticRoutingJson } from '../routing.ts';
+import { deployments } from '../schema.ts';
+import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT } from '../tiers.ts';
 import {
   MANIFEST_REDIRECT_RULE_STATUSES,
   SUPPORTED_MANIFEST_VERSIONS,
@@ -81,7 +81,7 @@ import {
   type DeployEvent,
   type SandboxMigrationMeta,
   type WebSocketMigrationMeta,
-} from '../types';
+} from '../types.ts';
 
 const DEFAULT_DISPATCH_NAMESPACE = 'void-users';
 

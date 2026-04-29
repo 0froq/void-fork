@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { scheduled } from '../../src/index';
+import { scheduled } from '../../src/index.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -7,7 +7,7 @@ import {
   createTestUser,
   createTestProject,
   type TestEnv,
-} from './helpers';
+} from './helpers.ts';
 
 let env: TestEnv;
 
@@ -39,7 +39,7 @@ function makeBindings(e: TestEnv) {
     CRON_SCHEDULER: e.CRON_SCHEDULER,
     ERROR_ALERT_MONITOR: e.ERROR_ALERT_MONITOR,
     CRON_FIRES_QUEUE: { send: async () => {}, sendBatch: async () => {} } as unknown as Queue<
-      import('../../src/cron-fires-queue').CronFireMessage
+      import('../../src/cron-fires-queue.ts').CronFireMessage
     >,
   };
 }

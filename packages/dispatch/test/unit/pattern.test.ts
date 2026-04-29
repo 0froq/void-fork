@@ -5,7 +5,7 @@ import {
   matchPattern,
   matchPatternCaptures,
   substituteParams,
-} from '../../src/pattern';
+} from '../../src/pattern.ts';
 
 describe('matchPattern', () => {
   it('matches exact path', () => {

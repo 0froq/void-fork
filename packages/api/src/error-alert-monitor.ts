@@ -1,8 +1,8 @@
 import { DurableObject } from 'cloudflare:workers';
-import { DEFAULT_DASHBOARD_URL } from './constants';
-import { createDb, getUser, getProject } from './db';
-import { sendErrorAlertEmail } from './email';
-import type { ApiEnv } from './env';
+import { DEFAULT_DASHBOARD_URL } from './constants.ts';
+import { createDb, getUser, getProject } from './db.ts';
+import { sendErrorAlertEmail } from './email.ts';
+import type { ApiEnv } from './env.ts';
 
 const DEBOUNCE_MS = 120_000; // 2 minutes
 const COUNT_CAP = 100; // immediate fire

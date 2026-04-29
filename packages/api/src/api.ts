@@ -3,12 +3,12 @@
 // doesn't support Hono JSX.
 
 import { Hono } from 'hono';
-import type { ApiEnv } from './env';
-import domains from './routes/domains';
-import me from './routes/me';
-import projects from './routes/projects';
-import secrets from './routes/secrets';
-import { projectUsage, accountUsage } from './routes/usage';
+import type { ApiEnv } from './env.ts';
+import domains from './routes/domains.ts';
+import me from './routes/me.ts';
+import projects from './routes/projects.ts';
+import secrets from './routes/secrets.ts';
+import { projectUsage, accountUsage } from './routes/usage.ts';
 
 const api = new Hono<ApiEnv>()
   .route('/me', me)

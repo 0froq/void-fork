@@ -1,4 +1,4 @@
-import { cfFetch, CF_API_BASE } from './cloudflare-api';
+import { cfFetch, CF_API_BASE } from './cloudflare-api.ts';
 
 export interface WorkerVersion {
   id: string;

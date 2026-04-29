@@ -6,7 +6,7 @@ import {
 } from '@voidcloud/api/db';
 import type { Project, Deployment, Domain, Resource } from '@voidcloud/api/types';
 import { defineHandler } from 'void';
-import { createClient, api, type API, type Client } from '../../lib/api';
+import { createClient, api, type API, type Client } from '../../lib/api.ts';
 
 type P = Client['projects'][':id'];
 

@@ -1,14 +1,14 @@
 import type { Context } from 'hono';
-import { DEFAULT_DISPATCH_NAMESPACE } from '../constants';
-import { clearCronScheduler } from '../cron-scheduler-client';
-import { getAllProjectDeployments, getProjectResources, getDomainsByProjectId } from '../db';
-import type { ApiEnv } from '../env';
+import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
+import { clearCronScheduler } from '../cron-scheduler-client.ts';
+import { getAllProjectDeployments, getProjectResources, getDomainsByProjectId } from '../db.ts';
+import type { ApiEnv } from '../env.ts';
 import {
   getLegacyProjectWorkerName,
   getProjectDeploymentWorkerName,
   getProjectQueueName,
-} from '../naming';
-import type { Project, Resource } from '../types';
+} from '../naming.ts';
+import type { Project, Resource } from '../types.ts';
 import {
   deleteD1Database,
   deleteKVNamespace,
@@ -16,8 +16,8 @@ import {
   deleteQueue,
   deleteCustomHostname,
   deleteHyperdrive,
-} from './cloudflare-api';
-import { deleteContainerApplication } from './containers';
+} from './cloudflare-api.ts';
+import { deleteContainerApplication } from './containers.ts';
 
 function deleteCloudflareResource(
   accountId: string,

@@ -1,6 +1,6 @@
 import { isrCacheKey, isrCacheVariantPrefix, isrEdgeCacheUrl } from '@voidcloud/isr-shared';
-import type { Env } from './env';
-import { matchLiteralPattern } from './pattern';
+import type { Env } from './env.ts';
+import { matchLiteralPattern } from './pattern.ts';
 
 // Re-export so callers that import from `./isr` (tests, index.ts) still work.
 export { isrCacheKey };

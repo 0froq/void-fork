@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { getProject, getProjectsByUserId } from '../db';
-import { type ApiEnv, isDevBypass } from '../env';
-import { getCurrentBillingPeriodStart } from '../tiers';
+import { getProject, getProjectsByUserId } from '../db.ts';
+import { type ApiEnv, isDevBypass } from '../env.ts';
+import { getCurrentBillingPeriodStart } from '../tiers.ts';
 
 const projectUsage = new Hono<ApiEnv>()
 

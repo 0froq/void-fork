@@ -18,8 +18,8 @@ import {
   cronMatchesMinute,
   CronScheduler,
   getNextFireTime,
-} from '../../src/cron-scheduler';
-import type { ApiEnv } from '../../src/env';
+} from '../../src/cron-scheduler.ts';
+import type { ApiEnv } from '../../src/env.ts';
 
 describe('cfCronToUnix', () => {
   it('converts single numeric DOW (CF 1=Sun → Unix 0=Sun)', () => {

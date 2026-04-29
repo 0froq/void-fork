@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
-import { hmacVerifyState } from '../auth/hmac';
-import { getProject } from '../db';
-import type { ApiEnv } from '../env';
-import { runRevalidate } from '../revalidate-core';
+import { hmacVerifyState } from '../auth/hmac.ts';
+import { getProject } from '../db.ts';
+import type { ApiEnv } from '../env.ts';
+import { runRevalidate } from '../revalidate-core.ts';
 
 const app = new Hono<ApiEnv>();
 

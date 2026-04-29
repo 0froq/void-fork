@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractSlug } from '../../src/hostname';
+import { extractSlug } from '../../src/hostname.ts';
 
 describe('extractSlug', () => {
   it('extracts slug from valid hostname', () => {

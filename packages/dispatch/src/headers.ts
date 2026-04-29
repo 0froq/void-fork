@@ -1,4 +1,4 @@
-import { matchLiteralPattern } from './pattern';
+import { matchLiteralPattern } from './pattern.ts';
 
 export interface HeaderRule {
   pattern: string;

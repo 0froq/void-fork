@@ -9,9 +9,9 @@ import {
   unique,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import type { PlatformWorkerName, PlatformEnv } from './admin/platform-workers';
-import type { PlanId } from './tiers';
-import type { InvitationStatus } from './types';
+import type { PlatformWorkerName, PlatformEnv } from './admin/platform-workers.ts';
+import type { PlanId } from './tiers.ts';
+import type { InvitationStatus } from './types.ts';
 
 // ---------------------------------------------------------------------------
 // users

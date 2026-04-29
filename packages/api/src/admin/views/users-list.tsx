@@ -1,6 +1,6 @@
-import type { User } from '../../types';
-import { Layout } from './layout';
-import { Pagination } from './pagination';
+import type { User } from '../../types.ts';
+import { Layout } from './layout.tsx';
+import { Pagination } from './pagination.tsx';
 
 export function UsersListPage({
   users,

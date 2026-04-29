@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createErrorResponse, shouldServeHtmlErrorPage } from '../../src/error-page';
+import { createErrorResponse, shouldServeHtmlErrorPage } from '../../src/error-page.ts';
 
 describe('dispatch default error pages', () => {
   it('serves self-contained HTML for document 404s', async () => {

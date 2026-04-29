@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseScriptName } from '../src/index';
+import { parseScriptName } from '../src/index.ts';
 
 describe('parseScriptName', () => {
   it('parses versioned script name', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildVariantOriginalUrl } from '../../src/variant-key';
+import { buildVariantOriginalUrl } from '../../src/variant-key.ts';
 
 /**
  * The variant key for ISR is derived from the original request URL on a

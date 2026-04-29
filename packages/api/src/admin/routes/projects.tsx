@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { SITE_DOMAIN } from '../../constants';
+import { SITE_DOMAIN } from '../../constants.ts';
 import {
   getAllProjectsWithOwner,
   countProjects,
@@ -10,12 +10,12 @@ import {
   getUser,
   getDomainsByProjectId,
   deleteProjectCascade,
-} from '../../db';
-import type { ApiEnv } from '../../env';
-import { cleanupProjectResources } from '../../provisioning/cleanup';
-import { DeploymentTable } from '../views/deployment-table';
-import { Layout } from '../views/layout';
-import { ProjectsListPage } from '../views/projects-list';
+} from '../../db.ts';
+import type { ApiEnv } from '../../env.ts';
+import { cleanupProjectResources } from '../../provisioning/cleanup.ts';
+import { DeploymentTable } from '../views/deployment-table.tsx';
+import { Layout } from '../views/layout.tsx';
+import { ProjectsListPage } from '../views/projects-list.tsx';
 
 const PAGE_SIZE = 20;
 const app = new Hono<ApiEnv>();

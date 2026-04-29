@@ -1,8 +1,8 @@
 import type { MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
-import { verifyJwt } from '../../auth/jwt';
-import { getUser, getFirstAdmin } from '../../db';
-import { type ApiEnv, isDevBypass } from '../../env';
+import { verifyJwt } from '../../auth/jwt.ts';
+import { getUser, getFirstAdmin } from '../../db.ts';
+import { type ApiEnv, isDevBypass } from '../../env.ts';
 
 export const adminAuthMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) => {
   if (isDevBypass(c.env)) {

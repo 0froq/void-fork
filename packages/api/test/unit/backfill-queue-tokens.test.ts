@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { backfillQueueTokens } from '../../src/admin/backfill-queue-tokens';
-import { hmacSignState } from '../../src/auth/hmac';
-import type { ProxyTokenLookup } from '../../src/provisioning/cloudflare-api';
+import { backfillQueueTokens } from '../../src/admin/backfill-queue-tokens.ts';
+import { hmacSignState } from '../../src/auth/hmac.ts';
+import type { ProxyTokenLookup } from '../../src/provisioning/cloudflare-api.ts';
 
 function createMockKV(initial: Record<string, string> = {}) {
   const store = new Map<string, string>(Object.entries(initial));

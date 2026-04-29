@@ -1,4 +1,4 @@
-import { matchLiteralPattern } from './pattern';
+import { matchLiteralPattern } from './pattern.ts';
 
 /**
  * Map of path-pattern → allowlisted query-param names. Patterns are matched

@@ -1,4 +1,4 @@
-import { verifyJwt } from './jwt';
+import { verifyJwt } from './jwt.ts';
 
 export interface DashboardSession {
   token: string;

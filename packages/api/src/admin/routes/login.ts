@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
-import { getGoogleAuthorizeUrl, exchangeCodeForToken, getGoogleUser } from '../../auth/google';
-import { hmacSignState, hmacVerifyState } from '../../auth/hmac';
-import { signJwt } from '../../auth/jwt';
+import { getGoogleAuthorizeUrl, exchangeCodeForToken, getGoogleUser } from '../../auth/google.ts';
+import { hmacSignState, hmacVerifyState } from '../../auth/hmac.ts';
+import { signJwt } from '../../auth/jwt.ts';
 import {
   getUserByOAuthAccount,
   getUserByEmail,
@@ -10,8 +10,8 @@ import {
   createOAuthAccount,
   storeOAuthNonce,
   consumeOAuthNonce,
-} from '../../db';
-import type { ApiEnv } from '../../env';
+} from '../../db.ts';
+import type { ApiEnv } from '../../env.ts';
 
 const app = new Hono<ApiEnv>();
 

@@ -1,13 +1,13 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { ai } from './ai';
-import { asString, isProxyBody } from './body';
-import { d1 } from './d1';
-import { kv } from './kv';
-import { r2 } from './r2';
-import { verifyProjectOwner } from './resolve';
-import { revalidate } from './revalidate';
-import type { JwtPayload, ProxyBody, ProxyEnv } from './types';
+import { ai } from './ai.ts';
+import { asString, isProxyBody } from './body.ts';
+import { d1 } from './d1.ts';
+import { kv } from './kv.ts';
+import { r2 } from './r2.ts';
+import { verifyProjectOwner } from './resolve.ts';
+import { revalidate } from './revalidate.ts';
+import type { JwtPayload, ProxyBody, ProxyEnv } from './types.ts';
 
 const app = new Hono<ProxyEnv>();
 

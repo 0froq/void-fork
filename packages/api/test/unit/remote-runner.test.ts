@@ -3,7 +3,7 @@ import {
   runRemoteMigrations,
   isSingleStatement,
   queryD1,
-} from '../../src/migrations/remote-runner';
+} from '../../src/migrations/remote-runner.ts';
 
 const ACCOUNT_ID = 'test-account';
 const API_TOKEN = 'test-token';

@@ -1,15 +1,15 @@
 import { Hono } from 'hono';
-import { adminAuthMiddleware } from './admin/middleware/auth';
-import adminDeployments from './admin/routes/deployments';
-import adminInvitations from './admin/routes/invitations';
-import adminLogin from './admin/routes/login';
-import adminPlatform from './admin/routes/platform';
-import adminProjects from './admin/routes/projects';
-import adminSignupControl from './admin/routes/signup-control';
-import { dashboardHandler, adminSystem } from './admin/routes/system';
-import adminUsers from './admin/routes/users';
-import { type CronFireMessage, processCronFiresBatch } from './cron-fires-queue';
-import { CronScheduler } from './cron-scheduler';
+import { adminAuthMiddleware } from './admin/middleware/auth.ts';
+import adminDeployments from './admin/routes/deployments.tsx';
+import adminInvitations from './admin/routes/invitations.tsx';
+import adminLogin from './admin/routes/login.ts';
+import adminPlatform from './admin/routes/platform.tsx';
+import adminProjects from './admin/routes/projects.tsx';
+import adminSignupControl from './admin/routes/signup-control.tsx';
+import { dashboardHandler, adminSystem } from './admin/routes/system.tsx';
+import adminUsers from './admin/routes/users.tsx';
+import { type CronFireMessage, processCronFiresBatch } from './cron-fires-queue.ts';
+import { CronScheduler } from './cron-scheduler.ts';
 import {
   createDb,
   getUsersWithProjectsBatch,
@@ -19,28 +19,28 @@ import {
   purgeExpiredAuthCodes,
   failStaleDeployments,
   type Db,
-} from './db';
-import { escapeHtml } from './email';
-import type { ApiEnv } from './env';
-import { ErrorAlertMonitor } from './error-alert-monitor';
-import { authMiddleware } from './middleware/auth';
-import auth from './routes/auth';
-import deleteRoute from './routes/delete';
-import deploy from './routes/deploy';
-import domains from './routes/domains';
-import internalResolveResource from './routes/internal-resolve-resource';
-import internalResolveWorker from './routes/internal-resolve-worker';
-import internalRevalidate from './routes/internal-revalidate';
-import internalVerifyOwner from './routes/internal-verify-owner';
-import me from './routes/me';
-import projects from './routes/projects';
-import revalidate from './routes/revalidate';
-import secrets from './routes/secrets';
-import { projectUsage, accountUsage } from './routes/usage';
-import { REASON_REQUESTS_EXCEEDED } from './suspension';
-import { getCurrentBillingPeriodStart, getPlanLimits } from './tiers';
-import { UsageCounter } from './usage-counter';
-import { processUsageEventBatch } from './usage-queue';
+} from './db.ts';
+import { escapeHtml } from './email.ts';
+import type { ApiEnv } from './env.ts';
+import { ErrorAlertMonitor } from './error-alert-monitor.ts';
+import { authMiddleware } from './middleware/auth.ts';
+import auth from './routes/auth.ts';
+import deleteRoute from './routes/delete.ts';
+import deploy from './routes/deploy.ts';
+import domains from './routes/domains.ts';
+import internalResolveResource from './routes/internal-resolve-resource.ts';
+import internalResolveWorker from './routes/internal-resolve-worker.ts';
+import internalRevalidate from './routes/internal-revalidate.ts';
+import internalVerifyOwner from './routes/internal-verify-owner.ts';
+import me from './routes/me.ts';
+import projects from './routes/projects.ts';
+import revalidate from './routes/revalidate.ts';
+import secrets from './routes/secrets.ts';
+import { projectUsage, accountUsage } from './routes/usage.ts';
+import { REASON_REQUESTS_EXCEEDED } from './suspension.ts';
+import { getCurrentBillingPeriodStart, getPlanLimits } from './tiers.ts';
+import { UsageCounter } from './usage-counter.ts';
+import { processUsageEventBatch } from './usage-queue.ts';
 
 const app = new Hono<ApiEnv>()
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import type { Env } from '../../src/env';
+import type { Env } from '../../src/env.ts';
 import {
   MAX_ISR_VARIANTS_PER_PATH,
   isrCacheKey,
@@ -17,7 +17,7 @@ import {
   normalizePageDataForJsonCache,
   writeIsrCache,
   type IsrCacheEntry,
-} from '../../src/isr';
+} from '../../src/isr.ts';
 
 describe('isrCacheKey', () => {
   it('maps root path to __index__', () => {

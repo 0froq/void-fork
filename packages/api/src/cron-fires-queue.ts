@@ -1,4 +1,4 @@
-import type { ApiEnv } from './env';
+import type { ApiEnv } from './env.ts';
 
 /**
  * One enqueued cron firing. The CronScheduler DO writes one of these per

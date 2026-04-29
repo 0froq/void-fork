@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import type { ApiEnv } from '../../env';
-import { getAllowlist, putAllowlist } from '../../signup-allowlist';
-import { SignupControlPage } from '../views/signup-control';
+import type { ApiEnv } from '../../env.ts';
+import { getAllowlist, putAllowlist } from '../../signup-allowlist.ts';
+import { SignupControlPage } from '../views/signup-control.tsx';
 
 const app = new Hono<ApiEnv>();
 

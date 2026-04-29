@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { getProject } from '../db';
-import type { ApiEnv } from '../env';
-import { runRevalidate } from '../revalidate-core';
+import { getProject } from '../db.ts';
+import type { ApiEnv } from '../env.ts';
+import { runRevalidate } from '../revalidate-core.ts';
 
 const app = new Hono<ApiEnv>();
 

@@ -1,9 +1,9 @@
 import { eq } from 'drizzle-orm';
-import { hmacSignState } from '../auth/hmac';
-import { getProjectResources, createResource, type Db } from '../db';
-import { getProjectQueueName } from '../naming';
-import { resources as resourcesTable } from '../schema';
-import type { DeployManifest, Resource } from '../types';
+import { hmacSignState } from '../auth/hmac.ts';
+import { getProjectResources, createResource, type Db } from '../db.ts';
+import { getProjectQueueName } from '../naming.ts';
+import { resources as resourcesTable } from '../schema.ts';
+import type { DeployManifest, Resource } from '../types.ts';
 import {
   createD1Database,
   createKVNamespace,
@@ -12,7 +12,7 @@ import {
   getD1DatabaseByName,
   getKVNamespaceByTitle,
   getQueueByName,
-} from './cloudflare-api';
+} from './cloudflare-api.ts';
 
 export interface WorkerBinding {
   type: 'd1' | 'kv_namespace' | 'r2_bucket' | 'queue' | 'service' | 'plain_text' | 'hyperdrive';

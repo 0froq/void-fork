@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
-import { asString } from './body';
-import { dispatchToWorker } from './dispatch';
-import { resolveResource } from './resolve';
-import type { ProxyEnv } from './types';
+import { asString } from './body.ts';
+import { dispatchToWorker } from './dispatch.ts';
+import { resolveResource } from './resolve.ts';
+import type { ProxyEnv } from './types.ts';
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
 

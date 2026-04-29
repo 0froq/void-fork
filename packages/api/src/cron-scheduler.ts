@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import { CronExpressionParser } from 'cron-parser';
-import type { ApiEnv } from './env';
+import type { ApiEnv } from './env.ts';
 
 interface CronState {
   workerName: string;

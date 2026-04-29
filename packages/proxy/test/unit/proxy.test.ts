@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
-import worker from '../../src/index';
+import worker from '../../src/index.ts';
 
 const JWT_SECRET = 'test-secret-key';
 

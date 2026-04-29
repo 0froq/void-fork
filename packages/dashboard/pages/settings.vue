@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Props } from './settings.server';
+import type { Props } from './settings.server.ts';
 
 const { user } = defineProps<Props>();
 

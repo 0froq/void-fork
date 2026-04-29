@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { RESERVED_SLUGS } from '../../src/routes/projects';
+import { RESERVED_SLUGS } from '../../src/routes/projects.ts';
 
 describe('reserved slugs (real implementation)', () => {
   it('blocks cname slug (CNAME target)', () => {

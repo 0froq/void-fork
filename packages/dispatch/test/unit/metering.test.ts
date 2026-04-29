@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { Env } from '../../src/env';
-import { recordRequest } from '../../src/metering';
+import type { Env } from '../../src/env.ts';
+import { recordRequest } from '../../src/metering.ts';
 
 function createMockEnv(): { env: Env; writes: Array<unknown> } {
   const writes: Array<unknown> = [];

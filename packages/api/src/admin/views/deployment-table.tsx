@@ -1,5 +1,5 @@
-import type { Deployment } from '../../types';
-import { formatDateTime } from './format';
+import type { Deployment } from '../../types.ts';
+import { formatDateTime } from './format.ts';
 
 export function displayStatus(
   d: Deployment,

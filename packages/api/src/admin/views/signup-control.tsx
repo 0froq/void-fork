@@ -1,5 +1,5 @@
-import type { AllowlistEntry } from '../../signup-allowlist';
-import { Layout } from './layout';
+import type { AllowlistEntry } from '../../signup-allowlist.ts';
+import { Layout } from './layout.tsx';
 
 export function SignupControlPage({
   enabled,

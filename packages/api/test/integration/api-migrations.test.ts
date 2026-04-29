@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
-import type { Db } from '../../src/db';
-import app from '../../src/index';
-import { deployments, projects, resources } from '../../src/schema';
+import type { Db } from '../../src/db.ts';
+import app from '../../src/index.ts';
+import { deployments, projects, resources } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -14,8 +14,8 @@ import {
   cfSuccess,
   cfError,
   type TestEnv,
-} from './helpers';
-import { setTestDb } from './setup';
+} from './helpers.ts';
+import { setTestDb } from './setup.ts';
 
 let env: TestEnv;
 

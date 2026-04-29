@@ -1,7 +1,7 @@
-import type { WorkerVersion, WorkerDeployment } from '../../provisioning/workers-versions';
-import type { PlatformWorker, PlatformEnv } from '../platform-workers';
-import { formatDateTime } from './format';
-import { Layout } from './layout';
+import type { WorkerVersion, WorkerDeployment } from '../../provisioning/workers-versions.ts';
+import type { PlatformWorker, PlatformEnv } from '../platform-workers.ts';
+import { formatDateTime } from './format.ts';
+import { Layout } from './layout.tsx';
 
 export function PlatformWorkerDetailPage({
   worker,

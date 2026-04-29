@@ -6,10 +6,10 @@ import {
   markDeploymentRetained,
   setActiveDeployment,
   setAppliedMigrations,
-} from '../../src/db';
-import app from '../../src/index';
-import { users } from '../../src/schema';
-import { domains, resources } from '../../src/schema';
+} from '../../src/db.ts';
+import app from '../../src/index.ts';
+import { users } from '../../src/schema.ts';
+import { domains, resources } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -19,7 +19,7 @@ import {
   mockCfApi,
   cfSuccess,
   type TestEnv,
-} from './helpers';
+} from './helpers.ts';
 
 let env: TestEnv;
 

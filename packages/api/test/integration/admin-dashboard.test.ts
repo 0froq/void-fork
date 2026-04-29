@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
-import { app } from '../../src/index';
-import { deployments, projects, users } from '../../src/schema';
+import { app } from '../../src/index.ts';
+import { deployments, projects, users } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -10,7 +10,7 @@ import {
   createTestDeployment,
   mockCfApi,
   type TestEnv,
-} from './helpers';
+} from './helpers.ts';
 
 let env: TestEnv;
 let manifestCounter = 0;

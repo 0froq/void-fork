@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
-import { hmacSignState } from '../../src/auth/hmac';
-import app from '../../src/index';
-import { users } from '../../src/schema';
+import { hmacSignState } from '../../src/auth/hmac.ts';
+import app from '../../src/index.ts';
+import { users } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -12,7 +12,7 @@ import {
   seedOAuthNonce,
   JWT_SECRET,
   type TestEnv,
-} from './helpers';
+} from './helpers.ts';
 
 let env: TestEnv;
 const executionCtx = createMockExecutionContext();
@@ -209,7 +209,7 @@ describe('email verification gating on account linking', () => {
     const location = res.headers.get('Location')!;
     const token = new URL(location).searchParams.get('token')!;
 
-    const { verifyJwt } = await import('../../src/auth/jwt');
+    const { verifyJwt } = await import('../../src/auth/jwt.ts');
     const payload = await verifyJwt(token, JWT_SECRET);
     expect(payload).toBeDefined();
     expect(payload!.sub).not.toBe(existing.id);
@@ -247,7 +247,7 @@ describe('email verification gating on account linking', () => {
     const location = res.headers.get('Location')!;
     const token = new URL(location).searchParams.get('token')!;
 
-    const { verifyJwt } = await import('../../src/auth/jwt');
+    const { verifyJwt } = await import('../../src/auth/jwt.ts');
     const payload = await verifyJwt(token, JWT_SECRET);
     expect(payload).toBeDefined();
     expect(payload!.sub).toBe(existing.id);
@@ -284,7 +284,7 @@ describe('email verification gating on account linking', () => {
     const location = res.headers.get('Location')!;
     const token = new URL(location).searchParams.get('token')!;
 
-    const { verifyJwt } = await import('../../src/auth/jwt');
+    const { verifyJwt } = await import('../../src/auth/jwt.ts');
     const payload = await verifyJwt(token, JWT_SECRET);
     expect(payload).toBeDefined();
     expect(payload!.sub).toBe(existing.id);

@@ -1,4 +1,4 @@
-import { SITE_DOMAIN } from './constants';
+import { SITE_DOMAIN } from './constants.ts';
 
 /**
  * Extract the project slug from a hostname.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRoutingJson, buildStaticRoutingJson } from '../../src/routing';
+import { buildRoutingJson, buildStaticRoutingJson } from '../../src/routing.ts';
 
 describe('buildRoutingJson', () => {
   const base = {

@@ -1,19 +1,19 @@
 import { Hono } from 'hono';
 import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
-import { getGitHubAuthorizeUrl, exchangeCodeForToken, getGitHubUser } from '../auth/github';
 import {
   ensureGitHubPreviewRepoAccess,
   getGitHubPreviewRepoConfig,
   hasGitHubPreviewRepoAccess,
-} from '../auth/github-preview';
+} from '../auth/github-preview.ts';
+import { getGitHubAuthorizeUrl, exchangeCodeForToken, getGitHubUser } from '../auth/github.ts';
 import {
   getGoogleAuthorizeUrl,
   exchangeCodeForToken as exchangeGoogleCode,
   getGoogleUser,
-} from '../auth/google';
-import { hmacSignState, hmacVerifyState } from '../auth/hmac';
-import { signJwt } from '../auth/jwt';
-import { DEFAULT_DASHBOARD_URL } from '../constants';
+} from '../auth/google.ts';
+import { hmacSignState, hmacVerifyState } from '../auth/hmac.ts';
+import { signJwt } from '../auth/jwt.ts';
+import { DEFAULT_DASHBOARD_URL } from '../constants.ts';
 import {
   getUserByOAuthAccount,
   getUserByEmail,
@@ -25,10 +25,10 @@ import {
   consumeOAuthNonce,
   storeAuthCode,
   consumeAuthCode,
-} from '../db';
-import { sendWelcomeEmail } from '../email';
-import type { ApiEnv } from '../env';
-import { isSignupAllowed, getAllowlist } from '../signup-allowlist';
+} from '../db.ts';
+import { sendWelcomeEmail } from '../email.ts';
+import type { ApiEnv } from '../env.ts';
+import { isSignupAllowed, getAllowlist } from '../signup-allowlist.ts';
 
 const DEFAULT_REDIRECT_URI = 'https://api.void.cloud/auth/callback';
 

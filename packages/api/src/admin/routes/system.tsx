@@ -1,18 +1,18 @@
 import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { Handler } from 'hono';
-import { DEFAULT_DISPATCH_NAMESPACE, SITE_DOMAIN } from '../../constants';
-import type { Db } from '../../db';
+import { DEFAULT_DISPATCH_NAMESPACE, SITE_DOMAIN } from '../../constants.ts';
+import type { Db } from '../../db.ts';
 import {
   getSystemStats,
   getAllProjectsWithOwner,
   getAllDeploymentsWithProject,
   getProjectsWithOwnerByIds,
-} from '../../db';
-import { type ApiEnv, isDevBypass } from '../../env';
-import { getRequestsDataset, queryTopProjectTraffic } from '../../routes/usage';
-import { backfillQueueTokens } from '../backfill-queue-tokens';
-import { DashboardPage } from '../views/dashboard';
+} from '../../db.ts';
+import { type ApiEnv, isDevBypass } from '../../env.ts';
+import { getRequestsDataset, queryTopProjectTraffic } from '../../routes/usage.ts';
+import { backfillQueueTokens } from '../backfill-queue-tokens.ts';
+import { DashboardPage } from '../views/dashboard.tsx';
 
 /** Derive the base cloud domain from the API request hostname.
  *  api.void.cloud → void.cloud, api.staging.void.cloud → staging.void.cloud */

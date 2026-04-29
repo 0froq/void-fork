@@ -8,12 +8,12 @@ import {
   splitIsrCacheKey,
 } from '@voidcloud/isr-shared';
 import type { Context } from 'hono';
-import { R2_CONCURRENCY, uploadPool } from './concurrency';
-import { SITE_DOMAIN } from './constants';
-import { getDomainsByProjectId } from './db';
-import type { ApiEnv } from './env';
-import { resolveCurrentIsrDeployments, type IsrRoutingTarget } from './isr-cache';
-import { purgeZoneCache } from './provisioning/cloudflare-api';
+import { R2_CONCURRENCY, uploadPool } from './concurrency.ts';
+import { SITE_DOMAIN } from './constants.ts';
+import { getDomainsByProjectId } from './db.ts';
+import type { ApiEnv } from './env.ts';
+import { resolveCurrentIsrDeployments, type IsrRoutingTarget } from './isr-cache.ts';
+import { purgeZoneCache } from './provisioning/cloudflare-api.ts';
 
 interface RevalidateProject {
   slug: string;

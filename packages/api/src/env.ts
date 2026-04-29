@@ -1,6 +1,6 @@
 import type { Env } from 'hono';
-import type { Db } from './db';
-import type { User } from './types';
+import type { Db } from './db.ts';
+import type { User } from './types.ts';
 
 /**
  * Returns true when DEV_AUTH_BYPASS is set and we are NOT in production.
@@ -50,7 +50,7 @@ export interface ApiEnv extends Env {
      * `env.DISPATCH.get(...).fetch(...)` — see the comment in that file for
      * why the DO can't make the call directly.
      */
-    CRON_FIRES_QUEUE: Queue<import('./cron-fires-queue').CronFireMessage>;
+    CRON_FIRES_QUEUE: Queue<import('./cron-fires-queue.ts').CronFireMessage>;
     LOGS_DATASET?: string;
     REQUESTS_DATASET?: string;
     PLATFORM_ENV?: string;

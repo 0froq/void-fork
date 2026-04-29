@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isAllowedRedirect } from '../../src/routes/auth';
+import { isAllowedRedirect } from '../../src/routes/auth.ts';
 
 describe('isAllowedRedirect', () => {
   // Valid cases

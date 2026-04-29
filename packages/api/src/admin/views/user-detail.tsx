@@ -1,8 +1,8 @@
-import type { PlanId } from '../../tiers';
-import { PLAN_LIMITS, getPlanLimits } from '../../tiers';
-import type { User, Project } from '../../types';
-import { formatLimit, formatNumber, formatBytes } from './format';
-import { Layout } from './layout';
+import type { PlanId } from '../../tiers.ts';
+import { PLAN_LIMITS, getPlanLimits } from '../../tiers.ts';
+import type { User, Project } from '../../types.ts';
+import { formatLimit, formatNumber, formatBytes } from './format.ts';
+import { Layout } from './layout.tsx';
 
 interface ProjectUsage {
   projectId: string;

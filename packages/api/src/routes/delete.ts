@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { getProject, deleteProjectCascade } from '../db';
-import type { ApiEnv } from '../env';
-import { cleanupProjectResources } from '../provisioning/cleanup';
+import { getProject, deleteProjectCascade } from '../db.ts';
+import type { ApiEnv } from '../env.ts';
+import { cleanupProjectResources } from '../provisioning/cleanup.ts';
 
 const app = new Hono<ApiEnv>();
 

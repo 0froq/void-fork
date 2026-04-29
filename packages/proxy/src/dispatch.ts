@@ -1,4 +1,4 @@
-import type { Env } from './types';
+import type { Env } from './types.ts';
 
 // In-memory cache: worker names are stable (only change on slug rename, which is rare).
 const workerNameCache = new Map<string, string>();

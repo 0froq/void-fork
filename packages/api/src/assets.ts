@@ -1,9 +1,9 @@
 import { extname } from 'node:path';
 import { createHasher, hash as blake3hash } from 'blake3-jit';
 import mime from 'mime';
-import { retryWithBackoff } from './cf-api';
-import { MultipartParseError, PartTooLargeError } from './multipart';
-import type { AssetConfig } from './types';
+import { retryWithBackoff } from './cf-api.ts';
+import { MultipartParseError, PartTooLargeError } from './multipart.ts';
+import type { AssetConfig } from './types.ts';
 
 // Per-asset upload size is bounded by which path consumes the bytes:
 //

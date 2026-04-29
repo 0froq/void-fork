@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyHeaderRules, type HeaderRule } from '../../src/headers';
+import { applyHeaderRules, type HeaderRule } from '../../src/headers.ts';
 
 describe('applyHeaderRules', () => {
   it('returns original response when no rules', () => {

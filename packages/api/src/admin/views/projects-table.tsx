@@ -1,4 +1,4 @@
-import type { Project } from '../../types';
+import type { Project } from '../../types.ts';
 
 export type ProjectRow = Project & {
   owner_login: string | null;

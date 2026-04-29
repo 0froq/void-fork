@@ -9,7 +9,7 @@ import type {
   domains,
   platformEvents,
   invitations,
-} from './schema';
+} from './schema.ts';
 
 export type InvitationStatus = 'pending' | 'accepted' | 'revoked';
 

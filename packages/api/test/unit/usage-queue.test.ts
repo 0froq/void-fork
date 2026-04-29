@@ -5,8 +5,8 @@ vi.mock('cloudflare:workers', () => ({
   DurableObject: class {},
 }));
 
-import type { UsageEvent } from '../../src/usage-counter';
-import { groupEventsByUser } from '../../src/usage-queue';
+import type { UsageEvent } from '../../src/usage-counter.ts';
+import { groupEventsByUser } from '../../src/usage-queue.ts';
 
 describe('groupEventsByUser', () => {
   it('groups events by userId', () => {

@@ -1,7 +1,7 @@
-import { createDb, getUser } from './db';
-import type { ApiEnv } from './env';
-import { getPlanLimits } from './tiers';
-import type { UsageEvent } from './usage-counter';
+import { createDb, getUser } from './db.ts';
+import type { ApiEnv } from './env.ts';
+import { getPlanLimits } from './tiers.ts';
+import type { UsageEvent } from './usage-counter.ts';
 
 export function groupEventsByUser(events: Array<UsageEvent>): Map<string, Array<UsageEvent>> {
   const grouped = new Map<string, Array<UsageEvent>>();

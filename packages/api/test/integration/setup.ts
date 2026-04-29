@@ -40,9 +40,9 @@ if ((globalThis as { FixedLengthStream?: unknown }).FixedLengthStream === undefi
 
 // Shared test db reference — set by setupEnv(), read by the createDb mock.
 // When null, createDb falls through to the real implementation.
-let testDb: import('../../src/db').Db | null = null;
+let testDb: import('../../src/db.ts').Db | null = null;
 
-export function setTestDb(db: import('../../src/db').Db) {
+export function setTestDb(db: import('../../src/db.ts').Db) {
   testDb = db;
 }
 
@@ -51,7 +51,7 @@ export function clearTestDb() {
 }
 
 vi.mock('../../src/db', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../../src/db')>();
+  const mod = await importOriginal<typeof import('../../src/db.ts')>();
   return {
     ...mod,
     createDb: (...args: [string]) => testDb ?? mod.createDb(...args),
