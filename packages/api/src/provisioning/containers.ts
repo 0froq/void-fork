@@ -71,44 +71,61 @@ export async function findDurableObjectNamespaceId(
   return match.namespace_id;
 }
 
+/**
+ * Find the container application that CF auto-created for a Sandbox class on
+ * a WfP worker, and PATCH it to match the project's desired configuration.
+ *
+ * Cloudflare auto-creates the container application as a side-effect of the
+ * worker upload's `containers: [{ class_name }]` metadata, binding it to the
+ * DO namespace declared by the script's migration. The application is named
+ * `proj-{projectId}-{containerName}` (matching this platform's convention,
+ * because CF carries the previous app's name forward when the namespace is
+ * recreated). Direct POST `/containers/applications` with `durable_objects`
+ * is rejected by CF as `unrecognized key(s) in object: 'durable_objects'`,
+ * so this code never POSTs — it locates the auto-created app and tunes its
+ * configuration via PATCH.
+ *
+ * The PATCH body deliberately omits `durable_objects`. CF treats the binding
+ * as immutable on the application; the namespace association is fixed by the
+ * worker's containers metadata at upload time.
+ */
 export async function upsertSandboxContainerApplication(
   accountId: string,
   apiToken: string,
   config: SandboxContainerConfig,
 ): Promise<ContainerApplicationInfo> {
-  const existing = await findContainerApplication(accountId, apiToken, config.name);
-  const requestBody = toContainerApplicationRequest(config);
+  const existing = await waitForAutoCreatedApplication(accountId, apiToken, config.name);
 
-  if (!existing) {
-    return cfFetch<ContainerApplicationInfo>(`${containersUrl(accountId)}/applications`, apiToken, {
-      method: 'POST',
-      body: JSON.stringify(requestBody),
-    });
-  }
-
-  const existingNamespaceId = existing.durable_objects?.namespace_id;
+  const desiredImage = config.image;
+  const desiredInstanceType = config.instanceType ?? 'lite';
+  const desiredMaxInstances = config.maxInstances ?? 20;
   const changed =
-    existing.configuration?.image !== config.image ||
-    existing.configuration?.instance_type !== (config.instanceType ?? 'lite') ||
-    existing.max_instances !== (config.maxInstances ?? 20) ||
-    existingNamespaceId !== config.namespaceId;
+    existing.configuration?.image !== desiredImage ||
+    existing.configuration?.instance_type !== desiredInstanceType ||
+    existing.max_instances !== desiredMaxInstances;
 
   if (!changed) {
     return existing;
   }
 
+  const patchBody = {
+    configuration: { image: desiredImage, instance_type: desiredInstanceType },
+    max_instances: desiredMaxInstances,
+    scheduling_policy: 'default',
+    rollout_active_grace_period: 0,
+  };
   const updated = await cfFetch<ContainerApplicationInfo>(
     `${containersUrl(accountId)}/applications/${existing.id}`,
     apiToken,
     {
       method: 'PATCH',
-      body: JSON.stringify(toContainerApplicationUpdateRequest(config)),
+      body: JSON.stringify(patchBody),
     },
   );
 
   await cfFetch(`${containersUrl(accountId)}/applications/${existing.id}/rollouts`, apiToken, {
     method: 'POST',
-    body: JSON.stringify({ target_configuration: requestBody.configuration }),
+    body: JSON.stringify({ target_configuration: patchBody.configuration }),
   });
 
   return updated;
@@ -124,6 +141,38 @@ export async function deleteContainerApplication(
   });
 }
 
+/**
+ * Poll CF for the auto-created container application by name. The app is
+ * created as a side-effect of the worker upload, but propagation to the
+ * `?name=` listing endpoint can lag a few hundred ms.
+ */
+async function waitForAutoCreatedApplication(
+  accountId: string,
+  apiToken: string,
+  name: string,
+): Promise<ContainerApplicationInfo> {
+  const delaysMs = [0, 250, 500, 1000, 2000, 4000];
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < delaysMs.length; attempt++) {
+    if (delaysMs[attempt] > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
+    }
+    try {
+      const found = await findContainerApplication(accountId, apiToken, name);
+      if (found) {
+        return found;
+      }
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw new Error(
+    `container application "${name}" was not auto-created by CF after worker upload${
+      lastErr instanceof Error ? `: ${lastErr.message}` : ''
+    }`,
+  );
+}
+
 async function findContainerApplication(
   accountId: string,
   apiToken: string,
@@ -134,30 +183,6 @@ async function findContainerApplication(
     apiToken,
   );
   return applications.find((application) => application.name === name);
-}
-
-function toContainerApplicationRequest(config: SandboxContainerConfig): Record<string, unknown> {
-  return {
-    name: config.name,
-    scheduling_policy: 'default',
-    configuration: {
-      image: config.image,
-      instance_type: config.instanceType ?? 'lite',
-    },
-    instances: 0,
-    max_instances: config.maxInstances ?? 20,
-    durable_objects: {
-      namespace_id: config.namespaceId,
-    },
-    rollout_active_grace_period: 0,
-  };
-}
-
-function toContainerApplicationUpdateRequest(
-  config: SandboxContainerConfig,
-): Record<string, unknown> {
-  const { name: _name, instances: _instances, ...request } = toContainerApplicationRequest(config);
-  return request;
 }
 
 function containersUrl(accountId: string): string {
