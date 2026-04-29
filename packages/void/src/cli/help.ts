@@ -31,7 +31,7 @@ const HELP_TREE: HelpTree = {
       { command: '--github', description: 'Only create GitHub Actions workflow' },
     ],
     examples: [
-      { command: 'void init', description: 'Run the interactive setup flow' },
+      { command: 'void init', description: 'Scaffold or configure the current project' },
       { command: 'void init --agents', description: 'Install agent instructions and MCP config' },
     ],
   },

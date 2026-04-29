@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { intro, outro, log, confirm, isCancel, cancel, note, select } from '@clack/prompts';
 import { parse, type ParseError } from 'jsonc-parser';
+import MagicString from 'magic-string';
 import { ensureProjectTsconfig } from '../codegen/project-tsconfig';
 import { getDatabaseDialect, readConfig, type DatabaseDialect } from '../config';
 import { writeDrizzleConfig } from '../drizzle/config';
@@ -32,6 +33,7 @@ import {
   createPagesStarterTemplate,
   detectScaffoldFrameworkFromDependencies,
   getScaffoldTsconfigCompilerOptions,
+  SCAFFOLD_BASE_DEV_DEPENDENCIES,
   SCAFFOLD_FRAMEWORKS,
   SCAFFOLD_FRAMEWORK_OPTIONS,
   SCAFFOLD_GITIGNORE_LINES,
@@ -935,6 +937,10 @@ export function detectProjectState(root: string): ProjectState {
     packageManager,
     typescriptWanted: hasTypescript,
   };
+}
+
+function findViteConfig(root: string): string | undefined {
+  return VITE_CONFIG_FILES.find((file) => existsSync(join(root, file)));
 }
 
 function hasDrizzleSchema(root: string): boolean {
@@ -2016,6 +2022,591 @@ function scaffoldPagesApp(
   return dependencyAdded;
 }
 
+interface ExistingProjectPackageSetupResult {
+  dependencyAdded: boolean;
+  packageJsonMutated: boolean;
+}
+
+function hasDeclaredDependency(pkg: JsonObject, name: string): boolean {
+  return DEPENDENCY_FIELDS.some((field) => {
+    const group = asRecord(pkg[field]);
+    return typeof group?.[name] === 'string';
+  });
+}
+
+function ensureExistingProjectPackage(
+  root: string,
+  options: { plainViteSetup?: boolean } = {},
+): ExistingProjectPackageSetupResult {
+  const packageJsonPath = join(root, 'package.json');
+  const voidSpec = resolveScaffoldDependencySpec(root, 'void', getOwnVersion());
+  const plainViteSetup = options.plainViteSetup ?? true;
+  let pkg: JsonObject = {};
+  let existedBefore = false;
+
+  if (existsSync(packageJsonPath)) {
+    existedBefore = true;
+    try {
+      pkg = asRecord(JSON.parse(readFileSync(packageJsonPath, 'utf-8'))) ?? {};
+    } catch {
+      throw new Error('Could not parse package.json while configuring Void');
+    }
+  }
+
+  const fallbackName =
+    basename(root)
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-') || 'my-app';
+  let changed = !existedBefore;
+  let dependencyAdded = false;
+
+  if (!pkg.name || typeof pkg.name !== 'string') {
+    pkg.name = fallbackName;
+    changed = true;
+  }
+  if (!existedBefore && pkg.private === undefined) {
+    pkg.private = true;
+    changed = true;
+  }
+  if (!existedBefore && !pkg.type) {
+    pkg.type = 'module';
+    changed = true;
+  }
+
+  if (plainViteSetup) {
+    const scripts = asRecord(pkg.scripts) ?? {};
+    pkg.scripts = scripts;
+    if (typeof scripts.dev !== 'string') {
+      scripts.dev = 'vite';
+      changed = true;
+    }
+    if (typeof scripts.build !== 'string') {
+      scripts.build = 'vite build';
+      changed = true;
+    }
+  }
+
+  const devDependencies = asRecord(pkg.devDependencies) ?? {};
+  pkg.devDependencies = devDependencies;
+  if (!hasDeclaredDependency(pkg, 'void')) {
+    devDependencies.void = voidSpec;
+    changed = true;
+    dependencyAdded = true;
+  }
+  if (plainViteSetup && !hasDeclaredDependency(pkg, 'vite')) {
+    devDependencies.vite = SCAFFOLD_BASE_DEV_DEPENDENCIES.vite;
+    changed = true;
+    dependencyAdded = true;
+  }
+
+  if (isPnpmProject(root, pkg)) {
+    const before = JSON.stringify(asRecord(pkg.pnpm)?.onlyBuiltDependencies ?? null);
+    ensurePnpmBuiltDependencies(pkg);
+    const after = JSON.stringify(asRecord(pkg.pnpm)?.onlyBuiltDependencies ?? null);
+    if (before !== after) {
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');
+    log.success(
+      existedBefore
+        ? plainViteSetup
+          ? 'Updated package.json with Void dependencies and Vite scripts'
+          : 'Updated package.json with Void dependency'
+        : plainViteSetup
+          ? 'Created package.json with Void dependencies and Vite scripts'
+          : 'Created package.json with Void dependency',
+    );
+  }
+
+  return { dependencyAdded, packageJsonMutated: changed };
+}
+
+function insertVoidImport(code: string): string {
+  if (/import\s*\{[^}]*\bvoidPlugin\b[^}]*\}\s*from\s*["']void["']/.test(code)) {
+    return code;
+  }
+
+  const importLine = 'import { voidPlugin } from "void";\n';
+  const lines = code.split(/(?<=\n)/);
+  let insertAt = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*import\b/.test(lines[i])) {
+      insertAt = i + 1;
+    }
+  }
+
+  lines.splice(insertAt, 0, importLine);
+  return lines.join('');
+}
+
+function isIdentifierStart(char: string | undefined): boolean {
+  return char !== undefined && /[$A-Za-z_]/.test(char);
+}
+
+function isIdentifierPart(char: string | undefined): boolean {
+  return char !== undefined && /[$0-9A-Za-z_]/.test(char);
+}
+
+function isKeywordAt(code: string, index: number, keyword: string): boolean {
+  return (
+    code.startsWith(keyword, index) &&
+    !isIdentifierPart(code[index - 1]) &&
+    !isIdentifierPart(code[index + keyword.length])
+  );
+}
+
+function skipStringLiteral(code: string, index: number): number {
+  const quote = code[index];
+  let i = index + 1;
+  while (i < code.length) {
+    const char = code[i];
+    if (char === '\\') {
+      i += 2;
+      continue;
+    }
+    if (char === quote) {
+      return i + 1;
+    }
+    i++;
+  }
+  return code.length;
+}
+
+function skipTemplateLiteral(code: string, index: number): number {
+  let i = index + 1;
+  while (i < code.length) {
+    const char = code[i];
+    if (char === '\\') {
+      i += 2;
+      continue;
+    }
+    if (char === '`') {
+      return i + 1;
+    }
+    i++;
+  }
+  return code.length;
+}
+
+function skipIgnored(code: string, index: number): number {
+  const char = code[index];
+  if (char === '"' || char === "'") {
+    return skipStringLiteral(code, index);
+  }
+  if (char === '`') {
+    return skipTemplateLiteral(code, index);
+  }
+  if (char === '/' && code[index + 1] === '/') {
+    const newline = code.indexOf('\n', index + 2);
+    return newline === -1 ? code.length : newline + 1;
+  }
+  if (char === '/' && code[index + 1] === '*') {
+    const end = code.indexOf('*/', index + 2);
+    return end === -1 ? code.length : end + 2;
+  }
+  return index;
+}
+
+function skipTrivia(code: string, index: number): number {
+  let i = index;
+  while (i < code.length) {
+    if (/\s/.test(code[i])) {
+      i++;
+      continue;
+    }
+    const next = skipIgnored(code, i);
+    if (next === i) {
+      return i;
+    }
+    i = next;
+  }
+  return i;
+}
+
+function skipIdentifier(code: string, index: number): number {
+  let i = index;
+  while (isIdentifierPart(code[i])) {
+    i++;
+  }
+  return i;
+}
+
+function skipBalanced(
+  code: string,
+  start: number,
+  open: string,
+  close: string,
+): number | undefined {
+  let depth = 1;
+  let i = start + 1;
+  while (i < code.length) {
+    const ignored = skipIgnored(code, i);
+    if (ignored !== i) {
+      i = ignored;
+      continue;
+    }
+
+    const char = code[i];
+    if (char === open) {
+      depth++;
+    } else if (char === close) {
+      depth--;
+      if (depth === 0) {
+        return i;
+      }
+    }
+    i++;
+  }
+  return undefined;
+}
+
+function skipTypeArguments(code: string, index: number): number {
+  const start = skipTrivia(code, index);
+  if (code[start] !== '<') {
+    return start;
+  }
+
+  const end = skipBalanced(code, start, '<', '>');
+  return end === undefined ? start : skipTrivia(code, end + 1);
+}
+
+function findTopLevelConfigObject(code: string): { start: number; end: number } | undefined {
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  let i = 0;
+
+  while (i < code.length) {
+    const ignored = skipIgnored(code, i);
+    if (ignored !== i) {
+      i = ignored;
+      continue;
+    }
+
+    if (
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      parenDepth === 0 &&
+      isKeywordAt(code, i, 'export')
+    ) {
+      const defaultIndex = skipTrivia(code, i + 'export'.length);
+      if (!isKeywordAt(code, defaultIndex, 'default')) {
+        i++;
+        continue;
+      }
+
+      let expressionStart = skipTrivia(code, defaultIndex + 'default'.length);
+      if (code[expressionStart] === '{') {
+        const end = skipBalanced(code, expressionStart, '{', '}');
+        return end === undefined ? undefined : { start: expressionStart, end };
+      }
+
+      if (!isKeywordAt(code, expressionStart, 'defineConfig')) {
+        return undefined;
+      }
+      expressionStart = skipTypeArguments(code, expressionStart + 'defineConfig'.length);
+      if (code[expressionStart] !== '(') {
+        return undefined;
+      }
+
+      const firstArgumentStart = skipTrivia(code, expressionStart + 1);
+      if (code[firstArgumentStart] !== '{') {
+        return undefined;
+      }
+
+      const end = skipBalanced(code, firstArgumentStart, '{', '}');
+      return end === undefined ? undefined : { start: firstArgumentStart, end };
+    }
+
+    const char = code[i];
+    if (char === '{') {
+      braceDepth++;
+    } else if (char === '}') {
+      braceDepth = Math.max(0, braceDepth - 1);
+    } else if (char === '[') {
+      bracketDepth++;
+    } else if (char === ']') {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+    } else if (char === '(') {
+      parenDepth++;
+    } else if (char === ')') {
+      parenDepth = Math.max(0, parenDepth - 1);
+    }
+    i++;
+  }
+
+  return undefined;
+}
+
+function readPropertyName(code: string, index: number): { name: string; end: number } | undefined {
+  const char = code[index];
+  if (isIdentifierStart(char)) {
+    const end = skipIdentifier(code, index);
+    return { name: code.slice(index, end), end };
+  }
+
+  if (char === '"' || char === "'") {
+    const end = skipStringLiteral(code, index);
+    return { name: code.slice(index + 1, end - 1), end };
+  }
+
+  return undefined;
+}
+
+function skipPropertyValue(code: string, index: number, objectEnd: number): number {
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  let i = index;
+
+  while (i < objectEnd) {
+    const ignored = skipIgnored(code, i);
+    if (ignored !== i) {
+      i = ignored;
+      continue;
+    }
+
+    const char = code[i];
+    if (braceDepth === 0 && bracketDepth === 0 && parenDepth === 0 && char === ',') {
+      return i + 1;
+    }
+
+    if (char === '{') {
+      braceDepth++;
+    } else if (char === '}') {
+      if (braceDepth === 0) {
+        return i;
+      }
+      braceDepth--;
+    } else if (char === '[') {
+      bracketDepth++;
+    } else if (char === ']') {
+      if (bracketDepth === 0) {
+        return i;
+      }
+      bracketDepth--;
+    } else if (char === '(') {
+      parenDepth++;
+    } else if (char === ')') {
+      if (parenDepth === 0) {
+        return i;
+      }
+      parenDepth--;
+    }
+    i++;
+  }
+
+  return i;
+}
+
+function findTopLevelPluginsProperty(
+  code: string,
+  object: { start: number; end: number },
+): { arrayStart: number; arrayEnd: number; propertyStart: number } | 'unsupported' | undefined {
+  let i = object.start + 1;
+  while (i < object.end) {
+    i = skipTrivia(code, i);
+    if (code[i] === ',') {
+      i++;
+      continue;
+    }
+
+    const propertyStart = i;
+    const propertyName = readPropertyName(code, i);
+    if (!propertyName) {
+      i = skipPropertyValue(code, i, object.end);
+      continue;
+    }
+
+    const colon = skipTrivia(code, propertyName.end);
+    if (code[colon] !== ':') {
+      i = skipPropertyValue(code, propertyName.end, object.end);
+      continue;
+    }
+
+    const valueStart = skipTrivia(code, colon + 1);
+    if (propertyName.name === 'plugins') {
+      if (code[valueStart] !== '[') {
+        return 'unsupported';
+      }
+      const arrayEnd = skipBalanced(code, valueStart, '[', ']');
+      return arrayEnd === undefined
+        ? 'unsupported'
+        : { arrayStart: valueStart, arrayEnd, propertyStart };
+    }
+
+    i = skipPropertyValue(code, valueStart, object.end);
+  }
+
+  return undefined;
+}
+
+function getLineIndent(code: string, index: number): string {
+  const lineStart = code.lastIndexOf('\n', index) + 1;
+  return code.slice(lineStart, index).match(/^\s*/)?.[0] ?? '';
+}
+
+function insertVoidPluginIntoTopLevelConfig(code: string): string | undefined {
+  const object = findTopLevelConfigObject(code);
+  if (!object) {
+    return undefined;
+  }
+
+  const pluginsProperty = findTopLevelPluginsProperty(code, object);
+  const ms = new MagicString(code);
+
+  if (pluginsProperty === 'unsupported') {
+    return undefined;
+  }
+
+  if (pluginsProperty) {
+    const arrayContent = code.slice(pluginsProperty.arrayStart + 1, pluginsProperty.arrayEnd);
+    if (/^\s*$/.test(arrayContent)) {
+      ms.overwrite(pluginsProperty.arrayStart + 1, pluginsProperty.arrayEnd, 'voidPlugin()');
+      return ms.toString();
+    }
+
+    const propIndent = getLineIndent(code, pluginsProperty.propertyStart);
+    const insertAt = pluginsProperty.arrayStart + 1;
+    const next = code[insertAt];
+    const insertion =
+      next === '\n' || next === '\r' ? `\n${propIndent}  voidPlugin(),` : 'voidPlugin(), ';
+    ms.appendLeft(insertAt, insertion);
+    return ms.toString();
+  }
+
+  const objectContent = code.slice(object.start + 1, object.end);
+  if (/^\s*$/.test(objectContent)) {
+    ms.overwrite(object.start + 1, object.end, ' plugins: [voidPlugin()] ');
+    return ms.toString();
+  }
+
+  const baseIndent = getLineIndent(code, object.start);
+  const next = code[object.start + 1];
+  const insertion =
+    next === '\n' || next === '\r'
+      ? `\n${baseIndent}  plugins: [voidPlugin()],`
+      : ' plugins: [voidPlugin()],';
+  ms.appendLeft(object.start + 1, insertion);
+  return ms.toString();
+}
+
+function patchViteConfigWithVoidPlugin(filePath: string, code: string): string | undefined {
+  if (/\bvoidPlugin\s*\(/.test(code)) {
+    return code;
+  }
+
+  if (filePath.endsWith('.cjs') || filePath.endsWith('.cts')) {
+    return undefined;
+  }
+
+  const withPlugin = insertVoidPluginIntoTopLevelConfig(code);
+  if (!withPlugin) {
+    return undefined;
+  }
+
+  return insertVoidImport(withPlugin);
+}
+
+function getBasicVoidViteConfig(): string {
+  return `import { defineConfig } from "vite";
+import { voidPlugin } from "void";
+
+export default defineConfig({
+  plugins: [voidPlugin()],
+});
+`;
+}
+
+function noteManualViteConfigSetup(configPath?: string): void {
+  const target = configPath ?? 'your framework Vite config';
+  note(
+    `Could not safely update ${target} automatically.\n\n` +
+      `Add \`voidPlugin()\` to the top-level Vite plugins array:\n\n` +
+      `import { voidPlugin } from "void";\n\n` +
+      `export default defineConfig({\n` +
+      `  plugins: [voidPlugin()],\n` +
+      `});`,
+    'Manual Vite config step',
+  );
+}
+
+function noteManualFrameworkConfigSetup(framework: DetectedFramework): void {
+  if (framework.name === 'astro') {
+    note(
+      `Detected Astro. Void init does not patch astro.config.* automatically.\n\n` +
+        `Add \`voidPlugin()\` to the Astro Vite plugins option:\n\n` +
+        `import { voidPlugin } from "void";\n\n` +
+        `export default defineConfig({\n` +
+        `  vite: { plugins: [voidPlugin()] },\n` +
+        `});`,
+      'Manual Astro config step',
+    );
+    return;
+  }
+
+  if (framework.name === 'nuxt') {
+    note(
+      `Detected Nuxt. Void init does not patch nuxt.config.* automatically.\n\n` +
+        `Add \`voidPlugin()\` to the Nuxt Vite plugins option:\n\n` +
+        `import { voidPlugin } from "void";\n\n` +
+        `export default defineNuxtConfig({\n` +
+        `  vite: { plugins: [voidPlugin()] },\n` +
+        `});`,
+      'Manual Nuxt config step',
+    );
+    return;
+  }
+
+  noteManualViteConfigSetup();
+}
+
+function ensureExistingProjectViteConfig(root: string, framework?: DetectedFramework): void {
+  if (framework?.class === 'c') {
+    noteManualFrameworkConfigSetup(framework);
+    return;
+  }
+
+  const configPath = findViteConfig(root);
+  if (!configPath) {
+    writeFileIfMissing(root, 'vite.config.ts', getBasicVoidViteConfig());
+    return;
+  }
+
+  const fullPath = join(root, configPath);
+  const original = readFileSync(fullPath, 'utf-8');
+  const updated = patchViteConfigWithVoidPlugin(configPath, original);
+  if (updated === undefined) {
+    noteManualViteConfigSetup(configPath);
+    return;
+  }
+  if (updated === original) {
+    log.info(`${configPath} already includes voidPlugin()`);
+    return;
+  }
+
+  writeFileSync(fullPath, updated);
+  log.success(`Added voidPlugin() to ${configPath}`);
+}
+
+function setupExistingProject(
+  root: string,
+  framework?: DetectedFramework,
+): {
+  dependencyAdded: boolean;
+  packageJsonMutated: boolean;
+} {
+  log.info('Existing project detected. Configuring Void...');
+  const packageResult = ensureExistingProjectPackage(root, {
+    plainViteSetup: framework?.class !== 'c',
+  });
+  ensureExistingProjectViteConfig(root, framework);
+  return packageResult;
+}
+
 /**
  * Scaffolds the minimal "SQL → types → handler → fetch" demo into an
  * existing project. The demo files import from `void/db` and
@@ -2497,6 +3088,27 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   const state = detectProjectState(root);
   const pagesFramework = scaffoldedPagesFramework ?? detectPagesFramework(root);
+
+  if (!targeted && !didScaffoldStarter) {
+    const existingSetup = setupExistingProject(root, framework);
+    const voidResolvable = isVoidResolvableFrom(root);
+    const needsInstall = existingSetup.dependencyAdded || !voidResolvable;
+    if (needsInstall) {
+      const deferral = resolveWorkspaceDeferral(root, readPackageJson(root));
+      if (deferral) {
+        workspaceSubpackageSkip = true;
+        const relRoot = relative(deferral.workspaceRoot, root) || '.';
+        note(
+          `Configured Void in ./${relRoot}.\n\n` +
+            `Run your workspace install from ${deferral.workspaceRoot} to sync the lockfile and pick up the updated dependencies.\n` +
+            `If this init flow scaffolds database files, then run \`void db generate\` from ./${relRoot}.`,
+          'Workspace subpackage',
+        );
+      } else {
+        scaffoldAddedDependencies = true;
+      }
+    }
+  }
 
   // Step 1: TypeScript / tsconfig
   if (!targeted || initArgs?.tsconfig) {
