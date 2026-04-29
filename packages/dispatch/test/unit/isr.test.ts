@@ -1,5 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import type { Env } from '../../src/env';
 import {
+  MAX_ISR_VARIANTS_PER_PATH,
   isrCacheKey,
   isStale,
   resolveRevalidateTtl,
@@ -13,6 +15,7 @@ import {
   unpackIsrValue,
   extractPageDataFromHtml,
   normalizePageDataForJsonCache,
+  writeIsrCache,
   type IsrCacheEntry,
 } from '../../src/isr';
 
@@ -37,6 +40,61 @@ describe('isrCacheKey', () => {
 
   it('handles path without leading slash', () => {
     expect(isrCacheKey('proj_1', 'dpl_1', 'about')).toBe('proj_1/isr/v2/dpl_1/about');
+  });
+
+  // User code can branch on `c.isRewritten()` / `c.originalUrl()`; a direct
+  // hit to /en/docs and a rewrite from /docs → /en/docs must not share a slot.
+  it('appends a rewrite-variant token when originalUrl is provided', () => {
+    const direct = isrCacheKey('proj_1', 'dpl_1', '/en/docs');
+    const rewritten = isrCacheKey('proj_1', 'dpl_1', '/en/docs', 'https://host/docs');
+    expect(direct).toBe('proj_1/isr/v2/dpl_1/en/docs');
+    expect(rewritten).not.toBe(direct);
+    expect(rewritten.startsWith('proj_1/isr/v2/dpl_1/en/docs#rw=')).toBe(true);
+  });
+
+  it('produces distinct keys for different originalUrl values', () => {
+    const a = isrCacheKey('proj_1', 'dpl_1', '/en/docs', 'https://host/docs');
+    const b = isrCacheKey('proj_1', 'dpl_1', '/en/docs', 'https://host/other');
+    expect(a).not.toBe(b);
+  });
+
+  it('treats null originalUrl as a direct hit (backward-compatible key)', () => {
+    expect(isrCacheKey('proj_1', 'dpl_1', '/x', null)).toBe('proj_1/isr/v2/dpl_1/x');
+    expect(isrCacheKey('proj_1', 'dpl_1', '/x', undefined)).toBe('proj_1/isr/v2/dpl_1/x');
+  });
+});
+
+describe('ISR edge cache URL variants', () => {
+  // The edge cache URL and the KV key must include the same rewrite-variant
+  // token so both layers see the same direct-vs-rewritten split.
+  it('appends __void_orig when originalUrl is provided', () => {
+    const direct = isrEdgeCacheKey(
+      new Request('https://app.void.app/en/docs'),
+      '/en/docs',
+      'dpl_1',
+    );
+    const rewritten = isrEdgeCacheKey(
+      new Request('https://app.void.app/docs'),
+      '/en/docs',
+      'dpl_1',
+      'https://app.void.app/docs',
+    );
+    expect(direct.url).toBe('https://app.void.app/en/docs?__void_isr=dpl_1');
+    expect(
+      rewritten.url.startsWith('https://app.void.app/en/docs?__void_isr=dpl_1&__void_orig='),
+    ).toBe(true);
+  });
+
+  it('appends __void_orig on the JSON variant too', () => {
+    const rewritten = isrEdgeCacheKeyJson(
+      new Request('https://app.void.app/docs'),
+      '/en/docs',
+      'dpl_1',
+      'https://app.void.app/docs',
+    );
+    expect(rewritten.url.includes('__void=json')).toBe(true);
+    expect(rewritten.url.includes('__void_isr=dpl_1')).toBe(true);
+    expect(rewritten.url.includes('__void_orig=')).toBe(true);
   });
 });
 
@@ -323,6 +381,146 @@ describe('page data extraction', () => {
         '{"component":"Index","props":{},"deferred":["stats"],"deferredKeys":{"stats":"stats"}}',
       ),
     ).toBeNull();
+  });
+});
+
+/**
+ * `MAX_ISR_VARIANTS_PER_PATH` defends against fanout when an attacker varies
+ * an *allowlisted* query param (the queryAllowlist already drops everything
+ * else). Past the cap, new variants are not written — the worker still
+ * renders fresh content per request, but KV growth and revalidation cost
+ * stay bounded.
+ */
+describe('writeIsrCache — variant cap', () => {
+  function createKvMock(seed: Map<string, ArrayBuffer> = new Map()): {
+    env: Env;
+    kvStore: Map<string, ArrayBuffer>;
+  } {
+    const kvStore = seed;
+    const env = {
+      ISR_CACHE: {
+        getWithMetadata: async (key: string) => {
+          const value = kvStore.get(key);
+          return value
+            ? { value, metadata: { s: 200, c: Date.now(), t: 60 } }
+            : { value: null, metadata: null };
+        },
+        put: async (key: string, value: ArrayBuffer) => {
+          kvStore.set(key, value);
+        },
+        delete: async (key: string) => {
+          kvStore.delete(key);
+        },
+        list: async (opts: { prefix: string; limit?: number; cursor?: string }) => {
+          const all = [...kvStore.keys()].filter((k) => k.startsWith(opts.prefix)).sort();
+          const limit = opts.limit ?? 1000;
+          const start = opts.cursor ? parseInt(opts.cursor, 10) : 0;
+          const slice = all.slice(start, start + limit);
+          const list_complete = start + limit >= all.length;
+          return {
+            keys: slice.map((name) => ({ name })),
+            list_complete,
+            cursor: list_complete ? '' : String(start + limit),
+          };
+        },
+      },
+    } as unknown as Env;
+    return { env, kvStore };
+  }
+
+  function seedVariants(kv: Map<string, ArrayBuffer>, count: number): void {
+    for (let i = 0; i < count; i++) {
+      const key = isrCacheKey('p', 'd', '/search', `https://h/search?q=${i}`);
+      kv.set(key, new ArrayBuffer(4));
+    }
+  }
+
+  it('writes a new variant when the path is under the cap', async () => {
+    const { env, kvStore } = createKvMock();
+    seedVariants(kvStore, MAX_ISR_VARIANTS_PER_PATH - 1);
+    const before = kvStore.size;
+
+    await writeIsrCache(
+      env,
+      'p',
+      'd',
+      '/search',
+      new Response('<html>x</html>', { headers: { 'Content-Type': 'text/html' } }),
+      60,
+      'https://h/search?q=NEW',
+    );
+
+    expect(kvStore.size).toBe(before + 1);
+    expect(kvStore.has(isrCacheKey('p', 'd', '/search', 'https://h/search?q=NEW'))).toBe(true);
+  });
+
+  it('refuses to write a brand-new variant once the cap is reached', async () => {
+    const { env, kvStore } = createKvMock();
+    seedVariants(kvStore, MAX_ISR_VARIANTS_PER_PATH);
+    const before = kvStore.size;
+
+    await writeIsrCache(
+      env,
+      'p',
+      'd',
+      '/search',
+      new Response('<html>x</html>', { headers: { 'Content-Type': 'text/html' } }),
+      60,
+      'https://h/search?q=OVERFLOW',
+    );
+
+    // No new key written; existing kv state is untouched.
+    expect(kvStore.size).toBe(before);
+    expect(kvStore.has(isrCacheKey('p', 'd', '/search', 'https://h/search?q=OVERFLOW'))).toBe(
+      false,
+    );
+  });
+
+  it('still updates an existing variant past the cap (revalidation must keep working)', async () => {
+    const { env, kvStore } = createKvMock();
+    seedVariants(kvStore, MAX_ISR_VARIANTS_PER_PATH);
+    // Pick one of the seeded URLs to update.
+    const updateUrl = 'https://h/search?q=5';
+    const updateKey = isrCacheKey('p', 'd', '/search', updateUrl);
+    expect(kvStore.has(updateKey)).toBe(true);
+    const before = kvStore.size;
+    const beforeBytes = kvStore.get(updateKey)!.byteLength;
+
+    await writeIsrCache(
+      env,
+      'p',
+      'd',
+      '/search',
+      new Response('<html>fresh</html>', { headers: { 'Content-Type': 'text/html' } }),
+      60,
+      updateUrl,
+    );
+
+    // Same key, but value should be updated (different size — packed value
+    // includes header JSON + body, both larger than the 4-byte seed).
+    expect(kvStore.size).toBe(before);
+    expect(kvStore.get(updateKey)!.byteLength).toBeGreaterThan(beforeBytes);
+  });
+
+  it('always writes direct-hit (non-variant) entries — cap only applies to #rw= entries', async () => {
+    // Different pathnames each get their own cap; direct hits at one path
+    // do not get squeezed by another path's variant fanout.
+    const { env, kvStore } = createKvMock();
+    seedVariants(kvStore, MAX_ISR_VARIANTS_PER_PATH);
+    const before = kvStore.size;
+
+    await writeIsrCache(
+      env,
+      'p',
+      'd',
+      '/search',
+      new Response('<html>x</html>', { headers: { 'Content-Type': 'text/html' } }),
+      60,
+      undefined, // direct hit, no originalUrl
+    );
+
+    expect(kvStore.size).toBe(before + 1);
+    expect(kvStore.has(isrCacheKey('p', 'd', '/search'))).toBe(true);
   });
 });
 

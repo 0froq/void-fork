@@ -230,6 +230,7 @@ describe('POST /projects/:id/deploy', () => {
       workerName: expect.stringMatching(/^user-routed-app-dpl_/),
       projectId: project.id,
       userId: user.id,
+      type: 'void',
       version: expect.stringMatching(/^dpl_/),
       limits: { cpuMs: 10, subRequests: 50 },
     });
@@ -258,6 +259,7 @@ describe('POST /projects/:id/deploy', () => {
       workerName: expect.stringMatching(/^user-ssr-app-dpl_/),
       projectId: project.id,
       userId: user.id,
+      type: 'void',
       ssr: true,
       version: expect.stringMatching(/^dpl_/),
       limits: { cpuMs: 10, subRequests: 50 },
@@ -585,6 +587,7 @@ describe('POST /projects/:id/deploy', () => {
       workerName: expect.stringMatching(/^user-domain-deploy-dpl_/),
       projectId: project.id,
       userId: user.id,
+      type: 'void',
       version: expect.stringMatching(/^dpl_/),
       limits: { cpuMs: 10, subRequests: 50 },
     });
@@ -2080,6 +2083,7 @@ describe('POST /projects/:id/deploy (static)', () => {
       staticDeploymentId: expect.stringMatching(/^dpl_/),
       projectId: project.id,
       userId: user.id,
+      type: 'static',
       assetConfig: { not_found_handling: 'single-page-application' },
       version: expect.stringMatching(/^dpl_/),
     });
@@ -3900,10 +3904,10 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     expect(dpls).toEqual([]);
   });
 
-  // Regression: round 4 review caught that a string `bindings.d1` would
-  // iterate characters and silently provision `d`/`b` resources. Validate
-  // that every bindings.* array is rejected unless it's a string[] — BEFORE
-  // createDeployment runs, so no deployment row or CF resources leak.
+  // A string `bindings.d1` would iterate characters and silently provision
+  // `d`/`b` resources. Every bindings.* array must be rejected unless it's a
+  // string[] — BEFORE createDeployment runs, so no deployment row or CF
+  // resources leak.
   it('returns 400 when bindings.d1 is a string instead of array', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-d1-string');
@@ -4012,9 +4016,9 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     await expectInvalidManifestShape(res, 'bindingName');
   });
 
-  // Regression: round 4 review caught that a non-array `websocket.classes`
-  // crashes `sortUnique()` in `enrichWebSocketManifest()`. Validate the
-  // entire websocket subtree before createDeployment runs.
+  // A non-array `websocket.classes` crashes `sortUnique()` in
+  // `enrichWebSocketManifest()`. The entire websocket subtree must be
+  // validated before createDeployment runs.
   it('returns 400 when websocket is not an object', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-ws-string');
@@ -4112,10 +4116,10 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     await expectInvalidManifestShape(res, 'websocket.migrations');
   });
 
-  // Regression: round 5 review caught that `headerRules`/`redirectRules` are
-  // persisted into ROUTING KV via `buildRoutingJson` without any shape check,
-  // so a malformed manifest can go live and then crash `dispatch` on the
-  // very first request. Reject malformed shapes before createDeployment.
+  // `headerRules`/`redirectRules` are persisted into ROUTING KV via
+  // `buildRoutingJson` without a later shape check, so a malformed manifest
+  // would go live and crash `dispatch` on the very first request. Reject
+  // malformed shapes before createDeployment.
   it('returns 400 when headerRules is not an array', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-headerRules-str');
@@ -4213,9 +4217,9 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     await expectInvalidManifestShape(res, /redirectRules.*source/);
   });
 
-  // Regression: round 5 review caught that scalar/object fields were
-  // accepted with any type. Wrong types survived `createDeployment` and
-  // either crashed late in the pipeline or persisted garbage routing.
+  // Scalar/object fields must have their types enforced at ingest — wrong
+  // types would otherwise survive `createDeployment` and either crash late
+  // in the pipeline or persist garbage routing.
   it('returns 400 when auth is not a boolean', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-auth-string');
@@ -4318,9 +4322,9 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     await expectInvalidManifestShape(res, /^invalid manifest shape: revalidate /);
   });
 
-  // Regression: round 6 review caught that `redirectRules[].status` was
-  // only checked for `typeof === 'number'`, so `{status: 999}` survived
-  // validation and broke matching requests at runtime.
+  // `redirectRules[].status` must be checked against the allowed-status
+  // list, not just `typeof === 'number'`. A bogus `{status: 999}` would
+  // otherwise survive validation and break matching requests at runtime.
   it('returns 400 when redirectRules status is not a recognized code', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-redirect-status-bogus');
@@ -4347,9 +4351,416 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     await expectInvalidManifestShape(res, /redirectRules.*status/);
   });
 
-  // Regression: round 6 review caught that `websocket.routes[].bindingName`
-  // was accepted with any type and fed into the CF worker metadata binding
-  // list (`buildWebSocketUploadBindings`). Reject non-string bindingName.
+  // Verify that 200 survives shape validation.
+  it('accepts redirectRules with status 200 (force rewrite)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-redirectRules-rewrite');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        redirectRules: [{ source: '/old', destination: '/new', status: 200 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    // Deploy route always returns 200 + NDJSON; a shape-validation failure
+    // would surface as an `event: 'error'` row containing 'invalid manifest
+    // shape: '. Assert we don't see one here.
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      message?: string;
+    }>;
+    const shapeErr = events.find(
+      (e) => e.event === 'error' && (e.message ?? '').startsWith('invalid manifest shape: '),
+    );
+    expect(shapeErr).toBeUndefined();
+  });
+
+  // status=200 rewrite destinations containing `?` would double-merge with
+  // request query via `mergeQueryIntoLocation`. For 3xx redirects the merge
+  // is intentional (destination query preserved, request query layered on
+  // top), so `?` is only rejected on status=200 entries.
+  it('returns 400 when redirectRules destination contains a query string at status 200', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-redirectRules-destquery-200');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        redirectRules: [{ source: '/a', destination: '/b?foo=1', status: 200 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    await expectInvalidManifestShape(res, /redirectRules entry .* destination must not contain/);
+  });
+
+  // Counterpart to the above: 3xx redirects with a `?` destination are valid
+  // because `mergeQueryIntoLocation` in dispatch is built specifically to
+  // layer incoming request query on top of the destination's own query.
+  it('accepts redirectRules 3xx redirect with query string in destination', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-redirectRules-destquery-3xx');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        redirectRules: [{ source: '/old', destination: '/new?from=old', status: 301 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      message?: string;
+    }>;
+    const shapeErr = events.find(
+      (e) => e.event === 'error' && (e.message ?? '').startsWith('invalid manifest shape: '),
+    );
+    expect(shapeErr).toBeUndefined();
+  });
+
+  // `fallbackRules` needs its own shape-validation branch — without it,
+  // malformed entries land in routing KV and crash dispatch. Cover each of
+  // the entry-shape failure modes plus the status/destination restrictions.
+  it('returns 400 when fallbackRules entries are missing fields', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-fallbackRules-missing');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        // Missing `destination`.
+        fallbackRules: [{ source: '/*', status: 200 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    await expectInvalidManifestShape(res, /fallbackRules/);
+  });
+
+  it('returns 400 when fallbackRules entry status is not 200', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-fallbackRules-status301');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        fallbackRules: [{ source: '/*', destination: '/index.html', status: 301 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    await expectInvalidManifestShape(res, /fallbackRules.*status must be 200/);
+  });
+
+  it('returns 400 when fallbackRules destination contains a query string', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-fallbackRules-destquery');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        fallbackRules: [{ source: '/*', destination: '/index.html?v=1', status: 200 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    await expectInvalidManifestShape(res, /fallbackRules entry .* destination must not contain/);
+  });
+
+  // Hand-crafted manifests that bypass the framework CLI could ship
+  // `destination: "https://evil.com"` on a `status: 200` entry, turning the
+  // edge router into an open HTTP proxy. Reject non-path-absolute
+  // destinations on rewrite entries (both rule lists).
+  it('returns 400 when redirectRules status-200 destination is not path-absolute', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-redirectRules-absolute');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        redirectRules: [{ source: '/docs', destination: 'https://evil.com', status: 200 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    await expectInvalidManifestShape(
+      res,
+      /redirectRules entry .* destination must be path-absolute/,
+    );
+  });
+
+  it('accepts redirectRules 3xx redirect with external destination', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-redirectRules-external3xx');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        redirectRules: [{ source: '/docs', destination: 'https://docs.example.com', status: 301 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      message?: string;
+    }>;
+    const shapeErr = events.find(
+      (e) => e.event === 'error' && (e.message ?? '').startsWith('invalid manifest shape: '),
+    );
+    expect(shapeErr).toBeUndefined();
+  });
+
+  // The path-absolute check (`startsWith('/')`) still accepts protocol-
+  // relative URLs like `//evil.com/x`, which parse cross-origin. Reject
+  // those explicitly so a hand-crafted manifest can't weaponize a rewrite
+  // into an open redirect.
+  it('returns 400 when redirectRules status-200 destination is protocol-relative (//...)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-redirectRules-proto-rel');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        redirectRules: [{ source: '/docs', destination: '//evil.com/x', status: 200 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    await expectInvalidManifestShape(
+      res,
+      /redirectRules entry .* destination must not start with "\/\/"/,
+    );
+  });
+
+  it('accepts redirectRules 3xx redirect with protocol-relative destination', async () => {
+    // 3xx redirects legitimately allow external/protocol-relative Location
+    // values — the guard fires only at status 200 (rewrite).
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-redirectRules-proto-rel-3xx');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        redirectRules: [{ source: '/docs', destination: '//cdn.example.com/docs', status: 301 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      message?: string;
+    }>;
+    const shapeErr = events.find(
+      (e) => e.event === 'error' && (e.message ?? '').startsWith('invalid manifest shape: '),
+    );
+    expect(shapeErr).toBeUndefined();
+  });
+
+  it('returns 400 when fallbackRules destination is protocol-relative (//...)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-fallbackRules-proto-rel');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        fallbackRules: [{ source: '/*', destination: '//evil.com/index.html', status: 200 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    await expectInvalidManifestShape(
+      res,
+      /fallbackRules entry .* destination must not start with "\/\/"/,
+    );
+  });
+
+  it('returns 400 when fallbackRules destination is not path-absolute', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-fallbackRules-absolute');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        fallbackRules: [{ source: '/*', destination: 'https://evil.com/index.html', status: 200 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    await expectInvalidManifestShape(
+      res,
+      /fallbackRules entry .* destination must be path-absolute/,
+    );
+  });
+
+  it('returns 400 when fallbackRules entries have wrong source type', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-fallbackRules-source-num');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        fallbackRules: [{ source: 1, destination: '/index.html', status: 200 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    await expectInvalidManifestShape(res, /fallbackRules.*source/);
+  });
+
+  // `websocket.routes[].bindingName` is fed into the CF worker metadata
+  // binding list (`buildWebSocketUploadBindings`); accepting any type would
+  // corrupt the metadata. Reject non-string bindingName.
   it('returns 400 when websocket.routes entry bindingName is not a string', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-ws-routes-bindingName');
@@ -4379,10 +4790,9 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     await expectInvalidManifestShape(res, /websocket\.routes.*bindingName/);
   });
 
-  // Regression: round 6 review caught that queue consumer tuning fields
-  // (maxBatchSize/maxBatchTimeout/maxRetries/retryDelay) were unvalidated.
-  // Bad values reached addQueueConsumer and could produce NaN CF settings
-  // via `maxBatchTimeout * 1000`.
+  // Queue consumer tuning fields (maxBatchSize/maxBatchTimeout/maxRetries/
+  // retryDelay) must be validated: unchecked, bad values reach
+  // addQueueConsumer and produce NaN CF settings via `maxBatchTimeout * 1000`.
   it('returns 400 when queue maxBatchTimeout is not a finite number', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-queue-tuning-string');
@@ -4409,9 +4819,9 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     await expectInvalidManifestShape(res, 'maxBatchTimeout');
   });
 
-  // Regression: round 6 review caught that `assetConfig.{not_found_handling,
-  // html_handling}` were unvalidated — wrong enum values would silently
-  // disable SPA/404 handling without crashing.
+  // `assetConfig.{not_found_handling, html_handling}` must validate against
+  // their enum lists — wrong values would silently disable SPA/404 handling
+  // without crashing.
   it('returns 400 when assetConfig.not_found_handling is not a recognized enum', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-assetConfig-404');
@@ -4464,10 +4874,10 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     await expectInvalidManifestShape(res, 'html_handling');
   });
 
-  // Regression: round 7 review caught that `migrations.dialect` and
-  // `migrations.pending` were unvalidated. The migration dispatch path reads
-  // `manifest.migrations.pending > 0` unconditionally, so a wrong-typed value
-  // would reach the CF migration runner and crash mid-deploy.
+  // `migrations.dialect` and `migrations.pending` must be validated. The
+  // migration dispatch path reads `manifest.migrations.pending > 0`
+  // unconditionally, so a wrong-typed value would reach the CF migration
+  // runner and crash mid-deploy.
   it('returns 400 when migrations.dialect is not a recognized value', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-migrations-dialect');
@@ -4572,10 +4982,10 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     await expectInvalidManifestShape(res, 'migrations.pending');
   });
 
-  // Regression: round 7 review caught that text parts (manifest, assetManifest,
-  // etc.) were read via `new Response(part.body).text()` with no cap. An
-  // attacker could force large allocations BEFORE validateManifestShape runs.
-  // Each buffered text part now has a hard byte cap; exceeding it returns 413.
+  // Text parts (manifest, assetManifest, etc.) read via
+  // `new Response(part.body).text()` with no cap let an attacker force
+  // large allocations BEFORE validateManifestShape runs. Each buffered text
+  // part has a hard byte cap; exceeding it returns 413.
   it('returns 413 when the manifest part exceeds the 8 MiB cap', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-manifest-too-large');
@@ -4609,10 +5019,10 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     expect(dpls).toEqual([]);
   });
 
-  // Regression: same round-10 class of OOM, but for `worker:*` parts.
-  // Worker script bytes are already streamed through readPartBytes with a
-  // 32 MiB cap; this test pins the 413 mapping end-to-end so a future
-  // refactor cannot silently reintroduce an unbounded read.
+  // Same OOM class as the manifest part, but for `worker:*` parts. Worker
+  // script bytes are already streamed through readPartBytes with a 32 MiB
+  // cap; this test pins the 413 mapping end-to-end so a future refactor
+  // cannot silently reintroduce an unbounded read.
   it('returns 413 when a single worker:* part exceeds the 32 MiB cap', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-worker-too-large');
@@ -4643,14 +5053,14 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     expect(dpls).toEqual([]);
   });
 
-  // Regression: round 11 review caught a leak window on static deploys.
-  // Between writing `asset_hashes` to the deployment row and claiming
-  // retention via `markDeploymentRetained(..., true)`, any failure must
-  // still sweep the streamed blobs — until the retention claim lands,
-  // `getRetainedDeployments` cannot see this deployment, so future cleanup
-  // would never evict its hashes and they'd leak indefinitely. We inject
-  // the failure by throwing on the second ROUTING.put call (the slug put
-  // at line ~1137), which lives exactly inside that window.
+  // Static-deploy leak window: between writing `asset_hashes` to the
+  // deployment row and claiming retention via `markDeploymentRetained(...,
+  // true)`, any failure must still sweep the streamed blobs — until the
+  // retention claim lands, `getRetainedDeployments` cannot see this
+  // deployment, so future cleanup would never evict its hashes and they'd
+  // leak indefinitely. We inject the failure by throwing on the second
+  // ROUTING.put call (the slug put at line ~1137), which lives exactly
+  // inside that window.
   it('sweeps streamed assets when a post-asset_hashes, pre-retention step fails', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-pre-retention-fail');
@@ -4726,16 +5136,15 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     }
   });
 
-  // Regression: round 12 review caught that the inner-catch cleanup gate was
-  // based on `streamedAssetsPersisted`, which only flipped AFTER
-  // `markDeploymentRetained` — so a failure between the slug ROUTING.put
-  // (which makes traffic live) and the retention claim would sweep assets
-  // that the now-live deployment is actively serving, while the
-  // `routingSwitched` recovery branch still marked the deployment "live".
-  // The fix gates cleanup on `!routingSwitched`, matching the real
-  // "traffic is live" signal. This test fails the active-domain ROUTING.put,
-  // which lands after `routingSwitched = true` and before
-  // `markDeploymentRetained`.
+  // The inner-catch cleanup gate must key off `!routingSwitched`, not
+  // `streamedAssetsPersisted` (which only flips AFTER
+  // `markDeploymentRetained`). Otherwise a failure between the slug
+  // ROUTING.put (which makes traffic live) and the retention claim would
+  // sweep assets that the now-live deployment is actively serving, while
+  // the `routingSwitched` recovery branch still marked the deployment
+  // "live". `!routingSwitched` matches the real "traffic is live" signal.
+  // This test fails the active-domain ROUTING.put, which lands after
+  // `routingSwitched = true` and before `markDeploymentRetained`.
   it('preserves streamed assets when a post-routing, pre-retention step fails', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-post-routing-fail');

@@ -87,6 +87,43 @@ export interface SandboxManifestMeta {
   migrations?: Array<SandboxMigrationMeta>;
 }
 
+/**
+ * Manifest header-rule shape. Mirrors `HeaderRule` in `dispatch/src/headers.ts`
+ * and the framework-side `HeaderRule` in `packages/void/src/cli/types.ts`.
+ * Structural equivalence across the three is pinned by
+ * `packages/dispatch/test/unit/framework-contract.test.ts`.
+ */
+export interface HeaderRule {
+  pattern: string;
+  headers: Array<[string, string]>;
+}
+
+/**
+ * Manifest redirect/rewrite rule shape. Mirrors `RedirectRule` in
+ * `dispatch/src/routing-rules.ts` and the framework-side `RedirectRule` in
+ * `packages/void/src/cli/types.ts`. Structural equivalence across the three
+ * is pinned by `packages/dispatch/test/unit/framework-contract.test.ts`.
+ */
+export interface RedirectRule {
+  source: string;
+  destination: string;
+  status: number;
+}
+
+/**
+ * Statuses accepted on manifest `redirectRules` entries at ingest:
+ * 200 for pre-asset "force" rewrites, 3xx for redirects. Superset of the
+ * framework's `VALID_REDIRECT_STATUSES` (`framework/packages/void/src/config.ts`) —
+ * the 200 case is encoded by which array the rule lives in, not a separate
+ * wire field. Keep in sync with the framework's 3xx list on HTTP-spec
+ * changes; a runtime cross-submodule pin isn't viable because the framework's
+ * `config.ts` pulls `node:fs` / `node:path`, which don't resolve against
+ * dispatch's `@cloudflare/workers-types`-only tsconfig.
+ */
+export const MANIFEST_REDIRECT_RULE_STATUSES: ReadonlySet<number> = new Set([
+  200, 301, 302, 303, 307, 308,
+]);
+
 export interface DeployManifest {
   version: number;
   auth?: boolean;
@@ -107,6 +144,15 @@ export interface DeployManifest {
   framework?: string;
   type?: 'void' | 'spa' | 'static' | 'framework';
   revalidate?: number | Record<string, number>;
+  /**
+   * Per-pathname allowlist of query params that participate in the ISR
+   * variant key on a rewrite. Default (no entry / no allowlist) drops
+   * every param so an attacker can't fan out cache slots by varying
+   * `?utm`/`?cb`/etc. Path patterns are matched against the user-facing
+   * (pre-rewrite) pathname; first match wins. A `*` entry acts as a
+   * catch-all default.
+   */
+  revalidateQueryAllowlist?: Record<string, Array<string>>;
   prerender?: Array<string>;
   assetConfig?: AssetConfig;
   vars?: Record<string, string>;
@@ -114,8 +160,9 @@ export interface DeployManifest {
   compatibilityDate?: string;
   compatibilityFlags?: Array<string>;
   hashedAssetsPrefix?: string;
-  headerRules?: Array<{ pattern: string; headers: Array<[string, string]> }>;
-  redirectRules?: Array<{ source: string; destination: string; status: number }>;
+  headerRules?: Array<HeaderRule>;
+  redirectRules?: Array<RedirectRule>;
+  fallbackRules?: Array<RedirectRule>;
   websocket?: WebSocketManifestMeta;
   sandbox?: SandboxManifestMeta;
 }

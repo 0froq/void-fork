@@ -1,3 +1,4 @@
+import { isrCacheKey, isrCachePrefix } from '@voidcloud/isr-shared';
 import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import {
@@ -51,7 +52,6 @@ import {
 } from '../db';
 import { sendDeployFailedEmail } from '../email';
 import type { ApiEnv } from '../env';
-import { isrCacheKey, isrCachePrefix } from '../isr-cache';
 import {
   MultipartParseError,
   parseBoundary,
@@ -74,6 +74,7 @@ import { buildRoutingJson, buildStaticRoutingJson } from '../routing';
 import { deployments } from '../schema';
 import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT } from '../tiers';
 import {
+  MANIFEST_REDIRECT_RULE_STATUSES,
   SUPPORTED_MANIFEST_VERSIONS,
   type DeployManifest,
   type DeployEvent,
@@ -264,7 +265,16 @@ function sortUnique(values: Array<string> | undefined): Array<string> {
 // payload would otherwise crash with a 500 — sometimes after a deployment row
 // or CF resources were created. Everything the deploy pipeline reads must be
 // validated here BEFORE createDeployment runs.
-function validateManifestShape(parsed: unknown): string | null {
+// Caps on user-supplied routing rule lists. Each rule compiles a regex per
+// request in dispatch (see `routing-rules.ts`), so an unbounded list lets a
+// 100k-entry manifest exhaust CPU on every request to the project. The limit
+// is per-list (redirect + fallback are independent), well above what real
+// frameworks emit (Vercel/Netlify both ship in the low thousands at most),
+// and validated at deploy ingest so dispatch never sees an oversized list.
+export const MAX_ROUTING_RULES = 2000;
+export const MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES = MAX_ROUTING_RULES;
+
+export function validateManifestShape(parsed: unknown): string | null {
   if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return 'invalid manifest shape: expected a JSON object';
   }
@@ -472,9 +482,16 @@ function validateManifestShape(parsed: unknown): string | null {
     }
   }
 
+  // redirectRules is the pre-asset rule list. `status: 200` means a force
+  // rewrite (internal URL rewrite, no Location header); `status: 3xx` means a
+  // redirect. Destinations may not contain `?` — request query is merged
+  // separately at dispatch time (see `mergeQueryIntoLocation`).
   if (m.redirectRules !== undefined) {
     if (!Array.isArray(m.redirectRules)) {
       return 'invalid manifest shape: redirectRules must be an array';
+    }
+    if (m.redirectRules.length > MAX_ROUTING_RULES) {
+      return `invalid manifest shape: redirectRules has ${m.redirectRules.length} entries, exceeds the ${MAX_ROUTING_RULES} per-list limit`;
     }
     for (const rule of m.redirectRules) {
       if (rule == null || typeof rule !== 'object' || Array.isArray(rule)) {
@@ -488,9 +505,97 @@ function validateManifestShape(parsed: unknown): string | null {
       ) {
         return 'invalid manifest shape: redirectRules entries must have string source, string destination, and numeric status';
       }
-      const allowedStatuses = [301, 302, 303, 307, 308];
-      if (!allowedStatuses.includes(ro.status)) {
-        return `invalid manifest shape: redirectRules entry status must be one of ${allowedStatuses.join(', ')}`;
+      // `JSON.stringify` safely quotes and escapes the user-supplied source
+      // string in the error message (handles embedded quotes, newlines, etc).
+      const sourceRef = JSON.stringify(ro.source as string);
+      if (!MANIFEST_REDIRECT_RULE_STATUSES.has(ro.status)) {
+        return `invalid manifest shape: redirectRules entry ${sourceRef} status must be one of ${[...MANIFEST_REDIRECT_RULE_STATUSES].join(', ')} (200 = rewrite, 3xx = redirect)`;
+      }
+      // Rewrites (status=200) must stay internal: no query string, path-absolute,
+      // and not protocol-relative (`//evil.com/x` parses cross-origin). 3xx
+      // redirects may include query strings and external Location values.
+      const destination = ro.destination as string;
+      const isRewrite = ro.status === 200;
+      if (isRewrite && destination.includes('?')) {
+        return `invalid manifest shape: redirectRules entry ${sourceRef} destination must not contain a query string when status is 200`;
+      }
+      if (isRewrite && !destination.startsWith('/')) {
+        return `invalid manifest shape: redirectRules entry ${sourceRef} destination must be path-absolute (start with "/") when status is 200`;
+      }
+      if (isRewrite && destination.startsWith('//')) {
+        return `invalid manifest shape: redirectRules entry ${sourceRef} destination must not start with "//" (protocol-relative URLs parse cross-origin; use a single-slash path-absolute destination)`;
+      }
+    }
+  }
+
+  // revalidateQueryAllowlist gates which query params participate in the
+  // ISR variant key on a rewrite. Shape: `{ "<pathPattern>": ["param", …] }`.
+  // The default (no entry / no allowlist) drops every param so a fanout
+  // attack via `?utm=…`/`?cb=…` can't multiply cache slots. The validator
+  // only enforces shape; semantic correctness (does the pattern match a
+  // real route?) is the user's responsibility.
+  if (m.revalidateQueryAllowlist !== undefined) {
+    if (
+      m.revalidateQueryAllowlist == null ||
+      typeof m.revalidateQueryAllowlist !== 'object' ||
+      Array.isArray(m.revalidateQueryAllowlist)
+    ) {
+      return 'invalid manifest shape: revalidateQueryAllowlist must be an object';
+    }
+    const entries = Object.entries(m.revalidateQueryAllowlist as Record<string, unknown>);
+    if (entries.length > MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES) {
+      return `invalid manifest shape: revalidateQueryAllowlist has ${entries.length} entries, exceeds the ${MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES} entry limit`;
+    }
+    for (const [pattern, value] of entries) {
+      if (pattern === '') {
+        return 'invalid manifest shape: revalidateQueryAllowlist must not include an empty pattern';
+      }
+      if (!Array.isArray(value)) {
+        return `invalid manifest shape: revalidateQueryAllowlist entry ${JSON.stringify(pattern)} must be an array of strings`;
+      }
+      for (const param of value) {
+        if (typeof param !== 'string') {
+          return `invalid manifest shape: revalidateQueryAllowlist entry ${JSON.stringify(pattern)} must contain only strings`;
+        }
+      }
+    }
+  }
+
+  // fallbackRules fire after the static asset resolver 404s. Rewrites only,
+  // so every entry carries the same internal-destination constraints as a
+  // status=200 redirectRule.
+  if (m.fallbackRules !== undefined) {
+    if (!Array.isArray(m.fallbackRules)) {
+      return 'invalid manifest shape: fallbackRules must be an array';
+    }
+    if (m.fallbackRules.length > MAX_ROUTING_RULES) {
+      return `invalid manifest shape: fallbackRules has ${m.fallbackRules.length} entries, exceeds the ${MAX_ROUTING_RULES} per-list limit`;
+    }
+    for (const rule of m.fallbackRules) {
+      if (rule == null || typeof rule !== 'object' || Array.isArray(rule)) {
+        return 'invalid manifest shape: fallbackRules entries must be objects';
+      }
+      const ro = rule as Record<string, unknown>;
+      if (
+        typeof ro.source !== 'string' ||
+        typeof ro.destination !== 'string' ||
+        typeof ro.status !== 'number'
+      ) {
+        return 'invalid manifest shape: fallbackRules entries must have string source, string destination, and numeric status';
+      }
+      const sourceRef = JSON.stringify(ro.source as string);
+      if (ro.status !== 200) {
+        return `invalid manifest shape: fallbackRules entry ${sourceRef} status must be 200 (fallbacks are rewrites only)`;
+      }
+      const destination = ro.destination as string;
+      if (destination.includes('?')) {
+        return `invalid manifest shape: fallbackRules entry ${sourceRef} destination must not contain a query string`;
+      }
+      if (!destination.startsWith('/')) {
+        return `invalid manifest shape: fallbackRules entry ${sourceRef} destination must be path-absolute (start with "/")`;
+      }
+      if (destination.startsWith('//')) {
+        return `invalid manifest shape: fallbackRules entry ${sourceRef} destination must not start with "//" (protocol-relative URLs parse cross-origin; use a single-slash path-absolute destination)`;
       }
     }
   }
@@ -3324,7 +3429,7 @@ function resolvePathTtl(
     return revalidate;
   }
   for (const [pattern, ttl] of Object.entries(revalidate)) {
-    if (matchPattern(pattern, pathname)) {
+    if (matchLiteralPattern(pattern, pathname)) {
       return ttl;
     }
   }
@@ -3335,10 +3440,16 @@ const MAX_CACHE = 256;
 const regexCache = new Map<string, RegExp>();
 
 /**
- * Match a pattern against a pathname.
- * `*` matches any characters including `/`.
+ * Match a pattern against a pathname using LITERAL semantics —
+ * only `*` is special (matches any characters including `/`); every other
+ * character (including `:`) is treated as a literal.
+ *
+ * Mirrors `matchLiteralPattern` in `packages/dispatch/src/pattern.ts`. Keep
+ * the two implementations in sync — `routing.revalidate` keys are written
+ * here (during deploy/prerender) and read by dispatch, so both sides must
+ * agree on what each pattern matches.
  */
-function matchPattern(pattern: string, pathname: string): boolean {
+function matchLiteralPattern(pattern: string, pathname: string): boolean {
   let regex = regexCache.get(pattern);
   if (regex) {
     regexCache.delete(pattern);

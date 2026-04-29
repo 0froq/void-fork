@@ -1,48 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchPattern, applyHeaderRules, type HeaderRule } from '../../src/headers';
-
-describe('matchPattern', () => {
-  it('matches exact path', () => {
-    expect(matchPattern('/index.html', '/index.html')).toBe(true);
-  });
-
-  it('rejects non-matching exact path', () => {
-    expect(matchPattern('/index.html', '/about.html')).toBe(false);
-  });
-
-  it('matches wildcard at end', () => {
-    expect(matchPattern('/assets/*', '/assets/app.js')).toBe(true);
-  });
-
-  it('matches wildcard across slashes', () => {
-    expect(matchPattern('/assets/*', '/assets/js/app.js')).toBe(true);
-  });
-
-  it('matches leading wildcard extension', () => {
-    expect(matchPattern('/*.html', '/index.html')).toBe(true);
-  });
-
-  it('rejects wildcard extension mismatch', () => {
-    expect(matchPattern('/*.html', '/app.js')).toBe(false);
-  });
-
-  it('matches catch-all wildcard', () => {
-    expect(matchPattern('/*', '/any/path/here')).toBe(true);
-  });
-
-  it('matches root with catch-all', () => {
-    expect(matchPattern('/*', '/')).toBe(true);
-  });
-
-  it('matches path with special regex chars', () => {
-    expect(matchPattern('/foo.bar', '/foo.bar')).toBe(true);
-  });
-
-  it('rejects dot as regex wildcard', () => {
-    // The . in the pattern is a literal dot, not regex wildcard
-    expect(matchPattern('/foo.html', '/fooXhtml')).toBe(false);
-  });
-});
+import { applyHeaderRules, type HeaderRule } from '../../src/headers';
 
 describe('applyHeaderRules', () => {
   it('returns original response when no rules', () => {

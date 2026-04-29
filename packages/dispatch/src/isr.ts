@@ -1,9 +1,24 @@
-import { isrCacheKey, isrEdgeCacheUrl } from '@voidcloud/isr-shared';
+import { isrCacheKey, isrCacheVariantPrefix, isrEdgeCacheUrl } from '@voidcloud/isr-shared';
 import type { Env } from './env';
-import { matchPattern } from './headers';
+import { matchLiteralPattern } from './pattern';
 
 // Re-export so callers that import from `./isr` (tests, index.ts) still work.
 export { isrCacheKey };
+
+/**
+ * Hard cap on rewrite-variant ISR entries per (project, deployment, pathname).
+ * The default `revalidateQueryAllowlist = {}` already drops every query param,
+ * so most fanout vectors are closed at the variant-key level — but a path
+ * with an allowlisted param (e.g. `/search` with `q`) can still be probed
+ * with random `q` values. The cap is the second line of defense: once the
+ * KV slot for a pathname holds this many variants, new variants stop being
+ * written. The worker still renders fresh content; we simply refuse to
+ * persist it, so KV growth and revalidation cost stay bounded.
+ *
+ * Existing variants continue to update so legitimate ISR refresh keeps
+ * working; only NEW variants are rejected past the cap.
+ */
+export const MAX_ISR_VARIANTS_PER_PATH = 200;
 
 export interface IsrCacheEntry {
   body: ReadableStream;
@@ -73,8 +88,9 @@ export async function readIsrCache(
   projectId: string,
   deploymentId: string,
   pathname: string,
+  originalUrl?: string | null,
 ): Promise<IsrCacheEntry | null> {
-  const key = isrCacheKey(projectId, deploymentId, pathname);
+  const key = isrCacheKey(projectId, deploymentId, pathname, originalUrl);
   const { value, metadata } = await env.ISR_CACHE.getWithMetadata<IsrCacheMetadata>(
     key,
     'arrayBuffer',
@@ -115,13 +131,17 @@ export async function deleteIsrCache(
   projectId: string,
   deploymentId: string,
   pathname: string,
+  originalUrl?: string | null,
 ): Promise<void> {
-  const key = isrCacheKey(projectId, deploymentId, pathname);
+  const key = isrCacheKey(projectId, deploymentId, pathname, originalUrl);
   await env.ISR_CACHE.delete(key);
 }
 
 /**
- * Write an ISR cache entry to KV.
+ * Write an ISR cache entry to KV. Variant writes are gated by
+ * `MAX_ISR_VARIANTS_PER_PATH` — past the cap, only updates to existing
+ * variant slots go through. Direct-hit entries (no `originalUrl`) are
+ * never gated.
  */
 export async function writeIsrCache(
   env: Env,
@@ -130,19 +150,57 @@ export async function writeIsrCache(
   pathname: string,
   response: Response,
   ttl: number,
+  originalUrl?: string | null,
 ): Promise<void> {
-  const key = isrCacheKey(projectId, deploymentId, pathname);
-  const headers = serializeHeaders(response);
-  const body = await response.clone().arrayBuffer();
+  const key = isrCacheKey(projectId, deploymentId, pathname, originalUrl);
+  // Clone synchronously so the cap-check `await` below cannot race with
+  // callers (in `index.ts`) that consume `response.body` for the client
+  // response after kicking us off via `ctx.waitUntil`. The clone has its
+  // own independent body; the original is free to be consumed elsewhere.
+  const responseClone = response.clone();
+  const headers = serializeHeaders(responseClone);
+  const status = responseClone.status;
+
+  if (originalUrl && !(await isVariantWriteAllowed(env, projectId, deploymentId, pathname, key))) {
+    return;
+  }
+
+  const body = await responseClone.arrayBuffer();
   const packed = packIsrValue(headers, body);
 
   await env.ISR_CACHE.put(key, packed, {
     metadata: {
-      s: response.status,
+      s: status,
       c: Date.now(),
       t: ttl,
     } satisfies IsrCacheMetadata,
   });
+}
+
+/**
+ * Returns true if writing the given variant key is allowed under the
+ * per-pathname cap. Always allows updates to existing variants (so ISR
+ * revalidation keeps working after a path saturates).
+ *
+ * The KV list call is alphabetically ordered; we list up to `1000` entries
+ * (the KV per-call max) which comfortably covers any realistic cap. If a
+ * pathname has more variants than the listing returns, we conservatively
+ * refuse new writes — that case shouldn't occur with the cap enforced.
+ */
+async function isVariantWriteAllowed(
+  env: Env,
+  projectId: string,
+  deploymentId: string,
+  pathname: string,
+  key: string,
+): Promise<boolean> {
+  const prefix = isrCacheVariantPrefix(projectId, deploymentId, pathname);
+  const listed = await env.ISR_CACHE.list({ prefix, limit: 1000 });
+  if (listed.keys.length < MAX_ISR_VARIANTS_PER_PATH) {
+    return true;
+  }
+  // At or over cap: only allow updates to existing keys.
+  return listed.keys.some((k) => k.name === key);
 }
 
 /**
@@ -225,7 +283,7 @@ export function resolvePathTtl(
     return revalidate;
   }
   for (const [pattern, ttl] of Object.entries(revalidate)) {
-    if (matchPattern(pattern, pathname)) {
+    if (matchLiteralPattern(pattern, pathname)) {
       return ttl;
     }
   }
@@ -273,10 +331,19 @@ export function serializeHeaders(response: Response): Record<string, string> {
  * Build a normalized cache key Request for the edge cache (caches.default).
  * The public URL stays clean; the internal cache key carries the deployment
  * id so a new deploy never reads HTML produced by an older deploy.
+ *
+ * When `originalUrl` is provided (the request was dispatch-rewritten), it is
+ * mixed into the key so direct and rewritten requests to the same rewritten
+ * pathname do not share a cache slot. See `isrCacheKey` for rationale.
  */
-export function isrEdgeCacheKey(request: Request, pathname: string, deploymentId: string): Request {
+export function isrEdgeCacheKey(
+  request: Request,
+  pathname: string,
+  deploymentId: string,
+  originalUrl?: string | null,
+): Request {
   return new Request(
-    isrEdgeCacheUrl(new URL(request.url).hostname, pathname, deploymentId, 'html'),
+    isrEdgeCacheUrl(new URL(request.url).hostname, pathname, deploymentId, 'html', originalUrl),
     { method: 'GET' },
   );
 }
@@ -284,15 +351,17 @@ export function isrEdgeCacheKey(request: Request, pathname: string, deploymentId
 /**
  * Build an edge cache key for the JSON variant (pages protocol navigation).
  * Uses `?__void=json` plus the deployment id to separate it from both HTML
- * and JSON generated by other deployments.
+ * and JSON generated by other deployments. `originalUrl` is mixed in under
+ * the same rules as `isrEdgeCacheKey`.
  */
 export function isrEdgeCacheKeyJson(
   request: Request,
   pathname: string,
   deploymentId: string,
+  originalUrl?: string | null,
 ): Request {
   return new Request(
-    isrEdgeCacheUrl(new URL(request.url).hostname, pathname, deploymentId, 'json'),
+    isrEdgeCacheUrl(new URL(request.url).hostname, pathname, deploymentId, 'json', originalUrl),
     { method: 'GET' },
   );
 }

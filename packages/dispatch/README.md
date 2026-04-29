@@ -1,25 +1,31 @@
 # @voidcloud/dispatch
 
-Edge router for deployed Void apps. It routes requests to user workers, serves static deployments, manages ISR caching, applies redirect/header rules, and records request usage.
+Edge router for deployed Void apps. It routes requests to user workers, serves static deployments, manages ISR caching, applies redirect/rewrite/header rules, and records request usage.
 
 ## Request Flow
 
 1. Extract slug from hostname or fall back to `domain:{hostname}` routing.
 2. Read routing data from `ROUTING` KV.
 3. Reject suspended projects with `429`.
-4. Apply redirect rules before any worker invocation.
+4. Apply `redirectRules` (pre-asset) before any worker invocation. Redirects short-circuit with a `Location` header; status-200 entries are "force" rewrites that mutate `url.pathname` and continue.
 5. Serve hashed assets from edge cache when possible.
 6. For static/SPA projects, serve files from `STATIC_ASSETS` KV with `STATIC_ASSETS_R2` overflow for large assets, using `assetConfig` path resolution.
-7. For `/api/*`, forward to the user worker in the dispatch namespace with plan-specific CPU/subrequest limits.
-8. For SSR with ISR enabled, use `caches.default` plus `ISR_CACHE` KV for stale-while-revalidate behavior.
-9. For WfP deploys, inspect the worker response for the Cloudflare asset-dedupe-poisoning stub (`Assets have not yet been deployed to this script.`). On detection, if the routing entry has `assetManifestId`, re-serve from the platform-owned mirror (`STATIC_ASSETS`/`STATIC_ASSETS_R2`). See `meta/design-docs/0066` and `meta/design-docs/0065`.
-10. Apply header rules and record usage in Analytics Engine. If `userId` is present on the routing entry, enqueue usage events as well.
+7. Apply `fallbackRules` (post-asset) only when static asset resolution misses — instead of returning 404, match the pathname against fallback rules (status=200 only) and rewrite. Intended for SPA shells (`/* → /index.html`) and default-locale catch-alls. On static deployments, a matched fallback serves the resolved asset directly without dispatching to a user worker, so `X-Void-Original-URL` is never set, `c.originalUrl()` is unavailable, and the response is not ISR-cached (see `packages/dispatch/test/unit/fallback-rules.test.ts`).
+8. For `/api/*`, forward to the user worker in the dispatch namespace with plan-specific CPU/subrequest limits.
+9. For SSR with ISR enabled, use `caches.default` plus `ISR_CACHE` KV for stale-while-revalidate behavior.
+10. For WfP deploys, inspect the worker response for the Cloudflare asset-dedupe-poisoning stub (`Assets have not yet been deployed to this script.`). On detection, if the routing entry has `assetManifestId`, re-serve from the platform-owned mirror (`STATIC_ASSETS`/`STATIC_ASSETS_R2`). See `meta/design-docs/0066` and `meta/design-docs/0065`.
+11. Apply header rules and record usage in Analytics Engine. If `userId` is present on the routing entry, enqueue usage events as well.
+
+Two rule lists exist so dispatch never has to reason about per-rule phase flags at the edge:
+
+1. **`redirectRules` — pre-asset.** Evaluated on every request before static-asset resolution or worker invocation. Handles 3xx redirects (`status: 301|302|303|307|308`) and status-200 rewrites that pre-empt the asset pipeline (from `routing.rewrites` or `_redirects` `200!` entries).
+2. **`fallbackRules` — post-asset.** Evaluated only when the static-asset resolver would otherwise 404. Always `status: 200` rewrites. Used for SPA shells and default-locale catch-alls.
 
 ## Static and ISR Storage
 
 - **Static/SPA deploys**: manifest in `ROUTING`, assets in `STATIC_ASSETS` KV, overflow in `STATIC_ASSETS_R2`
 - **WfP deploys with asset mirror**: same stores as static (manifest at `manifest:{deploymentId}`, assets at `assets/{projectId}/{hash}`). `RoutingEntry.assetManifestId` points at the manifest. CF's `ASSETS` binding remains primary — this mirror is only consulted when the CF stub is detected.
-- **ISR cache**: packed HTML/headers stored in `ISR_CACHE` KV, with edge-cache copies in `caches.default`
+- **ISR cache**: packed HTML/headers stored in `ISR_CACHE` KV, with edge-cache copies in `caches.default`. Keys are (project, deployment, pathname, optional rewrite-variant token) so a direct hit to `/en/docs` and a request rewritten from `/docs → /en/docs` live in distinct slots — user code can branch on `c.isRewritten()` / `c.originalUrl()` and the cache honors that. The variant suffix is derived from `X-Void-Original-URL` via the shared helpers in [`packages/isr-shared`](../isr-shared/README.md); direct hits (no rewrite, no header) use the unsuffixed key.
 - **Hashed assets**: immutable edge-cache entries keyed by URL path
 
 ## Queue Relay
@@ -39,8 +45,9 @@ src/
   hostname.ts     # Hostname/slug extraction
   static.ts       # Static manifest path resolution + content types
   isr.ts          # ISR cache packing, KV read/write, edge cache keys
-  redirects.ts    # Redirect rule matching
+  routing-rules.ts # Redirect and rewrite rule matching (applyRoutingRules)
   headers.ts      # Header rule application
+  pattern.ts      # Shared path-pattern compiler (compilePattern, matchPattern, substituteParams)
   metering.ts     # Analytics Engine writes + usage queue events
   constants.ts
   env.ts
@@ -49,8 +56,10 @@ test/unit/
   hostname.test.ts
   static.test.ts
   isr.test.ts
-  redirects.test.ts
+  routing-rules.test.ts
+  fallback-rules.test.ts
   headers.test.ts
+  pattern.test.ts
   metering.test.ts
 ```
 
@@ -86,7 +95,9 @@ Not cached:
 - `test/unit/index.test.ts` — main routing behavior
 - `test/unit/static.test.ts` — static path resolution and serving
 - `test/unit/isr.test.ts` — ISR cache packing and TTL behavior
-- `test/unit/redirects.test.ts` — redirect rule matching
+- `test/unit/routing-rules.test.ts` — redirect and rewrite rule matching
+- `test/unit/pattern.test.ts` — shared path-pattern compiler
+- `test/unit/fallback-rules.test.ts` — post-asset fallback rewrite rules (static deployments)
 - `test/unit/headers.test.ts` — header rule application
 - `test/unit/hostname.test.ts` — slug extraction
 - `test/unit/metering.test.ts` — Analytics Engine payload shape

@@ -1,16 +1,18 @@
+import {
+  denormalizeIsrPath,
+  isrCacheKey,
+  isrCachePrefix,
+  isrCacheVariantPrefix,
+  isrEdgeCacheUrl,
+  isrEdgeCacheUrlForToken,
+  splitIsrCacheKey,
+} from '@voidcloud/isr-shared';
 import type { Context } from 'hono';
 import { R2_CONCURRENCY, uploadPool } from './concurrency';
 import { SITE_DOMAIN } from './constants';
 import { getDomainsByProjectId } from './db';
 import type { ApiEnv } from './env';
-import {
-  denormalizeIsrPath,
-  isrCacheKey,
-  isrCachePrefix,
-  isrEdgeCacheUrl,
-  resolveCurrentIsrDeployments,
-  type IsrRoutingTarget,
-} from './isr-cache';
+import { resolveCurrentIsrDeployments, type IsrRoutingTarget } from './isr-cache';
 import { purgeZoneCache } from './provisioning/cloudflare-api';
 
 interface RevalidateProject {
@@ -68,9 +70,12 @@ export async function runRevalidate(
   );
 
   if (body.all) {
-    // Collect pathnames across all deployment namespaces so the edge
-    // purge has an accurate list (any path stored under any id becomes
-    // a candidate for purge under every hostname × every id).
+    // Edge purge fans out to `|hostnames| × |ids| × (2·|pathnames| + 2·|variantTuples|)`
+    // URL strings. For high-cardinality projects (tens of thousands of paths,
+    // dozens of variants each, multiple hostnames/ids) that array can pin
+    // hundreds of MB and OOM the Worker. Flush per KV list page instead so
+    // peak memory is bounded by a single page (~1000 keys). CF tolerates
+    // duplicate purge URLs across calls, so cross-page dedup loss is fine.
     const pathnameSet = new Set<string>();
 
     for (const deploymentId of union) {
@@ -80,17 +85,27 @@ export async function runRevalidate(
       do {
         const listed = await c.env.ISR_CACHE.list({ prefix, cursor });
         if (listed.keys.length > 0) {
+          // Per-page accumulators: dedup pathnames within a page, allow
+          // duplicates across pages (CF tolerates them).
+          const pageBatchPathnames = new Set<string>();
+          const pageBatchVariants: Array<PurgeVariantTuple> = [];
           for (const key of listed.keys) {
-            const normalized = key.name.slice(prefix.length);
-            pathnameSet.add(denormalizeIsrPath(normalized));
+            const tail = key.name.slice(prefix.length);
+            const split = splitIsrCacheKey(tail);
+            const pathname = denormalizeIsrPath(split.normalizedPath);
+            pathnameSet.add(pathname);
+            pageBatchPathnames.add(pathname);
+            if (split.variantToken) {
+              pageBatchVariants.push({ pathname, variantToken: split.variantToken });
+            }
           }
           await uploadPool(listed.keys, R2_CONCURRENCY, (key) => c.env.ISR_CACHE.delete(key.name));
+          await purgeEdgeCache(c, perHostname, Array.from(pageBatchPathnames), pageBatchVariants);
         }
         cursor = listed.list_complete ? undefined : listed.cursor;
       } while (cursor);
     }
 
-    await purgeEdgeCache(c, perHostname, Array.from(pathnameSet));
     // `purged` = unique pathnames purged (mirrors what the caller asked for,
     // not the raw count of KV keys deleted across all deployment namespaces).
     return c.json({ purged: pathnameSet.size });
@@ -100,26 +115,57 @@ export async function runRevalidate(
     return c.json({ error: 'provide `paths` array or `all: true`' }, 400);
   }
 
-  // Purge specific paths across every deployment namespace.
+  // Purge specific paths across every deployment namespace. Each path may
+  // have a direct-hit key plus one or more `#rw=<token>` variant keys
+  // (requests served via dispatch rewrite); delete every variant and
+  // collect the original URLs so the edge cache can be purged too.
+  const variantTuples: Array<PurgeVariantTuple> = [];
   for (const deploymentId of union) {
     for (const path of body.paths) {
-      const key = isrCacheKey(projectId, deploymentId, path);
-      await c.env.ISR_CACHE.delete(key);
+      await c.env.ISR_CACHE.delete(isrCacheKey(projectId, deploymentId, path));
+
+      const variantPrefix = isrCacheVariantPrefix(projectId, deploymentId, path);
+      let cursor: string | undefined;
+      do {
+        const listed = await c.env.ISR_CACHE.list({ prefix: variantPrefix, cursor });
+        if (listed.keys.length > 0) {
+          for (const key of listed.keys) {
+            const tail = key.name.slice(isrCachePrefix(projectId, deploymentId).length);
+            const split = splitIsrCacheKey(tail);
+            if (split.variantToken) {
+              variantTuples.push({ pathname: path, variantToken: split.variantToken });
+            }
+          }
+          await uploadPool(listed.keys, R2_CONCURRENCY, (key) => c.env.ISR_CACHE.delete(key.name));
+        }
+        cursor = listed.list_complete ? undefined : listed.cursor;
+      } while (cursor);
     }
   }
 
-  await purgeEdgeCache(c, perHostname, body.paths);
+  await purgeEdgeCache(c, perHostname, body.paths, variantTuples);
   // `purged` = unique path entries the caller asked for. The cross-namespace
   // KV deletes above are an implementation detail of the drift-handling hedge.
   return c.json({ purged: body.paths.length });
+}
+
+interface PurgeVariantTuple {
+  pathname: string;
+  /**
+   * Pre-hashed variant token from the KV key. The original URL is not
+   * recoverable post-hash; we only need the token to rebuild the matching
+   * `__void_orig=<token>` edge cache URL via `isrEdgeCacheUrlForToken`.
+   */
+  variantToken: string;
 }
 
 async function purgeEdgeCache(
   c: Context<ApiEnv>,
   perHostname: Map<string, Set<string>>,
   pathnames: Array<string>,
+  variantTuples: Array<PurgeVariantTuple> = [],
 ): Promise<void> {
-  if (pathnames.length === 0 || perHostname.size === 0) {
+  if ((pathnames.length === 0 && variantTuples.length === 0) || perHostname.size === 0) {
     return;
   }
 
@@ -130,6 +176,14 @@ async function purgeEdgeCache(
         for (const pathname of pathnames) {
           urls.push(isrEdgeCacheUrl(hostname, pathname, id, 'html'));
           urls.push(isrEdgeCacheUrl(hostname, pathname, id, 'json'));
+        }
+        for (const tuple of variantTuples) {
+          urls.push(
+            isrEdgeCacheUrlForToken(hostname, tuple.pathname, id, 'html', tuple.variantToken),
+          );
+          urls.push(
+            isrEdgeCacheUrlForToken(hostname, tuple.pathname, id, 'json', tuple.variantToken),
+          );
         }
       }
     }

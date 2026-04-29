@@ -26,7 +26,7 @@ For every WfP deploy with assets:
 At request time in `packages/dispatch`:
 
 1. Dispatch calls the user worker as today. CF's native asset binding may intercept asset paths before the worker runs (default `run_worker_first: false`) or serve them from the worker's `env.ASSETS.fetch()` fallback.
-2. Dispatch inspects the response. If and only if the routing entry has `assetManifestId` AND the response matches the stub fingerprint (status 200, `Content-Type` starts with `text/plain`, `Content-Length` 1–199), dispatch reads the body and checks for the known stub marker substring.
+2. Dispatch inspects every worker response that can come from CF's asset binding, including worker-backed `fallbackRules` re-dispatches and ISR background revalidation renders. If and only if the routing entry has `assetManifestId` AND the response matches the stub fingerprint (status 200, `Content-Type` starts with `text/plain`, `Content-Length` 1–199), dispatch reads the body and checks for the known stub marker substring.
 3. On marker match, dispatch loads the serving manifest from `ROUTING`, resolves the path via the same `resolveStaticPath` used for static-only deploys, and serves the bytes from the mirror via `fetchStaticAsset`.
 4. On any miss — missing manifest, unresolved path, missing bytes — dispatch returns the original (stub) response. Behavior identical to today for the paths we can't cover.
 

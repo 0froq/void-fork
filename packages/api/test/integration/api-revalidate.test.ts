@@ -1,3 +1,4 @@
+import { hashOriginalUrl } from '@voidcloud/isr-shared';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { hmacSignState } from '../../src/auth/hmac';
 import app from '../../src/index';
@@ -100,6 +101,62 @@ describe('POST /projects/:id/revalidate', () => {
       env,
     );
     expect(res.status).toBe(400);
+  });
+
+  it('purges rewrite-variant KV entries and edge URLs for the requested path', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const fetchMock = mockCfApi();
+
+    // Direct-hit and rewrite-variant entries for the same pathname.
+    const directKey = isrKey(project.id, deployment.id, 'en/docs');
+    // Token computed with the same hash dispatch uses (FNV-1a 64-bit hex).
+    // Purger only knows the hashed token; original URL is not recoverable.
+    const originalUrl = `https://${project.slug}.void.app/docs`;
+    const token = hashOriginalUrl(originalUrl);
+    const variantKey = `${directKey}#rw=${token}`;
+    await env.ISR_CACHE.put(directKey, 'direct');
+    await env.ISR_CACHE.put(variantKey, 'rewritten');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/revalidate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ paths: ['/en/docs'] }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    expect(await env.ISR_CACHE.get(directKey)).toBeNull();
+    expect(await env.ISR_CACHE.get(variantKey)).toBeNull();
+
+    const purgeCalls = fetchMock.mock.calls.filter(
+      (call: Array<unknown>) =>
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
+    );
+    expect(purgeCalls.length).toBe(1);
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
+    // Direct-hit edge URLs (html + json).
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/en/docs?__void_isr=${deployment.id}`,
+    );
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/en/docs?__void=json&__void_isr=${deployment.id}`,
+    );
+    // Rewrite-variant edge URLs (reconstructed from the decoded token).
+    expect(
+      purgedFiles.some((u) =>
+        u.startsWith(
+          `https://${project.slug}.void.app/en/docs?__void_isr=${deployment.id}&__void_orig=`,
+        ),
+      ),
+    ).toBe(true);
   });
 
   it('purges specific paths from KV and edge cache', async () => {

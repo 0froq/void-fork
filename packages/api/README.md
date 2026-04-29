@@ -106,7 +106,7 @@ Dashboard auth uses the same JWT model, stored in the `void_token` cookie.
 
 ## Deploy Flow
 
-`POST /projects/:id/deploy` handles both worker and static deploys.
+`POST /projects/:id/deploy` handles both worker and static deploys. Before either branch runs, the deploy endpoint validates the manifest wire-shape — including `redirectRules` / `fallbackRules` structure and destination constraints (path-absolute, no embedded query on `status: 200` entries) — so malformed routing rules are rejected before any resources are provisioned. See `packages/api/src/routes/deploy.ts` around lines 468-532.
 
 ### Worker deploys
 

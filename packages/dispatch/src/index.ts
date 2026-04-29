@@ -17,14 +17,16 @@ import {
   normalizePageDataForJsonCache,
 } from './isr';
 import { recordRequest, sendUsageEvent, type RequestType } from './metering';
-import { applyRedirectRules, type RedirectRule } from './redirects';
+import { applyRoutingRules, mergeQueryIntoLocation, type RedirectRule } from './routing-rules';
 import { resolveStaticPath, getContentType } from './static';
 import type { AssetConfig } from './static';
+import { buildVariantOriginalUrl, type QueryAllowlist } from './variant-key';
 
 interface RoutingEntry {
   workerName: string;
   projectId: string;
   userId?: string;
+  type?: 'void' | 'spa' | 'static' | 'framework';
   ssr?: boolean;
   revalidate?: number | Record<string, number>;
   version?: string;
@@ -32,7 +34,14 @@ interface RoutingEntry {
   suspended?: string;
   hashedAssetsPrefix?: string;
   headerRules?: Array<HeaderRule>;
+  // `redirectRules` fires pre-asset, `fallbackRules` fires post-asset.
+  // List identity encodes the pre-vs-post-asset semantic.
   redirectRules?: Array<RedirectRule>;
+  fallbackRules?: Array<RedirectRule>;
+  // Per-pathname allowlist of query params that are part of the ISR variant
+  // key on a rewrite. Default (no entry / no allowlist) drops every param,
+  // so an attacker can't fan out the cache by varying `?utm`/`?cb`/etc.
+  queryAllowlist?: QueryAllowlist;
   staticDeploymentId?: string;
   assetManifestId?: string;
   assetConfig?: AssetConfig;
@@ -82,6 +91,88 @@ async function populateJsonEdgeCache(
     return;
   }
   await cache.put(cacheKey, jsonCacheResponse(pageData, ttl, state));
+}
+
+async function applyWorkerFallbackRules(opts: {
+  response: Response;
+  worker: { fetch(request: Request): Promise<Response> };
+  dispatchReq: Request;
+  routing: RoutingEntry;
+  pathname: string;
+  url: URL;
+  originalRequestUrl: string;
+  originalUrlHeader?: string;
+  originalUrlVariant?: string;
+}): Promise<{
+  response: Response;
+  pathname: string;
+  originalUrlVariant?: string;
+  applied: boolean;
+}> {
+  if (opts.response.status !== 404 || !opts.routing.fallbackRules?.length) {
+    return {
+      response: opts.response,
+      pathname: opts.pathname,
+      originalUrlVariant: opts.originalUrlVariant,
+      applied: false,
+    };
+  }
+  if (opts.routing.type === 'void' && opts.response.headers.get('X-Void-No-Match') !== '1') {
+    return {
+      response: opts.response,
+      pathname: opts.pathname,
+      originalUrlVariant: opts.originalUrlVariant,
+      applied: false,
+    };
+  }
+
+  const fallback = applyRoutingRules(opts.pathname, opts.routing.fallbackRules);
+  if (fallback?.type !== 'rewrite') {
+    return {
+      response: opts.response,
+      pathname: opts.pathname,
+      originalUrlVariant: opts.originalUrlVariant,
+      applied: false,
+    };
+  }
+
+  const fallbackHeader = opts.originalUrlHeader ?? opts.originalRequestUrl;
+  const originalUrlVariant =
+    opts.originalUrlVariant ??
+    buildVariantOriginalUrl(opts.originalRequestUrl, opts.pathname, opts.routing.queryAllowlist);
+  const fallbackUrl = new URL(opts.url.toString());
+  fallbackUrl.pathname = fallback.destination;
+  const fallbackReq = rebuildRequest(opts.dispatchReq, fallbackUrl.toString(), (h) =>
+    h.set('X-Void-Original-URL', fallbackHeader),
+  );
+
+  return {
+    response: await opts.worker.fetch(fallbackReq),
+    pathname: fallback.destination,
+    originalUrlVariant,
+    applied: true,
+  };
+}
+
+function buildFallbackOriginalUrlVariant(
+  requestUrl: string,
+  pathname: string,
+  routing: RoutingEntry,
+  originalUrlVariant: string | undefined,
+): string | undefined {
+  // Fallback rewrites are discovered after the first worker/static miss, but
+  // ISR needs the read key before dispatching. If a fallback rule can handle
+  // this pathname, use the same original-URL variant a later fallback dispatch
+  // would expose via X-Void-Original-URL so query-allowlisted renders cannot
+  // collide with the direct ISR key.
+  if (originalUrlVariant || !routing.fallbackRules?.length) {
+    return originalUrlVariant;
+  }
+  const fallback = applyRoutingRules(pathname, routing.fallbackRules);
+  if (fallback?.type !== 'rewrite') {
+    return undefined;
+  }
+  return buildVariantOriginalUrl(requestUrl, pathname, routing.queryAllowlist);
 }
 
 // CF's error text for WC-4511 asset dedupe poisoning. Not guaranteed
@@ -166,6 +257,68 @@ function logWfpAssetFallback(
   );
 }
 
+async function maybeServeWfpAssetFallback(opts: {
+  env: Env;
+  routing: RoutingEntry;
+  pathname: string;
+  response: Response;
+  userAgent: string | null;
+}): Promise<Response> {
+  if (!opts.routing.assetManifestId || !isLikelyCfAssetStub(opts.response)) {
+    return opts.response;
+  }
+  const body = await opts.response.clone().text();
+  if (!body.includes(CF_ASSETS_STUB_MARKER)) {
+    return opts.response;
+  }
+  const fallback = await serveWfpAssetFallback(opts.env, opts.routing, opts.pathname);
+  if (!fallback) {
+    return opts.response;
+  }
+  logWfpAssetFallback(opts.routing, opts.pathname, opts.userAgent);
+  return fallback;
+}
+
+/**
+ * Rebuild a `Request` with mutated headers, optionally under a new URL.
+ * Handles the body-preservation cases we hit at three points in the fetch
+ * handler (ingress header-strip, rewrite URL swap, post-ISR dispatch):
+ *
+ * - Body already consumed/locked: drop body and any stale framing headers
+ *   (`content-length` / `transfer-encoding`) — some runtimes reject bodiless
+ *   frames that still advertise a framing size.
+ * - GET / HEAD: no body to forward; skip the body + duplex dance.
+ * - Everything else: forward the streaming body with `duplex: 'half'`.
+ */
+export function rebuildRequest(
+  request: Request,
+  url: string,
+  mutateHeaders: (headers: Headers) => void,
+): Request {
+  const headers = new Headers(request.headers);
+  mutateHeaders(headers);
+  // `cf` (country, colo, botManagement, tlsClientAuth, …) is populated by
+  // the CF edge and read by user workers. A plain `new Request(url, init)`
+  // does not propagate it; we have to thread it through init.cf explicitly.
+  const cf = request.cf;
+  if (request.bodyUsed || request.body?.locked) {
+    headers.delete('content-length');
+    headers.delete('transfer-encoding');
+    return new Request(url, { method: request.method, headers, cf });
+  }
+  if (request.method === 'GET' || request.method === 'HEAD') {
+    return new Request(url, { method: request.method, headers, cf });
+  }
+  return new Request(url, {
+    method: request.method,
+    headers,
+    body: request.body,
+    cf,
+    // @ts-expect-error -- duplex required for streaming bodies in CF Workers
+    duplex: 'half',
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const startTime = Date.now();
@@ -210,7 +363,15 @@ export default {
       );
     }
 
-    const pathname = url.pathname;
+    // Strip any client-supplied X-Void-Original-URL on entry. Dispatch owns this
+    // header: the only legitimate source is a dispatch-side rewrite below, which
+    // sets it on `workerRequest` with the true original URL. Allowing a client
+    // value to flow through would let callers spoof the "original URL" seen by
+    // user workers that trust the header.
+    if (request.headers.has('X-Void-Original-URL')) {
+      request = rebuildRequest(request, request.url, (h) => h.delete('X-Void-Original-URL'));
+    }
+    let pathname = url.pathname;
     let requestType: RequestType =
       request.headers.get('upgrade')?.toLowerCase() === 'websocket' ? 'websocket' : 'static';
 
@@ -238,24 +399,62 @@ export default {
         );
       }
       const res = new Response(response.body, response);
+      res.headers.delete('X-Void-No-Match');
       res.headers.set('X-Hosted-By', 'void.cloud');
       return res;
     };
 
-    // Redirect rules — short-circuit before any worker invocation
+    // Routing rules — redirects short-circuit, rewrites modify pathname
+    // Two distinct values flow out of a rewrite:
+    //   - `originalUrlVariant`: feeds the ISR variant key. Normalized via
+    //     `routing.queryAllowlist` so an attacker can't fan out cache slots
+    //     by varying `?utm`/`?cb`/etc.
+    //   - `originalUrlHeader`: the X-Void-Original-URL surfaced to user
+    //     workers for `c.originalUrl()`. Carries the full request URL —
+    //     user code expects to see the actual URL the client sent.
+    let originalUrlVariant: string | undefined;
+    let originalUrlHeader: string | undefined;
     if (routing.redirectRules?.length) {
-      const redirect = applyRedirectRules(pathname, routing.redirectRules);
-      if (redirect) {
-        return meter(redirect);
+      const result = applyRoutingRules(pathname, routing.redirectRules);
+      if (result?.type === 'redirect') {
+        const location = mergeQueryIntoLocation(result.destination, url.search);
+        return meter(
+          new Response(null, { status: result.status, headers: { Location: location } }),
+        );
       }
+      if (result?.type === 'rewrite') {
+        // Destination shape (path-absolute, no `//`, no `?`) is enforced by
+        // the framework validator and re-checked by the API on manifest ingest
+        // (see `packages/api/src/routes/deploy.ts`). Dispatch trusts those two
+        // gates and does not re-validate here.
+        originalUrlHeader = request.url;
+        originalUrlVariant = buildVariantOriginalUrl(request.url, pathname, routing.queryAllowlist);
+        pathname = result.destination;
+        url.pathname = pathname;
+      }
+    }
+
+    // If rewritten, build the request the worker + ISR should see (rewritten
+    // URL + original-URL header).
+    let workerRequest = request;
+    if (originalUrlHeader) {
+      workerRequest = rebuildRequest(request, url.toString(), (h) =>
+        h.set('X-Void-Original-URL', originalUrlHeader),
+      );
     }
 
     // Edge-cache hashed static assets (immutable, content-addressed URLs)
     if (request.method === 'GET' && routing.hashedAssetsPrefix) {
       const prefix = '/' + routing.hashedAssetsPrefix + '/';
       if (pathname.startsWith(prefix)) {
-        // Normalize cache key: strip query strings — hashed filenames are content-addressed
-        const cacheUrl = new URL(request.url);
+        // Cache key tracks the post-rewrite (hash-bearing) URL, not the
+        // request URL: hashed entries are stored with a 1-year immutable
+        // Cache-Control, so a redirect rule that maps a stable path like
+        // /logo to /assets/logo-<hash>.png must not cache content under
+        // /logo — a future deploy that points /logo at a different hash
+        // would keep serving the stale entry. Strip query: hashed
+        // filenames are already content-addressed by their pathname.
+        const cacheUrl = new URL(url.toString());
         cacheUrl.search = '';
         const cacheKey = new Request(cacheUrl.toString());
 
@@ -285,20 +484,17 @@ export default {
         }
         try {
           const worker = getWorker(env, routing);
-          let response = await worker.fetch(request);
+          let response = await worker.fetch(workerRequest);
           // Safety net for CF asset dedupe poisoning (WC-4511). See
           // meta/design-docs/0066. Detection only triggers on the CF
           // stub's fingerprint; all other responses stream through.
-          if (routing.assetManifestId && isLikelyCfAssetStub(response)) {
-            const body = await response.clone().text();
-            if (body.includes(CF_ASSETS_STUB_MARKER)) {
-              const fallback = await serveWfpAssetFallback(env, routing, pathname);
-              if (fallback) {
-                logWfpAssetFallback(routing, pathname, request.headers.get('user-agent'));
-                response = fallback;
-              }
-            }
-          }
+          response = await maybeServeWfpAssetFallback({
+            env,
+            routing,
+            pathname,
+            response,
+            userAgent: request.headers.get('user-agent'),
+          });
           if (response.ok) {
             const res = new Response(response.body, response);
             res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
@@ -324,10 +520,21 @@ export default {
         const isPagesRequest = request.headers.has('X-VoidPages');
         const isrDeploymentId = routing.version ?? 'legacy';
         const cache = caches.default;
+        const isrOriginalUrlVariant = buildFallbackOriginalUrlVariant(
+          request.url,
+          pathname,
+          routing,
+          originalUrlVariant,
+        );
 
         // Pages protocol: check JSON edge cache, fall through on miss
         if (isPagesRequest) {
-          const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname, isrDeploymentId);
+          const jsonCacheKey = isrEdgeCacheKeyJson(
+            request,
+            pathname,
+            isrDeploymentId,
+            isrOriginalUrlVariant,
+          );
           const jsonCached = await cache.match(jsonCacheKey);
           if (jsonCached) {
             requestType = 'isr';
@@ -336,8 +543,18 @@ export default {
           // Miss — fall through to general dispatch (worker returns JSON for X-VoidPages)
         } else {
           // HTML path: Edge → R2 → Worker
-          const cacheKey = isrEdgeCacheKey(request, pathname, isrDeploymentId);
-          const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname, isrDeploymentId);
+          const cacheKey = isrEdgeCacheKey(
+            request,
+            pathname,
+            isrDeploymentId,
+            isrOriginalUrlVariant,
+          );
+          const jsonCacheKey = isrEdgeCacheKeyJson(
+            request,
+            pathname,
+            isrDeploymentId,
+            isrOriginalUrlVariant,
+          );
 
           // L1: Edge cache (per-colo)
           const edgeCached = await cache.match(cacheKey);
@@ -347,7 +564,13 @@ export default {
           }
 
           // L2: R2 (global)
-          const cached = await readIsrCache(env, routing.projectId, isrDeploymentId, pathname);
+          const cached = await readIsrCache(
+            env,
+            routing.projectId,
+            isrDeploymentId,
+            pathname,
+            isrOriginalUrlVariant,
+          );
           if (cached) {
             const stale = isStale(cached);
             if (stale) {
@@ -355,11 +578,12 @@ export default {
                 revalidateInBackground(
                   env,
                   routing,
-                  request,
+                  workerRequest,
                   pathname,
                   isrTtl,
                   cacheKey,
                   jsonCacheKey,
+                  isrOriginalUrlVariant,
                 ),
               );
             }
@@ -372,13 +596,47 @@ export default {
           // Cache miss: render via worker, cache in background
           requestType = 'isr';
           const worker = getWorker(env, routing);
-          const workerResponse = await worker.fetch(request);
+          let workerResponse = await worker.fetch(workerRequest);
+          const cachePathname = pathname;
+          const cacheOriginalUrlVariant = isrOriginalUrlVariant;
+          const cacheKeyForWrite = cacheKey;
+          const jsonCacheKeyForWrite = jsonCacheKey;
+          const fallbackResult = await applyWorkerFallbackRules({
+            response: workerResponse,
+            worker,
+            dispatchReq: workerRequest,
+            routing,
+            pathname,
+            url,
+            originalRequestUrl: request.url,
+            originalUrlHeader,
+            originalUrlVariant: isrOriginalUrlVariant,
+          });
+          if (fallbackResult.applied) {
+            workerResponse = await maybeServeWfpAssetFallback({
+              env,
+              routing,
+              pathname: fallbackResult.pathname,
+              response: fallbackResult.response,
+              userAgent: request.headers.get('user-agent'),
+            });
+          }
           const ttl = resolveRevalidateTtl(workerResponse, isrTtl);
           if (ttl > 0 && workerResponse.ok) {
             ctx.waitUntil(
-              writeIsrCache(env, routing.projectId, isrDeploymentId, pathname, workerResponse, ttl),
+              writeIsrCache(
+                env,
+                routing.projectId,
+                isrDeploymentId,
+                cachePathname,
+                workerResponse,
+                ttl,
+                cacheOriginalUrlVariant,
+              ),
             );
-            ctx.waitUntil(populateJsonEdgeCache(cache, jsonCacheKey, workerResponse, ttl, 'MISS'));
+            ctx.waitUntil(
+              populateJsonEdgeCache(cache, jsonCacheKeyForWrite, workerResponse, ttl, 'MISS'),
+            );
             const cacheHeaders = new Headers(workerResponse.headers);
             cacheHeaders.set(
               'Cache-Control',
@@ -391,7 +649,7 @@ export default {
               status: workerResponse.status,
               headers: cacheHeaders,
             });
-            ctx.waitUntil(cache.put(cacheKey, cacheResponse.clone()));
+            ctx.waitUntil(cache.put(cacheKeyForWrite, cacheResponse.clone()));
 
             const clientHeaders = new Headers(cacheHeaders);
             clientHeaders.set('Cache-Control', CLIENT_REVALIDATE_CACHE_CONTROL);
@@ -436,7 +694,28 @@ export default {
       const assetManifest: Record<string, string> = JSON.parse(manifestRaw);
       const assetConfig: AssetConfig = routing.assetConfig ?? {};
 
-      const resolved = resolveStaticPath(pathname, assetManifest, assetConfig);
+      // Capture pathname before the fallback rewrite potentially mutates it.
+      // The edge cache must be keyed on the path seen here (what the client
+      // requested, post any pre-asset rewrites), not the rewrite target —
+      // otherwise future requests to this path miss the cache entry.
+      const fallbackOriginPathname = pathname;
+      let resolved = resolveStaticPath(pathname, assetManifest, assetConfig);
+
+      // Fallback rules — fire only when nothing matched in static resolution.
+      // Single-pass: re-resolve with rewritten path, no further fallbacks.
+      // `fallbackRules` are status-200-only (enforced at API ingest), so
+      // `applyRoutingRules` only ever yields `type: 'rewrite'` here.
+      if (!resolved && routing.fallbackRules?.length) {
+        const fallback = applyRoutingRules(pathname, routing.fallbackRules);
+        if (fallback?.type === 'rewrite') {
+          // Same trust model as the redirectRules rewrite above — framework +
+          // API both validate destination shape before the manifest lands here.
+          pathname = fallback.destination;
+          url.pathname = pathname;
+          resolved = resolveStaticPath(pathname, assetManifest, assetConfig);
+        }
+      }
+
       if (!resolved) {
         return meter(createErrorResponse(request, 404, 'Not Found'));
       }
@@ -467,11 +746,13 @@ export default {
       });
       const finalRes = applyHeaderRules(response, pathname, routing.headerRules);
 
-      // Populate edge cache (same pattern as existing deploy-versioned static cache)
+      // Populate edge cache (same pattern as existing deploy-versioned static cache).
+      // Key on the ORIGINAL pathname the client requested, not the post-fallback
+      // rewrite target — otherwise future requests to the original path miss.
       const edgeCacheKey =
         staticCacheKey ??
         (request.method === 'GET'
-          ? new Request(`${url.origin}${pathname}?_v=${routing.staticDeploymentId}`)
+          ? new Request(`${url.origin}${fallbackOriginPathname}?_v=${routing.staticDeploymentId}`)
           : undefined);
       if (edgeCacheKey && status === 200) {
         const cached = new Response(finalRes.clone().body, finalRes);
@@ -488,27 +769,59 @@ export default {
     // Dispatch to user worker — CF handles static assets transparently
     const worker = getWorker(env, routing);
     try {
-      let dispatchReq = request;
-      if (request.bodyUsed) {
-        const headers = new Headers(request.headers);
-        headers.delete('content-length');
-        headers.delete('transfer-encoding');
-        dispatchReq = new Request(request.url, { method: request.method, headers });
+      let dispatchReq = workerRequest;
+      if (dispatchReq.bodyUsed) {
+        dispatchReq = rebuildRequest(dispatchReq, dispatchReq.url, () => {});
       }
+      // If a worker-backed fallbackRule could fire on a 404, the inner
+      // re-dispatch needs the original body — but `worker.fetch` consumes
+      // the body stream and `rebuildRequest` on a `bodyUsed` request drops
+      // it (silently). Clone here so the fallback path has a replayable
+      // copy. `Request.clone()` tees the stream on CF Workers. Skip the
+      // clone when there are no fallback rules or the method has no body
+      // (GET/HEAD) — the common case stays free.
+      const hasBodyMethod = dispatchReq.method !== 'GET' && dispatchReq.method !== 'HEAD';
+      const dispatchReqForFallback =
+        hasBodyMethod && routing.fallbackRules?.length ? dispatchReq.clone() : dispatchReq;
       let response = await worker.fetch(dispatchReq);
 
       // Safety net for CF asset dedupe poisoning (WC-4511). See
       // meta/design-docs/0066. Pre-check gates body read so non-asset
       // responses stream through untouched.
-      if (routing.assetManifestId && isLikelyCfAssetStub(response)) {
-        const body = await response.clone().text();
-        if (body.includes(CF_ASSETS_STUB_MARKER)) {
-          const fallback = await serveWfpAssetFallback(env, routing, pathname);
-          if (fallback) {
-            logWfpAssetFallback(routing, pathname, request.headers.get('user-agent'));
-            response = fallback;
-          }
-        }
+      response = await maybeServeWfpAssetFallback({
+        env,
+        routing,
+        pathname,
+        response,
+        userAgent: request.headers.get('user-agent'),
+      });
+
+      // routing.fallbackRules — for static deployments these fire post-asset
+      // (line ~533). The user worker is the equivalent path resolver here, so
+      // a 404 is the analogue of a static-asset miss. Single-pass: the
+      // rewrite target's response is returned as-is even if it's also 404.
+      const fallbackResult = await applyWorkerFallbackRules({
+        response,
+        worker,
+        dispatchReq: dispatchReqForFallback,
+        routing,
+        pathname,
+        url,
+        originalRequestUrl: request.url,
+        originalUrlHeader,
+        originalUrlVariant,
+      });
+      if (fallbackResult.applied) {
+        pathname = fallbackResult.pathname;
+        url.pathname = pathname;
+        originalUrlVariant = fallbackResult.originalUrlVariant;
+        response = await maybeServeWfpAssetFallback({
+          env,
+          routing,
+          pathname,
+          response: fallbackResult.response,
+          userAgent: request.headers.get('user-agent'),
+        });
       }
 
       // Cache static asset at edge if eligible
@@ -546,9 +859,22 @@ export default {
         if (isrTtl > 0 && response.ok && requestType === 'ssr') {
           const isrDeploymentId = routing.version ?? 'legacy';
           ctx.waitUntil(
-            writeIsrCache(env, routing.projectId, isrDeploymentId, pathname, response, isrTtl),
+            writeIsrCache(
+              env,
+              routing.projectId,
+              isrDeploymentId,
+              pathname,
+              response,
+              isrTtl,
+              originalUrlVariant,
+            ),
           );
-          const jsonCacheKey = isrEdgeCacheKeyJson(request, pathname, isrDeploymentId);
+          const jsonCacheKey = isrEdgeCacheKeyJson(
+            request,
+            pathname,
+            isrDeploymentId,
+            originalUrlVariant,
+          );
           ctx.waitUntil(
             populateJsonEdgeCache(caches.default, jsonCacheKey, response, isrTtl, 'MISS'),
           );
@@ -782,17 +1108,34 @@ async function revalidateInBackground(
   defaultTtl: number,
   cacheKey: Request,
   jsonCacheKey: Request,
+  originalUrl?: string | null,
 ): Promise<void> {
   try {
     const worker = getWorker(env, routing);
-    // Strip X-VoidPages so the worker always returns HTML
-    const cleanHeaders = new Headers(request.headers);
-    cleanHeaders.delete('X-VoidPages');
-    const cleanRequest = new Request(request.url, {
-      method: request.method,
-      headers: cleanHeaders,
+    // Strip X-VoidPages so the worker always returns HTML.
+    // Use rebuildRequest so request.cf (country/colo/botManagement/tlsClientAuth)
+    // survives the rebuild — otherwise the background re-render runs with
+    // cf === undefined and writes wrong-geo/wrong-bot HTML into the ISR cache.
+    const cleanRequest = rebuildRequest(request, request.url, (h) => h.delete('X-VoidPages'));
+    let response = await worker.fetch(cleanRequest);
+    const fallbackResult = await applyWorkerFallbackRules({
+      response,
+      worker,
+      dispatchReq: cleanRequest,
+      routing,
+      pathname,
+      url: new URL(cleanRequest.url),
+      originalRequestUrl: request.url,
+      originalUrlHeader: request.headers.get('X-Void-Original-URL') ?? undefined,
+      originalUrlVariant: originalUrl ?? undefined,
     });
-    const response = await worker.fetch(cleanRequest);
+    response = await maybeServeWfpAssetFallback({
+      env,
+      routing,
+      pathname: fallbackResult.pathname,
+      response: fallbackResult.response,
+      userAgent: request.headers.get('user-agent'),
+    });
     const ttl = resolveRevalidateTtl(response, defaultTtl);
     const cache = caches.default;
     if (ttl > 0 && response.ok) {
@@ -803,6 +1146,7 @@ async function revalidateInBackground(
         pathname,
         response,
         ttl,
+        originalUrl,
       );
       // Update HTML edge cache with fresh response
       const headers = new Headers(response.headers);
@@ -820,7 +1164,13 @@ async function revalidateInBackground(
       await populateJsonEdgeCache(cache, jsonCacheKey, response, ttl, 'HIT');
     } else if (ttl === 0) {
       // Worker permanently opted out — remove stale R2 + edge entries + JSON edge
-      await deleteIsrCache(env, routing.projectId, routing.version ?? 'legacy', pathname);
+      await deleteIsrCache(
+        env,
+        routing.projectId,
+        routing.version ?? 'legacy',
+        pathname,
+        originalUrl,
+      );
       await cache.delete(cacheKey);
       await cache.delete(jsonCacheKey);
     }

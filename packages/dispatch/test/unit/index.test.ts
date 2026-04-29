@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../src/env';
-import app from '../../src/index';
+import app, { rebuildRequest } from '../../src/index';
 
 // Mock caches.default (CF edge cache) with a Map-backed store.
 // Uses full URL as key — callers (isrEdgeCacheKey, hashed asset code) already normalize.
@@ -38,6 +38,7 @@ interface RoutingEntry {
   staticDeploymentId?: string;
   headerRules?: Array<{ pattern: string; headers: Array<[string, string]> }>;
   redirectRules?: Array<{ source: string; destination: string; status: number }>;
+  queryAllowlist?: Record<string, Array<string>>;
 }
 
 function createCtx(): ExecutionContext {
@@ -123,6 +124,16 @@ function createEnv(options: {
       },
       delete: async (key: string) => {
         kvStore.delete(key);
+      },
+      list: async (opts: { prefix: string; limit?: number }) => {
+        const all = [...kvStore.keys()].filter((k) => k.startsWith(opts.prefix)).sort();
+        const limit = opts.limit ?? 1000;
+        const slice = all.slice(0, limit);
+        return {
+          keys: slice.map((name) => ({ name })),
+          list_complete: slice.length === all.length,
+          cursor: '',
+        };
       },
     },
     ANALYTICS: {
@@ -226,6 +237,96 @@ describe('dispatch fetch handler', () => {
     expect(forwarded.headers.has('content-length')).toBe(false);
     expect(forwarded.headers.has('transfer-encoding')).toBe(false);
     expect(await response.text()).toBe('ok');
+  });
+});
+
+/**
+ * `request.cf` (country, colo, botManagement, tlsClientAuth, …) is populated
+ * by the CF edge and is what user workers read for geolocation, bot scoring,
+ * and mTLS info. Plain `new Request(url, { method, headers, body })` drops it
+ * — we have to thread it through `cf:` in init when we rebuild.
+ *
+ * Node's `Request` doesn't accept `cf` in init, so we can't observe it on the
+ * resulting Request directly. Instead we wrap `globalThis.Request` and assert
+ * the constructor receives `cf` in its init bag.
+ */
+describe('rebuildRequest preserves request.cf', () => {
+  let RequestCalls: Array<{ url: unknown; init: RequestInit | undefined }>;
+  const OriginalRequest = globalThis.Request;
+
+  beforeEach(() => {
+    RequestCalls = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).Request = class extends OriginalRequest {
+      constructor(input: RequestInfo | URL, init?: RequestInit) {
+        // Strip `cf` before delegating — Node would otherwise reject it. We
+        // record the original init for assertion.
+        RequestCalls.push({ url: input, init });
+        const cleaned = init ? { ...init } : undefined;
+        if (cleaned && 'cf' in cleaned) {
+          delete (cleaned as { cf?: unknown }).cf;
+        }
+        super(input, cleaned);
+      }
+    };
+  });
+
+  afterEach(() => {
+    globalThis.Request = OriginalRequest;
+  });
+
+  function withCf<T extends Request>(req: T, cf: unknown): T {
+    Object.defineProperty(req, 'cf', { value: cf, configurable: true, enumerable: true });
+    return req;
+  }
+
+  it('forwards cf when rebuilding a GET (no body)', () => {
+    const cf = { country: 'US', colo: 'SFO', botManagement: { score: 99 } };
+    const src = withCf(new OriginalRequest('https://my-app.void.app/old'), cf);
+
+    const out = rebuildRequest(src, 'https://my-app.void.app/new', () => {});
+
+    expect(out).toBeInstanceOf(OriginalRequest);
+    // The last constructor invocation is the rebuilt request.
+    const last = RequestCalls.at(-1)!;
+    expect(last.url).toBe('https://my-app.void.app/new');
+    expect((last.init as { cf?: unknown } | undefined)?.cf).toBe(cf);
+  });
+
+  it('forwards cf when rebuilding a POST with streaming body', () => {
+    const cf = { country: 'DE' };
+    const src = withCf(
+      new OriginalRequest('https://my-app.void.app/x', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'payload',
+      }),
+      cf,
+    );
+
+    rebuildRequest(src, 'https://my-app.void.app/y', () => {});
+
+    const last = RequestCalls.at(-1)!;
+    expect((last.init as { cf?: unknown } | undefined)?.cf).toBe(cf);
+  });
+
+  it('forwards cf when the body is already consumed (drop-body branch)', async () => {
+    const cf = { country: 'JP' };
+    const src = withCf(
+      new OriginalRequest('https://my-app.void.app/x', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'payload',
+      }),
+      cf,
+    );
+    await src.text();
+    expect(src.bodyUsed).toBe(true);
+
+    rebuildRequest(src, 'https://my-app.void.app/y', () => {});
+
+    const last = RequestCalls.at(-1)!;
+    expect((last.init as { cf?: unknown } | undefined)?.cf).toBe(cf);
   });
 });
 
@@ -628,6 +729,149 @@ describe('ISR (stale-while-revalidate)', () => {
     const edgeCached = edgeCacheStore.get('https://my-app.void.app/dashboard?__void_isr=legacy');
     expect(edgeCached).toBeDefined();
     expect(edgeCached!.headers.get('Cache-Control')).toContain('s-maxage=');
+  });
+
+  // User code can branch on `c.isRewritten()` / `c.originalUrl()`, so the ISR
+  // cache must not conflate a direct hit to `/en/docs` with a request that
+  // was rewritten from `/docs`. Both cache layers (edge URL + KV key) key
+  // on the original-URL value so the two variants live in distinct slots.
+  it('isolates ISR edge cache between direct and rewritten requests to the same path', async () => {
+    // First request: direct hit to /en/docs. Seed only the direct-hit edge
+    // cache entry for /en/docs; the rewritten request should miss it.
+    edgeCacheStore.set(
+      'https://my-app.void.app/en/docs?__void_isr=legacy',
+      new Response('<html>direct</html>', {
+        headers: { 'x-isr-cache': 'HIT', 'Content-Type': 'text/html' },
+      }),
+    );
+
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+        redirectRules: [{ source: '/docs', destination: '/en/docs', status: 200 }],
+      },
+      workerResponse: new Response('<html>rewritten-render</html>', {
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+
+    const direct = await app.fetch(
+      new Request('https://my-app.void.app/en/docs'),
+      env,
+      createCtx(),
+    );
+    expect(direct.headers.get('x-isr-cache')).toBe('HIT');
+    expect(await direct.text()).toBe('<html>direct</html>');
+
+    const rewritten = await app.fetch(
+      new Request('https://my-app.void.app/docs'),
+      env,
+      createCtx(),
+    );
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(rewritten.headers.get('x-isr-cache')).toBe('MISS');
+    expect(await rewritten.text()).toBe('<html>rewritten-render</html>');
+  });
+
+  // The variant key is derived from the original request URL on a rewrite.
+  // Without query normalization, varying any param fans out KV slots and
+  // forces re-renders. The default behavior (no allowlist) drops every
+  // param so the cache slot is shared across all incoming queries.
+  it('collapses all query strings into one ISR variant slot when no queryAllowlist is configured', async () => {
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+        redirectRules: [{ source: '/*', destination: '/en/:splat', status: 200 }],
+      },
+      workerResponse: new Response('<html>x</html>', {
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+
+    for (let i = 0; i < 3; i++) {
+      const ctx = createCtx();
+      await app.fetch(new Request(`https://my-app.void.app/docs?cb=${i}`), env, ctx);
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    }
+
+    // First request renders + writes; subsequent requests hit the same KV
+    // slot regardless of `?cb=` value, so the worker is invoked exactly once.
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+    const variantKeys = [...kvStore.keys()].filter((k) => k.includes('#rw='));
+    expect(variantKeys).toHaveLength(1);
+  });
+
+  it('keeps allowlisted query params in the variant key (distinct slots per value)', async () => {
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+        redirectRules: [{ source: '/*', destination: '/en/:splat', status: 200 }],
+        queryAllowlist: { '/search': ['q'] },
+      },
+      workerResponse: new Response('<html>x</html>', {
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+
+    const send = async (url: string) => {
+      const ctx = createCtx();
+      await app.fetch(new Request(url), env, ctx);
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    };
+
+    await send('https://my-app.void.app/search?q=void&cb=1');
+    await send('https://my-app.void.app/search?q=void&cb=2'); // different cb → same slot (cb dropped)
+    await send('https://my-app.void.app/search?q=cloud'); // different q → new slot
+
+    // Three requests, two distinct cache slots, two worker invocations.
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+    const variantKeys = [...kvStore.keys()].filter((k) => k.includes('#rw='));
+    expect(variantKeys).toHaveLength(2);
+  });
+
+  it('isolates ISR KV keys between direct and rewritten requests to the same path', async () => {
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+        redirectRules: [{ source: '/docs', destination: '/en/docs', status: 200 }],
+      },
+      workerResponse: new Response('<html>rendered</html>', {
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+
+    const directCtx = createCtx();
+    await app.fetch(new Request('https://my-app.void.app/en/docs'), env, directCtx);
+    await Promise.all(
+      (directCtx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]),
+    );
+
+    const rewriteCtx = createCtx();
+    await app.fetch(new Request('https://my-app.void.app/docs'), env, rewriteCtx);
+    await Promise.all(
+      (rewriteCtx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]),
+    );
+
+    // Worker invoked once per request — neither saw a cached entry written by
+    // the other, because the KV keys carry a rewrite-variant suffix.
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+
+    const keys = [...kvStore.keys()].sort();
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe('proj_1/isr/v2/legacy/en/docs');
+    expect(keys[1]!.startsWith('proj_1/isr/v2/legacy/en/docs#rw=')).toBe(true);
   });
 });
 
@@ -1147,6 +1391,30 @@ describe('hashed asset caching', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
     expect(workerFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keys cache on post-rewrite hashed URL when a redirect rule rewrites into the hashed prefix', async () => {
+    // Hashed assets are cached `immutable` for a year. The cache key must
+    // track the post-rewrite (hash-bearing) URL, not the source URL — a
+    // future deploy that maps /logo to a different hash would otherwise
+    // keep serving the stale entry under /logo.
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      hashedAssetsPrefix: 'assets',
+      redirectRules: [{ source: '/logo', destination: '/assets/logo-abc123.png', status: 200 }],
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response('asset-body') });
+    const ctx = createCtx();
+
+    const res = await app.fetch(new Request('https://test.void.app/logo'), env, ctx);
+    expect(res.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    expect(edgeCacheStore.has('https://test.void.app/assets/logo-abc123.png')).toBe(true);
+    expect(edgeCacheStore.has('https://test.void.app/logo')).toBe(false);
   });
 
   it('normalizes query strings for cache key', async () => {
@@ -1675,6 +1943,389 @@ describe('redirect rules', () => {
     expect(response.status).toBe(301);
     expect(response.headers.get('Location')).toBe('/posts/hello-world');
     expect(workerFetch).not.toHaveBeenCalled();
+  });
+
+  it('redirects with named :slug captures', async () => {
+    const { env } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [{ source: '/blog/:slug', destination: '/articles/:slug', status: 301 }],
+      },
+    });
+
+    const response = await app.fetch(
+      new Request('https://test.void.app/blog/hello'),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(301);
+    expect(response.headers.get('Location')).toBe('/articles/hello');
+  });
+
+  it('preserves the request query string in the Location header', async () => {
+    const { env } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [{ source: '/old', destination: '/new', status: 301 }],
+      },
+    });
+
+    const response = await app.fetch(
+      new Request('https://test.void.app/old?utm_source=email&id=42'),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(301);
+    expect(response.headers.get('Location')).toBe('/new?utm_source=email&id=42');
+  });
+
+  it('destination query takes precedence over request query on conflict', async () => {
+    const { env } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [{ source: '/old', destination: '/new?ref=internal', status: 302 }],
+      },
+    });
+
+    const response = await app.fetch(
+      new Request('https://test.void.app/old?ref=external&utm=x'),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get('Location')).toBe('/new?ref=internal&utm=x');
+  });
+});
+
+describe('rewrite rules', () => {
+  it('rewrites path and forwards to worker', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [{ source: '/docs', destination: '/en/docs', status: 200 }],
+      },
+      workerResponse: new Response('rewritten content'),
+    });
+
+    const response = await app.fetch(new Request('https://test.void.app/docs'), env, createCtx());
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('rewritten content');
+    expect(response.headers.has('Location')).toBe(false);
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    expect(new URL(forwarded.url).pathname).toBe('/en/docs');
+  });
+
+  it('rewrites with :splat substitution', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [{ source: '/docs/*', destination: '/en/docs/:splat', status: 200 }],
+      },
+      workerResponse: new Response('ok'),
+    });
+
+    const response = await app.fetch(
+      new Request('https://test.void.app/docs/getting-started'),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    expect(new URL(forwarded.url).pathname).toBe('/en/docs/getting-started');
+  });
+
+  it('rewrites with named :author/:slug captures', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [
+          { source: '/blog/:author/:slug', destination: '/posts/:author/:slug', status: 200 },
+        ],
+      },
+      workerResponse: new Response('ok'),
+    });
+
+    const response = await app.fetch(
+      new Request('https://test.void.app/blog/jane/first-post'),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    expect(new URL(forwarded.url).pathname).toBe('/posts/jane/first-post');
+  });
+
+  it('sets X-Void-Original-URL header on rewritten requests', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [{ source: '/docs', destination: '/en/docs', status: 200 }],
+      },
+      workerResponse: new Response('ok'),
+    });
+
+    const response = await app.fetch(new Request('https://test.void.app/docs'), env, createCtx());
+
+    expect(response.status).toBe(200);
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    expect(forwarded.headers.get('X-Void-Original-URL')).toBe('https://test.void.app/docs');
+  });
+
+  it('preserves query string on rewritten requests', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [{ source: '/docs', destination: '/en/docs', status: 200 }],
+      },
+      workerResponse: new Response('ok'),
+    });
+
+    const response = await app.fetch(
+      new Request('https://test.void.app/docs?lang=en'),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwardedUrl = new URL(forwarded.url);
+    expect(forwardedUrl.pathname).toBe('/en/docs');
+    expect(forwardedUrl.search).toBe('?lang=en');
+  });
+
+  it('does not rewrite non-matching paths', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [{ source: '/docs', destination: '/en/docs', status: 200 }],
+      },
+      workerResponse: new Response('ok'),
+    });
+
+    const response = await app.fetch(new Request('https://test.void.app/other'), env, createCtx());
+
+    expect(response.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    expect(new URL(forwarded.url).pathname).toBe('/other');
+    expect(forwarded.headers.has('X-Void-Original-URL')).toBe(false);
+  });
+
+  it('rewrite wins over redirect when it is the last match', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [
+          { source: '/page', destination: '/other', status: 302 },
+          { source: '/page', destination: '/en/page', status: 200 },
+        ],
+      },
+      workerResponse: new Response('rewritten'),
+    });
+
+    const response = await app.fetch(new Request('https://test.void.app/page'), env, createCtx());
+
+    expect(response.status).toBe(200);
+    expect(response.headers.has('Location')).toBe(false);
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    expect(new URL(forwarded.url).pathname).toBe('/en/page');
+  });
+
+  // ISR miss must render against the rewritten URL, otherwise content for /docs
+  // gets cached under the /en/docs key.
+  it('dispatches ISR miss to worker with rewritten URL', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+        redirectRules: [{ source: '/docs', destination: '/en/docs', status: 200 }],
+      },
+      workerResponse: new Response('<html>rewritten</html>', {
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+
+    const response = await app.fetch(new Request('https://my-app.void.app/docs'), env, createCtx());
+
+    expect(response.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledOnce();
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    expect(new URL(forwarded.url).pathname).toBe('/en/docs');
+    expect(forwarded.headers.get('X-Void-Original-URL')).toBe('https://my-app.void.app/docs');
+  });
+
+  // Dispatch owns X-Void-Original-URL. A client-supplied value on a request
+  // with no matching rewrite must not leak through to the user worker —
+  // otherwise a non-Void worker that trusts the header could be spoofed.
+  it('strips client-supplied X-Void-Original-URL when no rewrite fires', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+      },
+      workerResponse: new Response('ok'),
+    });
+
+    const response = await app.fetch(
+      new Request('https://test.void.app/plain', {
+        headers: { 'X-Void-Original-URL': 'https://evil/attacker' },
+      }),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledOnce();
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    expect(forwarded.headers.has('X-Void-Original-URL')).toBe(false);
+  });
+
+  // On a rewrite, dispatch must overwrite any client value with the true
+  // original URL, not concatenate or pass the spoofed value through.
+  it('overrides client-supplied X-Void-Original-URL with the true original URL on rewrite', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [{ source: '/docs', destination: '/en/docs', status: 200 }],
+      },
+      workerResponse: new Response('ok'),
+    });
+
+    const response = await app.fetch(
+      new Request('https://test.void.app/docs', {
+        headers: { 'X-Void-Original-URL': 'https://evil/attacker' },
+      }),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    expect(forwarded.headers.get('X-Void-Original-URL')).toBe('https://test.void.app/docs');
+  });
+
+  // Pin the full original URL (including query) on the X-Void-Original-URL
+  // header after a 200-status redirectRule rewrite — not just its presence.
+  it('sets X-Void-Original-URL to the full original URL (with query) on redirectRules rewrite', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [{ source: '/old', destination: '/new', status: 200 }],
+      },
+      workerResponse: new Response('ok'),
+    });
+
+    const originalUrl = 'https://test.void.app/old?ref=email';
+    const response = await app.fetch(new Request(originalUrl), env, createCtx());
+
+    expect(response.status).toBe(200);
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    expect(new URL(forwarded.url).pathname).toBe('/new');
+    expect(forwarded.headers.get('X-Void-Original-URL')).toBe(originalUrl);
+  });
+
+  // When the inbound body is already consumed (e.g. middleware upstream of
+  // dispatch drained it), the rewrite-request builder must: avoid throwing
+  // in the Request ctor; forward no body; strip content-length and
+  // transfer-encoding so the downstream worker doesn't see stale framing;
+  // and still set X-Void-Original-URL on the rewritten URL.
+  it('forwards a body-less rewrite request with X-Void-Original-URL when POST body is consumed', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [{ source: '/submit', destination: '/en/submit', status: 200 }],
+      },
+      workerResponse: new Response('ok'),
+    });
+
+    const originalUrl = 'https://test.void.app/submit';
+    const inbound = new Request(originalUrl, { method: 'POST', body: 'payload' });
+    await inbound.text(); // disturb the stream — bodyUsed becomes true
+    expect(inbound.bodyUsed).toBe(true);
+
+    const response = await app.fetch(inbound, env, createCtx());
+    expect(response.status).toBe(200);
+
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    expect(forwarded.method).toBe('POST');
+    expect(forwarded.body).toBeNull();
+    expect(forwarded.headers.has('content-length')).toBe(false);
+    expect(forwarded.headers.has('transfer-encoding')).toBe(false);
+    expect(forwarded.headers.get('X-Void-Original-URL')).toBe(originalUrl);
+    expect(new URL(forwarded.url).pathname).toBe('/en/submit');
+  });
+
+  // The `createEnv` helper returns the same routing entry for any KV key, which
+  // hides the `slug ?? domain:${hostname}` branch in dispatch. This test builds
+  // ROUTING manually so the rewrite path is exercised against a custom-domain
+  // routing entry (the `domain:` KV key path) rather than a slug lookup.
+  it('applies rewrite rules on a custom-domain request (domain: KV key path)', async () => {
+    const workerFetch = vi.fn(async (_req: Request) => new Response('rewritten'));
+    const routingLookups: Array<string> = [];
+    const routing: RoutingEntry = {
+      workerName: 'user-app',
+      projectId: 'proj_custom',
+      redirectRules: [{ source: '/docs/*', destination: '/en/docs/:splat', status: 200 }],
+    };
+
+    const env = {
+      ROUTING: {
+        get: async (key: string) => {
+          routingLookups.push(key);
+          if (key === 'domain:app.example.com') {
+            return JSON.stringify(routing);
+          }
+          return null;
+        },
+      },
+      DISPATCH: { get: () => ({ fetch: workerFetch }) },
+      ISR_CACHE: { getWithMetadata: async () => ({ value: null, metadata: null }) },
+      ANALYTICS: { writeDataPoint: () => {} },
+    } as unknown as Env;
+
+    const originalUrl = 'https://app.example.com/docs/intro';
+    const response = await app.fetch(new Request(originalUrl), env, createCtx());
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('rewritten');
+
+    // Routing entry was looked up under the `domain:` key, not a slug.
+    expect(routingLookups).toContain('domain:app.example.com');
+    expect(routingLookups.every((k) => !k.startsWith('app'))).toBe(true);
+
+    // Rewrite applied correctly; original URL handed off to the worker.
+    expect(workerFetch).toHaveBeenCalledOnce();
+    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    expect(new URL(forwarded.url).pathname).toBe('/en/docs/intro');
+    expect(forwarded.headers.get('X-Void-Original-URL')).toBe(originalUrl);
   });
 });
 

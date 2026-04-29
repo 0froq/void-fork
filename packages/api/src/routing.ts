@@ -17,11 +17,16 @@ export function buildRoutingJson(opts: {
     workerName: opts.workerName,
     projectId: opts.projectId,
     userId: opts.userId,
+    type: manifest?.type ?? (manifest?.framework ? 'framework' : 'void'),
     ...(manifest?.ssr ? { ssr: true } : {}),
     ...(manifest?.revalidate ? { revalidate: manifest.revalidate } : {}),
     ...(manifest?.hashedAssetsPrefix ? { hashedAssetsPrefix: manifest.hashedAssetsPrefix } : {}),
     ...(manifest?.headerRules?.length ? { headerRules: manifest.headerRules } : {}),
     ...(manifest?.redirectRules?.length ? { redirectRules: manifest.redirectRules } : {}),
+    ...(manifest?.fallbackRules?.length ? { fallbackRules: manifest.fallbackRules } : {}),
+    ...(manifest?.revalidateQueryAllowlist
+      ? { queryAllowlist: manifest.revalidateQueryAllowlist }
+      : {}),
     version: opts.deploymentId,
     ...(opts.dispatchLimits ? { limits: opts.dispatchLimits } : {}),
     ...(opts.suspended ? { suspended: opts.suspended } : {}),
@@ -44,11 +49,16 @@ export function buildStaticRoutingJson(opts: {
     staticDeploymentId: opts.deploymentId,
     projectId: opts.projectId,
     userId: opts.userId,
+    type: manifest?.type ?? 'static',
     assetConfig: opts.assetConfig,
     version: opts.deploymentId,
     ...(manifest?.hashedAssetsPrefix ? { hashedAssetsPrefix: manifest.hashedAssetsPrefix } : {}),
     ...(manifest?.headerRules?.length ? { headerRules: manifest.headerRules } : {}),
     ...(manifest?.redirectRules?.length ? { redirectRules: manifest.redirectRules } : {}),
+    ...(manifest?.fallbackRules?.length ? { fallbackRules: manifest.fallbackRules } : {}),
+    ...(manifest?.revalidateQueryAllowlist
+      ? { queryAllowlist: manifest.revalidateQueryAllowlist }
+      : {}),
     ...(opts.suspended ? { suspended: opts.suspended } : {}),
   });
 }

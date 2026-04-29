@@ -46,15 +46,16 @@ interface Harness {
     assetManifestId?: string;
     assetConfig?: { not_found_handling?: 'none' | 'single-page-application' | '404-page' };
     hashedAssetsPrefix?: string;
+    fallbackRules?: Array<{ source: string; destination: string; status: number }>;
   };
   servingManifest?: Record<string, string>;
   staticAssets?: Record<string, { content: ArrayBuffer; ct?: string }>;
-  workerResponse: Response | (() => Response);
+  workerResponse: Response | ((req: Request) => Response);
 }
 
 function createEnv(h: Harness): { env: Env; workerFetch: ReturnType<typeof vi.fn> } {
-  const workerFetch = vi.fn(async () =>
-    typeof h.workerResponse === 'function' ? h.workerResponse() : h.workerResponse,
+  const workerFetch = vi.fn(async (req: Request) =>
+    typeof h.workerResponse === 'function' ? h.workerResponse(req) : h.workerResponse,
   );
   const env = {
     ROUTING: {
@@ -257,5 +258,36 @@ describe('WfP asset fallback on CF stub', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('application/javascript');
     expect(await res.text()).toBe('console.log(1)');
+  });
+
+  it('checks fallback rewrite responses for the CF asset stub before returning', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        assetManifestId: 'dep_abc',
+        fallbackRules: [{ source: '/*', destination: '/index.html', status: 200 }],
+      },
+      servingManifest: { '/index.html': 'hashhtml' },
+      staticAssets: {
+        'assets/proj_1/hashhtml': {
+          content: new TextEncoder().encode('<html>mirror</html>').buffer as ArrayBuffer,
+          ct: 'text/html',
+        },
+      },
+      workerResponse: (req) => {
+        if (new URL(req.url).pathname === '/index.html') {
+          return stubResponse();
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const res = await app.fetch(new Request('https://my-app.void.app/app/route'), env, createCtx());
+
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('text/html');
+    expect(await res.text()).toBe('<html>mirror</html>');
   });
 });

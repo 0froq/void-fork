@@ -1,3 +1,5 @@
+import { matchLiteralPattern } from './pattern';
+
 export interface HeaderRule {
   pattern: string;
   headers: Array<[string, string]>;
@@ -16,30 +18,6 @@ export interface HeaderRule {
  */
 const BLOCKED_HEADERS = new Set(['set-cookie']);
 
-const MAX_CACHE = 256;
-const regexCache = new Map<string, RegExp>();
-
-/**
- * Match a pattern against a pathname.
- * `*` matches any characters including `/`.
- */
-export function matchPattern(pattern: string, pathname: string): boolean {
-  let regex = regexCache.get(pattern);
-  if (regex) {
-    // Move to end (most recently used)
-    regexCache.delete(pattern);
-    regexCache.set(pattern, regex);
-  } else {
-    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*');
-    regex = new RegExp(`^${escaped}$`);
-    if (regexCache.size >= MAX_CACHE) {
-      regexCache.delete(regexCache.keys().next().value!);
-    }
-    regexCache.set(pattern, regex);
-  }
-  return regex.test(pathname);
-}
-
 /**
  * Apply matching header rules to a response.
  * All matching rules merge; last match wins for same header name.
@@ -56,7 +34,7 @@ export function applyHeaderRules(
 
   const matched: Array<[string, string]> = [];
   for (const rule of rules) {
-    if (matchPattern(rule.pattern, pathname)) {
+    if (matchLiteralPattern(rule.pattern, pathname)) {
       matched.push(...rule.headers);
     }
   }

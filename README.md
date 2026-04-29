@@ -159,24 +159,24 @@ Void is split across two codebases in this repo:
 
 ### Where Code for X Lives
 
-| Feature                                                                   | Primary code paths                                                                                                                                |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vite plugin and local runtime                                             | `framework/packages/void/src/index.ts`, `plugin-*`, `runtime/*`                                                                                   |
-| CLI commands                                                              | `framework/packages/void/src/cli/*`                                                                                                               |
-| File-based API routing                                                    | `framework/packages/void/src/router/*`, `runtime/handler.ts`                                                                                      |
-| Pages routing, loaders, actions, named actions, deferred props            | `framework/packages/void/src/pages/*`, adapter runtimes in `framework/packages/{vue,react,svelte,solid}/src/runtime/*`                            |
-| Typed route/page/action codegen                                           | `framework/packages/void/src/codegen/*`, `routes-stub.ts`                                                                                         |
-| Binding inference                                                         | `framework/packages/void/src/plugin-inference.ts`, `framework/packages/void/src/inference/*`                                                      |
-| Drizzle integration and migrations                                        | `framework/packages/void/src/drizzle/*`, `framework/packages/void/src/migrations/*`                                                               |
-| Framework detection and deploy presets                                    | `framework/packages/void/src/plugin-inference.ts`, `framework/packages/void/src/cli/preset.ts`                                                    |
-| Platform auth and project APIs                                            | `packages/api/src/routes/*`, `packages/api/src/auth/*`, `packages/api/src/middleware/*`                                                           |
-| Internal admin UI                                                         | `packages/api/src/admin/*`                                                                                                                        |
-| Deploy pipeline                                                           | `framework/packages/void/src/cli/deploy.ts`, `packages/api/src/routes/deploy.ts`, `packages/api/src/assets.ts`, `packages/api/src/provisioning/*` |
-| Hostname routing, static serving, ISR, redirects, headers, metering       | `packages/dispatch/src/*`                                                                                                                         |
-| AI metering, BYOK AI gateway, remote D1/KV/R2 access, revalidation bridge | `packages/proxy/src/*`                                                                                                                            |
-| Runtime logs and live tailing                                             | `packages/tail/src/index.ts`, `packages/api/src/admin/routes/deployments.tsx`                                                                     |
-| User-facing dashboard                                                     | `packages/dashboard/pages/*`, `packages/dashboard/middleware/01.auth.ts`, `packages/dashboard/lib/api.ts`                                         |
-| Shared internal styling                                                   | `packages/ui/src/base.css`, `packages/ui/src/theme.css`                                                                                           |
+| Feature                                                                       | Primary code paths                                                                                                                                |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vite plugin and local runtime                                                 | `framework/packages/void/src/index.ts`, `plugin-*`, `runtime/*`                                                                                   |
+| CLI commands                                                                  | `framework/packages/void/src/cli/*`                                                                                                               |
+| File-based API routing                                                        | `framework/packages/void/src/router/*`, `runtime/handler.ts`                                                                                      |
+| Pages routing, loaders, actions, named actions, deferred props                | `framework/packages/void/src/pages/*`, adapter runtimes in `framework/packages/{vue,react,svelte,solid}/src/runtime/*`                            |
+| Typed route/page/action codegen                                               | `framework/packages/void/src/codegen/*`, `routes-stub.ts`                                                                                         |
+| Binding inference                                                             | `framework/packages/void/src/plugin-inference.ts`, `framework/packages/void/src/inference/*`                                                      |
+| Drizzle integration and migrations                                            | `framework/packages/void/src/drizzle/*`, `framework/packages/void/src/migrations/*`                                                               |
+| Framework detection and deploy presets                                        | `framework/packages/void/src/plugin-inference.ts`, `framework/packages/void/src/cli/preset.ts`                                                    |
+| Platform auth and project APIs                                                | `packages/api/src/routes/*`, `packages/api/src/auth/*`, `packages/api/src/middleware/*`                                                           |
+| Internal admin UI                                                             | `packages/api/src/admin/*`                                                                                                                        |
+| Deploy pipeline                                                               | `framework/packages/void/src/cli/deploy.ts`, `packages/api/src/routes/deploy.ts`, `packages/api/src/assets.ts`, `packages/api/src/provisioning/*` |
+| Hostname routing, static serving, ISR, redirects, rewrites, headers, metering | `packages/dispatch/src/*`                                                                                                                         |
+| AI metering, BYOK AI gateway, remote D1/KV/R2 access, revalidation bridge     | `packages/proxy/src/*`                                                                                                                            |
+| Runtime logs and live tailing                                                 | `packages/tail/src/index.ts`, `packages/api/src/admin/routes/deployments.tsx`                                                                     |
+| User-facing dashboard                                                         | `packages/dashboard/pages/*`, `packages/dashboard/middleware/01.auth.ts`, `packages/dashboard/lib/api.ts`                                         |
+| Shared internal styling                                                       | `packages/ui/src/base.css`, `packages/ui/src/theme.css`                                                                                           |
 
 The dashboard depends on `void` and `@void/vue`, resolved via `pnpm.overrides` to `link:framework/...` (the git submodule). CI checks out the submodule and builds it before `pnpm install`.
 
@@ -247,7 +247,7 @@ The edge router.
 - Reads slug/domain routing from KV.
 - Sends worker projects to Workers for Platforms.
 - Serves static/SPA deployments directly from `STATIC_ASSETS` KV with R2 overflow for large files.
-- Handles ISR, edge caching, redirect rules, header rules, and request metering.
+- Handles ISR, edge caching, redirect/rewrite rules, header rules, and request metering.
 - Relays Cloudflare Queue batches to user workers.
 
 ### `packages/proxy`

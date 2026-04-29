@@ -1,18 +1,7 @@
 /**
- * API-side ISR helpers. Pure key/URL helpers live in `@voidcloud/isr-shared`
- * and are re-exported here so existing imports (`../isr-cache`) keep working.
- * This file also owns the API-only pieces that touch `KVNamespace`.
+ * API-side ISR helpers that touch `KVNamespace`. Pure key/URL helpers live in
+ * `@voidcloud/isr-shared` — import from there directly.
  */
-
-export {
-  ISR_CACHE_KEY_VERSION,
-  canonicalIsrPathname,
-  denormalizeIsrPath,
-  isrCacheKey,
-  isrCachePrefix,
-  isrEdgeCacheUrl,
-  normalizeIsrPath,
-} from '@voidcloud/isr-shared';
 
 export interface IsrRoutingTarget {
   /** Hostname users visit (e.g., `myproject.void.app` or `example.com`). */
