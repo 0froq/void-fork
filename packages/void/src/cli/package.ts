@@ -10,6 +10,7 @@ import { toSlash } from '../shared/utils';
 import type {
   AssetConfig,
   DeployManifest,
+  DevRedirectRule,
   HeaderRule,
   QueueMeta,
   RedirectRule,
@@ -21,6 +22,97 @@ import type {
 const textEncoder = new TextEncoder();
 
 type ProgressCallback = (message: string) => void;
+
+/**
+ * Strip dev-only / internal-only fields from each rule before shipping the
+ * manifest. The resulting entries contain only `{ source, destination, status }`.
+ *
+ * - `origin` is used to build the `X-Void-Routing` trace header during local
+ *   dev; the deployed platform doesn't consume it.
+ * - `force` is used internally by the CLI/router to split rules into the
+ *   `redirectRules` (pre-asset, always-fires) and `fallbackRules` (post-asset,
+ *   only when the asset resolver 404s) buckets and to label the trace header
+ *   on `node`/`bun`/`deno` targets. The platform dispatch worker decides phase
+ *   purely from which array the rule lives in, so shipping `force` is dead weight.
+ *
+ * Keep in sync with `stripOriginForProd` in `router/compile.ts`, which strips
+ * only `origin` because the Node/Bun/Deno-target generated code still reads
+ * `force` at runtime to label the dev trace header.
+ */
+function stripDevOnlyRuleFields(
+  rules: Array<DevRedirectRule> | undefined,
+): Array<RedirectRule> | undefined {
+  if (!rules) {
+    return rules;
+  }
+  return rules.map(({ origin: _origin, force: _force, ...rest }) => rest);
+}
+
+/**
+ * Layer user-defined `routing.fallbacks` with the SPA app type's implicit
+ * `/index.html` fallback. Decision: user fallbacks take precedence; if none
+ * matches, the SPA default kicks in.
+ *
+ * The platform's `not_found_handling: 'single-page-application'` is a global
+ * switch — set once per deployment — so we can't have the platform evaluate
+ * user fallbacks *before* applying it. Instead, when the user has configured
+ * fallbacks on a SPA app, we disable the platform-level SPA setting and
+ * prepend a synthetic catch-all fallback rule (`/*` → `/index.html`) before
+ * the user's rules. The dispatch worker evaluates fallback rules with
+ * last-match-wins semantics, so placing the synthetic rule first means any
+ * user rule that matches a more specific pattern overrides it; the synthetic
+ * rule only fires when no user rule matched.
+ *
+ * When the user has no fallbacks configured, the platform-level SPA switch
+ * is left intact (zero worker-side overhead for the common case).
+ */
+export function resolveSpaFallbackChain(
+  appType: 'spa' | 'static' | undefined,
+  fallbackRules: Array<DevRedirectRule> | undefined,
+): {
+  assetConfig: AssetConfig;
+  fallbackRules: Array<DevRedirectRule> | undefined;
+} {
+  const userRules = fallbackRules && fallbackRules.length > 0 ? fallbackRules : undefined;
+
+  if (appType !== 'spa') {
+    return {
+      assetConfig: { not_found_handling: appType === 'static' ? '404-page' : 'none' },
+      fallbackRules: userRules,
+    };
+  }
+
+  if (!userRules) {
+    // No user fallbacks — keep the zero-overhead platform SPA switch.
+    return {
+      assetConfig: { not_found_handling: 'single-page-application' },
+      fallbackRules: undefined,
+    };
+  }
+
+  // User fallbacks present on a SPA app — disable the platform-level SPA
+  // switch and prepend a synthetic catch-all rule before user rules, so that
+  // under last-match-wins any more specific user rule overrides it. If the
+  // user already has `/*` → `/index.html`, skip the prepend so we don't ship
+  // two identical rules (which would trip the duplicate-source lint).
+  const alreadyHasCatchAll = userRules.some(
+    (r) => r.source === '/*' && r.destination === '/index.html',
+  );
+  if (alreadyHasCatchAll) {
+    return { assetConfig: { not_found_handling: 'none' }, fallbackRules: userRules };
+  }
+  const syntheticSpaFallback: DevRedirectRule = {
+    source: '/*',
+    destination: '/index.html',
+    status: 200,
+    force: false,
+    origin: 'spa-default',
+  };
+  return {
+    assetConfig: { not_found_handling: 'none' },
+    fallbackRules: [syntheticSpaFallback, ...userRules],
+  };
+}
 
 const PROGRESS_CHUNK = 50;
 
@@ -194,6 +286,8 @@ export interface PackageOptions {
   compatibilityFlags?: Array<string>;
   /** Cloudflare Sandbox container metadata for platform deploys. */
   sandbox?: ResolvedSandboxConfig;
+  /** Query params that participate in ISR variant keys for dispatch rewrites. */
+  revalidateQueryAllowlist?: Record<string, Array<string>>;
 }
 
 function toWebSocketManifest(
@@ -242,7 +336,8 @@ export async function packageBuild(
   neededAssets?: Set<string> | null,
   hashedAssetsPrefix?: string,
   headerRules?: Array<HeaderRule>,
-  redirectRules?: Array<RedirectRule>,
+  redirectRules?: Array<DevRedirectRule>,
+  fallbackRules?: Array<DevRedirectRule>,
   dialect?: 'sqlite' | 'postgresql',
   webSockets?: Array<WebSocketRouteDefinition>,
   onProgress?: ProgressCallback,
@@ -316,13 +411,46 @@ export async function packageBuild(
   if (revalidate != null && revalidate !== 0) {
     manifest.revalidate = revalidate;
   }
+  if (
+    options?.revalidateQueryAllowlist &&
+    Object.keys(options.revalidateQueryAllowlist).length > 0
+  ) {
+    manifest.revalidateQueryAllowlist = options.revalidateQueryAllowlist;
+  }
 
   if (prerender && prerender.length > 0) {
     manifest.prerender = prerender;
   }
 
-  if (assetConfig) {
-    manifest.assetConfig = assetConfig;
+  // Layer user fallbacks with the SPA default (if applicable). When the
+  // caller signals SPA mode via `not_found_handling: 'single-page-application'`
+  // and the user has `routing.fallbacks` configured, we disable the
+  // platform-level SPA switch and append a synthetic catch-all rule so user
+  // fallbacks are evaluated first and the SPA default only fires when none
+  // matched.
+  let resolvedAssetConfig = assetConfig;
+  let resolvedFallbackRules = fallbackRules;
+  if (assetConfig?.not_found_handling === 'single-page-application') {
+    const chain = resolveSpaFallbackChain('spa', fallbackRules);
+    resolvedAssetConfig = { ...assetConfig, ...chain.assetConfig };
+    resolvedFallbackRules = chain.fallbackRules;
+  } else if (fallbackRules && fallbackRules.length > 0) {
+    // Fallbacks ship for any app type, but the SPA-shell chain (prepending
+    // `/* -> /index.html`) only runs when `not_found_handling` is
+    // `single-page-application`. On SSR / Void / framework apps, user
+    // fallbacks still fire post-lookup, but no SPA shell is synthesised —
+    // callers relying on the rules to provide an `/index.html` safety net
+    // will hit the platform's default 404 on unmatched paths. Warn so the
+    // expectation mismatch surfaces at build time.
+    const msg =
+      `routing.fallbacks is set but appType is not "spa"; fallbacks will be applied, ` +
+      `but no "/* -> /index.html" SPA shell fallback is synthesised — unmatched paths fall through to the platform 404.`;
+    onProgress?.(msg);
+    console.warn(`[void] ${msg}`);
+  }
+
+  if (resolvedAssetConfig) {
+    manifest.assetConfig = resolvedAssetConfig;
   }
 
   if (vars && Object.keys(vars).length > 0) {
@@ -348,7 +476,11 @@ export async function packageBuild(
   }
 
   if (redirectRules && redirectRules.length > 0) {
-    manifest.redirectRules = redirectRules;
+    manifest.redirectRules = stripDevOnlyRuleFields(redirectRules);
+  }
+
+  if (resolvedFallbackRules && resolvedFallbackRules.length > 0) {
+    manifest.fallbackRules = stripDevOnlyRuleFields(resolvedFallbackRules);
   }
 
   const websocketManifest = toWebSocketManifest(webSockets);
@@ -415,18 +547,22 @@ export async function packageStaticBuild(
   neededAssets?: Set<string> | null,
   hashedAssetsPrefix?: string,
   headerRules?: Array<HeaderRule>,
-  redirectRules?: Array<RedirectRule>,
+  redirectRules?: Array<DevRedirectRule>,
+  fallbackRules?: Array<DevRedirectRule>,
   onProgress?: ProgressCallback,
 ): Promise<FormData> {
   const formData = new FormData();
+
+  const { assetConfig, fallbackRules: resolvedFallbackRules } = resolveSpaFallbackChain(
+    appType,
+    fallbackRules,
+  );
 
   const manifest: DeployManifest = {
     version: 3,
     bindings: {},
     type: appType,
-    assetConfig: {
-      not_found_handling: appType === 'spa' ? 'single-page-application' : '404-page',
-    },
+    assetConfig,
   };
 
   if (hashedAssetsPrefix) {
@@ -438,7 +574,11 @@ export async function packageStaticBuild(
   }
 
   if (redirectRules && redirectRules.length > 0) {
-    manifest.redirectRules = redirectRules;
+    manifest.redirectRules = stripDevOnlyRuleFields(redirectRules);
+  }
+
+  if (resolvedFallbackRules && resolvedFallbackRules.length > 0) {
+    manifest.fallbackRules = stripDevOnlyRuleFields(resolvedFallbackRules);
   }
 
   formData.append('manifest', JSON.stringify(manifest));
@@ -486,6 +626,7 @@ export async function packageFrameworkBuild(opts: {
   schedules?: Array<ScheduleMeta>;
   queues?: Array<QueueMeta>;
   revalidate?: number | Record<string, number>;
+  revalidateQueryAllowlist?: Record<string, Array<string>>;
   prerender?: Array<string>;
   assetConfig?: AssetConfig;
   vars?: Record<string, string>;
@@ -493,7 +634,8 @@ export async function packageFrameworkBuild(opts: {
   neededAssets?: Set<string> | null;
   hashedAssetsPrefix?: string;
   headerRules?: Array<HeaderRule>;
-  redirectRules?: Array<RedirectRule>;
+  redirectRules?: Array<DevRedirectRule>;
+  fallbackRules?: Array<DevRedirectRule>;
   dialect?: 'sqlite' | 'postgresql';
   webSockets?: Array<WebSocketRouteDefinition>;
   onProgress?: ProgressCallback;
@@ -543,6 +685,9 @@ export async function packageFrameworkBuild(opts: {
   if (opts.revalidate != null && opts.revalidate !== 0) {
     manifest.revalidate = opts.revalidate;
   }
+  if (opts.revalidateQueryAllowlist && Object.keys(opts.revalidateQueryAllowlist).length > 0) {
+    manifest.revalidateQueryAllowlist = opts.revalidateQueryAllowlist;
+  }
   if (opts.prerender && opts.prerender.length > 0) {
     manifest.prerender = opts.prerender;
   }
@@ -573,7 +718,11 @@ export async function packageFrameworkBuild(opts: {
   }
 
   if (opts.redirectRules && opts.redirectRules.length > 0) {
-    manifest.redirectRules = opts.redirectRules;
+    manifest.redirectRules = stripDevOnlyRuleFields(opts.redirectRules);
+  }
+
+  if (opts.fallbackRules && opts.fallbackRules.length > 0) {
+    manifest.fallbackRules = stripDevOnlyRuleFields(opts.fallbackRules);
   }
 
   const websocketManifest = toWebSocketManifest(opts.webSockets);

@@ -13,14 +13,7 @@ import {
   readWranglerCompat,
   syncWranglerBindings,
 } from './cli/wrangler';
-import {
-  readConfig,
-  resolveBindingNames,
-  isNodeTarget,
-  convertHeadersConfig,
-  convertRedirectsConfig,
-  getDatabaseDialect,
-} from './config';
+import { readConfig, resolveBindingNames, isNodeTarget, getDatabaseDialect } from './config';
 import { scanJobsSync } from './crons/scan';
 import { inferBindingsFromSource } from './inference/walk';
 import { voidLog, voidWarn, voidError } from './log';
@@ -1054,8 +1047,10 @@ export function voidPlugin(options?: {
         output: config.output,
         prerenderPaths: config.routing?.prerender,
         target: config.target as 'node' | 'bun' | 'deno',
-        headerRules: convertHeadersConfig(config.routing?.headers),
-        redirectRules: convertRedirectsConfig(config.routing?.redirects),
+        // Pass the full routing section so the plugin can merge
+        // `public/_redirects` / `public/_headers` with `void.json` rules at
+        // `configResolved` time and again on HMR (parity with deploy).
+        routing: config.routing,
         hasSandbox: false,
       }),
       prerenderPlugin(root, config),
@@ -1118,6 +1113,12 @@ export function voidPlugin(options?: {
       output: config.output,
       prerenderPaths: config.routing?.prerender,
       remoteMode,
+      // Pass the full routing section so the plugin can merge
+      // `public/_redirects` / `public/_headers` with `void.json` rules for
+      // dev-time parity with the deployment runtime. In production the
+      // platform dispatch worker owns the pipeline and the plugin compiles
+      // these rules out of the worker bundle.
+      routing: config.routing,
       hasSandbox: bindings.needsSandbox,
       sandboxBindingName: sandboxConfig?.binding,
       sandboxClassName: sandboxConfig?.className,
@@ -1146,6 +1147,7 @@ export {
   defineRender,
   defineHead,
   defineQueue,
+  VoidAssetRewriteError,
 } from './runtime/handler';
 export type {
   CloudContext,

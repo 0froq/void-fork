@@ -1,8 +1,27 @@
 import type { Context, Env, MiddlewareHandler } from 'hono';
+import type { RewriteDestination } from 'void/routes';
 import type { HeadDescriptor } from '../pages/head';
 import type { AuthSession, AuthUser } from './auth';
 import { convertReturnValue } from './response';
 import { runValidation, type ValidatorSlots, type HandlerInput } from './validator';
+
+/**
+ * Thrown when `c.rewrite()` is called with a destination whose final path
+ * segment ends in a known static-asset extension (e.g. `/hero.png`,
+ * `/app.css`). Runtime rewrites only reach routes and SSR entries inside
+ * the worker — static asset handlers run in front of the worker, so a
+ * `c.rewrite()` into an asset path re-enters the Hono router, matches
+ * nothing, and returns a 404. Fail at the call site so users reach for
+ * static `routing.rewrites` instead of debugging a mystery 404.
+ */
+export class VoidAssetRewriteError extends Error {
+  override name = 'VoidAssetRewriteError';
+  constructor(destination: string) {
+    super(
+      `c.rewrite() cannot re-dispatch to a static asset path (${JSON.stringify(destination)}). Runtime rewrites only reach routes and SSR entries inside the worker — static asset handlers run in front of the worker. To rewrite into an asset, use a static \`routing.rewrites\` rule in void.json or a \`200!\` entry in _redirects. See https://void.dev/guide/edge/rewrites#runtime-rewrites-cannot-reach-static-assets`,
+    );
+  }
+}
 
 /**
  * Hono environment type for Void workers.
@@ -37,6 +56,60 @@ export interface CloudBindings {
 export interface CloudEnv extends Env {
   Bindings: CloudBindings;
   Variables: CloudContextVariables;
+}
+
+declare module 'hono' {
+  interface Context {
+    /**
+     * Rewrite the request to a different internal path without changing the browser URL.
+     *
+     * Must be called inside a `defineMiddleware` handler and the result must be returned:
+     *
+     * ```ts
+     * export default defineMiddleware(async (c, next) => {
+     *   if (!hasLocalePrefix(c.req.path)) {
+     *     return c.rewrite(`/en${c.req.path}`);
+     *   }
+     *   return next();
+     * });
+     * ```
+     *
+     * The request is re-dispatched through the Hono router with the new pathname.
+     * The re-dispatched request is tracked internally so that static routing rules
+     * do not re-evaluate on it. Your middleware is responsible for its own loop
+     * prevention (e.g., checking if the path already has a prefix).
+     *
+     * The `path` type is `RewriteDestination`, which is `keyof RouteMap | (string & {})`.
+     * Known routes autocomplete, but any string is still accepted so dynamic paths
+     * (e.g. `` `/users/${id}` ``) continue to work. When `.void/routes.d.ts` has not
+     * been generated yet, `RouteMap` is empty and this is equivalent to `string`.
+     */
+    rewrite: (path: RewriteDestination) => Promise<Response>;
+
+    /**
+     * Returns the URL the client actually requested — the pre-rewrite URL as
+     * a `URL` object — or `null` when the current request was not rewritten.
+     *
+     * Set on every Void-managed request, whether the rewrite came from a
+     * static rule (`routing.rewrites`, `routing.fallbacks`, `_redirects`
+     * `200`/`200!`) or `c.rewrite()` in middleware. Useful for canonical
+     * link generation and locale negotiation that must reference the URL
+     * the user actually requested.
+     */
+    originalUrl: () => URL | null;
+
+    /**
+     * Returns `true` when the current request was re-dispatched by a rewrite,
+     * `false` otherwise. Equivalent to `c.originalUrl() !== null`.
+     *
+     * Use this to skip side-effectful work that would otherwise double-fire
+     * on the second pass of middleware (request logging, rate-limit
+     * increments, auth audit trails). Static rewrites (edge dispatch,
+     * `routing.rewrites`, `routing.fallbacks`, `_redirects` `200`/`200!`)
+     * and `c.rewrite()` in middleware both set the flag.
+     */
+    isRewritten: () => boolean;
+  }
 }
 
 /**

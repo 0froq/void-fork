@@ -1,5 +1,5 @@
 import type { VoidAuthProvider } from '../auth/providers';
-import type { HeaderRule, RedirectRule } from '../cli/types';
+import type { DevRedirectRule, HeaderRule } from '../cli/types';
 import { resolveLayoutIds } from '../pages/layout-resolution';
 import { INTERNAL_BINDING_PREFIXES } from '../runtime/env-raw';
 import type { ScanResult } from './scan';
@@ -628,6 +628,8 @@ export interface CompileOptions {
   honoPath: string;
   /** Absolute path to the void/response module */
   responsePath: string;
+  /** Absolute path to the void/handler module (for runtime error classes) */
+  handlerPath: string;
   /** Absolute path to the void/_env module */
   runtimeEnvPath: string;
   /** Absolute path to the project root */
@@ -640,7 +642,7 @@ export interface CompileOptions {
   dev?: boolean;
   /** Auth configuration (null = disabled) */
   auth: AuthCompileOptions | null;
-  /** Non-CF target — omits executionCtx from ALS context */
+  /** `node`/`bun`/`deno` target — omits executionCtx from ALS context */
   nodeTarget?: boolean;
   /** Absolute path to the binding handler module (for /__void/* native binding access) */
   bindingHandlerPath?: string;
@@ -650,10 +652,17 @@ export interface CompileOptions {
   migrations?: Array<{ name: string; sql: string }>;
   /** Migration dialect (sqlite or postgresql) */
   migrationDialect?: 'sqlite' | 'postgresql';
-  /** Header rules from routing.headers config (node targets only) */
+  /** Header rules from routing.headers config (node/bun/deno targets only) */
   headerRules?: Array<HeaderRule>;
-  /** Redirect rules from routing.redirects config (node targets only) */
-  redirectRules?: Array<RedirectRule>;
+  /** Redirect rules from routing.redirects config (node/bun/deno targets only) */
+  redirectRules?: Array<DevRedirectRule>;
+  /**
+   * Post-asset fallback rules (plain `_redirects` 200 + `routing.fallbacks`).
+   * Only fire when no route/SSR handler matched — emitted inside Hono's
+   * `notFound` hook on `node`/`bun`/`deno` targets. Empty/undefined skips
+   * the fallback middleware entirely.
+   */
+  fallbackRules?: Array<DevRedirectRule>;
   /** Explicit prerender paths from void.json routing.prerender */
   explicitPrerenderPaths?: Array<string>;
   /** Absolute path to the internal WebSocket runtime module */
@@ -709,6 +718,9 @@ export function compileRouteTable(
   lines.push(`import { AsyncLocalStorage } from "node:async_hooks";`);
   lines.push(`import { Hono } from ${JSON.stringify(options.honoPath)};`);
   lines.push(`import { convertReturnValue } from ${JSON.stringify(options.responsePath)};`);
+  lines.push(
+    `import { VoidAssetRewriteError as __VoidAssetRewriteError } from ${JSON.stringify(options.handlerPath)};`,
+  );
   if (options.nodeTarget) {
     lines.push(`const withRuntimeEnv = (_env, fn) => fn();`);
   } else {
@@ -767,6 +779,230 @@ export function compileRouteTable(
 
   lines.push(`const app = new Hono();`);
   lines.push(`export const requestContext = new AsyncLocalStorage();`);
+  // WeakMap<Request, URL> — keyed on the Request the user handler sees
+  // (`c.req.raw`), value is the pre-rewrite URL. Single source of truth for
+  // `c.originalUrl` / `c.isRewritten` and the "already re-dispatched, skip
+  // routing rules" short-circuit. Populated by (a) in-worker `c.rewrite` on
+  // the new `rewriteReq`, (b) the static-rewrite middleware on re-dispatch,
+  // and (c) the entry middleware below, which migrates `X-Void-Original-URL`
+  // set by an outer edge dispatcher into the map once per request. WeakMap
+  // so entries collect when the Request is GC'd.
+  lines.push('const __voidOriginalUrls = new WeakMap();');
+  // WeakSet<Request> — marks re-dispatches that have already been through
+  // the fallback-rules phase, so the `notFound` fallback check skips them
+  // (prevents fallback→fallback cycles). Populated only by fallback rule
+  // re-dispatches, NOT by `c.rewrite` or the static-rewrite middleware —
+  // those should still get a chance at fallbacks for their target URL.
+  lines.push('const __voidFallbackHandled = new WeakSet();');
+  // Known static-asset extensions — `c.rewrite()` into one of these re-enters
+  // the Hono router and 404s (static asset handlers run in front of the
+  // worker, not inside it). `.html` is deliberately excluded: it's ambiguous
+  // with legit route handlers at `.html` paths.
+  //
+  // The framework also lets users name route files with dotted extensions
+  // (e.g. `routes/feed.xml.ts` → pattern `/feed.xml`), so we filter the
+  // blocklist down to extensions NOT used by any registered route/page.
+  // Without this, `c.rewrite("/feed.xml")` to a real `feed.xml.ts` route
+  // would falsely throw, diverging from `routing.rewrites` which routes
+  // the same destination to the same handler without complaint.
+  const ASSET_EXTENSIONS = [
+    'png',
+    'jpg',
+    'jpeg',
+    'gif',
+    'webp',
+    'avif',
+    'svg',
+    'ico',
+    'css',
+    'js',
+    'mjs',
+    'cjs',
+    'woff',
+    'woff2',
+    'ttf',
+    'otf',
+    'eot',
+    'mp4',
+    'webm',
+    'mp3',
+    'wav',
+    'pdf',
+    'txt',
+    'xml',
+    'json',
+    'wasm',
+    'map',
+  ];
+  const routePatterns: Array<string> = [];
+  for (const r of scan.routes) {
+    routePatterns.push(r.pattern);
+  }
+  if (pages && scan.pages.pages.length > 0) {
+    for (const p of scan.pages.pages) {
+      routePatterns.push(p.pattern);
+    }
+  }
+  const usedExts = new Set<string>();
+  for (const p of routePatterns) {
+    const m = /\.([A-Za-z0-9]+)$/.exec(p);
+    if (m) {
+      usedExts.add(m[1]!.toLowerCase());
+    }
+  }
+  const blockedExts = ASSET_EXTENSIONS.filter((e) => !usedExts.has(e));
+  if (blockedExts.length > 0) {
+    lines.push(`const __voidAssetRewriteExtRE = /\\.(${blockedExts.join('|')})$/i;`);
+  } else {
+    // Every asset extension is shadowed by a route — no blocklist needed.
+    // Match-nothing regex keeps the throw site shape unchanged.
+    lines.push('const __voidAssetRewriteExtRE = /(?!)/;');
+  }
+  // Dev-only compile-time flag gating the `X-Void-Routing` trace header.
+  // Stays `false` in production builds so the header never ships to users.
+  lines.push(`const __VOID_DEV_ROUTING = ${JSON.stringify(options.dev === true)};`);
+  // Re-wrap a terminal Response with an added `X-Void-Routing` trace header.
+  // Becomes an identity function in production because `__VOID_DEV_ROUTING`
+  // is `false`, so the header never ships — and because the constant is a
+  // literal `false`, minifiers can eliminate the whole branch.
+  lines.push('function __voidAnnotateRouting(response, trace) {');
+  lines.push('  if (!__VOID_DEV_ROUTING || !response) return response;');
+  lines.push('  const headers = new Headers(response.headers);');
+  lines.push('  headers.set("X-Void-Routing", trace);');
+  lines.push(
+    '  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });',
+  );
+  lines.push('}');
+  lines.push('');
+  // Internal signal consumed by platform dispatch: a 404 came from generated
+  // no-route handling, not from a user route intentionally returning 404.
+  // Dispatch strips the header before responding to the client.
+  lines.push('function __voidShouldMarkNoMatch(request) {');
+  lines.push('  const url = new URL(request.url);');
+  lines.push('  if (request.method !== "GET" && request.method !== "HEAD") return false;');
+  lines.push('  if (url.pathname === "/api" || url.pathname.startsWith("/api/")) return false;');
+  lines.push('  if (/\\/[^/]+\\.[^/]+$/.test(url.pathname)) return false;');
+  lines.push('  return true;');
+  lines.push('}');
+  lines.push('function __voidMarkNoMatch(request, response) {');
+  lines.push(
+    '  if (!response || response.status !== 404 || !__voidShouldMarkNoMatch(request)) return response;',
+  );
+  lines.push('  const headers = new Headers(response.headers);');
+  lines.push('  headers.set("X-Void-No-Match", "1");');
+  lines.push(
+    '  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });',
+  );
+  lines.push('}');
+  lines.push('');
+
+  // `__mergeQueryIntoLocation` is used by both the routing-rules middleware
+  // (static redirects) and the `c.redirect` wrapper below — emit it up-front
+  // so it's available regardless of whether routing rules are compiled in.
+  ensureMergeQueryHelperEmitted(lines);
+
+  // Inject rewrite utility onto context — closure over `app` for re-dispatch.
+  // Also wrap `c.redirect` so dynamic redirects preserve the incoming query
+  // string the same way static `_redirects` entries do.
+  lines.push('app.use(async (c, next) => {');
+  // Migrate `X-Void-Original-URL` set by an outer edge dispatcher into the
+  // WeakMap exactly once per request. Only emitted for the CF-prod target,
+  // where dispatch runs in front of the worker and strips any client-supplied
+  // value on ingress — making the header a trusted, dispatch-authored
+  // handoff. On CF-dev (no dispatch) and on node/bun/deno self-hosted
+  // targets (user owns ingress) the header is client-controlled and not
+  // trustworthy, so the read is skipped. In-worker `c.rewrite` / static-
+  // rewrite re-dispatches populate the WeakMap directly on the `rewriteReq`
+  // and never depend on this header-read path.
+  if (!options.nodeTarget && options.dev !== true) {
+    lines.push('  if (!__voidOriginalUrls.has(c.req.raw)) {');
+    lines.push('    const __h = c.req.raw.headers.get("X-Void-Original-URL");');
+    lines.push('    if (__h != null) {');
+    lines.push('      try { __voidOriginalUrls.set(c.req.raw, new URL(__h)); } catch {}');
+    lines.push('    }');
+    lines.push('  }');
+  }
+  lines.push('  c.rewrite = (path) => {');
+  // `path: RewriteDestination` is typed to path-absolute strings, but a
+  // leading `//` parses as a protocol-relative URL (`//host/path` →
+  // `https://host/path`) and would silently turn the re-dispatch into a
+  // cross-origin proxy. Combine both checks in one condition.
+  lines.push('    if (!path.startsWith("/") || path.startsWith("//")) {');
+  lines.push(
+    '      throw new Error("c.rewrite() only accepts internal, path-absolute destinations — they must start with a single \\"/\\" (a leading \\"//\\" parses as protocol-relative and would proxy cross-origin); use fetch() for external URLs");',
+  );
+  lines.push('    }');
+  // `URL.pathname` setter percent-encodes `?`, so split path into pathname +
+  // search to keep query strings intact when callers pass `"/page?x=1"`.
+  lines.push('    const __qIdx = path.indexOf("?");');
+  // Reject re-dispatches into static asset paths — those handlers live in
+  // front of the worker, so `app.fetch(rewriteReq)` would match nothing and
+  // return a confusing 404. Strip query/fragment before matching so callers
+  // passing cache-busters (e.g. `/hero.png?v=2`) still trip the guard.
+  lines.push('    const __hIdx = path.indexOf("#");');
+  lines.push(
+    '    const __firstDelim = __qIdx === -1 ? __hIdx : __hIdx === -1 ? __qIdx : Math.min(__qIdx, __hIdx);',
+  );
+  lines.push(
+    '    const __assetCheckPath = __firstDelim === -1 ? path : path.slice(0, __firstDelim);',
+  );
+  lines.push('    if (__voidAssetRewriteExtRE.test(__assetCheckPath)) {');
+  lines.push('      throw new __VoidAssetRewriteError(path);');
+  lines.push('    }');
+  // Strip the fragment too: `URL.pathname` setter percent-encodes `#` into
+  // `%23`, so `/foo#frag` would become `/foo%23frag` and the re-dispatched
+  // request would land at the wrong route. Fragments don't reach servers
+  // anyway, so we drop them rather than try to preserve them. The search
+  // portion still starts at `?` (if present), trimmed at `#` (if present).
+  lines.push('    const __pathOnly = __firstDelim === -1 ? path : path.slice(0, __firstDelim);');
+  lines.push(
+    '    const __searchOnly = __qIdx === -1 ? "" : path.slice(__qIdx, __hIdx === -1 ? path.length : __hIdx);',
+  );
+  lines.push('    const rewriteUrl = new URL(c.req.url);');
+  lines.push('    rewriteUrl.pathname = __pathOnly;');
+  // Only override the search when the destination carries its own query.
+  // A queryless destination (`c.rewrite("/en" + c.req.path)`) preserves the
+  // incoming query — mirrors the static-rewrite codegen below and keeps
+  // callers from having to re-append `?page=2`, OAuth callbacks, etc.
+  lines.push('    if (__searchOnly) rewriteUrl.search = __searchOnly;');
+  lines.push('    const rewriteReq = new Request(rewriteUrl.toString(), c.req.raw);');
+  // Preserve the earliest original URL across multi-hop rewrites: inherit
+  // whatever the current hop was rewritten from (or record this hop's URL
+  // if it's the first rewrite).
+  lines.push('    const __prior = __voidOriginalUrls.get(c.req.raw);');
+  lines.push('    __voidOriginalUrls.set(rewriteReq, __prior ?? new URL(c.req.url));');
+  // `c.executionCtx` is only populated on the default Cloudflare target;
+  // Hono's getter throws on node/bun/deno. Branch at compile time so we
+  // don't need a runtime try/catch that could swallow unrelated errors.
+  if (options.nodeTarget) {
+    lines.push('    const __rewritePromise = app.fetch(rewriteReq, c.env);');
+  } else {
+    lines.push('    const __rewritePromise = app.fetch(rewriteReq, c.env, c.executionCtx);');
+  }
+  lines.push('    if (!__VOID_DEV_ROUTING) return __rewritePromise;');
+  lines.push(
+    '    return __rewritePromise.then((res) => __voidAnnotateRouting(res, "c.rewrite \\u2192 " + path + " (middleware)"));',
+  );
+  lines.push('  };');
+  lines.push('  const __origRedirect = c.redirect.bind(c);');
+  lines.push('  c.redirect = (location, status) => {');
+  // `startsWith("/")` alone matches protocol-relative URLs ("//host/x"),
+  // which the browser resolves cross-origin — merging the request query
+  // there would leak params (incl. session tokens) off-origin. External
+  // and protocol-relative locations pass through to the original redirect.
+  lines.push(
+    '    if (typeof location === "string" && location.startsWith("/") && !location.startsWith("//")) {',
+  );
+  lines.push('      const search = new URL(c.req.raw.url).search;');
+  lines.push('      return __origRedirect(__mergeQueryIntoLocation(location, search), status);');
+  lines.push('    }');
+  lines.push('    return __origRedirect(location, status);');
+  lines.push('  };');
+  // Read helpers for rewrite metadata — single source is the WeakMap.
+  lines.push('  c.originalUrl = () => __voidOriginalUrls.get(c.req.raw) ?? null;');
+  lines.push('  c.isRewritten = () => __voidOriginalUrls.has(c.req.raw);');
+  lines.push('  await next();');
+  lines.push('});');
   lines.push('');
 
   // Request context middleware — threads outer request into ALS for isomorphic fetch
@@ -781,11 +1017,21 @@ export function compileRouteTable(
   lines.push('});');
   lines.push('');
 
-  // Edge routing middleware (node targets only — on CF these are handled by the dispatch worker)
-  if (options.nodeTarget && options.redirectRules?.length) {
-    compileRedirectMiddleware(lines, options.redirectRules);
+  // Edge routing middleware. On `node`/`bun`/`deno` targets the emitted Hono
+  // app owns routing end-to-end, so the middleware runs in both dev and prod.
+  // On the default target the platform dispatch worker applies these rules in
+  // front of the user worker at deploy time — we only emit them in dev there
+  // so `vite dev` mirrors deployed behavior locally.
+  const emitEdgeRules = options.nodeTarget || options.dev === true;
+  if (emitEdgeRules && options.redirectRules?.length) {
+    compileRoutingRulesMiddleware(
+      lines,
+      options.redirectRules,
+      options.dev === true,
+      options.nodeTarget === true,
+    );
   }
-  if (options.nodeTarget && options.headerRules?.length) {
+  if (emitEdgeRules && options.headerRules?.length) {
     compileHeaderMiddleware(lines, options.headerRules);
   }
 
@@ -1019,11 +1265,13 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`async function fetchFromAssets(c) {`);
     lines.push(`  const assets = c.env?.ASSETS;`);
     lines.push(`  if (!assets || typeof assets.fetch !== "function") {`);
-    lines.push(`    return new Response("Not Found", { status: 404 });`);
+    lines.push(
+      `    return __voidMarkNoMatch(c.req.raw, new Response("Not Found", { status: 404 }));`,
+    );
     lines.push(`  }`);
     lines.push(`  const response = await assets.fetch(c.req.raw);`);
     lines.push(
-      `  return response.status === 404 ? new Response("Not Found", { status: 404 }) : response;`,
+      `  return response.status === 404 ? __voidMarkNoMatch(c.req.raw, new Response("Not Found", { status: 404 })) : response;`,
     );
     lines.push(`}`);
     lines.push('');
@@ -1037,11 +1285,77 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`}`);
     lines.push('');
     lines.push(`app.notFound(async (c) => {`);
+    if (options.nodeTarget && options.fallbackRules?.length) {
+      // On `node`/`bun`/`deno` the Hono app owns both routing and asset
+      // serving, so "no route matched" is already the asset-miss phase —
+      // run fallbacks before touching assets. (On the default target in dev
+      // the flow below tries assets first, see the non-SSR branch for the
+      // standalone hook and the `else` arm of this `shouldHandleSsrRequest`
+      // for the SSR-path assets-then-fallback check.)
+      emitFallbackRulesCheck(
+        lines,
+        options.fallbackRules,
+        options.dev === true,
+        '  ',
+        options.nodeTarget === true,
+      );
+    }
     lines.push(`  if (!shouldHandleSsrRequest(c)) {`);
-    lines.push(`    return fetchFromAssets(c);`);
+    if (!options.nodeTarget && options.dev === true && options.fallbackRules?.length) {
+      // Default target in dev: static assets are served by the platform
+      // runtime in front of this worker in production, so to reproduce that
+      // behavior locally we look up assets first, then apply fallback rules
+      // on a 404. Production builds on the default target skip this and let
+      // the platform dispatch worker own the fallback phase.
+      lines.push(`    const __assetRes = await fetchFromAssets(c);`);
+      lines.push(`    if (__assetRes.status !== 404) return __assetRes;`);
+      // This branch is gated on `!options.nodeTarget`, so pass `false`.
+      emitFallbackRulesCheck(lines, options.fallbackRules, options.dev === true, '    ', false);
+      lines.push(`    return __assetRes;`);
+    } else {
+      lines.push(`    return fetchFromAssets(c);`);
+    }
     lines.push(`  }`);
     lines.push(`  const mod = await import(${JSON.stringify(ssr.serverEntryPath)});`);
     lines.push(`  return renderSsrResponse(c, mod);`);
+    lines.push(`});`);
+    lines.push('');
+  } else if (
+    (options.nodeTarget || options.dev === true) &&
+    options.fallbackRules?.length &&
+    !(pages && scan.pages.pages.length > 0)
+  ) {
+    // No SSR entry and no pages mode — emit a standalone notFound hook so
+    // `_redirects` / `routing.fallbacks` rules still fire on asset-miss.
+    // Pages mode owns its own notFound (with its own assets-first + SPA
+    // fallback logic) and injects the fallback check inline at the correct
+    // point; see `compilePageRoutes`.
+    //
+    // On `node`/`bun`/`deno` the Hono app owns asset serving, so "no route"
+    // already means "no asset" — fallbacks run straight away.
+    //
+    // On the default target in dev we first ask the platform asset binding
+    // (`env.ASSETS`) so the in-worker flow matches production, where the
+    // platform serves static files before the worker even sees the request.
+    // Fallbacks only fire when the asset lookup also 404s.
+    lines.push(`app.notFound(async (c) => {`);
+    if (!options.nodeTarget && options.dev === true) {
+      lines.push(`  const assets = c.env?.ASSETS;`);
+      lines.push(`  if (assets && typeof assets.fetch === "function") {`);
+      lines.push(`    const __assetRes = await assets.fetch(c.req.raw);`);
+      lines.push(`    if (__assetRes.status !== 404) return __assetRes;`);
+      lines.push(`  }`);
+    }
+    emitFallbackRulesCheck(
+      lines,
+      options.fallbackRules,
+      options.dev === true,
+      '  ',
+      options.nodeTarget === true,
+    );
+    lines.push(
+      `  return __voidMarkNoMatch(c.req.raw, new Response("Not Found", { status: 404 }));`,
+    );
     lines.push(`});`);
     lines.push('');
   }
@@ -1687,7 +2001,9 @@ function compilePageRoutes(
   lines.push(`  }`);
   lines.push(`  const assets = c.env?.ASSETS;`);
   lines.push(`  if (!assets || typeof assets.fetch !== "function") {`);
-  lines.push(`    return new Response("Not Found", { status: 404 });`);
+  lines.push(
+    `    return __voidMarkNoMatch(c.req.raw, new Response("Not Found", { status: 404 }));`,
+  );
   lines.push(`  }`);
   lines.push(`  return assets.fetch(c.req.raw);`);
   lines.push(`}`);
@@ -1750,6 +2066,21 @@ function compilePageRoutes(
   // Try static assets for any path (not just dot-containing last segments)
   lines.push(`  const assetRes = await fetchPagesAsset(c);`);
   lines.push(`  if (assetRes.status !== 404) return assetRes;`);
+  // Post-asset fallback phase — `routing.fallbacks` / plain `_redirects 200`
+  // rules re-dispatch through the app when assets miss but before the SPA
+  // fallback renders. Node/bun/deno targets emit this in both dev and prod
+  // (the Hono app owns the full pipeline there); the default target only
+  // emits it in dev, since production relies on the platform dispatch
+  // worker to apply fallbacks before assets are even served.
+  if ((options.nodeTarget || options.dev === true) && options.fallbackRules?.length) {
+    emitFallbackRulesCheck(
+      lines,
+      options.fallbackRules,
+      options.dev === true,
+      '  ',
+      options.nodeTarget === true,
+    );
+  }
   // Dot-prefixed path segments (/.well-known/, /.env, /.git/) are never pages — 404
   lines.push(`  if (path.includes("/.")) {`);
   lines.push(`    return serveCustomErrorPage(c, 404, "Not Found");`);
@@ -1770,7 +2101,9 @@ function compilePageRoutes(
   // All page routes are registered as explicit Hono handlers above.
   // Any path reaching here is genuinely unknown — serve the app's custom
   // 404 page when available, otherwise fall back to Void's default one.
-  lines.push(`  return serveCustomErrorPage(c, 404, "Not Found");`);
+  lines.push(
+    `  return __voidMarkNoMatch(c.req.raw, await serveCustomErrorPage(c, 404, "Not Found"));`,
+  );
   lines.push(`});`);
   lines.push('');
 }
@@ -2175,45 +2508,307 @@ export async function fetch(path, options) {
 }
 
 /**
- * Emit inline `matchPattern()` — glob `*` → regex matching.
- * Mirrors the dispatch worker's `matchPattern()` from `packages/dispatch/src/headers.ts`.
+ * Emit inline `__compilePattern()` and `__matchPattern()` — pattern compilation
+ * with named captures, matching the dispatch worker's behavior in
+ * `packages/dispatch/src/pattern.ts`.
+ *
+ * Syntax:
+ *   :name    — single path segment (captured as `name`)
+ *   :name*   — zero or more segments (captured as `name`)
+ *   *        — zero or more segments (captured as `splat`, legacy)
+ *
+ * When a pattern contains multiple bare `*`, only the first captures as
+ * `splat`; later occurrences emit a non-capturing `.*` so the constructed
+ * `RegExp` doesn't reject "duplicate group name" at request time. `:name*`
+ * uses a distinct group name and never clashes with `*`. `__matchPattern`
+ * additionally swallows any compile-time `RegExp` error and returns `false`
+ * so a single malformed rule cannot 500 unrelated requests on CF dev.
  */
-function emitMatchPattern(lines: Array<string>): void {
+function emitCompilePattern(lines: Array<string>): void {
+  lines.push('function __compilePattern(source) {');
+  lines.push('  const names = [];');
+  lines.push('  let legacySplatCaptured = false;');
+  lines.push('  let pattern = "";');
+  lines.push('  let i = 0;');
+  lines.push('  while (i < source.length) {');
+  lines.push('    const ch = source[i];');
+  lines.push('    if (ch === ":") {');
+  lines.push('      let j = i + 1;');
+  lines.push('      while (j < source.length && /[A-Za-z0-9_]/.test(source[j])) j++;');
+  lines.push('      const name = source.slice(i + 1, j);');
+  lines.push('      if (!name) { pattern += "\\\\:"; i++; continue; }');
+  lines.push('      if (source[j] === "*") {');
+  lines.push('        names.push(name);');
+  lines.push('        pattern += `(?<${name}>.*)`;');
+  lines.push('        i = j + 1;');
+  lines.push('      } else {');
+  lines.push('        names.push(name);');
+  lines.push('        pattern += `(?<${name}>[^/]+)`;');
+  lines.push('        i = j;');
+  lines.push('      }');
+  lines.push('    } else if (ch === "*") {');
+  lines.push('      if (legacySplatCaptured) {');
+  lines.push('        pattern += ".*";');
+  lines.push('      } else {');
+  lines.push('        names.push("splat");');
+  lines.push('        pattern += "(?<splat>.*)";');
+  lines.push('        legacySplatCaptured = true;');
+  lines.push('      }');
+  lines.push('      i++;');
+  lines.push('    } else {');
+  lines.push('      if (/[.+?^${}()|[\\]\\\\]/.test(ch)) pattern += "\\\\";');
+  lines.push('      pattern += ch;');
+  lines.push('      i++;');
+  lines.push('    }');
+  lines.push('  }');
+  lines.push('  return { regex: new RegExp(`^${pattern}$`), names };');
+  lines.push('}');
+  lines.push('const __matchPatternWarned = new Set();');
   lines.push('function __matchPattern(pattern, pathname) {');
+  lines.push('  try {');
+  lines.push('    return __compilePattern(pattern).regex.test(pathname);');
+  lines.push('  } catch (err) {');
+  lines.push('    if (!__matchPatternWarned.has(pattern)) {');
+  lines.push('      __matchPatternWarned.add(pattern);');
   lines.push(
-    '  const escaped = pattern.replace(/[.+?^${}()|[\\]\\\\]/g, "\\\\$&").replaceAll("*", ".*");',
+    '      console.warn(`[void] failed to compile route pattern ${JSON.stringify(pattern)}: ${err && err.message ? err.message : err}`);',
   );
-  lines.push('  return new RegExp(`^${escaped}$`).test(pathname);');
+  lines.push('    }');
+  lines.push('    return false;');
+  lines.push('  }');
+  lines.push('}');
+  lines.push('function __substituteParams(destination, params) {');
+  lines.push('  return destination.replace(/:([A-Za-z0-9_]+)\\*?/g, (whole, name) => {');
+  lines.push('    return params[name] != null ? params[name] : whole;');
+  lines.push('  });');
+  lines.push('}');
+  lines.push('');
+}
+
+function ensureCompilePatternEmitted(lines: Array<string>): void {
+  if (!lines.some((l) => l.includes('function __compilePattern'))) {
+    emitCompilePattern(lines);
+  }
+}
+
+/**
+ * Emit the `__mergeQueryIntoLocation` helper. Shared between the static
+ * routing-rules middleware (for `_redirects` entries) and the dynamic
+ * `c.redirect` wrapper, so it's emitted unconditionally above the rewrite
+ * middleware. If the destination already carries a param, the destination
+ * wins — matching the static-redirect semantics.
+ */
+function ensureMergeQueryHelperEmitted(lines: Array<string>): void {
+  if (lines.some((l) => l.includes('function __mergeQueryIntoLocation'))) {
+    return;
+  }
+  lines.push('function __mergeQueryIntoLocation(destination, search) {');
+  lines.push('  if (!search || search === "?") return destination;');
+  lines.push('  const fragIdx = destination.indexOf("#");');
+  lines.push('  const base = fragIdx === -1 ? destination : destination.slice(0, fragIdx);');
+  lines.push('  const fragment = fragIdx === -1 ? "" : destination.slice(fragIdx);');
+  lines.push('  const q = base.indexOf("?");');
+  lines.push('  if (q === -1) return base + search + fragment;');
+  lines.push('  if (q === base.length - 1) return base.slice(0, q) + fragment;');
+  lines.push('  const dp = new URLSearchParams(base.slice(q + 1));');
+  lines.push('  for (const [k, v] of new URLSearchParams(search)) {');
+  lines.push('    if (!dp.has(k)) dp.append(k, v);');
+  lines.push('  }');
+  lines.push('  return base.slice(0, q) + "?" + dp.toString() + fragment;');
   lines.push('}');
   lines.push('');
 }
 
 /**
- * Emit redirect middleware — short-circuits matching requests before route handlers.
- * Last match wins, consistent with dispatch worker behavior.
+ * Shared body for routing-rule evaluation: match rules in order (last wins),
+ * substitute captures into destination, handle rewrite (200) or redirect (3xx).
+ * Used by both the pre-pipeline routing middleware and the post-pipeline
+ * fallback (notFound) middleware.
  */
-function compileRedirectMiddleware(lines: Array<string>, rules: Array<RedirectRule>): void {
-  emitMatchPattern(lines);
-  lines.push('// Redirect rules (applied before route handlers)');
-  lines.push(`const __redirectRules = ${JSON.stringify(rules)};`);
+function emitApplyRoutingRules(
+  lines: Array<string>,
+  rulesVar: string,
+  indent: string,
+  nodeTarget: boolean,
+  markFallbackHandled: boolean = false,
+): void {
+  lines.push(`${indent}let matched;`);
+  lines.push(`${indent}for (const rule of ${rulesVar}) {`);
+  // A malformed rule.source (e.g. `:id/:id` or `:splat`+`*` colliding on
+  // the same group name) makes `new RegExp` throw inside __compilePattern.
+  // Build-time validators reject those, but a hand-crafted manifest could
+  // still reach the worker — skip the offending rule rather than 500ing
+  // every request that hits this middleware. Mirrors dispatch's
+  // applyRoutingRules try/catch (packages/dispatch/src/routing-rules.ts).
+  lines.push(`${indent}  let regex;`);
+  lines.push(`${indent}  try {`);
+  lines.push(`${indent}    ({ regex } = __compilePattern(rule.source));`);
+  lines.push(`${indent}  } catch (err) {`);
+  lines.push(`${indent}    if (!__matchPatternWarned.has(rule.source)) {`);
+  lines.push(`${indent}      __matchPatternWarned.add(rule.source);`);
+  lines.push(
+    `${indent}      console.warn(\`[void] skipping routing rule with invalid source \${JSON.stringify(rule.source)}: \${err && err.message ? err.message : err}\`);`,
+  );
+  lines.push(`${indent}    }`);
+  lines.push(`${indent}    continue;`);
+  lines.push(`${indent}  }`);
+  lines.push(`${indent}  const m = regex.exec(pathname);`);
+  lines.push(`${indent}  if (m) matched = { rule, params: m.groups || {} };`);
+  lines.push(`${indent}}`);
+  lines.push(`${indent}if (matched) {`);
+  lines.push(
+    `${indent}  const dest = __substituteParams(matched.rule.destination, matched.params);`,
+  );
+  lines.push(`${indent}  if (matched.rule.status === 200) {`);
+  // Config-level validation already rejects `?` in rewrite/fallback
+  // destinations, but split pathname + search here anyway so emitted code
+  // stays defensive and parallel with the `c.rewrite` helper above.
+  lines.push(`${indent}    const __qIdx = dest.indexOf("?");`);
+  lines.push(`${indent}    const __pathOnly = __qIdx === -1 ? dest : dest.slice(0, __qIdx);`);
+  lines.push(`${indent}    const __searchOnly = __qIdx === -1 ? "" : dest.slice(__qIdx);`);
+  lines.push(`${indent}    const rewriteUrl = new URL(c.req.url);`);
+  lines.push(`${indent}    rewriteUrl.pathname = __pathOnly;`);
+  lines.push(`${indent}    if (__searchOnly) rewriteUrl.search = __searchOnly;`);
+  lines.push(`${indent}    const rewriteReq = new Request(rewriteUrl.toString(), c.req.raw);`);
+  // Seed the WeakMap so re-dispatched handlers see the pre-rewrite URL via
+  // `c.originalUrl()` / `c.isRewritten()`. Inherit a prior hop's value if
+  // one exists (multi-hop via `c.rewrite` from user middleware that wraps
+  // a static rewrite).
+  lines.push(`${indent}    const __prior = __voidOriginalUrls.get(c.req.raw);`);
+  lines.push(`${indent}    __voidOriginalUrls.set(rewriteReq, __prior ?? new URL(c.req.url));`);
+  if (markFallbackHandled) {
+    // Fallback rule re-dispatch: tag the next hop so its `notFound` won't
+    // re-enter the fallback phase (single-hop fallback semantics, parity
+    // with dispatch's single `applyRoutingRules(fallbackRules, ...)` call).
+    lines.push(`${indent}    __voidFallbackHandled.add(rewriteReq);`);
+  }
+  // Branch at compile time on target — Hono's `c.executionCtx` getter throws
+  // on node/bun/deno targets where the ExecutionContext is absent.
+  if (nodeTarget) {
+    lines.push(`${indent}    const __r = await app.fetch(rewriteReq, c.env);`);
+  } else {
+    lines.push(`${indent}    const __r = await app.fetch(rewriteReq, c.env, c.executionCtx);`);
+  }
+  lines.push(`${indent}    if (!__VOID_DEV_ROUTING) return __r;`);
+  lines.push(`${indent}    const __kind = matched.rule.force === true ? "rewrite" : "fallback";`);
+  lines.push(
+    `${indent}    const __trace = __kind + "[" + matched.rule.source + "] \\u2192 " + dest + " (" + (matched.rule.origin || "unknown") + ")";`,
+  );
+  lines.push(`${indent}    return __voidAnnotateRouting(__r, __trace);`);
+  lines.push(`${indent}  }`);
+  lines.push(
+    `${indent}  const location = __mergeQueryIntoLocation(dest, new URL(c.req.url).search);`,
+  );
+  lines.push(`${indent}  const __redir = c.redirect(location, matched.rule.status);`);
+  lines.push(`${indent}  if (!__VOID_DEV_ROUTING) return __redir;`);
+  lines.push(
+    `${indent}  const __rtrace = "redirect[" + matched.rule.source + "] \\u2192 " + dest + " " + matched.rule.status + " (" + (matched.rule.origin || "unknown") + ")";`,
+  );
+  lines.push(`${indent}  return __voidAnnotateRouting(__redir, __rtrace);`);
+  lines.push(`${indent}}`);
+}
+
+/**
+ * Strip dev-only `origin` metadata from a rule list before embedding in the
+ * generated worker code. Keeps production bundles free of authoring hints.
+ *
+ * Keep in sync with `stripDevOnlyRuleFields` in `cli/package.ts`. This helper
+ * intentionally preserves `force` because the Node/Bun/Deno-target codegen
+ * reads it at runtime to label the `X-Void-Routing` trace header as either
+ * `rewrite[...]` (force) or `fallback[...]`. The CLI version strips both
+ * fields because the deploy manifest never transmits either to the dispatch
+ * worker (phase is implied by which bucket the rule ships in).
+ */
+function stripOriginForProd(rules: Array<DevRedirectRule>): Array<DevRedirectRule> {
+  return rules.map(({ origin: _origin, ...rest }) => rest);
+}
+
+/**
+ * Emit routing rules middleware — handles both redirects (3xx) and rewrites (200).
+ * Last match wins. Rewrites re-dispatch with a guard header to prevent loops.
+ * Redirects preserve the request's query string in the Location header.
+ *
+ * When `dev === true` the per-rule `origin` metadata is preserved in the
+ * compiled rule table and a matched rule's trace is emitted on the
+ * `X-Void-Routing` response header. In production the origin field is
+ * stripped and no trace header is emitted.
+ */
+function compileRoutingRulesMiddleware(
+  lines: Array<string>,
+  rules: Array<DevRedirectRule>,
+  dev: boolean,
+  nodeTarget: boolean,
+): void {
+  ensureCompilePatternEmitted(lines);
+  lines.push('// Routing rules: redirects + rewrites (applied before route handlers)');
+  lines.push(`const __routingRules = ${JSON.stringify(dev ? rules : stripOriginForProd(rules))};`);
   lines.push('app.use("*", async (c, next) => {');
+  // Re-dispatched rewrites short-circuit: the outer caller (either a static
+  // rule or a user `c.rewrite()`) owns annotating the final response, so
+  // we intentionally don't set a trace header here.
+  lines.push('  if (__voidOriginalUrls.has(c.req.raw)) return next();');
   lines.push('  const pathname = new URL(c.req.url).pathname;');
-  lines.push('  let matched;');
-  lines.push('  for (const rule of __redirectRules) {');
-  lines.push('    if (__matchPattern(rule.source, pathname)) matched = rule;');
-  lines.push('  }');
-  lines.push('  if (matched) {');
-  lines.push('    let dest = matched.destination;');
-  lines.push('    if (dest.includes(":splat") && matched.source.includes("*")) {');
-  lines.push('      const prefix = matched.source.split("*")[0];');
-  lines.push('      const splat = pathname.slice(prefix.length);');
-  lines.push('      dest = dest.replace(":splat", splat);');
-  lines.push('    }');
-  lines.push('    return c.redirect(dest, matched.status);');
-  lines.push('  }');
-  lines.push('  return next();');
+  emitApplyRoutingRules(lines, '__routingRules', '  ', nodeTarget);
+  if (dev) {
+    // No static rule matched — let the pipeline run, then annotate the final
+    // response with a default pass-through trace (unless downstream already
+    // set one, e.g. from a middleware `c.rewrite()` hop).
+    lines.push('  await next();');
+    lines.push('  if (__VOID_DEV_ROUTING && c.res && !c.res.headers.has("X-Void-Routing")) {');
+    // Some runtimes produce Responses with guarded/immutable Headers; silently
+    // skip the trace annotation rather than crashing the dev middleware.
+    lines.push('    try { c.res.headers.set("X-Void-Routing", "pass-through"); } catch {}');
+    lines.push('  }');
+  } else {
+    lines.push('  return next();');
+  }
   lines.push('});');
   lines.push('');
+}
+
+/**
+ * Emit a fallback-rule check inside Hono's `notFound` hook. Fires only when
+ * the pipeline didn't match a route — the "asset-miss / no route matched"
+ * phase. Re-dispatches through `app.fetch` on a rule match so the re-dispatched
+ * request runs through the full middleware + route stack with
+ * `X-Void-Original-URL` set; falls through to the caller's existing notFound
+ * body when no rule matches.
+ *
+ * Indent `indent` so the emitted statements nest cleanly within the caller's
+ * block. Expects `__matchPattern`, `__voidOriginalUrls`, `__mergeQueryIntoLocation`,
+ * `__substituteParams`, and `__voidAnnotateRouting` to already be in scope —
+ * which they are, because `compileRoutingRulesMiddleware` runs earlier in
+ * compile order and emits every one of them.
+ */
+function emitFallbackRulesCheck(
+  lines: Array<string>,
+  rules: Array<DevRedirectRule>,
+  dev: boolean,
+  indent: string,
+  nodeTarget: boolean,
+): void {
+  ensureCompilePatternEmitted(lines);
+  // Emit the rule table once; reference from the notFound body. The table is
+  // hoisted to module scope so multiple notFound call sites see the same
+  // constant — today there's only one, but leaving the door open costs nothing.
+  const tableMarker = '// Fallback rules (applied on no-match, post-route)';
+  if (!lines.includes(tableMarker)) {
+    lines.push(tableMarker);
+    lines.push(
+      `const __fallbackRules = ${JSON.stringify(dev ? rules : stripOriginForProd(rules))};`,
+    );
+    lines.push('');
+  }
+  // Single-hop guard: skip when this request was itself produced by a
+  // fallback re-dispatch. User `c.rewrite` and static-rewrite middleware
+  // re-dispatches are NOT marked here — they should still get a chance at
+  // fallbacks for the rewrite target (`/old → /new` then `/new` matches
+  // a fallback, or `c.rewrite('/missing')` where `/missing` is a fallback
+  // source). See `__voidFallbackHandled` declaration above.
+  lines.push(`${indent}if (!__voidFallbackHandled.has(c.req.raw)) {`);
+  lines.push(`${indent}  const pathname = new URL(c.req.url).pathname;`);
+  emitApplyRoutingRules(lines, '__fallbackRules', `${indent}  `, nodeTarget, true);
+  lines.push(`${indent}}`);
 }
 
 /**
@@ -2221,10 +2816,7 @@ function compileRedirectMiddleware(lines: Array<string>, rules: Array<RedirectRu
  * All matching rules merge; last match wins for same header name.
  */
 function compileHeaderMiddleware(lines: Array<string>, rules: Array<HeaderRule>): void {
-  // matchPattern may already be emitted by redirect middleware
-  if (!lines.some((l) => l.includes('function __matchPattern'))) {
-    emitMatchPattern(lines);
-  }
+  ensureCompilePatternEmitted(lines);
   lines.push('// Header rules (applied to responses)');
   lines.push(`const __headerRules = ${JSON.stringify(rules)};`);
   lines.push('app.use("*", async (c, next) => {');

@@ -1,13 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { HeaderRule, RedirectRule } from './cli/types';
+import type { RewriteDestination } from 'void/routes';
+import type { DevRedirectRule, HeaderRule, RedirectRule } from './cli/types';
 export type { RedirectRule };
 import { VOID_AUTH_PROVIDERS, isVoidAuthProvider, type VoidAuthProvider } from './auth/providers';
 import type { HeadConfig } from './pages/head';
 import type { SandboxConfig, SandboxInstanceType } from './sandbox/config';
 
 /** Redirect destination — string (302) or object with explicit status. */
-export type RedirectDestination = string | { to: string; status?: 301 | 302 | 307 | 308 };
+export type RedirectDestination = string | { to: string; status?: 301 | 302 | 303 | 307 | 308 };
 
 /** Supported database dialects (internal representation). */
 export type DatabaseDialect = 'sqlite' | 'postgresql';
@@ -18,12 +19,15 @@ export interface WranglerConfig {
   compatibility_flags?: Array<string>;
 }
 
-/** Routing configuration — headers, redirects, revalidation, prerendering. */
+/** Routing configuration — headers, redirects, rewrites, fallbacks, revalidation, prerendering. */
 export interface RoutingConfig {
   revalidate?: number | Record<string, number>;
+  revalidateQueryAllowlist?: Record<string, Array<string>>;
   prerender?: Array<string>;
   headers?: Record<string, Array<string>>;
   redirects?: Record<string, RedirectDestination>;
+  rewrites?: Record<string, RewriteDestination>;
+  fallbacks?: Record<string, RewriteDestination>;
 }
 
 /** Inference configuration — bindings, scanDirs, build, outputDir, appType. */
@@ -65,7 +69,13 @@ const CONFIG_FILE = 'void.json';
 const VALID_TARGETS = new Set(['cloudflare', 'node', 'bun', 'deno']);
 const VALID_APP_TYPES = new Set(['spa', 'static', 'void', 'framework']);
 const VALID_OUTPUTS = new Set(['server', 'static']);
-const VALID_REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
+/**
+ * Allowed 3xx redirect statuses. Source of truth for the framework, the
+ * `_redirects` parser (`cli/headers.ts`), and the schema.json enum. 303 is
+ * included for POST→GET after-submit patterns; 304/305/306 aren't
+ * cacheable-safe / are deprecated.
+ */
+export const VALID_REDIRECT_STATUSES: Set<number> = new Set([301, 302, 303, 307, 308]);
 const VALID_DATABASE_VALUES = new Set(['pg']);
 const VALID_SANDBOX_INSTANCE_TYPES = new Set<SandboxInstanceType>([
   'dev',
@@ -77,6 +87,134 @@ const VALID_SANDBOX_INSTANCE_TYPES = new Set<SandboxInstanceType>([
   'standard-3',
   'standard-4',
 ]);
+
+/**
+ * Count anonymous `*` wildcards in a pattern, ignoring the `*` that
+ * terminates a `:name*` multi-segment named capture.
+ *
+ * Both the framework's emitted `__compilePattern` (router/compile.ts) and
+ * dispatch's `compilePattern` (packages/dispatch/src/pattern.ts) emit a
+ * distinct `(?<name>.*)` group for `:name*` and a `(?<splat>.*)` group for
+ * the first bare `*` — those don't clash, so a pattern with both a named
+ * multi-segment capture and a bare splat is legitimate and must validate.
+ * Walking raw chars would over-count and cause `assertSingleSplat` to
+ * reject such patterns.
+ *
+ * The identifier character class matches `[A-Za-z0-9_]+` from both compilers.
+ */
+export function countSplats(source: string): number {
+  // Strip `:name*` first — the `*` there is the tail of a named multi-segment
+  // capture (matches `[A-Za-z0-9_]+` per both compilers' identifier class),
+  // not an anonymous splat. The remaining `*`s are the ones validators care
+  // about for duplicate-group-name avoidance.
+  return source.replace(/:[A-Za-z0-9_]+\*/g, '').match(/\*/g)?.length ?? 0;
+}
+
+/**
+ * Reject a rule source containing more than one `*` wildcard. The dispatch
+ * worker compiles each `*` into a `(?<splat>...)` named capture group; having
+ * two of them in one pattern means `new RegExp()` throws at startup with a
+ * cryptic "duplicate group name" error. Fail at config-read time with a
+ * clear message instead. `kind` is a capitalised noun (e.g. "Redirect",
+ * "Rewrite") used in the error text.
+ */
+export function assertSingleSplat(source: string, kind: string): void {
+  const count = countSplats(source);
+  if (count > 1) {
+    throw new Error(
+      `${kind} source "${source}" in ${CONFIG_FILE} must contain at most one "*" wildcard (got ${count}); the matched portion is captured once as :splat`,
+    );
+  }
+}
+
+/**
+ * Reject patterns whose compilation would produce duplicate named-capture
+ * groups, which makes `new RegExp()` throw `SyntaxError: Duplicate capture
+ * group name` at request time. Two cases:
+ *
+ *   1. Two `:name` (or `:name` + trailing `*`) tokens with the same
+ *      identifier — e.g. `/:id/:id`, or two named-multi-segment captures
+ *      sharing a name.
+ *   2. A `:splat` (named) token alongside a bare `*` — both compile to a
+ *      `(?<splat>...)` group.
+ *
+ * `assertSingleSplat` already prevents two bare `*`s clashing on the
+ * implicit `splat` name. This complements it. The runtime emitter has a
+ * try/catch defense-in-depth in `emitApplyRoutingRules`, but failing at
+ * config-read with a precise message is friendlier than a CLI-log warn.
+ */
+export function assertUniqueCaptureNames(source: string, kind: string): void {
+  const seen = new Set<string>();
+  const dups = new Set<string>();
+  // Same identifier class as both compilers (`__compilePattern` and
+  // dispatch's `compilePattern`). Trailing `*` is optional — `:name` and
+  // `:name*` both produce a `<name>` capture group.
+  const re = /:([A-Za-z0-9_]+)\*?/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) {
+    const name = m[1]!;
+    if (seen.has(name)) {
+      dups.add(name);
+    }
+    seen.add(name);
+  }
+  // Bare `*` (post-`:name*` strip) emits `(?<splat>...)`. If the pattern
+  // also has a `:splat` token, both produce the same group name.
+  if (countSplats(source) >= 1 && seen.has('splat')) {
+    dups.add('splat');
+  }
+  if (dups.size > 0) {
+    const names = [...dups].map((n) => `:${n}`).join(', ');
+    throw new Error(
+      `${kind} source "${source}" in ${CONFIG_FILE} has duplicate capture group name(s) (${names}); each :name token must be unique within a pattern, and :splat collides with a bare "*"`,
+    );
+  }
+}
+
+/**
+ * Predicate for the "protocol-relative" shape: a leading `//` parses as
+ * `//host/path` → `https://host/path`, which silently turns an intended
+ * in-worker rewrite/redirect into a cross-origin proxy.
+ *
+ * Shared by the `void.json` validators below and the `_redirects` parser
+ * (`cli/headers.ts`). The `c.rewrite()` codegen in `router/compile.ts`
+ * inlines an equivalent check in emitted worker code — it validates
+ * runtime user input rather than config, so it can't call through here.
+ */
+export function isProtocolRelative(dest: string): boolean {
+  return dest.startsWith('//');
+}
+
+function assertNotProtocolRelative(
+  dest: string,
+  source: string,
+  kind: 'Redirect' | 'Rewrite' | 'Fallback',
+): void {
+  if (!isProtocolRelative(dest)) {
+    return;
+  }
+  const suffix =
+    kind === 'Redirect'
+      ? 'use a single-slash path for internal redirects or an explicit "https://..." URL for external'
+      : 'only internal paths are supported';
+  throw new Error(
+    `${kind} destination for "${source}" in ${CONFIG_FILE} must not start with "//" (protocol-relative URLs parse as cross-origin; ${suffix})`,
+  );
+}
+
+/**
+ * Shared guard for rewrite/fallback destinations: they preserve the incoming
+ * request's query string, so embedding one in the destination would silently
+ * override (or merge confusingly with) the request query.
+ */
+function assertNoQueryString(dest: string, source: string, kind: 'Rewrite' | 'Fallback'): void {
+  if (!dest.includes('?')) {
+    return;
+  }
+  throw new Error(
+    `${kind} destination for "${source}" in ${CONFIG_FILE} must not contain "?" (query strings are not supported in ${kind.toLowerCase()} destinations; the incoming request's query is preserved automatically)`,
+  );
+}
 
 /** Old flat keys that have moved into namespaces. */
 const MIGRATION_ERRORS: Record<string, string> = {
@@ -305,6 +443,7 @@ export function readConfig(root: string): VoidConfig {
             `config: Header pattern '${pattern}' in ${CONFIG_FILE} must start with "/".`,
           );
         }
+        assertSingleSplat(pattern, 'Header');
         if (!Array.isArray(values) || !values.every((v) => typeof v === 'string')) {
           throw new Error(
             `config: Headers for '${pattern}' in ${CONFIG_FILE} must be an array of strings.`,
@@ -329,8 +468,12 @@ export function readConfig(root: string): VoidConfig {
             `config: Redirect source '${source}' in ${CONFIG_FILE} must start with "/".`,
           );
         }
+        assertSingleSplat(source, 'Redirect');
+        assertUniqueCaptureNames(source, 'Redirect');
         if (typeof dest === 'string') {
-          // ok
+          if (dest.startsWith('/')) {
+            assertNotProtocolRelative(dest, source, 'Redirect');
+          }
         } else if (typeof dest === 'object' && dest !== null && !Array.isArray(dest)) {
           const d = dest as Record<string, unknown>;
           if (typeof d.to !== 'string') {
@@ -338,9 +481,12 @@ export function readConfig(root: string): VoidConfig {
               `config: Redirect for '${source}' in ${CONFIG_FILE} must have a "to" string.`,
             );
           }
+          if ((d.to as string).startsWith('/')) {
+            assertNotProtocolRelative(d.to as string, source, 'Redirect');
+          }
           if (d.status !== undefined && !VALID_REDIRECT_STATUSES.has(d.status as number)) {
             throw new Error(
-              `config: Redirect status for '${source}' in ${CONFIG_FILE} must be 301, 302, 307, or 308.`,
+              `config: Redirect status for '${source}' in ${CONFIG_FILE} must be 301, 302, 303, 307, or 308.`,
             );
           }
         } else {
@@ -348,6 +494,92 @@ export function readConfig(root: string): VoidConfig {
             `config: Redirect for '${source}' in ${CONFIG_FILE} must be a string or an object with "to" and optional "status".`,
           );
         }
+      }
+    }
+
+    // Validate routing.revalidateQueryAllowlist
+    if (routing.revalidateQueryAllowlist !== undefined) {
+      if (
+        typeof routing.revalidateQueryAllowlist !== 'object' ||
+        routing.revalidateQueryAllowlist === null ||
+        Array.isArray(routing.revalidateQueryAllowlist)
+      ) {
+        throw new Error(`"routing.revalidateQueryAllowlist" in ${CONFIG_FILE} must be an object`);
+      }
+      for (const [pattern, params] of Object.entries(routing.revalidateQueryAllowlist)) {
+        if (pattern !== '*' && !pattern.startsWith('/')) {
+          throw new Error(
+            `config: revalidateQueryAllowlist pattern '${pattern}' in ${CONFIG_FILE} must start with "/" or be "*".`,
+          );
+        }
+        if (pattern !== '*') {
+          assertSingleSplat(pattern, 'revalidateQueryAllowlist');
+        }
+        if (!Array.isArray(params) || !params.every((v) => typeof v === 'string')) {
+          throw new Error(
+            `config: revalidateQueryAllowlist for '${pattern}' in ${CONFIG_FILE} must be an array of strings.`,
+          );
+        }
+      }
+    }
+
+    // Validate routing.rewrites
+    if (routing.rewrites !== undefined) {
+      if (
+        typeof routing.rewrites !== 'object' ||
+        routing.rewrites === null ||
+        Array.isArray(routing.rewrites)
+      ) {
+        throw new Error(`"routing.rewrites" in ${CONFIG_FILE} must be an object`);
+      }
+      const rw = routing.rewrites as Record<string, unknown>;
+      for (const [source, dest] of Object.entries(rw)) {
+        if (!source.startsWith('/')) {
+          throw new Error(`Rewrite source "${source}" in ${CONFIG_FILE} must start with "/"`);
+        }
+        assertSingleSplat(source, 'Rewrite');
+        assertUniqueCaptureNames(source, 'Rewrite');
+        if (typeof dest !== 'string') {
+          throw new Error(`Rewrite destination for "${source}" in ${CONFIG_FILE} must be a string`);
+        }
+        if (!dest.startsWith('/')) {
+          throw new Error(
+            `Rewrite destination for "${source}" in ${CONFIG_FILE} must start with "/" (only internal paths are supported)`,
+          );
+        }
+        assertNotProtocolRelative(dest, source, 'Rewrite');
+        assertNoQueryString(dest, source, 'Rewrite');
+      }
+    }
+
+    // Validate routing.fallbacks
+    if (routing.fallbacks !== undefined) {
+      if (
+        typeof routing.fallbacks !== 'object' ||
+        routing.fallbacks === null ||
+        Array.isArray(routing.fallbacks)
+      ) {
+        throw new Error(`"routing.fallbacks" in ${CONFIG_FILE} must be an object`);
+      }
+      const fb = routing.fallbacks as Record<string, unknown>;
+      for (const [source, dest] of Object.entries(fb)) {
+        if (!source.startsWith('/')) {
+          throw new Error(`Fallback source "${source}" in ${CONFIG_FILE} must start with "/"`);
+        }
+        assertSingleSplat(source, 'Fallback');
+        assertUniqueCaptureNames(source, 'Fallback');
+        if (typeof dest !== 'string') {
+          throw new Error(
+            `Fallback destination for "${source}" in ${CONFIG_FILE} must be a string`,
+          );
+        }
+        if (!dest.startsWith('/')) {
+          throw new Error(
+            `Fallback destination for "${source}" in ${CONFIG_FILE} must start with "/" (only internal paths are supported)`,
+          );
+        }
+        assertNotProtocolRelative(dest, source, 'Fallback');
+        assertNoQueryString(dest, source, 'Fallback');
       }
     }
   }
@@ -620,7 +852,7 @@ export function convertHeadersConfig(
 }
 
 /**
- * Convert the `redirects` config field into `RedirectRule[]` for the deploy manifest.
+ * Convert the `redirects` config field into `DevRedirectRule[]` for the deploy manifest.
  *
  * Each key is a URL pattern (e.g. "/old") and each value is either a string
  * destination (defaults to 302) or an object with `to` and optional `status`.
@@ -628,18 +860,69 @@ export function convertHeadersConfig(
  */
 export function convertRedirectsConfig(
   redirects: Record<string, RedirectDestination> | undefined,
-): Array<RedirectRule> | undefined {
+): Array<DevRedirectRule> | undefined {
   if (!redirects) {
     return undefined;
   }
 
-  const rules: Array<RedirectRule> = [];
+  const origin = 'void.json#routing.redirects';
+  const rules: Array<DevRedirectRule> = [];
   for (const [source, dest] of Object.entries(redirects)) {
     if (typeof dest === 'string') {
-      rules.push({ source, destination: dest, status: 302 });
+      rules.push({ source, destination: dest, status: 302, origin });
     } else {
-      rules.push({ source, destination: dest.to, status: dest.status ?? 302 });
+      rules.push({ source, destination: dest.to, status: dest.status ?? 302, origin });
     }
+  }
+
+  return rules.length > 0 ? rules : undefined;
+}
+
+/**
+ * Convert the `rewrites` config field into `DevRedirectRule[]` with status 200.
+ *
+ * Each key is a URL pattern (e.g. "/docs") and each value is a destination path.
+ * Rewrites serve content from the destination without changing the browser URL.
+ * Emits `force: true` so these rules fire unconditionally, overriding any
+ * matching static asset (Netlify-compat `200!` semantics). Returns undefined
+ * if the input is empty or undefined.
+ */
+export function convertRewritesConfig(
+  rewrites: Record<string, RewriteDestination> | undefined,
+): Array<DevRedirectRule> | undefined {
+  if (!rewrites) {
+    return undefined;
+  }
+
+  const origin = 'void.json#routing.rewrites';
+  const rules: Array<DevRedirectRule> = [];
+  for (const [source, destination] of Object.entries(rewrites)) {
+    rules.push({ source, destination, status: 200, force: true, origin });
+  }
+
+  return rules.length > 0 ? rules : undefined;
+}
+
+/**
+ * Convert the `fallbacks` config field into `DevRedirectRule[]` with status 200.
+ *
+ * Fallbacks fire only when the static asset resolver would otherwise return
+ * 404. They share the rewrite shape (status 200, pathname-only destination)
+ * but are evaluated at a different pipeline phase — post-lookup instead of
+ * pre-lookup. Emits `force: false` (Netlify-compat plain `200` semantics).
+ * Returns undefined if the input is empty or undefined.
+ */
+export function convertFallbacksConfig(
+  fallbacks: Record<string, RewriteDestination> | undefined,
+): Array<DevRedirectRule> | undefined {
+  if (!fallbacks) {
+    return undefined;
+  }
+
+  const origin = 'void.json#routing.fallbacks';
+  const rules: Array<DevRedirectRule> = [];
+  for (const [source, destination] of Object.entries(fallbacks)) {
+    rules.push({ source, destination, status: 200, force: false, origin });
   }
 
   return rules.length > 0 ? rules : undefined;

@@ -21,11 +21,11 @@ import {
   readConfig,
   resolveBindingNames,
   type DatabaseDialect,
+  type RoutingConfig,
   type VoidConfig,
   getDatabaseDialect,
   isNodeTarget,
 } from '../config';
-import { convertHeadersConfig, convertRedirectsConfig } from '../config';
 import { scanJobsSync } from '../crons/scan';
 import { writeDrizzleConfig } from '../drizzle/config';
 import { discoverSchema } from '../drizzle/discover';
@@ -64,7 +64,7 @@ import {
   getDeployEnvDefaults,
   validateProdEnv,
 } from './env-validation';
-import { parseHeadersFile, parseRedirectsFile } from './headers';
+import { lintDestinationSplats, lintDuplicateSources, mergeRoutingRules } from './headers';
 import { promptForLoginToken } from './login';
 import { cliTitle, createSpinner, pc } from './output';
 import {
@@ -84,7 +84,7 @@ import {
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from './project';
 import { promptProjectSelection, promptProjectSetupAction } from './prompt';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project';
-import type { AssetConfig, DeployEvent, HeaderRule, RedirectRule } from './types';
+import type { AssetConfig, DeployEvent, DevRedirectRule, HeaderRule } from './types';
 import { readWranglerCompat, type WranglerCompat } from './wrangler';
 import { needsWrapper, generateWrapper, bundleEntry, cleanupWrapper } from './wrapper';
 
@@ -311,8 +311,10 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
           options?.skipBuild,
           gitCommit,
           undefined,
-          convertHeadersConfig(voidConfig.routing?.headers) ?? [],
-          convertRedirectsConfig(voidConfig.routing?.redirects) ?? [],
+          undefined,
+          undefined,
+          undefined,
+          voidConfig.routing,
         );
       } else {
         await runFullDeploy(root, config, client, undefined, options?.skipBuild, gitCommit);
@@ -506,7 +508,9 @@ async function runStaticDeploy(
   commit?: string | null,
   hashedAssetsPrefix?: string,
   headerRules?: Array<HeaderRule>,
-  redirectRules?: Array<RedirectRule>,
+  redirectRules?: Array<DevRedirectRule>,
+  fallbackRules?: Array<DevRedirectRule>,
+  routing?: RoutingConfig,
 ): Promise<void> {
   const typeLabel = preset.appType === 'spa' ? 'Static SPA' : 'Static Site';
   log.info(`${typeLabel} deploy`);
@@ -520,6 +524,18 @@ async function runStaticDeploy(
   if (!existsSync(preset.outputDir)) {
     log.error(`deploy: Output directory '${preset.outputDir}' not found. Run the build first.`);
     process.exit(1);
+  }
+
+  if (routing) {
+    const merged = mergeRoutingRules({ dir: preset.outputDir, routing });
+    warnRedundantForceOn3xx(merged.redundantForceOn3xx);
+    lintDuplicateSources(merged.redirectRules, 'redirects/rewrites (pre-asset)');
+    lintDuplicateSources(merged.fallbackRules, 'fallbacks (post-asset)');
+    lintDestinationSplats(merged.redirectRules, 'redirects/rewrites (pre-asset)');
+    lintDestinationSplats(merged.fallbackRules, 'fallbacks (post-asset)');
+    headerRules = merged.headerRules;
+    redirectRules = merged.redirectRules;
+    fallbackRules = merged.fallbackRules;
   }
 
   const s = createSpinner();
@@ -544,6 +560,7 @@ async function runStaticDeploy(
     hashedAssetsPrefix ?? 'assets',
     headerRules,
     redirectRules,
+    fallbackRules,
     onProgress,
   );
   formData.append('assetManifest', JSON.stringify(assetManifest));
@@ -558,6 +575,22 @@ async function runStaticDeploy(
   note(summary.join('\n'), result.url);
 
   outro('Done!');
+}
+
+/**
+ * Emit a single aggregated lint warning when a `_redirects` file contains
+ * one or more `!` force suffixes on 3xx entries (e.g. `301!`, `302!`).
+ * The `!` is a no-op on redirects — we parse them as if the `!` weren't
+ * there — but we nudge the user to clean up for clarity. Silenced when
+ * `count === 0`.
+ */
+export function warnRedundantForceOn3xx(count: number): void {
+  if (count === 0) {
+    return;
+  }
+  log.warn(
+    `Found ${count} redundant "!" on 3xx entries in _redirects (these always force by nature; safe to remove).`,
+  );
 }
 
 /**
@@ -591,18 +624,25 @@ async function runFrameworkDeploy(
   const workerDir = join(root, fwPreset.workerDir);
   const assetsDir = join(root, fwPreset.assetsDir);
 
-  // Collect header rules: parse framework-generated _headers file + void.json config
-  const fwHeaderRules = existsSync(assetsDir) ? parseHeadersFile(assetsDir) : undefined;
-  const cfgHeaderRules = convertHeadersConfig(voidConfig.routing?.headers);
-  const headerRules: Array<HeaderRule> = [...(fwHeaderRules ?? []), ...(cfgHeaderRules ?? [])];
+  // Merge framework-generated `_headers` / `_redirects` + void.json routing rules.
+  // Netlify-symmetric phases:
+  //   - `_redirects` `200!` + routing.rewrites  → redirectRules (always-fires)
+  //   - `_redirects` `200`  + routing.fallbacks → fallbackRules (asset-miss only)
+  const { headerRules, redirectRules, fallbackRules, redundantForceOn3xx } = mergeRoutingRules({
+    dir: assetsDir,
+    routing: voidConfig.routing,
+  });
+  warnRedundantForceOn3xx(redundantForceOn3xx);
 
-  // Collect redirect rules: parse framework-generated _redirects file + void.json config
-  const fwRedirectRules = existsSync(assetsDir) ? parseRedirectsFile(assetsDir) : undefined;
-  const cfgRedirectRules = convertRedirectsConfig(voidConfig.routing?.redirects);
-  const redirectRules: Array<RedirectRule> = [
-    ...(fwRedirectRules ?? []),
-    ...(cfgRedirectRules ?? []),
-  ];
+  // Lint each phase independently: duplicates across phases (redirects vs
+  // fallbacks) don't shadow each other, only duplicates within a phase do.
+  lintDuplicateSources(redirectRules, 'redirects/rewrites (pre-asset)');
+  lintDuplicateSources(fallbackRules, 'fallbacks (post-asset)');
+
+  // Warn on destinations containing a literal `*` — only `:name` tokens are
+  // substituted at dispatch time, so `*` is almost always a user mistake.
+  lintDestinationSplats(redirectRules, 'redirects/rewrites (pre-asset)');
+  lintDestinationSplats(fallbackRules, 'fallbacks (post-asset)');
 
   if (!existsSync(workerDir)) {
     log.error(`deploy: Worker output '${fwPreset.workerDir}' not found. Run '${buildCmd}' first.`);
@@ -780,10 +820,12 @@ async function runFrameworkDeploy(
       compatibilityDate: wranglerCompat.compatibilityDate,
       compatibilityFlags: wranglerCompat.compatibilityFlags,
     },
+    revalidateQueryAllowlist: voidConfig.routing?.revalidateQueryAllowlist,
     neededAssets: neededSet,
     hashedAssetsPrefix: fwPreset.hashedAssetsPrefix ?? 'assets',
     headerRules,
     redirectRules,
+    fallbackRules,
     dialect,
     onProgress,
   });
@@ -918,19 +960,23 @@ async function runFullDeploy(
     process.exit(1);
   }
 
-  // Collect header rules: parse user/framework _headers file + void.json config
+  // Merge user/framework `_headers` / `_redirects` in the built client dir with
+  // `void.json` routing rules. See the framework branch above for phase splitting.
   const clientDir = join(distDir, 'client');
-  const userHeaderRules = existsSync(clientDir) ? parseHeadersFile(clientDir) : undefined;
-  const cfgHeaderRules = convertHeadersConfig(deployConfig.routing?.headers);
-  const headerRules: Array<HeaderRule> = [...(userHeaderRules ?? []), ...(cfgHeaderRules ?? [])];
+  const { headerRules, redirectRules, fallbackRules, redundantForceOn3xx } = mergeRoutingRules({
+    dir: clientDir,
+    routing: deployConfig.routing,
+  });
+  warnRedundantForceOn3xx(redundantForceOn3xx);
 
-  // Collect redirect rules: parse user/framework _redirects file + void.json config
-  const userRedirectRules = existsSync(clientDir) ? parseRedirectsFile(clientDir) : undefined;
-  const cfgRedirectRules = convertRedirectsConfig(deployConfig.routing?.redirects);
-  const redirectRules: Array<RedirectRule> = [
-    ...(userRedirectRules ?? []),
-    ...(cfgRedirectRules ?? []),
-  ];
+  // Lint each phase independently — same rationale as the framework branch.
+  lintDuplicateSources(redirectRules, 'redirects/rewrites (pre-asset)');
+  lintDuplicateSources(fallbackRules, 'fallbacks (post-asset)');
+
+  // Warn on destinations containing a literal `*` — splat tokens in
+  // destinations aren't substituted (`:splat` is the correct token).
+  lintDestinationSplats(redirectRules, 'redirects/rewrites (pre-asset)');
+  lintDestinationSplats(fallbackRules, 'fallbacks (post-asset)');
 
   const migrationsDir = join(root, 'db', 'migrations');
 
@@ -1068,6 +1114,7 @@ async function runFullDeploy(
         assetsPrefix,
         headerRules,
         redirectRules,
+        fallbackRules,
       );
     }
   }
@@ -1155,11 +1202,13 @@ async function runFullDeploy(
       compatibilityDate: wranglerCompat?.compatibilityDate,
       compatibilityFlags: wranglerCompat?.compatibilityFlags,
       ...(sandboxConfig && { sandbox: sandboxConfig }),
+      revalidateQueryAllowlist: deployConfig.routing?.revalidateQueryAllowlist,
     },
     neededSet,
     assetsPrefix,
     headerRules,
     redirectRules,
+    fallbackRules,
     dialect,
     webSockets,
     onProgress,

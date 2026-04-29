@@ -232,6 +232,79 @@ function defineHead<P = Record<string, unknown>>(
 ): (c: CloudContext, props: P) => HeadDescriptor | undefined;
 ```
 
+## Rewrites
+
+URL rewrites re-dispatch a request at a different internal path without changing the browser's URL. `c.rewrite()`, `c.originalUrl()`, and `c.isRewritten()` are available on every Hono `Context` the Void runtime hands you. See the [Rewrites guide](../guide/edge/rewrites.md) for the full overview, including static `routing.rewrites` / `routing.fallbacks` in [`void.json`](./config.md#routing).
+
+### `c.rewrite(destination)`
+
+Re-dispatches the current request at `destination` and returns the resulting `Response`. The browser URL does not change — this is a server-side hop. If `destination` has no query string, the original request query is preserved. If `destination` includes a query string, it replaces the original query. `destination` must start with `/`; known generated routes autocomplete via [`RewriteDestination`](#rewritedestination), while arbitrary strings remain accepted for dynamic paths.
+
+`c.redirect()` also preserves request query params for internal destinations, but it merges rather than replaces: destination params win on collision, and request-only params are appended.
+
+```ts
+import { defineHandler } from 'void';
+
+export const GET = defineHandler((c) => {
+  const locale = c.req.header('accept-language')?.startsWith('de') ? 'de' : 'en';
+  return c.rewrite(`/${locale}${new URL(c.req.url).pathname}`);
+});
+```
+
+**Signature:**
+
+```ts
+interface CloudContext {
+  rewrite(destination: RewriteDestination): Promise<Response>;
+}
+```
+
+**Caveats:**
+
+- `destination` must start with a single `/` and point at an internal path. External URLs, protocol-relative destinations (`//host/...`), and anything non-path-absolute throw immediately — use `fetch()` for cross-origin calls.
+- Destinations whose final path segment ends in a known static-asset extension (e.g. `/hero.png`, `/app.css`, `/data.json`) throw `VoidAssetRewriteError` (exported from `"void"`) before the re-dispatch. Runtime rewrites cannot reach assets — use a static `routing.rewrites` rule or a `_redirects` `200!` entry. `.html` is deliberately excluded from this guard because `.html` paths may be legitimate route handlers. See the [guide](../guide/edge/rewrites.md#runtime-rewrites-cannot-reach-static-assets) for the full extension list and rationale.
+- Middleware re-runs on every rewrite hop. Guard side-effects with [`c.isRewritten()`](#c-originalurl-c-isrewritten).
+- Client-side SPA navigation via `Link` does not trigger server rewrites; only full HTTP requests do.
+- [ISR](../guide/edge/revalidation.md) cache keys follow the rewritten path, not the original URL.
+
+### `c.originalUrl()` / `c.isRewritten()`
+
+Context methods for inspecting rewrite state. `c.originalUrl()` returns the pre-rewrite URL as a `URL` object, or `null` on the first, non-rewritten hop. `c.isRewritten()` returns `true` on any re-dispatched context and `false` on the original. Both helpers read from an in-worker `WeakMap<Request, URL>` keyed on `c.req.raw`; the `X-Void-Original-URL` header is only how edge dispatch forwards the pre-rewrite URL to the worker, and entry middleware migrates it into the map once per request.
+
+```ts
+import { defineMiddleware } from 'void';
+
+export default defineMiddleware(async (c, next) => {
+  if (!c.isRewritten()) {
+    // Only log the user-visible request, not internal rewrite hops.
+    console.log(`${c.req.method} ${c.req.path}`);
+  }
+  await next();
+});
+```
+
+**Signature:**
+
+```ts
+interface CloudContext {
+  originalUrl(): URL | null;
+  isRewritten(): boolean;
+}
+```
+
+### `RewriteDestination`
+
+```ts
+import type { RewriteDestination } from 'void/routes';
+```
+
+Union of the exact route patterns from your generated `RouteMap` plus a `string` fallback (`RouteName | (string & {})`). Known route patterns (e.g. `/posts/[id]`) are offered as autocomplete entries in your editor, while the `string` branch keeps the type assignable from concrete runtime paths like `` `/posts/${id}` `` — there is no `:id` template-literal resolution at the type level. Used as:
+
+- The parameter type of [`c.rewrite()`](#c-rewrite-destination).
+- The type of `destination` entries in `routing.rewrites` and `routing.fallbacks` in [`void.json`](./config.md#routing).
+
+Like [`RouteMap`](#routemap), `RewriteDestination` lives in the virtual `void/routes` module and is refreshed whenever routes change.
+
 ## Auth
 
 Imported from `"void"` or `"void/auth"`. Client-side helpers imported from `"void/client"`.

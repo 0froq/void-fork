@@ -248,7 +248,7 @@ Curated Cloudflare Workers configuration. Cloudflare-targeted apps require an ex
 
 ### `routing`
 
-Routing and edge configuration for headers, redirects, and caching.
+Routing and edge configuration for headers, redirects, rewrites, and caching.
 
 #### `routing.headers`
 
@@ -267,7 +267,7 @@ Custom response headers for static assets. Keys are URL patterns, values are arr
 
 #### `routing.redirects`
 
-URL redirects. Keys are source URL patterns, values are destination strings (302 default) or objects with `to` and optional `status`. See [Redirects](../guide/edge/redirects) for details.
+URL redirects. Keys are source URL patterns, values are destination strings (302 default) or objects with `to` and optional `status` (`301`, `302`, `303`, `307`, `308`). See [Redirects](../guide/edge/redirects) for details.
 
 ```json
 {
@@ -275,6 +275,37 @@ URL redirects. Keys are source URL patterns, values are destination strings (302
     "redirects": {
       "/old": "/new",
       "/blog/*": { "to": "/posts/:splat", "status": 301 }
+    }
+  }
+}
+```
+
+#### `routing.rewrites`
+
+URL rewrites. Keys are source URL patterns, values are destination paths. Serves content from the destination without changing the browser URL. See [Rewrites](../guide/edge/rewrites) for details.
+
+```json
+{
+  "routing": {
+    "rewrites": {
+      "/": "/en",
+      "/docs/*": "/en/docs/:splat"
+    }
+  }
+}
+```
+
+Destinations use the `RewriteDestination` shape — typed route patterns plus `string`, so known routes autocomplete while dynamic paths remain accepted. See [Programmatic rewrites in middleware](../guide/edge/rewrites#programmatic-rewrites-in-middleware) for the trade-off and performance notes.
+
+#### `routing.fallbacks`
+
+Fallback rewrites. Same shape as `rewrites`, but rules only fire when no static asset or route matched the request (i.e. the request would otherwise 404). Useful for SPA shells or default-locale catch-alls that shouldn't pre-empt real routes. See [Rewrites → Fallbacks](../guide/edge/rewrites#fallbacks) for details.
+
+```json
+{
+  "routing": {
+    "fallbacks": {
+      "/*": "/index.html"
     }
   }
 }
@@ -291,6 +322,22 @@ ISR revalidation TTL in seconds, either globally or per path. See [Revalidation]
       "/": 60,
       "/docs/*": 31536000,
       "*": 30
+    }
+  }
+}
+```
+
+#### `routing.revalidateQueryAllowlist`
+
+Query parameters that participate in ISR variant keys for dispatch rewrites. Keys are source URL patterns, values are query parameter names to keep. When omitted, rewritten ISR cache keys drop every incoming query parameter to avoid unbounded cache fanout.
+
+```json
+{
+  "routing": {
+    "revalidateQueryAllowlist": {
+      "/search": ["q"],
+      "/products/*": ["variant", "currency"],
+      "*": []
     }
   }
 }

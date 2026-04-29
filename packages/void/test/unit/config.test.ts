@@ -1,15 +1,29 @@
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('../../src/log', () => ({
+  voidLog: vi.fn(),
+  voidWarn: vi.fn(),
+  voidError: vi.fn(),
+}));
+
 import {
   readConfig,
   convertHeadersConfig,
+  convertFallbacksConfig,
   convertRedirectsConfig,
+  convertRewritesConfig,
   resolveBindingNames,
   isNodeTarget,
   getDatabaseDialect,
+  VALID_REDIRECT_STATUSES,
+  countSplats,
 } from '../../src/config';
+import { voidWarn } from '../../src/log';
 import { resolveSandboxConfig } from '../../src/sandbox/config';
+
+const warnMock = vi.mocked(voidWarn);
 
 const tmpDir = join(import.meta.dirname, '.tmp-config-test');
 
@@ -588,7 +602,325 @@ describe('readConfig redirects', () => {
 
   it('throws on invalid status code', () => {
     setup(JSON.stringify({ routing: { redirects: { '/old': { to: '/new', status: 200 } } } }));
-    expect(() => readConfig(tmpDir)).toThrow('must be 301, 302, 307, or 308');
+    expect(() => readConfig(tmpDir)).toThrow('must be 301, 302, 303, 307, or 308');
+    cleanup();
+  });
+
+  it('accepts status 303', () => {
+    setup(JSON.stringify({ routing: { redirects: { '/old': { to: '/new', status: 303 } } } }));
+    const config = readConfig(tmpDir);
+    expect(config.routing?.redirects).toEqual({ '/old': { to: '/new', status: 303 } });
+    cleanup();
+  });
+
+  it('schema.json redirect status enum matches VALID_REDIRECT_STATUSES', () => {
+    const schema = JSON.parse(readFileSync(join(import.meta.dirname, '../../schema.json'), 'utf8'));
+    const schemaEnum: Array<number> =
+      schema.properties.routing.properties.redirects.patternProperties['^/'].oneOf[1].properties
+        .status.enum;
+    expect(new Set(schemaEnum)).toEqual(VALID_REDIRECT_STATUSES);
+  });
+});
+
+describe('routing.rewrites validation', () => {
+  it('accepts valid rewrites', () => {
+    setup(JSON.stringify({ routing: { rewrites: { '/docs': '/en/docs' } } }));
+    const config = readConfig(tmpDir);
+    expect(config.routing?.rewrites).toEqual({ '/docs': '/en/docs' });
+    cleanup();
+  });
+
+  it('throws when rewrites is not an object', () => {
+    setup(JSON.stringify({ routing: { rewrites: ['/old', '/new'] } }));
+    expect(() => readConfig(tmpDir)).toThrow('"routing.rewrites" in void.json must be an object');
+    cleanup();
+  });
+
+  it('throws when source does not start with /', () => {
+    setup(JSON.stringify({ routing: { rewrites: { docs: '/en/docs' } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must start with "/"');
+    cleanup();
+  });
+
+  it('throws when destination is not a string', () => {
+    setup(JSON.stringify({ routing: { rewrites: { '/docs': 42 } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must be a string');
+    cleanup();
+  });
+
+  it('throws when destination does not start with /', () => {
+    setup(JSON.stringify({ routing: { rewrites: { '/docs': 'en/docs' } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must start with "/"');
+    cleanup();
+  });
+
+  it('throws when destination contains a query string', () => {
+    setup(JSON.stringify({ routing: { rewrites: { '/docs': '/en/docs?lang=en' } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must not contain "?"');
+    cleanup();
+  });
+
+  it('throws when destination is protocol-relative ("//host/x")', () => {
+    // Mirrors the `c.rewrite()` codegen guard in router/compile.ts (commit
+    // 3c60d38). `"//evil.com/x".startsWith("/")` is true, so a naive
+    // single-slash check lets the value through — but when the manifest is
+    // applied at dispatch, `new URL("//evil.com/x", base)` resolves to
+    // `https://evil.com/x` and turns the rewrite into a cross-origin proxy.
+    setup(JSON.stringify({ routing: { rewrites: { '/docs': '//evil.com/x' } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must not start with "//"');
+    cleanup();
+  });
+});
+
+describe('routing.fallbacks validation', () => {
+  it('accepts valid fallbacks', () => {
+    setup(JSON.stringify({ routing: { fallbacks: { '/*': '/index.html' } } }));
+    const config = readConfig(tmpDir);
+    expect(config.routing?.fallbacks).toEqual({ '/*': '/index.html' });
+    cleanup();
+  });
+
+  it('throws when fallbacks is not an object', () => {
+    setup(JSON.stringify({ routing: { fallbacks: ['/*', '/index.html'] } }));
+    expect(() => readConfig(tmpDir)).toThrow('"routing.fallbacks" in void.json must be an object');
+    cleanup();
+  });
+
+  it('throws when source does not start with /', () => {
+    setup(JSON.stringify({ routing: { fallbacks: { '*': '/index.html' } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must start with "/"');
+    cleanup();
+  });
+
+  it('throws when destination is not a string', () => {
+    setup(JSON.stringify({ routing: { fallbacks: { '/*': 42 } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must be a string');
+    cleanup();
+  });
+
+  it('throws when destination does not start with /', () => {
+    setup(JSON.stringify({ routing: { fallbacks: { '/*': 'index.html' } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must start with "/"');
+    cleanup();
+  });
+
+  it('throws when destination contains a query string', () => {
+    setup(JSON.stringify({ routing: { fallbacks: { '/*': '/index.html?foo=1' } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must not contain "?"');
+    cleanup();
+  });
+
+  it('throws when destination is protocol-relative ("//host/x")', () => {
+    // Symmetric with the rewrites guard — fallbacks reach the platform via
+    // the same manifest path, so the same cross-origin hazard applies.
+    setup(JSON.stringify({ routing: { fallbacks: { '/*': '//evil.com/index.html' } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must not start with "//"');
+    cleanup();
+  });
+});
+
+describe('routing.redirects protocol-relative guard', () => {
+  // Redirects legitimately support external destinations ("https://..."), so
+  // the guard only applies when the destination is an internal path ("/..").
+  it('throws on string destination starting with "//"', () => {
+    setup(JSON.stringify({ routing: { redirects: { '/old': '//evil.com/new' } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must not start with "//"');
+    cleanup();
+  });
+
+  it('throws on object destination with `to` starting with "//"', () => {
+    setup(
+      JSON.stringify({
+        routing: { redirects: { '/old': { to: '//evil.com/new', status: 301 } } },
+      }),
+    );
+    expect(() => readConfig(tmpDir)).toThrow('must not start with "//"');
+    cleanup();
+  });
+
+  it('still accepts explicit "https://" external destinations', () => {
+    setup(
+      JSON.stringify({
+        routing: { redirects: { '/old': 'https://example.com/new' } },
+      }),
+    );
+    const config = readConfig(tmpDir);
+    expect(config.routing?.redirects).toEqual({ '/old': 'https://example.com/new' });
+    cleanup();
+  });
+});
+
+describe('duplicate "*" wildcards in rule sources', () => {
+  // Dispatch compiles each `*` into a `(?<splat>...)` capture group, so two
+  // in one source makes `new RegExp()` throw on duplicate group name at
+  // startup. Catch these at config-read time with a clear message.
+  it('rejects a redirect source with two "*"', () => {
+    setup(JSON.stringify({ routing: { redirects: { '/a/*/b/*': '/dest' } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must contain at most one "*" wildcard');
+    cleanup();
+  });
+
+  it('rejects a rewrite source with two "*"', () => {
+    setup(JSON.stringify({ routing: { rewrites: { '/*/docs/*': '/dest' } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must contain at most one "*" wildcard');
+    cleanup();
+  });
+
+  it('rejects a fallback source with two "*"', () => {
+    setup(JSON.stringify({ routing: { fallbacks: { '/*/*': '/index.html' } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must contain at most one "*" wildcard');
+    cleanup();
+  });
+
+  it('rejects a header pattern with two "*"', () => {
+    // Multi-`*` header rules used to crash `vite dev` on the first request:
+    // the framework's emitted `__compilePattern` produced two `(?<splat>...)`
+    // capture groups, so `new RegExp()` threw "Duplicate capture group name"
+    // and every request 500'd. Validation now catches this at config-read time.
+    setup(
+      JSON.stringify({ routing: { headers: { '/assets/*/img/*': ['Cache-Control: no-cache'] } } }),
+    );
+    expect(() => readConfig(tmpDir)).toThrow('must contain at most one "*" wildcard');
+    cleanup();
+  });
+
+  it('rejects a revalidateQueryAllowlist pattern with two "*"', () => {
+    setup(
+      JSON.stringify({
+        routing: { revalidateQueryAllowlist: { '/a/*/b/*': ['q'] } },
+      }),
+    );
+    expect(() => readConfig(tmpDir)).toThrow('must contain at most one "*" wildcard');
+    cleanup();
+  });
+
+  it('accepts a source with exactly one "*"', () => {
+    setup(JSON.stringify({ routing: { rewrites: { '/docs/*': '/en/docs/:splat' } } }));
+    const config = readConfig(tmpDir);
+    expect(config.routing?.rewrites).toEqual({ '/docs/*': '/en/docs/:splat' });
+    cleanup();
+  });
+
+  it('accepts a source with zero "*"', () => {
+    setup(JSON.stringify({ routing: { rewrites: { '/docs': '/en/docs' } } }));
+    const config = readConfig(tmpDir);
+    expect(config.routing?.rewrites).toEqual({ '/docs': '/en/docs' });
+    cleanup();
+  });
+
+  // `countSplats` only counts anonymous `*` wildcards. The `*` that terminates
+  // a `:name*` multi-segment named capture compiles to `(?<name>.*)` (distinct
+  // group name from the legacy `(?<splat>.*)`), so it doesn't trigger the
+  // duplicate-group-name `RegExp` failure that `assertSingleSplat` guards.
+  describe('countSplats', () => {
+    it('returns 0 for a path with no wildcards', () => {
+      expect(countSplats('/foo')).toBe(0);
+    });
+
+    it('counts a bare trailing splat', () => {
+      expect(countSplats('/foo/*')).toBe(1);
+    });
+
+    it('counts multiple anonymous splats', () => {
+      expect(countSplats('/foo/*/bar/*')).toBe(2);
+    });
+
+    it('does not count the "*" inside a named multi-segment capture', () => {
+      expect(countSplats('/users/:id*/files/*')).toBe(1);
+    });
+
+    it('returns 0 when both "*"s are tails of named captures', () => {
+      expect(countSplats('/users/:id*/files/:rest*')).toBe(0);
+    });
+
+    it('counts a single bare splat alongside a single-segment named param', () => {
+      expect(countSplats('/users/:id/files/*')).toBe(1);
+    });
+  });
+
+  it('accepts a rewrite combining ":name*" and "*"', () => {
+    // `:id*` → `(?<id>.*)` and `*` → `(?<splat>.*)` are distinct named groups.
+    // The validator must not reject this pattern as a duplicate-splat pattern.
+    setup(
+      JSON.stringify({
+        routing: { rewrites: { '/users/:id*/files/*': '/v2/:id/files/:splat' } },
+      }),
+    );
+    const config = readConfig(tmpDir);
+    expect(config.routing?.rewrites).toEqual({
+      '/users/:id*/files/*': '/v2/:id/files/:splat',
+    });
+    cleanup();
+  });
+
+  it('rejects a redirect with two ":name" tokens sharing an identifier', () => {
+    // `/:id/:id` would compile to `(?<id>...)/(?<id>...)`, which throws
+    // `SyntaxError: Duplicate capture group name` at request time. The
+    // validator must reject this at config-read time.
+    setup(JSON.stringify({ routing: { redirects: { '/:id/:id': '/x' } } }));
+    expect(() => readConfig(tmpDir)).toThrow(/duplicate capture group name/);
+    cleanup();
+  });
+
+  it('rejects a rewrite with ":splat" colliding with a bare "*"', () => {
+    // The bare `*` emits `(?<splat>.*)`; an explicit `:splat` token also
+    // emits a `<splat>` group. Both compile to a duplicate group name.
+    setup(JSON.stringify({ routing: { rewrites: { '/:splat/*': '/x' } } }));
+    expect(() => readConfig(tmpDir)).toThrow(/duplicate capture group name/);
+    cleanup();
+  });
+
+  it('rejects a fallback with two ":name*" tokens sharing an identifier', () => {
+    // `/:rest{splat-suffix}/:rest{splat-suffix}` would emit two `<rest>` groups.
+    setup(
+      JSON.stringify({
+        routing: { fallbacks: { '/api/:rest*/v2/:rest*': '/index.html' } },
+      }),
+    );
+    expect(() => readConfig(tmpDir)).toThrow(/duplicate capture group name/);
+    cleanup();
+  });
+});
+
+describe('routing.revalidateQueryAllowlist validation', () => {
+  it('accepts path-pattern arrays', () => {
+    setup(
+      JSON.stringify({
+        routing: {
+          revalidateQueryAllowlist: {
+            '/search': ['q'],
+            '/products/*': ['variant'],
+            '*': [],
+          },
+        },
+      }),
+    );
+    const config = readConfig(tmpDir);
+    expect(config.routing?.revalidateQueryAllowlist).toEqual({
+      '/search': ['q'],
+      '/products/*': ['variant'],
+      '*': [],
+    });
+    cleanup();
+  });
+
+  it('throws when allowlist is not an object', () => {
+    setup(JSON.stringify({ routing: { revalidateQueryAllowlist: ['/search'] } }));
+    expect(() => readConfig(tmpDir)).toThrow(
+      '"routing.revalidateQueryAllowlist" in void.json must be an object',
+    );
+    cleanup();
+  });
+
+  it('throws when pattern does not start with /', () => {
+    setup(JSON.stringify({ routing: { revalidateQueryAllowlist: { search: ['q'] } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must start with "/" or be "*"');
+    cleanup();
+  });
+
+  it('throws when params are not string arrays', () => {
+    setup(JSON.stringify({ routing: { revalidateQueryAllowlist: { '/search': ['q', 1] } } }));
+    expect(() => readConfig(tmpDir)).toThrow('must be an array of strings');
     cleanup();
   });
 });
@@ -683,12 +1015,16 @@ describe('convertRedirectsConfig', () => {
 
   it('converts string destinations with default 302', () => {
     const result = convertRedirectsConfig({ '/old': '/new' });
-    expect(result).toEqual([{ source: '/old', destination: '/new', status: 302 }]);
+    expect(result).toEqual([
+      { source: '/old', destination: '/new', status: 302, origin: 'void.json#routing.redirects' },
+    ]);
   });
 
   it('converts object destinations with explicit status', () => {
     const result = convertRedirectsConfig({ '/old': { to: '/new', status: 301 } });
-    expect(result).toEqual([{ source: '/old', destination: '/new', status: 301 }]);
+    expect(result).toEqual([
+      { source: '/old', destination: '/new', status: 301, origin: 'void.json#routing.redirects' },
+    ]);
   });
 
   it('converts mixed entries preserving order', () => {
@@ -697,9 +1033,163 @@ describe('convertRedirectsConfig', () => {
       '/c/*': { to: '/d/:splat', status: 308 },
     });
     expect(result).toEqual([
-      { source: '/a', destination: '/b', status: 302 },
-      { source: '/c/*', destination: '/d/:splat', status: 308 },
+      { source: '/a', destination: '/b', status: 302, origin: 'void.json#routing.redirects' },
+      {
+        source: '/c/*',
+        destination: '/d/:splat',
+        status: 308,
+        origin: 'void.json#routing.redirects',
+      },
     ]);
+  });
+});
+
+describe('convertRewritesConfig', () => {
+  it('returns undefined for undefined input', () => {
+    expect(convertRewritesConfig(undefined)).toBeUndefined();
+  });
+
+  it('returns undefined for empty object', () => {
+    expect(convertRewritesConfig({})).toBeUndefined();
+  });
+
+  it('converts entries with status 200 and force=true (always-rewrite)', () => {
+    const result = convertRewritesConfig({ '/docs': '/en/docs' });
+    expect(result).toEqual([
+      {
+        source: '/docs',
+        destination: '/en/docs',
+        status: 200,
+        force: true,
+        origin: 'void.json#routing.rewrites',
+      },
+    ]);
+  });
+
+  it('converts multiple entries preserving order', () => {
+    const result = convertRewritesConfig({
+      '/': '/en',
+      '/docs/*': '/en/docs/:splat',
+    });
+    expect(result).toEqual([
+      {
+        source: '/',
+        destination: '/en',
+        status: 200,
+        force: true,
+        origin: 'void.json#routing.rewrites',
+      },
+      {
+        source: '/docs/*',
+        destination: '/en/docs/:splat',
+        status: 200,
+        force: true,
+        origin: 'void.json#routing.rewrites',
+      },
+    ]);
+  });
+});
+
+describe('convertFallbacksConfig', () => {
+  it('returns undefined for undefined input', () => {
+    expect(convertFallbacksConfig(undefined)).toBeUndefined();
+  });
+
+  it('returns undefined for empty object', () => {
+    expect(convertFallbacksConfig({})).toBeUndefined();
+  });
+
+  it('converts entries with status 200 and force=false (asset-miss only)', () => {
+    const result = convertFallbacksConfig({ '/*': '/index.html' });
+    expect(result).toEqual([
+      {
+        source: '/*',
+        destination: '/index.html',
+        status: 200,
+        force: false,
+        origin: 'void.json#routing.fallbacks',
+      },
+    ]);
+  });
+
+  it('converts multiple entries preserving order', () => {
+    const result = convertFallbacksConfig({
+      '/api/*': '/api/fallback',
+      '/*': '/index.html',
+    });
+    expect(result).toEqual([
+      {
+        source: '/api/*',
+        destination: '/api/fallback',
+        status: 200,
+        force: false,
+        origin: 'void.json#routing.fallbacks',
+      },
+      {
+        source: '/*',
+        destination: '/index.html',
+        status: 200,
+        force: false,
+        origin: 'void.json#routing.fallbacks',
+      },
+    ]);
+  });
+});
+
+describe('lintDestinationSplats', () => {
+  beforeEach(() => {
+    warnMock.mockClear();
+  });
+
+  // Platform `substituteParams` only replaces `:name` tokens — a literal `*`
+  // in a destination passes through unchanged, which is almost never what the
+  // author meant. Warn (not fail) so misuse surfaces at deploy-time without
+  // blocking otherwise-valid configs.
+  it('emits no warning when destinations only contain :splat / :name', async () => {
+    const { lintDestinationSplats } = await import('../../src/cli/headers');
+    const rules = convertRewritesConfig({
+      '/docs/*': '/en/docs/:splat',
+      '/posts/:id': '/archive/:id',
+    });
+    lintDestinationSplats(rules, 'rewrites');
+    expect(warnMock).not.toHaveBeenCalled();
+  });
+
+  it('emits a single aggregated warning for a redirect destination with *', async () => {
+    const { lintDestinationSplats } = await import('../../src/cli/headers');
+    const rules = convertRedirectsConfig({ '/old/*': '/new/*' });
+    lintDestinationSplats(rules, 'redirects/rewrites (pre-asset)');
+    expect(warnMock).toHaveBeenCalledOnce();
+    const msg = warnMock.mock.calls[0][0];
+    expect(msg).toContain('/old/*');
+    expect(msg).toContain('/new/*');
+    expect(msg).toContain('void.json#routing.redirects');
+  });
+
+  it('emits a single aggregated warning covering all affected rules', async () => {
+    const { lintDestinationSplats } = await import('../../src/cli/headers');
+    const rules = [
+      ...(convertRewritesConfig({ '/a/*': '/x/*' }) ?? []),
+      ...(convertRewritesConfig({ '/b/*': '/y/:splat' }) ?? []),
+      ...(convertRewritesConfig({ '/c': '/z/*' }) ?? []),
+    ];
+    lintDestinationSplats(rules, 'rewrites');
+    expect(warnMock).toHaveBeenCalledOnce();
+    const msg = warnMock.mock.calls[0][0];
+    expect(msg).toContain('/a/*');
+    expect(msg).toContain('/x/*');
+    expect(msg).toContain('/c');
+    expect(msg).toContain('/z/*');
+    // The rule with a clean `:splat` destination must not appear.
+    expect(msg).not.toContain('/y/:splat');
+  });
+
+  it('works with fallbacks output shape as well', async () => {
+    const { lintDestinationSplats } = await import('../../src/cli/headers');
+    const rules = convertFallbacksConfig({ '/docs/*': '/docs/*' });
+    lintDestinationSplats(rules, 'fallbacks (post-asset)');
+    expect(warnMock).toHaveBeenCalledOnce();
+    expect(warnMock.mock.calls[0][0]).toContain('void.json#routing.fallbacks');
   });
 });
 

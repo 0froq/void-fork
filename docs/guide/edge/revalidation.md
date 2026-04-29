@@ -102,6 +102,14 @@ Only successful responses (2xx) are cached.
 
 Requests with `Cookie` or `Authorization` headers bypass the ISR cache entirely and always dispatch to the worker. This ensures personalized or authenticated pages are never served from a shared cache.
 
+## Cache keys and rewrites
+
+If a request is rewritten at dispatch (`routing.rewrites`, `routing.fallbacks`, or `_redirects` 200/200!), the ISR cache slot is keyed on the **rewritten** pathname **plus** the original request URL's pathname. Query parameters are dropped from rewrite variant keys by default; use `routing.revalidateQueryAllowlist` to keep selected query params when they should vary cached output. So a direct request to `/en/docs/foo` and a rewrite from `/docs/foo → /en/docs/foo` no longer share a slot — each renders and caches independently. Middleware `c.rewrite()` runs after ISR lookup, so it observes rewrite metadata but does not create a separate ISR variant.
+
+`revalidate({ paths })` operates on the rewritten pathname (the slot's primary key). Purging `/en/docs/foo` removes **all variants** (direct + every rewrite source) under that path. Purging the source path (`/docs/foo`) invalidates nothing, because no slot was ever written under it.
+
+**Migration note:** the ISR cache key format bumped to a versioned `v2` prefix alongside this feature, with no reader-side fallback to the previous unversioned format. The first time a project deploys on the new dispatch, **every** pre-existing ISR entry becomes unreachable — not only paths that gained a rewrite rule. Cache slots warm up normally under the new key as traffic comes in; you'll see a one-time cache-miss wave proportional to your traffic × TTL, then the hit rate returns to normal. No manual purge is required, and the stranded entries expire on their own via their original TTLs and deployment age-out. Additionally, if you introduce a rewrite on an existing path (e.g. `/docs/foo` → `/en/docs/foo`), the cache slot for that path moves to the rewritten pathname, so the source path's `v2` slot will cold-start too.
+
 ## On-demand revalidation
 
 You can purge ISR cache entries programmatically from a route handler:
