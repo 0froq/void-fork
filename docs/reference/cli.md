@@ -72,7 +72,7 @@ If run in an existing project, `void init` configures the project in place: it e
 
 After that, the full interactive flow walks through:
 
-1. **TypeScript:** creates or updates `tsconfig.json`, including `extends .void/tsconfig.json` and `void/env` types.
+1. **TypeScript:** creates or updates `tsconfig.json`, including `extends .void/tsconfig.json`, `void/env` types, and root-level `files` / `compilerOptions.paths` merges when an existing config would otherwise replace Void's generated entries.
 2. **Database:** asks whether you want D1, PostgreSQL, or no database yet. Choosing PostgreSQL writes `"database": "pg"` to `void.json`; D1 stays implicit; choosing no database leaves config unchanged so you can add data features later.
 3. **Agent instructions:** detects agents once and injects instructions into `CLAUDE.md` or `AGENTS.md`.
 4. **Skills:** links Void skills using the same detected or selected agent context.
@@ -93,6 +93,8 @@ Use flags to run individual steps without prompts:
 | `--github`   | Only create GitHub Actions workflow               |
 
 Flags can be combined. When any flag is provided, only the specified steps run and interactive prompts are skipped.
+
+For projects that already have `"extends"`, `void init --tsconfig` preserves the existing config and adds `./.void/tsconfig.json`. If the existing config defines `files` or `compilerOptions.paths`, Void also merges its generated declaration files and aliases into the root config because TypeScript replaces those fields across `extends` instead of deeply merging them.
 
 ### `void prepare`
 

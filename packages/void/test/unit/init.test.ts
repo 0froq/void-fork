@@ -1575,6 +1575,185 @@ export default config;
     }
   });
 
+  it('merges Void type files and path aliases into root-level tsconfig fields', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+    try {
+      mkdirSync(join(root, 'routes'), { recursive: true });
+      mkdirSync(join(root, 'src'), { recursive: true });
+      writeFileSync(join(root, 'src', 'main.ts'), 'export {};\n');
+      writeFileSync(
+        join(root, 'tsconfig.json'),
+        JSON.stringify(
+          {
+            extends: './tsconfig.base.json',
+            compilerOptions: {
+              paths: {
+                '@/*': ['src/*'],
+              },
+            },
+            files: ['src/main.ts'],
+            include: ['src', 'routes'],
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+
+      await runInitCommand(root, { tsconfig: true, github: false, agents: false });
+
+      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
+      expect(tsconfig.extends).toEqual(['./tsconfig.base.json', './.void/tsconfig.json']);
+      expect(tsconfig.files).toEqual(['./src/main.ts', './.void/routes.d.ts']);
+      expect(tsconfig.compilerOptions.paths).toEqual({
+        '@/*': ['./src/*'],
+        'void/routes': ['./.void/routes.d.ts'],
+      });
+      expect(tsconfig.compilerOptions.types).toContain('void/env');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves directly extended tsconfig files and paths when adding Void config', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+    try {
+      mkdirSync(join(root, 'routes'), { recursive: true });
+      writeFileSync(join(root, 'base.d.ts'), 'declare const baseValue: string;\n');
+      writeFileSync(
+        join(root, 'tsconfig.base.json'),
+        JSON.stringify(
+          {
+            compilerOptions: {
+              paths: {
+                '~/*': ['./src/*'],
+              },
+            },
+            files: ['base.d.ts'],
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+      writeFileSync(
+        join(root, 'tsconfig.json'),
+        JSON.stringify(
+          {
+            extends: ['./tsconfig.base.json'],
+            include: ['src', 'routes'],
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+
+      await runInitCommand(root, { tsconfig: true, github: false, agents: false });
+
+      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
+      expect(tsconfig.extends).toEqual(['./tsconfig.base.json', './.void/tsconfig.json']);
+      expect(tsconfig.files).toEqual(['./base.d.ts', './.void/routes.d.ts']);
+      expect(tsconfig.compilerOptions.paths).toEqual({
+        '~/*': ['./src/*'],
+        'void/routes': ['./.void/routes.d.ts'],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('writes Void path aliases relative to an inherited baseUrl', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'void-init-'));
+    try {
+      const root = join(workspaceRoot, 'packages', 'app');
+      mkdirSync(join(root, 'routes'), { recursive: true });
+      writeFileSync(
+        join(workspaceRoot, 'tsconfig.base.json'),
+        JSON.stringify(
+          {
+            compilerOptions: {
+              baseUrl: '.',
+              paths: {
+                '@shared/*': ['shared/*'],
+              },
+            },
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+      writeFileSync(
+        join(root, 'tsconfig.json'),
+        JSON.stringify(
+          {
+            extends: '../../tsconfig.base.json',
+            include: ['src', 'routes'],
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+
+      await runInitCommand(root, { tsconfig: true, github: false, agents: false });
+
+      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
+      expect(tsconfig.extends).toEqual(['../../tsconfig.base.json', './.void/tsconfig.json']);
+      expect(tsconfig.compilerOptions.paths).toEqual({
+        '@shared/*': ['./shared/*'],
+        'void/routes': ['./packages/app/.void/routes.d.ts'],
+      });
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('merges Void type files and paths into explicit empty tsconfig override fields', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+    try {
+      mkdirSync(join(root, 'routes'), { recursive: true });
+      writeFileSync(join(root, 'base.d.ts'), 'declare const baseValue: string;\n');
+      writeFileSync(
+        join(root, 'tsconfig.base.json'),
+        JSON.stringify(
+          {
+            compilerOptions: {
+              paths: {
+                '~/*': ['./src/*'],
+              },
+            },
+            files: ['base.d.ts'],
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+      writeFileSync(
+        join(root, 'tsconfig.json'),
+        JSON.stringify(
+          {
+            extends: './tsconfig.base.json',
+            compilerOptions: {
+              paths: {},
+            },
+            files: [],
+            include: ['src', 'routes'],
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+
+      await runInitCommand(root, { tsconfig: true, github: false, agents: false });
+
+      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
+      expect(tsconfig.extends).toEqual(['./tsconfig.base.json', './.void/tsconfig.json']);
+      expect(tsconfig.files).toEqual(['./.void/routes.d.ts']);
+      expect(tsconfig.compilerOptions.paths).toEqual({
+        'void/routes': ['./.void/routes.d.ts'],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('uses the preinstalled adapter to scaffold an empty project', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {

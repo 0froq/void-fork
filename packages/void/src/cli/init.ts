@@ -8,13 +8,14 @@ import {
   rmdirSync,
   unlinkSync,
 } from 'node:fs';
-import { basename, dirname, join, relative } from 'node:path';
+import { createRequire } from 'node:module';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { intro, outro, log, confirm, isCancel, cancel, note, select } from '@clack/prompts';
 import { parse, type ParseError } from 'jsonc-parser';
 import MagicString from 'magic-string';
-import { ensureProjectTsconfig } from '../codegen/project-tsconfig';
+import { createProjectTsconfig, ensureProjectTsconfig } from '../codegen/project-tsconfig';
 import { getDatabaseDialect, readConfig, type DatabaseDialect } from '../config';
 import { writeDrizzleConfig } from '../drizzle/config';
 import { detectFramework, type DetectedFramework } from '../plugin-inference';
@@ -137,12 +138,233 @@ const VITE_CONFIG_FILES = [
 const VOID_CONFIG_FILE = 'void.json';
 type DatabaseSetupChoice = DatabaseDialect | 'none';
 type JsonObject = Record<string, unknown>;
+interface TsconfigInheritancePatch {
+  files: Array<string>;
+  paths: Record<string, Array<string>>;
+}
 
 function asRecord(value: unknown): JsonObject | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
   }
   return value as JsonObject;
+}
+
+function parseJsoncFile(path: string): JsonObject | null {
+  const errors: Array<ParseError> = [];
+  const parsed = asRecord(parse(readFileSync(path, 'utf-8'), errors));
+  return errors.length === 0 ? parsed : null;
+}
+
+function uniqueStrings(values: Array<string>): Array<string> {
+  return Array.from(new Set(values));
+}
+
+function normalizeRelativePath(fromDir: string, toPath: string): string {
+  const rel = relative(fromDir, toPath).replaceAll('\\', '/');
+  return rel === '..' || rel.startsWith('../') || rel.startsWith('./') ? rel : `./${rel}`;
+}
+
+function getOwnConfigBaseUrlDir(config: JsonObject, configDir: string): string | null {
+  const compilerOptions = asRecord(config.compilerOptions);
+  return compilerOptions && typeof compilerOptions.baseUrl === 'string'
+    ? resolve(configDir, compilerOptions.baseUrl)
+    : null;
+}
+
+function getEffectiveConfigBaseUrlDir(
+  config: JsonObject,
+  configPath: string,
+  seen: Set<string>,
+): string | null {
+  if (seen.has(configPath)) {
+    return null;
+  }
+  seen.add(configPath);
+
+  const configDir = dirname(configPath);
+  const ownBaseUrl = getOwnConfigBaseUrlDir(config, configDir);
+  if (ownBaseUrl) {
+    return ownBaseUrl;
+  }
+
+  const extendsValues =
+    typeof config.extends === 'string'
+      ? [config.extends]
+      : Array.isArray(config.extends)
+        ? config.extends.filter((value): value is string => typeof value === 'string')
+        : [];
+
+  let inheritedBaseUrl: string | null = null;
+  for (const extendsValue of extendsValues) {
+    const extendedPath = resolveExtendedTsconfig(configPath, extendsValue);
+    if (!extendedPath || !existsSync(extendedPath)) {
+      continue;
+    }
+
+    const extendedConfig = parseJsoncFile(extendedPath);
+    if (!extendedConfig) {
+      continue;
+    }
+
+    inheritedBaseUrl =
+      getEffectiveConfigBaseUrlDir(extendedConfig, extendedPath, seen) ?? inheritedBaseUrl;
+  }
+
+  return inheritedBaseUrl;
+}
+
+function effectiveConfigPathBaseDir(config: JsonObject, configPath: string): string {
+  return getEffectiveConfigBaseUrlDir(config, configPath, new Set()) ?? dirname(configPath);
+}
+
+function convertConfigFileEntry(value: string, configDir: string, root: string): string {
+  if (isAbsolute(value)) {
+    return normalizeRelativePath(root, value);
+  }
+  return normalizeRelativePath(root, resolve(configDir, value));
+}
+
+function convertPathTarget(value: string, fromBaseDir: string, toBaseDir: string): string {
+  if (isAbsolute(value)) {
+    return normalizeRelativePath(toBaseDir, value);
+  }
+  return normalizeRelativePath(toBaseDir, resolve(fromBaseDir, value));
+}
+
+function mergePathMaps(
+  target: Record<string, Array<string>>,
+  source: Record<string, Array<string>>,
+): void {
+  for (const [key, values] of Object.entries(source)) {
+    target[key] = values;
+  }
+}
+
+function readStringArray(value: unknown): Array<string> {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+}
+
+function readPaths(value: unknown): Record<string, Array<string>> {
+  const paths = asRecord(value);
+  if (!paths) {
+    return {};
+  }
+
+  const result: Record<string, Array<string>> = {};
+  for (const [key, values] of Object.entries(paths)) {
+    const stringValues = readStringArray(values);
+    if (stringValues.length > 0) {
+      result[key] = stringValues;
+    }
+  }
+  return result;
+}
+
+function resolveExtendedTsconfig(fromConfigPath: string, specifier: string): string | null {
+  if (specifier.startsWith('.') || specifier.startsWith('/')) {
+    const resolved = resolve(dirname(fromConfigPath), specifier);
+    return resolved.endsWith('.json') ? resolved : `${resolved}.json`;
+  }
+
+  try {
+    return createRequire(fromConfigPath).resolve(specifier);
+  } catch {
+    try {
+      return createRequire(fromConfigPath).resolve(`${specifier}.json`);
+    } catch {
+      return null;
+    }
+  }
+}
+
+function collectTsconfigPatchFromConfig(
+  config: JsonObject,
+  configPath: string,
+  root: string,
+  outputBaseDir: string,
+  seen: Set<string>,
+): TsconfigInheritancePatch {
+  const patch: TsconfigInheritancePatch = { files: [], paths: {} };
+
+  if (seen.has(configPath)) {
+    return patch;
+  }
+  seen.add(configPath);
+
+  const extendsValues =
+    typeof config.extends === 'string'
+      ? [config.extends]
+      : Array.isArray(config.extends)
+        ? config.extends.filter((value): value is string => typeof value === 'string')
+        : [];
+
+  const hasOwnFiles = Array.isArray(config.files);
+  const compilerOptions = asRecord(config.compilerOptions);
+  const hasOwnPaths = asRecord(compilerOptions?.paths) !== null;
+
+  for (const extendsValue of extendsValues) {
+    const extendedPath = resolveExtendedTsconfig(configPath, extendsValue);
+    if (!extendedPath || !existsSync(extendedPath)) {
+      continue;
+    }
+
+    const extendedConfig = parseJsoncFile(extendedPath);
+    if (!extendedConfig) {
+      continue;
+    }
+
+    const extendedPatch = collectTsconfigPatchFromConfig(
+      extendedConfig,
+      extendedPath,
+      root,
+      outputBaseDir,
+      seen,
+    );
+    if (!hasOwnFiles) {
+      patch.files.push(...extendedPatch.files);
+    }
+    if (!hasOwnPaths) {
+      mergePathMaps(patch.paths, extendedPatch.paths);
+    }
+  }
+
+  const configDir = dirname(configPath);
+  if (hasOwnFiles) {
+    patch.files.push(
+      ...readStringArray(config.files).map((entry) =>
+        convertConfigFileEntry(entry, configDir, root),
+      ),
+    );
+  }
+
+  if (hasOwnPaths) {
+    const paths = readPaths(compilerOptions?.paths);
+    const pathBaseDir = effectiveConfigPathBaseDir(config, configPath);
+    const convertedPaths: Record<string, Array<string>> = {};
+    for (const [key, values] of Object.entries(paths)) {
+      convertedPaths[key] = values.map((value) =>
+        convertPathTarget(value, pathBaseDir, outputBaseDir),
+      );
+    }
+    mergePathMaps(patch.paths, convertedPaths);
+  }
+
+  return patch;
+}
+
+function createVoidTsconfigPatch(root: string, outputBaseDir: string): TsconfigInheritancePatch {
+  const hasSchema = hasDrizzleSchema(root);
+  const voidConfig = createProjectTsconfig(root, undefined, hasSchema, hasSchema);
+  return collectTsconfigPatchFromConfig(
+    voidConfig as unknown as JsonObject,
+    join(root, '.void', 'tsconfig.json'),
+    root,
+    outputBaseDir,
+    new Set(),
+  );
 }
 
 export function isScaffoldableEmptyProject(root: string): boolean {
@@ -1169,18 +1391,26 @@ function setupTsconfig(
     // Case C: existing tsconfig — check and offer fixes
     let tsconfig: JsonObject;
     try {
-      const raw = readFileSync(tsconfigPath, 'utf-8');
-      const errors: Array<ParseError> = [];
-      tsconfig = asRecord(parse(raw, errors)) ?? {};
-      if (errors.length > 0) {
+      const parsed = parseJsoncFile(tsconfigPath);
+      if (!parsed) {
         throw new SyntaxError('Failed to parse tsconfig.json');
       }
+      tsconfig = parsed;
     } catch {
       log.warn('Could not parse tsconfig.json, skipping');
       return;
     }
 
     let updated = false;
+    const rootPathBaseDir = effectiveConfigPathBaseDir(tsconfig, tsconfigPath);
+    const existingPatch = collectTsconfigPatchFromConfig(
+      tsconfig,
+      tsconfigPath,
+      root,
+      rootPathBaseDir,
+      new Set(),
+    );
+    const voidPatch = createVoidTsconfigPatch(root, rootPathBaseDir);
 
     // Check extends
     const extendsValue = tsconfig.extends;
@@ -1221,6 +1451,27 @@ function setupTsconfig(
     }
 
     compilerOptions.types = types;
+
+    const existingFiles = uniqueStrings(existingPatch.files);
+    if (existingFiles.length > 0 || Array.isArray(tsconfig.files)) {
+      const files = uniqueStrings([...existingFiles, ...voidPatch.files]);
+      if (JSON.stringify(tsconfig.files) !== JSON.stringify(files)) {
+        tsconfig.files = files;
+        updated = true;
+        log.success('Updated tsconfig.json — merged generated Void type files');
+      }
+    }
+
+    if (Object.keys(existingPatch.paths).length > 0 || asRecord(compilerOptions.paths) !== null) {
+      const paths = { ...existingPatch.paths };
+      mergePathMaps(paths, voidPatch.paths);
+      const existingPaths = readPaths(compilerOptions.paths);
+      if (JSON.stringify(existingPaths) !== JSON.stringify(paths)) {
+        compilerOptions.paths = paths;
+        updated = true;
+        log.success('Updated tsconfig.json — merged generated Void path aliases');
+      }
+    }
 
     if (updated) {
       // Rebuild with extends first so it appears at the top of the file
