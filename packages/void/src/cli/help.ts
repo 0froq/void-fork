@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { note, outro } from '@clack/prompts';
-import { getPackageDir } from './agents';
-import { asciiArts } from './ascii';
-import { categoryTitle, helpLine, pc, sectionTitle } from './output';
+import { getPackageDir } from './agents.ts';
+import { asciiArts } from './ascii.ts';
+import { categoryTitle, helpLine, pc, sectionTitle } from './output.ts';
 
 interface HelpCommand {
   command: string;

@@ -13,7 +13,7 @@ vi.mock('@clack/prompts', () => ({
   spinner: () => ({ start: vi.fn(), stop: vi.fn(), message: vi.fn() }),
 }));
 
-import { parseHeadersFile, parseRedirectsFile } from '../../src/cli/headers';
+import { parseHeadersFile, parseRedirectsFile } from '../../src/cli/headers.ts';
 
 const tmpDir = join(import.meta.dirname, '.tmp-parse-redirects-test');
 
@@ -316,8 +316,8 @@ describe('_redirects + void.json merge precedence (same source)', () => {
   // simple array concat, but if someone reverses the order the silent override
   // flips direction without failing the deploy.
   it('places _redirects first and void.json rules last, so void.json wins under last-match-wins', async () => {
-    const { splitRedirectRulesByForce } = await import('../../src/cli/headers');
-    const { convertRedirectsConfig, convertRewritesConfig } = await import('../../src/config');
+    const { splitRedirectRulesByForce } = await import('../../src/cli/headers.ts');
+    const { convertRedirectsConfig, convertRewritesConfig } = await import('../../src/config.ts');
 
     setup('/x /from-file 301\n');
     const parsed = parseRedirectsFile(tmpDir);
@@ -362,7 +362,7 @@ describe('warnRedundantForceOn3xx', () => {
   // `redundantForceOn3xx` and strips them silently; the deploy pipeline
   // surfaces a single aggregated `log.warn` via `warnRedundantForceOn3xx`.
   it('skips emitting when the count is zero', async () => {
-    const { warnRedundantForceOn3xx } = await import('../../src/cli/deploy');
+    const { warnRedundantForceOn3xx } = await import('../../src/cli/deploy.ts');
     const { log } = await import('@clack/prompts');
     const warnSpy = log.warn as ReturnType<typeof vi.fn>;
     warnSpy.mockClear();
@@ -373,7 +373,7 @@ describe('warnRedundantForceOn3xx', () => {
   });
 
   it('emits a single aggregated warning including the count when > 0', async () => {
-    const { warnRedundantForceOn3xx } = await import('../../src/cli/deploy');
+    const { warnRedundantForceOn3xx } = await import('../../src/cli/deploy.ts');
     const { log } = await import('@clack/prompts');
     const warnSpy = log.warn as ReturnType<typeof vi.fn>;
     warnSpy.mockClear();
@@ -388,12 +388,12 @@ describe('warnRedundantForceOn3xx', () => {
 
 describe('splitRedirectRulesByForce', () => {
   it('returns empty buckets for undefined input', async () => {
-    const { splitRedirectRulesByForce } = await import('../../src/cli/headers');
+    const { splitRedirectRulesByForce } = await import('../../src/cli/headers.ts');
     expect(splitRedirectRulesByForce(undefined)).toEqual({ always: [], fallbacks: [] });
   });
 
   it('bucketizes 200 (non-force) into fallbacks and 200! / 3xx into always', async () => {
-    const { splitRedirectRulesByForce } = await import('../../src/cli/headers');
+    const { splitRedirectRulesByForce } = await import('../../src/cli/headers.ts');
     const split = splitRedirectRulesByForce([
       { source: '/a', destination: '/spa.html', status: 200, force: false },
       { source: '/b', destination: '/api', status: 200, force: true },

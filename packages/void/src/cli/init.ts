@@ -15,21 +15,21 @@ import { parseArgs } from 'node:util';
 import { intro, outro, log, confirm, isCancel, cancel, note, select } from '@clack/prompts';
 import { parse, type ParseError } from 'jsonc-parser';
 import MagicString from 'magic-string';
-import { createProjectTsconfig, ensureProjectTsconfig } from '../codegen/project-tsconfig';
-import { getDatabaseDialect, readConfig, type DatabaseDialect } from '../config';
-import { writeDrizzleConfig } from '../drizzle/config';
-import { detectFramework, type DetectedFramework } from '../plugin-inference';
+import { createProjectTsconfig, ensureProjectTsconfig } from '../codegen/project-tsconfig.ts';
+import { getDatabaseDialect, readConfig, type DatabaseDialect } from '../config.ts';
+import { writeDrizzleConfig } from '../drizzle/config.ts';
+import { detectFramework, type DetectedFramework } from '../plugin-inference.ts';
 import {
   detectAgents,
   getAgentById,
   getPackageDir,
   type AgentConfig,
   type McpConfigTarget,
-} from './agents';
-import { maybeSetupDeployProject } from './deploy-setup';
-import { maybeScaffoldEnvTs } from './env-scaffold';
-import { cliTitle } from './output';
-import { formatProjectCommand } from './preset';
+} from './agents.ts';
+import { maybeSetupDeployProject } from './deploy-setup.ts';
+import { maybeScaffoldEnvTs } from './env-scaffold.ts';
+import { cliTitle } from './output.ts';
+import { formatProjectCommand } from './preset.ts';
 import {
   createPagesStarterTemplate,
   detectScaffoldFrameworkFromDependencies,
@@ -40,8 +40,12 @@ import {
   SCAFFOLD_GITIGNORE_LINES,
   type ScaffoldFramework,
   type ScaffoldStarterMode,
-} from './template';
-import { buildDrizzleKitSpawnEnv, findInstalledYarnPnpRuntime, hasLocalLockfile } from './yarn-pnp';
+} from './template.ts';
+import {
+  buildDrizzleKitSpawnEnv,
+  findInstalledYarnPnpRuntime,
+  hasLocalLockfile,
+} from './yarn-pnp.ts';
 
 export interface InitArgs {
   tsconfig: boolean;
@@ -3398,7 +3402,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
     // Step 5: Link skills
     if (agentSetup.agents.length > 0) {
-      const { linkSkillsForSpecificAgents } = await import('./skills');
+      const { linkSkillsForSpecificAgents } = await import('./skills.ts');
       linkSkillsForSpecificAgents(root, agentSetup.agents);
     } else {
       log.info('Skills linking skipped for generic agent setup');

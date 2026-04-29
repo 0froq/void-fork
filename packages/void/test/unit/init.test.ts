@@ -20,8 +20,8 @@ import {
   isVoidResolvableFrom,
   runInitCommand,
   toAliasedPreviewSpec,
-} from '../../src/cli/init';
-import { buildDrizzleKitSpawnEnv } from '../../src/cli/yarn-pnp';
+} from '../../src/cli/init.ts';
+import { buildDrizzleKitSpawnEnv } from '../../src/cli/yarn-pnp.ts';
 
 const mockSpawnSync = vi.fn();
 const mockSelect = vi.fn();
