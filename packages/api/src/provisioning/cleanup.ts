@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants';
+import { clearCronScheduler } from '../cron-scheduler-client';
 import { getAllProjectDeployments, getProjectResources, getDomainsByProjectId } from '../db';
 import type { ApiEnv } from '../env';
 import {
@@ -97,19 +98,11 @@ export async function cleanupProjectResources(
     cleanup.push(del.catch(warn(`Failed to delete ${resource.type} resource ${resource.cf_id}`)));
   }
 
-  // Clear cron scheduler DO if project had crons
-  cleanup.push(
-    c.env.ROUTING.get(project.slug)
-      .then(async (raw) => {
-        if (raw && JSON.parse(raw).hasCrons) {
-          const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
-          await c.env.CRON_SCHEDULER.get(cronId).fetch(
-            new Request('https://do/clear', { method: 'POST' }),
-          );
-        }
-      })
-      .catch(warn('Failed to clear cron scheduler')),
-  );
+  // Clear cron scheduler DO unconditionally — /clear is idempotent
+  // (deleteAll + deleteAlarm). KV `hasCrons` is omitted when false and
+  // missing on older entries; the PG manifest is the authoritative source,
+  // and unconditional clear avoids a stale-KV gate.
+  cleanup.push(clearCronScheduler(c.env, projectId));
 
   // KV routing entry
   cleanup.push(c.env.ROUTING.delete(project.slug).catch(warn('Failed to delete routing entry')));

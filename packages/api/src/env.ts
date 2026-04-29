@@ -43,6 +43,14 @@ export interface ApiEnv extends Env {
     USAGE_COUNTER: DurableObjectNamespace;
     CRON_SCHEDULER: DurableObjectNamespace;
     ERROR_ALERT_MONITOR: DurableObjectNamespace;
+    /**
+     * Producer for the cron-firing queue. Used by `CronScheduler.alarm()` to
+     * enqueue user-worker invocations from inside its Durable Object context.
+     * The queue handler in `cron-fires-queue.ts` is what actually calls
+     * `env.DISPATCH.get(...).fetch(...)` — see the comment in that file for
+     * why the DO can't make the call directly.
+     */
+    CRON_FIRES_QUEUE: Queue<import('./cron-fires-queue').CronFireMessage>;
     LOGS_DATASET?: string;
     REQUESTS_DATASET?: string;
     PLATFORM_ENV?: string;

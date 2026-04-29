@@ -136,6 +136,27 @@ function mockSetTimeout() {
   ) => nativeSetTimeout(fn, 0, ...args)) as typeof setTimeout);
 }
 
+/**
+ * Builds an ExecutionContext that captures every `waitUntil` promise into
+ * `pending` so tests can `await Promise.all(pending)` after `app.fetch`.
+ * Real Workers awaits these on response close; Hono passes the ctx through
+ * to handlers but does not await it. Without this, deferred work (e.g. the
+ * post-routing cron sync in deploy.ts step 5c) never runs in tests.
+ */
+function createWaitUntilTrackingCtx(): {
+  ctx: ExecutionContext;
+  pending: Array<Promise<unknown>>;
+} {
+  const pending: Array<Promise<unknown>> = [];
+  const ctx = {
+    waitUntil: (p: Promise<unknown>) => {
+      pending.push(p);
+    },
+    passThroughOnException: () => {},
+  } as unknown as ExecutionContext;
+  return { ctx, pending };
+}
+
 describe('POST /projects/:id/deploy', () => {
   it('returns 401 without auth', async () => {
     const res = await app.fetch(
@@ -314,6 +335,8 @@ describe('POST /projects/:id/deploy', () => {
     } as unknown as DurableObjectNamespace;
 
     const testEnv = { ...env, CRON_SCHEDULER: cronSchedulerMock };
+    // Cron sync runs in waitUntil — capture and await it before assertions.
+    const { ctx, pending } = createWaitUntilTrackingCtx();
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -328,9 +351,11 @@ describe('POST /projects/:id/deploy', () => {
         }),
       }),
       testEnv,
+      ctx,
     );
     expect(res.status).toBe(200);
     await res.text();
+    await Promise.all(pending);
 
     // Verify DO received /sync with correct payload
     const syncCall = cronDoFetches.find((f) => f.url.includes('/sync'));
@@ -384,23 +409,196 @@ describe('POST /projects/:id/deploy', () => {
     expect(clearCall).toBeDefined();
   });
 
-  it('skips CronScheduler DO when no crons present or previously configured', async () => {
+  it('static deploy clears CronScheduler DO when previous PG manifest had schedules even if KV hasCrons is missing', async () => {
+    // The static-only deploy path at deploy.ts:2346 used to gate /clear on
+    // KV's `hasCrons` flag. `routing.ts:33` only writes that flag when true,
+    // so KV entries from older code paths or pre-`hasCrons` deploys have it
+    // missing — and the cron DO would silently keep firing against a script
+    // we just deleted. PG's previous live manifest is the authoritative
+    // source: same precedent as the rollback path in `routes/projects.ts`
+    // and `api-migrations.test.ts`'s 'rollback cron reconciliation is
+    // driven by the pg manifest, not stale ROUTING KV' test.
     const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'plain-app');
+    const project = await createTestProject(env.db, user.id, 'static-from-cron');
     mockCfApi();
 
-    let doCalled = false;
+    // Pre-seed a live deployment whose PG manifest carries cron schedules…
+    const liveDeployId = 'dpl_live_cronsched';
+    const liveManifest = {
+      version: 3,
+      bindings: {},
+      schedules: [{ name: 'job', cron: '0 * * * *' }],
+    };
+    await env.db.insert(deployments).values({
+      id: liveDeployId,
+      project_id: project.id,
+      status: 'live',
+      manifest: JSON.stringify(liveManifest),
+      created_at: sql`now()`,
+    });
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: liveDeployId })
+      .where(eq(projects.id, project.id));
+
+    // …but the KV routing entry pre-dates the `hasCrons` flag, so it's
+    // missing — exactly the stale-KV case this fix exists to handle.
+    await env.ROUTING.put(project.slug, JSON.stringify({ workerName: `user-${project.slug}` }));
+
+    const cronDoFetches: Array<{ url: string }> = [];
     const cronSchedulerMock = {
       idFromName: (name: string) => ({ toString: () => name }),
       get: (_id: unknown) => ({
-        fetch: async () => {
-          doCalled = true;
+        fetch: async (req: Request) => {
+          cronDoFetches.push({ url: req.url });
           return Response.json({ ok: true });
         },
       }),
     } as unknown as DurableObjectNamespace;
 
     const testEnv = { ...env, CRON_SCHEDULER: cronSchedulerMock };
+
+    // Static deploy: no worker files, manifest.type='spa' to take the
+    // streaming-static branch that hits deploy.ts:2346.
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildStaticDeployForm({
+          type: 'spa',
+          streamed: true,
+          assets: { 'index.html': '<html>static</html>' },
+        }),
+      }),
+      testEnv,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+
+    const clearCall = cronDoFetches.find((f) => f.url.includes('/clear'));
+    expect(clearCall).toBeDefined();
+  });
+
+  it('pre-routing failure does not disable previous deployment crons', async () => {
+    // Regression: cron sync used to run BEFORE the routing switch. If a
+    // step between cron-sync and routing-switch (ISR clear, prerender, …)
+    // threw, the failure-cleanup path would `/clear` the DO — wiping the
+    // still-live previous deployment's crons even though routing never
+    // moved. Cron sync now runs AFTER the routing switch, so a pre-cutover
+    // failure must NOT touch the cron DO at all.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'cron-pre-fail');
+    mockCfApi();
+
+    // Pre-seed a live deployment with cron schedules — the previous live
+    // deploy whose CronScheduler DO state must remain intact.
+    const liveDeployId = 'dpl_live_pre_fail';
+    await env.db.insert(deployments).values({
+      id: liveDeployId,
+      project_id: project.id,
+      status: 'live',
+      manifest: JSON.stringify({
+        version: 3,
+        bindings: {},
+        schedules: [{ name: 'old', cron: '0 * * * *' }],
+      }),
+      created_at: sql`now()`,
+    });
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: liveDeployId })
+      .where(eq(projects.id, project.id));
+
+    const cronDoFetches: Array<{ url: string; body: string }> = [];
+    const cronSchedulerMock = {
+      idFromName: (name: string) => ({ toString: () => name }),
+      get: (_id: unknown) => ({
+        fetch: async (req: Request) => {
+          const body = await req.text().catch(() => '');
+          cronDoFetches.push({ url: req.url, body });
+          return Response.json({ ok: true });
+        },
+      }),
+    } as unknown as DurableObjectNamespace;
+
+    // Force a pre-routing failure. `clearIsrCache` (step 3) is the first
+    // step after cancellation checks that is NOT wrapped in a try/catch —
+    // an `ISR_CACHE.list` throw bubbles straight to the outer catch.
+    const failingIsrCache = {
+      list: async () => {
+        throw new Error('ISR list failed');
+      },
+      put: async () => {},
+      delete: async () => {},
+      get: async () => null,
+      getWithMetadata: async () => ({ value: null, metadata: null }),
+    } as unknown as KVNamespace;
+
+    const testEnv = {
+      ...env,
+      CRON_SCHEDULER: cronSchedulerMock,
+      ISR_CACHE: failingIsrCache,
+    };
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            version: 3,
+            bindings: {},
+            // The new deploy also declares schedules — we want to be sure
+            // we didn't /sync to the new (failing) worker either.
+            schedules: [{ name: 'new', cron: '*/5 * * * *' }],
+          },
+        }),
+      }),
+      testEnv,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+
+    // Deploy must be marked failed (pre-routing throw → catch's
+    // !routingSwitched branch).
+    const [dpl] = await env.db
+      .select({ status: deployments.status })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id))
+      .orderBy(desc(deployments.created_at))
+      .limit(1);
+    expect(dpl?.status).toBe('failed');
+
+    // The cron DO MUST NOT have been touched — neither /sync nor /clear.
+    // The previous deployment's cron state is still in the DO untouched.
+    expect(cronDoFetches).toEqual([]);
+  });
+
+  it('clears CronScheduler DO unconditionally when no crons present (KV hasCrons gate is unreliable)', async () => {
+    // The previous-deploy KV `hasCrons` flag is unreliable as a gate — it's
+    // only written when true, so older entries or paths that didn't
+    // propagate it have it missing. `/clear` is idempotent (deleteAll +
+    // deleteAlarm, both no-ops on empty DOs) so we call it unconditionally
+    // for no-cron deploys; this matches the static-only deploy and the
+    // project-deletion path.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'plain-app');
+    mockCfApi();
+
+    const cronDoFetches: Array<{ url: string }> = [];
+    const cronSchedulerMock = {
+      idFromName: (name: string) => ({ toString: () => name }),
+      get: (_id: unknown) => ({
+        fetch: async (req: Request) => {
+          cronDoFetches.push({ url: req.url });
+          return Response.json({ ok: true });
+        },
+      }),
+    } as unknown as DurableObjectNamespace;
+
+    const testEnv = { ...env, CRON_SCHEDULER: cronSchedulerMock };
+    // Cron clear runs in waitUntil — capture and await it before assertions.
+    const { ctx, pending } = createWaitUntilTrackingCtx();
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -411,12 +609,17 @@ describe('POST /projects/:id/deploy', () => {
         }),
       }),
       testEnv,
+      ctx,
     );
     expect(res.status).toBe(200);
     await res.text();
+    await Promise.all(pending);
 
-    // DO should NOT have been called
-    expect(doCalled).toBe(false);
+    // /clear was called even though there's no prior live deploy with crons.
+    const clearCall = cronDoFetches.find((f) => f.url.includes('/clear'));
+    expect(clearCall).toBeDefined();
+    // No /sync — there are no schedules to register.
+    expect(cronDoFetches.find((f) => f.url.includes('/sync'))).toBeUndefined();
   });
 
   it('provisions D1 when manifest requires it', async () => {
@@ -5873,7 +6076,7 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
       // pre-routing cleanup branch and calls deleteDispatchScript exactly
       // once for the freshly uploaded worker. Pinning to === 1 guards
       // against both a regression that skips cleanup AND a regression that
-      // re-introduces the double-delete bug from round 1.
+      // re-introduces a double-delete on the same worker.
       const workerDeletes = fetchMock.mock.calls.filter(([input, init]) => {
         const url =
           typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;

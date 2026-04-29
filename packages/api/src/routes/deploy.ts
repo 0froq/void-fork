@@ -26,6 +26,7 @@ import { deleteDispatchScript, retryWithBackoff } from '../cf-api';
 import { R2_CONCURRENCY, uploadPool } from '../concurrency';
 import { SITE_DOMAIN } from '../constants';
 import { DEFAULT_DASHBOARD_URL } from '../constants';
+import { clearCronScheduler, syncCronScheduler } from '../cron-scheduler-client';
 import {
   getProject,
   getDeployment,
@@ -1148,20 +1149,30 @@ async function deploySandboxContainer(
   db: Db,
   accountId: string,
   apiToken: string,
+  dispatchNamespace: string,
   projectId: string,
   workerName: string,
   sandbox: NonNullable<DeployManifest['sandbox']>,
 ): Promise<void> {
   const namespaceId = await retryWithBackoff(
-    async () => {
+    async (attempt) => {
       try {
         return await findDurableObjectNamespaceId(
           accountId,
           apiToken,
+          dispatchNamespace,
           workerName,
+          sandbox.bindingName,
           sandbox.className,
         );
-      } catch {
+      } catch (err) {
+        // Diagnostic: log every miss so the next time this fails in the wild
+        // we can see whether CF is returning empty bindings, returning the
+        // binding without a namespace_id, or failing the request outright.
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[deploy] sandbox namespace probe miss (attempt ${attempt}) for ${dispatchNamespace}/${workerName} class=${sandbox.className}: ${msg}`,
+        );
         return undefined;
       }
     },
@@ -1556,7 +1567,6 @@ app.post('/:id/deploy', async (c) => {
 
   void (async () => {
     let routingSwitched = false;
-    let cronSynced = false;
     let manifest: DeployManifest | undefined;
     let workerName: string | undefined;
     let dispatchNamespace: string | undefined;
@@ -2327,6 +2337,15 @@ app.post('/:id/deploy', async (c) => {
           await setActiveDeployment(c.get('db'), projectId, deployment.id);
           await markDeploymentRetained(c.get('db'), deployment.id, true);
 
+          // Static deploys have no crons. Clear unconditionally so a stale
+          // CronScheduler DO never churns through "Worker not found" against
+          // scripts we're about to delete. /clear is idempotent (deleteAll +
+          // deleteAlarm are no-ops on empty DOs), and a prior deploy's clear
+          // may have failed transiently (clearCronScheduler swallows errors)
+          // — gating on the previous manifest would skip the recovery path.
+          // Matches the WfP no-cron branch and project deletion.
+          await clearCronScheduler(c.env, projectId);
+
           // Hard cutoff: delete legacy WfP scripts (one-time cleanup on first KV/R2 deploy)
           const legacyName = `user-${project.slug}`;
           await deleteDispatchScript(
@@ -2734,6 +2753,7 @@ app.post('/:id/deploy', async (c) => {
             c.get('db'),
             c.env.CF_ACCOUNT_ID,
             c.env.CF_API_TOKEN,
+            dispatchNamespace,
             projectId,
             workerName,
             manifest.sandbox,
@@ -2957,36 +2977,7 @@ app.post('/:id/deploy', async (c) => {
         }
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
-        // 2c. Sync cron schedules to CronScheduler DO
-        currentStep = 'cron_setup';
         const hasCrons = manifest.schedules && manifest.schedules.length > 0;
-
-        if (hasCrons) {
-          const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
-          const cronProxyToken = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN')?.text;
-          await c.env.CRON_SCHEDULER.get(cronId).fetch(
-            new Request('https://do/sync', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                workerName,
-                schedules: manifest.schedules,
-                proxyToken: cronProxyToken,
-              }),
-            }),
-          );
-          cronSynced = true;
-        } else {
-          // Only clear if previous deploy had crons (avoid creating empty DOs)
-          const prevRouting = await c.env.ROUTING.get(project.slug);
-          if (prevRouting && JSON.parse(prevRouting).hasCrons) {
-            const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
-            await c.env.CRON_SCHEDULER.get(cronId).fetch(
-              new Request('https://do/clear', { method: 'POST' }),
-            );
-          }
-        }
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
 
         // 3. Clear this deployment's ISR namespace before warming it.
         // ISR keys are deployment-scoped so a new deployment never reads HTML
@@ -3089,6 +3080,61 @@ app.post('/:id/deploy', async (c) => {
         // 5b. Set active deployment + mark retained
         await setActiveDeployment(c.get('db'), projectId, deployment.id);
         await markDeploymentRetained(c.get('db'), deployment.id, true);
+
+        // 5c. Sync cron schedules to CronScheduler DO. Deferred via waitUntil
+        // because the deploy is already live (routing/DB committed); cron sync
+        // failure is non-fatal (next deploy resyncs) and we should not extend
+        // the user-visible deploy time by a DO RPC.
+        //
+        // (Why this runs AFTER the routing switch, not before: a pre-cutover
+        // failure with cron state already mutated would strand the still-live
+        // previous deployment without crons. Running cron sync after routing
+        // switch guarantees the previous deployment cron state is untouched
+        // until its routing entry has been replaced.)
+        //
+        // /clear is idempotent (deleteAll + deleteAlarm); we call it
+        // unconditionally for no-cron deploys rather than gating on KV
+        // `hasCrons`, which is omitted when false and missing on older
+        // entries.
+        currentStep = 'cron_setup';
+        const cronSyncPromise = (async () => {
+          try {
+            if (hasCrons) {
+              const cronProxyToken = workerBindings.find(
+                (b) => b.name === '__VOID_PROXY_TOKEN',
+              )?.text;
+              await syncCronScheduler(c.env, projectId, {
+                workerName,
+                schedules: manifest.schedules!,
+                proxyToken: cronProxyToken,
+              });
+            } else {
+              await clearCronScheduler(c.env, projectId);
+            }
+          } catch (err) {
+            console.error(
+              `[deploy] cron sync failed for ${projectId} after routing switch: ${
+                err instanceof Error ? err.message : err
+              }`,
+            );
+          }
+        })();
+        // Prefer waitUntil so we don't extend the user-visible deploy time;
+        // fall back to awaiting inline if no ExecutionContext is available
+        // (e.g. tests that drive `app.fetch` without one).
+        try {
+          c.executionCtx.waitUntil(cronSyncPromise);
+        } catch {
+          await cronSyncPromise;
+        }
+
+        // Deliberately NO `assertDeploymentNotCanceled` after this point.
+        // Routing has switched and the new deployment is already serving
+        // traffic, so a cancellation request can no longer be honored. If we
+        // threw here, the outer catch's `routingSwitched=true` branch would
+        // force-mark the deploy live but skip legacy script deletion and
+        // retention cleanup below — leaking CF scripts and stale R2/KV
+        // mirror state. The remaining work must complete.
 
         // Legacy cleanup — delete unversioned worker script (safe no-op if already gone)
         const legacyWorkerName = `user-${project.slug}`;
@@ -3251,15 +3297,11 @@ app.post('/:id/deploy', async (c) => {
           await clearIsrCache(c.env.ISR_CACHE, projectId, dep.id).catch((e) =>
             console.error(`[deploy] failed to clear ISR cache for ${dep.id}:`, e),
           );
-          // Clear cron DO if we synced it before the failure (step 2c runs before routing switch)
-          if (cronSynced) {
-            const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
-            await c.env.CRON_SCHEDULER.get(cronId)
-              .fetch(new Request('https://do/clear', { method: 'POST' }))
-              .catch((e) =>
-                console.error(`[deploy] failed to clear cron scheduler for ${projectId}:`, e),
-              );
-          }
+          // No cron-DO unwind here: cron sync runs only AFTER the routing
+          // switch (step 5c above), so a pre-routing failure means we never
+          // touched the DO and the previous deployment's cron state is
+          // intact. A post-routing cron-sync failure is logged in step 5c's
+          // own try/catch and does not bubble to this branch.
           if (!wasCanceled) {
             await updateDeploymentStatus(c.get('db'), dep.id, 'failed', msg);
           } else {

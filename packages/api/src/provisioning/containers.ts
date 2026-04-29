@@ -1,14 +1,5 @@
 import { CF_API_BASE, cfFetch } from './cloudflare-api';
 
-export interface DurableObjectNamespaceInfo {
-  id: string;
-  class?: string;
-  class_name?: string;
-  name?: string;
-  script?: string;
-  script_name?: string;
-}
-
 export interface ContainerApplicationInfo {
   id: string;
   name: string;
@@ -31,28 +22,53 @@ export interface SandboxContainerConfig {
   maxInstances?: number;
 }
 
+interface ScriptBinding {
+  type: string;
+  name?: string;
+  class_name?: string;
+  namespace_id?: string;
+}
+
+/**
+ * Resolve a Durable Object namespace ID for a class on a WfP script.
+ *
+ * Reads the script's own bindings (per-script endpoint) instead of paging the
+ * account-wide `/workers/durable_objects/namespaces` listing. The listing
+ * endpoint is global, doesn't accept a working `script` filter (CF ignores it
+ * silently), and races against propagation lag for new WfP scripts. The
+ * per-script bindings endpoint returns `namespace_id` directly the moment the
+ * script is uploaded, so the caller's retry loop only ever waits for the
+ * worker upload step itself to be visible — not for the global list to
+ * eventually-consist.
+ */
 export async function findDurableObjectNamespaceId(
   accountId: string,
   apiToken: string,
+  dispatchNamespace: string,
   scriptName: string,
+  bindingName: string,
   className: string,
 ): Promise<string> {
-  const namespaces = await cfFetch<Array<DurableObjectNamespaceInfo>>(
-    `${CF_API_BASE}/${accountId}/workers/durable_objects/namespaces`,
+  const bindings = await cfFetch<Array<ScriptBinding>>(
+    `${CF_API_BASE}/${accountId}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${scriptName}/bindings`,
     apiToken,
   );
 
-  const match = namespaces.find((namespace) => {
-    const namespaceClass = namespace.class_name ?? namespace.class;
-    const namespaceScript = namespace.script_name ?? namespace.script;
-    return namespaceClass === className && namespaceScript === scriptName;
-  });
+  const match = bindings.find(
+    (binding) =>
+      binding.type === 'durable_object_namespace' &&
+      binding.name === bindingName &&
+      binding.class_name === className &&
+      typeof binding.namespace_id === 'string',
+  );
 
-  if (!match) {
-    throw new Error(`Durable Object namespace not found for ${scriptName}/${className}`);
+  if (!match || !match.namespace_id) {
+    throw new Error(
+      `Durable Object namespace binding not found on ${dispatchNamespace}/${scriptName} for ${bindingName}=${className}`,
+    );
   }
 
-  return match.id;
+  return match.namespace_id;
 }
 
 export async function upsertSandboxContainerApplication(

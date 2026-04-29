@@ -687,6 +687,13 @@ const app = new Hono<ApiEnv>()
         // prior failed cutover could leave the DO holding schedules that
         // no pg manifest still mentions, and a guarded clear would let
         // that stale DO state persist across every future rollback.
+        //
+        // Not migrated to clearCronScheduler/syncCronScheduler helpers: those
+        // helpers swallow errors (catch+log) because deploy/cleanup paths can
+        // self-heal on the next deploy. Rollback runs inside a DB transaction
+        // and must throw on cron failure so the txn aborts and the rollback
+        // is retried atomically; swallowing here would silently desync DO
+        // state from the rolled-back manifest.
         if (manifest?.schedules?.length) {
           const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
           await c.env.CRON_SCHEDULER.get(cronId).fetch(

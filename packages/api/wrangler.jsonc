@@ -77,11 +77,20 @@
     },
   ],
   "queues": {
+    "producers": [{ "binding": "CRON_FIRES_QUEUE", "queue": "void-cron-fires" }],
     "consumers": [
       {
         "queue": "void-usage-events",
         "max_batch_size": 100,
         "max_batch_timeout": 5,
+      },
+      // Cron firings deferred from CronScheduler DO. See cron-fires-queue.ts
+      // for why the DO can't dispatch directly.
+      {
+        "queue": "void-cron-fires",
+        "max_batch_size": 50,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
       },
     ],
   },
@@ -152,11 +161,18 @@
         ],
       },
       "queues": {
+        "producers": [{ "binding": "CRON_FIRES_QUEUE", "queue": "void-cron-fires-staging" }],
         "consumers": [
           {
             "queue": "void-usage-events-staging",
             "max_batch_size": 100,
             "max_batch_timeout": 5,
+          },
+          {
+            "queue": "void-cron-fires-staging",
+            "max_batch_size": 50,
+            "max_batch_timeout": 1,
+            "max_retries": 3,
           },
         ],
       },

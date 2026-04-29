@@ -8,9 +8,6 @@ interface CronState {
   proxyToken?: string;
 }
 
-/** Thrown when the worker script cannot be reached (deleted/evicted). */
-class WorkerUnreachableError extends Error {}
-
 /**
  * Convert a CF/Quartz-style cron expression to Unix-style for cron-parser.
  *
@@ -97,8 +94,42 @@ export function getNextFireTime(schedules: Array<{ cron: string }>, now: number)
   return earliest < Infinity ? earliest : null;
 }
 
-const MAX_CONSECUTIVE_FAILURES = 5;
+/** CF Queues `sendBatch` is capped at 100 messages or 256 KiB per call. */
+const SEND_BATCH_CHUNK_SIZE = 100;
 
+/**
+ * Cap workerd alarm retries we accept before abandoning the firing window.
+ *
+ * Workerd retries `alarm()` ~6 times after a throw; once that budget is
+ * exhausted, the alarm is permanently dropped and never re-invoked until
+ * `setAlarm()` is called again. If the all-fail branch keeps throwing past
+ * the workerd cap, the DO is left with `state.schedules.length > 0` and no
+ * alarm — a permanent silent failure that requires a deploy or manual
+ * `/sync` to recover.
+ *
+ * We cap at 5 (one less than the workerd cap) so we still get one workerd-
+ * managed retry AND we keep the DO armed for the next firing window. The
+ * cost is losing one fire window for sparse crons (e.g. `0 * * * *`) or one
+ * minute for per-minute crons — both recoverable on the next valid alarm.
+ */
+const ALARM_RETRY_BUDGET = 5;
+
+/** Split `items` into chunks of at most `size` (size must be >= 1). */
+export function chunkMessages<T>(items: ReadonlyArray<T>, size: number): Array<Array<T>> {
+  if (size < 1) {
+    throw new Error('chunkMessages: size must be >= 1');
+  }
+  const chunks: Array<Array<T>> = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+// Every code path that calls deleteDispatchScript on a user worker MUST also
+// call clearCronScheduler / syncCronScheduler from cron-scheduler-client.ts.
+// Audited callsites: deploy.ts post-routing, deploy.ts static-supersede,
+// provisioning/cleanup.ts, routes/projects.ts rollback.
 export class CronScheduler extends DurableObject<ApiEnv['Bindings']> {
   private state: CronState | null = null;
 
@@ -136,7 +167,6 @@ export class CronScheduler extends DurableObject<ApiEnv['Bindings']> {
   private async handleSync(request: Request): Promise<Response> {
     const body = await request.json<CronState>();
     await this.saveState(body);
-    await this.ctx.storage.put('failures', 0);
     await this.scheduleNextAlarm();
     return Response.json({ ok: true });
   }
@@ -151,13 +181,14 @@ export class CronScheduler extends DurableObject<ApiEnv['Bindings']> {
   private async handleStatus(): Promise<Response> {
     const state = await this.getState();
     const alarm = await this.ctx.storage.getAlarm();
-    const failures = (await this.ctx.storage.get<number>('failures')) ?? 0;
-    // Omit proxyToken from status response to avoid leaking secrets
+    // Omit proxyToken from status response to avoid leaking secrets.
+    // The legacy `failures` storage key (left orphaned on older DOs) is
+    // intentionally not read or returned — it has no incrementer anymore.
     const { proxyToken: _, ...safeState } = state ?? {};
-    return Response.json({ state: state ? safeState : null, nextAlarm: alarm, failures });
+    return Response.json({ state: state ? safeState : null, nextAlarm: alarm });
   }
 
-  async alarm(): Promise<void> {
+  async alarm(alarmInfo?: AlarmInvocationInfo): Promise<void> {
     const state = await this.getState();
     if (!state || state.schedules.length === 0) {
       return;
@@ -173,7 +204,24 @@ export class CronScheduler extends DurableObject<ApiEnv['Bindings']> {
       return;
     }
 
-    const now = Date.now();
+    // Use `alarmInfo.scheduledTime` (the cron minute the alarm was originally
+    // scheduled for) rather than `Date.now()`. Workerd retries `alarm()` after
+    // a throw, but `Date.now()` reads wall-clock at retry time — so:
+    //   - Queue-message `scheduledTime` would carry the retry instant rather
+    //     than the original cron minute (wrong for downstream consumers).
+    //   - If a retry crosses a minute boundary, `cronMatchesMinute` would
+    //     evaluate the wrong minute. For sparse crons (`0 * * * *`) the cross-
+    //     minute case yields `matching.length === 0` → the firing is silently
+    //     lost.
+    // Using the scheduled time pins both checks to the same minute regardless
+    // of when the retry executes.
+    //
+    // Invariant: workerd always passes `alarmInfo` to `alarm()` on modern
+    // runtimes (the `alarmInfo?` optionality in `@cloudflare/workers-types` is
+    // a source-compat artifact). The `?? Date.now()` and `?? 0` retryCount
+    // fallbacks below are defensive — they only matter for unit tests that
+    // invoke `alarm()` directly without an `alarmInfo` argument.
+    const now = alarmInfo?.scheduledTime ?? Date.now();
     const matching = state.schedules.filter((s) => cronMatchesMinute(s.cron, now));
 
     if (matching.length === 0) {
@@ -181,87 +229,67 @@ export class CronScheduler extends DurableObject<ApiEnv['Bindings']> {
       return;
     }
 
+    // Hand off to the cron-fires queue. Calling `env.DISPATCH.get(...).fetch(...)`
+    // directly from inside this DO is broken: workerd dispatches such calls
+    // with the calling DO class as the entrypoint name, which user workers do
+    // not export. Every dispatched fetch arrives at the user worker with
+    // `entrypoint: "CronScheduler"` and fails with `The entrypoint name
+    // CronScheduler was not found in this worker`. The queue handler runs as
+    // a fresh fetch event with no DO context, so the dispatch resolves to the
+    // user worker's default entrypoint as expected.
+    const messages = matching.map((s) => ({
+      body: {
+        workerName: state.workerName,
+        cron: s.cron,
+        scheduledTime: now,
+        ...(state.proxyToken !== undefined && { proxyToken: state.proxyToken }),
+      },
+    }));
+    const chunks = chunkMessages(messages, SEND_BATCH_CHUNK_SIZE);
     const results = await Promise.allSettled(
-      matching.map((s) => this.invokeWorker(state.workerName, s.cron, now, state.proxyToken)),
+      chunks.map((chunk) => this.env.CRON_FIRES_QUEUE.sendBatch(chunk)),
     );
+    const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
 
-    for (let i = 0; i < results.length; i++) {
-      if (results[i].status === 'rejected') {
-        console.error(
-          `cron ${matching[i].name} (${matching[i].cron}) failed for ${state.workerName}:`,
-          (results[i] as PromiseRejectedResult).reason,
-        );
+    if (failures.length > 0) {
+      const reasons = failures
+        .map((f) => (f.reason instanceof Error ? f.reason.message : String(f.reason)))
+        .join('; ');
+      console.error(
+        `CronScheduler: ${failures.length}/${chunks.length} sendBatch chunks failed for ${state.workerName}: ${reasons}`,
+      );
+      if (failures.length === chunks.length) {
+        const retryCount = alarmInfo?.retryCount ?? 0;
+        if (retryCount >= ALARM_RETRY_BUDGET) {
+          // Workerd retries are about to exhaust. If we throw again, the
+          // alarm would be permanently dropped — leaving the DO with active
+          // schedules but no alarm, requiring a deploy or manual `/sync` to
+          // recover. Accept that this firing is lost, schedule the NEXT cron
+          // minute, and return. Sparse crons lose one fire window; per-minute
+          // crons lose at most one minute. Either is recoverable on the next
+          // valid alarm.
+          console.error(
+            `CronScheduler: retry budget exhausted (retryCount=${retryCount}) for ${state.workerName}; abandoning this fire and scheduling next alarm`,
+          );
+          await this.scheduleNextAlarm();
+          return;
+        }
+        // No fires were enqueued (likely CF Queues API outage). Within retry
+        // budget: throw so workerd retries the alarm with backoff. The retry
+        // re-evaluates via `alarmInfo.scheduledTime`, so the original cron
+        // minute is preserved. Safe because nothing succeeded — there is no
+        // double-fire risk. Critically, we throw BEFORE calling
+        // scheduleNextAlarm() so the runtime keeps the current alarm in place
+        // for retry. See:
+        // https://developers.cloudflare.com/durable-objects/api/alarms/#alarm-handler-method
+        throw new Error(`CronScheduler: all sendBatch chunks failed: ${reasons}`);
       }
-    }
-
-    // Only count toward circuit breaker when the worker itself is unreachable
-    // (deleted/evicted), not when the handler returns an application-level error.
-    const allUnreachable = results.every(
-      (r) => r.status === 'rejected' && r.reason instanceof WorkerUnreachableError,
-    );
-    if (allUnreachable) {
-      const failures = ((await this.ctx.storage.get<number>('failures')) ?? 0) + 1;
-      await this.ctx.storage.put('failures', failures);
-      if (failures >= MAX_CONSECUTIVE_FAILURES) {
-        console.error(
-          `CronScheduler: ${failures} consecutive failures for ${state.workerName}, auto-clearing`,
-        );
-        await this.handleClear();
-        return;
-      }
-    } else {
-      await this.ctx.storage.put('failures', 0);
+      // Partial success: some fires landed, others were lost. Re-running
+      // would double-fire the successful chunks, so we accept the loss and
+      // let the next matching minute proceed normally.
     }
 
     await this.scheduleNextAlarm();
-  }
-
-  private async invokeWorker(
-    workerName: string,
-    cron: string,
-    scheduledTime: number,
-    proxyToken?: string,
-  ): Promise<void> {
-    let res: Response;
-    try {
-      const worker = this.env.DISPATCH.get(workerName);
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (proxyToken) {
-        headers['x-void-internal'] = proxyToken;
-      }
-      const body = JSON.stringify({ cron, scheduledTime });
-      res = await worker.fetch(
-        new Request('https://internal/__void/scheduled', {
-          method: 'POST',
-          headers,
-          body,
-        }),
-      );
-      // Legacy: fall back for workers deployed before the /__void/ migration.
-      // TODO: remove once all deployed workers use /__void/* paths. See #88
-      if (res.status === 404) {
-        res = await worker.fetch(
-          new Request('https://internal/__scheduled', {
-            method: 'POST',
-            headers,
-            body,
-          }),
-        );
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // Only classify as unreachable when the worker script is definitively gone.
-      // Other thrown errors (CPU limit, transient infra, compilation) mean the
-      // worker exists or the failure is transient — don't count toward circuit breaker.
-      if (msg.includes('Worker not found')) {
-        throw new WorkerUnreachableError(msg);
-      }
-      throw new Error(msg);
-    }
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`${res.status}: ${text}`);
-    }
   }
 
   private async scheduleNextAlarm(): Promise<void> {

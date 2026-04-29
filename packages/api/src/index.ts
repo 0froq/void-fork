@@ -8,6 +8,7 @@ import adminProjects from './admin/routes/projects';
 import adminSignupControl from './admin/routes/signup-control';
 import { dashboardHandler, adminSystem } from './admin/routes/system';
 import adminUsers from './admin/routes/users';
+import { type CronFireMessage, processCronFiresBatch } from './cron-fires-queue';
 import { CronScheduler } from './cron-scheduler';
 import {
   createDb,
@@ -263,6 +264,15 @@ export default {
   fetch: app.fetch,
   scheduled,
   async queue(batch: MessageBatch<unknown>, env: ApiEnv['Bindings']): Promise<void> {
+    // Dispatch by queue name. void-api consumes two queues:
+    // - `void-usage-events` (and `*-staging`): per-request usage rollup
+    // - `void-cron-fires` (and `*-staging`): cron-trigger invocations from
+    //   the CronScheduler DO, deferred here so the dispatched fetch runs
+    //   outside the DO's RPC context.
+    if (batch.queue.startsWith('void-cron-fires')) {
+      await processCronFiresBatch(batch as unknown as MessageBatch<CronFireMessage>, env);
+      return;
+    }
     await processUsageEventBatch(batch, env);
   },
 } satisfies ExportedHandler<ApiEnv['Bindings']>;

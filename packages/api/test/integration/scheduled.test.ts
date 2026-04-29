@@ -38,6 +38,9 @@ function makeBindings(e: TestEnv) {
     USAGE_COUNTER: e.USAGE_COUNTER,
     CRON_SCHEDULER: e.CRON_SCHEDULER,
     ERROR_ALERT_MONITOR: e.ERROR_ALERT_MONITOR,
+    CRON_FIRES_QUEUE: { send: async () => {}, sendBatch: async () => {} } as unknown as Queue<
+      import('../../src/cron-fires-queue').CronFireMessage
+    >,
   };
 }
 
