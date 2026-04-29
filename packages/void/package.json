@@ -292,10 +292,6 @@
   },
   "peerDependencies": {
     "@void-sdk/md": "workspace:*",
-    "@void-sdk/react": "workspace:*",
-    "@void-sdk/solid": "workspace:*",
-    "@void-sdk/svelte": "workspace:*",
-    "@void-sdk/vue": "workspace:*",
     "arktype": ">=2.0.0",
     "valibot": ">=1.0.0-beta.7",
     "vite": "^8.0.0",
@@ -303,18 +299,6 @@
   },
   "peerDependenciesMeta": {
     "@void-sdk/md": {
-      "optional": true
-    },
-    "@void-sdk/vue": {
-      "optional": true
-    },
-    "@void-sdk/react": {
-      "optional": true
-    },
-    "@void-sdk/svelte": {
-      "optional": true
-    },
-    "@void-sdk/solid": {
       "optional": true
     },
     "arktype": {

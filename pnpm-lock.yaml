@@ -259,18 +259,6 @@ importers:
       '@void-sdk/md':
         specifier: workspace:*
         version: link:../md
-      '@void-sdk/react':
-        specifier: workspace:*
-        version: link:../react
-      '@void-sdk/solid':
-        specifier: workspace:*
-        version: link:../solid
-      '@void-sdk/svelte':
-        specifier: workspace:*
-        version: link:../svelte
-      '@void-sdk/vue':
-        specifier: workspace:*
-        version: link:../vue
       better-auth:
         specifier: ^1.6.9
         version: 1.6.9(904897a9fde70e780ee0d5cb43668121)
