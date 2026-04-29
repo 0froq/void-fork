@@ -123,14 +123,26 @@ export async function upsertSandboxContainerApplication(
     },
   );
 
-  // CF's rollout endpoint requires `strategy` and `description` (matches the
-  // shape wrangler sends — see workers-sdk/packages/wrangler container deploy).
+  // POST rollout to apply the PATCHed configuration to running instances.
+  // Body shape mirrors what wrangler sends (workers-sdk/packages/wrangler/src/
+  // containers/deploy.ts and packages/containers-shared/src/client/models/
+  // CreateApplicationRolloutRequest.ts). Required fields:
+  //   - description: free-form string
+  //   - strategy: only "rolling" is valid (lowercase)
+  //   - target_configuration: the new configuration
+  //   - step_percentage OR steps: rollout pacing (one is required); 100 = a
+  //     single instant step, which is what we want for platform-driven config
+  //     updates (no manual gating)
+  //   - kind: optional; defaults to full_auto. We set it explicitly so a
+  //     future API change can't surprise us with a manual-rollout default.
   await cfFetch(`${containersUrl(accountId)}/applications/${existing.id}/rollouts`, apiToken, {
     method: 'POST',
     body: JSON.stringify({
       description: 'void platform sandbox config update',
       strategy: 'rolling',
       target_configuration: patchBody.configuration,
+      step_percentage: 100,
+      kind: 'full_auto',
     }),
   });
 
