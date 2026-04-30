@@ -7,6 +7,23 @@ interface CfApiResult<T> {
   result: T;
 }
 
+/**
+ * Error thrown by `cfFetch` when the Cloudflare API returns a non-success
+ * envelope. Exposes the HTTP `status` so callers can branch on the wire-level
+ * code (e.g. treat 409 as a concurrent-create race) rather than relying on
+ * fragile message matching. The `.message` format is preserved verbatim
+ * (`Cloudflare API error: <joined messages>`) so existing string-based
+ * detection keeps working as a defense-in-depth fallback.
+ */
+export class CloudflareApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'CloudflareApiError';
+    this.status = status;
+  }
+}
+
 export async function cfFetch<T>(url: string, apiToken: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
@@ -19,7 +36,7 @@ export async function cfFetch<T>(url: string, apiToken: string, init?: RequestIn
   const json = (await response.json()) as CfApiResult<T>;
   if (!json.success) {
     const msg = json.errors.map((e) => e.message).join(', ');
-    throw new Error(`Cloudflare API error: ${msg}`);
+    throw new CloudflareApiError(`Cloudflare API error: ${msg}`, response.status);
   }
   return json.result;
 }

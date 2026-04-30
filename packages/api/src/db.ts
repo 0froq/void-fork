@@ -845,6 +845,64 @@ export async function getResourceByBinding(
     .then((rows) => rows[0]);
 }
 
+/**
+ * Upsert a `container` resource row, returning the prior `cf_id` when an
+ * existing row's id was updated to a new application id.
+ *
+ * Container applications can be replaced out-of-band: the CF API can return
+ * 404 when an operator deletes a stale same-name app (or the namespace-mismatch
+ * remediation the deploy path now relies on tells the operator to delete it).
+ * In those cases `upsertSandboxContainerApplication` POSTs a fresh app and
+ * returns a new `application.id`. The old `createResource`-only path skipped
+ * persistence whenever a row already existed for the binding, leaving the DB
+ * pointing at a dead `cf_id` — cleanup later 404s on that id and the new app
+ * leaks. This helper closes that hole by reconciling on the natural unique
+ * key `(project_id, type, binding_name)`.
+ *
+ * Returns `{ priorCfId }` so callers can log the transition. `priorCfId` is
+ * `null` when a new row was inserted, the same string as `cfId` when the row
+ * already pointed at the same id (no-op), and the prior id when an existing
+ * row was updated to point at a new application.
+ */
+export async function upsertContainerResource(
+  db: Db,
+  projectId: string,
+  bindingName: string,
+  cfId: string,
+): Promise<{ priorCfId: string | null }> {
+  // Read first so we can report the prior cf_id even on the update path.
+  // Drizzle's RETURNING returns post-update columns; without this read we
+  // could not distinguish "inserted" from "updated to same id" from
+  // "updated to a new id" cleanly.
+  const prior = await db
+    .select({ cf_id: resources.cf_id })
+    .from(resources)
+    .where(
+      and(
+        eq(resources.project_id, projectId),
+        eq(resources.type, 'container'),
+        eq(resources.binding_name, bindingName),
+      ),
+    )
+    .then((rows) => rows[0]);
+
+  await db
+    .insert(resources)
+    .values({
+      id: generateId('res'),
+      project_id: projectId,
+      type: 'container',
+      cf_id: cfId,
+      binding_name: bindingName,
+    })
+    .onConflictDoUpdate({
+      target: [resources.project_id, resources.type, resources.binding_name],
+      set: { cf_id: cfId },
+    });
+
+  return { priorCfId: prior?.cf_id ?? null };
+}
+
 // --- Domains ---
 
 export async function createDomain(

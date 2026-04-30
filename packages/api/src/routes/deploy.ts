@@ -46,8 +46,7 @@ import {
   getRetainedDeploymentsExcluding,
   getProjectSecrets,
   upsertProjectSecret,
-  createResource,
-  getProjectResources,
+  upsertContainerResource,
   CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES,
   type Db,
 } from '../db.ts';
@@ -1191,14 +1190,25 @@ async function deploySandboxContainer(
     ...(sandbox.maxInstances != null && { maxInstances: sandbox.maxInstances }),
   });
 
-  const existing = await getProjectResources(db, projectId);
-  if (
-    !existing.some(
-      (resource) =>
-        resource.type === 'container' && resource.binding_name === sandbox.containerName,
-    )
-  ) {
-    await createResource(db, projectId, 'container', application.id, sandbox.containerName);
+  // Reconcile the resource row's cf_id with whatever application id CF
+  // actually returned. A pre-existing row can point at a stale id when the
+  // CF app behind it was deleted out-of-band (operator action, the branch's
+  // own namespace-mismatch remediation, external cleanup) — on the next
+  // deploy `upsertSandboxContainerApplication` POSTs a fresh app and returns
+  // a new id, but the old `createResource`-only path skipped persistence,
+  // leaving the DB pointing at the dead id. Cleanup later 404s on that id
+  // and the new app leaks. Upsert closes the loop.
+  const { priorCfId } = await upsertContainerResource(
+    db,
+    projectId,
+    sandbox.containerName,
+    application.id,
+  );
+  if (priorCfId !== null && priorCfId !== application.id) {
+    console.warn(
+      `[deploy] sandbox container resource cf_id transition ${priorCfId} -> ${application.id} ` +
+        `for project=${projectId} binding=${sandbox.containerName}`,
+    );
   }
 }
 
