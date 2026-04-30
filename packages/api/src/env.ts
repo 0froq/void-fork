@@ -36,6 +36,14 @@ export interface ApiEnv extends Env {
     DEV_AUTH_BYPASS?: string;
     DISPATCH_NAMESPACE?: string;
     DISPATCH_WORKER_NAME?: string;
+    /**
+     * Name of the tail-consumer Worker that receives runtime logs (Tail Worker).
+     * Wired into per-user-script `tail_consumers` metadata on each WfP upload
+     * so user scripts have explicit, belt-and-suspenders log fan-out in
+     * addition to the dispatch worker's namespace-wide propagation.
+     * Falls back to `void-tail` when unset.
+     */
+    TAIL_SERVICE_NAME?: string;
     VOID_PROXY_SERVICE?: string;
     VOID_PROXY_TOKEN?: string;
     SITE_DOMAIN?: string;

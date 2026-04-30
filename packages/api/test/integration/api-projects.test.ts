@@ -902,4 +902,177 @@ describe('GET /projects/:id/logs', () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it('appends an error-level WHERE clause when level=error', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'lvl-error');
+
+    let capturedBody = '';
+    mockCfApi({
+      analyticsQuery: (_url, init) => {
+        capturedBody = typeof init?.body === 'string' ? init.body : '';
+        return Response.json({ data: [] });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/logs?level=error`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(capturedBody).toContain(
+      `AND (blob1 != 'ok' OR blob3 != '[]' OR blob2 LIKE '%"level":"error"%')`,
+    );
+  });
+
+  it('appends a warn-level WHERE clause when level=warn', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'lvl-warn');
+
+    let capturedBody = '';
+    mockCfApi({
+      analyticsQuery: (_url, init) => {
+        capturedBody = typeof init?.body === 'string' ? init.body : '';
+        return Response.json({ data: [] });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/logs?level=warn`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(capturedBody).toContain(`AND blob2 LIKE '%"level":"warn"%'`);
+    expect(capturedBody).not.toContain(`blob1 != 'ok'`);
+  });
+
+  it.each(['info', 'log', 'debug'] as const)(
+    'appends a %s-level WHERE clause when level=%s',
+    async (lvl) => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, `lvl-${lvl}`);
+
+      let capturedBody = '';
+      mockCfApi({
+        analyticsQuery: (_url, init) => {
+          capturedBody = typeof init?.body === 'string' ? init.body : '';
+          return Response.json({ data: [] });
+        },
+      });
+
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/logs?level=${lvl}`, {
+          headers: { Authorization: `Bearer ${user.jwt}` },
+        }),
+        env,
+      );
+      expect(res.status).toBe(200);
+      expect(capturedBody).toContain(`AND blob2 LIKE '%"level":"${lvl}"%'`);
+      expect(capturedBody).not.toContain(`blob1 != 'ok'`);
+    },
+  );
+
+  it('omits the level WHERE clause when level=all', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'lvl-all');
+
+    let capturedBody = '';
+    mockCfApi({
+      analyticsQuery: (_url, init) => {
+        capturedBody = typeof init?.body === 'string' ? init.body : '';
+        return Response.json({ data: [] });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/logs?level=all`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(capturedBody).not.toContain(`"level":`);
+    expect(capturedBody).not.toContain(`blob1 != 'ok'`);
+  });
+
+  it('omits the level WHERE clause when level is missing', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'lvl-missing');
+
+    let capturedBody = '';
+    mockCfApi({
+      analyticsQuery: (_url, init) => {
+        capturedBody = typeof init?.body === 'string' ? init.body : '';
+        return Response.json({ data: [] });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/logs`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(capturedBody).not.toContain(`"level":`);
+    expect(capturedBody).not.toContain(`blob1 != 'ok'`);
+  });
+
+  it('rejects unknown level values with a 400 and never queries AE', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'lvl-bad');
+
+    let aeCalls = 0;
+    mockCfApi({
+      analyticsQuery: () => {
+        aeCalls++;
+        return Response.json({ data: [] });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/logs?level=foo`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toMatch(/invalid level parameter/);
+    expect(json.error).toMatch(/error, warn, info, log, debug/);
+    expect(aeCalls).toBe(0);
+  });
+
+  it('combines level=error with deploymentId so both clauses are ANDed', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'lvl-combo');
+    const deploymentId = 'dpl_abc123';
+
+    let capturedBody = '';
+    mockCfApi({
+      analyticsQuery: (_url, init) => {
+        capturedBody = typeof init?.body === 'string' ? init.body : '';
+        return Response.json({ data: [] });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(
+        `http://localhost/projects/${project.id}/logs?level=error&deploymentId=${deploymentId}`,
+        {
+          headers: { Authorization: `Bearer ${user.jwt}` },
+        },
+      ),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(capturedBody).toContain(`AND blob7 = '${deploymentId}'`);
+    expect(capturedBody).toContain(
+      `AND (blob1 != 'ok' OR blob3 != '[]' OR blob2 LIKE '%"level":"error"%')`,
+    );
+  });
 });

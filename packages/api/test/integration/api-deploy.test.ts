@@ -6718,6 +6718,70 @@ describe('POST /projects/:id/deploy/preflight', () => {
     });
   });
 
+  it('includes explicit tail_consumers metadata in worker upload', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'tail-proj');
+
+    let capturedMetadata: Record<string, unknown> | undefined;
+    mockCfApi({
+      uploadWorker: async (_url: string, init?: RequestInit) => {
+        const body = init?.body as FormData;
+        const metadataBlob = body.get('metadata') as Blob;
+        capturedMetadata = JSON.parse(await metadataBlob.text());
+        return new Response('ok', { status: 200 });
+      },
+    });
+
+    const form = buildDeployForm();
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(capturedMetadata).toBeDefined();
+    expect(capturedMetadata!.tail_consumers).toEqual([{ service: 'void-tail' }]);
+  });
+
+  it('uses TAIL_SERVICE_NAME env override in worker upload tail_consumers', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'tail-proj-staging');
+
+    let capturedMetadata: Record<string, unknown> | undefined;
+    mockCfApi({
+      uploadWorker: async (_url: string, init?: RequestInit) => {
+        const body = init?.body as FormData;
+        const metadataBlob = body.get('metadata') as Blob;
+        capturedMetadata = JSON.parse(await metadataBlob.text());
+        return new Response('ok', { status: 200 });
+      },
+    });
+
+    const originalTailServiceName = env.TAIL_SERVICE_NAME;
+    env.TAIL_SERVICE_NAME = 'void-tail-staging';
+    try {
+      const form = buildDeployForm();
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${user.jwt}` },
+          body: form,
+        }),
+        env,
+      );
+      expect(res.status).toBe(200);
+      await res.text();
+    } finally {
+      env.TAIL_SERVICE_NAME = originalTailServiceName;
+    }
+    expect(capturedMetadata).toBeDefined();
+    expect(capturedMetadata!.tail_consumers).toEqual([{ service: 'void-tail-staging' }]);
+  });
+
   it('serializes websocket durable object migrations in Cloudflare upload format', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'ws-migrations-proj');

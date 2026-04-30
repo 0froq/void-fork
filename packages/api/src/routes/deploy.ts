@@ -84,6 +84,7 @@ import {
 } from '../types.ts';
 
 const DEFAULT_DISPATCH_NAMESPACE = 'void-users';
+const DEFAULT_TAIL_SERVICE_NAME = 'void-tail';
 
 // Per-part byte caps for buffered text fields. The Cloudflare Workers request
 // budget is 128 MiB, and these parts are fully buffered in memory before
@@ -2684,6 +2685,7 @@ app.post('/:id/deploy', async (c) => {
           manifest.sandbox?.migrations,
         );
         const containers = buildSandboxUploadContainers(manifest.sandbox);
+        const tailServiceName = c.env.TAIL_SERVICE_NAME ?? DEFAULT_TAIL_SERVICE_NAME;
         const metadata: Record<string, unknown> = {
           main_module: manifest.workerMain ?? 'index.js',
           compatibility_date: manifest.compatibilityDate ?? '2026-02-12',
@@ -2696,6 +2698,15 @@ app.post('/:id/deploy', async (c) => {
             enabled: true,
             logs: { invocation_logs: true, head_sampling_rate: 1 },
           },
+          // Explicit per-script tail consumer wiring. The dispatch worker
+          // already declares `tail_consumers` (which CF documents as
+          // propagating to scripts in the namespace), but propagation is
+          // undocumented for dispatch-namespace scripts and silent if it
+          // breaks — log rows would simply stop appearing in AE under
+          // `index1='user-{slug}'`. Belt-and-suspenders: send it on every
+          // upload as well. If CF rejects this on namespace scripts, the
+          // upload will fail loudly and we'll iterate.
+          tail_consumers: [{ service: tailServiceName }],
         };
         workerFormData.append(
           'metadata',

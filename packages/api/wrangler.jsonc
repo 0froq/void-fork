@@ -104,6 +104,7 @@
   "vars": {
     "PLATFORM_ENV": "production",
     "REQUESTS_DATASET": "void_requests",
+    "TAIL_SERVICE_NAME": "void-tail",
   },
   // Secrets (via `wrangler secret put`): CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID, JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
   // Optional env var: AUTH_REDIRECT_URI (defaults to https://api.void.cloud/auth/callback)
@@ -188,6 +189,7 @@
         "LOGS_DATASET": "void_logs_staging",
         "REQUESTS_DATASET": "void_requests_staging",
         "PLATFORM_ENV": "staging",
+        "TAIL_SERVICE_NAME": "void-tail-staging",
       },
     },
   },

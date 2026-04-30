@@ -1383,11 +1383,42 @@ const app = new Hono<ApiEnv>()
     if (deploymentId && !/^dpl_[0-9a-z]+$/.test(deploymentId)) {
       return c.json({ error: 'invalid deploymentId format' }, 400);
     }
+
+    // Optional level filter applied at the AE SQL layer so sparse error rows
+    // are not hidden behind successful invocations by the LIMIT clause. The
+    // 'all' value is treated as absence; any other value must be in the fixed
+    // allowlist (allowlist check, not regex, so future code can't widen this
+    // accidentally and let a tainted value reach the SQL string).
+    const levelParam = c.req.query('level');
+    const ALLOWED_LEVELS = ['error', 'warn', 'info', 'log', 'debug'] as const;
+    type LogLevel = (typeof ALLOWED_LEVELS)[number];
+    let level: LogLevel | null = null;
+    if (levelParam !== undefined && levelParam !== 'all') {
+      if (!(ALLOWED_LEVELS as ReadonlyArray<string>).includes(levelParam)) {
+        return c.json(
+          {
+            error: `invalid level parameter, must be one of: error, warn, info, log, debug, all`,
+          },
+          400,
+        );
+      }
+      level = levelParam as LogLevel;
+    }
+
     const workerName = `user-${project.slug}`;
     const sinceStr = new Date(Date.now() - sinceMs).toISOString().replace('T', ' ').slice(0, 19);
     const dataset = c.env.LOGS_DATASET ?? 'void_logs';
 
     const deployFilter = deploymentId ? `\n        AND blob7 = '${deploymentId}'` : '';
+    let levelFilter = '';
+    if (level === 'error') {
+      // Catch non-ok outcomes (blob1), captured exceptions (blob3 non-empty
+      // array), and console.error logs (blob2 has level:"error").
+      levelFilter = `\n        AND (blob1 != 'ok' OR blob3 != '[]' OR blob2 LIKE '%"level":"error"%')`;
+    } else if (level !== null) {
+      levelFilter = `\n        AND blob2 LIKE '%"level":"${level}"%'`;
+    }
+
     const query = `
       SELECT
         blob1 as outcome,
@@ -1401,7 +1432,7 @@ const app = new Hono<ApiEnv>()
         timestamp
       FROM ${dataset}
       WHERE index1 = '${workerName}'
-        AND timestamp >= toDateTime('${sinceStr}')${deployFilter}
+        AND timestamp >= toDateTime('${sinceStr}')${deployFilter}${levelFilter}
       ORDER BY timestamp DESC
       LIMIT ${limit}
     `;
