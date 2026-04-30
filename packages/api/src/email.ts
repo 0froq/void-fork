@@ -41,11 +41,13 @@ export async function sendInvitationEmail(
   });
 }
 
+const GITHUB_SETUP_URL = 'https://github.com/void-sdk/void';
+const DISCORD_URL = 'https://discord.gg/AxmAk8PffV';
+
 export async function sendWelcomeEmail(
   emailBinding: SendEmail,
   to: string,
   login: string,
-  dashboardUrl: string,
 ): Promise<void> {
   await sendEmail(emailBinding, {
     to,
@@ -53,10 +55,12 @@ export async function sendWelcomeEmail(
     html: emailHtml(
       `<h2 style="margin-bottom:8px">Welcome to Void, ${escapeHtml(login)}</h2>
 <p>Your account is ready. Void is the deployment platform for the Vite ecosystem — deploy full-stack apps with file-based routing, database bindings, AI integration, and edge-first infrastructure.</p>
-<p>${button(dashboardUrl, 'Go to Dashboard')}</p>`,
+<p>Join our Discord to get an early-access feedback role and chat with the team:</p>
+<p>${button(DISCORD_URL, 'Join Discord')}</p>
+<p style="margin-top:16px">To install Void, you'll need to set up GitHub Packages access — see the <a href="${GITHUB_SETUP_URL}" style="color:#1a1a1a">setup instructions</a>.</p>`,
       'You received this email because you signed up for Void.',
     ),
-    text: `Welcome to Void, ${login}\n\nYour account is ready. Void is the deployment platform for the Vite ecosystem — deploy full-stack apps with file-based routing, database bindings, AI integration, and edge-first infrastructure.\n\nGo to dashboard: ${dashboardUrl}\n\nYou received this email because you signed up for Void.`,
+    text: `Welcome to Void, ${login}\n\nYour account is ready. Void is the deployment platform for the Vite ecosystem — deploy full-stack apps with file-based routing, database bindings, AI integration, and edge-first infrastructure.\n\nJoin our Discord to get an early-access feedback role and chat with the team: ${DISCORD_URL}\n\nTo install Void, you'll need to set up GitHub Packages access — setup instructions: ${GITHUB_SETUP_URL}\n\nYou received this email because you signed up for Void.`,
   });
 }
 

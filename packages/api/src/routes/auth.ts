@@ -258,9 +258,8 @@ app.get('/callback', async (c) => {
         console.error(`Failed to accept invitation for ${email} (user ${user.id}):`, err);
       }
       if (c.env.EMAIL) {
-        const dashboardUrl = c.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
         c.executionCtx.waitUntil(
-          sendWelcomeEmail(c.env.EMAIL, email, login, dashboardUrl).catch((err) =>
+          sendWelcomeEmail(c.env.EMAIL, email, login).catch((err) =>
             console.error(`[welcome-email] Failed for ${email}:`, err),
           ),
         );
