@@ -17,6 +17,7 @@ import { readConfig, resolveBindingNames, isNodeTarget, getDatabaseDialect } fro
 import { scanJobsSync } from './crons/scan.ts';
 import { inferBindingsFromSource } from './inference/walk.ts';
 import { voidLog, voidWarn, voidError } from './log.ts';
+import { devTriggersHintPlugin } from './plugin-dev-triggers-hint.ts';
 import { drizzlePlugin } from './plugin-drizzle.ts';
 import { envClientFoldPlugin } from './plugin-env-client-fold.ts';
 import { envClientGuardPlugin } from './plugin-env-client-guard.ts';
@@ -478,6 +479,7 @@ export function voidPlugin(options?: {
       migrationPlugin(root, dialect, 'local', frameworkPersistRoot, {
         enabled: false,
       }),
+      devTriggersHintPlugin(root, { framework: true, devTriggerToken }),
     ];
   }
 
@@ -999,6 +1001,7 @@ export function voidPlugin(options?: {
       }),
       migrationPlugin(root, getDatabaseDialect(config)),
       ...(vinextCompat ? [vinextCompat] : []),
+      devTriggersHintPlugin(root, { framework: true, devTriggerToken }),
       ...cloudflare({
         ...inspectorPortOption,
         persistState: { path: options?.persistTo ?? outDir },
@@ -1134,6 +1137,7 @@ export function voidPlugin(options?: {
       configPath: authConfigPath,
     }),
     prerenderPlugin(root, config),
+    devTriggersHintPlugin(root, { framework: false, devTriggerToken }),
     ...cloudflare({
       ...inspectorPortOption,
       persistState: { path: options?.persistTo ?? outDir },
