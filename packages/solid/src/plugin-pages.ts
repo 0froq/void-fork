@@ -212,7 +212,7 @@ function generateClientEntry(
 import { createSignal, createComponent, batch } from "solid-js";
 import { hydrate } from "solid-js/web";
 import { SharedContext, ErrorsContext, RouterContext, NavigationContext, setActionRouter } from "@void/solid";
-import { createPageRouter, createRouterFacade, idleNavigationState } from "void/pages-client";
+import { createRouterFacade, createVoidRouter, idleNavigationState } from "void/pages-client";
 import { parseCacheFor } from "void/pages-prefetch";
 
 ${generateComponentManifest(scan, pagesDir)}
@@ -226,7 +226,7 @@ const [routeUrl, setRouteUrl] = createSignal(window.location.pathname + window.l
 const [navigation, setNavigation] = createSignal(idleNavigationState());
 
 const { router, initialPageData, initialComponent, initialLayouts, start } =
-  await createPageRouter({
+  await createVoidRouter({
     adapter: {
       createDeferred: () => ({ value: null, loading: true, error: null }),
       resolveDeferred(ref, value) { return { value, loading: false, error: null }; },

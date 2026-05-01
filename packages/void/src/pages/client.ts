@@ -66,7 +66,7 @@ export interface VoidRouter {
   flushAll(): void;
 }
 
-export interface PageRouterAdapter {
+export interface VoidRouterAdapter {
   createDeferred(): unknown;
   resolveDeferred(ref: unknown, value: unknown): unknown;
   rejectDeferred(ref: unknown, error: string): unknown;
@@ -79,8 +79,8 @@ export interface PageRouterAdapter {
   onDeferredUpdate?(props: Record<string, unknown>): void;
 }
 
-export interface PageRouterConfig {
-  adapter: PageRouterAdapter;
+export interface VoidRouterConfig {
+  adapter: VoidRouterAdapter;
   components: Record<string, () => Promise<PageComponentModule>>;
   layoutTree: Record<string, Array<string>>;
   routeMeta: Record<string, { island?: boolean }>;
@@ -197,19 +197,19 @@ export function createSsrRouter(url = '/'): VoidRouter {
       return this.url.searchParams;
     },
     visit() {
-      throw new Error('pages: router.visit() is not available during SSR.');
+      throw new Error('Void Router: visit() is not available during SSR.');
     },
     refresh() {
-      throw new Error('pages: router.refresh() is not available during SSR.');
+      throw new Error('Void Router: refresh() is not available during SSR.');
     },
     prefetch() {
-      throw new Error('pages: router.prefetch() is not available during SSR.');
+      throw new Error('Void Router: prefetch() is not available during SSR.');
     },
     flush() {
-      throw new Error('pages: router.flush() is not available during SSR.');
+      throw new Error('Void Router: flush() is not available during SSR.');
     },
     flushAll() {
-      throw new Error('pages: router.flushAll() is not available during SSR.');
+      throw new Error('Void Router: flushAll() is not available during SSR.');
     },
   };
 
@@ -310,9 +310,9 @@ export async function submitAction(
   }
 }
 
-// --- createPageRouter factory ---
+// --- createVoidRouter factory ---
 
-export async function createPageRouter(config: PageRouterConfig): Promise<{
+export async function createVoidRouter(config: VoidRouterConfig): Promise<{
   router: VoidRouter;
   initialPageData: PageData;
   initialComponent: unknown;

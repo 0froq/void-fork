@@ -48,7 +48,7 @@ async function readActionErrorBody(response: Response): Promise<unknown> {
 
 /**
  * Form composable for island pages. Uses fetch + page reload instead of the
- * Inertia client-side router (which is not available in island mode).
+ * Void Router (which is not available in island mode).
  */
 export function useIslandForm<T extends Record<string, unknown>>(defaults: T): IslandFormReturn<T> {
   const data = reactive({ ...defaults }) as T;

@@ -48,7 +48,7 @@ export interface IslandFormReturn<T extends Record<string, unknown>> {
 
 /**
  * Form hook for island pages. Uses fetch + page reload instead of the
- * Inertia client-side router (which is not available in island mode).
+ * Void Router (which is not available in island mode).
  */
 export function useIslandForm<T extends Record<string, unknown>>(defaults: T): IslandFormReturn<T> {
   const [data, setDataState] = useState<T>(() => ({ ...defaults }));

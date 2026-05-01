@@ -27,7 +27,7 @@ function mixedItems(ext) {
     {
       name: "pages/",
       children: [
-        { name: `index${ext}`, description: "regular page (full hydration, client-side router)" },
+        { name: `index${ext}`, description: "regular page (full hydration, Void Router)" },
         { name: `about${ext}`, description: "regular page" },
         {
           name: "blog/",
@@ -71,7 +71,7 @@ Name your page file with the `.island` suffix:
 
 The `.island` suffix tells Void to:
 
-1. **Server-render the full page** as static HTML (no `data-page` attribute, no client-side router)
+1. **Server-render the full page** as static HTML (no `data-page` attribute, no Void Router)
 2. **Only hydrate** the components you explicitly mark as islands
 3. **Skip the Inertia protocol:** navigation between island pages uses full page loads
 4. **Auto-prerender:** island pages with no `loader` and no dynamic params are automatically [prerendered](/guide/edge/prerendering) at deploy time. Opt out with `export const prerender = false` in the companion `.server.ts` file.
@@ -214,11 +214,11 @@ export const action = defineHandler(async (c) => {
 });
 ```
 
-The key difference is what happens after a successful action. On a regular page, the Inertia protocol redirects and the client-side router fetches fresh props as JSON. On an island page, there is no client-side router, so successful actions cause a full page reload or a redirect through `window.location`.
+The key difference is what happens after a successful action. On a regular page, the Inertia protocol redirects and the Void Router fetches fresh props as JSON. On an island page, there is no Void Router, so successful actions cause a full page reload or a redirect through `window.location`.
 
 ## Forms
 
-Island pages cannot use `useForm` because it depends on the client-side router. Use `useIslandForm` instead. It has the same API, but it uses `fetch()` directly:
+Island pages cannot use `useForm` because it depends on the Void Router. Use `useIslandForm` instead. It has the same API, but it uses `fetch()` directly:
 
 ::: code-group
 
@@ -380,13 +380,13 @@ On validation error (422), `errors` is populated from the response
 
 ## Navigation
 
-Island pages do not have a client-side router. Use regular `<a>` tags for navigation:
+Island pages do not have a Void Router. Use regular `<a>` tags for navigation:
 
 ```tsx
 // ✅ Use regular links in island pages
 <a href="/blog/my-post">Read more</a>
 
-// ❌ Don't use <Link>; there is no client-side router to handle it
+// ❌ Don't use <Link>; there is no Void Router to handle it
 <Link href="/blog/my-post">Read more</Link>
 ```
 
@@ -402,4 +402,4 @@ Island pages and regular pages can coexist in the same app:
 
 <FileTree :items="mixedItems" adapter-tabs default-expanded />
 
-The client-side router handles navigation between regular pages. Navigating to or from an island page triggers a full-page load.
+The Void Router handles navigation between regular pages. Navigating to or from an island page triggers a full-page load.

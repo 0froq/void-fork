@@ -139,14 +139,14 @@ accepts `{ data, method, params }`.
 
 ### `useRouter`
 
-`useRouter()` returns the Pages router. `visit()`, `refresh()`, and `prefetch()`
+`useRouter()` returns the Void Router. `visit()`, `refresh()`, and `prefetch()`
 are awaitable; `prefetch()` resolves when the page data has been cached.
 
 ### `Link`
 
 `Link` is the React Pages navigation component. GET links render an `<a>` and
 client-side navigate when the click is safe to intercept. Mutation links render a
-`<button type="button">` and submit through the Pages router.
+`<button type="button">` and submit through the Void Router.
 
 ```tsx
 import { Link } from '@void/react';

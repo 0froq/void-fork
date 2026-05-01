@@ -417,7 +417,7 @@ export async function renderIslandPage(pageObj, assetTags) {
       provide("__void_shared", reactive(pageObj.shared || {}));
       provide("__void_errors", reactive(pageObj.errors || {}));
       if (__frontmatter) provide("__void_frontmatter", __frontmatter);
-      // No router provided — islands have no client-side router
+      // No router provided — islands have no Void Router
       return () => {
         let vnode = h(PageComponent, pageObj.props);
         for (let i = layoutComponents.length - 1; i >= 0; i--) {

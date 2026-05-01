@@ -379,7 +379,7 @@ export async function renderIslandPage(pageObj, assetTags) {
           value: pageObj.errors || {},
           get children() {
             // Build layout chain inside providers so contexts are available.
-            // No RouterContext — islands have no client-side router.
+            // No RouterContext — islands have no Void Router.
             let element = createComponent(PageComponent, pageObj.props);
             for (let i = layoutComponents.length - 1; i >= 0; i--) {
               const Layout = layoutComponents[i];

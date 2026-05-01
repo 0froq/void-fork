@@ -563,7 +563,7 @@ function defineIslandTests(getBase: () => string) {
         window.__SPA_MARKER = true;
       });
 
-      // Click Blog link (goes through Inertia router.visit)
+      // Click Blog link (goes through Void Router visit)
       await page.click('a[href="/blog"]');
       await page.waitForFunction(() => document.querySelector('h1')?.textContent?.includes('Blog'));
 

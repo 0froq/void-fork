@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createPageRouter, ssrProxy } from '../../src/pages/client.ts';
+import { createVoidRouter, ssrProxy } from '../../src/pages/client.ts';
 import { parseCacheFor } from '../../src/pages/prefetch.ts';
 
 type DeferredTestWindow = Window & {
@@ -59,7 +59,7 @@ function stubClientGlobals() {
   return documentStub;
 }
 
-describe('createPageRouter prefetch', () => {
+describe('createVoidRouter prefetch', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -68,7 +68,9 @@ describe('createPageRouter prefetch', () => {
     expect(ssrProxy.path).toBe('/');
     expect(ssrProxy.url.pathname).toBe('/');
     expect(ssrProxy.query.toString()).toBe('');
-    expect(() => ssrProxy.visit('/users')).toThrow('router.visit() is not available during SSR');
+    expect(() => ssrProxy.visit('/users')).toThrow(
+      'Void Router: visit() is not available during SSR.',
+    );
   });
 
   it('rejects non-GET methods before route side effects', async () => {
@@ -78,7 +80,7 @@ describe('createPageRouter prefetch', () => {
     const layoutLoader = vi.fn(async () => ({ default: {} }));
     const matchRoute = vi.fn(() => 'users');
 
-    const { router } = await createPageRouter({
+    const { router } = await createVoidRouter({
       adapter: {
         applyUpdate: vi.fn(),
         createDeferred: vi.fn(() => ({})),
@@ -104,7 +106,7 @@ describe('createPageRouter prefetch', () => {
     });
 
     expect(() => router.prefetch('/users', { method: 'POST' })).toThrow(
-      'router.prefetch() only supports GET requests.',
+      'Void Router: prefetch() only supports GET requests.',
     );
     expect(matchRoute).not.toHaveBeenCalled();
     expect(usersLoader).not.toHaveBeenCalled();
@@ -124,7 +126,7 @@ describe('createPageRouter prefetch', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const { router } = await createPageRouter({
+    const { router } = await createVoidRouter({
       adapter: {
         applyUpdate: vi.fn(),
         createDeferred: vi.fn(() => ({})),
@@ -192,7 +194,7 @@ describe('createPageRouter prefetch', () => {
       ),
     );
 
-    const { router, start } = await createPageRouter({
+    const { router, start } = await createVoidRouter({
       adapter: {
         applyUpdate,
         createDeferred: vi.fn(() => ({ loading: true, value: null, error: null })),
@@ -236,7 +238,7 @@ describe('createPageRouter prefetch', () => {
     vi.stubGlobal('fetch', vi.fn());
 
     const events: Array<string> = [];
-    const { router } = await createPageRouter({
+    const { router } = await createVoidRouter({
       adapter: {
         applyUpdate,
         createDeferred: vi.fn(() => ({})),
@@ -294,7 +296,7 @@ describe('createPageRouter prefetch', () => {
       }),
     );
 
-    const { router } = await createPageRouter({
+    const { router } = await createVoidRouter({
       adapter: {
         applyUpdate,
         createDeferred: vi.fn(() => ({})),
@@ -360,7 +362,7 @@ describe('createPageRouter prefetch', () => {
     const applyUpdate = vi.fn();
     vi.stubGlobal('fetch', vi.fn());
 
-    const { router } = await createPageRouter({
+    const { router } = await createVoidRouter({
       adapter: {
         applyUpdate,
         createDeferred: vi.fn(() => ({})),
@@ -400,7 +402,7 @@ describe('createPageRouter prefetch', () => {
     const matchRoute = vi.fn(() => 'home');
     vi.stubGlobal('fetch', vi.fn());
 
-    const { router } = await createPageRouter({
+    const { router } = await createVoidRouter({
       adapter: {
         applyUpdate,
         createDeferred: vi.fn(() => ({})),
@@ -440,7 +442,7 @@ describe('createPageRouter prefetch', () => {
     const applyUpdate = vi.fn();
     vi.stubGlobal('fetch', vi.fn());
 
-    const { router } = await createPageRouter({
+    const { router } = await createVoidRouter({
       adapter: {
         applyUpdate,
         createDeferred: vi.fn(() => ({})),
@@ -488,7 +490,7 @@ describe('createPageRouter prefetch', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const { router } = await createPageRouter({
+    const { router } = await createVoidRouter({
       adapter: {
         applyUpdate,
         createDeferred: vi.fn(() => ({})),
@@ -552,7 +554,7 @@ describe('createPageRouter prefetch', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const { router } = await createPageRouter({
+    const { router } = await createVoidRouter({
       adapter: {
         applyUpdate,
         createDeferred: vi.fn(() => ({})),
@@ -616,7 +618,7 @@ describe('createPageRouter prefetch', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const { router } = await createPageRouter({
+    const { router } = await createVoidRouter({
       adapter: {
         applyUpdate,
         createDeferred: vi.fn(() => ({})),
@@ -698,7 +700,7 @@ describe('createPageRouter prefetch', () => {
       ),
     );
 
-    const { router, start } = await createPageRouter({
+    const { router, start } = await createVoidRouter({
       adapter: {
         applyUpdate,
         createDeferred: vi.fn(() => initialRef),
@@ -785,7 +787,7 @@ describe('createPageRouter prefetch', () => {
       }),
     );
 
-    const { router, start } = await createPageRouter({
+    const { router, start } = await createVoidRouter({
       adapter: {
         applyUpdate: vi.fn(),
         createDeferred: vi.fn(() => ({ loading: true, value: null, error: null })),
@@ -864,7 +866,7 @@ describe('createPageRouter prefetch', () => {
       }),
     );
 
-    const { router } = await createPageRouter({
+    const { router } = await createVoidRouter({
       adapter: {
         applyUpdate: vi.fn(),
         createDeferred: vi.fn(() => ({ loading: true, value: null, error: null })),

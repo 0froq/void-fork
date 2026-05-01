@@ -194,7 +194,7 @@ import { hydrate } from "svelte";
 import { writable } from "svelte/store";
 import App from "@void/svelte/App.svelte";
 import { setActionRouter } from "@void/svelte";
-import { createPageRouter, createRouterFacade, idleNavigationState } from "void/pages-client";
+import { createRouterFacade, createVoidRouter, idleNavigationState } from "void/pages-client";
 import { parseCacheFor } from "void/pages-prefetch";
 
 ${generateComponentManifest(scan, pagesDir)}
@@ -209,7 +209,7 @@ const routeStore = writable(routeUrl);
 const navigationStore = writable(idleNavigationState());
 
 const { router, initialPageData, initialComponent, initialLayouts, start } =
-  await createPageRouter({
+  await createVoidRouter({
     adapter: {
       createDeferred: () => ({ value: null, loading: true, error: null }),
       resolveDeferred(ref, value) { return { value, loading: false, error: null }; },

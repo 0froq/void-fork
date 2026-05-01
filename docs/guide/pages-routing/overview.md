@@ -197,7 +197,7 @@ router.visit('/logout', { method: 'POST' }); // non-GET navigation
 
 ## Scroll Restoration
 
-The pages router automatically saves and restores scroll position during client-side navigation:
+The Void Router automatically saves and restores scroll position during client-side navigation:
 
 - **Back/forward navigation** restores the exact scroll position you were at before navigating away.
 - **Forward navigation** scrolls to the top of the page.

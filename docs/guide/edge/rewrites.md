@@ -312,14 +312,14 @@ Static rewrites are evaluated at the edge (zero-cost). Middleware rewrites run i
 
 ## Caveat: client navigation skips rewrites
 
-Rewrites run on the server. A full HTTP request to `/docs` resolves through `routing.rewrites` and serves `/en/docs` content. But a client-side `<Link to="/docs">` navigation in Pages mode fetches loader data directly for `/docs` — the client router doesn't know about the server's rewrite table, so there's no lookup against `/en/docs` on that path.
+Rewrites run on the server. A full HTTP request to `/docs` resolves through `routing.rewrites` and serves `/en/docs` content. But a client-side `<Link to="/docs">` navigation in Pages mode fetches loader data directly for `/docs` — the Void Router doesn't know about the server's rewrite table, so there's no lookup against `/en/docs` on that path.
 
 In practice this only matters when the source and destination have **different loader behavior**. If `/docs` has no route handler but `/en/docs` does, clicking a `<Link to="/docs">` will fail where a fresh page load would succeed. The first render (server) and a subsequent client nav (CSR) to the same URL can diverge.
 
 Two mitigations:
 
 - Use a plain `<a href="/docs">` when you need the navigation to round-trip through the server (and therefore through rewrites).
-- If the URL change is meant to be authoritative, use a [redirect](./redirects) instead — the client router follows redirects via HTTP, so behavior is consistent.
+- If the URL change is meant to be authoritative, use a [redirect](./redirects) instead — the Void Router follows redirects via HTTP, so behavior is consistent.
 
 ## ISR cache keys with rewrites
 

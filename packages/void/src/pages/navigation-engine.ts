@@ -41,7 +41,7 @@ export interface PrefetchOptions {
   cacheFor?: CacheForInput;
 }
 
-export interface PageRouterAdapter {
+export interface VoidRouterAdapter {
   createDeferred(): unknown;
   resolveDeferred(ref: unknown, value: unknown): unknown;
   rejectDeferred(ref: unknown, error: string): unknown;
@@ -50,7 +50,7 @@ export interface PageRouterAdapter {
 }
 
 export interface PageNavigationEngineConfig {
-  adapter: PageRouterAdapter;
+  adapter: VoidRouterAdapter;
   components: Record<string, () => Promise<PageComponentModule>>;
   layoutTree: Record<string, Array<string>>;
   routeMeta: Record<string, { island?: boolean }>;
@@ -1034,7 +1034,7 @@ export async function createPageNavigationEngine(
     prefetch(url, options = {}) {
       const method = (options.method || 'GET').toUpperCase();
       if (method !== 'GET') {
-        throw new Error('pages: router.prefetch() only supports GET requests.');
+        throw new Error('Void Router: prefetch() only supports GET requests.');
       }
 
       const id = matchRoute(url);

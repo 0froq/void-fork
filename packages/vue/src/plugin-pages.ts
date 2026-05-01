@@ -286,7 +286,7 @@ function generateClientEntry(
 import { createSSRApp, h, reactive, provide, shallowRef, nextTick, ref } from "vue";
 import { createDeferred, resolveDeferred, rejectDeferred } from "@void/vue/deferred";
 import { setActionRouter } from "@void/vue";
-import { createPageRouter, createRouterFacade, idleNavigationState } from "void/pages-client";
+import { createRouterFacade, createVoidRouter, idleNavigationState } from "void/pages-client";
 import { parseCacheFor } from "void/pages-prefetch";
 
 ${generateComponentManifest(scan, pagesDir)}
@@ -306,7 +306,7 @@ function patchProps(comp, props) {
 }
 
 const { router, initialPageData, initialComponent, initialLayouts, start } =
-  await createPageRouter({
+  await createVoidRouter({
     adapter: {
       createDeferred: () => createDeferred(),
       resolveDeferred(ref, value) { resolveDeferred(ref, value); return ref; },

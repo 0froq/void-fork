@@ -359,7 +359,7 @@ export async function renderIslandPage(pageObj, assetTags) {
     element = React.createElement(layoutComponents[i], null, element);
   }
 
-  // No RouterContext — islands have no client-side router
+  // No RouterContext — islands have no Void Router
   element = React.createElement(
     SharedContext.Provider,
     { value: pageObj.shared || {} },
