@@ -1,7 +1,10 @@
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { defineHandler } from 'void';
+import { getPublicApiUrl } from '../../lib/api.ts';
 
 export const loader = defineHandler(async (c) => {
+  const homeUrl = new URL('/', c.req.url).toString();
+
   // Production/staging: exchange short-lived auth code for JWT via API
   const code = c.req.query('code');
   if (code) {
@@ -16,7 +19,7 @@ export const loader = defineHandler(async (c) => {
       return c.redirect('/login');
     }
     deleteCookie(c, 'void_auth_nonce', { path: '/auth' });
-    const apiUrl = (c.env as Record<string, string>).API_URL ?? 'https://api.void.cloud';
+    const apiUrl = getPublicApiUrl(c);
     const resp = await fetch(`${apiUrl}/auth/exchange`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -26,14 +29,15 @@ export const loader = defineHandler(async (c) => {
       return c.redirect('/login');
     }
     const { token } = (await resp.json()) as { token: string };
+    const host = c.req.header('host') ?? '';
     setCookie(c, 'void_token', token, {
       httpOnly: true,
-      secure: true,
+      secure: !(host.startsWith('localhost') || host.startsWith('127.0.0.1')),
       sameSite: 'Lax',
       path: '/',
       maxAge: 30 * 24 * 60 * 60,
     });
-    return c.redirect('/');
+    return c.redirect(homeUrl);
   }
 
   // Local dev: token arrives as query param (localhost-only, not available in production)
@@ -52,7 +56,7 @@ export const loader = defineHandler(async (c) => {
       path: '/',
       maxAge: 30 * 24 * 60 * 60,
     });
-    return c.redirect('/');
+    return c.redirect(homeUrl);
   }
 
   return c.redirect('/login');

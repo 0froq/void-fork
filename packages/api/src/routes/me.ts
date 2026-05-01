@@ -13,6 +13,7 @@ const app = new Hono<ApiEnv>()
       email: user.email,
       provider: user.provider,
       plan: user.plan,
+      role: user.role,
       billing_cycle_start: user.billing_cycle_start,
       limits,
     });

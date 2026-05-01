@@ -1,42 +1,33 @@
-import { getProjectsByUserId, getDomainsByProjectId } from '@voidcloud/api/db';
-import type { Project } from '@voidcloud/api/types';
 import { defineHandler } from 'void';
 import { createClient, type API } from '../lib/api.ts';
 
-export type Props = {
-  projects: Array<Project & { custom_domain: string | null }>;
-  usage: API<'usage'>;
-  siteDomain: string;
-};
+export type Props =
+  | {
+      canAccessDashboard: false;
+      user: API<'me'>;
+    }
+  | {
+      canAccessDashboard: true;
+      user: API<'me'>;
+      projects: API<'projects'>;
+      siteDomain: string;
+    };
 
 export const loader = defineHandler<Props>(async (c) => {
-  const db = c.get('db');
-  const userId = c.get('userId');
+  const user = c.get('dashboardUser');
+  if (!c.get('canAccessDashboard')) {
+    return { canAccessDashboard: false, user };
+  }
+
   const client = createClient(c);
-
-  // Start usage request immediately to avoid serializing external API latency after D1 queries.
-  const usagePromise = client.usage.$get();
-
-  // Direct D1
-  const projectsWithDomainsPromise = getProjectsByUserId(db, userId).then((projects) =>
-    Promise.all(
-      projects.map(async (p) => {
-        const domains = await getDomainsByProjectId(db, p.id);
-        const domain = domains.find((d) => d.status === 'active') ?? domains[0];
-        return { ...p, custom_domain: domain?.hostname ?? null };
-      }),
-    ),
-  );
-
-  // Still via API (Analytics Engine)
-  const [projectsWithDomains, usageRes] = await Promise.all([
-    projectsWithDomainsPromise,
-    usagePromise,
-  ]);
-  const usage = usageRes.ok
-    ? await usageRes.json()
-    : { requests: 0, bandwidthBytes: 0, aiNeurons: 0, projects: [] };
-
+  const projectsRes = await client.projects.$get();
+  const projects = projectsRes.ok ? await projectsRes.json() : [];
   const siteDomain = (c.env as Record<string, string>).SITE_DOMAIN ?? 'void.app';
-  return { projects: projectsWithDomains, usage, siteDomain };
+
+  return {
+    canAccessDashboard: true,
+    user,
+    projects,
+    siteDomain,
+  };
 });

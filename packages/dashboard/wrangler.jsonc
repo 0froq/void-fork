@@ -1,18 +1,11 @@
 {
   "name": "void-dashboard",
   "compatibility_date": "2026-02-12",
-  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "dist/client",
   },
   "routes": [{ "pattern": "dash.void.cloud", "custom_domain": true }],
   "services": [{ "binding": "API", "service": "void-api" }],
-  "hyperdrive": [
-    {
-      "binding": "HYPERDRIVE",
-      "id": "7bd6b2a606a347819ad3421867840736",
-    },
-  ],
   "env": {
     "staging": {
       "name": "void-dashboard-staging",
@@ -22,12 +15,6 @@
         "API_URL": "https://api.staging.void.cloud",
         "SITE_DOMAIN": "staging.void.app",
       },
-      "hyperdrive": [
-        {
-          "binding": "HYPERDRIVE",
-          "id": "7cde35825e6249d0b60b9de69feb29dd",
-        },
-      ],
     },
   },
 }

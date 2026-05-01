@@ -9,24 +9,26 @@
     "deploy:staging": "CLOUDFLARE_ENV=staging pnpm build && wrangler deploy",
     "dev": "vite",
     "preview": "vite preview",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "drizzle-orm": "^0.45.2",
+    "@voidcloud/ui": "workspace:*",
     "hono": "catalog:",
-    "vue": "^3.5.33"
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
     "@tailwindcss/vite": "^4.2.4",
-    "@void/vue": "link:../../framework/packages/vue",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@typescript/native-preview": "catalog:",
+    "@void/react": "link:../../framework/packages/react",
     "@voidcloud/api": "workspace:*",
-    "@voidcloud/ui": "workspace:*",
     "tailwindcss": "^4.2.4",
     "typescript": "~6.0.3",
     "vite": "8.0.10",
     "void": "link:../../framework/packages/void",
-    "vue-tsc": "^3.2.7",
     "wrangler": "catalog:"
   }
 }

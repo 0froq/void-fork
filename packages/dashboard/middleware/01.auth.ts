@@ -1,62 +1,62 @@
-import { authenticateDashboardToken } from '@voidcloud/api/auth/dashboard';
-import { createDb, getUser, type Db } from '@voidcloud/api/db';
-import { isDevBypass } from '@voidcloud/api/env';
-import { isAdminSuspended } from '@voidcloud/api/suspension';
 import { deleteCookie, getCookie } from 'hono/cookie';
 import { defineMiddleware } from 'void';
+import { getCurrentUser, type API } from '../lib/api.ts';
+
+export type DashboardUser = API<'me'>;
+
+export type DashboardShared = {
+  user: DashboardUser | null;
+  canAccessDashboard: boolean;
+};
 
 declare module 'void' {
   interface CloudContextVariables {
     token: string;
-    db: Db;
     userId: string;
-    shared: { user: { login: string } | null };
+    dashboardUser: DashboardUser;
+    canAccessDashboard: boolean;
+    shared: DashboardShared;
   }
+}
+
+const PUBLIC_PATHS = new Set(['/login', '/logout']);
+
+function isLocalHost(host: string | undefined): boolean {
+  host ??= '';
+  return host.startsWith('localhost') || host.startsWith('127.0.0.1');
 }
 
 export default defineMiddleware(async (c, next) => {
   const path = c.req.path;
 
-  // Init DB from Hyperdrive binding (available on all routes)
-  const connectionString = (c.env as unknown as { HYPERDRIVE: Hyperdrive }).HYPERDRIVE
-    .connectionString;
-  c.set('db', createDb(connectionString));
-
-  // Dev bypass — skip auth entirely, platform also bypasses when DEV_AUTH_BYPASS is set
-  if (isDevBypass(c.env as Record<string, string>)) {
-    c.set('token', 'dev-bypass');
-    c.set('userId', 'user_seed1');
-    c.set('shared', { user: { login: 'dev' } });
-    return next();
-  }
-
-  // Public routes — no auth required
-  if (path === '/login' || path.startsWith('/auth/')) {
-    c.set('shared', { user: null });
+  if (PUBLIC_PATHS.has(path) || path.startsWith('/auth/')) {
+    c.set('shared', { user: null, canAccessDashboard: false });
     return next();
   }
 
   const token = getCookie(c, 'void_token');
-  const session = await authenticateDashboardToken(
-    token,
-    (c.env as Record<string, string | undefined>).JWT_SECRET,
-  );
-  if (!session) {
-    deleteCookie(c, 'void_token', { path: '/' });
-    c.set('shared', { user: null });
+  if (!token) {
+    c.set('shared', { user: null, canAccessDashboard: false });
     return c.redirect('/login');
   }
 
-  const user = await getUser(c.get('db'), session.user.id);
-  if (!user || isAdminSuspended(user.suspended_reason)) {
+  c.set('token', token);
+  const user = await getCurrentUser(c);
+  if (!user) {
     deleteCookie(c, 'void_token', { path: '/' });
-    c.set('shared', { user: null });
+    c.set('shared', { user: null, canAccessDashboard: false });
     return c.redirect('/login');
   }
 
-  c.set('token', session.token);
+  const canAccessDashboard = user.role === 'admin' || isLocalHost(c.req.header('host'));
   c.set('userId', user.id);
-  c.set('shared', { user: { login: user.login } });
+  c.set('dashboardUser', user);
+  c.set('canAccessDashboard', canAccessDashboard);
+  c.set('shared', { user, canAccessDashboard });
+
+  if (!canAccessDashboard && path !== '/') {
+    return c.redirect('/');
+  }
 
   return next();
 });

@@ -1,22 +1,16 @@
-import {
-  getProject,
-  getProjectDeployments,
-  getDomainsByProjectId,
-  getProjectResources,
-} from '@voidcloud/api/db';
-import type { Project, Deployment, Domain, Resource } from '@voidcloud/api/types';
+import type { InferResponseType } from 'hono/client';
 import { defineHandler } from 'void';
-import { createClient, api, type API, type Client } from '../../lib/api.ts';
+import { api, createClient, type API, type Client } from '../../lib/api.ts';
 
-type P = Client['projects'][':id'];
+type ProjectRoutes = Client['projects'][':id'];
 
 export type Props = {
-  project: Project & { custom_domain: string | null };
-  deployments: Array<Deployment>;
-  usage: API<'usage', P>;
-  domains: Array<Domain>;
-  secrets: API<'secrets', P>;
-  resources: Array<Resource>;
+  project: InferResponseType<ProjectRoutes['$get'], 200>;
+  deployments: InferResponseType<ProjectRoutes['deployments']['$get'], 200>;
+  domains: InferResponseType<ProjectRoutes['domains']['$get'], 200>;
+  resources: InferResponseType<ProjectRoutes['resources']['$get'], 200>;
+  usage: API<'usage', ProjectRoutes>;
+  secrets: API<'secrets', ProjectRoutes>;
   siteDomain: string;
 };
 
@@ -25,75 +19,76 @@ export const loader = defineHandler<Props>(async (c) => {
   if (!id) {
     return c.notFound();
   }
-  const db = c.get('db');
 
-  // Direct D1
-  const project = await getProject(db, id);
-  if (!project || project.user_id !== c.get('userId')) {
+  const client = createClient(c);
+  const projectRes = await client.projects[':id'].$get({ param: { id } });
+  if (!projectRes.ok) {
     return c.notFound();
   }
 
-  const [deployments, domains, resources] = await Promise.all([
-    getProjectDeployments(db, project.id),
-    getDomainsByProjectId(db, project.id),
-    getProjectResources(db, project.id),
-  ]);
+  const [project, deploymentsRes, domainsRes, resourcesRes, usageRes, secretsRes] =
+    await Promise.all([
+      projectRes.json(),
+      client.projects[':id'].deployments.$get({ param: { id } }),
+      client.projects[':id'].domains.$get({ param: { id } }),
+      client.projects[':id'].resources.$get({ param: { id } }),
+      client.projects[':id'].usage.$get({ param: { id } }),
+      client.projects[':id'].secrets.$get({ param: { id } }),
+    ]);
 
-  // Still via API (Analytics Engine + CF API)
-  const client = createClient(c);
-  const [usageRes, secretsRes] = await Promise.all([
-    client.projects[':id'].usage.$get({ param: { id } }),
-    client.projects[':id'].secrets.$get({ param: { id } }),
-  ]);
-  const usage = usageRes.ok
-    ? ((await usageRes.json()) as Props['usage'])
-    : {
-        projectId: id,
-        billingPeriodStart: new Date().toISOString(),
-        requests: 0,
-        bandwidthBytes: 0,
-        aiNeurons: 0,
-      };
-  const secrets = secretsRes.ok ? ((await secretsRes.json()) as Props['secrets']) : [];
-
-  const siteDomain = (c.env as Record<string, string>).SITE_DOMAIN ?? 'void.app';
-  const activeDomain = domains.find((d) => d.status === 'active') ?? domains[0];
   return {
-    project: { ...project, custom_domain: activeDomain?.hostname ?? null },
-    deployments,
-    usage,
-    domains,
-    secrets,
-    resources,
-    siteDomain,
+    project,
+    deployments: deploymentsRes.ok
+      ? await deploymentsRes.json()
+      : { deployments: [], activeDeploymentId: project.active_deployment_id },
+    domains: domainsRes.ok ? await domainsRes.json() : [],
+    resources: resourcesRes.ok ? await resourcesRes.json() : [],
+    usage: usageRes.ok
+      ? ((await usageRes.json()) as Props['usage'])
+      : {
+          projectId: id,
+          billingPeriodStart: new Date().toISOString(),
+          requests: 0,
+          bandwidthBytes: 0,
+          aiNeurons: 0,
+        },
+    secrets: secretsRes.ok ? ((await secretsRes.json()) as Props['secrets']) : [],
+    siteDomain: (c.env as Record<string, string>).SITE_DOMAIN ?? 'void.app',
   };
 });
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
 
 export const action = defineHandler(async (c) => {
   const id = c.req.param('id');
   if (!id) {
     return c.notFound();
   }
-  const form = await c.req.json<Record<string, string>>();
-  const intent = form._intent;
+
+  const form = await c.req.parseBody();
+  const intent = stringValue(form._intent);
 
   if (intent === 'add-domain') {
     await api(c, `/projects/${id}/domains`, {
       method: 'POST',
-      body: JSON.stringify({ hostname: form.hostname }),
+      body: JSON.stringify({ hostname: stringValue(form.hostname).trim() }),
     });
   } else if (intent === 'remove-domain') {
-    await api(c, `/projects/${id}/domains/${form.domainId}`, {
+    await api(c, `/projects/${id}/domains/${stringValue(form.domainId)}`, {
       method: 'DELETE',
     });
   } else if (intent === 'add-secret') {
-    await api(c, `/projects/${id}/secrets/${form.name}`, {
+    await api(c, `/projects/${id}/secrets/${stringValue(form.name).trim()}`, {
       method: 'PUT',
-      body: JSON.stringify({ value: form.value }),
+      body: JSON.stringify({ value: stringValue(form.value) }),
     });
   } else if (intent === 'remove-secret') {
-    await api(c, `/projects/${id}/secrets/${form.name}`, {
+    await api(c, `/projects/${id}/secrets/${stringValue(form.name)}`, {
       method: 'DELETE',
     });
   }
+
+  return c.redirect(`/projects/${id}`);
 });

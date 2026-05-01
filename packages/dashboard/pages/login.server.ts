@@ -1,18 +1,31 @@
+import apkProtocolMedium from '@voidcloud/ui/fonts/APK-Protocol-Medium.woff2';
+import interRomanLatin from '@voidcloud/ui/fonts/inter-roman-latin.woff2';
+import khTekaMonoRegular from '@voidcloud/ui/fonts/KHTekaMono-Regular.woff2';
 import { setCookie } from 'hono/cookie';
-import { defineHandler } from 'void';
+import { defineHandler, defineHead } from 'void';
+import { getPublicApiUrl } from '../lib/api.ts';
 
 export interface Props {
   githubUrl: string;
   googleUrl: string;
 }
 
+export const head = defineHead<Props>(() => ({
+  link: [
+    { rel: 'preload', href: apkProtocolMedium, as: 'font', type: 'font/woff2', crossorigin: '' },
+    { rel: 'preload', href: interRomanLatin, as: 'font', type: 'font/woff2', crossorigin: '' },
+    { rel: 'preload', href: khTekaMonoRegular, as: 'font', type: 'font/woff2', crossorigin: '' },
+  ],
+}));
+
 export const loader = defineHandler<Props>((c) => {
-  const platformUrl = (c.env as Record<string, string>).API_URL ?? 'https://api.void.cloud';
+  const platformUrl = getPublicApiUrl(c);
 
   // Derive origin from Host header — c.req.url can be localhost in prod
   // due to Workers Assets internal dispatch
   const host = c.req.header('host')!;
-  const protocol = host.startsWith('localhost') ? 'http' : 'https';
+  const isLocal = host.startsWith('localhost') || host.startsWith('127.0.0.1');
+  const protocol = isLocal ? 'http' : 'https';
   const callbackUrl = `${protocol}://${host}/auth/callback`;
 
   // Bind the OAuth callback to this browser session to prevent login CSRF.
@@ -22,7 +35,7 @@ export const loader = defineHandler<Props>((c) => {
   const nonce = crypto.randomUUID();
   setCookie(c, 'void_auth_nonce', nonce, {
     httpOnly: true,
-    secure: protocol === 'https',
+    secure: !isLocal,
     sameSite: 'Lax',
     path: '/auth',
     maxAge: 300,

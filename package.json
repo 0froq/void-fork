@@ -47,6 +47,7 @@
     ],
     "overrides": {
       "void": "link:framework/packages/void",
+      "@void/react": "link:framework/packages/react",
       "@void/vue": "link:framework/packages/vue"
     }
   }

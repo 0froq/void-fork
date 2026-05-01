@@ -1,6 +1,6 @@
-@import 'tailwindcss';
-@import '@voidcloud/ui/theme.css';
-@import '@voidcloud/ui/base.css';
+@import '@voidcloud/ui/styles.css';
+
+@source '../ui/src/**/*.{ts,tsx}';
 
 /* Navigation progress bar */
 .nav-progress {
@@ -10,7 +10,7 @@
   height: 2px;
   width: 100%;
   z-index: 50;
-  background: #86efac;
+  background: var(--color-brand);
   transform-origin: left;
   pointer-events: none;
   opacity: 0;
