@@ -4,6 +4,119 @@ import type { Props } from './index.server.ts';
 
 type Project = Extract<Props, { canAccessDashboard: true }>['projects'][number];
 
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat('en-US').format(value);
+}
+
+function formatPercent(value: number): string {
+  return `${Math.round(value * 1000) / 10}%`;
+}
+
+function formatRelativeTime(value: string | null | undefined, empty = 'No deploy'): string {
+  if (!value) {
+    return empty;
+  }
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) {
+    return empty;
+  }
+
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
+  if (diffSeconds < 60) {
+    return `${diffSeconds}s ago`;
+  }
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`;
+  }
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  }
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 30) {
+    return `${diffDays}d ago`;
+  }
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(
+    new Date(value),
+  );
+}
+
+function displayDeployStatus(status: string | undefined): string {
+  if (
+    status === 'pending' ||
+    status === 'uploading' ||
+    status === 'migrating' ||
+    status === 'prerendering'
+  ) {
+    return 'building';
+  }
+  return status ?? 'no deploy';
+}
+
+function deployStatusClass(status: string | undefined): string {
+  if (status === 'live') {
+    return 'border-zest/30 bg-zest/10 text-zest';
+  }
+  if (status === 'failed' || status === 'canceled') {
+    return 'border-fire/30 bg-fire/10 text-fire';
+  }
+  if (
+    status === 'pending' ||
+    status === 'uploading' ||
+    status === 'migrating' ||
+    status === 'prerendering' ||
+    status === 'canceling'
+  ) {
+    return 'border-electric/30 bg-electric/10 text-electric';
+  }
+  return 'border-stroke bg-white text-grey dark:border-nickel dark:bg-primary';
+}
+
+function deployTime(project: Project): string | null {
+  const deployment = project.latest_deployment;
+  if (!deployment) {
+    return null;
+  }
+  return deployment.status === 'live'
+    ? (deployment.deployed_at ?? deployment.created_at)
+    : deployment.created_at;
+}
+
+function Sparkline({ values }: { values: Array<number> }) {
+  const width = 118;
+  const height = 30;
+  const gap = 2;
+  const barWidth = 4;
+  const max = Math.max(1, ...values);
+
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-[30px] w-[118px] shrink-0 text-electric"
+      fill="currentColor"
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      width={width}
+    >
+      {values.map((value, index) => {
+        const barHeight = Math.max(2, Math.round((value / max) * (height - 4)));
+        return (
+          <rect
+            height={barHeight}
+            key={index}
+            opacity={value === 0 ? 0.22 : 0.8}
+            rx="1"
+            width={barWidth}
+            x={index * (barWidth + gap)}
+            y={height - barHeight}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
 function ExternalLinkIcon() {
   return (
     <svg
@@ -47,41 +160,81 @@ function ChevronRightIcon() {
 function ProjectListItem({ project, siteDomain }: { project: Project; siteDomain: string }) {
   const domain = project.custom_domain ?? `${project.slug}.${siteDomain}`;
   const domainHref = `https://${domain}`;
+  const deployment = project.latest_deployment;
+  const commit = deployment?.commit ? deployment.commit.slice(0, 7) : null;
+  const deployMeta = [commit, deployment?.source].filter(Boolean).join(' · ');
+  const has5xx = project.health.responses5xx15m > 0;
+  const has4xx = project.health.responses4xx15m > 0;
+  const lastSeen = project.traffic.lastSeenAt
+    ? `last ${formatRelativeTime(project.traffic.lastSeenAt)}`
+    : 'No traffic';
 
   return (
-    <div className="group">
-      <div className="squircle border p-4 transition-[background] group-hover:bg-gray-100/40 dark:group-hover:bg-gray-900/40">
-        <div className="flex cursor-pointer items-center justify-between gap-4">
+    <div className="squircle relative border p-4 transition-colors hover:bg-beige/50 dark:hover:bg-nickel/30">
+      <Link
+        aria-label={`Open ${project.slug}`}
+        className="squircle absolute inset-0 z-10 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-electric focus-visible:ring-offset-2"
+        href={`/projects/${project.id}`}
+      />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(15rem,0.95fr)_minmax(20rem,1.15fr)_1rem] lg:items-center">
+        <div className="flex min-w-0 flex-col gap-2">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <Link
-              className="underline decoration-1 underline-offset-2 hover:no-underline"
-              href={`/projects/${project.id}`}
-            >
-              <code className="squircle bg-gray-100 p-1 dark:bg-gray-800">{project.slug}</code>
-            </Link>
+            <code className="squircle bg-beige p-1 dark:bg-slate">{project.slug}</code>
             <Badge
               className="border-stroke bg-white text-grey uppercase dark:border-nickel dark:bg-primary dark:text-white"
               variant="outline"
             >
               {project.type}
             </Badge>
-            <a
-              className="flex min-w-0 items-center gap-1 text-sm text-grey underline decoration-1 underline-offset-2 hover:text-primary hover:no-underline dark:hover:text-white"
-              href={domainHref}
-              rel="noopener noreferrer"
-              target="_blank"
-            >
-              <span className="truncate">{domain}</span>
-              <ExternalLinkIcon />
-            </a>
           </div>
-          <Link
-            aria-label={`Open ${project.slug}`}
-            className="text-primary transition-opacity hover:opacity-60 dark:text-white"
-            href={`/projects/${project.id}`}
+          <a
+            className="relative z-20 flex min-w-0 items-center gap-1 text-sm text-grey underline decoration-1 underline-offset-2 hover:text-primary hover:no-underline dark:hover:text-white"
+            href={domainHref}
+            rel="noopener noreferrer"
+            target="_blank"
           >
-            <ChevronRightIcon />
-          </Link>
+            <span className="truncate">{domain}</span>
+            <ExternalLinkIcon />
+          </a>
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`squircle border px-2 py-1 text-xs uppercase ${deployStatusClass(deployment?.status)}`}
+            >
+              {displayDeployStatus(deployment?.status)}
+            </span>
+            <span className="text-grey">{formatRelativeTime(deployTime(project))}</span>
+          </div>
+          <div className="min-w-0 truncate text-xs text-grey">
+            {deployMeta || 'No commit/source'}
+          </div>
+        </div>
+
+        <div className="grid min-w-0 gap-3 sm:grid-cols-[118px_minmax(0,1fr)] sm:items-center">
+          <Sparkline values={project.traffic.sparkline5m} />
+          <div className="grid gap-1 text-sm">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="text-primary dark:text-white">
+                {formatNumber(project.traffic.requests5m)} req / 5m
+              </span>
+              <span className="text-xs text-grey">{lastSeen}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              <span className={has5xx ? 'text-fire' : 'text-grey'}>
+                {formatNumber(project.health.responses5xx15m)} 5xx
+                {has5xx ? ` · ${formatPercent(project.health.errorRate5xx15m)}` : ''}
+              </span>
+              <span className={has4xx ? 'text-grey' : 'text-grey/70'}>
+                {formatNumber(project.health.responses4xx15m)} 4xx
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div aria-hidden="true" className="text-primary dark:text-white">
+          <ChevronRightIcon />
         </div>
       </div>
     </div>

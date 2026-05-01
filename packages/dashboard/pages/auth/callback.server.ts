@@ -1,6 +1,6 @@
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { defineHandler } from 'void';
-import { getPublicApiUrl } from '../../lib/api.ts';
+import { fetchApi } from '../../lib/api.ts';
 
 export const loader = defineHandler(async (c) => {
   const homeUrl = new URL('/', c.req.url).toString();
@@ -19,10 +19,8 @@ export const loader = defineHandler(async (c) => {
       return c.redirect('/login');
     }
     deleteCookie(c, 'void_auth_nonce', { path: '/auth' });
-    const apiUrl = getPublicApiUrl(c);
-    const resp = await fetch(`${apiUrl}/auth/exchange`, {
+    const resp = await fetchApi(c, '/auth/exchange', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code }),
     });
     if (!resp.ok) {

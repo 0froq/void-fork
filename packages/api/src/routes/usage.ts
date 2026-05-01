@@ -122,6 +122,25 @@ interface TopProjectTrafficEntry {
   lastSeen: string;
 }
 
+interface ProjectRequestOverviewRow {
+  blob1: string;
+  bucket: number;
+  last_seen: string;
+  requests: number;
+  responses_4xx: number;
+  responses_5xx: number;
+}
+
+interface ProjectRequestOverview {
+  requests5m: number;
+  requests15m: number;
+  lastSeenAt: string | null;
+  sparkline5m: Array<number>;
+  responses4xx15m: number;
+  responses5xx15m: number;
+  errorRate5xx15m: number;
+}
+
 function getRequestsDataset(env: { REQUESTS_DATASET?: string; PLATFORM_ENV?: string }): string {
   if (env.REQUESTS_DATASET) {
     return env.REQUESTS_DATASET;
@@ -276,6 +295,134 @@ async function queryTopProjectTraffic(
   }));
 }
 
+function formatAnalyticsDate(date: Date): string {
+  return date.toISOString().replace('T', ' ').slice(0, 19);
+}
+
+function normalizeAnalyticsDate(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  if (value.includes('T')) {
+    return value;
+  }
+  return `${value.replace(' ', 'T')}Z`;
+}
+
+function emptyRequestOverview(): ProjectRequestOverview {
+  const bucketCount = 20;
+  return {
+    requests5m: 0,
+    requests15m: 0,
+    lastSeenAt: null,
+    sparkline5m: Array.from({ length: bucketCount }, () => 0),
+    responses4xx15m: 0,
+    responses5xx15m: 0,
+    errorRate5xx15m: 0,
+  };
+}
+
+async function queryProjectRequestOverview(
+  accountId: string,
+  apiToken: string,
+  requestsDataset: string,
+  projectIds: Array<string>,
+  now = new Date(),
+): Promise<Map<string, ProjectRequestOverview>> {
+  const bucketSizeSeconds = 15;
+  const bucketCount = 20;
+  const healthWindowMs = 15 * 60 * 1000;
+  const overview = new Map<string, ProjectRequestOverview>();
+  for (const projectId of projectIds) {
+    overview.set(projectId, emptyRequestOverview());
+  }
+  if (projectIds.length === 0) {
+    return overview;
+  }
+
+  const since = new Date(now.getTime() - healthWindowMs);
+  const sinceStr = formatAnalyticsDate(since);
+  const inList = projectIds.map((id) => `'${id}'`).join(', ');
+  const query = `
+    SELECT
+      blob1,
+      intDiv(toUnixTimestamp(timestamp), ${bucketSizeSeconds}) * ${bucketSizeSeconds} as bucket,
+      MAX(timestamp) as last_seen,
+      SUM(_sample_interval * double1) as requests,
+      SUM(if(blob4 LIKE '4%', _sample_interval * double1, 0)) as responses_4xx,
+      SUM(if(blob4 LIKE '5%', _sample_interval * double1, 0)) as responses_5xx
+    FROM ${requestsDataset}
+    WHERE blob1 IN (${inList})
+      AND timestamp >= toDateTime('${sinceStr}')
+    GROUP BY blob1, bucket
+    ORDER BY bucket ASC
+  `;
+
+  let json: { data: Array<ProjectRequestOverviewRow> };
+  try {
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          'Content-Type': 'text/plain',
+        },
+        body: query,
+      },
+    );
+
+    if (!response.ok) {
+      return overview;
+    }
+
+    json = (await response.json()) as { data: Array<ProjectRequestOverviewRow> };
+  } catch {
+    return overview;
+  }
+
+  const firstSparkBucket =
+    Math.floor(now.getTime() / 1000 / bucketSizeSeconds) * bucketSizeSeconds -
+    (bucketCount - 1) * bucketSizeSeconds;
+
+  for (const row of json.data ?? []) {
+    const entry = overview.get(row.blob1);
+    if (!entry) {
+      continue;
+    }
+
+    const requests = Math.round(row.requests ?? 0);
+    const responses4xx = Math.round(row.responses_4xx ?? 0);
+    const responses5xx = Math.round(row.responses_5xx ?? 0);
+    entry.requests15m += requests;
+    entry.responses4xx15m += responses4xx;
+    entry.responses5xx15m += responses5xx;
+
+    const normalizedLastSeen = normalizeAnalyticsDate(row.last_seen);
+    if (
+      normalizedLastSeen &&
+      (!entry.lastSeenAt || new Date(normalizedLastSeen) > new Date(entry.lastSeenAt))
+    ) {
+      entry.lastSeenAt = normalizedLastSeen;
+    }
+
+    const bucket = Number(row.bucket);
+    if (bucket >= firstSparkBucket) {
+      const index = Math.floor((bucket - firstSparkBucket) / bucketSizeSeconds);
+      if (index >= 0 && index < bucketCount) {
+        entry.sparkline5m[index] += requests;
+        entry.requests5m += requests;
+      }
+    }
+  }
+
+  for (const entry of overview.values()) {
+    entry.errorRate5xx15m = entry.requests15m === 0 ? 0 : entry.responses5xx15m / entry.requests15m;
+  }
+
+  return overview;
+}
+
 interface AiGatewayResponse {
   data: {
     viewer: {
@@ -334,6 +481,7 @@ export {
   queryProjectUsage,
   queryBatchProjectUsage,
   queryTopProjectTraffic,
+  queryProjectRequestOverview,
   queryProjectAiUsage,
   projectUsage,
   accountUsage,

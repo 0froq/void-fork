@@ -16,6 +16,7 @@ import {
   clearTables,
   createTestUser,
   createTestProject,
+  createTestDeployment,
   mockCfApi,
   cfSuccess,
   type TestEnv,
@@ -108,6 +109,7 @@ describe('GET /projects', () => {
     const bob = await createTestUser(env.db, 'bob');
     await createTestProject(env.db, alice.id, 'alice-app');
     await createTestProject(env.db, bob.id, 'bob-app');
+    mockCfApi();
 
     const res = await app.fetch(
       new Request('http://localhost/projects', {
@@ -119,6 +121,80 @@ describe('GET /projects', () => {
     const projects = (await res.json()) as Array<{ slug: string }>;
     expect(projects).toHaveLength(1);
     expect(projects[0].slug).toBe('alice-app');
+  });
+
+  it('returns deployment, traffic, and health summaries sorted by attention', async () => {
+    const user = await createTestUser(env.db, 'overview-user');
+    const alpha = await createTestProject(env.db, user.id, 'alpha');
+    const beta = await createTestProject(env.db, user.id, 'beta');
+    const alphaDeploy = await createTestDeployment(env.db, alpha.id, 'live', 'main');
+    const betaDeploy = await createTestDeployment(env.db, beta.id, 'failed', 'preview');
+    await env.db.insert(domains).values({
+      id: 'dom_alpha',
+      project_id: alpha.id,
+      hostname: 'alpha.example.com',
+      cf_hostname_id: 'cf-alpha',
+      status: 'active',
+    });
+
+    const bucketNow = Math.floor(Date.now() / 1000 / 15) * 15;
+    const lastSeen = new Date().toISOString();
+    mockCfApi({
+      analyticsQuery: (_url, init) => {
+        expect(init?.body).toContain('FROM void_requests');
+        return Response.json({
+          data: [
+            {
+              blob1: alpha.id,
+              bucket: bucketNow - 15,
+              last_seen: lastSeen,
+              requests: 4,
+              responses_4xx: 1,
+              responses_5xx: 0,
+            },
+            {
+              blob1: beta.id,
+              bucket: bucketNow,
+              last_seen: lastSeen,
+              requests: 9,
+              responses_4xx: 0,
+              responses_5xx: 2,
+            },
+          ],
+        });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request('http://localhost/projects', {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const projects = (await res.json()) as Array<{
+      slug: string;
+      custom_domain: string | null;
+      latest_deployment: { id: string; status: string; source: string | null } | null;
+      traffic: { requests5m: number; lastSeenAt: string | null; sparkline5m: Array<number> };
+      health: { responses4xx15m: number; responses5xx15m: number; errorRate5xx15m: number };
+    }>;
+
+    expect(projects.map((p) => p.slug)).toEqual(['beta', 'alpha']);
+    expect(projects[0].latest_deployment).toMatchObject({
+      id: betaDeploy.id,
+      status: 'failed',
+      source: 'preview',
+    });
+    expect(projects[0].traffic.requests5m).toBe(9);
+    expect(projects[0].traffic.lastSeenAt).toBe(lastSeen);
+    expect(projects[0].traffic.sparkline5m).toHaveLength(20);
+    expect(projects[0].health.responses5xx15m).toBe(2);
+    expect(projects[0].health.errorRate5xx15m).toBeCloseTo(2 / 9);
+    expect(projects[1].latest_deployment?.id).toBe(alphaDeploy.id);
+    expect(projects[1].custom_domain).toBe('alpha.example.com');
+    expect(projects[1].health.responses4xx15m).toBe(1);
   });
 });
 

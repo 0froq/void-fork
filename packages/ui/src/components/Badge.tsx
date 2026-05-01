@@ -19,7 +19,7 @@ function Badge({ className, variant = 'default', ...props }: BadgeProps) {
   return (
     <div
       className={cx(
-        'inline-flex items-center squircle border px-1.5 py-0.5 text-xs font-semibold transition-colors focus:ring-2 focus:ring-offset-2 focus:outline-none',
+        'inline-flex items-center squircle border px-1.5 pt-0.5 pb-0 text-xs font-semibold transition-colors focus:ring-2 focus:ring-offset-2 focus:outline-none',
         badgeVariants[variant],
         className,
       )}

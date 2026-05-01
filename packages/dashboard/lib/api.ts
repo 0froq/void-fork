@@ -38,8 +38,26 @@ function getToken(c: Context): string | undefined {
   return c.get('token') as string | undefined;
 }
 
-function getHeaders(c: Context, headers?: HeadersInit): Headers {
+function getCfAccessHeaders(c: Context): Record<string, string> {
+  const env = c.env as Record<string, string | undefined>;
+  if (env.CF_ACCESS_CLIENT_ID && env.CF_ACCESS_CLIENT_SECRET) {
+    return {
+      'CF-Access-Client-Id': env.CF_ACCESS_CLIENT_ID,
+      'CF-Access-Client-Secret': env.CF_ACCESS_CLIENT_SECRET,
+    };
+  }
+  if (env.CF_ACCESS_TOKEN) {
+    return { 'cf-access-token': env.CF_ACCESS_TOKEN };
+  }
+  return {};
+}
+
+export function getHeaders(c: Context, headers?: HeadersInit): Headers {
   const out = new Headers(headers);
+  for (const [key, value] of Object.entries(getCfAccessHeaders(c))) {
+    out.set(key, value);
+  }
+
   const token = getToken(c);
   if (token) {
     out.set('Authorization', `Bearer ${token}`);
@@ -75,9 +93,13 @@ export async function fetchApi(c: Context, path: string, options?: RequestInit):
 export function createClient(c: Context) {
   const token = getToken(c);
   const baseUrl = getApiUrl(c);
+  const headers = getCfAccessHeaders(c);
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   return hc<ApiRoutes>(baseUrl, {
     fetch: getApiFetch(c),
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers,
   });
 }
 

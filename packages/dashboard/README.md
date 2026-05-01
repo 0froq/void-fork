@@ -37,6 +37,17 @@ API_URL=https://api.void.cloud SITE_DOMAIN=void.app pnpm -C packages/dashboard d
 Open the local Vite URL and sign in. The production API allows localhost OAuth
 redirects and returns the dashboard token to `/auth/callback`.
 
+To run against staging, first get a Cloudflare Access token and pass it through
+to the local dashboard worker:
+
+```sh
+export CF_ACCESS_TOKEN="$(cloudflared access token -app=https://api.staging.void.cloud)"
+API_URL=https://api.staging.void.cloud SITE_DOMAIN=staging.void.app pnpm -C packages/dashboard dev
+```
+
+You can also put `API_URL`, `SITE_DOMAIN`, and `CF_ACCESS_TOKEN` in
+`packages/dashboard/.dev.vars`.
+
 To run against a local API instead:
 
 ```sh

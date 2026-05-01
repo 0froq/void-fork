@@ -8,6 +8,7 @@ import {
   getProject,
   getProjectBySlug,
   getProjectsByUserId,
+  getLatestDeploymentsByProjectIds,
   getProjectDeployments,
   getProjectResources,
   getActivatedDeployments,
@@ -24,7 +25,7 @@ import {
   migrationRenameExists,
   invalidateMigrationRenamesForOldName,
 } from '../db.ts';
-import type { ApiEnv } from '../env.ts';
+import { type ApiEnv, isDevBypass } from '../env.ts';
 import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations/remote-runner.ts';
 import { getProjectDeploymentWorkerName, getProjectQueueName } from '../naming.ts';
 import { getDispatchWorkerProxyToken } from '../provisioning/cloudflare-api.ts';
@@ -32,6 +33,7 @@ import { buildRoutingJson, buildStaticRoutingJson } from '../routing.ts';
 import { tokenizeSql } from '../sql/tokenize.ts';
 import { getPlanLimits } from '../tiers.ts';
 import type { DeployManifest } from '../types.ts';
+import { getRequestsDataset, queryProjectRequestOverview } from './usage.ts';
 
 export const RESERVED_SLUGS = new Set([
   'admin',
@@ -142,6 +144,78 @@ class RollbackError extends Error {
     super(message);
     this.name = 'RollbackError';
   }
+}
+
+type ProjectListItem = Awaited<ReturnType<typeof getProjectsByUserId>>[number] & {
+  custom_domain: string | null;
+  latest_deployment: Awaited<ReturnType<typeof getLatestDeploymentsByProjectIds>> extends Map<
+    string,
+    infer Deployment
+  >
+    ? Deployment | null
+    : null;
+  traffic: {
+    requests5m: number;
+    lastSeenAt: string | null;
+    sparkline5m: Array<number>;
+  };
+  health: {
+    responses4xx15m: number;
+    responses5xx15m: number;
+    errorRate5xx15m: number;
+  };
+};
+
+function deployAttentionScore(status: string | null | undefined): number {
+  if (status === 'failed') {
+    return 4;
+  }
+  if (
+    status === 'pending' ||
+    status === 'uploading' ||
+    status === 'migrating' ||
+    status === 'prerendering' ||
+    status === 'canceling'
+  ) {
+    return 3;
+  }
+  if (status === 'canceled') {
+    return 1;
+  }
+  return 0;
+}
+
+function projectListSortScore(project: ProjectListItem): number {
+  const hasRecentErrors = project.health.responses5xx15m > 0 ? 2 : 0;
+  return Math.max(deployAttentionScore(project.latest_deployment?.status), hasRecentErrors);
+}
+
+function parseSortDate(value: string | null | undefined): number {
+  if (!value) {
+    return 0;
+  }
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function sortProjectList(a: ProjectListItem, b: ProjectListItem): number {
+  const attentionDelta = projectListSortScore(b) - projectListSortScore(a);
+  if (attentionDelta !== 0) {
+    return attentionDelta;
+  }
+
+  const deployDelta =
+    parseSortDate(b.latest_deployment?.created_at) - parseSortDate(a.latest_deployment?.created_at);
+  if (deployDelta !== 0) {
+    return deployDelta;
+  }
+
+  const trafficDelta = b.traffic.requests5m - a.traffic.requests5m;
+  if (trafficDelta !== 0) {
+    return trafficDelta;
+  }
+
+  return a.slug.localeCompare(b.slug);
 }
 
 /**
@@ -348,17 +422,45 @@ const app = new Hono<ApiEnv>()
 
     // Batch-fetch domains for all projects in a single query
     const projectIds = projects.map((p) => p.id);
-    const domainMap =
-      projectIds.length > 0 ? await getDomainsByProjectIds(c.get('db'), projectIds) : new Map();
+    const [domainMap, latestDeployments, requestOverview] =
+      projectIds.length > 0
+        ? await Promise.all([
+            getDomainsByProjectIds(c.get('db'), projectIds),
+            getLatestDeploymentsByProjectIds(c.get('db'), projectIds),
+            isDevBypass(c.env)
+              ? Promise.resolve(new Map())
+              : queryProjectRequestOverview(
+                  c.env.CF_ACCOUNT_ID,
+                  c.env.CF_API_TOKEN,
+                  getRequestsDataset(c.env),
+                  projectIds,
+                ),
+          ])
+        : [new Map(), new Map(), new Map()];
 
-    const projectsWithDomains = projects.map((p) => {
+    const projectsWithSummaries = projects.map((p): ProjectListItem => {
       const pDomains = domainMap.get(p.id);
       const domain =
         pDomains?.find((d: { status: string }) => d.status === 'active') ?? pDomains?.[0];
-      return { ...p, custom_domain: domain?.hostname ?? null };
+      const overview = requestOverview.get(p.id);
+      return {
+        ...p,
+        custom_domain: domain?.hostname ?? null,
+        latest_deployment: latestDeployments.get(p.id) ?? null,
+        traffic: {
+          requests5m: overview?.requests5m ?? 0,
+          lastSeenAt: overview?.lastSeenAt ?? null,
+          sparkline5m: overview?.sparkline5m ?? Array.from({ length: 20 }, () => 0),
+        },
+        health: {
+          responses4xx15m: overview?.responses4xx15m ?? 0,
+          responses5xx15m: overview?.responses5xx15m ?? 0,
+          errorRate5xx15m: overview?.errorRate5xx15m ?? 0,
+        },
+      };
     });
 
-    return c.json(projectsWithDomains);
+    return c.json(projectsWithSummaries.sort(sortProjectList));
   })
 
   // Create a new project

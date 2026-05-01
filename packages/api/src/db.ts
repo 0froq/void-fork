@@ -192,6 +192,45 @@ export async function getProjectsByUserId(db: Db, userId: string): Promise<Array
     .orderBy(desc(projects.created_at));
 }
 
+export async function getLatestDeploymentsByProjectIds(
+  db: Db,
+  projectIds: Array<string>,
+): Promise<
+  Map<
+    string,
+    Pick<
+      Deployment,
+      'id' | 'project_id' | 'status' | 'source' | 'commit' | 'created_at' | 'deployed_at'
+    >
+  >
+> {
+  if (projectIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = await db
+    .select({
+      id: deployments.id,
+      project_id: deployments.project_id,
+      status: deployments.status,
+      source: deployments.source,
+      commit: deployments.commit,
+      created_at: deployments.created_at,
+      deployed_at: deployments.deployed_at,
+    })
+    .from(deployments)
+    .where(inArray(deployments.project_id, projectIds))
+    .orderBy(desc(deployments.created_at));
+
+  const latest = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    if (!latest.has(row.project_id)) {
+      latest.set(row.project_id, row);
+    }
+  }
+  return latest;
+}
+
 export async function getProjectsWithOwnerByIds(
   db: Db,
   ids: Array<string>,
