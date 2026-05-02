@@ -84,7 +84,7 @@ describe('packageStaticBuild', () => {
     expect(manifest.fallbackRules).toBeUndefined();
   });
 
-  it('disables platform SPA switch and prepends synthetic /* -> /index.html when user fallbacks exist', async () => {
+  it('disables platform SPA switch and appends synthetic /* -> /index.html after user fallbacks', async () => {
     writeFileSync(join(TMP, 'index.html'), 'x');
 
     const userFallbacks = [
@@ -102,9 +102,10 @@ describe('packageStaticBuild', () => {
 
     const manifest = JSON.parse(form.get('manifest') as string);
     expect(manifest.assetConfig).toEqual({ not_found_handling: 'none' });
+    // First-match-wins: user rule comes first, synthetic catch-all last.
     expect(manifest.fallbackRules).toEqual([
-      { source: '/*', destination: '/index.html', status: 200 },
       { source: '/docs/*', destination: '/docs.html', status: 200 },
+      { source: '/*', destination: '/index.html', status: 200 },
     ]);
   });
 
@@ -139,11 +140,15 @@ describe('resolveSpaFallbackChain', () => {
     expect(result.fallbackRules).toBeUndefined();
   });
 
-  it('prepends synthetic catch-all before user fallbacks (SPA)', () => {
+  it('appends synthetic catch-all after user fallbacks (SPA)', () => {
+    // Under first-match-wins, user rules must come BEFORE the synthetic
+    // catch-all so a more-specific user rule fires first; the synthetic
+    // `/*` only catches paths no user rule matched.
     const userRules = [{ source: '/docs/*', destination: '/docs.html', status: 200, force: false }];
     const result = resolveSpaFallbackChain('spa', userRules);
     expect(result.assetConfig).toEqual({ not_found_handling: 'none' });
     expect(result.fallbackRules).toEqual([
+      { source: '/docs/*', destination: '/docs.html', status: 200, force: false },
       {
         source: '/*',
         destination: '/index.html',
@@ -151,11 +156,10 @@ describe('resolveSpaFallbackChain', () => {
         force: false,
         origin: 'spa-default',
       },
-      { source: '/docs/*', destination: '/docs.html', status: 200, force: false },
     ]);
   });
 
-  it('returns the user rules verbatim (no prepend, no duplication) when user already has /* -> /index.html', () => {
+  it('returns the user rules verbatim (no append, no duplication) when user already has /* -> /index.html', () => {
     const userRules = [
       {
         source: '/*',
@@ -171,6 +175,33 @@ describe('resolveSpaFallbackChain', () => {
     expect(result.assetConfig).toEqual({ not_found_handling: 'none' });
     // No synthetic rule prepended: the returned list is exactly what the user supplied.
     expect(result.fallbackRules).toEqual(userRules);
+  });
+
+  it('still appends synthetic catch-all when user catch-all is host-scoped (SPA)', () => {
+    // A host-scoped `/*` -> `/index.html` only covers one hostname, so other
+    // bound hosts still need the synthetic global SPA fallback.
+    const userRules = [
+      {
+        host: 'www.example.com',
+        source: '/*',
+        destination: '/index.html',
+        status: 200,
+        force: false,
+        origin: 'void.json#routing.fallbacks',
+      },
+    ];
+    const result = resolveSpaFallbackChain('spa', userRules);
+    expect(result.assetConfig).toEqual({ not_found_handling: 'none' });
+    expect(result.fallbackRules).toEqual([
+      ...userRules,
+      {
+        source: '/*',
+        destination: '/index.html',
+        status: 200,
+        force: false,
+        origin: 'spa-default',
+      },
+    ]);
   });
 
   it('leaves user fallbacks untouched for static app type', () => {
@@ -330,9 +361,10 @@ describe('packageBuild', () => {
 
     const manifest = JSON.parse(form.get('manifest') as string);
     expect(manifest.assetConfig).toEqual({ not_found_handling: 'none' });
+    // First-match-wins: user rule first, synthetic catch-all last.
     expect(manifest.fallbackRules).toEqual([
-      { source: '/*', destination: '/index.html', status: 200 },
       { source: '/docs/*', destination: '/docs.html', status: 200 },
+      { source: '/*', destination: '/index.html', status: 200 },
     ]);
   });
 
