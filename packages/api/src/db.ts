@@ -145,11 +145,24 @@ export async function updateUserPlan(db: Db, id: string, plan: PlanId): Promise<
 }
 
 export async function countUserDeploymentsToday(db: Db, userId: string): Promise<number> {
+  // Excludes precheck placeholder rows (manifest IS NULL). Those represent
+  // in-flight deploys that have passed serialization but not yet validated
+  // against quota; counting them would charge a deploy against quota BEFORE
+  // the quota check fires for that same request, dropping the effective
+  // daily limit by one for both streamed-static and worker-backed paths.
+  // See deploy.ts placeholder insert (~line 1306) and quota check sites
+  // (~lines 1725 / 2206).
   const [result] = await db
     .select({ count: count() })
     .from(deployments)
     .innerJoin(projects, eq(deployments.project_id, projects.id))
-    .where(and(eq(projects.user_id, userId), sql`${deployments.created_at} >= CURRENT_DATE`));
+    .where(
+      and(
+        eq(projects.user_id, userId),
+        sql`${deployments.created_at} >= CURRENT_DATE`,
+        isNotNull(deployments.manifest),
+      ),
+    );
   return result?.count ?? 0;
 }
 
@@ -234,6 +247,33 @@ export async function createDeployment(
       source: source ?? null,
       commit: commit ?? null,
     })
+    .returning();
+  return row;
+}
+
+/**
+ * Fill in the manifest/source/commit on a deployment row that was inserted
+ * pre-parse as an atomic concurrent-deploy claim (see the early FOR UPDATE
+ * precheck in `routes/deploy.ts`). The row is created with NULL values for
+ * these columns; this helper writes them once the multipart manifest has
+ * been parsed and validated.
+ */
+export async function updateDeploymentManifest(
+  db: Db,
+  id: string,
+  manifest: string,
+  source: string | null,
+  commit: string | null,
+): Promise<Deployment> {
+  const [row] = await db
+    .update(deployments)
+    .set({
+      manifest,
+      source,
+      commit,
+      updated_at: sql`now()`,
+    })
+    .where(eq(deployments.id, id))
     .returning();
   return row;
 }

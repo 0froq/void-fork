@@ -1,5 +1,5 @@
 import { isrCacheKey, isrCachePrefix } from '@voidcloud/isr-shared';
-import { eq } from 'drizzle-orm';
+import { eq, sql as drizzleSql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import {
   applyDeclaredAssetManifest,
@@ -31,6 +31,7 @@ import {
   getProject,
   getDeployment,
   createDeployment,
+  updateDeploymentManifest,
   updateDeploymentStatus,
   updateProjectType,
   updateProjectWebSocketVersion,
@@ -46,7 +47,6 @@ import {
   getRetainedDeploymentsExcluding,
   getProjectSecrets,
   upsertProjectSecret,
-  upsertContainerResource,
   CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES,
   type Db,
 } from '../db.ts';
@@ -65,11 +65,12 @@ import {
   encryptProjectSecret,
 } from '../project-secrets.ts';
 import { addQueueConsumer } from '../provisioning/cloudflare-api.ts';
-import {
-  findDurableObjectNamespaceId,
-  upsertSandboxContainerApplication,
-} from '../provisioning/containers.ts';
 import { provisionBindings } from '../provisioning/provision.ts';
+import {
+  ProjectDeletingError,
+  provisionSandboxHost,
+  type SandboxHostInfo,
+} from '../provisioning/sandbox-host.ts';
 import { buildRoutingJson, buildStaticRoutingJson } from '../routing.ts';
 import { deployments } from '../schema.ts';
 import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT } from '../tiers.ts';
@@ -636,6 +637,10 @@ export function validateManifestShape(parsed: unknown): string | null {
     }
   }
 
+  // TODO(0067): reject manifest.sandbox when the deploy type is static/spa
+  // and there are no worker files. This is currently tolerated as a no-op
+  // (the deploy provisions nothing) but a clearer signal at validation time
+  // would prevent stale-manifest leakage.
   if (m.sandbox !== undefined) {
     if (m.sandbox == null || typeof m.sandbox !== 'object' || Array.isArray(m.sandbox)) {
       return 'invalid manifest shape: sandbox must be an object';
@@ -827,6 +832,42 @@ async function assertDeploymentNotCanceled(db: Db, deploymentId: string): Promis
   }
 }
 
+// Race guard against concurrent project teardown (design-doc 0067 §7).
+// Teardown takes a project-row lock and flips `projects.status='deleting'`
+// before tearing down CF state. A concurrent deploy that has already passed
+// `assertDeploymentNotCanceled` could still race the route flip and recreate
+// routing for a deleted project. Calling this alongside every cancellation
+// check (and re-checking under FOR UPDATE at the final commit) closes that
+// window. See `provisionSandboxHost` for the canonical lock pattern.
+const PROJECT_DELETING_ERROR_MESSAGE = 'project deletion in progress';
+
+/**
+ * Sentinel error thrown by the atomic precheck-and-claim transaction to
+ * signal "another deploy is already in flight". The route handler catches
+ * this and returns HTTP 409. Defined as a class (not a string sentinel) so
+ * the catch-path can do an `instanceof` check without colliding with
+ * arbitrary error messages from elsewhere in the transaction.
+ */
+class ConcurrentDeployError extends Error {
+  constructor(public readonly deploymentId: string) {
+    super(`deploy in progress: ${deploymentId}`);
+    this.name = 'ConcurrentDeployError';
+  }
+}
+
+async function assertProjectNotDeleting(db: Db, projectId: string): Promise<void> {
+  const project = await getProject(db, projectId);
+  // Fail closed: a missing project row is treated the same as `status='deleting'`.
+  // After teardown flips status='deleting' and `deleteProjectCascade` removes the
+  // project row, an in-flight deploy that observes the missing row would otherwise
+  // sail past this guard and recreate routing/worker state for an already-deleted
+  // project. Throwing here funnels both cases into the same catch-path branch
+  // (PROJECT_DELETING_ERROR_MESSAGE) which rolls back KV writes and the worker.
+  if (!project || project.status === 'deleting') {
+    throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
+  }
+}
+
 export function buildWebSocketUploadMigrations(
   migrations: Array<WebSocketMigrationMeta> | undefined,
 ):
@@ -844,6 +885,7 @@ export function buildWebSocketUploadMigrations(
 export function buildDurableObjectUploadMigrations(
   websocketMigrations: Array<WebSocketMigrationMeta> | undefined,
   sandboxMigrations: Array<SandboxMigrationMeta> | undefined,
+  crossScriptHost?: { scriptName: string } | null,
 ):
   | {
       new_tag: string;
@@ -854,6 +896,13 @@ export function buildDurableObjectUploadMigrations(
       }>;
     }
   | undefined {
+  // When a cross-script DO host owns the Sandbox class (design-doc 0067 §3),
+  // the per-deploy user worker MUST NOT declare any sandbox migrations — it
+  // doesn't own the class. Drop sandbox migrations entirely; the host script
+  // is the only writer of `new_sqlite_classes: ['Sandbox']` and uses its own
+  // migration_tag protocol (see `provisionSandboxHost`).
+  const effectiveSandboxMigrations = crossScriptHost ? undefined : sandboxMigrations;
+
   const steps: Array<{
     tag: string;
     index: number;
@@ -871,7 +920,7 @@ export function buildDurableObjectUploadMigrations(
     });
   }
 
-  for (const migration of sandboxMigrations ?? []) {
+  for (const migration of effectiveSandboxMigrations ?? []) {
     steps.push({
       tag: migration.tag,
       index: steps.length,
@@ -966,10 +1015,14 @@ export function buildWebSocketUploadBindings(
   }));
 }
 
-export function buildSandboxUploadBindings(sandbox: DeployManifest['sandbox'] | undefined): Array<{
+export function buildSandboxUploadBindings(
+  sandbox: DeployManifest['sandbox'] | undefined,
+  crossScriptHost?: { scriptName: string } | null,
+): Array<{
   type: 'durable_object_namespace';
   name: string;
   class_name: string;
+  script_name?: string;
 }> {
   if (!sandbox) {
     return [];
@@ -978,14 +1031,32 @@ export function buildSandboxUploadBindings(sandbox: DeployManifest['sandbox'] | 
     {
       type: 'durable_object_namespace',
       name: sandbox.bindingName,
-      class_name: sandbox.className,
+      // When a stable per-project DO host owns the Sandbox class (design-doc
+      // 0067 §3), the per-deploy user worker references the namespace via a
+      // cross-script binding pointing at the host's literal `Sandbox` class.
+      // The host script declares ONLY `new_sqlite_classes: ['Sandbox']`, so a
+      // user manifest with a custom `className` (e.g. `'CustomSandbox'`) MUST
+      // be rewritten to `'Sandbox'` here — otherwise the user worker binds to
+      // a class the host doesn't export. The user-facing `bindingName`
+      // (alias in `env`) is preserved either way.
+      class_name: crossScriptHost ? 'Sandbox' : sandbox.className,
+      // Without `script_name` the user worker would mint its own (per-deploy)
+      // namespace, which is the bug this fixes.
+      ...(crossScriptHost ? { script_name: crossScriptHost.scriptName } : {}),
     },
   ];
 }
 
 export function buildSandboxUploadContainers(
   sandbox: DeployManifest['sandbox'] | undefined,
+  crossScriptHost?: { scriptName: string } | null,
 ): Array<{ class_name: string }> | undefined {
+  // When the cross-script DO host owns the container application (design-doc
+  // 0067 §3), the per-deploy user worker MUST NOT declare a `containers`
+  // block — the host is the sole owner of the container app's lifecycle.
+  if (crossScriptHost) {
+    return undefined;
+  }
   return sandbox ? [{ class_name: sandbox.className }] : undefined;
 }
 
@@ -1145,77 +1216,6 @@ export function enrichSandboxManifest(
   };
 }
 
-async function deploySandboxContainer(
-  db: Db,
-  accountId: string,
-  apiToken: string,
-  dispatchNamespace: string,
-  projectId: string,
-  workerName: string,
-  sandbox: NonNullable<DeployManifest['sandbox']>,
-): Promise<void> {
-  const namespaceId = await retryWithBackoff(
-    async (attempt) => {
-      try {
-        return await findDurableObjectNamespaceId(
-          accountId,
-          apiToken,
-          dispatchNamespace,
-          workerName,
-          sandbox.bindingName,
-          sandbox.className,
-        );
-      } catch (err) {
-        // Diagnostic: log every miss so the next time this fails in the wild
-        // we can see whether CF is returning empty bindings, returning the
-        // binding without a namespace_id, or failing the request outright.
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(
-          `[deploy] sandbox namespace probe miss (attempt ${attempt}) for ${dispatchNamespace}/${workerName} class=${sandbox.className}: ${msg}`,
-        );
-        return undefined;
-      }
-    },
-    {
-      maxRetries: 8,
-      delayMs: 500,
-      errorMessage: 'sandbox Durable Object namespace was not created',
-    },
-  );
-  const application = await upsertSandboxContainerApplication(accountId, apiToken, {
-    name: getSandboxContainerApplicationName(projectId, sandbox.containerName),
-    image: sandbox.image,
-    namespaceId,
-    ...(sandbox.instanceType && { instanceType: sandbox.instanceType }),
-    ...(sandbox.maxInstances != null && { maxInstances: sandbox.maxInstances }),
-  });
-
-  // Reconcile the resource row's cf_id with whatever application id CF
-  // actually returned. A pre-existing row can point at a stale id when the
-  // CF app behind it was deleted out-of-band (operator action, the branch's
-  // own namespace-mismatch remediation, external cleanup) — on the next
-  // deploy `upsertSandboxContainerApplication` POSTs a fresh app and returns
-  // a new id, but the old `createResource`-only path skipped persistence,
-  // leaving the DB pointing at the dead id. Cleanup later 404s on that id
-  // and the new app leaks. Upsert closes the loop.
-  const { priorCfId } = await upsertContainerResource(
-    db,
-    projectId,
-    sandbox.containerName,
-    application.id,
-  );
-  if (priorCfId !== null && priorCfId !== application.id) {
-    console.warn(
-      `[deploy] sandbox container resource cf_id transition ${priorCfId} -> ${application.id} ` +
-        `for project=${projectId} binding=${sandbox.containerName}`,
-    );
-  }
-}
-
-function getSandboxContainerApplicationName(projectId: string, containerName: string): string {
-  return `${projectId}-${containerName}`.toLowerCase().replaceAll('_', '-');
-}
-
 // Deploy to a project
 app.post('/:id/deploy', async (c) => {
   const projectId = c.req.param('id');
@@ -1228,38 +1228,91 @@ app.post('/:id/deploy', async (c) => {
     return c.json({ error: 'forbidden' }, 403);
   }
 
+  // Race guard against project teardown (design-doc 0067 §7). Teardown flips
+  // `projects.status='deleting'` under a project-row lock before tearing down
+  // CF state and ultimately calling deleteProjectCascade. A deploy admitted
+  // after the flip would create a fresh deployment row, which can break
+  // cascade deletion (deployments FK is ON DELETE no action) and leave the
+  // project stuck in 'deleting'. The same status is re-checked under
+  // FOR UPDATE in the atomic precheck-and-claim below to close the TOCTOU
+  // window.
+  if (project.status === 'deleting') {
+    return c.json({ error: 'project is being deleted' }, 410);
+  }
+
   // Admin suspensions are already blocked by authMiddleware → 403. Usage-limit
   // suspensions (requests_exceeded) must remain able to deploy so users can
   // ship fixes and roll back while their limits reset.
 
-  // Run independent pre-checks in parallel
-  const [activeDeploy, currentLiveDeployment] = await Promise.all([
-    getActiveDeployment(c.get('db'), projectId),
-    project.active_deployment_id
-      ? getDeployment(c.get('db'), project.active_deployment_id)
-      : Promise.resolve(null),
-  ]);
   const user = c.get('user');
 
-  // Reject concurrent deploys to the same project
-  if (activeDeploy) {
-    // Normalize timestamp to ISO 8601 for safe Date parsing.
-    // PostgreSQL returns ISO format; also handles legacy format (space separator, no Z).
-    const createdAt = activeDeploy.created_at.includes('T')
-      ? activeDeploy.created_at
-      : activeDeploy.created_at.replace(' ', 'T') + 'Z';
-    const ageMs = Date.now() - new Date(createdAt).getTime();
-    if (ageMs < 10 * 60 * 1000) {
-      return c.json({ error: 'deploy in progress', deployment: activeDeploy.id }, 409);
+  const currentLiveDeployment = project.active_deployment_id
+    ? await getDeployment(c.get('db'), project.active_deployment_id)
+    : null;
+
+  // Atomic precheck-and-claim (design-doc 0067 §7). Two concurrent deploys
+  // would otherwise both observe "no active deploy" before either inserts a
+  // row, race past the gate, and produce two parallel pipelines — corrupting
+  // sandbox state and racing CF API mutations. To serialize them BEFORE the
+  // streaming multipart parse begins, this transaction:
+  //   1. SELECT FOR UPDATE on the project row, serializing concurrent
+  //      precheck transactions and any teardown holding the same lock.
+  //   2. Re-checks `projects.status` under the lock. Closes the TOCTOU
+  //      window between the early reject above and createDeployment.
+  //   3. Looks up the active in-flight deploy. If fresh (<10min), throws
+  //      ConcurrentDeployError → caller maps to HTTP 409. If stale, marks
+  //      the predecessor failed/canceled and proceeds.
+  //   4. Inserts a placeholder deployment row with NULL manifest/source/
+  //      commit. Its existence is the serialization point: the second
+  //      concurrent precheck transaction reads it via getActiveDeployment
+  //      (status='pending', non-terminal) and rejects with 409.
+  //
+  // The placeholder row's manifest/source/commit are filled in by
+  // `updateDeploymentManifest` after the multipart parse completes. This
+  // keeps the lock duration to the precheck only — a pg connection is NOT
+  // held across the streaming parse, deploy upload, or routing flip.
+  let preDeployment: Awaited<ReturnType<typeof createDeployment>>;
+  try {
+    preDeployment = await c.get('db').transaction(async (tx) => {
+      await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
+      const txDb = tx as unknown as Db;
+      const lockedProject = await getProject(txDb, projectId);
+      if (!lockedProject || lockedProject.status === 'deleting') {
+        throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
+      }
+      const activeDeploy = await getActiveDeployment(txDb, projectId);
+      if (activeDeploy) {
+        // Normalize timestamp to ISO 8601 for safe Date parsing. PostgreSQL
+        // returns ISO format; also handles legacy format (space separator,
+        // no Z).
+        const createdAt = activeDeploy.created_at.includes('T')
+          ? activeDeploy.created_at
+          : activeDeploy.created_at.replace(' ', 'T') + 'Z';
+        const ageMs = Date.now() - new Date(createdAt).getTime();
+        if (ageMs < 10 * 60 * 1000) {
+          throw new ConcurrentDeployError(activeDeploy.id);
+        }
+        // Stale — auto-fail and proceed
+        await updateDeploymentStatus(
+          txDb,
+          activeDeploy.id,
+          activeDeploy.status === 'canceling' ? 'canceled' : 'failed',
+          'timed out',
+          activeDeploy.status === 'canceling' ? { force: true } : undefined,
+        );
+      }
+      // Insert placeholder. Manifest/source/commit are filled in
+      // post-parse via updateDeploymentManifest.
+      return await createDeployment(txDb, projectId, null, null, null);
+    });
+  } catch (err) {
+    if (err instanceof ConcurrentDeployError) {
+      return c.json({ error: 'deploy in progress', deployment: err.deploymentId }, 409);
     }
-    // Stale — auto-fail and proceed
-    await updateDeploymentStatus(
-      c.get('db'),
-      activeDeploy.id,
-      activeDeploy.status === 'canceling' ? 'canceled' : 'failed',
-      'timed out',
-      activeDeploy.status === 'canceling' ? { force: true } : undefined,
-    );
+    if (err instanceof Error && err.message === PROJECT_DELETING_ERROR_MESSAGE) {
+      return c.json({ error: 'project is being deleted' }, 410);
+    }
+    throw err;
   }
 
   // The daily deploy-count limit is evaluated in two places depending on the
@@ -1338,7 +1391,12 @@ app.post('/:id/deploy', async (c) => {
   let streamedStaticAssets = false;
   let newStaticAssetCount = 0;
   let deferredParseErrorMessage: string | null = null;
-  let cleanupExcludeDeploymentId: string | null = null;
+  // Pre-populated with the placeholder deployment row created by the
+  // atomic precheck-and-claim transaction. The streamed-asset abort path
+  // excludes this id when computing the in-flight retained-hash set so
+  // assets streamed by THIS request are not preserved by their own
+  // claim row.
+  let cleanupExcludeDeploymentId: string | null = preDeployment.id;
   const streamedAssetClaimToken = crypto.randomUUID();
   const claimedStreamedHashes = new Set<string>();
 
@@ -1543,7 +1601,10 @@ app.post('/:id/deploy', async (c) => {
   const writer = writable.getWriter();
   let streamOpen = true;
   let currentStep = 'parsing';
-  let currentDeploymentId = '';
+  // Initialize with the placeholder id so heartbeats during the parse
+  // phase carry the correct deployment id (the row exists from the
+  // atomic precheck-and-claim transaction at route entry).
+  let currentDeploymentId = preDeployment.id;
   const emit = (event: DeployEvent): void => {
     if (!streamOpen) {
       return;
@@ -1578,6 +1639,14 @@ app.post('/:id/deploy', async (c) => {
 
   void (async () => {
     let routingSwitched = false;
+    // Track every ROUTING KV key written by this deploy so the catch-path
+    // can roll them ALL back if teardown wins the race or pre-routing fails
+    // — `routingSwitched` only flags the slug write, but queue routes are
+    // written before the slug and active-domain routes are written after,
+    // and all three need to be cleaned up on rollback.
+    const writtenRoutingKeys: Array<string> = [];
+    let workerUploaded = false;
+    let workerUploadUrl: string | undefined;
     let manifest: DeployManifest | undefined;
     let workerName: string | undefined;
     let dispatchNamespace: string | undefined;
@@ -2113,6 +2182,14 @@ app.post('/:id/deploy', async (c) => {
           // preserved by deleteUnreferencedAssets.
           await cleanupStreamedAssetsOnAbort();
           await cleanupOwnStreamedAssetClaims();
+          // Release the placeholder claim row inserted by the precheck —
+          // this request is a verified no-op against the live deployment,
+          // so the placeholder represents no real deploy attempt. Delete
+          // it so deploy history shows only meaningful rows. Nothing
+          // outside this transaction holds a reference to the row yet
+          // (no routing entry, no `active_deployment_id`, no logs); the
+          // delete is safe.
+          await c.get('db').delete(deployments).where(eq(deployments.id, preDeployment.id));
           return;
         }
       }
@@ -2131,12 +2208,38 @@ app.post('/:id/deploy', async (c) => {
           await cleanupStreamedAssetsOnAbort();
           await cleanupOwnStreamedAssetClaims();
           emit({ event: 'error', message: 'deploy limit exceeded', step: currentStep });
+          // The finally-block reaper marks the placeholder 'failed' if it
+          // is still 'pending'; let it run.
           return;
         }
       }
 
-      // Create deployment record
-      deployment = await createDeployment(c.get('db'), projectId, finalManifestRaw, source, commit);
+      // Fill in the deployment record. The row was inserted pre-stream by
+      // the atomic precheck-and-claim transaction at route entry (see the
+      // `c.get('db').transaction(...)` block above the response stream
+      // construction). Wrap the update in a FOR UPDATE transaction that
+      // re-checks `projects.status` so a teardown that won the race
+      // between the route's early reject and here cannot leave a
+      // partially-populated deployment row pointing at a deleting project
+      // (design-doc 0067 §7). `deleteProjectCascade` deletes deployments
+      // before the project, and the deployments FK is ON DELETE no action
+      // — a late update would break cascade deletion or leave the project
+      // stuck in 'deleting'.
+      deployment = await c.get('db').transaction(async (tx) => {
+        await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
+        const txDb = tx as unknown as Db;
+        const lockedProject = await getProject(txDb, projectId);
+        if (!lockedProject || lockedProject.status === 'deleting') {
+          throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
+        }
+        return await updateDeploymentManifest(
+          txDb,
+          preDeployment.id,
+          finalManifestRaw,
+          source,
+          commit,
+        );
+      });
       currentDeploymentId = deployment.id;
       cleanupExcludeDeploymentId = deployment.id;
       if (manifestVersionChanged) {
@@ -2171,10 +2274,54 @@ app.post('/:id/deploy', async (c) => {
 
         emit({ event: 'start', deploymentId: deployment.id });
 
+        // === SANDBOX HOST PROVISIONING ===
+        // Per design-doc 0067 §4: the per-project sandbox DO host script
+        // (`do-host-${slug}`) MUST be PUT before the user worker, because the
+        // user worker references the host's namespace via a cross-script DO
+        // binding and CF rejects the upload if `script_name` doesn't exist in
+        // the dispatch namespace. `provisionSandboxHost` runs inside its own
+        // `db.transaction` with `SELECT ... FOR UPDATE` on the project row, so
+        // it serializes against concurrent first deploys and project teardown
+        // (status='deleting') without us holding extra locks here.
+        //
+        // Guard: only run sandbox provisioning for worker-backed deploys.
+        // Static/SPA deploys return early below without uploading a worker
+        // script, so the cross-script DO binding is never consumed. A malformed
+        // or stale manifest that includes `sandbox` on a static deploy must not
+        // mutate CF sandbox state before the early return.
+        let sandboxHostInfo: SandboxHostInfo | null = null;
+        if (manifest.sandbox && hasWorkerFiles) {
+          currentStep = 'sandbox_host';
+          try {
+            sandboxHostInfo = await provisionSandboxHost(
+              c.env,
+              c.get('db'),
+              projectId,
+              project.slug,
+              manifest.sandbox.containerName,
+              manifest.sandbox.image,
+              manifest.sandbox.instanceType,
+              manifest.sandbox.maxInstances,
+            );
+          } catch (err) {
+            if (err instanceof ProjectDeletingError) {
+              // Deploy raced with project deletion — fail fast before any
+              // CF-side mutation. Re-throw so the outer catch handles it via
+              // the standard pre-routing failure path (deployment marked
+              // failed, error emitted with currentStep='sandbox_host').
+              throw new Error('project is being deleted');
+            }
+            throw err;
+          }
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+          await assertProjectNotDeleting(c.get('db'), projectId);
+        }
+
         // === ASSET UPLOAD PHASE ===
         currentStep = 'asset_upload';
         await updateDeploymentStatus(c.get('db'), deployment.id, 'uploading');
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+        await assertProjectNotDeleting(c.get('db'), projectId);
 
         // Merge the declared asset manifest into the one we built from the
         // streamed parts — this validates hash agreement and preserves the
@@ -2184,6 +2331,7 @@ app.post('/:id/deploy', async (c) => {
           incomingAssetManifest ?? undefined,
         );
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+        await assertProjectNotDeleting(c.get('db'), projectId);
 
         // When preflight was used, fill in skipped assets.
         // Prefer the CLI's full manifest (new CLIs send it) to avoid accumulating
@@ -2262,6 +2410,7 @@ app.post('/:id/deploy', async (c) => {
                 projectId,
               );
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+          await assertProjectNotDeleting(c.get('db'), projectId);
           emit({ event: 'asset_upload_done' });
 
           // Build serving manifest: path → hash (prefix with "!" for R2-stored assets)
@@ -2331,20 +2480,41 @@ app.post('/:id/deploy', async (c) => {
             suspended: existingEntry?.suspended,
           });
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+          await assertProjectNotDeleting(c.get('db'), projectId);
           await c.env.ROUTING.put(project.slug, routingJson);
+          // Record AFTER successful put — a rejected put must not appear in
+          // the rollback set, otherwise the catch path would delete a
+          // previous deployment's still-live route on a transient KV failure.
+          writtenRoutingKeys.push(project.slug);
           routingSwitched = true;
 
           for (const domain of projectDomains) {
             if (domain.status === 'active') {
-              await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
+              const domainKey = `domain:${domain.hostname}`;
+              await c.env.ROUTING.put(domainKey, routingJson);
+              writtenRoutingKeys.push(domainKey);
             }
           }
 
-          // Mark deployment live + update project type
-          await updateDeploymentStatus(c.get('db'), deployment.id, 'live', undefined, {
-            force: true,
+          // Mark deployment live + update project type. Take a project-row
+          // FOR UPDATE lock and re-check status so a teardown that flipped
+          // `projects.status='deleting'` between the pre-routing checks and
+          // here can't sneak past — see the WfP path for the same pattern
+          // and design-doc 0067 §7.
+          await c.get('db').transaction(async (tx) => {
+            await tx.execute(
+              drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
+            );
+            const txDb = tx as unknown as Db;
+            const lockedProject = await getProject(txDb, projectId);
+            if (!lockedProject || lockedProject.status === 'deleting') {
+              throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
+            }
+            await updateDeploymentStatus(txDb, deployment.id, 'live', undefined, {
+              force: true,
+            });
+            await updateProjectType(txDb, projectId, type);
           });
-          await updateProjectType(c.get('db'), projectId, type);
           await setActiveDeployment(c.get('db'), projectId, deployment.id);
           await markDeploymentRetained(c.get('db'), deployment.id, true);
 
@@ -2483,6 +2653,7 @@ app.post('/:id/deploy', async (c) => {
           c.env.VOID_PROXY_SERVICE ?? 'void-proxy',
         );
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+        await assertProjectNotDeleting(c.get('db'), projectId);
 
         if (bindingLabels.length > 0) {
           emit({ event: 'provisioning_done' });
@@ -2559,6 +2730,7 @@ app.post('/:id/deploy', async (c) => {
             assetsByHash,
           );
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+          await assertProjectNotDeleting(c.get('db'), projectId);
           console.log(
             `[deploy] ${projectId}: asset upload complete, got completion JWT: ${completionJwt ? 'yes' : 'no'}`,
           );
@@ -2672,7 +2844,10 @@ app.post('/:id/deploy', async (c) => {
           text,
         }));
         const websocketBindings = buildWebSocketUploadBindings(manifest.websocket);
-        const sandboxBindings = buildSandboxUploadBindings(manifest.sandbox);
+        const sandboxBindings = buildSandboxUploadBindings(
+          manifest.sandbox,
+          sandboxHostInfo ? { scriptName: sandboxHostInfo.scriptName } : null,
+        );
         const allBindings = [
           ...plainTextBindings,
           ...secretBindings,
@@ -2693,8 +2868,12 @@ app.post('/:id/deploy', async (c) => {
         const durableObjectMigrations = buildDurableObjectUploadMigrations(
           manifest.websocket?.migrations,
           manifest.sandbox?.migrations,
+          sandboxHostInfo ? { scriptName: sandboxHostInfo.scriptName } : null,
         );
-        const containers = buildSandboxUploadContainers(manifest.sandbox);
+        const containers = buildSandboxUploadContainers(
+          manifest.sandbox,
+          sandboxHostInfo ? { scriptName: sandboxHostInfo.scriptName } : null,
+        );
         const tailServiceName = c.env.TAIL_SERVICE_NAME ?? DEFAULT_TAIL_SERVICE_NAME;
         const metadata: Record<string, unknown> = {
           main_module: manifest.workerMain ?? 'index.js',
@@ -2735,10 +2914,13 @@ app.post('/:id/deploy', async (c) => {
         // been uploaded") with 200 status instead of completing the upload.
         // This is the same CF bug handled in createAssetUploadSession — retry
         // to hit a different edge node.
-        const workerUploadUrl = `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`;
+        // Assigned to the outer-scoped `workerUploadUrl` so the catch-path
+        // teardown-race branch can DELETE the script if teardown's own
+        // worker DELETE ran before our PUT (orphan recovery).
+        workerUploadUrl = `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`;
         await retryWithBackoff(
           async () => {
-            const cfResponse = await fetch(workerUploadUrl, {
+            const cfResponse = await fetch(workerUploadUrl!, {
               method: 'PUT',
               headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
               body: workerFormData,
@@ -2766,21 +2948,14 @@ app.post('/:id/deploy', async (c) => {
             errorMessage: 'worker upload returned an unexpected Cloudflare response',
           },
         );
+        workerUploaded = true;
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+        await assertProjectNotDeleting(c.get('db'), projectId);
 
-        if (manifest.sandbox) {
-          currentStep = 'sandbox';
-          await deploySandboxContainer(
-            c.get('db'),
-            c.env.CF_ACCOUNT_ID,
-            c.env.CF_API_TOKEN,
-            dispatchNamespace,
-            projectId,
-            workerName,
-            manifest.sandbox,
-          );
-          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-        }
+        // Note: the sandbox host script + container application are now
+        // provisioned BEFORE the user worker upload (design-doc 0067 §4).
+        // The user-worker metadata above carries cross-script DO bindings to
+        // `do-host-${slug}`; no per-deploy container plumbing happens here.
 
         emit({ event: 'worker_upload_done' });
 
@@ -2793,6 +2968,7 @@ app.post('/:id/deploy', async (c) => {
           currentStep = 'migration';
           await updateDeploymentStatus(c.get('db'), deployment.id, 'migrating');
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+          await assertProjectNotDeleting(c.get('db'), projectId);
           emit({ event: 'migration_start', pending: manifest.migrations.pending });
 
           const proxyTokenBinding = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN');
@@ -2920,6 +3096,7 @@ app.post('/:id/deploy', async (c) => {
           const allApplied = result.migrations.map((m) => m.name);
           await setAppliedMigrations(c.get('db'), deployment.id, allApplied);
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+          await assertProjectNotDeleting(c.get('db'), projectId);
         }
 
         // 2b. Configure queue consumers (dispatch worker relays to user workers)
@@ -2986,8 +3163,9 @@ app.post('/:id/deploy', async (c) => {
           if (!outcome) {
             continue;
           }
+          const queueKey = `queue:${outcome.queueBinding.queue_name}`;
           await c.env.ROUTING.put(
-            `queue:${outcome.queueBinding.queue_name}`,
+            queueKey,
             JSON.stringify({
               workerName,
               projectId,
@@ -2995,8 +3173,13 @@ app.post('/:id/deploy', async (c) => {
               proxyToken: queueProxyToken,
             }),
           );
+          // Record AFTER successful put — a rejected put must not appear in
+          // the rollback set, otherwise the catch path would delete a
+          // previous deployment's still-live route on a transient KV failure.
+          writtenRoutingKeys.push(queueKey);
         }
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+        await assertProjectNotDeleting(c.get('db'), projectId);
 
         const hasCrons = manifest.schedules && manifest.schedules.length > 0;
 
@@ -3005,6 +3188,7 @@ app.post('/:id/deploy', async (c) => {
         // produced by an older deployment with different hashed assets.
         await clearIsrCache(c.env.ISR_CACHE, projectId, deployment.id);
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+        await assertProjectNotDeleting(c.get('db'), projectId);
 
         // 3b. Prerender pages (write ISR cache entries before going live)
         currentStep = 'prerender';
@@ -3012,6 +3196,7 @@ app.post('/:id/deploy', async (c) => {
           emit({ event: 'prerender', pages: manifest.prerender.length });
           await updateDeploymentStatus(c.get('db'), deployment.id, 'prerendering');
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+          await assertProjectNotDeleting(c.get('db'), projectId);
           const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
 
           await uploadPool(manifest.prerender, 3, async (pathname) => {
@@ -3047,6 +3232,7 @@ app.post('/:id/deploy', async (c) => {
           emit({ event: 'prerender_done' });
         }
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+        await assertProjectNotDeleting(c.get('db'), projectId);
 
         // 4. Update KV routing table
         // Carry forward suspended flag from current KV entry
@@ -3075,7 +3261,10 @@ app.post('/:id/deploy', async (c) => {
           assetConfig: assetCount > 0 ? assetConfig : undefined,
         });
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+        await assertProjectNotDeleting(c.get('db'), projectId);
         await c.env.ROUTING.put(project.slug, routingJson);
+        // Record AFTER successful put — see queue route comment above.
+        writtenRoutingKeys.push(project.slug);
 
         // Traffic can now reach the new worker via project.slug.
         // Set the flag immediately so the outer catch never deletes a live worker.
@@ -3084,19 +3273,37 @@ app.post('/:id/deploy', async (c) => {
         // Update KV routing for active custom domains
         for (const domain of projectDomains) {
           if (domain.status === 'active') {
-            await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
+            const domainKey = `domain:${domain.hostname}`;
+            await c.env.ROUTING.put(domainKey, routingJson);
+            writtenRoutingKeys.push(domainKey);
           }
         }
 
-        // 5. Mark deployment as live + update project mode
-        await updateDeploymentStatus(c.get('db'), deployment.id, 'live', undefined, {
-          force: true,
+        // 5. Mark deployment as live + update project mode.
+        //
+        // Race guard (design-doc 0067 §7): teardown takes the project-row
+        // lock and flips `projects.status='deleting'` before tearing down CF
+        // state. The window between the pre-routing checks above and the KV
+        // writes is small but real, so the final commit must take the same
+        // FOR UPDATE lock and re-check status. If teardown won the race, we
+        // throw `PROJECT_DELETING_ERROR_MESSAGE` so the catch-path branch
+        // below rolls back the routing entries we just wrote.
+        await c.get('db').transaction(async (tx) => {
+          await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
+          const txDb = tx as unknown as Db;
+          const lockedProject = await getProject(txDb, projectId);
+          if (!lockedProject || lockedProject.status === 'deleting') {
+            throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
+          }
+          await updateDeploymentStatus(txDb, deployment.id, 'live', undefined, {
+            force: true,
+          });
+          await updateProjectType(
+            txDb,
+            projectId,
+            manifest.type ?? (manifest.framework ? 'framework' : 'void'),
+          );
         });
-        await updateProjectType(
-          c.get('db'),
-          projectId,
-          manifest.type ?? (manifest.framework ? 'framework' : 'void'),
-        );
 
         // 5b. Set active deployment + mark retained
         await setActiveDeployment(c.get('db'), projectId, deployment.id);
@@ -3279,7 +3486,40 @@ app.post('/:id/deploy', async (c) => {
         const wn = workerName!;
         const dn = dispatchNamespace!;
 
-        if (routingSwitched) {
+        // Teardown race (design-doc 0067 §7): the final-commit FOR UPDATE
+        // transaction threw `PROJECT_DELETING_ERROR_MESSAGE` because teardown
+        // flipped `projects.status='deleting'` between the pre-routing checks
+        // and this commit. Every ROUTING KV entry we wrote (queue routes,
+        // slug, active domains) points at a worker teardown has already
+        // deleted (or is about to delete); iterate the tracker so the
+        // rollback covers all three write sites — DB-fetched domains can
+        // miss the queue routes entirely. Also DELETE the uploaded user
+        // worker: teardown's worker DELETE may have run BEFORE our PUT,
+        // leaving an orphan that won't be cleaned up by anyone else.
+        const teardownRaceLost = routingSwitched && raw === PROJECT_DELETING_ERROR_MESSAGE;
+        if (teardownRaceLost) {
+          console.error(
+            `[deploy] teardown won race against route flip for ${wn}; rolling back routing entries`,
+          );
+          for (const key of writtenRoutingKeys) {
+            await c.env.ROUTING.delete(key).catch((e) =>
+              console.error(`[deploy] failed to roll back ROUTING ${key}:`, e),
+            );
+          }
+          // Orphan-recovery: if teardown's DELETE on the worker script
+          // happened BEFORE our PUT (the only ordering that lets the PUT
+          // succeed against a deleting project), the script we just uploaded
+          // is now an orphan. Issue our own DELETE here. If teardown's
+          // DELETE happens AFTER our PUT, this is a redundant 404 — safe.
+          if (workerUploaded && workerUploadUrl) {
+            await fetch(workerUploadUrl, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
+            }).catch((e) => console.error(`[deploy] failed to delete orphaned worker ${wn}:`, e));
+          }
+          await updateDeploymentStatus(c.get('db'), dep.id, 'failed', msg).catch(() => {});
+          emit({ event: 'error', message: msg, step: currentStep });
+        } else if (routingSwitched) {
           // Routing already points to this worker — it IS serving live traffic.
           // Mark as "live" so DB state matches reality. The late-step failure
           // (retention cleanup, asset_hashes update, etc.) is non-critical and
@@ -3308,10 +3548,18 @@ app.post('/:id/deploy', async (c) => {
           });
         } else {
           // Routing not yet switched — safe to clean up the worker script and
-          // mark the deployment as failed.
+          // mark the deployment as failed. We may still have written queue
+          // routing keys earlier in the pipeline (queue routes are written
+          // BEFORE the slug route) — iterate the tracker so any partially
+          // written ROUTING entries are removed too.
           const latest = await getDeployment(c.get('db'), dep.id);
           const wasCanceled =
             latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status);
+          for (const key of writtenRoutingKeys) {
+            await c.env.ROUTING.delete(key).catch((e) =>
+              console.error(`[deploy] failed to roll back ROUTING ${key}:`, e),
+            );
+          }
           await deleteDispatchScript(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, dn, wn).catch((e) =>
             console.error(`[deploy] failed to clean up worker script ${wn}:`, e),
           );
@@ -3364,6 +3612,30 @@ app.post('/:id/deploy', async (c) => {
         await cleanupOwnStreamedAssetClaims();
       } catch {
         // ignore — best-effort cleanup on unhandled path
+      }
+      // Reap the placeholder deployment row if it never advanced past the
+      // initial 'pending' + null-manifest state (e.g. parse-loop early
+      // return, multipart error, manifest validation failure). Leaving
+      // it at 'pending' would block future deploys for 10 minutes via
+      // the active-deploy precheck. We DELETE rather than mark 'failed'
+      // because the row represents no real deploy attempt — no manifest,
+      // no source/commit, nothing the user would want surfaced in their
+      // deploy history. The combined `status='pending' AND manifest IS
+      // NULL` predicate is the only safe DELETE: once the post-parse
+      // `updateDeploymentManifest` lands a non-null manifest, the row
+      // represents a real attempt and the pipeline's own catch paths
+      // become responsible for status transitions ('failed' / 'canceled'
+      // / 'live').
+      try {
+        const latest = await getDeployment(c.get('db'), preDeployment.id);
+        if (latest && latest.status === 'pending' && latest.manifest === null) {
+          await c.get('db').delete(deployments).where(eq(deployments.id, preDeployment.id));
+        }
+      } catch (err) {
+        console.warn(
+          `[deploy] ${projectId}: failed to reap placeholder deployment ${preDeployment.id}:`,
+          err instanceof Error ? err.message : err,
+        );
       }
       streamOpen = false;
       try {

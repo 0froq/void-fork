@@ -9,10 +9,9 @@ import {
   getProjectResources,
   getUser,
   getDomainsByProjectId,
-  deleteProjectCascade,
 } from '../../db.ts';
 import type { ApiEnv } from '../../env.ts';
-import { cleanupProjectResources } from '../../provisioning/cleanup.ts';
+import { teardownProject } from '../../provisioning/cleanup.ts';
 import { DeploymentTable } from '../views/deployment-table.tsx';
 import { Layout } from '../views/layout.tsx';
 import { ProjectsListPage } from '../views/projects-list.tsx';
@@ -199,8 +198,7 @@ app.post('/:id/delete', async (c) => {
   if (!project) {
     return c.html('<h1>Project not found</h1>', 404);
   }
-  await cleanupProjectResources(c, project.id, project);
-  await deleteProjectCascade(c.get('db'), project.id);
+  await teardownProject(c, project.id, project);
   return c.redirect('/admin/projects');
 });
 

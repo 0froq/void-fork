@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { getProject, deleteProjectCascade } from '../db.ts';
+import { getProject } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
-import { cleanupProjectResources } from '../provisioning/cleanup.ts';
+import { teardownProject } from '../provisioning/cleanup.ts';
 
 const app = new Hono<ApiEnv>();
 
@@ -16,10 +16,12 @@ app.delete('/:id', async (c) => {
     return c.json({ error: 'forbidden' }, 403);
   }
 
-  const warnings = await cleanupProjectResources(c, projectId, project);
-
-  // Atomic DB cleanup (domains, resources, deployments, project)
-  await deleteProjectCascade(c.get('db'), projectId);
+  // `teardownProject` handles the FOR UPDATE lock, status='deleting' flip,
+  // bulk deployment cancellation, critical CF cleanup (sandbox host script +
+  // container apps — fatal on failure), best-effort CF cleanup (D1, KV, R2,
+  // queues, hyperdrive, custom hostnames, routing entries — warnings), and
+  // the DB cascade. Critical-cleanup failure throws and surfaces as a 5xx.
+  const { warnings } = await teardownProject(c, projectId, project);
 
   return c.json({
     ok: true,

@@ -501,3 +501,51 @@ The platform's own database was migrated from Cloudflare D1 (SQLite) to PlanetSc
 ### Domain: voidcloud.dev → void.app (February 2026)
 
 The userspace domain was migrated from `voidcloud.dev` to `void.app` in February 2026. All DNS records, CF for SaaS configuration, API token permissions, code references, tests, and documentation have been updated. The `void.app` zone is now the primary zone for user site routing and custom domain CNAME targets (`cname.void.app`).
+
+## Runbooks
+
+### Pre-PR-#0067 sandbox cutover (one-time)
+
+The 4 tenants below have stale CF container apps bound to per-deploy DO namespaces from before the cross-script DO host architecture (PR #131). Their next deploy after #131 ships will fail with:
+
+> container application "proj-<id>-void-sandbox" exists but is bound to namespace ... (expected ...). This is the pre-PR-#0067 stuck-tenant state. Operator action required: ...
+
+**Affected tenants (project IDs):**
+
+- recappi (look up project ID before running)
+- dtnyzh0qckg3
+- 2ves8mgqb4po
+- 60c3lfqptd2i
+
+**Operator steps (run BEFORE the tenant's next deploy):**
+
+1. Notify the tenant 24h in advance — sandbox container state will be lost (filesystem, processes, exposed ports, in-flight WebSockets).
+2. Find each project's deterministic container app name: `proj-{projectId}-void-sandbox` (lowercased, underscores → dashes; same as `sandboxContainerApplicationName(projectId, 'void-sandbox')` in code).
+3. Delete the stale container app:
+   ```
+   wrangler containers delete proj-<projectId>-void-sandbox
+   ```
+4. Tell the tenant they can deploy. Their first post-cutover deploy will:
+   - PUT a fresh `do-host-${slug}` script
+   - POST a fresh container app on the host's namespace
+   - Resolve `getSandbox(id)` to a fresh DO instance (state lost — by design at cutover only)
+
+Subsequent deploys preserve sandbox state per the architecture's normal guarantees.
+
+### Sandbox host script orphaned after partial teardown failure
+
+**Symptom:** A project was deleted but its `do-host-<slug>` script and/or `<projectId>-<containerName>` container application still exist in Cloudflare. This can happen if the platform's `teardownProject` flow crashed between status flip and CF cleanup completion, or after a manual operator intervention.
+
+**Diagnosis:**
+
+1. Confirm the project is fully deleted from PostgreSQL: `SELECT * FROM projects WHERE slug = '<slug>'` returns 0 rows.
+2. List the dispatch namespace: `wrangler dispatch-namespace get-script <namespace> do-host-<slug>` — if it returns success, the host is orphaned.
+3. List container apps: `wrangler containers list | rg <projectId>` — if any match, they're orphaned.
+
+**Remediation:**
+
+1. DELETE the host script: `curl -X DELETE -H "Authorization: Bearer $CF_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/workers/dispatch/namespaces/$DISPATCH_NAMESPACE/scripts/do-host-<slug>"`
+2. DELETE the container app: `curl -X DELETE -H "Authorization: Bearer $CF_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/containers/applications/<containerAppId>"`
+3. Re-run platform teardown if the project row still exists in PG (idempotent).
+
+**Why this can happen:** Critical CF DELETE failures (5xx, network) abort `teardownProject` BEFORE the DB cascade runs, so the operator can retry. But if the operator force-cascades the DB or runs an out-of-band delete, the CF state is left behind with no DB pointer.

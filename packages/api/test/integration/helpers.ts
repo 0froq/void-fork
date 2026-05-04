@@ -498,6 +498,11 @@ export async function createTestDeployment(
     status,
     source: source ?? null,
     error_message: errorMessage ?? null,
+    // Production deploys always have a manifest set after `updateDeploymentManifest`
+    // (post-parse). Test fixtures seeding rows directly need a non-null
+    // manifest so they're counted by `countUserDeploymentsToday` (which
+    // filters `manifest IS NOT NULL` to exclude precheck placeholders).
+    manifest: '{}',
     deployed_at: status === 'live' ? sql`now()` : null,
   });
   if (status === 'live') {
@@ -548,6 +553,233 @@ export function cfError(message: string, status = 400): Response {
   return Response.json({ success: false, errors: [{ code: 1000, message }] }, { status });
 }
 
+// ---------------------------------------------------------------------------
+// Sandbox host / container application stateful mock infrastructure
+// ---------------------------------------------------------------------------
+//
+// Tasks 7 (unit) and 8 (integration) need a mock fetch that can model:
+//   - WfP host scripts that mint a stable namespace_id on first PUT (when
+//     `metadata.migrations` declares `new_sqlite_classes`) and PRESERVE that
+//     namespace_id on subsequent PUTs without migrations (the wrangler
+//     migration_tag protocol the cross-script DO host design relies on).
+//   - Container applications keyed by name with POST/PATCH/DELETE/GET.
+//   - Cross-script DO binding validation: a user-worker PUT with a binding
+//     entry containing `script_name` is rejected if that script does not
+//     exist in the dispatch namespace.
+//   - Recording of CF call ordering so tests can assert "host PUT preceded
+//     user-worker PUT".
+//
+// The state container is fresh per `mockCfApi()` call.
+// ---------------------------------------------------------------------------
+
+export interface SandboxMockHostScript {
+  /** wrangler-style migration_tag — present once `migrations` has been applied. */
+  migration_tag?: string;
+  /** className -> namespace_id (stable per-script-per-class). */
+  classes: Map<string, string>;
+  /** Most recent bindings list parsed from the multipart PUT body. */
+  bindings: Array<{
+    type: string;
+    name?: string;
+    class_name?: string;
+    namespace_id?: string;
+    script_name?: string;
+    [key: string]: unknown;
+  }>;
+  /** Raw last-PUT metadata object. */
+  metadata: Record<string, unknown>;
+}
+
+export interface SandboxMockContainerApp {
+  id: string;
+  name: string;
+  scheduling_policy?: string;
+  configuration: { image?: string; instance_type?: string };
+  max_instances: number;
+  durable_objects: { namespace_id: string };
+}
+
+export interface SandboxMockState {
+  /** scriptName -> recorded host/user-worker script state. */
+  hostScripts: Map<string, SandboxMockHostScript>;
+  /** appId -> recorded container application state. */
+  containerApps: Map<string, SandboxMockContainerApp>;
+  /** Structured ordered recording of every method-modifying call. */
+  recordedCalls: Array<{ method: string; url: string; body?: string | undefined }>;
+}
+
+function createSandboxMockState(): SandboxMockState {
+  return {
+    hostScripts: new Map(),
+    containerApps: new Map(),
+    recordedCalls: [],
+  };
+}
+
+/**
+ * Best-effort multipart-body parser tailored to the platform's CF Workers
+ * Upload API usage. Returns the parsed `metadata` JSON and the raw bindings
+ * array if present. Returns `null` if the body is not a parseable multipart
+ * form (e.g. tests overriding `uploadWorker` may supply opaque bodies).
+ */
+async function parseMultipartMetadata(
+  init: RequestInit | undefined,
+): Promise<{ metadata: Record<string, unknown> } | null> {
+  if (!init?.body) {
+    return null;
+  }
+  // FormData is what `putSandboxHostScript` and `deploy.ts` build.
+  if (init.body instanceof FormData) {
+    const metaEntry = init.body.get('metadata');
+    if (typeof metaEntry === 'string') {
+      try {
+        return { metadata: JSON.parse(metaEntry) };
+      } catch {
+        return null;
+      }
+    }
+    if (metaEntry instanceof Blob) {
+      try {
+        return { metadata: JSON.parse(await metaEntry.text()) };
+      } catch {
+        return null;
+      }
+    }
+  }
+  // Some helpers serialize their own multipart string. We don't attempt to
+  // parse arbitrary multipart strings — tests that pass strings either don't
+  // need binding validation or they install a custom uploadWorker handler.
+  return null;
+}
+
+function mintNamespaceId(scriptName: string, className: string): string {
+  // Deterministic and unique per (scriptName, className). Test code only
+  // cares about stability across calls, not the exact format.
+  return `ns_${scriptName}_${className}`;
+}
+
+function extractBindings(metadata: Record<string, unknown>): Array<{
+  type: string;
+  name?: string;
+  class_name?: string;
+  script_name?: string;
+  [key: string]: unknown;
+}> {
+  const raw = (metadata as { bindings?: unknown }).bindings;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.filter(
+    (b): b is Record<string, unknown> => typeof b === 'object' && b !== null,
+  ) as Array<{
+    type: string;
+    name?: string;
+    class_name?: string;
+    script_name?: string;
+    [key: string]: unknown;
+  }>;
+}
+
+function pushStringValues(into: Array<string>, src: unknown): void {
+  if (!Array.isArray(src)) {
+    return;
+  }
+  for (const c of src) {
+    if (typeof c === 'string') {
+      into.push(c);
+    }
+  }
+}
+
+function extractNewSqliteClasses(metadata: Record<string, unknown>): Array<string> {
+  const migrations = metadata.migrations;
+  if (!migrations) {
+    return [];
+  }
+  const classes: Array<string> = [];
+  // CF Workers Upload API shape: `{ new_tag, steps: [{ new_sqlite_classes, new_classes }] }`
+  if (typeof migrations === 'object' && !Array.isArray(migrations)) {
+    const obj = migrations as {
+      steps?: unknown;
+      new_sqlite_classes?: unknown;
+      new_classes?: unknown;
+    };
+    pushStringValues(classes, obj.new_sqlite_classes);
+    pushStringValues(classes, obj.new_classes);
+    if (Array.isArray(obj.steps)) {
+      for (const step of obj.steps) {
+        if (typeof step === 'object' && step !== null) {
+          const s = step as { new_sqlite_classes?: unknown; new_classes?: unknown };
+          pushStringValues(classes, s.new_sqlite_classes);
+          pushStringValues(classes, s.new_classes);
+        }
+      }
+    }
+  }
+  // Wrangler config-array shape: `[{ tag, new_sqlite_classes }]`
+  if (Array.isArray(migrations)) {
+    for (const step of migrations) {
+      if (typeof step === 'object' && step !== null) {
+        const s = step as { new_sqlite_classes?: unknown; new_classes?: unknown };
+        pushStringValues(classes, s.new_sqlite_classes);
+        pushStringValues(classes, s.new_classes);
+      }
+    }
+  }
+  return classes;
+}
+
+function extractMigrationTag(metadata: Record<string, unknown>): string | undefined {
+  const migrations = metadata.migrations;
+  if (!migrations) {
+    return undefined;
+  }
+  if (typeof migrations === 'object' && !Array.isArray(migrations)) {
+    const obj = migrations as { new_tag?: unknown; tag?: unknown };
+    if (typeof obj.new_tag === 'string') {
+      return obj.new_tag;
+    }
+    if (typeof obj.tag === 'string') {
+      return obj.tag;
+    }
+  }
+  if (Array.isArray(migrations)) {
+    // Wrangler config form — last `tag` wins.
+    let tag: string | undefined;
+    for (const step of migrations) {
+      if (typeof step === 'object' && step !== null) {
+        const s = step as { tag?: unknown };
+        if (typeof s.tag === 'string') {
+          tag = s.tag;
+        }
+      }
+    }
+    return tag;
+  }
+  return undefined;
+}
+
+function parseScriptNameFromUrl(url: string): string | null {
+  // .../workers/dispatch/namespaces/{ns}/scripts/{name}[/...]
+  const m = /\/workers\/dispatch\/namespaces\/[^/]+\/scripts\/([^/?#]+)/.exec(url);
+  return m ? decodeURIComponent(m[1]!) : null;
+}
+
+function parseAppIdFromUrl(url: string): string | null {
+  // .../containers/applications/{id}[/...]
+  const m = /\/containers\/applications\/([^/?#]+)/.exec(url);
+  return m ? decodeURIComponent(m[1]!) : null;
+}
+
+function parseAppNameQuery(url: string): string | null {
+  try {
+    const u = new URL(url);
+    return u.searchParams.get('name');
+  } catch {
+    return null;
+  }
+}
+
 export interface CfApiMocks {
   createD1: (url: string, init?: RequestInit) => Response;
   createKV: (url: string, init?: RequestInit) => Response;
@@ -556,12 +788,12 @@ export interface CfApiMocks {
   addQueueConsumer: (url: string, init?: RequestInit) => Response;
   listQueueConsumers: (url: string, init?: RequestInit) => Response;
   updateQueueConsumer: (url: string, init?: RequestInit) => Response;
-  listWorkerBindings: (url: string, init?: RequestInit) => Response;
+  listWorkerBindings: (url: string, init?: RequestInit) => Response | Promise<Response>;
   deleteD1: (url: string, init?: RequestInit) => Response;
   deleteKV: (url: string, init?: RequestInit) => Response;
   deleteR2: (url: string, init?: RequestInit) => Response;
   deleteQueue: (url: string, init?: RequestInit) => Response;
-  deleteWorker: (url: string, init?: RequestInit) => Response;
+  deleteWorker: (url: string, init?: RequestInit) => Response | Promise<Response>;
   queryD1: (url: string, init?: RequestInit) => Response | Promise<Response>;
   uploadWorker: (url: string, init?: RequestInit) => Response | Promise<Response>;
   assetUploadSession: (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -574,9 +806,18 @@ export interface CfApiMocks {
   deleteCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
   purgeCache: (url: string, init?: RequestInit) => Response | Promise<Response>;
   analyticsQuery: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  // Sandbox-host / container-app endpoints. State-aware defaults are wired up
+  // when overrides are not supplied. Tests can still override individually.
+  getDispatchScript?: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  createContainerApp?: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  patchContainerApp?: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  deleteContainerApp?: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  getContainerApp?: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  listContainerApps?: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  postContainerAppRollout?: (url: string, init?: RequestInit) => Response | Promise<Response>;
 }
 
-const defaultMocks: CfApiMocks = {
+const baseDefaultMocks: Omit<CfApiMocks, 'uploadWorker' | 'listWorkerBindings' | 'deleteWorker'> = {
   createD1: () => cfSuccess({ uuid: 'd1-test-uuid', name: 'test-db' }),
   createKV: () => cfSuccess({ id: 'kv-test-id', title: 'test-kv' }),
   createR2: () => cfSuccess({ name: 'test-bucket' }),
@@ -585,15 +826,11 @@ const defaultMocks: CfApiMocks = {
   addQueueConsumer: () => cfSuccess({}),
   listQueueConsumers: () => cfSuccess([]),
   updateQueueConsumer: () => cfSuccess({}),
-  listWorkerBindings: () =>
-    cfSuccess([{ type: 'plain_text', name: '__VOID_PROXY_TOKEN', text: 'mock-proxy-token' }]),
   deleteD1: () => cfSuccess(null),
   deleteKV: () => cfSuccess(null),
   deleteR2: () => cfSuccess(null),
   deleteQueue: () => cfSuccess(null),
-  deleteWorker: () => new Response('ok', { status: 200 }),
   queryD1: () => cfSuccess([{ results: [] }]),
-  uploadWorker: () => new Response('ok', { status: 200 }),
   assetUploadSession: async (_url: string, init?: RequestInit) => {
     // Extract real hashes from the manifest in the request body so the mock
     // bucket matches what the streaming deploy route actually computed
@@ -642,15 +879,343 @@ const defaultMocks: CfApiMocks = {
   analyticsQuery: () => Response.json({ data: [{ requests: 0, bandwidth_bytes: 0 }] }),
 };
 
-export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeof vi.fn> {
-  const mocks = { ...defaultMocks, ...overrides };
+/**
+ * Backwards-compatible mock fetch handle. Existing tests use the return value
+ * directly as a `vi.fn()` (e.g. `fetchMock.mock.calls`); new tests destructure
+ * `state` / `seedHostScript` / `seedContainerApp` / `expectCallOrder` to drive
+ * the sandbox-host scenarios.
+ *
+ * The handle IS the `vi.fn()` — the additional fields are attached via
+ * `Object.assign` so existing call sites continue to work unchanged.
+ */
+export type MockCfApiHandle = ReturnType<typeof vi.fn> & {
+  /** Live state container — fresh per `mockCfApi()` call. */
+  state: SandboxMockState;
+  /**
+   * Seed a host script directly into the mock state without going through
+   * `provisionSandboxHost`. Useful for fixturing tests that assert the
+   * cached-fast-path of a deploy.
+   */
+  seedHostScript(args: {
+    scriptName: string;
+    migrationTag?: string;
+    classes?: Record<string, string>;
+    bindings?: Array<Record<string, unknown>>;
+    metadata?: Record<string, unknown>;
+  }): SandboxMockHostScript;
+  /**
+   * Seed a container application directly into the mock state. The minted id
+   * is `app_<name>` to match the create handler's id format.
+   */
+  seedContainerApp(args: {
+    name: string;
+    namespaceId: string;
+    image?: string;
+    instanceType?: string;
+    maxInstances?: number;
+  }): SandboxMockContainerApp;
+  /**
+   * Assert that a sequence of substrings appears (in order) in the recorded
+   * call URLs. Each substring may be a plain URL fragment or an object with
+   * `{ method, url }` for a stricter match.
+   */
+  expectCallOrder(...steps: Array<string | { method: string; url: string }>): void;
+};
+
+export function mockCfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle {
+  const state = createSandboxMockState();
+
+  // ------------------------------------------------------------------------
+  // State-aware defaults (closure over `state`).
+  // ------------------------------------------------------------------------
+
+  // Default `uploadWorker` parses the multipart metadata, mints + preserves
+  // namespace_ids, validates cross-script bindings, and records the script.
+  const defaultUploadWorker = async (url: string, init?: RequestInit): Promise<Response> => {
+    const scriptName = parseScriptNameFromUrl(url);
+    if (!scriptName) {
+      return new Response('ok', { status: 200 });
+    }
+
+    const parsed = await parseMultipartMetadata(init);
+    if (!parsed) {
+      // Body shape is opaque (string body or non-FormData). Behave like the
+      // legacy `() => new Response('ok')` default — tests that need state
+      // recording for these cases will install their own override.
+      return new Response('ok', { status: 200 });
+    }
+
+    const { metadata } = parsed;
+    const bindings = extractBindings(metadata);
+
+    // Cross-script binding validation. Catches the regression where a user
+    // worker is PUT before the host script exists (or where the metadata
+    // rewrite is skipped).
+    for (const binding of bindings) {
+      const refScript = (binding as { script_name?: unknown }).script_name;
+      if (typeof refScript === 'string' && refScript !== scriptName) {
+        if (!state.hostScripts.has(refScript)) {
+          return Response.json(
+            {
+              success: false,
+              errors: [
+                {
+                  code: 10021,
+                  message: `cross-script binding refers to non-existent script: ${refScript}`,
+                },
+              ],
+            },
+            { status: 400 },
+          );
+        }
+      }
+    }
+
+    // Resolve / mint namespace_ids for declared classes.
+    const existing = state.hostScripts.get(scriptName);
+    const declaredClasses = extractNewSqliteClasses(metadata);
+    const newTag = extractMigrationTag(metadata);
+
+    const classes: Map<string, string> = new Map(existing?.classes);
+    for (const className of declaredClasses) {
+      if (!classes.has(className)) {
+        classes.set(className, mintNamespaceId(scriptName, className));
+      }
+    }
+
+    // Tag handling: declaring `migrations` advances the tag (or creates one);
+    // omitting `migrations` preserves whatever tag was already there.
+    const migrationTag = newTag ?? existing?.migration_tag;
+
+    // Populate same-script DO bindings with their resolved namespace_id so
+    // GET /bindings reflects what `findDurableObjectNamespaceId` reads.
+    const persistedBindings = bindings.map((b) => {
+      if (
+        b.type === 'durable_object_namespace' &&
+        typeof b.class_name === 'string' &&
+        !b.script_name
+      ) {
+        const nsId = classes.get(b.class_name);
+        if (nsId) {
+          return { ...b, namespace_id: nsId };
+        }
+      }
+      return b;
+    });
+
+    state.hostScripts.set(scriptName, {
+      migration_tag: migrationTag,
+      classes,
+      bindings: persistedBindings,
+      metadata,
+    });
+
+    return new Response('ok', { status: 200 });
+  };
+
+  // Default `listWorkerBindings` reads from state when the script has been
+  // PUT through the stateful path; otherwise returns the legacy proxy-token
+  // payload so existing tests keep passing.
+  const defaultListWorkerBindings = (url: string): Response => {
+    const scriptName = parseScriptNameFromUrl(url);
+    if (scriptName && state.hostScripts.has(scriptName)) {
+      const script = state.hostScripts.get(scriptName)!;
+      return cfSuccess(script.bindings);
+    }
+    return cfSuccess([
+      { type: 'plain_text', name: '__VOID_PROXY_TOKEN', text: 'mock-proxy-token' },
+    ]);
+  };
+
+  // Default `deleteWorker` removes the script from state. Returns a CF-shaped
+  // 404 envelope when the script doesn't exist (so `cfFetch` callers see the
+  // right `CloudflareApiError.status`).
+  const defaultDeleteWorker = (url: string): Response => {
+    const scriptName = parseScriptNameFromUrl(url);
+    if (!scriptName) {
+      return new Response('ok', { status: 200 });
+    }
+    if (!state.hostScripts.has(scriptName)) {
+      // Existing tests historically expect 200 from deleteWorker even for
+      // unknown scripts (idempotent semantics on the platform side). Keep
+      // that default; only sandbox-host tests need 404 differentiation, and
+      // those tests can install an override.
+      return new Response('ok', { status: 200 });
+    }
+    state.hostScripts.delete(scriptName);
+    return new Response('ok', { status: 200 });
+  };
+
+  // GET dispatch script — returns metadata including migration_tag.
+  const defaultGetDispatchScript = (url: string): Response => {
+    const scriptName = parseScriptNameFromUrl(url);
+    if (!scriptName || !state.hostScripts.has(scriptName)) {
+      return Response.json(
+        {
+          success: false,
+          errors: [{ code: 10007, message: 'workers.api.error.script_not_found' }],
+        },
+        { status: 404 },
+      );
+    }
+    const script = state.hostScripts.get(scriptName)!;
+    return cfSuccess({
+      migration_tag: script.migration_tag ?? null,
+      ...script.metadata,
+    });
+  };
+
+  // Container app handlers.
+  const defaultListContainerApps = (url: string): Response => {
+    const name = parseAppNameQuery(url);
+    if (!name) {
+      return cfSuccess(Array.from(state.containerApps.values()));
+    }
+    const app = Array.from(state.containerApps.values()).find((a) => a.name === name);
+    return cfSuccess(app ? [app] : []);
+  };
+
+  const defaultGetContainerApp = (url: string): Response => {
+    const id = parseAppIdFromUrl(url);
+    if (!id || !state.containerApps.has(id)) {
+      return Response.json(
+        {
+          success: false,
+          errors: [{ code: 1000, message: 'container application not found' }],
+        },
+        { status: 404 },
+      );
+    }
+    return cfSuccess(state.containerApps.get(id));
+  };
+
+  const defaultCreateContainerApp = async (_url: string, init?: RequestInit): Promise<Response> => {
+    let body: Record<string, unknown> = {};
+    if (typeof init?.body === 'string') {
+      try {
+        body = JSON.parse(init.body) as Record<string, unknown>;
+      } catch {
+        // ignore
+      }
+    }
+    const name = typeof body.name === 'string' ? body.name : '';
+    if (!name) {
+      return Response.json(
+        { success: false, errors: [{ code: 1000, message: 'name is required' }] },
+        { status: 400 },
+      );
+    }
+    const conflict = Array.from(state.containerApps.values()).find((a) => a.name === name);
+    if (conflict) {
+      return Response.json(
+        { success: false, errors: [{ code: 1000, message: 'already exists' }] },
+        { status: 409 },
+      );
+    }
+    const durableObjects = (body.durable_objects as { namespace_id?: string } | undefined) ?? {
+      namespace_id: '',
+    };
+    const configuration =
+      (body.configuration as { image?: string; instance_type?: string } | undefined) ?? {};
+    const app: SandboxMockContainerApp = {
+      id: `app_${name}`,
+      name,
+      scheduling_policy:
+        typeof body.scheduling_policy === 'string' ? body.scheduling_policy : 'default',
+      configuration: {
+        image: configuration.image,
+        instance_type: configuration.instance_type ?? 'lite',
+      },
+      max_instances: typeof body.max_instances === 'number' ? body.max_instances : 20,
+      durable_objects: { namespace_id: durableObjects.namespace_id ?? '' },
+    };
+    state.containerApps.set(app.id, app);
+    return cfSuccess(app);
+  };
+
+  const defaultPatchContainerApp = async (url: string, init?: RequestInit): Promise<Response> => {
+    const id = parseAppIdFromUrl(url);
+    if (!id || !state.containerApps.has(id)) {
+      return Response.json(
+        { success: false, errors: [{ code: 1000, message: 'not found' }] },
+        { status: 404 },
+      );
+    }
+    const app = state.containerApps.get(id)!;
+    let body: Record<string, unknown> = {};
+    if (typeof init?.body === 'string') {
+      try {
+        body = JSON.parse(init.body) as Record<string, unknown>;
+      } catch {
+        // ignore
+      }
+    }
+    if (body.configuration && typeof body.configuration === 'object') {
+      const cfg = body.configuration as { image?: string; instance_type?: string };
+      app.configuration = {
+        image: cfg.image ?? app.configuration.image,
+        instance_type: cfg.instance_type ?? app.configuration.instance_type,
+      };
+    }
+    if (typeof body.max_instances === 'number') {
+      app.max_instances = body.max_instances;
+    }
+    state.containerApps.set(id, app);
+    return cfSuccess(app);
+  };
+
+  const defaultDeleteContainerApp = (url: string): Response => {
+    const id = parseAppIdFromUrl(url);
+    if (!id || !state.containerApps.has(id)) {
+      return Response.json(
+        { success: false, errors: [{ code: 1000, message: 'not found' }] },
+        { status: 404 },
+      );
+    }
+    state.containerApps.delete(id);
+    return cfSuccess(null);
+  };
+
+  const defaultPostContainerAppRollout = (): Response => {
+    return cfSuccess({ id: 'rollout-test-id' });
+  };
+
+  const mocks: CfApiMocks = {
+    ...baseDefaultMocks,
+    uploadWorker: defaultUploadWorker,
+    listWorkerBindings: defaultListWorkerBindings,
+    deleteWorker: defaultDeleteWorker,
+    getDispatchScript: defaultGetDispatchScript,
+    createContainerApp: defaultCreateContainerApp,
+    patchContainerApp: defaultPatchContainerApp,
+    deleteContainerApp: defaultDeleteContainerApp,
+    getContainerApp: defaultGetContainerApp,
+    listContainerApps: defaultListContainerApps,
+    postContainerAppRollout: defaultPostContainerAppRollout,
+    ...overrides,
+  };
 
   const fn = vi.fn(async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url =
       typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     const method = init?.method ?? 'GET';
 
-    // Order matters: more specific patterns first
+    // Record every call (excluding bare GETs without a method? — they're
+    // already useful for ordering). Bodies are recorded only when serializable
+    // as a string — multipart FormData bodies are summarized as `[FormData]`.
+    let bodySnapshot: string | undefined;
+    if (init?.body !== undefined) {
+      if (typeof init.body === 'string') {
+        bodySnapshot = init.body;
+      } else if (init.body instanceof FormData) {
+        bodySnapshot = '[FormData]';
+      } else {
+        bodySnapshot = '[binary]';
+      }
+    }
+    state.recordedCalls.push({ method, url, body: bodySnapshot });
+
+    // Order matters: more specific patterns first.
     if (method === 'POST' && url.includes('/purge_cache')) {
       return mocks.purgeCache(url, init);
     }
@@ -672,6 +1237,32 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
     if (method === 'POST' && url.includes('/workers/assets/upload')) {
       return mocks.assetUpload(url, init);
     }
+
+    // Container application endpoints (must come before the generic dispatch
+    // worker matchers because both live under /accounts/{a}/...).
+    if (
+      method === 'POST' &&
+      url.includes('/containers/applications/') &&
+      url.endsWith('/rollouts')
+    ) {
+      return mocks.postContainerAppRollout!(url, init);
+    }
+    if (method === 'PATCH' && url.includes('/containers/applications/')) {
+      return mocks.patchContainerApp!(url, init);
+    }
+    if (method === 'DELETE' && url.includes('/containers/applications/')) {
+      return mocks.deleteContainerApp!(url, init);
+    }
+    if (method === 'GET' && url.includes('/containers/applications/')) {
+      return mocks.getContainerApp!(url, init);
+    }
+    if (method === 'GET' && url.includes('/containers/applications')) {
+      return mocks.listContainerApps!(url, init);
+    }
+    if (method === 'POST' && url.includes('/containers/applications')) {
+      return mocks.createContainerApp!(url, init);
+    }
+
     if (method === 'GET' && url.includes('/workers/dispatch/') && url.includes('/secrets')) {
       return mocks.listWorkerSecrets(url, init);
     }
@@ -680,6 +1271,18 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
     }
     if (method === 'DELETE' && url.includes('/workers/dispatch/') && url.includes('/secrets/')) {
       return mocks.deleteWorkerSecret(url, init);
+    }
+    if (method === 'GET' && url.includes('/workers/dispatch/') && url.includes('/bindings')) {
+      return mocks.listWorkerBindings(url, init);
+    }
+    // GET on a dispatch script (no /bindings, no /secrets) — read the
+    // script's metadata + migration_tag. Must come AFTER /bindings and
+    // /secrets matches because those URLs share the prefix.
+    if (
+      method === 'GET' &&
+      /\/workers\/dispatch\/namespaces\/[^/]+\/scripts\/[^/?#]+(?:[?#]|$)/.test(url)
+    ) {
+      return mocks.getDispatchScript!(url, init);
     }
     if (method === 'DELETE' && url.includes('/workers/dispatch/')) {
       return mocks.deleteWorker(url, init);
@@ -717,9 +1320,6 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
     if (method === 'PUT' && url.includes('/queues/') && url.includes('/consumers/')) {
       return mocks.updateQueueConsumer(url, init);
     }
-    if (method === 'GET' && url.includes('/workers/dispatch/') && url.includes('/bindings')) {
-      return mocks.listWorkerBindings(url, init);
-    }
     if (method === 'POST' && url.includes('/queues')) {
       return mocks.createQueue(url, init);
     }
@@ -731,7 +1331,71 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): ReturnType<typeo
   });
 
   vi.stubGlobal('fetch', fn);
-  return fn;
+
+  const seedHostScript: MockCfApiHandle['seedHostScript'] = (args) => {
+    const classes = new Map<string, string>();
+    if (args.classes) {
+      for (const [k, v] of Object.entries(args.classes)) {
+        classes.set(k, v);
+      }
+    }
+    const bindings = (args.bindings ?? []) as SandboxMockHostScript['bindings'];
+    const script: SandboxMockHostScript = {
+      migration_tag: args.migrationTag,
+      classes,
+      bindings,
+      metadata: args.metadata ?? {},
+    };
+    state.hostScripts.set(args.scriptName, script);
+    return script;
+  };
+
+  const seedContainerApp: MockCfApiHandle['seedContainerApp'] = (args) => {
+    const app: SandboxMockContainerApp = {
+      id: `app_${args.name}`,
+      name: args.name,
+      scheduling_policy: 'default',
+      configuration: {
+        image: args.image,
+        instance_type: args.instanceType ?? 'lite',
+      },
+      max_instances: args.maxInstances ?? 20,
+      durable_objects: { namespace_id: args.namespaceId },
+    };
+    state.containerApps.set(app.id, app);
+    return app;
+  };
+
+  const expectCallOrder: MockCfApiHandle['expectCallOrder'] = (...steps) => {
+    let cursor = 0;
+    for (const step of steps) {
+      const matchAt = state.recordedCalls.findIndex((c, i) => {
+        if (i < cursor) {
+          return false;
+        }
+        if (typeof step === 'string') {
+          return c.url.includes(step);
+        }
+        return c.method === step.method && c.url.includes(step.url);
+      });
+      if (matchAt === -1) {
+        const recorded = state.recordedCalls.map((c) => `${c.method} ${c.url}`).join('\n');
+        const stepStr = typeof step === 'string' ? step : `${step.method} ${step.url}`;
+        throw new Error(
+          `expectCallOrder: did not find step "${stepStr}" after index ${cursor}.\nRecorded calls:\n${recorded}`,
+        );
+      }
+      cursor = matchAt + 1;
+    }
+  };
+
+  const handle = Object.assign(fn, {
+    state,
+    seedHostScript,
+    seedContainerApp,
+    expectCallOrder,
+  }) as MockCfApiHandle;
+  return handle;
 }
 
 export async function readAllEvents(res: Response): Promise<Array<unknown>> {

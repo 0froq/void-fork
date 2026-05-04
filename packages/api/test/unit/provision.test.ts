@@ -166,6 +166,7 @@ describe('provisionBindings', () => {
         cf_id: 'existing-d1-id',
         binding_name: 'DB',
         created_at: new Date().toISOString(),
+        metadata: {},
       },
     ];
     vi.mocked(getProjectResources).mockResolvedValue(existingResources);
@@ -292,6 +293,7 @@ describe('provisionBindings', () => {
         cf_id: 'existing-d1-id',
         binding_name: 'DB',
         created_at: new Date().toISOString(),
+        metadata: {},
       },
     ];
     vi.mocked(getProjectResources).mockResolvedValue(existingResources);

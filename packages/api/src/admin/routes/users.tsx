@@ -9,11 +9,10 @@ import {
   suspendUser,
   unsuspendUser,
   countUserDeploymentsToday,
-  deleteProjectCascade,
   deleteUser,
 } from '../../db.ts';
 import type { ApiEnv } from '../../env.ts';
-import { cleanupProjectResources } from '../../provisioning/cleanup.ts';
+import { teardownProject } from '../../provisioning/cleanup.ts';
 import { getRequestsDataset, queryBatchProjectUsage, ZERO_USAGE } from '../../routes/usage.ts';
 import { PLAN_LIMITS, getCurrentBillingPeriodStart, type PlanId } from '../../tiers.ts';
 import { UserDetailPage } from '../views/user-detail.tsx';
@@ -162,8 +161,7 @@ app.post('/:id/delete', async (c) => {
   }
   const projects = await getProjectsByUserId(c.get('db'), user.id);
   for (const project of projects) {
-    await cleanupProjectResources(c, project.id, project);
-    await deleteProjectCascade(c.get('db'), project.id);
+    await teardownProject(c, project.id, project);
   }
   await deleteUser(c.get('db'), user.id);
   return c.redirect('/admin/users');

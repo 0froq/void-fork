@@ -48,15 +48,17 @@ void _entry;
 // Pin the key set on every side. If `force` (or any other dev-only field)
 // leaks back onto a public `RedirectRule`, `Exclude<...>` resolves to a
 // non-`never` type and the `never` assignment below fails.
-type _FrameworkExtras = Exclude<keyof FrameworkRule, 'source' | 'destination' | 'status'>;
+type _PinnedKeys = 'source' | 'destination' | 'status' | 'host';
+
+type _FrameworkExtras = Exclude<keyof FrameworkRule, _PinnedKeys>;
 const _noFrameworkExtras: _FrameworkExtras extends never ? true : false = true;
 void _noFrameworkExtras;
 
-type _DispatchExtras = Exclude<keyof DispatchRule, 'source' | 'destination' | 'status'>;
+type _DispatchExtras = Exclude<keyof DispatchRule, _PinnedKeys>;
 const _noDispatchExtras: _DispatchExtras extends never ? true : false = true;
 void _noDispatchExtras;
 
-type _ApiExtras = Exclude<keyof ApiRule, 'source' | 'destination' | 'status'>;
+type _ApiExtras = Exclude<keyof ApiRule, _PinnedKeys>;
 const _noApiExtras: _ApiExtras extends never ? true : false = true;
 void _noApiExtras;
 
@@ -65,7 +67,12 @@ describe('framework wire-shape contract', () => {
     // Real enforcement is at compile time (see top-of-file assertions). This
     // runtime assertion documents the pinned key set and keeps vitest from
     // reporting the file as empty.
-    const sample: FrameworkRule = { source: '/a', destination: '/b', status: 301 };
-    expect(Object.keys(sample).sort()).toEqual(['destination', 'source', 'status']);
+    const sample: FrameworkRule = {
+      source: '/a',
+      destination: '/b',
+      status: 301,
+      host: 'example.com',
+    };
+    expect(Object.keys(sample).sort()).toEqual(['destination', 'host', 'source', 'status']);
   });
 });

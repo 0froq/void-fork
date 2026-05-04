@@ -818,6 +818,7 @@ describe('POST /projects/:id/deploy', () => {
         id: `dpl_limit_${i}`,
         project_id: project.id,
         status: 'live',
+        manifest: '{}',
         created_at: sql`now()`,
       });
     }
@@ -847,6 +848,7 @@ describe('POST /projects/:id/deploy', () => {
         id: `dpl_under_${i}`,
         project_id: project.id,
         status: 'live',
+        manifest: '{}',
         created_at: sql`now()`,
       });
     }
@@ -2669,6 +2671,7 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
         id: `dpl_pad_${i}`,
         project_id: project.id,
         status: 'live',
+        manifest: '{}',
         created_at: sql`now()`,
       });
     }
@@ -2719,6 +2722,7 @@ describe('POST /projects/:id/deploy (streaming static)', () => {
         id: `dpl_pad_worker_${i}`,
         project_id: project.id,
         status: 'live',
+        manifest: '{}',
         created_at: sql`now()`,
       });
     }
@@ -5842,20 +5846,30 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
 
   // ---- Post-parse DB failures ----
 
-  it('sweeps streamed assets when createDeployment throws after parsing', async () => {
+  it('sweeps streamed assets when post-parse deployment update fails', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'edge-db-fail');
     mockCfApi();
 
-    // Fail the deployment insert after the parse loop completes, so the outer
-    // finally must sweep the asset that already landed in KV.
-    const origInsert = env.db.insert.bind(env.db);
-    vi.spyOn(env.db, 'insert').mockImplementation((table: unknown) => {
-      if (table === deployments) {
-        throw new Error('simulated deployment insert failure');
+    // Fail the deployment row update after the parse loop completes, so the
+    // outer finally must sweep the asset that already landed in KV. The
+    // route's atomic precheck-and-claim transaction inserts a placeholder
+    // deployment row pre-stream (call #1 to env.db.transaction); the
+    // post-parse pipeline calls env.db.transaction again (call #2) to fill
+    // in the manifest under a FOR UPDATE re-check. Letting #1 succeed and
+    // throwing on #2 simulates a post-parse DB failure: the placeholder
+    // exists, the manifest update never lands, and the abort path runs.
+    const origTransaction = env.db.transaction.bind(env.db);
+    let txCallCount = 0;
+    vi.spyOn(env.db, 'transaction').mockImplementation(((
+      ...args: Parameters<typeof origTransaction>
+    ) => {
+      txCallCount += 1;
+      if (txCallCount >= 2) {
+        throw new Error('simulated deployment update failure');
       }
-      return origInsert(table as Parameters<typeof origInsert>[0]);
-    });
+      return origTransaction(...args);
+    }) as typeof origTransaction);
 
     const form = new FormData();
     form.append(
@@ -5894,7 +5908,11 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     const listed = await env.STATIC_ASSETS.list({ prefix: `assets/${project.id}/` });
     expect(listed.keys).toEqual([]);
 
-    // The insert threw — the deployment row must not exist.
+    // The post-parse update threw — the placeholder row inserted by the
+    // precheck never advanced past `status='pending' AND manifest IS NULL`,
+    // so the IIFE's finally-block reaper deletes it. Net: no deployment
+    // row remains, so the next deploy can proceed without waiting on the
+    // 10-minute stale-deploy timeout.
     const dpls = await env.db
       .select({ id: deployments.id })
       .from(deployments)

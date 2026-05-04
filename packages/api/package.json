@@ -17,6 +17,7 @@
     "./suspension": "./src/suspension.ts"
   },
   "scripts": {
+    "build:sandbox-host": "node scripts/build-sandbox-host.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "deploy": "wrangler deploy",
@@ -27,6 +28,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@cloudflare/sandbox": "0.9.1",
     "@voidcloud/isr-shared": "workspace:*",
     "blake3-jit": "^1.1.0",
     "cron-parser": "5.5.0",
@@ -42,6 +44,7 @@
     "@typescript/native-preview": "catalog:",
     "drizzle-kit": "^0.31.10",
     "miniflare": "^4.20260421.0",
+    "tsdown": "0.21.10",
     "wrangler": "catalog:"
   },
   "optionalDependencies": {

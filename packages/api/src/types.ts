@@ -108,6 +108,18 @@ export interface RedirectRule {
   source: string;
   destination: string;
   status: number;
+  /**
+   * Optional literal host the rule is scoped to. Authored as an
+   * `https://host/path` prefix on the source in `_redirects` (or as the
+   * `host` key in a `routing.redirects` object form in `void.json`); the
+   * framework parser splits the URL and stores `host` here, leaving
+   * `source` as the path-only pattern. Lowercase-normalized at parse time.
+   * The platform validates that `host` is bound to the project at deploy
+   * ingest, and dispatch matches it byte-for-byte against `url.hostname`
+   * at request time. Optional — path-only rules apply to every host bound
+   * to the project.
+   */
+  host?: string;
 }
 
 /**

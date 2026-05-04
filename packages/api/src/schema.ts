@@ -1,7 +1,9 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   index,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -72,6 +74,7 @@ export const projects = pgTable(
     type: text('mode').notNull().default('worker').$type<'void' | 'spa' | 'static' | 'framework'>(),
     active_deployment_id: text('active_deployment_id'),
     websocket_version: integer('websocket_version').notNull().default(0),
+    status: text('status').notNull().default('active').$type<'active' | 'deleting'>(),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
   (t) => [
@@ -158,6 +161,10 @@ export const resources = pgTable(
     type: text('type').notNull().$type<'d1' | 'kv' | 'r2' | 'queue' | 'hyperdrive' | 'container'>(),
     cf_id: text('cf_id').notNull(),
     binding_name: text('binding_name').notNull(),
+    metadata: jsonb('metadata')
+      .notNull()
+      .default(sql`'{}'::jsonb`)
+      .$type<Record<string, unknown>>(),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
   (t) => [unique().on(t.project_id, t.type, t.binding_name)],
