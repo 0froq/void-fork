@@ -968,6 +968,44 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle 
             { status: 400 },
           );
         }
+        // Container-enabled validation. CF rejects cross-script DO bindings
+        // to a class that the OWNING script has not declared as
+        // container-enabled via its metadata `containers` field. Prior to
+        // this check the mock accepted any cross-script binding so long as
+        // the host existed — which is exactly the regression that let
+        // PR #131's missing `containers` field slip into production. The
+        // host's last-PUT metadata is stored under
+        // `state.hostScripts.<host>.metadata`; we look up the referenced
+        // class_name there.
+        if (binding.type === 'durable_object_namespace' && typeof binding.class_name === 'string') {
+          const refClassName = binding.class_name;
+          const hostScript = state.hostScripts.get(refScript)!;
+          const hostContainers = (hostScript.metadata as { containers?: unknown }).containers;
+          const isContainerEnabled =
+            Array.isArray(hostContainers) &&
+            hostContainers.some(
+              (c) =>
+                typeof c === 'object' &&
+                c !== null &&
+                (c as { class_name?: unknown }).class_name === refClassName,
+            );
+          if (!isContainerEnabled) {
+            return Response.json(
+              {
+                success: false,
+                errors: [
+                  {
+                    code: 10103,
+                    message: `DURABLE_OBJECT_NOT_CONTAINER_ENABLED: cross-script binding to ${refScript}.${refClassName} requires the host script to declare containers: [{ class_name: "${refClassName}" }]`,
+                  },
+                ],
+                messages: [],
+                result: null,
+              },
+              { status: 400 },
+            );
+          }
+        }
       }
     }
 

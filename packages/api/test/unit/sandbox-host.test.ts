@@ -231,7 +231,7 @@ describe('provisionSandboxHost', () => {
     });
   });
 
-  it('2. existing valid host (cache hit, no drift): no host PUT, no namespace lookup, no container POST/DELETE/PATCH', async () => {
+  it('2. existing valid host (cache hit, no drift): exactly one always-PUT host (no migrations rotation), includes containers signal, no namespace lookup, no container POST/DELETE/PATCH', async () => {
     cf.seedHostScript({
       scriptName: HOST_SCRIPT_NAME,
       migrationTag: HOST_MIGRATION_TAG,
@@ -264,6 +264,26 @@ describe('provisionSandboxHost', () => {
       },
     ];
 
+    // Capture the always-PUT host body so we can assert it omits `migrations`
+    // (tag preserved → no namespace rotation) and includes `containers` so
+    // cross-script DO bindings on the user worker PUT will be accepted.
+    let capturedHostPutMetadata: Record<string, unknown> | null = null;
+    const realFetch = global.fetch;
+    global.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : (input as Request | URL).toString();
+      if (
+        init?.method === 'PUT' &&
+        url.includes(`/scripts/${HOST_SCRIPT_NAME}`) &&
+        init.body instanceof FormData
+      ) {
+        const meta = init.body.get('metadata');
+        if (meta instanceof Blob) {
+          capturedHostPutMetadata = JSON.parse(await meta.text());
+        }
+      }
+      return (realFetch as typeof fetch)(input as RequestInfo | URL, init);
+    }) as typeof fetch;
+
     const info = await provisionSandboxHost(
       ENV,
       stubDb,
@@ -280,12 +300,22 @@ describe('provisionSandboxHost', () => {
       containerApplicationId: `app_${CONTAINER_APP_NAME}`,
     });
 
-    // No host PUT (script already there).
-    expect(
-      cf.state.recordedCalls.some(
-        (c) => c.method === 'PUT' && c.url.includes(`/scripts/${HOST_SCRIPT_NAME}`),
-      ),
-    ).toBe(false);
+    // Exactly one host PUT — the unconditional always-PUT at the top of
+    // provisionSandboxHost. Body OMITS migrations (tag preserved, no
+    // namespace rotation) and INCLUDES the containers capability marker.
+    const hostPuts = cf.state.recordedCalls.filter(
+      (c) => c.method === 'PUT' && c.url.includes(`/scripts/${HOST_SCRIPT_NAME}`),
+    );
+    expect(hostPuts).toHaveLength(1);
+    expect(capturedHostPutMetadata).not.toBeNull();
+    expect(capturedHostPutMetadata).not.toHaveProperty('migrations');
+    expect(capturedHostPutMetadata!.containers).toEqual([{ class_name: 'Sandbox' }]);
+    // Tag was preserved on the seeded host (no rotation).
+    expect(cf.state.hostScripts.get(HOST_SCRIPT_NAME)!.migration_tag).toBe(HOST_MIGRATION_TAG);
+    expect(cf.state.hostScripts.get(HOST_SCRIPT_NAME)!.classes.get('Sandbox')).toBe(
+      HOST_NAMESPACE_ID,
+    );
+
     // No container POST/DELETE/PATCH (config matches).
     expect(
       cf.state.recordedCalls.some(
@@ -306,7 +336,7 @@ describe('provisionSandboxHost', () => {
     expect(dbState.inserts).toHaveLength(0);
   });
 
-  it('3. existing valid host but container config drift (image change): fast path PATCHes container + posts rollout; no host PUT', async () => {
+  it('3. existing valid host but container config drift (image change): exactly one always-PUT host (no migrations rotation) + container PATCH + rollout', async () => {
     cf.seedHostScript({
       scriptName: HOST_SCRIPT_NAME,
       migrationTag: HOST_MIGRATION_TAG,
@@ -339,6 +369,23 @@ describe('provisionSandboxHost', () => {
       },
     ];
 
+    let capturedHostPutMetadata: Record<string, unknown> | null = null;
+    const realFetch = global.fetch;
+    global.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : (input as Request | URL).toString();
+      if (
+        init?.method === 'PUT' &&
+        url.includes(`/scripts/${HOST_SCRIPT_NAME}`) &&
+        init.body instanceof FormData
+      ) {
+        const meta = init.body.get('metadata');
+        if (meta instanceof Blob) {
+          capturedHostPutMetadata = JSON.parse(await meta.text());
+        }
+      }
+      return (realFetch as typeof fetch)(input as RequestInfo | URL, init);
+    }) as typeof fetch;
+
     await provisionSandboxHost(
       ENV,
       stubDb,
@@ -350,12 +397,18 @@ describe('provisionSandboxHost', () => {
       DESIRED_MAX_INSTANCES,
     );
 
-    // No host PUT.
-    expect(
-      cf.state.recordedCalls.some(
-        (c) => c.method === 'PUT' && c.url.includes(`/scripts/${HOST_SCRIPT_NAME}`),
-      ),
-    ).toBe(false);
+    // Exactly one host PUT — the unconditional always-PUT, with migrations
+    // OMITTED (no rotation) and the containers capability marker present.
+    const hostPuts = cf.state.recordedCalls.filter(
+      (c) => c.method === 'PUT' && c.url.includes(`/scripts/${HOST_SCRIPT_NAME}`),
+    );
+    expect(hostPuts).toHaveLength(1);
+    expect(capturedHostPutMetadata).not.toBeNull();
+    expect(capturedHostPutMetadata).not.toHaveProperty('migrations');
+    expect(capturedHostPutMetadata!.containers).toEqual([{ class_name: 'Sandbox' }]);
+    // Tag preserved.
+    expect(cf.state.hostScripts.get(HOST_SCRIPT_NAME)!.migration_tag).toBe(HOST_MIGRATION_TAG);
+
     // PATCH then rollout.
     cf.expectCallOrder(
       { method: 'PATCH', url: `/containers/applications/app_${CONTAINER_APP_NAME}` },
@@ -369,14 +422,20 @@ describe('provisionSandboxHost', () => {
     expect(dbState.inserts).toHaveLength(0);
   });
 
-  it("4. existing host record but host script HEAD 404: recovery PUTs host; if a container app already exists on the host's minted namespace (e.g. partial-failure replay where host PUT + container POST landed but resource UPSERT did not), it is reused and config drift is reconciled", async () => {
-    // No host script in CF (HEAD will 404). A container app already exists
-    // bound to what WILL be the host's freshly-minted namespace — this is the
+  it('4. existing host record but no host script in CF: always-PUT recreates the host with initial migrations; cached fast path then reconciles container drift (PATCH+rollout)', async () => {
+    // No host script in CF (fetchScriptMigrationTag returns null). A container
+    // app already exists bound to what the always-PUT will mint — this is the
     // post-host-PUT-pre-resource-UPSERT replay shape after an external host
     // delete. Image is stale to exercise the drift-reconcile branch.
+    //
+    // After always-PUT, the freshly-minted SANDBOX namespace_id equals
+    // `HOST_NAMESPACE_ID` (deterministic in the mock from scriptName +
+    // className) which matches the cached metadata, so the cached fast path
+    // succeeds and reconciles drift via PATCH+rollout instead of falling
+    // through to create-or-recover.
     cf.seedContainerApp({
       name: CONTAINER_APP_NAME,
-      namespaceId: HOST_NAMESPACE_ID, // same namespace the recovery PUT will mint
+      namespaceId: HOST_NAMESPACE_ID, // same namespace the always-PUT will mint
       image: 'registry.cloudflare.com/sandbox:0.5.0', // stale → triggers PATCH+rollout
       instanceType: DESIRED_INSTANCE_TYPE,
       maxInstances: DESIRED_MAX_INSTANCES,
@@ -404,13 +463,13 @@ describe('provisionSandboxHost', () => {
       DESIRED_MAX_INSTANCES,
     );
 
-    // Host script verification GET hit before the recovery branch — host was
-    // missing so cached path returned false and create-or-recover ran. The
-    // pre-existing same-namespace container is reused (no DELETE, no POST);
-    // its config drift is reconciled via PATCH + rollout.
+    // Order: fetchScriptMigrationTag GET → always-PUT host → cached fast path
+    // GETs the container by id, then probes live bindings, then reconciles
+    // drift via PATCH + rollout.
     cf.expectCallOrder(
       { method: 'GET', url: `/scripts/${HOST_SCRIPT_NAME}` },
       { method: 'PUT', url: `/scripts/${HOST_SCRIPT_NAME}` },
+      { method: 'GET', url: `/containers/applications/app_${CONTAINER_APP_NAME}` },
       { method: 'GET', url: `/scripts/${HOST_SCRIPT_NAME}/bindings` },
       { method: 'PATCH', url: `/containers/applications/app_${CONTAINER_APP_NAME}` },
       { method: 'POST', url: `/containers/applications/app_${CONTAINER_APP_NAME}/rollouts` },
@@ -441,12 +500,9 @@ describe('provisionSandboxHost', () => {
     expect(appAfter!.durable_objects.namespace_id).toBe(HOST_NAMESPACE_ID);
     expect(appAfter!.configuration.image).toBe(DESIRED_IMAGE);
 
-    // Row UPSERTed (idempotent — same key, same metadata).
-    expect(dbState.inserts).toHaveLength(1);
-    expect(dbState.inserts[0]!.values).toMatchObject({
-      cf_id: appAfter!.id,
-      metadata: { namespaceId: HOST_NAMESPACE_ID, hostScriptName: HOST_SCRIPT_NAME },
-    });
+    // No UPSERT — cached fast path returned after reconciling drift; the row
+    // already matches what would be written.
+    expect(dbState.inserts).toHaveLength(0);
   });
 
   it('5. pre-PR-#0067 stuck-tenant fixture: throws with runbook hint and performs no compensating DELETE', async () => {
@@ -943,7 +999,7 @@ describe('putSandboxHostScript', () => {
     vi.unstubAllGlobals();
   });
 
-  it('9. tag === null → PUT body INCLUDES migrations { new_tag, steps: [{ new_sqlite_classes: ["Sandbox"] }] } (CF Workers Upload API shape)', async () => {
+  it('9. tag === null → PUT body INCLUDES migrations { new_tag, steps: [{ new_sqlite_classes: ["Sandbox"] }] } AND containers: [{ class_name: "Sandbox" }] (CF Workers Upload API shape)', async () => {
     // No host script seeded → fetchScriptMigrationTag returns null (404 path).
     let captured: Record<string, unknown> | null = null;
     const realFetch = global.fetch;
@@ -973,10 +1029,13 @@ describe('putSandboxHostScript', () => {
     expect(captured!.bindings).toEqual([
       { type: 'durable_object_namespace', name: 'SANDBOX', class_name: 'Sandbox' },
     ]);
+    // Containers capability marker required — without it, cross-script DO
+    // bindings on user workers fail with DURABLE_OBJECT_NOT_CONTAINER_ENABLED.
+    expect(captured!.containers).toEqual([{ class_name: 'Sandbox' }]);
     expect(captured!.main_module).toBe('index.js');
   });
 
-  it('10. tag === "void-sandbox-host-v1" → PUT body OMITS migrations entirely', async () => {
+  it('10. tag === "void-sandbox-host-v1" → PUT body OMITS migrations entirely BUT still includes containers: [{ class_name: "Sandbox" }]', async () => {
     cf.seedHostScript({
       scriptName: HOST_SCRIPT_NAME,
       migrationTag: HOST_MIGRATION_TAG,
@@ -1015,6 +1074,55 @@ describe('putSandboxHostScript', () => {
     expect(captured!.bindings).toEqual([
       { type: 'durable_object_namespace', name: 'SANDBOX', class_name: 'Sandbox' },
     ]);
+    // Containers capability marker MUST also be present in the re-PUT branch
+    // (it's a class-capability declaration, independent of migrations). This
+    // is the regression test for the production failure where existing
+    // tenants' hosts were missing this field after PR #131.
+    expect(captured!.containers).toEqual([{ class_name: 'Sandbox' }]);
+  });
+
+  it('10b. containers: [{ class_name: "Sandbox" }] is ALWAYS present in the PUT body, regardless of migration_tag branch (regression test for DURABLE_OBJECT_NOT_CONTAINER_ENABLED)', async () => {
+    // Capture the host PUT body across two scenarios: tag=null (first create)
+    // and tag=HOST_MIGRATION_TAG (re-PUT on existing host). Both bodies MUST
+    // declare the container capability so cross-script DO bindings work.
+    const realFetch = global.fetch;
+    let captureSlot: Record<string, unknown> | null = null;
+    global.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : (input as Request | URL).toString();
+      if (
+        init?.method === 'PUT' &&
+        url.includes(`/scripts/${HOST_SCRIPT_NAME}`) &&
+        init.body instanceof FormData
+      ) {
+        const meta = init.body.get('metadata');
+        if (meta instanceof Blob) {
+          captureSlot = JSON.parse(await meta.text());
+        }
+      }
+      return (realFetch as typeof fetch)(input as RequestInfo | URL, init);
+    }) as typeof fetch;
+
+    // Branch 1: tag === null (no host script seeded).
+    captureSlot = null;
+    await putSandboxHostScript('acct-test', 'token-test', 'void-users', SLUG);
+    expect(captureSlot).not.toBeNull();
+    expect(captureSlot!.containers).toEqual([{ class_name: 'Sandbox' }]);
+    // And migrations are present in this branch — sanity check.
+    expect(captureSlot).toHaveProperty('migrations');
+
+    // Branch 2: tag === HOST_MIGRATION_TAG (re-PUT). Seed an already-migrated
+    // host so fetchScriptMigrationTag returns the live tag.
+    cf.seedHostScript({
+      scriptName: HOST_SCRIPT_NAME,
+      migrationTag: HOST_MIGRATION_TAG,
+      classes: { Sandbox: HOST_NAMESPACE_ID },
+    });
+    captureSlot = null;
+    await putSandboxHostScript('acct-test', 'token-test', 'void-users', SLUG);
+    expect(captureSlot).not.toBeNull();
+    expect(captureSlot!.containers).toEqual([{ class_name: 'Sandbox' }]);
+    // Migrations OMITTED in this branch — sanity check.
+    expect(captureSlot).not.toHaveProperty('migrations');
   });
 
   // Sanity check on `fetchScriptMigrationTag` so test #6's regression assertion

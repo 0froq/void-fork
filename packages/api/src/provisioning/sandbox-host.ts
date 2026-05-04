@@ -65,16 +65,20 @@ export class ProjectDeletingError extends Error {
  *
  * 1. Status check: throw `ProjectDeletingError` if the project is being
  *    deleted.
- * 2. Cached fast path: if a `resources` row exists with `metadata.namespaceId`,
- *    `metadata.hostScriptName`, and a non-null `cf_id`, HEAD the host script,
- *    GET the container app, and verify the container's
- *    `durable_objects.namespace_id` matches. On all-pass, only reconcile
- *    container config drift (image / instance_type / max_instances) via
- *    PATCH + rollout, then return the cached info.
- * 3. Create-or-recover: PUT the host (read-tag-first via
- *    `putSandboxHostScript` so partial-failure replays don't rotate the
- *    namespace), read the namespace_id from the host's bindings endpoint
- *    (with retry/backoff to absorb propagation lag), locate any
+ * 2. Always-PUT host script: idempotent PUT via `putSandboxHostScript`
+ *    (read-tag-first; OMITS `migrations` when the live tag matches so no
+ *    namespace rotation occurs). Runs unconditionally on every invocation
+ *    so platform-side host-metadata fixes (e.g. the `containers` capability
+ *    marker) propagate to existing tenants on their next deploy.
+ * 3. Cached fast path: if a `resources` row exists with `metadata.namespaceId`,
+ *    `metadata.hostScriptName`, and a non-null `cf_id`, GET the container
+ *    app and verify the container's `durable_objects.namespace_id` matches.
+ *    Also verify the live host's SANDBOX binding still resolves to the
+ *    expected namespace (catches external host delete + recreate). On
+ *    all-pass, only reconcile container config drift (image / instance_type
+ *    / max_instances) via PATCH + rollout, then return the cached info.
+ * 4. Create-or-recover: read the namespace_id from the host's bindings
+ *    endpoint (with retry/backoff to absorb propagation lag), locate any
  *    pre-existing container app by name. If a same-name app exists, branch
  *    by namespace: same as the host's freshly-minted namespace → drift-
  *    reconcile and reuse; bound to the cached previous namespace → safe
@@ -121,6 +125,29 @@ export async function provisionSandboxHost(
     if (project.status === 'deleting') {
       throw new ProjectDeletingError(projectId);
     }
+
+    // Always-PUT the host script on every invocation, BEFORE the resource
+    // lookup / cached fast path. Two reasons:
+    //
+    //   1. Forward-fix propagation. PR #131 shipped host metadata WITHOUT
+    //      the `containers: [{ class_name: 'Sandbox' }]` capability marker,
+    //      which is a hard prerequisite for cross-script DO bindings on a
+    //      container-backed class (CF rejects the user-worker PUT with
+    //      `DURABLE_OBJECT_NOT_CONTAINER_ENABLED` otherwise). Existing
+    //      tenants whose host was created before this fix would otherwise
+    //      keep their broken metadata indefinitely because the cached fast
+    //      path skipped the host PUT entirely.
+    //
+    //   2. The host PUT is genuinely idempotent. `putSandboxHostScript`
+    //      does a read-tag-first against CF: when the live `migration_tag`
+    //      already equals HOST_MIGRATION_TAG it OMITS the `migrations`
+    //      field, so no namespace rotation occurs — only the metadata
+    //      (compat date / flags / bindings / containers) is refreshed.
+    //
+    // DO NOT remove this unconditional PUT without a host-upgrade plan —
+    // it is the only mechanism by which platform-side metadata fixes ever
+    // reach existing tenants.
+    await putSandboxHostScript(accountId, apiToken, dispatchNamespace, slug);
 
     // Resource lookup. Natural key is `(project_id, type='container',
     // binding_name=containerName)` — matches `upsertContainerResource` at
@@ -171,8 +198,9 @@ export async function provisionSandboxHost(
       // Fall through to create-or-recover.
     }
 
-    // Create-or-recover (§2 step 4).
-    await putSandboxHostScript(accountId, apiToken, dispatchNamespace, slug);
+    // Create-or-recover (§2 step 4). The host PUT already happened
+    // unconditionally above, so we proceed directly to the namespace
+    // probe / container reconcile.
 
     // CF's per-script bindings endpoint has brief propagation lag after a
     // successful PUT — `findDurableObjectNamespaceId` can transiently 404 or
@@ -443,6 +471,12 @@ export async function fetchScriptMigrationTag(
  * (`findDurableObjectNamespaceId` reads exactly this binding shape — the
  * host's own runtime never invokes it; the binding exists only so the
  * namespace_id is reflected).
+ *
+ * Always declares `containers: [{ class_name: 'Sandbox' }]` regardless of
+ * the migration_tag branch. CF requires the script that OWNS a DO class to
+ * declare it as container-enabled before any cross-script DO binding to
+ * that class will be accepted; without this field user-worker PUTs fail
+ * with `DURABLE_OBJECT_NOT_CONTAINER_ENABLED`.
  */
 export async function putSandboxHostScript(
   accountId: string,
@@ -458,6 +492,15 @@ export async function putSandboxHostScript(
     compatibility_date: COMPATIBILITY_DATE,
     compatibility_flags: ['nodejs_compat'],
     bindings: [{ type: 'durable_object_namespace', name: 'SANDBOX', class_name: 'Sandbox' }],
+    // Tells CF this DO class is backed by a container application. Without
+    // this, cross-script DO bindings from user workers to the Sandbox class
+    // on this host fail at PUT time with DURABLE_OBJECT_NOT_CONTAINER_ENABLED.
+    // The container app itself is created via the separate
+    // /containers/applications API by provisionSandboxHost; this field is a
+    // class-capability declaration only. Always present in BOTH the
+    // first-create branch (tag === null) and the re-PUT branch
+    // (tag === HOST_MIGRATION_TAG).
+    containers: [{ class_name: 'Sandbox' }],
   };
 
   if (tag === null) {
@@ -521,25 +564,18 @@ interface VerifyAndReconcileArgs extends ContainerConfigDesired {
 
 /**
  * Cached-fast-path verification + container-drift reconciliation. Returns
- * `true` when the cached state is intact (host script present, container
- * present and bound to the expected namespace) and any drift was reconciled
- * via PATCH+rollout. Returns `false` when any verification check fails so the
- * caller falls through to create-or-recover.
+ * `true` when the cached state is intact (container present and bound to
+ * the expected namespace) and any drift was reconciled via PATCH+rollout.
+ * Returns `false` when any verification check fails so the caller falls
+ * through to create-or-recover.
+ *
+ * NOTE: the host script HEAD check is intentionally absent — `provisionSandboxHost`
+ * always PUTs the host script unconditionally (and idempotently) before
+ * reaching the cached fast path, so a separate HEAD would just be a wasted
+ * round-trip. The live binding probe in step 3b still validates that the
+ * SANDBOX class on the host resolves to the expected namespace_id.
  */
 async function verifyAndReconcileCached(args: VerifyAndReconcileArgs): Promise<boolean> {
-  // 1. HEAD the host script. 404 => host is gone, fall through.
-  try {
-    await cfFetch<unknown>(
-      `${CF_API_BASE}/${args.accountId}/workers/dispatch/namespaces/${args.dispatchNamespace}/scripts/${args.hostScriptName}`,
-      args.apiToken,
-    );
-  } catch (err) {
-    if (err instanceof CloudflareApiError && err.status === 404) {
-      return false;
-    }
-    throw err;
-  }
-
   // 2. GET the container app by id. 404 => container is gone, fall through.
   let app: ContainerApplicationInfo;
   try {

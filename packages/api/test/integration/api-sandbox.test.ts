@@ -154,7 +154,7 @@ describe('cross-script DO host integration (design-doc 0067 §12)', () => {
   // ----------------------------------------------------------------------
   // 2. Redeploy unchanged config — no host PUTs, no container ops
   // ----------------------------------------------------------------------
-  it('2. sandbox redeploy with unchanged config triggers zero host PUTs and zero container POST/DELETE/PATCH (only the new user worker PUTs)', async () => {
+  it('2. sandbox redeploy with unchanged config triggers exactly one always-PUT host (no namespace rotation, no container POST/DELETE/PATCH); plus the new user worker PUT', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'sb-redeploy-same');
     const cf = mockCfApi();
@@ -163,6 +163,9 @@ describe('cross-script DO host integration (design-doc 0067 §12)', () => {
     const res1 = await deploy(project.id, user.jwt, buildSandboxManifest());
     expect(res1.status).toBe(200);
     await res1.text();
+
+    const hostScriptName = `do-host-${project.slug}`;
+    const seededNamespaceId = cf.state.hostScripts.get(hostScriptName)!.classes.get('Sandbox')!;
 
     // Snapshot the recorded calls so we can isolate the second deploy.
     const beforeIndex = cf.state.recordedCalls.length;
@@ -173,13 +176,17 @@ describe('cross-script DO host integration (design-doc 0067 §12)', () => {
     await res2.text();
 
     const secondCalls = cf.state.recordedCalls.slice(beforeIndex);
-    const hostScriptName = `do-host-${project.slug}`;
 
-    // Zero host PUTs.
+    // Exactly one host PUT — the unconditional always-PUT in
+    // provisionSandboxHost. Body OMITS `migrations` (tag preserved → no
+    // namespace rotation) so the namespace_id is unchanged.
     const hostPuts = secondCalls.filter(
       (c) => c.method === 'PUT' && c.url.includes(`/scripts/${hostScriptName}`),
     );
-    expect(hostPuts).toHaveLength(0);
+    expect(hostPuts).toHaveLength(1);
+    expect(cf.state.hostScripts.get(hostScriptName)!.classes.get('Sandbox')).toBe(
+      seededNamespaceId,
+    );
 
     // Zero container POSTs/DELETEs/PATCHes.
     const containerOps = secondCalls.filter(
@@ -199,7 +206,7 @@ describe('cross-script DO host integration (design-doc 0067 §12)', () => {
   // ----------------------------------------------------------------------
   // 3. Redeploy with container config change — PATCH + rollout
   // ----------------------------------------------------------------------
-  it('3. sandbox redeploy with image change triggers PATCH + rollout via existing-host fast path (no host PUT)', async () => {
+  it('3. sandbox redeploy with image change triggers exactly one always-PUT host (no namespace rotation) + PATCH + rollout via cached fast path', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'sb-image-drift');
     const cf = mockCfApi();
@@ -213,6 +220,9 @@ describe('cross-script DO host integration (design-doc 0067 §12)', () => {
     expect(res1.status).toBe(200);
     await res1.text();
 
+    const hostScriptName = `do-host-${project.slug}`;
+    const seededNamespaceId = cf.state.hostScripts.get(hostScriptName)!.classes.get('Sandbox')!;
+
     const beforeIndex = cf.state.recordedCalls.length;
 
     // Second deploy with image v2.
@@ -225,12 +235,15 @@ describe('cross-script DO host integration (design-doc 0067 §12)', () => {
     await res2.text();
 
     const secondCalls = cf.state.recordedCalls.slice(beforeIndex);
-    const hostScriptName = `do-host-${project.slug}`;
 
-    // No host PUT.
-    expect(
-      secondCalls.some((c) => c.method === 'PUT' && c.url.includes(`/scripts/${hostScriptName}`)),
-    ).toBe(false);
+    // Exactly one host PUT — always-PUT, no namespace rotation.
+    const hostPuts = secondCalls.filter(
+      (c) => c.method === 'PUT' && c.url.includes(`/scripts/${hostScriptName}`),
+    );
+    expect(hostPuts).toHaveLength(1);
+    expect(cf.state.hostScripts.get(hostScriptName)!.classes.get('Sandbox')).toBe(
+      seededNamespaceId,
+    );
 
     // PATCH + rollout fired against the container app.
     const patches = secondCalls.filter(
@@ -732,11 +745,16 @@ describe('cross-script DO host integration (design-doc 0067 §12)', () => {
     expect(body.success).toBe(false);
     expect(body.errors[0]!.message).toMatch(/cross-script binding refers to non-existent script/);
 
-    // Sanity: with the host seeded, the same PUT succeeds.
+    // Sanity: with the host seeded AND container-enabled, the same PUT succeeds.
+    // The metadata MUST declare `containers: [{ class_name: 'Sandbox' }]` —
+    // otherwise the mock's container-enabled validation would reject the PUT
+    // with `DURABLE_OBJECT_NOT_CONTAINER_ENABLED` (see helpers.ts), which is
+    // the regression-test for the production bug PR #131 shipped.
     cf.seedHostScript({
       scriptName: 'do-host-nonexistent',
       migrationTag: 'void-sandbox-host-v1',
       classes: { Sandbox: 'ns_x' },
+      metadata: { containers: [{ class_name: 'Sandbox' }] },
     });
 
     const res2 = await fetch(
