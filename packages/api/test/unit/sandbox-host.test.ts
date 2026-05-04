@@ -1142,6 +1142,145 @@ describe('putSandboxHostScript', () => {
   });
 });
 
+// Regression suite against the EXACT CF API envelope, independent of the
+// shared mockCfApi helper. The previous bug (recappi P0 redeploy 412):
+// `fetchScriptMigrationTag` read `result.migration_tag` directly, but the
+// CF dispatch-namespace endpoint returns
+// `{ result: { script: { migration_tag, ... } } }` — so the helper silently
+// returned `null` for every existing script, causing `putSandboxHostScript`
+// to send first-create migrations on a re-PUT and getting 412 from CF.
+//
+// These tests pin the helper's expected response shape against literal
+// `Response` payloads matching real CF, so a future shape regression on
+// either side (helper or mock) trips a unit test instead of a production
+// 412.
+describe('fetchScriptMigrationTag (CF envelope shape regression)', () => {
+  const ACCOUNT_ID = 'acct-test';
+  const API_TOKEN = 'token-test';
+  const NAMESPACE = 'void-users';
+  const SCRIPT_NAME = 'do-host-recappi';
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('reads migration_tag from result.script.migration_tag (NOT result.migration_tag) — matches wrangler durable.ts:32-38', async () => {
+    // Real CF envelope: result is `{ script: { id, migration_tag, ... } }`.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          success: true,
+          errors: [],
+          result: {
+            script: {
+              id: SCRIPT_NAME,
+              migration_tag: 'void-sandbox-host-v1',
+            },
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      fetchScriptMigrationTag(ACCOUNT_ID, API_TOKEN, NAMESPACE, SCRIPT_NAME),
+    ).resolves.toBe('void-sandbox-host-v1');
+  });
+
+  it('returns null when CF returns 404 (script not found in dispatch namespace)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          {
+            success: false,
+            errors: [{ code: 10007, message: 'workers.api.error.script_not_found' }],
+          },
+          { status: 404 },
+        ),
+      ),
+    );
+
+    await expect(
+      fetchScriptMigrationTag(ACCOUNT_ID, API_TOKEN, NAMESPACE, SCRIPT_NAME),
+    ).resolves.toBeNull();
+  });
+
+  it('returns null when CF surfaces script_not_found via non-404 status (defense in depth)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          {
+            success: false,
+            errors: [{ code: 10007, message: 'workers.api.error.script_not_found' }],
+          },
+          { status: 400 },
+        ),
+      ),
+    );
+
+    await expect(
+      fetchScriptMigrationTag(ACCOUNT_ID, API_TOKEN, NAMESPACE, SCRIPT_NAME),
+    ).resolves.toBeNull();
+  });
+
+  it('returns null when CF returns environment_not_found (code 10092, dispatch namespace specific)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          {
+            success: false,
+            errors: [{ code: 10092, message: 'workers.api.error.environment_not_found' }],
+          },
+          { status: 404 },
+        ),
+      ),
+    );
+
+    await expect(
+      fetchScriptMigrationTag(ACCOUNT_ID, API_TOKEN, NAMESPACE, SCRIPT_NAME),
+    ).resolves.toBeNull();
+  });
+
+  it('returns null when result.script is missing (defensive — script field absent)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          success: true,
+          errors: [],
+          result: { script: { id: SCRIPT_NAME } }, // no migration_tag yet
+        }),
+      ),
+    );
+
+    await expect(
+      fetchScriptMigrationTag(ACCOUNT_ID, API_TOKEN, NAMESPACE, SCRIPT_NAME),
+    ).resolves.toBeNull();
+  });
+
+  it('rethrows unrecognized CF errors (e.g. transport / auth failures)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          {
+            success: false,
+            errors: [{ code: 10000, message: 'Authentication error' }],
+          },
+          { status: 401 },
+        ),
+      ),
+    );
+
+    await expect(
+      fetchScriptMigrationTag(ACCOUNT_ID, API_TOKEN, NAMESPACE, SCRIPT_NAME),
+    ).rejects.toBeInstanceOf(CloudflareApiError);
+  });
+});
+
 describe('deleteContainerApplicationIdempotent', () => {
   afterEach(() => {
     vi.unstubAllGlobals();

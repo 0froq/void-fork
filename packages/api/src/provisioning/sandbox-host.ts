@@ -429,15 +429,50 @@ export async function provisionSandboxHost(
 
 /**
  * Read the live `migration_tag` for a host script in the dispatch namespace.
- * Returns `null` on 404 or when the script has no tag yet.
+ * Returns `null` when the script does not exist yet (404 / `script_not_found`
+ * / `environment_not_found`) or has no tag.
  *
- * Mirrors wrangler's read-before-PUT discipline (see node_modules/.pnpm/
- * wrangler/wrangler-dist/cli.js:301012-301083): the script's CURRENT
- * `migration_tag` is the source of truth, and the next PUT either omits
- * `migrations` (preserving the tag) or sends `{ old_tag, new_tag, steps }`.
- * Replaying a `new_sqlite_classes` step against a script that already has
- * the class is what would rotate the namespace and break the whole design.
+ * Mirrors wrangler's `getMigrationsToUpload` for the dispatch-namespace path
+ * (workers-sdk/packages/wrangler/src/durable.ts:32-38). The CF API endpoint
+ * `GET /accounts/{a}/workers/dispatch/namespaces/{ns}/scripts/{name}` returns
+ * the envelope:
+ *
+ *     { success: true, result: { script: { id, migration_tag, ... } } }
+ *
+ * After `cfFetch` unwraps `result`, callers must read
+ * `result.script.migration_tag` — NOT `result.migration_tag` (which is always
+ * `undefined` on this endpoint and silently degrades every read to `null`).
+ *
+ * The previous bug — reading `result.migration_tag` directly — caused
+ * `putSandboxHostScript` to treat every existing host as a first-create,
+ * sending `{ new_tag: 'void-sandbox-host-v1', steps: [...] }`. CF then
+ * rejects the PUT with code 10079 ("Actor migration tag precondition
+ * failed, got tag '' when expected tag is 'void-sandbox-host-v1'") because
+ * the script's current tag already matches the proposed new_tag. See
+ * meta/design-docs/0067-cross-script-do-host-architecture.md and the
+ * recappi failure recap for the production incident.
+ *
+ * 404 detection follows wrangler's not-found semantics
+ * (workers-sdk/packages/wrangler/src/utils/worker-not-found-error.ts +
+ * durable.ts:113-121 `suppressNotFoundError`):
+ *   - HTTP 404 with any envelope shape.
+ *   - CF error code 10007 ("This Worker does not exist on your account") —
+ *     CF returns HTTP 404 for this.
+ *   - CF error code 10090 (legacy environment not found).
+ *   - CF error code 10092 ("environment_not_found", returned by the
+ *     dispatch-namespace endpoint when the script is absent).
+ *
+ * The `cfFetch` wrapper joins `errors[].message` into the exception
+ * message, so we additionally string-match the not-found phrases on the
+ * non-404 error case as a defense-in-depth fallback (some CF endpoints
+ * have historically returned 400 instead of 404 for these conditions).
  */
+const NOT_FOUND_MESSAGE_FRAGMENTS = [
+  'workers.api.error.script_not_found',
+  'workers.api.error.environment_not_found',
+  'This Worker does not exist',
+];
+
 export async function fetchScriptMigrationTag(
   accountId: string,
   apiToken: string,
@@ -446,11 +481,19 @@ export async function fetchScriptMigrationTag(
 ): Promise<string | null> {
   const url = `${CF_API_BASE}/${accountId}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${scriptName}`;
   try {
-    const result = await cfFetch<{ migration_tag?: string | null }>(url, apiToken);
-    return result?.migration_tag ?? null;
+    const result = await cfFetch<{ script?: { migration_tag?: string | null } | null } | null>(
+      url,
+      apiToken,
+    );
+    return result?.script?.migration_tag ?? null;
   } catch (err) {
-    if (err instanceof CloudflareApiError && err.status === 404) {
-      return null;
+    if (err instanceof CloudflareApiError) {
+      if (err.status === 404) {
+        return null;
+      }
+      if (NOT_FOUND_MESSAGE_FRAGMENTS.some((fragment) => err.message.includes(fragment))) {
+        return null;
+      }
     }
     throw err;
   }

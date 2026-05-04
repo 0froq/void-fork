@@ -1085,6 +1085,15 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle 
   };
 
   // GET dispatch script — returns metadata including migration_tag.
+  //
+  // Matches the real CF API envelope:
+  //   { success: true, result: { script: { id, migration_tag, ... } } }
+  //
+  // (See workers-sdk/packages/wrangler/src/durable.ts:32-38 — wrangler reads
+  // `result.script.migration_tag`. The previous mock returned the script
+  // fields hoisted into `result` directly, which masked a production bug
+  // where `fetchScriptMigrationTag` read `result.migration_tag` and always
+  // got `null`.)
   const defaultGetDispatchScript = (url: string): Response => {
     const scriptName = parseScriptNameFromUrl(url);
     if (!scriptName || !state.hostScripts.has(scriptName)) {
@@ -1098,8 +1107,11 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle 
     }
     const script = state.hostScripts.get(scriptName)!;
     return cfSuccess({
-      migration_tag: script.migration_tag ?? null,
-      ...script.metadata,
+      script: {
+        id: scriptName,
+        migration_tag: script.migration_tag ?? null,
+        ...script.metadata,
+      },
     });
   };
 
