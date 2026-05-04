@@ -73,22 +73,45 @@ describe('applyRoutingRules', () => {
     expect(result).toEqual({ type: 'rewrite', destination: '/storage/a/b/c.txt' });
   });
 
-  it('last match wins across redirects and rewrites', () => {
+  // First-match-wins matches Netlify `_redirects` and Vercel `vercel.json`
+  // semantics — users put more-specific rules above more-general ones, and
+  // the first rule whose source matches takes effect. Header rules use
+  // last-match-wins for `_headers` compat; the asymmetry is intentional.
+  it('first match wins when redirect comes before rewrite', () => {
     const rules = [
       { source: '/page', destination: '/other', status: 302 },
       { source: '/page', destination: '/en/page', status: 200 },
     ];
     const result = applyRoutingRules('/page', rules);
-    expect(result).toEqual({ type: 'rewrite', destination: '/en/page' });
+    expect(result).toEqual({ type: 'redirect', destination: '/other', status: 302 });
   });
 
-  it('redirect wins when it is the last match', () => {
+  it('first match wins when rewrite comes before redirect', () => {
     const rules = [
       { source: '/page', destination: '/en/page', status: 200 },
       { source: '/page', destination: '/other', status: 301 },
     ];
     const result = applyRoutingRules('/page', rules);
-    expect(result).toEqual({ type: 'redirect', destination: '/other', status: 301 });
+    expect(result).toEqual({ type: 'rewrite', destination: '/en/page' });
+  });
+
+  it('first match wins on overlapping wildcards', () => {
+    // Specific rule above catch-all is the typical Netlify/Vercel pattern.
+    const rules = [
+      { source: '/blog/preview', destination: '/preview', status: 302 },
+      { source: '/blog/*', destination: '/posts/:splat', status: 301 },
+    ];
+    expect(applyRoutingRules('/blog/preview', rules)).toEqual({
+      type: 'redirect',
+      destination: '/preview',
+      status: 302,
+    });
+    // The catch-all still applies for non-overlapping pathnames.
+    expect(applyRoutingRules('/blog/hello', rules)).toEqual({
+      type: 'redirect',
+      destination: '/posts/hello',
+      status: 301,
+    });
   });
 
   it('leaves unknown :placeholders untouched in destination', () => {
@@ -135,6 +158,113 @@ describe('applyRoutingRules', () => {
     expect(applyRoutingRules('/caf%C3%A9/menu', rules)).toEqual({
       type: 'rewrite',
       destination: '/fr/caf%C3%A9/menu',
+    });
+  });
+
+  describe('host-scoped rules', () => {
+    // The API normalizes `host` to lowercase at deploy ingest and
+    // `url.hostname` is lowercase per WHATWG, so the runtime compare is a
+    // byte-exact equality.
+    it('fires when rule.host equals requestHost', () => {
+      const rules = [
+        { source: '/*', destination: 'https://foo.com/:splat', status: 301, host: 'www.foo.com' },
+      ];
+      expect(applyRoutingRules('/about', rules, 'www.foo.com')).toEqual({
+        type: 'redirect',
+        destination: 'https://foo.com/about',
+        status: 301,
+      });
+    });
+
+    it('skips when rule.host differs from requestHost', () => {
+      const rules = [
+        { source: '/*', destination: 'https://foo.com/:splat', status: 301, host: 'www.foo.com' },
+      ];
+      expect(applyRoutingRules('/about', rules, 'foo.com')).toBeNull();
+    });
+
+    it('skips when rule.host set but requestHost is undefined', () => {
+      // Defensive: callers in dispatch always pass `url.hostname`, but the
+      // parameter is optional. A host-scoped rule must not fire when no host
+      // is provided (otherwise it would silently leak across domains).
+      const rules = [
+        { source: '/*', destination: 'https://foo.com/:splat', status: 301, host: 'www.foo.com' },
+      ];
+      expect(applyRoutingRules('/about', rules)).toBeNull();
+    });
+
+    it('falls through to a path-only rule when host-scoped rule misses', () => {
+      const rules = [
+        { source: '/*', destination: 'https://foo.com/:splat', status: 301, host: 'www.foo.com' },
+        { source: '/old', destination: '/new', status: 301 },
+      ];
+      // Request to a different host: host-rule skipped via `continue`, path
+      // rule still considered.
+      expect(applyRoutingRules('/old', rules, 'foo.com')).toEqual({
+        type: 'redirect',
+        destination: '/new',
+        status: 301,
+      });
+    });
+
+    it('matches the first host-scoped rule whose host equals requestHost', () => {
+      // Two host-scoped rules with overlapping path patterns; first wins.
+      const rules = [
+        { source: '/*', destination: 'https://foo.com/:splat', status: 301, host: 'www.foo.com' },
+        { source: '/*', destination: 'https://other.com/:splat', status: 301, host: 'other.com' },
+      ];
+      expect(applyRoutingRules('/about', rules, 'other.com')).toEqual({
+        type: 'redirect',
+        destination: 'https://other.com/about',
+        status: 301,
+      });
+    });
+
+    it('host comparison is case-sensitive (relies on API lowercasing)', () => {
+      // API normalizes both sides to lowercase. If a manifest with mixed-case
+      // host slips past validation, the runtime correctly does not match an
+      // already-lowercase `url.hostname`. This documents the contract; in
+      // practice the API gate makes case mismatches impossible.
+      const rules = [{ source: '/*', destination: '/x', status: 301, host: 'WWW.FOO.COM' }];
+      expect(applyRoutingRules('/about', rules, 'www.foo.com')).toBeNull();
+    });
+
+    it('path-only rules apply to every host', () => {
+      const rules = [{ source: '/old', destination: '/new', status: 301 }];
+      expect(applyRoutingRules('/old', rules, 'a.com')).toEqual({
+        type: 'redirect',
+        destination: '/new',
+        status: 301,
+      });
+      expect(applyRoutingRules('/old', rules, 'b.com')).toEqual({
+        type: 'redirect',
+        destination: '/new',
+        status: 301,
+      });
+    });
+
+    it('host-scoped rule above a matching path-only rule wins on its host', () => {
+      const rules = [
+        {
+          source: '/old',
+          destination: 'https://foo.com/new',
+          status: 301,
+          host: 'www.foo.com',
+        },
+        { source: '/old', destination: '/new', status: 301 },
+      ];
+      // On www.foo.com: host-scoped rule fires (first match).
+      expect(applyRoutingRules('/old', rules, 'www.foo.com')).toEqual({
+        type: 'redirect',
+        destination: 'https://foo.com/new',
+        status: 301,
+      });
+      // On any other bound host: host-scoped rule skipped, path rule fires.
+      expect(applyRoutingRules('/old', rules, 'foo.com')).toEqual({
+        type: 'redirect',
+        destination: '/new',
+        status: 301,
+      });
     });
   });
 });

@@ -4972,6 +4972,461 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     await expectInvalidManifestShape(res, /fallbackRules.*source/);
   });
 
+  // ---------------------------------------------------------------------------
+  // Host-prefixed routing rules: shape validation
+  // ---------------------------------------------------------------------------
+  // `redirectRules[].host` and `fallbackRules[].host` scope a rule to a
+  // specific Host header. The shape validator enforces literal hostname
+  // form and lowercase-normalizes for byte-exact match against
+  // `url.hostname` at dispatch. Bound-domain enforcement runs later in the
+  // deploy IIFE (covered by separate tests below).
+
+  it('returns 400 when redirectRules host is not a string', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-redirect-host-type');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        redirectRules: [{ source: '/old', destination: '/new', status: 301, host: 42 }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    await expectInvalidManifestShape(res, /redirectRules entry .* host must be a string/);
+  });
+
+  // it.each table covers the rejection cases the literal-hostname regex
+  // promises: scheme prefix, port, path, wildcards, single-label hosts,
+  // userinfo, IPv4 literals, Unicode, control chars, leading/trailing dots,
+  // empty string. Each row exercises one regex branch.
+  it.each([
+    ['https://example.com'],
+    ['example.com:8080'],
+    ['example.com/path'],
+    ['*.example.com'],
+    ['example'],
+    ['user:pass@example.com'],
+    ['192.168.1.1'],
+    ['bücher.de'],
+    ['\nexample.com'],
+    ['example.com.'],
+    ['.example.com'],
+    [''],
+  ])('returns 400 when redirectRules host is invalid format: %s', async (host) => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(
+      env.db,
+      user.id,
+      `edge-redirect-host-fmt-${Math.random().toString(36).slice(2, 8)}`,
+    );
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        redirectRules: [{ source: '/old', destination: '/new', status: 301, host }],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    await expectInvalidManifestShape(res, /redirectRules entry .* host must be a literal hostname/);
+  });
+
+  it('accepts redirectRules host with IDN punycode form (xn--…)', async () => {
+    // `url.hostname` returns punycode for IDN domains, and the API regex is
+    // ASCII-only by design. Punycode is the canonical wire form; this test
+    // pins that policy so a future regex tightening can't accidentally lock
+    // it out.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-redirect-host-idn');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        // host isn't bound, so the bound-domain check (later in the IIFE)
+        // will still reject this deploy — but the manifest-shape validator
+        // must let it through. We assert no shape error specifically.
+        redirectRules: [
+          {
+            source: '/old',
+            destination: '/new',
+            status: 301,
+            host: 'xn--bcher-kva.de',
+          },
+        ],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      message?: string;
+    }>;
+    const shapeErr = events.find(
+      (e) => e.event === 'error' && (e.message ?? '').startsWith('invalid manifest shape: '),
+    );
+    expect(shapeErr).toBeUndefined();
+  });
+
+  it('returns 400 when fallbackRules host is invalid format', async () => {
+    // Spot-check that `host` validation is symmetric across redirect/fallback
+    // rule lists. Full table is exercised on redirectRules above.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'edge-fallback-host-fmt');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        fallbackRules: [
+          { source: '/*', destination: '/index.html', status: 200, host: '*.example.com' },
+        ],
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
+      }),
+      env,
+    );
+    await expectInvalidManifestShape(res, /fallbackRules entry .* host must be a literal hostname/);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Host-prefixed routing rules: bound-domain check
+  // ---------------------------------------------------------------------------
+  // The deploy IIFE rejects any rule whose host isn't bound to the project
+  // (via slug.<SITE_DOMAIN> or an entry in the `domains` table). Pending
+  // custom domains are accepted by design — DCV may complete after deploy.
+
+  it('rejects deploy when redirectRules host is not bound to the project', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'host-bound-reject');
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            version: 3,
+            bindings: {},
+            redirectRules: [
+              { source: '/old', destination: '/new', status: 301, host: 'unbound.example.com' },
+            ],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      message?: string;
+    }>;
+    const err = events.find((e) => e.event === 'error');
+    expect(err?.message).toMatch(/routing rule host not bound to project: unbound\.example\.com/);
+  });
+
+  it('accepts deploy when host equals project slug.<SITE_DOMAIN>', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'host-bound-slug');
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            version: 3,
+            bindings: {},
+            redirectRules: [
+              {
+                source: '/*',
+                destination: '/new/:splat',
+                status: 301,
+                host: `${project.slug}.void.app`,
+              },
+            ],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      message?: string;
+    }>;
+    const err = events.find(
+      (e) => e.event === 'error' && /routing rule host not bound/.test(e.message ?? ''),
+    );
+    expect(err).toBeUndefined();
+    requireEvent<DoneEvent>(events, 'done');
+  });
+
+  it('accepts deploy when host is an active custom domain', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'host-bound-active');
+    mockCfApi();
+
+    await env.db.insert(domains).values({
+      id: 'dom_active',
+      project_id: project.id,
+      hostname: 'www.foo.com',
+      cf_hostname_id: 'ch_active',
+      status: 'active',
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            version: 3,
+            bindings: {},
+            redirectRules: [
+              {
+                source: '/*',
+                destination: 'https://foo.com/:splat',
+                status: 301,
+                host: 'www.foo.com',
+              },
+            ],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      message?: string;
+    }>;
+    const err = events.find(
+      (e) => e.event === 'error' && /routing rule host not bound/.test(e.message ?? ''),
+    );
+    expect(err).toBeUndefined();
+    requireEvent<DoneEvent>(events, 'done');
+  });
+
+  it('accepts deploy when host is a pending custom domain (DCV in progress)', async () => {
+    // Pending domains pass the bound check by design. While DCV is incomplete
+    // traffic doesn't reach this dispatch entry anyway, so the rule is inert
+    // until DCV completes — at which point it starts firing without a redeploy.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'host-bound-pending');
+    mockCfApi();
+
+    await env.db.insert(domains).values({
+      id: 'dom_pending',
+      project_id: project.id,
+      hostname: 'pending.example.com',
+      cf_hostname_id: 'ch_pending',
+      status: 'pending',
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            version: 3,
+            bindings: {},
+            redirectRules: [
+              {
+                source: '/*',
+                destination: '/new/:splat',
+                status: 301,
+                host: 'pending.example.com',
+              },
+            ],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      message?: string;
+    }>;
+    const err = events.find(
+      (e) => e.event === 'error' && /routing rule host not bound/.test(e.message ?? ''),
+    );
+    expect(err).toBeUndefined();
+    requireEvent<DoneEvent>(events, 'done');
+  });
+
+  it('reports each unbound host once when multiple unbound rules exist', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'host-bound-dedupe');
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            version: 3,
+            bindings: {},
+            redirectRules: [
+              { source: '/a', destination: '/x', status: 301, host: 'a.example.com' },
+              { source: '/b', destination: '/x', status: 301, host: 'a.example.com' },
+              { source: '/c', destination: '/x', status: 301, host: 'b.example.com' },
+            ],
+          },
+        }),
+      }),
+      env,
+    );
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      message?: string;
+    }>;
+    const err = events.find((e) => e.event === 'error');
+    expect(err?.message).toBeDefined();
+    // Both hosts present, each appears exactly once (deduped).
+    expect(err!.message).toContain('a.example.com');
+    expect(err!.message).toContain('b.example.com');
+    expect(err!.message!.match(/a\.example\.com/g)).toHaveLength(1);
+    expect(err!.message!.match(/b\.example\.com/g)).toHaveLength(1);
+  });
+
+  it('bound-domain check applies to fallbackRules host as well', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'host-bound-fallback');
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            version: 3,
+            bindings: {},
+            fallbackRules: [
+              {
+                source: '/*',
+                destination: '/index.html',
+                status: 200,
+                host: 'unbound.example.com',
+              },
+            ],
+          },
+        }),
+      }),
+      env,
+    );
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      message?: string;
+    }>;
+    const err = events.find((e) => e.event === 'error');
+    expect(err?.message).toMatch(/routing rule host not bound to project: unbound\.example\.com/);
+  });
+
+  it('lowercases mixed-case host in the persisted manifest', async () => {
+    // The validator lowercases `host` in place before the manifest is
+    // serialized to `deployments.manifest`. This pins the storage contract
+    // so a future refactor can't lose the normalization on persistence.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'host-bound-mixedcase');
+    mockCfApi();
+
+    await env.db.insert(domains).values({
+      id: 'dom_mixedcase',
+      project_id: project.id,
+      hostname: 'www.foo.com',
+      cf_hostname_id: 'ch_mixedcase',
+      status: 'active',
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: buildDeployForm({
+          manifest: {
+            version: 3,
+            bindings: {},
+            redirectRules: [
+              {
+                source: '/old',
+                destination: '/new',
+                status: 301,
+                host: 'WWW.FOO.COM',
+              },
+            ],
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = parseDeployStream(await res.text()) as Array<{
+      event: string;
+      message?: string;
+      deployment?: string;
+    }>;
+    const done = requireEvent<DoneEvent>(events, 'done');
+
+    const [row] = await env.db
+      .select({ manifest: deployments.manifest })
+      .from(deployments)
+      .where(eq(deployments.id, done.deployment));
+    const stored = JSON.parse(row!.manifest!) as {
+      redirectRules: Array<{ host: string }>;
+    };
+    expect(stored.redirectRules[0].host).toBe('www.foo.com');
+  });
+
   // `websocket.routes[].bindingName` is fed into the CF worker metadata
   // binding list (`buildWebSocketUploadBindings`); accepting any type would
   // corrupt the metadata. Reject non-string bindingName.

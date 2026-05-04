@@ -126,7 +126,7 @@ async function applyWorkerFallbackRules(opts: {
     };
   }
 
-  const fallback = applyRoutingRules(opts.pathname, opts.routing.fallbackRules);
+  const fallback = applyRoutingRules(opts.pathname, opts.routing.fallbackRules, opts.url.hostname);
   if (fallback?.type !== 'rewrite') {
     return {
       response: opts.response,
@@ -157,6 +157,7 @@ async function applyWorkerFallbackRules(opts: {
 function buildFallbackOriginalUrlVariant(
   requestUrl: string,
   pathname: string,
+  requestHost: string,
   routing: RoutingEntry,
   originalUrlVariant: string | undefined,
 ): string | undefined {
@@ -168,7 +169,7 @@ function buildFallbackOriginalUrlVariant(
   if (originalUrlVariant || !routing.fallbackRules?.length) {
     return originalUrlVariant;
   }
-  const fallback = applyRoutingRules(pathname, routing.fallbackRules);
+  const fallback = applyRoutingRules(pathname, routing.fallbackRules, requestHost);
   if (fallback?.type !== 'rewrite') {
     return undefined;
   }
@@ -415,7 +416,7 @@ export default {
     let originalUrlVariant: string | undefined;
     let originalUrlHeader: string | undefined;
     if (routing.redirectRules?.length) {
-      const result = applyRoutingRules(pathname, routing.redirectRules);
+      const result = applyRoutingRules(pathname, routing.redirectRules, url.hostname);
       if (result?.type === 'redirect') {
         const location = mergeQueryIntoLocation(result.destination, url.search);
         return meter(
@@ -523,6 +524,7 @@ export default {
         const isrOriginalUrlVariant = buildFallbackOriginalUrlVariant(
           request.url,
           pathname,
+          url.hostname,
           routing,
           originalUrlVariant,
         );
@@ -706,7 +708,7 @@ export default {
       // `fallbackRules` are status-200-only (enforced at API ingest), so
       // `applyRoutingRules` only ever yields `type: 'rewrite'` here.
       if (!resolved && routing.fallbackRules?.length) {
-        const fallback = applyRoutingRules(pathname, routing.fallbackRules);
+        const fallback = applyRoutingRules(pathname, routing.fallbackRules, url.hostname);
         if (fallback?.type === 'rewrite') {
           // Same trust model as the redirectRules rewrite above — framework +
           // API both validate destination shape before the manifest lands here.

@@ -20,7 +20,16 @@ export type RoutingRuleResult =
 
 /**
  * Check routing rules (redirects + rewrites) against a request pathname.
- * Last match wins (consistent with header rules).
+ *
+ * **First match wins** — matches Netlify `_redirects` and Vercel `vercel.json`
+ * semantics: users put more-specific rules above more-general ones, and the
+ * first rule whose source matches takes effect. (Header rules in this same
+ * package use last-match-wins for compatibility with Netlify `_headers`,
+ * which is the opposite of `_redirects`. The asymmetry is intentional.)
+ *
+ * `requestHost` is the WHATWG `url.hostname` (lowercase, port-stripped).
+ * Rules with a `host` field are skipped when `rule.host !== requestHost`;
+ * path-only rules apply to every host bound to the project.
  *
  * Returns a discriminated result. The caller is responsible for building the
  * actual `Response` for redirects (so it can merge the request's query string
@@ -29,43 +38,44 @@ export type RoutingRuleResult =
 export function applyRoutingRules(
   pathname: string,
   rules?: Array<RedirectRule>,
+  requestHost?: string,
 ): RoutingRuleResult | null {
   if (!rules?.length) {
     return null;
   }
 
-  // A malformed `source` (e.g. duplicate named params) throws inside
-  // `new RegExp`. Framework validation rejects those at build, but a
-  // hand-crafted manifest could still reach the edge. Skip the offending rule
-  // and continue rather than 500ing the whole request.
-  let matched: { rule: RedirectRule; params: Record<string, string> } | undefined;
   for (const rule of rules) {
+    if (rule.host && rule.host !== requestHost) {
+      continue;
+    }
     let regex: RegExp;
     try {
       ({ regex } = compilePattern(rule.source));
     } catch (err) {
+      // A malformed `source` (e.g. duplicate named params) throws inside
+      // `new RegExp`. Framework validation rejects those at build, but a
+      // hand-crafted manifest could still reach the edge. Skip the offending
+      // rule and continue rather than 500ing the whole request.
       console.warn(
         `[dispatch] skipping routing rule with invalid source ${JSON.stringify(rule.source)}: ${err instanceof Error ? err.message : String(err)}`,
       );
       continue;
     }
     const m = regex.exec(pathname);
-    if (m) {
-      matched = { rule, params: m.groups ?? {} };
+    if (!m) {
+      continue;
     }
+
+    const destination = substituteParams(rule.destination, m.groups ?? {});
+
+    if (rule.status === 200) {
+      return { type: 'rewrite', destination };
+    }
+
+    return { type: 'redirect', destination, status: rule.status };
   }
 
-  if (!matched) {
-    return null;
-  }
-
-  const destination = substituteParams(matched.rule.destination, matched.params);
-
-  if (matched.rule.status === 200) {
-    return { type: 'rewrite', destination };
-  }
-
-  return { type: 'redirect', destination, status: matched.rule.status };
+  return null;
 }
 
 /**

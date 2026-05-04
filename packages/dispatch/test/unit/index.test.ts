@@ -37,7 +37,7 @@ interface RoutingEntry {
   hashedAssetsPrefix?: string;
   staticDeploymentId?: string;
   headerRules?: Array<{ pattern: string; headers: Array<[string, string]> }>;
-  redirectRules?: Array<{ source: string; destination: string; status: number }>;
+  redirectRules?: Array<{ source: string; destination: string; status: number; host?: string }>;
   queryAllowlist?: Record<string, Array<string>>;
 }
 
@@ -2131,14 +2131,67 @@ describe('rewrite rules', () => {
     expect(forwarded.headers.has('X-Void-Original-URL')).toBe(false);
   });
 
-  it('rewrite wins over redirect when it is the last match', async () => {
+  // Host-scoped redirects: dispatch passes `url.hostname` into
+  // `applyRoutingRules`. Confirm the wiring through the full handler so a
+  // future refactor that loses the hostname argument is caught here. The
+  // fixture's ROUTING binding returns the same routing entry for every
+  // hostname, so the only thing distinguishing the two requests below is
+  // `url.hostname`.
+  it('host-scoped redirect fires when request host matches rule.host', async () => {
     const { env, workerFetch } = createEnv({
       routing: {
         workerName: 'test-worker',
         projectId: 'proj-1',
         redirectRules: [
-          { source: '/page', destination: '/other', status: 302 },
+          {
+            source: '/*',
+            destination: 'https://foo.com/:splat',
+            status: 301,
+            host: 'www.foo.com',
+          },
+        ],
+      },
+    });
+
+    const response = await app.fetch(new Request('https://www.foo.com/about'), env, createCtx());
+
+    expect(response.status).toBe(301);
+    expect(response.headers.get('Location')).toBe('https://foo.com/about');
+    expect(workerFetch).not.toHaveBeenCalled();
+  });
+
+  it('host-scoped redirect skipped when request host differs from rule.host', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [
+          {
+            source: '/*',
+            destination: 'https://foo.com/:splat',
+            status: 301,
+            host: 'www.foo.com',
+          },
+        ],
+      },
+      workerResponse: new Response('ok'),
+    });
+
+    const response = await app.fetch(new Request('https://foo.com/about'), env, createCtx());
+
+    expect(response.status).toBe(200);
+    expect(response.headers.has('Location')).toBe(false);
+    expect(workerFetch).toHaveBeenCalledOnce();
+  });
+
+  it('rewrite wins over redirect when it is the first match', async () => {
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        redirectRules: [
           { source: '/page', destination: '/en/page', status: 200 },
+          { source: '/page', destination: '/other', status: 302 },
         ],
       },
       workerResponse: new Response('rewritten'),

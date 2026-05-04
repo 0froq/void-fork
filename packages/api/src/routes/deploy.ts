@@ -276,6 +276,43 @@ function sortUnique(values: Array<string> | undefined): Array<string> {
 export const MAX_ROUTING_RULES = 2000;
 export const MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES = MAX_ROUTING_RULES;
 
+/**
+ * Strict literal-hostname regex used to validate `redirectRules[].host` /
+ * `fallbackRules[].host` on the deploy manifest. Mirrors the regex in
+ * `routes/domains.ts` (custom-domain create endpoint) — the source of truth
+ * for what counts as a valid project-owned hostname. Rejects scheme prefixes,
+ * ports, paths, whitespace, control chars, wildcards, single-label hosts,
+ * IPv4 literals, and userinfo. Hostnames are lowercased before testing so
+ * the same byte-exact form is what dispatch compares against `url.hostname`
+ * (also lowercase per WHATWG).
+ */
+const LITERAL_HOSTNAME_REGEX = /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/;
+
+/**
+ * Validate and lowercase-normalize an optional `host` field on a redirect or
+ * fallback rule. Mutates `ro.host` in place so the persisted manifest carries
+ * the canonical form. Returns an error message string on failure, or `null`
+ * on success (including the absent-field case).
+ */
+function validateRuleHost(
+  ro: Record<string, unknown>,
+  ruleKind: 'redirectRules' | 'fallbackRules',
+  sourceRef: string,
+): string | null {
+  if (ro.host === undefined) {
+    return null;
+  }
+  if (typeof ro.host !== 'string') {
+    return `invalid manifest shape: ${ruleKind} entry ${sourceRef} host must be a string`;
+  }
+  const normalized = ro.host.toLowerCase();
+  if (!LITERAL_HOSTNAME_REGEX.test(normalized)) {
+    return `invalid manifest shape: ${ruleKind} entry ${sourceRef} host must be a literal hostname (e.g. "www.example.com"; no scheme, port, path, or wildcards): ${JSON.stringify(ro.host)}`;
+  }
+  ro.host = normalized;
+  return null;
+}
+
 export function validateManifestShape(parsed: unknown): string | null {
   if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return 'invalid manifest shape: expected a JSON object';
@@ -527,6 +564,10 @@ export function validateManifestShape(parsed: unknown): string | null {
       if (isRewrite && destination.startsWith('//')) {
         return `invalid manifest shape: redirectRules entry ${sourceRef} destination must not start with "//" (protocol-relative URLs parse cross-origin; use a single-slash path-absolute destination)`;
       }
+      const hostError = validateRuleHost(ro, 'redirectRules', sourceRef);
+      if (hostError) {
+        return hostError;
+      }
     }
   }
 
@@ -598,6 +639,10 @@ export function validateManifestShape(parsed: unknown): string | null {
       }
       if (destination.startsWith('//')) {
         return `invalid manifest shape: fallbackRules entry ${sourceRef} destination must not start with "//" (protocol-relative URLs parse cross-origin; use a single-slash path-absolute destination)`;
+      }
+      const hostError = validateRuleHost(ro, 'fallbackRules', sourceRef);
+      if (hostError) {
+        return hostError;
       }
     }
   }
@@ -1651,6 +1696,12 @@ app.post('/:id/deploy', async (c) => {
     let workerName: string | undefined;
     let dispatchNamespace: string | undefined;
     let deployment: Awaited<ReturnType<typeof createDeployment>> | undefined;
+    // Memoized project-domain fetch shared across the deploy pipeline. Three
+    // independent branches need the project's domains: the host-scoped
+    // routing-rule check, the dedupe-skip URL builder, and the post-upload
+    // routing/URL stage. Each branch lazy-initialises this so deploys that
+    // never enter a given branch don't pay for the Postgres roundtrip.
+    let projectDomains: Awaited<ReturnType<typeof getDomainsByProjectId>> | undefined;
 
     // Timer is created inside the IIFE so it is scope-paired with its
     // clearInterval in the finally below. If setup and teardown lived in
@@ -2136,6 +2187,44 @@ app.post('/:id/deploy', async (c) => {
         websocketManifestResult.changed || enrichedManifestResult.changed;
       manifest = enrichedManifestResult.manifest;
       const finalManifestRaw = JSON.stringify(manifest);
+
+      // Host-scoped routing rules: reject any rule whose `host` is not
+      // registered on the project. Checked here (not in
+      // `validateManifestShape`) because the valid set depends on live DB
+      // state. A rule scoped to a host that isn't on this project would
+      // silently never fire at dispatch — reject at deploy time so the
+      // author sees the mistake instead.
+      //
+      // Pending custom domains are accepted: while DCV is incomplete, traffic
+      // for that hostname doesn't route to this project's dispatch entry, so
+      // the rule physically can't fire. Once DCV completes, the rule starts
+      // firing automatically without a redeploy. This matches Netlify/Vercel
+      // UX — stage the redirect in the same change as the domain.
+      const hostScopedRedirects = manifest.redirectRules?.some((r) => r.host) ?? false;
+      const hostScopedFallbacks = manifest.fallbackRules?.some((r) => r.host) ?? false;
+      if (hostScopedRedirects || hostScopedFallbacks) {
+        const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+        projectDomains ??= await getDomainsByProjectId(c.get('db'), projectId);
+        const boundHosts = new Set<string>([`${project.slug}.${siteDomain}`]);
+        for (const d of projectDomains) {
+          boundHosts.add(d.hostname);
+        }
+        const unbound = [...(manifest.redirectRules ?? []), ...(manifest.fallbackRules ?? [])]
+          .map((r) => r.host)
+          .filter((h): h is string => typeof h === 'string' && !boundHosts.has(h));
+        if (unbound.length > 0) {
+          const unique = Array.from(new Set(unbound));
+          await cleanupStreamedAssetsOnAbort();
+          await cleanupOwnStreamedAssetClaims();
+          emit({
+            event: 'error',
+            message: `routing rule host not bound to project: ${unique.join(', ')} — add the domain (\`void domain add\`) before deploying rules scoped to it`,
+            step: currentStep,
+          });
+          return;
+        }
+      }
+
       const comparableAssetManifest = await buildComparableAssetManifestForDedupe(
         c.get('db'),
         projectId,
@@ -2157,7 +2246,7 @@ app.post('/:id/deploy', async (c) => {
         );
         if (sameManifest && sameAssets) {
           const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-          const projectDomains = await getDomainsByProjectId(c.get('db'), projectId);
+          projectDomains ??= await getDomainsByProjectId(c.get('db'), projectId);
           const activeDomains = projectDomains.filter((d) => d.status === 'active');
           const fullUrl =
             activeDomains.length > 0
@@ -2380,8 +2469,10 @@ app.post('/:id/deploy', async (c) => {
 
         const assetCount = Object.keys(assetManifest).length;
 
-        // Fetch domains once — used in both static-only and full deploy paths
-        const projectDomains = await getDomainsByProjectId(c.get('db'), projectId);
+        // Fetch domains once — used in both static-only and full deploy paths.
+        // Reuses the IIFE-scoped memo so the host-scoped rule check and the
+        // dedupe-skip block don't double-fetch.
+        projectDomains ??= await getDomainsByProjectId(c.get('db'), projectId);
 
         if (isStaticOnly) {
           // Static-only deploy: upload assets to KV/R2, skip bindings/migrations/WfP

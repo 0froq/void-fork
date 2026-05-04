@@ -148,8 +148,8 @@ describe('SPA app — no user fallbacks (zero-overhead common case)', () => {
 
 describe('SPA app — user fallbacks with not_found_handling: none', () => {
   // Shape emitted by the CLI when the user defines `routing.fallbacks` on an SPA:
-  // synthetic catch-all `/*` → `/index.html` is PREPENDED, user rules follow.
-  // Under dispatch's last-match-wins semantics the more-specific user rule wins
+  // user rules come first, synthetic catch-all `/*` → `/index.html` is APPENDED.
+  // Under dispatch's first-match-wins semantics the more-specific user rule wins
   // when it matches, and the synthetic rule catches everything else.
   const makeEnv = () =>
     createStaticEnv({
@@ -158,8 +158,8 @@ describe('SPA app — user fallbacks with not_found_handling: none', () => {
         projectId: 'proj_1',
         assetConfig: { not_found_handling: 'none', html_handling: 'none' },
         fallbackRules: [
-          { source: '/*', destination: '/index.html', status: 200 },
           { source: '/docs/*', destination: '/docs.html', status: 200 },
+          { source: '/*', destination: '/index.html', status: 200 },
         ],
       },
       manifest: {
@@ -174,7 +174,7 @@ describe('SPA app — user fallbacks with not_found_handling: none', () => {
       },
     });
 
-  it('serves /docs.html when /docs/foo has no asset (user rule matches last, wins)', async () => {
+  it('serves /docs.html when /docs/foo has no asset (user rule matches first, wins)', async () => {
     const { env } = makeEnv();
     const res = await app.fetch(new Request('https://test.void.app/docs/foo'), env, createCtx());
     expect(res.status).toBe(200);
