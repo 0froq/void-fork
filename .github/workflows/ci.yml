@@ -12,16 +12,16 @@ jobs:
   lint-and-check:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: pnpm/action-setup@26f6d4f2c533a43e6b5da0b4a5dd983f98f7b49a # v6.0.4
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: .node-version
           cache: pnpm
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: framework/node_modules
           key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
@@ -45,16 +45,16 @@ jobs:
           - suite: integration
             pattern: api/test/integration
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: pnpm/action-setup@26f6d4f2c533a43e6b5da0b4a5dd983f98f7b49a # v6.0.4
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: .node-version
           cache: pnpm
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: framework/node_modules
           key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
@@ -72,7 +72,7 @@ jobs:
       POSTGRES_DB: void_schema_compat
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18
         env:
           POSTGRES_USER: ${{ env.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
@@ -86,16 +86,16 @@ jobs:
           --health-retries=5
     steps:
       # --- Phase 1: Apply PR branch migrations to real PG ---
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: pnpm/action-setup@26f6d4f2c533a43e6b5da0b4a5dd983f98f7b49a # v6.0.4
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: .node-version
           cache: pnpm
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: framework/node_modules
           key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
@@ -107,7 +107,7 @@ jobs:
           DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
 
       # --- Phase 2: Run prod branch tests against new schema ---
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: prod
           clean: false
