@@ -117,6 +117,7 @@ export const deployments = pgTable(
     deployed_at: timestamp('deployed_at', { mode: 'string' }),
     retained: boolean('retained').notNull().default(false),
     applied_migrations: text('applied_migrations'),
+    bundle_stored: boolean('bundle_stored').notNull().default(false),
   },
   (t) => [
     index('idx_deployments_project_id').on(t.project_id, t.created_at),

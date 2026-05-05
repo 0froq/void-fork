@@ -17,7 +17,6 @@
     "./suspension": "./src/suspension.ts"
   },
   "scripts": {
-    "build:sandbox-host": "node scripts/build-sandbox-host.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "deploy": "wrangler deploy",

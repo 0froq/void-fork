@@ -554,20 +554,22 @@ export function cfError(message: string, status = 400): Response {
 }
 
 // ---------------------------------------------------------------------------
-// Sandbox host / container application stateful mock infrastructure
+// Dispatch script / container application stateful mock infrastructure
 // ---------------------------------------------------------------------------
 //
-// Tasks 7 (unit) and 8 (integration) need a mock fetch that can model:
-//   - WfP host scripts that mint a stable namespace_id on first PUT (when
-//     `metadata.migrations` declares `new_sqlite_classes`) and PRESERVE that
-//     namespace_id on subsequent PUTs without migrations (the wrangler
-//     migration_tag protocol the cross-script DO host design relies on).
-//   - Container applications keyed by name with POST/PATCH/DELETE/GET.
-//   - Cross-script DO binding validation: a user-worker PUT with a binding
-//     entry containing `script_name` is rejected if that script does not
-//     exist in the dispatch namespace.
-//   - Recording of CF call ordering so tests can assert "host PUT preceded
-//     user-worker PUT".
+// Sandbox-related integration tests need a mock fetch that can model:
+//   - WfP dispatch namespace scripts that mint a stable namespace_id on first
+//     PUT (when `metadata.migrations` declares `new_sqlite_classes`) and
+//     PRESERVE that namespace_id on subsequent PUTs without migrations (the
+//     wrangler migration_tag protocol).
+//   - Container applications keyed by name with POST/PATCH/DELETE/GET. The
+//     container POST also enforces the CF invariant that a given DO
+//     namespace_id can only ever be bound to ONE container application
+//     (CF code 1608 DURABLE_OBJECT_ALREADY_HAS_APPLICATION).
+//   - Cross-script DO binding validation kept as a regression guard against
+//     PR #131 — CF rejects cross-script DO bindings to dispatch namespace
+//     scripts; only same-script DO bindings work in dispatch namespaces.
+//   - Recording of CF call ordering so tests can assert PUT/POST sequencing.
 //
 // The state container is fresh per `mockCfApi()` call.
 // ---------------------------------------------------------------------------
@@ -600,7 +602,7 @@ export interface SandboxMockContainerApp {
 }
 
 export interface SandboxMockState {
-  /** scriptName -> recorded host/user-worker script state. */
+  /** scriptName -> recorded dispatch namespace script state. */
   hostScripts: Map<string, SandboxMockHostScript>;
   /** appId -> recorded container application state. */
   containerApps: Map<string, SandboxMockContainerApp>;
@@ -628,7 +630,7 @@ async function parseMultipartMetadata(
   if (!init?.body) {
     return null;
   }
-  // FormData is what `putSandboxHostScript` and `deploy.ts` build.
+  // FormData is what `deploy.ts` and the sandbox provisioner build.
   if (init.body instanceof FormData) {
     const metaEntry = init.body.get('metadata');
     if (typeof metaEntry === 'string') {
@@ -806,8 +808,8 @@ export interface CfApiMocks {
   deleteCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
   purgeCache: (url: string, init?: RequestInit) => Response | Promise<Response>;
   analyticsQuery: (url: string, init?: RequestInit) => Response | Promise<Response>;
-  // Sandbox-host / container-app endpoints. State-aware defaults are wired up
-  // when overrides are not supplied. Tests can still override individually.
+  // Dispatch script / container-app endpoints. State-aware defaults are wired
+  // up when overrides are not supplied. Tests can still override individually.
   getDispatchScript?: (url: string, init?: RequestInit) => Response | Promise<Response>;
   createContainerApp?: (url: string, init?: RequestInit) => Response | Promise<Response>;
   patchContainerApp?: (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -883,7 +885,7 @@ const baseDefaultMocks: Omit<CfApiMocks, 'uploadWorker' | 'listWorkerBindings' |
  * Backwards-compatible mock fetch handle. Existing tests use the return value
  * directly as a `vi.fn()` (e.g. `fetchMock.mock.calls`); new tests destructure
  * `state` / `seedHostScript` / `seedContainerApp` / `expectCallOrder` to drive
- * the sandbox-host scenarios.
+ * sandbox-related scenarios (dispatch namespace scripts + container apps).
  *
  * The handle IS the `vi.fn()` — the additional fields are attached via
  * `Object.assign` so existing call sites continue to work unchanged.
@@ -892,9 +894,9 @@ export type MockCfApiHandle = ReturnType<typeof vi.fn> & {
   /** Live state container — fresh per `mockCfApi()` call. */
   state: SandboxMockState;
   /**
-   * Seed a host script directly into the mock state without going through
-   * `provisionSandboxHost`. Useful for fixturing tests that assert the
-   * cached-fast-path of a deploy.
+   * Seed a dispatch namespace script directly into the mock state without
+   * going through a real PUT. Useful for fixturing tests that assert the
+   * cached-fast-path of a deploy or set up cross-script binding precondition.
    */
   seedHostScript(args: {
     scriptName: string;
@@ -948,64 +950,27 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle 
     const { metadata } = parsed;
     const bindings = extractBindings(metadata);
 
-    // Cross-script binding validation. Catches the regression where a user
-    // worker is PUT before the host script exists (or where the metadata
-    // rewrite is skipped).
+    // Cross-script binding validation — regression guard against PR #131.
+    // CF empirically rejects ALL cross-script DO bindings between dispatch
+    // namespace scripts, regardless of whether the target script exists or
+    // declares the class as container-enabled. Reject unconditionally so any
+    // future code that reintroduces cross-script DO bindings (the architecture
+    // PR #131 attempted) fails fast in CI instead of shipping to production.
     for (const binding of bindings) {
       const refScript = (binding as { script_name?: unknown }).script_name;
       if (typeof refScript === 'string' && refScript !== scriptName) {
-        if (!state.hostScripts.has(refScript)) {
-          return Response.json(
-            {
-              success: false,
-              errors: [
-                {
-                  code: 10021,
-                  message: `cross-script binding refers to non-existent script: ${refScript}`,
-                },
-              ],
-            },
-            { status: 400 },
-          );
-        }
-        // Container-enabled validation. CF rejects cross-script DO bindings
-        // to a class that the OWNING script has not declared as
-        // container-enabled via its metadata `containers` field. Prior to
-        // this check the mock accepted any cross-script binding so long as
-        // the host existed — which is exactly the regression that let
-        // PR #131's missing `containers` field slip into production. The
-        // host's last-PUT metadata is stored under
-        // `state.hostScripts.<host>.metadata`; we look up the referenced
-        // class_name there.
-        if (binding.type === 'durable_object_namespace' && typeof binding.class_name === 'string') {
-          const refClassName = binding.class_name;
-          const hostScript = state.hostScripts.get(refScript)!;
-          const hostContainers = (hostScript.metadata as { containers?: unknown }).containers;
-          const isContainerEnabled =
-            Array.isArray(hostContainers) &&
-            hostContainers.some(
-              (c) =>
-                typeof c === 'object' &&
-                c !== null &&
-                (c as { class_name?: unknown }).class_name === refClassName,
-            );
-          if (!isContainerEnabled) {
-            return Response.json(
+        return Response.json(
+          {
+            success: false,
+            errors: [
               {
-                success: false,
-                errors: [
-                  {
-                    code: 10103,
-                    message: `DURABLE_OBJECT_NOT_CONTAINER_ENABLED: cross-script binding to ${refScript}.${refClassName} requires the host script to declare containers: [{ class_name: "${refClassName}" }]`,
-                  },
-                ],
-                messages: [],
-                result: null,
+                code: 10061,
+                message: `Cannot create binding for class in script '${refScript}' that does not exist.`,
               },
-              { status: 400 },
-            );
-          }
-        }
+            ],
+          },
+          { status: 400 },
+        );
       }
     }
 
@@ -1076,8 +1041,8 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle 
     if (!state.hostScripts.has(scriptName)) {
       // Existing tests historically expect 200 from deleteWorker even for
       // unknown scripts (idempotent semantics on the platform side). Keep
-      // that default; only sandbox-host tests need 404 differentiation, and
-      // those tests can install an override.
+      // that default; tests that need 404 differentiation can install an
+      // override.
       return new Response('ok', { status: 200 });
     }
     state.hostScripts.delete(scriptName);
@@ -1161,6 +1126,35 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle 
         { success: false, errors: [{ code: 1000, message: 'already exists' }] },
         { status: 409 },
       );
+    }
+    // Regression guard: CF rejects a 2nd container application bound to the
+    // same DO namespace_id with code 1608 DURABLE_OBJECT_ALREADY_HAS_APPLICATION.
+    // Empirically verified against the real CF API. Without this check, the
+    // mock accepted duplicate namespace bindings and tests passed while
+    // production failed — the same regression pattern as PR #131. Per-deploy
+    // architecture mints a fresh namespace_id per deploy so this should never
+    // fire in healthy code; if a future change reintroduces a stable
+    // namespace_id rebound across deploys, this rejection will surface it.
+    const namespaceId = (body.durable_objects as { namespace_id?: string } | undefined)
+      ?.namespace_id;
+    if (namespaceId) {
+      const namespaceConflict = Array.from(state.containerApps.values()).find(
+        (a) => a.durable_objects.namespace_id === namespaceId,
+      );
+      if (namespaceConflict) {
+        return Response.json(
+          {
+            success: false,
+            errors: [
+              {
+                code: 1608,
+                message: `DURABLE_OBJECT_ALREADY_HAS_APPLICATION: namespace_id ${namespaceId} is already bound to application ${namespaceConflict.name}`,
+              },
+            ],
+          },
+          { status: 400 },
+        );
+      }
     }
     const durableObjects = (body.durable_objects as { namespace_id?: string } | undefined) ?? {
       namespace_id: '',

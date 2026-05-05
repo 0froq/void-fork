@@ -2,7 +2,7 @@ import { eq, and } from 'drizzle-orm';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { markDeploymentRetained } from '../../src/db.ts';
 import app from '../../src/index.ts';
-import { projects, resources } from '../../src/schema.ts';
+import { deployments, projects, resources } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -15,10 +15,26 @@ import {
 } from './helpers.ts';
 
 // ---------------------------------------------------------------------------
-// Integration tests for the cross-script DO host architecture (design-doc
-// 0067 §12). Twelve cases covering first deploy, redeploy paths, stuck-tenant
-// migration, partial-failure replay, concurrency, rollback, project teardown
-// and the regression for skipped metadata rewrite.
+// Integration tests for the per-deploy sandbox architecture (post-#46/#47).
+//
+// Each sandbox deploy creates its own user worker `user-{slug}-{deployId}`
+// that owns its own `Sandbox` Durable Object class via the Worker upload
+// metadata (`bindings + containers + migrations`). The deploy then POSTs a
+// fresh container application named
+// `${projectId}-${deploymentId}-${containerName}` (lowercased, `_`→`-`)
+// bound to the freshly-minted DO namespace.
+//
+// There is NO host script (`do-host-{slug}` is gone), NO cross-script DO
+// binding, and NO `provisionSandboxHost` step. Cross-script bindings into a
+// dispatch namespace are rejected by CF (the mock guards this); the
+// regression test asserts the rejection still fires.
+//
+// Worker bytes are stored in R2 at
+// `worker-bundles/{projectId}/{deploymentId}/{path}` so future rollbacks
+// can re-PUT them. `deployments.bundle_stored=true` after R2 puts succeed.
+// Retention deletes the per-deploy container app + R2 bundle objects when
+// evicting; project teardown deletes ALL retained deployments' container
+// apps via the orphan-recovery enumeration in `cleanup.ts`.
 // ---------------------------------------------------------------------------
 
 let env: TestEnv;
@@ -41,16 +57,18 @@ afterEach(() => {
 });
 
 const SANDBOX_IMAGE_V1 = 'registry.cloudflare.com/sandbox:1.0.0';
-const SANDBOX_IMAGE_V2 = 'registry.cloudflare.com/sandbox:2.0.0';
 
-function buildSandboxManifest(overrides?: { image?: string }): Record<string, unknown> {
+function buildSandboxManifest(overrides?: {
+  image?: string;
+  containerName?: string;
+}): Record<string, unknown> {
   return {
     version: 3,
     bindings: {},
     sandbox: {
       bindingName: 'SANDBOX',
       className: 'Sandbox',
-      containerName: 'void-sandbox',
+      containerName: overrides?.containerName ?? 'void-sandbox',
       image: overrides?.image ?? SANDBOX_IMAGE_V1,
       instanceType: 'lite',
       maxInstances: 20,
@@ -77,644 +95,431 @@ function buildSandboxDeployForm(opts?: {
 async function deploy(
   projectId: string,
   jwt: string,
-  manifest: Record<string, unknown>,
+  manifest?: Record<string, unknown>,
+  workers?: Record<string, string>,
 ): Promise<Response> {
   return app.fetch(
     new Request(`http://localhost/projects/${projectId}/deploy`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${jwt}` },
-      body: buildSandboxDeployForm({ manifest }),
+      body: buildSandboxDeployForm({ manifest, workers }),
     }),
     env,
   );
 }
 
-describe('cross-script DO host integration (design-doc 0067 §12)', () => {
+function getDoneEvent(events: Array<unknown>): { event: string; deployment: string } | undefined {
+  return events.find(
+    (e): e is { event: string; deployment: string } =>
+      typeof e === 'object' && e !== null && (e as { event?: unknown }).event === 'done',
+  );
+}
+
+async function listR2Keys(prefix: string): Promise<Array<string>> {
+  const list = await env.STATIC_ASSETS_R2.list({ prefix });
+  return list.objects.map((o) => o.key);
+}
+
+describe('per-deploy sandbox integration', () => {
   // ----------------------------------------------------------------------
   // 1. First sandbox deploy
   // ----------------------------------------------------------------------
-  it('1. first sandbox deploy creates host script, mints namespace, creates container app, user worker uses cross-script binding (host PUT precedes user-worker PUT)', async () => {
+  it('first sandbox deploy: PUT user worker with same-script DO binding + containers + migrations; POST per-deploy container app; NO resources row', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'sb-first');
     const cf = mockCfApi();
 
-    const res = await deploy(project.id, user.jwt, buildSandboxManifest());
+    const res = await deploy(project.id, user.jwt);
     expect(res.status).toBe(200);
     const events = await readAllEvents(res);
-    const done = events.find(
-      (e): e is { event: string; deployment: string } =>
-        typeof e === 'object' && e !== null && (e as { event?: unknown }).event === 'done',
-    );
+    const done = getDoneEvent(events);
     expect(done).toBeDefined();
+    const deployId = done!.deployment;
 
-    // Host script + container app exist in mock state.
-    const hostScriptName = `do-host-${project.slug}`;
-    const host = cf.state.hostScripts.get(hostScriptName);
-    expect(host).toBeDefined();
-    expect(host!.classes.get('Sandbox')).toBeTruthy();
-    const namespaceId = host!.classes.get('Sandbox')!;
+    // No host script `do-host-{slug}` should exist.
+    expect(cf.state.hostScripts.has(`do-host-${project.slug}`)).toBe(false);
 
-    const app = Array.from(cf.state.containerApps.values()).find((a) =>
-      a.name.endsWith('-void-sandbox'),
-    );
-    expect(app).toBeDefined();
-    expect(app!.durable_objects.namespace_id).toBe(namespaceId);
+    // The dispatch namespace contains exactly the per-deploy user worker.
+    const userWorkerName = `user-${project.slug}-${deployId}`;
+    const userWorker = cf.state.hostScripts.get(userWorkerName);
+    expect(userWorker).toBeDefined();
 
-    // User worker has cross-script binding to the host.
-    const userWorkerEntry = Array.from(cf.state.hostScripts.entries()).find(([n]) =>
-      n.startsWith(`user-${project.slug}-`),
-    );
-    expect(userWorkerEntry).toBeDefined();
-    const [, userWorker] = userWorkerEntry!;
-    const sandboxBinding = userWorker.bindings.find(
+    // User worker owns the Sandbox DO class (mock minted a namespace_id for
+    // it because metadata.migrations declared `new_sqlite_classes: ['Sandbox']`).
+    expect(userWorker!.classes.get('Sandbox')).toBeTruthy();
+    const namespaceId = userWorker!.classes.get('Sandbox')!;
+
+    // Same-script DO binding: no `script_name`, with the resolved `namespace_id`.
+    const sandboxBinding = userWorker!.bindings.find(
       (b) => b.type === 'durable_object_namespace' && b.name === 'SANDBOX',
     );
     expect(sandboxBinding).toBeDefined();
-    expect(sandboxBinding!.script_name).toBe(hostScriptName);
+    expect(sandboxBinding!.script_name).toBeUndefined();
+    expect(sandboxBinding!.class_name).toBe('Sandbox');
+    expect(sandboxBinding!.namespace_id).toBe(namespaceId);
 
-    // Ordering: host PUT precedes user-worker PUT.
-    cf.expectCallOrder(
-      { method: 'PUT', url: `/scripts/${hostScriptName}` },
-      { method: 'PUT', url: `/scripts/user-${project.slug}-` },
+    // Metadata declares Sandbox as a container-enabled class on the user worker.
+    const containers = (userWorker!.metadata as { containers?: Array<unknown> }).containers;
+    expect(containers).toEqual([{ class_name: 'Sandbox' }]);
+
+    // Migrations include `new_sqlite_classes: ['Sandbox']` so CF mints + sticks
+    // a fresh DO namespace to this user worker.
+    const migrations = userWorker!.metadata.migrations as {
+      new_tag?: string;
+      steps?: Array<{ new_sqlite_classes?: Array<string> }>;
+    };
+    expect(migrations).toBeDefined();
+    expect(migrations.steps?.some((s) => s.new_sqlite_classes?.includes('Sandbox'))).toBe(true);
+
+    // Per-deploy container app exists: `${projectId}-${deployId}-void-sandbox`
+    // (lowercased, `_`→`-`), bound to the user worker's namespace_id.
+    const containerAppName = `${project.id}-${deployId}-void-sandbox`
+      .toLowerCase()
+      .replaceAll('_', '-');
+    const containerApp = Array.from(cf.state.containerApps.values()).find(
+      (a) => a.name === containerAppName,
     );
+    expect(containerApp).toBeDefined();
+    expect(containerApp!.durable_objects.namespace_id).toBe(namespaceId);
+    expect(containerApp!.configuration.image).toBe(SANDBOX_IMAGE_V1);
 
-    // Resource row written.
+    // Per-deploy containers do NOT write a `resources` row (no DB pointer —
+    // teardown finds them via orphan-recovery enumeration).
     const resRows = await env.db
       .select()
       .from(resources)
       .where(and(eq(resources.project_id, project.id), eq(resources.type, 'container')));
-    expect(resRows).toHaveLength(1);
-    expect(resRows[0]!.binding_name).toBe('void-sandbox');
-    expect(resRows[0]!.metadata).toMatchObject({
-      namespaceId,
-      hostScriptName,
-    });
+    expect(resRows).toHaveLength(0);
   });
 
   // ----------------------------------------------------------------------
-  // 2. Redeploy unchanged config — no host PUTs, no container ops
+  // 2. Sandbox redeploy creates fresh user worker + container with NEW namespace
   // ----------------------------------------------------------------------
-  it('2. sandbox redeploy with unchanged config triggers exactly one always-PUT host (no namespace rotation, no container POST/DELETE/PATCH); plus the new user worker PUT', async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'sb-redeploy-same');
-    const cf = mockCfApi();
-
-    // First deploy — set up initial state.
-    const res1 = await deploy(project.id, user.jwt, buildSandboxManifest());
-    expect(res1.status).toBe(200);
-    await res1.text();
-
-    const hostScriptName = `do-host-${project.slug}`;
-    const seededNamespaceId = cf.state.hostScripts.get(hostScriptName)!.classes.get('Sandbox')!;
-
-    // Snapshot the recorded calls so we can isolate the second deploy.
-    const beforeIndex = cf.state.recordedCalls.length;
-
-    // Second deploy with identical manifest.
-    const res2 = await deploy(project.id, user.jwt, buildSandboxManifest());
-    expect(res2.status).toBe(200);
-    await res2.text();
-
-    const secondCalls = cf.state.recordedCalls.slice(beforeIndex);
-
-    // Exactly one host PUT — the unconditional always-PUT in
-    // provisionSandboxHost. Body OMITS `migrations` (tag preserved → no
-    // namespace rotation) so the namespace_id is unchanged.
-    const hostPuts = secondCalls.filter(
-      (c) => c.method === 'PUT' && c.url.includes(`/scripts/${hostScriptName}`),
-    );
-    expect(hostPuts).toHaveLength(1);
-    expect(cf.state.hostScripts.get(hostScriptName)!.classes.get('Sandbox')).toBe(
-      seededNamespaceId,
-    );
-
-    // Zero container POSTs/DELETEs/PATCHes.
-    const containerOps = secondCalls.filter(
-      (c) =>
-        c.url.includes('/containers/applications') &&
-        (c.method === 'POST' || c.method === 'DELETE' || c.method === 'PATCH'),
-    );
-    expect(containerOps).toHaveLength(0);
-
-    // The new user worker IS PUT.
-    const userPuts = secondCalls.filter(
-      (c) => c.method === 'PUT' && c.url.includes(`/scripts/user-${project.slug}-`),
-    );
-    expect(userPuts.length).toBeGreaterThanOrEqual(1);
-  });
-
-  // ----------------------------------------------------------------------
-  // 3. Redeploy with container config change — PATCH + rollout
-  // ----------------------------------------------------------------------
-  it('3. sandbox redeploy with image change triggers exactly one always-PUT host (no namespace rotation) + PATCH + rollout via cached fast path', async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'sb-image-drift');
-    const cf = mockCfApi();
-
-    // First deploy with image v1.
-    const res1 = await deploy(
-      project.id,
-      user.jwt,
-      buildSandboxManifest({ image: SANDBOX_IMAGE_V1 }),
-    );
-    expect(res1.status).toBe(200);
-    await res1.text();
-
-    const hostScriptName = `do-host-${project.slug}`;
-    const seededNamespaceId = cf.state.hostScripts.get(hostScriptName)!.classes.get('Sandbox')!;
-
-    const beforeIndex = cf.state.recordedCalls.length;
-
-    // Second deploy with image v2.
-    const res2 = await deploy(
-      project.id,
-      user.jwt,
-      buildSandboxManifest({ image: SANDBOX_IMAGE_V2 }),
-    );
-    expect(res2.status).toBe(200);
-    await res2.text();
-
-    const secondCalls = cf.state.recordedCalls.slice(beforeIndex);
-
-    // Exactly one host PUT — always-PUT, no namespace rotation.
-    const hostPuts = secondCalls.filter(
-      (c) => c.method === 'PUT' && c.url.includes(`/scripts/${hostScriptName}`),
-    );
-    expect(hostPuts).toHaveLength(1);
-    expect(cf.state.hostScripts.get(hostScriptName)!.classes.get('Sandbox')).toBe(
-      seededNamespaceId,
-    );
-
-    // PATCH + rollout fired against the container app.
-    const patches = secondCalls.filter(
-      (c) => c.method === 'PATCH' && c.url.includes('/containers/applications/'),
-    );
-    expect(patches.length).toBe(1);
-    const rollouts = secondCalls.filter(
-      (c) =>
-        c.method === 'POST' &&
-        c.url.includes('/containers/applications/') &&
-        c.url.endsWith('/rollouts'),
-    );
-    expect(rollouts.length).toBe(1);
-
-    // Live container reflects the new image.
-    const app = Array.from(cf.state.containerApps.values()).find((a) =>
-      a.name.endsWith('-void-sandbox'),
-    );
-    expect(app!.configuration.image).toBe(SANDBOX_IMAGE_V2);
-  });
-
-  // ----------------------------------------------------------------------
-  // 4. Redeploy after stale host script — recovery path
-  // ----------------------------------------------------------------------
-  it('4. sandbox redeploy after host script HEAD 404: recovery PUTs host with initial migrations and verifies container', async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'sb-stale-host');
-    const cf = mockCfApi();
-
-    // First deploy seeds DB cache.
-    const res1 = await deploy(project.id, user.jwt, buildSandboxManifest());
-    expect(res1.status).toBe(200);
-    await res1.text();
-
-    const hostScriptName = `do-host-${project.slug}`;
-    // Externally remove the host script (CF dashboard delete simulation).
-    cf.state.hostScripts.delete(hostScriptName);
-
-    const beforeIndex = cf.state.recordedCalls.length;
-
-    const res2 = await deploy(project.id, user.jwt, buildSandboxManifest());
-    expect(res2.status).toBe(200);
-    await res2.text();
-
-    const secondCalls = cf.state.recordedCalls.slice(beforeIndex);
-
-    // Host PUT happened during recovery (HEAD GET returned 404, so cached
-    // path returned false and create-or-recover ran).
-    const hostPuts = secondCalls.filter(
-      (c) => c.method === 'PUT' && c.url.includes(`/scripts/${hostScriptName}`),
-    );
-    expect(hostPuts.length).toBeGreaterThanOrEqual(1);
-
-    // Host now exists with the initial migration tag (because tag was null
-    // when fetchScriptMigrationTag fired during recovery — the script truly
-    // did not exist).
-    expect(cf.state.hostScripts.get(hostScriptName)!.migration_tag).toBe('void-sandbox-host-v1');
-  });
-
-  // ----------------------------------------------------------------------
-  // 5. Partial-failure replay — host already PUT, no resource row
-  // ----------------------------------------------------------------------
-  it('5. sandbox redeploy after partial-failure replay: PUT body OMITS migrations field, namespace preserved, container POSTed, row written', async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'sb-partial-replay');
-
-    const hostScriptName = `do-host-${project.slug}`;
-    const seededNamespaceId = `ns_${hostScriptName}_Sandbox`;
-
-    // Capture the host PUT body so we can assert `migrations` is omitted.
-    let capturedHostPutMetadata: Record<string, unknown> | null = null;
-    const cf = mockCfApi();
-
-    // Pre-seed the host as if a prior deploy's PUT succeeded, then the
-    // resource UPSERT rolled back. NO resource row.
-    cf.seedHostScript({
-      scriptName: hostScriptName,
-      migrationTag: 'void-sandbox-host-v1',
-      classes: { Sandbox: seededNamespaceId },
-      bindings: [
-        {
-          type: 'durable_object_namespace',
-          name: 'SANDBOX',
-          class_name: 'Sandbox',
-          namespace_id: seededNamespaceId,
-        },
-      ],
-    });
-
-    // Capture mock-installed fetch AFTER mockCfApi() so the wrapper delegates
-    // back into the in-memory mock rather than calling the original network
-    // fetch. We restore on test exit via vi.unstubAllGlobals().
-    const mockFetch = global.fetch;
-    global.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : (input as Request | URL).toString();
-      if (
-        init?.method === 'PUT' &&
-        url.includes(`/scripts/${hostScriptName}`) &&
-        init.body instanceof FormData
-      ) {
-        const meta = init.body.get('metadata');
-        if (meta instanceof Blob) {
-          capturedHostPutMetadata = JSON.parse(await meta.text());
-        }
-      }
-      return (mockFetch as typeof fetch)(input as RequestInfo | URL, init);
-    }) as typeof fetch;
-
-    const res = await deploy(project.id, user.jwt, buildSandboxManifest());
-    expect(res.status).toBe(200);
-    await res.text();
-
-    // Host PUT happened with NO migrations field (read-tag-first preserves tag).
-    expect(capturedHostPutMetadata).not.toBeNull();
-    expect(capturedHostPutMetadata).not.toHaveProperty('migrations');
-    expect(capturedHostPutMetadata!.main_module).toBe('index.js');
-
-    // Namespace_id preserved (not rotated).
-    expect(cf.state.hostScripts.get(hostScriptName)!.classes.get('Sandbox')).toBe(
-      seededNamespaceId,
-    );
-
-    // Container POSTed.
-    const app = Array.from(cf.state.containerApps.values()).find((a) =>
-      a.name.endsWith('-void-sandbox'),
-    );
-    expect(app).toBeDefined();
-    expect(app!.durable_objects.namespace_id).toBe(seededNamespaceId);
-
-    // Row written.
-    const rows = await env.db
-      .select()
-      .from(resources)
-      .where(and(eq(resources.project_id, project.id), eq(resources.type, 'container')));
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.metadata).toMatchObject({
-      namespaceId: seededNamespaceId,
-      hostScriptName,
-    });
-  });
-
-  // ----------------------------------------------------------------------
-  // 6. Pre-PR-#0067 stuck-tenant cutover: deploy fails with a runbook error
-  // ----------------------------------------------------------------------
-  it('6. stuck-tenant deploy: pre-fix container app on stale namespace causes the deploy to fail with a runbook hint and leaves the stale CF state untouched', async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'sb-stuck-tenant');
-    const cf = mockCfApi();
-
-    const containerName = 'void-sandbox';
-    const containerAppName = `${project.id}-${containerName}`.toLowerCase().replaceAll('_', '-');
-    const staleNamespaceId = 'ns_stale_per_deploy';
-
-    // Seed a stale container app on a different namespace (per-deploy from
-    // the pre-fix codepath). No host script.
-    cf.seedContainerApp({
-      name: containerAppName,
-      namespaceId: staleNamespaceId,
-      image: 'registry.cloudflare.com/sandbox:0.5.0',
-      instanceType: 'lite',
-      maxInstances: 20,
-    });
-
-    // Seed a pre-fix DB row: binding_name = 'void-sandbox' (the manifest's
-    // containerName), empty metadata, cf_id pointing at the stale container.
-    await env.db.insert(resources).values({
-      id: 'res_stuck',
-      project_id: project.id,
-      type: 'container',
-      cf_id: `app_${containerAppName}`,
-      binding_name: containerName,
-      // metadata defaults to {} per schema
-    });
-
-    const res = await deploy(project.id, user.jwt, buildSandboxManifest());
-    expect(res.status).toBe(200); // SSE stream — HTTP 200, error reported as event
-    const events = await readAllEvents(res);
-
-    // Deploy fails with a runbook-pointing error event in the SSE stream.
-    const errorEvent = events.find(
-      (e): e is { event: string; message: string; step?: string } =>
-        typeof e === 'object' &&
-        e !== null &&
-        (e as { event?: unknown }).event === 'error' &&
-        typeof (e as { message?: unknown }).message === 'string',
-    );
-    expect(errorEvent).toBeDefined();
-    expect(errorEvent!.message).toMatch(/wrangler containers delete/);
-    expect(errorEvent!.message).toMatch(/meta\/operations\.md/);
-
-    // No `done` event — deploy did not succeed.
-    const doneEvent = events.find(
-      (e) => typeof e === 'object' && e !== null && (e as { event?: unknown }).event === 'done',
-    );
-    expect(doneEvent).toBeUndefined();
-
-    // No DELETE was issued against the stale container app — the operator
-    // owns cutover via the runbook, not the platform.
-    const deletes = cf.state.recordedCalls.filter(
-      (c) =>
-        c.method === 'DELETE' && c.url.includes(`/containers/applications/app_${containerAppName}`),
-    );
-    expect(deletes).toHaveLength(0);
-
-    // Stale container app still in CF state, still on the stale namespace.
-    const apps = Array.from(cf.state.containerApps.values()).filter(
-      (a) => a.name === containerAppName,
-    );
-    expect(apps).toHaveLength(1);
-    expect(apps[0]!.durable_objects.namespace_id).toBe(staleNamespaceId);
-  });
-
-  // ----------------------------------------------------------------------
-  // 7. Concurrent two sandbox deploys for same project
-  // ----------------------------------------------------------------------
-  // The deploy route's precheck (deploy.ts:1208-1218) rejects concurrent
-  // deploys to the same project with 409 when an in-flight deploy is younger
-  // than 10 minutes — this is the platform's existing concurrency-control
-  // surface, separate from `provisionSandboxHost`'s FOR UPDATE on the
-  // project row. So one of the two parallel deploys returns 409 by design,
-  // and the other proceeds normally. The provisionSandboxHost FOR UPDATE
-  // serialization is exercised by the unit test in Task 7 at finer
-  // granularity. Here we assert the integration outcome: at least one
-  // deploy succeeds, the deploy that succeeds creates the host/container
-  // exactly once, and the resources table has exactly one row.
-  it('7. concurrent two sandbox deploys: one succeeds, one is rejected with 409 by the deploy precheck; sandbox state is consistent (one host, one container, one resource row)', async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'sb-concurrent');
-    const cf = mockCfApi();
-
-    const [res1, res2] = await Promise.all([
-      deploy(project.id, user.jwt, buildSandboxManifest()),
-      deploy(project.id, user.jwt, buildSandboxManifest()),
-    ]);
-    await Promise.all([res1.text(), res2.text()]);
-
-    // One succeeded, one was rejected with 409.
-    const statuses = [res1.status, res2.status].sort();
-    expect(statuses).toEqual([200, 409]);
-
-    // Host script created exactly once with one namespace.
-    const hostScriptName = `do-host-${project.slug}`;
-    const host = cf.state.hostScripts.get(hostScriptName);
-    expect(host).toBeDefined();
-    expect(host!.classes.size).toBe(1);
-
-    // Exactly one container app for this project.
-    const containerAppName = `${project.id}-void-sandbox`.toLowerCase().replaceAll('_', '-');
-    const apps = Array.from(cf.state.containerApps.values()).filter(
-      (a) => a.name === containerAppName,
-    );
-    expect(apps).toHaveLength(1);
-
-    // Resources table has exactly one row.
-    const rows = await env.db
-      .select()
-      .from(resources)
-      .where(and(eq(resources.project_id, project.id), eq(resources.type, 'container')));
-    expect(rows).toHaveLength(1);
-  });
-
-  // ----------------------------------------------------------------------
-  // 8. Deploy in progress + rollback initiated
-  // ----------------------------------------------------------------------
-  // Per the task prompt: "This may already be covered elsewhere; if so,
-  // write a brief assertion and skip if untestable in this context."
-  // The rollback handler takes its own FOR UPDATE on the project row inside
-  // its own transaction; cross-transaction blocking under PGlite is not
-  // reliably reproducible. The covering existing test is in
-  // api-projects.test.ts ("rolls back to a retained deployment") and the
-  // sandbox-host unit suite covers the FOR UPDATE locking discipline. We
-  // skip with explanation to keep the suite hermetic.
-  it.skip('8. deploy in progress + rollback initiated: rollback FOR UPDATE blocks until deploy commits then 409s — covered by api-projects rollback tests + Task 7 unit tests', () => {
-    /* see comment block above */
-  });
-
-  // ----------------------------------------------------------------------
-  // 9. Rollback preserves sandbox state
-  // ----------------------------------------------------------------------
-  it('9. rollback to v1 of a sandbox project performs zero host PUTs and zero container DELETEs (sandbox state survives)', async () => {
-    // 'solo' plan has retainedDeployments=5 so v1 stays retained after v2.
-    const user = await createTestUser(env.db, 'rb-user', 'github', undefined, 'solo');
-    const project = await createTestProject(env.db, user.id, 'sb-rollback');
+  it('sandbox redeploy: brand-new user worker name, brand-new namespace_id, brand-new container app (no namespace preservation across deploys)', async () => {
+    const user = await createTestUser(env.db, 'sb-rd-user', 'github', undefined, 'solo');
+    const project = await createTestProject(env.db, user.id, 'sb-redeploy');
     const cf = mockCfApi();
 
     // Deploy v1.
-    const res1 = await deploy(project.id, user.jwt, buildSandboxManifest());
+    const res1 = await deploy(project.id, user.jwt);
     expect(res1.status).toBe(200);
-    const events1 = await readAllEvents(res1);
-    const done1 = events1.find(
-      (e): e is { event: string; deployment: string } =>
-        typeof e === 'object' && e !== null && (e as { event?: unknown }).event === 'done',
-    );
+    const done1 = getDoneEvent(await readAllEvents(res1));
     expect(done1).toBeDefined();
     const v1Id = done1!.deployment;
-    await markDeploymentRetained(env.db, v1Id, true);
 
-    // Deploy v2.
-    const res2 = await deploy(project.id, user.jwt, buildSandboxManifest());
+    const v1WorkerName = `user-${project.slug}-${v1Id}`;
+    const v1Namespace = cf.state.hostScripts.get(v1WorkerName)!.classes.get('Sandbox')!;
+    const v1ContainerName = `${project.id}-${v1Id}-void-sandbox`.toLowerCase().replaceAll('_', '-');
+
+    // Deploy v2 with the same manifest.
+    const res2 = await deploy(project.id, user.jwt);
     expect(res2.status).toBe(200);
-    const events2 = await readAllEvents(res2);
-    const done2 = events2.find(
-      (e): e is { event: string; deployment: string } =>
-        typeof e === 'object' && e !== null && (e as { event?: unknown }).event === 'done',
-    );
+    const done2 = getDoneEvent(await readAllEvents(res2));
     expect(done2).toBeDefined();
     const v2Id = done2!.deployment;
-    await markDeploymentRetained(env.db, v2Id, true);
 
-    const beforeRollback = cf.state.recordedCalls.length;
+    expect(v2Id).not.toBe(v1Id);
 
-    // Rollback to v1.
-    const rollbackRes = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/rollback`, {
+    // Brand-new user worker.
+    const v2WorkerName = `user-${project.slug}-${v2Id}`;
+    expect(v2WorkerName).not.toBe(v1WorkerName);
+    const v2Worker = cf.state.hostScripts.get(v2WorkerName);
+    expect(v2Worker).toBeDefined();
+
+    // Brand-new namespace_id (per-deploy, NOT preserved across deploys).
+    const v2Namespace = v2Worker!.classes.get('Sandbox')!;
+    expect(v2Namespace).toBeTruthy();
+    expect(v2Namespace).not.toBe(v1Namespace);
+
+    // Brand-new container app bound to the new namespace.
+    const v2ContainerName = `${project.id}-${v2Id}-void-sandbox`.toLowerCase().replaceAll('_', '-');
+    expect(v2ContainerName).not.toBe(v1ContainerName);
+    const v2App = Array.from(cf.state.containerApps.values()).find(
+      (a) => a.name === v2ContainerName,
+    );
+    expect(v2App).toBeDefined();
+    expect(v2App!.durable_objects.namespace_id).toBe(v2Namespace);
+  });
+
+  // ----------------------------------------------------------------------
+  // 3. R2 bundle write
+  // ----------------------------------------------------------------------
+  it('successful sandbox deploy persists worker bundle to R2 and flips bundle_stored=true', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'sb-bundle');
+    mockCfApi();
+
+    const workerSource = "export default { fetch() { return new Response('hi'); } }";
+    const res = await deploy(project.id, user.jwt, buildSandboxManifest(), {
+      'index.js': workerSource,
+    });
+    expect(res.status).toBe(200);
+    const done = getDoneEvent(await readAllEvents(res));
+    expect(done).toBeDefined();
+    const deployId = done!.deployment;
+
+    // R2 has at least one object under `worker-bundles/{projectId}/{deploymentId}/`.
+    const bundleKeys = await listR2Keys(`worker-bundles/${project.id}/${deployId}/`);
+    expect(bundleKeys.length).toBeGreaterThan(0);
+    expect(bundleKeys).toContain(`worker-bundles/${project.id}/${deployId}/index.js`);
+
+    // bundle_stored flipped to true.
+    const [row] = await env.db.select().from(deployments).where(eq(deployments.id, deployId));
+    expect(row!.bundle_stored).toBe(true);
+  });
+
+  // ----------------------------------------------------------------------
+  // 4. Static-only deploy doesn't write bundle
+  // ----------------------------------------------------------------------
+  it('static-only deploy does NOT write a worker bundle (bundle_stored stays false, no R2 objects)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'sb-static');
+    mockCfApi();
+
+    const form = new FormData();
+    form.append(
+      'manifest',
+      JSON.stringify({
+        version: 3,
+        bindings: {},
+        type: 'static',
+        assetConfig: { not_found_handling: 'none' },
+      }),
+    );
+    form.append('asset:index.html', new Blob(['<html>hello</html>']));
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${user.jwt}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ deploymentId: v1Id }),
+        headers: { Authorization: `Bearer ${user.jwt}` },
+        body: form,
       }),
       env,
     );
-    expect(rollbackRes.status).toBe(200);
-    await rollbackRes.text();
+    expect(res.status).toBe(200);
+    const done = getDoneEvent(await readAllEvents(res));
+    expect(done).toBeDefined();
+    const deployId = done!.deployment;
 
-    const rollbackCalls = cf.state.recordedCalls.slice(beforeRollback);
-    const hostScriptName = `do-host-${project.slug}`;
+    // No bundle objects under `worker-bundles/{projectId}/{deploymentId}/`.
+    const bundleKeys = await listR2Keys(`worker-bundles/${project.id}/${deployId}/`);
+    expect(bundleKeys).toHaveLength(0);
 
-    // Zero host PUTs during rollback.
-    const hostPuts = rollbackCalls.filter(
-      (c) => c.method === 'PUT' && c.url.includes(`/scripts/${hostScriptName}`),
+    // bundle_stored stays false.
+    const [row] = await env.db.select().from(deployments).where(eq(deployments.id, deployId));
+    expect(row!.bundle_stored).toBe(false);
+  });
+
+  // ----------------------------------------------------------------------
+  // 5. Retention eviction
+  // ----------------------------------------------------------------------
+  it('retention eviction: oldest sandbox deploy has its user worker, container app, AND R2 bundle deleted when retention limit is exceeded', async () => {
+    // Free plan: retainedDeployments=1 — second deploy evicts the first.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'sb-evict');
+    const cf = mockCfApi();
+
+    // Deploy v1.
+    const res1 = await deploy(project.id, user.jwt);
+    expect(res1.status).toBe(200);
+    const done1 = getDoneEvent(await readAllEvents(res1));
+    expect(done1).toBeDefined();
+    const v1Id = done1!.deployment;
+    const v1WorkerName = `user-${project.slug}-${v1Id}`;
+    const v1ContainerName = `${project.id}-${v1Id}-void-sandbox`.toLowerCase().replaceAll('_', '-');
+
+    // Sanity: v1 state is in place.
+    expect(cf.state.hostScripts.has(v1WorkerName)).toBe(true);
+    expect(
+      Array.from(cf.state.containerApps.values()).some((a) => a.name === v1ContainerName),
+    ).toBe(true);
+    expect((await listR2Keys(`worker-bundles/${project.id}/${v1Id}/`)).length).toBeGreaterThan(0);
+
+    // Deploy v2 — retention sweep should evict v1.
+    const res2 = await deploy(project.id, user.jwt);
+    expect(res2.status).toBe(200);
+    const done2 = getDoneEvent(await readAllEvents(res2));
+    expect(done2).toBeDefined();
+
+    // v1's user worker is gone.
+    expect(cf.state.hostScripts.has(v1WorkerName)).toBe(false);
+
+    // v1's container app is gone.
+    expect(
+      Array.from(cf.state.containerApps.values()).some((a) => a.name === v1ContainerName),
+    ).toBe(false);
+
+    // v1's bundle objects are gone from R2.
+    expect(await listR2Keys(`worker-bundles/${project.id}/${v1Id}/`)).toHaveLength(0);
+
+    // v1's retained flag flipped false in DB.
+    const [v1Row] = await env.db.select().from(deployments).where(eq(deployments.id, v1Id));
+    expect(v1Row!.retained).toBe(false);
+  });
+
+  // ----------------------------------------------------------------------
+  // 6. Pre-routing failure: catch deletes user worker AND container
+  // ----------------------------------------------------------------------
+  it('pre-routing failure: outer catch deletes the user worker AND the per-deploy container app (no orphans)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'sb-prefail');
+
+    // Make CF reject the worker secret PUT to fail BETWEEN the user worker
+    // PUT (and container POST) AND routing flip. This forces the
+    // `routingSwitched=false` cleanup branch.
+    //
+    // Actually, an easier approach: stub `c.env.DISPATCH.get(...)` so the
+    // readiness probe times out / fails. But the readiness probe only runs
+    // when there are migrations (`manifest.migrations.pending > 0`). For a
+    // sandbox-only deploy, the failure point we need is between the
+    // container POST and the routing flip. Make `setWorkerSecret` fail —
+    // it runs as part of secret upload AFTER the user worker PUT and
+    // sandbox container POST. (No, that runs BEFORE worker PUT.)
+    //
+    // Simpler: make the slug ROUTING.put fail. We spy on env.ROUTING.put
+    // and reject when key === project.slug, which is exactly the routing
+    // flip step (`routingSwitched` is set true RIGHT AFTER that put, so a
+    // failing put aborts before `routingSwitched=true`).
+    const originalPut = env.ROUTING.put.bind(env.ROUTING);
+    const putSpy = vi.spyOn(env.ROUTING, 'put').mockImplementation((async (
+      key: string,
+      value: string | ArrayBuffer | ArrayBufferView | ReadableStream,
+      options?: KVNamespacePutOptions,
+    ) => {
+      if (key === project.slug) {
+        throw new Error('forced ROUTING.put failure for test');
+      }
+      return originalPut(key, value as never, options as never);
+    }) as typeof env.ROUTING.put);
+
+    const cf = mockCfApi();
+
+    const res = await deploy(project.id, user.jwt);
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    const done = getDoneEvent(events);
+    expect(done).toBeUndefined();
+
+    const errorEvent = events.find(
+      (e): e is { event: string; message: string } =>
+        typeof e === 'object' && e !== null && (e as { event?: unknown }).event === 'error',
     );
-    expect(hostPuts).toHaveLength(0);
+    expect(errorEvent).toBeDefined();
 
-    // Zero container DELETEs during rollback.
-    const containerDeletes = rollbackCalls.filter(
+    putSpy.mockRestore();
+
+    // The user worker PUT is recorded in cf.state.hostScripts (mock state),
+    // and the catch path issues a DELETE — so the script should NOT be present
+    // anymore.
+    const userWorkerKey = Array.from(cf.state.hostScripts.keys()).find((k) =>
+      k.startsWith(`user-${project.slug}-`),
+    );
+    expect(userWorkerKey).toBeUndefined();
+
+    // The per-deploy container app should also be gone.
+    const sandboxApps = Array.from(cf.state.containerApps.values()).filter((a) =>
+      a.name.endsWith('-void-sandbox'),
+    );
+    expect(sandboxApps).toHaveLength(0);
+
+    // The deploy was recorded as a DELETE on the worker script and a DELETE
+    // on the container app.
+    const workerDeletes = cf.state.recordedCalls.filter(
+      (c) =>
+        c.method === 'DELETE' &&
+        c.url.includes('/workers/dispatch/') &&
+        c.url.includes(`/scripts/user-${project.slug}-`),
+    );
+    expect(workerDeletes.length).toBeGreaterThanOrEqual(1);
+    const containerDeletes = cf.state.recordedCalls.filter(
       (c) => c.method === 'DELETE' && c.url.includes('/containers/applications/'),
     );
-    expect(containerDeletes).toHaveLength(0);
-
-    // Routing flipped to v1's worker.
-    const routing = (await env.ROUTING.get(project.slug, 'json')) as { workerName: string };
-    expect(routing.workerName).toBe(`user-${project.slug}-${v1Id}`);
+    expect(containerDeletes.length).toBeGreaterThanOrEqual(1);
   });
 
   // ----------------------------------------------------------------------
-  // 10. Project teardown serializes with provisioning
+  // 7. Post-routing teardown race: rollback branch deletes the container app
   // ----------------------------------------------------------------------
-  // Per the task prompt: simplify to sequential outcome — deploy first, then
-  // delete — and verify cleanup picks up the host/container. Concurrent race
-  // serialization under PGlite is not reliably reproducible.
-  it('10. project teardown after a sandbox deploy: cleanup deletes host script and container app (sequential outcome)', async () => {
+  it('post-routing teardown race: when status flips to deleting after the slug routing PUT, the rollback branch deletes the user worker AND the per-deploy container app', async () => {
     const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'sb-teardown-seq');
+    const project = await createTestProject(env.db, user.id, 'sb-teardown-race');
     const cf = mockCfApi();
 
-    // Deploy first so host + container exist.
-    const res = await deploy(project.id, user.jwt, buildSandboxManifest());
+    // Hook: AFTER the slug ROUTING.put commits (routingSwitched=true), flip
+    // projects.status='deleting' so the very next FOR UPDATE check throws
+    // PROJECT_DELETING_ERROR_MESSAGE — which lands in the teardownRaceLost
+    // branch of the outer catch.
+    const originalPut = env.ROUTING.put.bind(env.ROUTING);
+    const putSpy = vi.spyOn(env.ROUTING, 'put').mockImplementation((async (
+      key: string,
+      value: string | ArrayBuffer | ArrayBufferView | ReadableStream,
+      options?: KVNamespacePutOptions,
+    ) => {
+      const result = await originalPut(key, value as never, options as never);
+      if (key === project.slug) {
+        // Flip status='deleting' AFTER the slug routing flips. The next
+        // FOR UPDATE re-check inside deploy.ts will throw and trigger the
+        // teardownRaceLost branch.
+        await env.db
+          .update(projects)
+          .set({ status: 'deleting' })
+          .where(eq(projects.id, project.id));
+      }
+      return result;
+    }) as typeof env.ROUTING.put);
+
+    const res = await deploy(project.id, user.jwt);
     expect(res.status).toBe(200);
-    await res.text();
+    const events = await readAllEvents(res);
 
-    const hostScriptName = `do-host-${project.slug}`;
-    const containerAppName = `${project.id}-void-sandbox`.toLowerCase().replaceAll('_', '-');
-    expect(cf.state.hostScripts.get(hostScriptName)).toBeDefined();
-    const appBefore = Array.from(cf.state.containerApps.values()).find(
-      (a) => a.name === containerAppName,
+    // No `done` event — deploy hit the teardown-race branch and emitted error.
+    const done = getDoneEvent(events);
+    expect(done).toBeUndefined();
+    const errorEvent = events.find(
+      (e): e is { event: string; message: string } =>
+        typeof e === 'object' && e !== null && (e as { event?: unknown }).event === 'error',
     );
-    expect(appBefore).toBeDefined();
+    expect(errorEvent).toBeDefined();
 
-    // Now delete the project.
-    const delRes = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${user.jwt}` },
-      }),
-      env,
+    putSpy.mockRestore();
+
+    // Both the user worker and the container app are deleted by the
+    // teardown-race rollback branch.
+    const userWorkerKey = Array.from(cf.state.hostScripts.keys()).find((k) =>
+      k.startsWith(`user-${project.slug}-`),
     );
-    expect(delRes.status).toBe(200);
+    expect(userWorkerKey).toBeUndefined();
 
-    // Host script removed.
-    expect(cf.state.hostScripts.get(hostScriptName)).toBeUndefined();
-    // Container app removed.
-    const appAfter = Array.from(cf.state.containerApps.values()).find(
-      (a) => a.name === containerAppName,
+    const sandboxApps = Array.from(cf.state.containerApps.values()).filter((a) =>
+      a.name.endsWith('-void-sandbox'),
     );
-    expect(appAfter).toBeUndefined();
+    expect(sandboxApps).toHaveLength(0);
 
-    // DB rows for resources cascaded.
-    const rows = await env.db.select().from(resources).where(eq(resources.project_id, project.id));
-    expect(rows).toHaveLength(0);
+    // The recorded calls include a DELETE on the user worker AND a DELETE
+    // on the per-deploy container app from the teardownRaceLost branch.
+    const workerDeletes = cf.state.recordedCalls.filter(
+      (c) =>
+        c.method === 'DELETE' &&
+        c.url.includes('/workers/dispatch/') &&
+        c.url.includes(`/scripts/user-${project.slug}-`),
+    );
+    expect(workerDeletes.length).toBeGreaterThanOrEqual(1);
+    const containerDeletes = cf.state.recordedCalls.filter(
+      (c) => c.method === 'DELETE' && c.url.includes('/containers/applications/'),
+    );
+    expect(containerDeletes.length).toBeGreaterThanOrEqual(1);
   });
 
   // ----------------------------------------------------------------------
-  // 11. Project teardown deletes host + container
+  // 8. Mock regression: cross-script DO binding to non-existent script
   // ----------------------------------------------------------------------
-  it('11. DELETE /projects/:id triggers host script DELETE + container app DELETE + resources cascade', async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'sb-delete');
-    const cf = mockCfApi();
+  it('mock regression: cross-script DO binding referencing a non-existent dispatch-namespace script returns CF error (validates the architectural constraint)', async () => {
+    mockCfApi();
 
-    // Deploy first.
-    const res = await deploy(project.id, user.jwt, buildSandboxManifest());
-    expect(res.status).toBe(200);
-    await res.text();
-
-    const hostScriptName = `do-host-${project.slug}`;
-    const containerAppName = `${project.id}-void-sandbox`.toLowerCase().replaceAll('_', '-');
-    const appId = Array.from(cf.state.containerApps.values()).find(
-      (a) => a.name === containerAppName,
-    )!.id;
-
-    const beforeIndex = cf.state.recordedCalls.length;
-
-    const delRes = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${user.jwt}` },
-      }),
-      env,
-    );
-    expect(delRes.status).toBe(200);
-
-    const teardownCalls = cf.state.recordedCalls.slice(beforeIndex);
-
-    // Host script DELETE recorded.
-    const hostDelete = teardownCalls.find(
-      (c) => c.method === 'DELETE' && c.url.includes(`/scripts/${hostScriptName}`),
-    );
-    expect(hostDelete).toBeDefined();
-
-    // Container app DELETE recorded.
-    const containerDelete = teardownCalls.find(
-      (c) => c.method === 'DELETE' && c.url.includes(`/containers/applications/${appId}`),
-    );
-    expect(containerDelete).toBeDefined();
-
-    // Resources cascaded.
-    const rows = await env.db.select().from(resources).where(eq(resources.project_id, project.id));
-    expect(rows).toHaveLength(0);
-
-    // Project row gone.
-    const [proj] = await env.db.select().from(projects).where(eq(projects.id, project.id));
-    expect(proj).toBeUndefined();
-  });
-
-  // ----------------------------------------------------------------------
-  // 12. Regression: framework-emitted same-script binding fails fast
-  // ----------------------------------------------------------------------
-  // The cross-script rewrite happens in deploy.ts during metadata assembly.
-  // If a future bug skips it and the user worker is PUT with a same-script
-  // Sandbox binding (no script_name) AND no `migrations.new_sqlite_classes`
-  // entry for Sandbox, the dispatch namespace should reject the PUT because
-  // the class isn't declared on the user script.
-  //
-  // The metadata-rewrite is wired up in production deploy.ts via
-  // buildSandboxUploadBindings/buildSandboxUploadContainers/
-  // buildDurableObjectUploadMigrations — those helpers' rewrite path is
-  // exercised by every other test in this file (#1 / #2 / etc. all assert
-  // that user workers carry a `script_name`). The "rewrite is intentionally
-  // skipped" scenario can only be reproduced via direct mock manipulation
-  // of the dispatch namespace PUT endpoint — there's no production path
-  // that would skip it. We assert the mock's cross-script binding validator
-  // does the right thing on a hand-crafted PUT, which is what the design
-  // doc calls out as the safety net.
-  it('12. cross-script binding validator rejects a user-worker PUT that references a non-existent host script (rewrite-bypass safety net)', async () => {
-    const cf = mockCfApi();
-
-    // Hand-craft a user worker PUT with a cross-script binding to a host
-    // that does NOT exist in the dispatch namespace. The mock's
-    // uploadWorker validator should reject it.
+    // Hand-craft a user-worker PUT with a cross-script DO binding to a
+    // dispatch script that does NOT exist. The mock's uploadWorker validator
+    // rejects this — same rejection the real CF API issues, which is the
+    // architectural reason per-deploy avoids cross-script bindings.
     const metadata = {
       main_module: 'index.js',
       compatibility_date: '2024-01-01',
@@ -723,7 +528,7 @@ describe('cross-script DO host integration (design-doc 0067 §12)', () => {
           type: 'durable_object_namespace',
           name: 'SANDBOX',
           class_name: 'Sandbox',
-          script_name: 'do-host-nonexistent', // not seeded
+          script_name: 'no-such-host', // not seeded
         },
       ],
     };
@@ -736,31 +541,167 @@ describe('cross-script DO host integration (design-doc 0067 §12)', () => {
     );
 
     const res = await fetch(
-      'https://api.cloudflare.com/client/v4/accounts/test-account-id/workers/dispatch/namespaces/void-users/scripts/user-bypass-test-dpl_test',
+      'https://api.cloudflare.com/client/v4/accounts/test-account-id/workers/dispatch/namespaces/void-users/scripts/user-some-test-dpl_test',
       { method: 'PUT', headers: { Authorization: 'Bearer test' }, body: formData },
     );
 
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { success: boolean; errors: Array<{ message: string }> };
+    const body = (await res.json()) as {
+      success: boolean;
+      errors: Array<{ code: number; message: string }>;
+    };
     expect(body.success).toBe(false);
-    expect(body.errors[0]!.message).toMatch(/cross-script binding refers to non-existent script/);
+    expect(body.errors[0]!.code).toBe(10061);
+    expect(body.errors[0]!.message).toMatch(/Cannot create binding for class in script/);
+  });
 
-    // Sanity: with the host seeded AND container-enabled, the same PUT succeeds.
-    // The metadata MUST declare `containers: [{ class_name: 'Sandbox' }]` —
-    // otherwise the mock's container-enabled validation would reject the PUT
-    // with `DURABLE_OBJECT_NOT_CONTAINER_ENABLED` (see helpers.ts), which is
-    // the regression-test for the production bug PR #131 shipped.
+  // ----------------------------------------------------------------------
+  // 8b. Mock regression: cross-script DO binding to an EXISTING dispatch
+  // script is also rejected. CF rejects ALL cross-script DO bindings between
+  // dispatch namespace scripts; the mock used to allow this when the target
+  // existed (and was container-enabled), letting some bad architectures slip
+  // through tests. The unconditional rejection is the closest analog to real
+  // CF behavior.
+  // ----------------------------------------------------------------------
+  it('mock regression: cross-script DO binding to an EXISTING dispatch-namespace script is also rejected with 10061', async () => {
+    const cf = mockCfApi();
+
     cf.seedHostScript({
-      scriptName: 'do-host-nonexistent',
-      migrationTag: 'void-sandbox-host-v1',
-      classes: { Sandbox: 'ns_x' },
-      metadata: { containers: [{ class_name: 'Sandbox' }] },
+      scriptName: 'do-host-existing',
+      classes: { Sandbox: 'ns_seeded' },
+      migrationTag: 'sandbox-v1',
+      metadata: {
+        containers: [{ class_name: 'Sandbox' }],
+      },
     });
 
-    const res2 = await fetch(
-      'https://api.cloudflare.com/client/v4/accounts/test-account-id/workers/dispatch/namespaces/void-users/scripts/user-bypass-test-dpl_test',
+    const metadata = {
+      main_module: 'index.js',
+      compatibility_date: '2024-01-01',
+      bindings: [
+        {
+          type: 'durable_object_namespace',
+          name: 'SANDBOX',
+          class_name: 'Sandbox',
+          script_name: 'do-host-existing',
+        },
+      ],
+    };
+
+    const formData = new FormData();
+    formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    formData.append(
+      'index.js',
+      new Blob(['export default {}'], { type: 'application/javascript+module' }),
+    );
+
+    const res = await fetch(
+      'https://api.cloudflare.com/client/v4/accounts/test-account-id/workers/dispatch/namespaces/void-users/scripts/user-x-dpl_test',
       { method: 'PUT', headers: { Authorization: 'Bearer test' }, body: formData },
     );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      success: boolean;
+      errors: Array<{ code: number; message: string }>;
+    };
+    expect(body.success).toBe(false);
+    expect(body.errors[0]!.code).toBe(10061);
+    expect(body.errors[0]!.message).toMatch(/do-host-existing/);
+  });
+
+  // ----------------------------------------------------------------------
+  // 9. Mock regression: 2nd container POST for same namespace_id returns 1608
+  // ----------------------------------------------------------------------
+  it('mock regression: 2nd container POST for the same namespace_id returns CF code 1608 DURABLE_OBJECT_ALREADY_HAS_APPLICATION', async () => {
+    const cf = mockCfApi();
+
+    cf.seedContainerApp({
+      name: 'first-app',
+      namespaceId: 'ns_shared',
+      image: SANDBOX_IMAGE_V1,
+      maxInstances: 20,
+    });
+
+    const res = await fetch(
+      'https://api.cloudflare.com/client/v4/test-account-id/containers/applications',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer test', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'second-app',
+          scheduling_policy: 'default',
+          configuration: { image: SANDBOX_IMAGE_V1, instance_type: 'lite' },
+          max_instances: 20,
+          durable_objects: { namespace_id: 'ns_shared' },
+        }),
+      },
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { success: boolean; errors: Array<{ code: number }> };
+    expect(body.success).toBe(false);
+    expect(body.errors[0]!.code).toBe(1608);
+  });
+
+  // ----------------------------------------------------------------------
+  // 10. Project teardown deletes all retained deployments' container apps
+  // ----------------------------------------------------------------------
+  it('project teardown deletes per-deploy container apps for ALL retained deployments via deterministic-name orphan recovery', async () => {
+    // Solo plan: retainedDeployments=5 — both v1 and v2 stay retained.
+    const user = await createTestUser(env.db, 'sb-td-user', 'github', undefined, 'solo');
+    const project = await createTestProject(env.db, user.id, 'sb-teardown');
+    const cf = mockCfApi();
+
+    // Deploy v1.
+    const res1 = await deploy(project.id, user.jwt);
+    expect(res1.status).toBe(200);
+    const done1 = getDoneEvent(await readAllEvents(res1));
+    expect(done1).toBeDefined();
+    const v1Id = done1!.deployment;
+    const v1ContainerName = `${project.id}-${v1Id}-void-sandbox`.toLowerCase().replaceAll('_', '-');
+
+    // Deploy v2.
+    const res2 = await deploy(project.id, user.jwt);
     expect(res2.status).toBe(200);
+    const done2 = getDoneEvent(await readAllEvents(res2));
+    expect(done2).toBeDefined();
+    const v2Id = done2!.deployment;
+    const v2ContainerName = `${project.id}-${v2Id}-void-sandbox`.toLowerCase().replaceAll('_', '-');
+
+    // Both retention-keepable container apps exist before teardown.
+    expect(
+      Array.from(cf.state.containerApps.values()).some((a) => a.name === v1ContainerName),
+    ).toBe(true);
+    expect(
+      Array.from(cf.state.containerApps.values()).some((a) => a.name === v2ContainerName),
+    ).toBe(true);
+
+    // Tear down the project.
+    const delRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(delRes.status).toBe(200);
+
+    // Both per-deploy container apps are gone.
+    expect(
+      Array.from(cf.state.containerApps.values()).some((a) => a.name === v1ContainerName),
+    ).toBe(false);
+    expect(
+      Array.from(cf.state.containerApps.values()).some((a) => a.name === v2ContainerName),
+    ).toBe(false);
+
+    // DB cascaded.
+    const remainingResources = await env.db
+      .select()
+      .from(resources)
+      .where(eq(resources.project_id, project.id));
+    expect(remainingResources).toHaveLength(0);
+    const [proj] = await env.db.select().from(projects).where(eq(projects.id, project.id));
+    expect(proj).toBeUndefined();
   });
 });

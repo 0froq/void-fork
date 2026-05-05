@@ -85,6 +85,13 @@
       "when": 1777824065590,
       "tag": "0011_curly_stryfe",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1777914461330,
+      "tag": "0012_eminent_mystique",
+      "breakpoints": true
     }
   ]
 }

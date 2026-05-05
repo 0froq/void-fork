@@ -1,3 +1,4 @@
+import { retryWithBackoff } from '../cf-api.ts';
 import { CF_API_BASE, cfFetch, CloudflareApiError } from './cloudflare-api.ts';
 
 export interface ContainerApplicationInfo {
@@ -84,7 +85,7 @@ export async function deleteContainerApplication(
 /**
  * Idempotent variant of {@link deleteContainerApplication}. Swallows 404
  * responses (the application is already gone) and re-throws any other error.
- * Used by `provisionSandboxHost` and project teardown to make repeated DELETE
+ * Used by the deploy pipeline and project teardown to make repeated DELETE
  * attempts safe under partial-failure replay.
  */
 export async function deleteContainerApplicationIdempotent(
@@ -173,4 +174,108 @@ export async function findContainerApplication(
 
 function containersUrl(accountId: string): string {
   return `${CF_API_BASE}/${accountId}/containers`;
+}
+
+/**
+ * Compute the per-deploy CF container application name. The deployment id is
+ * baked in so each deploy gets a globally-unique name — the per-deploy
+ * architecture relies on every POST creating a fresh app (one DO namespace
+ * can only ever bind to one container app, and each deploy mints a fresh
+ * namespace via its own `Sandbox` class declaration).
+ *
+ * Lowercased and underscores converted to dashes because CF container names
+ * reject uppercase / `_`.
+ */
+export function perDeployContainerApplicationName(
+  projectId: string,
+  deploymentId: string,
+  containerName: string,
+): string {
+  return `${projectId}-${deploymentId}-${containerName}`.toLowerCase().replaceAll('_', '-');
+}
+
+/**
+ * After the per-deploy user worker has been PUT to the dispatch namespace,
+ * look up its fresh DO namespace_id and POST a new container application
+ * bound to it. Each deploy creates a new container; old ones are deleted by
+ * the retention loop.
+ *
+ * Container app name: `${projectId}-${deploymentId}-${containerName}` (lowercased,
+ * underscores → dashes — CF container names reject uppercase / `_`).
+ *
+ * Returns the namespace id and the new container application id, ready for
+ * the deploy pipeline to UPSERT the resources row.
+ *
+ * Wraps the namespace probe in retry/backoff to absorb CF's brief
+ * post-PUT propagation lag on the per-script bindings endpoint.
+ */
+export async function provisionPerDeployContainer(
+  accountId: string,
+  apiToken: string,
+  dispatchNamespace: string,
+  workerScriptName: string,
+  containerAppName: string,
+  bindingName: string,
+  className: string,
+  sandbox: { image: string; instanceType?: string; maxInstances?: number },
+): Promise<{ namespaceId: string; containerApplicationId: string }> {
+  const namespaceId = await retryWithBackoff(
+    async () => {
+      try {
+        return await findDurableObjectNamespaceId(
+          accountId,
+          apiToken,
+          dispatchNamespace,
+          workerScriptName,
+          bindingName,
+          className,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[per-deploy-container] namespace probe miss for ${workerScriptName} (will retry): ${msg}`,
+        );
+        return undefined;
+      }
+    },
+    {
+      maxRetries: 8,
+      delayMs: 500,
+      errorMessage: `per-deploy DO namespace was not visible after worker PUT (script=${workerScriptName})`,
+    },
+  );
+
+  const created = await tryCreateContainerApplication(accountId, apiToken, {
+    name: containerAppName,
+    image: sandbox.image,
+    namespaceId,
+    instanceType: sandbox.instanceType,
+    maxInstances: sandbox.maxInstances,
+  });
+
+  if (!created) {
+    // 409 here is recoverable iff the existing app is bound to the same
+    // namespace_id we just resolved — that means a previous attempt of this
+    // same deploy POSTed the app but threw before recording the id. Reusing
+    // it is safe. Any other state (different namespace, or vanished entirely)
+    // signals a real collision or concurrent deletion and must not be papered
+    // over.
+    const existing = await findContainerApplication(accountId, apiToken, containerAppName);
+    if (!existing) {
+      throw new Error(
+        `per-deploy container application "${containerAppName}" POST returned 409 ` +
+          `but a follow-up lookup found no application by that name`,
+      );
+    }
+    if (existing.durable_objects?.namespace_id !== namespaceId) {
+      throw new Error(
+        `per-deploy container application "${containerAppName}" already exists but is bound to ` +
+          `namespace_id=${existing.durable_objects?.namespace_id ?? '<none>'} ` +
+          `instead of expected ${namespaceId}; refusing to reuse`,
+      );
+    }
+    return { namespaceId, containerApplicationId: existing.id };
+  }
+
+  return { namespaceId, containerApplicationId: created.id };
 }

@@ -17,10 +17,11 @@ app.delete('/:id', async (c) => {
   }
 
   // `teardownProject` handles the FOR UPDATE lock, status='deleting' flip,
-  // bulk deployment cancellation, critical CF cleanup (sandbox host script +
-  // container apps — fatal on failure), best-effort CF cleanup (D1, KV, R2,
-  // queues, hyperdrive, custom hostnames, routing entries — warnings), and
-  // the DB cascade. Critical-cleanup failure throws and surfaces as a 5xx.
+  // bulk deployment cancellation, critical CF cleanup (container apps from
+  // `resources` rows + per-deploy container orphan recovery by deterministic
+  // name — fatal on failure), best-effort CF cleanup (D1, KV, R2, queues,
+  // hyperdrive, custom hostnames, routing entries — warnings), and the DB
+  // cascade. Critical-cleanup failure throws and surfaces as a 5xx.
   const { warnings } = await teardownProject(c, projectId, project);
 
   return c.json({

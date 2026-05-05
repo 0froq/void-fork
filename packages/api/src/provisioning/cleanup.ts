@@ -1,5 +1,6 @@
 import { sql as drizzleSql, and, eq, notInArray } from 'drizzle-orm';
 import type { Context } from 'hono';
+import { deleteWorkerBundle } from '../assets.ts';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
 import { clearCronScheduler } from '../cron-scheduler-client.ts';
 import {
@@ -16,10 +17,9 @@ import {
   getLegacyProjectWorkerName,
   getProjectDeploymentWorkerName,
   getProjectQueueName,
-  getSandboxHostScriptName,
 } from '../naming.ts';
 import { deployments as deploymentsTable, projects as projectsTable } from '../schema.ts';
-import type { Project, Resource } from '../types.ts';
+import type { DeployManifest, Project, Resource } from '../types.ts';
 import {
   deleteCustomHostname,
   deleteD1Database,
@@ -28,8 +28,11 @@ import {
   deleteQueue,
   deleteR2Bucket,
 } from './cloudflare-api.ts';
-import { deleteContainerApplicationIdempotent, findContainerApplication } from './containers.ts';
-import { sandboxContainerApplicationName } from './sandbox-host.ts';
+import {
+  deleteContainerApplicationIdempotent,
+  findContainerApplication,
+  perDeployContainerApplicationName,
+} from './containers.ts';
 
 function deleteCloudflareResource(
   accountId: string,
@@ -58,39 +61,15 @@ function deleteCloudflareResource(
 }
 
 /**
- * DELETE the project's sandbox host worker script in the dispatch namespace.
- * Treats 404 as success. Throws on any other non-OK response.
- *
- * The host script is the cross-script DO host (`do-host-${slug}`). Failing to
- * delete it would leave a CF script with a DO namespace bound to a project
- * whose DB row we are about to delete — orphaning CF state with no DB pointer
- * left for retry. So this MUST succeed before the DB cascade.
- */
-async function deleteSandboxHostScript(
-  accountId: string,
-  apiToken: string,
-  dispatchNamespace: string,
-  scriptName: string,
-): Promise<void> {
-  const res = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${scriptName}`,
-    { method: 'DELETE', headers: { Authorization: `Bearer ${apiToken}` } },
-  );
-  if (!res.ok && res.status !== 404) {
-    throw new Error(
-      `Failed to delete sandbox host script ${scriptName}: ${res.status} ${await res.text()}`,
-    );
-  }
-}
-
-/**
  * Critical CF cleanup. These deletes MUST succeed before the DB cascade,
  * otherwise we orphan CF state with no DB pointer left for retry.
  *
  * Currently:
- *   - Sandbox host script (`do-host-${slug}`) in the dispatch namespace.
  *   - Container application(s) referenced by `resources` rows of type
  *     `container`.
+ *   - Per-deploy container application orphans located by deterministic name
+ *     (recovery for deploys whose container POST succeeded but whose resources
+ *     UPSERT did not commit before the deploy rolled back).
  *
  * Throws on the first non-404 failure. The caller MUST NOT proceed to
  * `deleteProjectCascade` if this throws.
@@ -98,23 +77,8 @@ async function deleteSandboxHostScript(
 async function cleanupCriticalResources(
   c: Context<ApiEnv>,
   projectId: string,
-  project: Pick<Project, 'slug'>,
+  _project: Pick<Project, 'slug'>,
 ): Promise<void> {
-  const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
-
-  // Host script DELETE runs unconditionally — 404 is treated as idempotent
-  // success, so the cost for non-sandbox projects is a single cheap call.
-  // Gating this on `resources` would create a critical leak: if a past
-  // `provisionSandboxHost` PUT the host script but then the resources UPSERT
-  // failed (deploy.ts catch path also failed, e.g. network drop), no row
-  // exists and the host would be orphaned with no DB pointer for retry.
-  await deleteSandboxHostScript(
-    c.env.CF_ACCOUNT_ID,
-    c.env.CF_API_TOKEN,
-    dispatchNamespace,
-    getSandboxHostScriptName(project.slug),
-  );
-
   const resources = await getProjectResources(c.get('db'), projectId);
   for (const resource of resources) {
     if (resource.type !== 'container') {
@@ -127,30 +91,86 @@ async function cleanupCriticalResources(
     );
   }
 
-  // Orphan-recovery fallback: a past `provisionSandboxHost` failure could
-  // have left a CF container app behind without a corresponding `resources`
-  // row (e.g. CF POST succeeded, DB UPSERT failed, deploy rolled back). The
-  // primary loop above only catches container apps that have a row; this
-  // fallback uses the deterministic name (`${projectId}-void-sandbox`) to
-  // locate orphans by name and DELETE them. Only covers the default
-  // containerName ('void-sandbox') because non-default names are rare and
-  // would have a `resources` row whenever they're successfully written.
+  // Orphan-recovery fallback: a past `provisionPerDeployContainer` failure
+  // could have left a CF container app behind without a corresponding
+  // `resources` row (e.g. CF POST succeeded, DB UPSERT failed, deploy rolled
+  // back). The primary loop above only catches container apps that have a
+  // row; this fallback enumerates every deployment for the project, parses
+  // its manifest, and locates per-deploy container orphans by deterministic
+  // name (`perDeployContainerApplicationName`).
   //
-  // Runs unconditionally for the same reason as the host DELETE above: the
-  // failure mode this catches (resources row missing) means we can't gate
-  // on resources presence without defeating the recovery's purpose. The
-  // GET listing is cheap enough to absorb on every teardown.
-  const orphanName = sandboxContainerApplicationName(projectId, 'void-sandbox');
+  // Runs unconditionally because the failure mode this catches (resources
+  // row missing) means we can't gate on resources presence without
+  // defeating the recovery's purpose. Per-deployment GETs are cheap enough
+  // to absorb on every teardown — and teardown is rare relative to deploy.
+  //
+  // Race-mitigation (full fix is project-level locking — see design-doc 0067):
+  // an in-flight deploy whose container POST lands AFTER our first scan
+  // would leak as an orphan once the DB cascade nulls its deployment row.
+  // Run the scan TWICE with a short delay; the second pass catches any POST
+  // that completed during the gap. `assertProjectNotDeleting` /
+  // `assertDeploymentNotCanceled` checks in the deploy pipeline mean an
+  // in-flight deploy aborts shortly after `lockAndMarkDeleting` flips the
+  // status, so a 2s delay is comfortably longer than the worst-case
+  // post-status-flip container POST tail.
   const alreadyDeletedCfIds = new Set(
     resources.filter((r) => r.type === 'container').map((r) => r.cf_id),
   );
-  const orphan = await findContainerApplication(
-    c.env.CF_ACCOUNT_ID,
-    c.env.CF_API_TOKEN,
-    orphanName,
-  );
-  if (orphan && !alreadyDeletedCfIds.has(orphan.id)) {
-    await deleteContainerApplicationIdempotent(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, orphan.id);
+  await sweepPerDeployContainerOrphans(c, projectId, alreadyDeletedCfIds);
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  await sweepPerDeployContainerOrphans(c, projectId, alreadyDeletedCfIds);
+}
+
+/**
+ * Locate per-deploy container orphans by deterministic name and delete any
+ * not already in `alreadyDeletedCfIds`. Mutates the set with each new id so
+ * subsequent passes skip already-handled orphans.
+ */
+async function sweepPerDeployContainerOrphans(
+  c: Context<ApiEnv>,
+  projectId: string,
+  alreadyDeletedCfIds: Set<string>,
+): Promise<void> {
+  const allDeployments = await getAllProjectDeployments(c.get('db'), projectId);
+  for (const deployment of allDeployments) {
+    const manifest = parseDeploymentManifest(deployment.manifest);
+    if (!manifest?.sandbox) {
+      continue;
+    }
+    const orphanName = perDeployContainerApplicationName(
+      projectId,
+      deployment.id,
+      manifest.sandbox.containerName ?? 'void-sandbox',
+    );
+    const orphan = await findContainerApplication(
+      c.env.CF_ACCOUNT_ID,
+      c.env.CF_API_TOKEN,
+      orphanName,
+    );
+    if (orphan && !alreadyDeletedCfIds.has(orphan.id)) {
+      await deleteContainerApplicationIdempotent(
+        c.env.CF_ACCOUNT_ID,
+        c.env.CF_API_TOKEN,
+        orphan.id,
+      );
+      alreadyDeletedCfIds.add(orphan.id);
+    }
+  }
+}
+
+/**
+ * Best-effort manifest parse for orphan-recovery enumeration. Manifests are
+ * stored as JSON-encoded text on `deployments.manifest`. Returns `null` for
+ * absent or unparseable bodies so the caller can skip those rows.
+ */
+function parseDeploymentManifest(raw: string | null): DeployManifest | null {
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as DeployManifest;
+  } catch {
+    return null;
   }
 }
 
@@ -177,8 +197,6 @@ async function cleanupBestEffortResources(
   ]);
 
   const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
-  // Note: the sandbox host script is handled in `cleanupCriticalResources`
-  // and must NOT be retried here.
   const workerNames = new Set([
     getLegacyProjectWorkerName(project.slug),
     ...projectDeployments.map((deployment) =>
@@ -200,6 +218,19 @@ async function cleanupBestEffortResources(
           }
         })
         .catch(warn(`Failed to delete worker ${workerName}`)),
+    ),
+  );
+
+  // Delete R2 worker bundle objects under `worker-bundles/{projectId}/{deploymentId}/...`
+  // for every deployment. Without this, project teardown leaves these objects
+  // permanently orphaned in STATIC_ASSETS_R2 (the cascade only drops DB rows).
+  // `deleteWorkerBundle` is idempotent — listing returns no objects for deploys
+  // that never stored a bundle, so we don't need to gate on `bundle_stored`.
+  await Promise.all(
+    projectDeployments.map((deployment) =>
+      deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, deployment.id).catch(
+        warn(`Failed to delete worker bundle for deployment ${deployment.id}`),
+      ),
     ),
   );
 
@@ -257,13 +288,12 @@ async function cleanupBestEffortResources(
  * teardown attempts.
  *
  * Holding the FOR UPDATE lock across the status flip + deployment cancellation
- * serializes with `provisionSandboxHost`, which also takes the same lock and
- * checks status. Any in-flight deploy that already passed its own
- * `provisionSandboxHost` lock check (and thus committed CF host + container
- * state) will observe status='canceling' on its NEXT
- * `assertDeploymentNotCanceled` call inside `routes/deploy.ts` and abort
- * before issuing further CF mutations (worker PUT, asset session, routing
- * flip, etc.).
+ * serializes with the deploy pipeline's atomic precheck-and-claim transaction,
+ * which also locks the project row and checks status. Any in-flight deploy
+ * that already passed its own status check will observe status='canceling' on
+ * its NEXT `assertDeploymentNotCanceled` / `assertProjectNotDeleting` call
+ * inside `routes/deploy.ts` and abort before issuing further CF mutations
+ * (worker PUT, asset session, routing flip, etc.).
  */
 async function lockAndMarkDeleting(db: Db, projectId: string): Promise<void> {
   await db.transaction(async (tx) => {
@@ -306,9 +336,9 @@ async function lockAndMarkDeleting(db: Db, projectId: string): Promise<void> {
  *   1. Take FOR UPDATE on the project row, flip status='deleting' (if not
  *      already), and mark all non-terminal deployments as 'canceling' so any
  *      in-flight deploy aborts before further CF mutations.
- *   2. Run critical CF cleanup (sandbox host script + container apps). Throws
- *      on non-404 failure; the caller should surface a 5xx and the DB row
- *      remains, allowing retry.
+ *   2. Run critical CF cleanup (container apps + per-deploy container
+ *      orphan recovery). Throws on non-404 failure; the caller should surface
+ *      a 5xx and the DB row remains, allowing retry.
  *   3. Run best-effort CF cleanup (D1, KV, R2, queues, hyperdrive, custom
  *      hostnames, routing entries, deployment workers). Failures become
  *      warnings.

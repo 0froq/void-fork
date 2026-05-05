@@ -495,3 +495,29 @@ The exact operator steps live in `meta/operations.md` under "Pre-PR-#0067 sandbo
 - **Slug rename for sandbox projects.** Document as unsupported, or design a rename migration as a separate runbook.
 - **Host script upgrades (`@cloudflare/sandbox` version bump).** When we eventually upgrade, ship a one-shot migration job that walks all sandbox projects and re-PUTs the host using `migration_tag` protocol with no new migration steps. Out of scope; deferred until a real upgrade is needed.
 - **Local `wrangler dev` for projects that share container state with prod.** Local dev creates its own per-developer Sandbox namespace; not connected to the prod host. Matches today's behavior.
+
+## Resolution: per-deploy architecture
+
+The cross-script-host architecture above shipped in PR #131 (`e21d0a75`) and was empirically rejected by Cloudflare in production. The user-worker PUT — which carried `durable_object_namespace` bindings with `script_name: "do-host-${slug}"` — failed with CF error code 10061: `Cannot create binding for class in script 'do-host-${slug}' that does not exist.` The host script DOES exist in the same dispatch namespace, but CF's resolver does not look there.
+
+A subagent investigation against the upstream `~/workspace/github/workers-sdk` source confirmed the cause. The `script_name` field on a `durable_object_namespace` binding has no scope qualifier — no `dispatch_namespace`, no `account_namespace_id`. CF resolves it against account-level Workers only. WfP scripts inside a dispatch namespace are not visible to that resolver. The two unblocked options were: (a) move the host out of the dispatch namespace into account-level Workers; or (b) abandon stable-host ownership and put the `Sandbox` class back on the per-deploy user worker.
+
+We picked (b) — per-deploy isolation. Each sandbox deploy now creates a fresh user worker that owns its own `Sandbox` class via a same-script DO binding plus a `containers` declaration plus the `void-sandbox-v1` migration step. Because each deploy gets a fresh `(script_name, class_name)` pair, CF mints a fresh DO namespace, and each deploy POSTs its own per-deploy container application bound to that fresh namespace. The container app name is deterministic: `${projectId}-${deploymentId}-${containerName}`, lowercased with `_` → `-` (CF rejects uppercase / underscores). See `packages/api/src/provisioning/containers.ts:189-195` (`perDeployContainerApplicationName`) and `:212-` (`provisionPerDeployContainer`).
+
+Worker module bytes are stored in R2 at `worker-bundles/{projectId}/{deploymentId}/...` (`packages/api/src/assets.ts:1228-1234`) so a future rollback-beyond-retention path can re-PUT a deleted user worker. The re-PUT path is deferred; for now, retained deployments rollback by flipping the routing pointer to a still-live user worker + container.
+
+Lifecycle:
+
+- **First deploy / redeploy:** PUT user worker (mints DO namespace via `new_sqlite_classes: ["Sandbox"]`), GET namespace_id off the bindings endpoint, POST a fresh container app, write a `resources` row with `cf_id = <containerApplicationId>` and `binding_name = manifest.sandbox.containerName`.
+- **Retention loop:** DELETE the aged-out user-worker script, its container application (deterministic-name lookup from manifest — `packages/api/src/provisioning/cleanup.ts:129-159` `sweepPerDeployContainerOrphans`), and its R2 bundle objects. Deleting the script alone does NOT free the container app.
+- **Project teardown:** enumerates retained deployments via `getAllProjectDeployments`, recomputes each container app name via `perDeployContainerApplicationName`, and DELETEs idempotently.
+- **Rollback within retention:** existing pointer-flip works; the target deploy's script + container are still alive.
+- **Rollback beyond retention:** re-PUT user worker from the R2 bundle. Deferred follow-up.
+
+Trade-offs accepted:
+
+- ~5s extra per-deploy latency for the per-deploy container application POST.
+- Sandbox container state is ephemeral per deploy. Users who need persistence across deploys persist into D1 / KV / R2 explicitly. The previous design's "container state survives deploys" property was a side effect of the stable host; it is not a contract we can keep without account-level Workers.
+- The framework's same-script `Sandbox` declaration + `containers` block + migrations entry pass through unchanged. No upload-time metadata rewrite is needed. `wrangler dev` continues to work locally with no platform-specific shape.
+
+The earlier sections (Context, Decision, Implementation, Edge cases, Concrete file plan, Pre-PR cutover) are preserved as archival history of the rejected design. All references to `do-host-${slug}`, `provisionSandboxHost`, `putSandboxHostScript`, the bundled `@cloudflare/sandbox` host source, the `metadata.namespaceId` / `metadata.hostScriptName` fields on the `resources` row, and the cross-script binding rewrite at upload time are obsolete and should be read against the per-deploy resolution above.

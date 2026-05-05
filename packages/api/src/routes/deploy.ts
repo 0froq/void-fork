@@ -8,6 +8,7 @@ import {
   collectBufferedAsset,
   computeAssetHash,
   createAssetUploadSession,
+  deleteWorkerBundle,
   KV_THRESHOLD,
   readStaticAssetPart,
   STATIC_ASSET_UPLOAD_CONCURRENCY,
@@ -19,6 +20,7 @@ import {
   deleteUnreferencedAssets,
   verifyStreamedAssetPart,
   getContentType,
+  persistWorkerBundle,
   type AssetEntry,
   type AssetManifestEntry,
 } from '../assets.ts';
@@ -42,6 +44,7 @@ import {
   getLastLiveAssetManifest,
   setActiveDeployment,
   markDeploymentRetained,
+  markDeploymentBundleStored,
   setAppliedMigrations,
   getRetainedDeployments,
   getRetainedDeploymentsExcluding,
@@ -65,12 +68,13 @@ import {
   encryptProjectSecret,
 } from '../project-secrets.ts';
 import { addQueueConsumer } from '../provisioning/cloudflare-api.ts';
-import { provisionBindings } from '../provisioning/provision.ts';
 import {
-  ProjectDeletingError,
-  provisionSandboxHost,
-  type SandboxHostInfo,
-} from '../provisioning/sandbox-host.ts';
+  deleteContainerApplicationIdempotent,
+  findContainerApplication,
+  perDeployContainerApplicationName,
+  provisionPerDeployContainer,
+} from '../provisioning/containers.ts';
+import { provisionBindings } from '../provisioning/provision.ts';
 import { buildRoutingJson, buildStaticRoutingJson } from '../routing.ts';
 import { deployments } from '../schema.ts';
 import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT } from '../tiers.ts';
@@ -127,6 +131,51 @@ const CF_READINESS_RETRY = { maxRetries: 6, delayMs: 1000 };
 // Migration dispatch: propagation lag is handled by the readiness probe,
 // so this only retries genuine transient failures (e.g. network blips).
 const CF_MIGRATION_RETRY = { maxRetries: 2, delayMs: 1000 };
+// Container DELETE retry budget for catch-handler cleanup (pre-routing
+// failure + teardown-race rollback). One retry at 500ms covers transient CF
+// failures (502/503/network blips) during the cancellation window without
+// stretching cancellation latency. Errors are still swallowed by the caller
+// after the retry budget is exhausted because the orphan-recovery pass in
+// `cleanupCriticalResources` will reap any straggler on the next teardown.
+const CF_CONTAINER_DELETE_RETRY = { maxRetries: 1, delayMs: 500 };
+
+/**
+ * Wrap `deleteContainerApplicationIdempotent` with a small retry budget for
+ * catch-path cleanup. Returns `true` on success, `false` if every attempt
+ * threw — the caller decides whether to swallow the failure (currently:
+ * always swallow + log; teardown's orphan recovery is the safety net).
+ */
+async function deleteContainerApplicationWithRetry(
+  accountId: string,
+  apiToken: string,
+  applicationId: string,
+): Promise<boolean> {
+  let lastErr: unknown;
+  try {
+    await retryWithBackoff(
+      async () => {
+        try {
+          await deleteContainerApplicationIdempotent(accountId, apiToken, applicationId);
+          return true;
+        } catch (err) {
+          lastErr = err;
+          return undefined; // signal retry
+        }
+      },
+      {
+        maxRetries: CF_CONTAINER_DELETE_RETRY.maxRetries,
+        delayMs: CF_CONTAINER_DELETE_RETRY.delayMs,
+        errorMessage: `failed to delete container application ${applicationId}`,
+      },
+    );
+    return true;
+  } catch {
+    if (lastErr) {
+      console.error(`[deploy] failed to clean up container application ${applicationId}:`, lastErr);
+    }
+    return false;
+  }
+}
 
 const app = new Hono<ApiEnv>();
 
@@ -883,7 +932,8 @@ async function assertDeploymentNotCanceled(db: Db, deploymentId: string): Promis
 // `assertDeploymentNotCanceled` could still race the route flip and recreate
 // routing for a deleted project. Calling this alongside every cancellation
 // check (and re-checking under FOR UPDATE at the final commit) closes that
-// window. See `provisionSandboxHost` for the canonical lock pattern.
+// window. The atomic precheck-and-claim transaction below holds the same
+// FOR UPDATE lock teardown uses, serializing the two flows.
 const PROJECT_DELETING_ERROR_MESSAGE = 'project deletion in progress';
 
 /**
@@ -930,7 +980,6 @@ export function buildWebSocketUploadMigrations(
 export function buildDurableObjectUploadMigrations(
   websocketMigrations: Array<WebSocketMigrationMeta> | undefined,
   sandboxMigrations: Array<SandboxMigrationMeta> | undefined,
-  crossScriptHost?: { scriptName: string } | null,
 ):
   | {
       new_tag: string;
@@ -941,13 +990,6 @@ export function buildDurableObjectUploadMigrations(
       }>;
     }
   | undefined {
-  // When a cross-script DO host owns the Sandbox class (design-doc 0067 §3),
-  // the per-deploy user worker MUST NOT declare any sandbox migrations — it
-  // doesn't own the class. Drop sandbox migrations entirely; the host script
-  // is the only writer of `new_sqlite_classes: ['Sandbox']` and uses its own
-  // migration_tag protocol (see `provisionSandboxHost`).
-  const effectiveSandboxMigrations = crossScriptHost ? undefined : sandboxMigrations;
-
   const steps: Array<{
     tag: string;
     index: number;
@@ -965,7 +1007,7 @@ export function buildDurableObjectUploadMigrations(
     });
   }
 
-  for (const migration of effectiveSandboxMigrations ?? []) {
+  for (const migration of sandboxMigrations ?? []) {
     steps.push({
       tag: migration.tag,
       index: steps.length,
@@ -1060,14 +1102,15 @@ export function buildWebSocketUploadBindings(
   }));
 }
 
-export function buildSandboxUploadBindings(
-  sandbox: DeployManifest['sandbox'] | undefined,
-  crossScriptHost?: { scriptName: string } | null,
-): Array<{
+/**
+ * Per-deploy user worker owns its own Sandbox class. CF rejects cross-script
+ * DO bindings into dispatch namespaces (the resolver only sees account-level
+ * scripts), so each deploy declares its own DO namespace + container app.
+ */
+export function buildSandboxUploadBindings(sandbox: DeployManifest['sandbox'] | undefined): Array<{
   type: 'durable_object_namespace';
   name: string;
   class_name: string;
-  script_name?: string;
 }> {
   if (!sandbox) {
     return [];
@@ -1076,32 +1119,14 @@ export function buildSandboxUploadBindings(
     {
       type: 'durable_object_namespace',
       name: sandbox.bindingName,
-      // When a stable per-project DO host owns the Sandbox class (design-doc
-      // 0067 §3), the per-deploy user worker references the namespace via a
-      // cross-script binding pointing at the host's literal `Sandbox` class.
-      // The host script declares ONLY `new_sqlite_classes: ['Sandbox']`, so a
-      // user manifest with a custom `className` (e.g. `'CustomSandbox'`) MUST
-      // be rewritten to `'Sandbox'` here — otherwise the user worker binds to
-      // a class the host doesn't export. The user-facing `bindingName`
-      // (alias in `env`) is preserved either way.
-      class_name: crossScriptHost ? 'Sandbox' : sandbox.className,
-      // Without `script_name` the user worker would mint its own (per-deploy)
-      // namespace, which is the bug this fixes.
-      ...(crossScriptHost ? { script_name: crossScriptHost.scriptName } : {}),
+      class_name: sandbox.className,
     },
   ];
 }
 
 export function buildSandboxUploadContainers(
   sandbox: DeployManifest['sandbox'] | undefined,
-  crossScriptHost?: { scriptName: string } | null,
 ): Array<{ class_name: string }> | undefined {
-  // When the cross-script DO host owns the container application (design-doc
-  // 0067 §3), the per-deploy user worker MUST NOT declare a `containers`
-  // block — the host is the sole owner of the container app's lifecycle.
-  if (crossScriptHost) {
-    return undefined;
-  }
   return sandbox ? [{ class_name: sandbox.className }] : undefined;
 }
 
@@ -1692,6 +1717,9 @@ app.post('/:id/deploy', async (c) => {
     const writtenRoutingKeys: Array<string> = [];
     let workerUploaded = false;
     let workerUploadUrl: string | undefined;
+    let sandboxContainerAppId: string | undefined;
+    let sandboxContainerAppName: string | undefined;
+    let bundleStored = false;
     let manifest: DeployManifest | undefined;
     let workerName: string | undefined;
     let dispatchNamespace: string | undefined;
@@ -2363,49 +2391,6 @@ app.post('/:id/deploy', async (c) => {
 
         emit({ event: 'start', deploymentId: deployment.id });
 
-        // === SANDBOX HOST PROVISIONING ===
-        // Per design-doc 0067 §4: the per-project sandbox DO host script
-        // (`do-host-${slug}`) MUST be PUT before the user worker, because the
-        // user worker references the host's namespace via a cross-script DO
-        // binding and CF rejects the upload if `script_name` doesn't exist in
-        // the dispatch namespace. `provisionSandboxHost` runs inside its own
-        // `db.transaction` with `SELECT ... FOR UPDATE` on the project row, so
-        // it serializes against concurrent first deploys and project teardown
-        // (status='deleting') without us holding extra locks here.
-        //
-        // Guard: only run sandbox provisioning for worker-backed deploys.
-        // Static/SPA deploys return early below without uploading a worker
-        // script, so the cross-script DO binding is never consumed. A malformed
-        // or stale manifest that includes `sandbox` on a static deploy must not
-        // mutate CF sandbox state before the early return.
-        let sandboxHostInfo: SandboxHostInfo | null = null;
-        if (manifest.sandbox && hasWorkerFiles) {
-          currentStep = 'sandbox_host';
-          try {
-            sandboxHostInfo = await provisionSandboxHost(
-              c.env,
-              c.get('db'),
-              projectId,
-              project.slug,
-              manifest.sandbox.containerName,
-              manifest.sandbox.image,
-              manifest.sandbox.instanceType,
-              manifest.sandbox.maxInstances,
-            );
-          } catch (err) {
-            if (err instanceof ProjectDeletingError) {
-              // Deploy raced with project deletion — fail fast before any
-              // CF-side mutation. Re-throw so the outer catch handles it via
-              // the standard pre-routing failure path (deployment marked
-              // failed, error emitted with currentStep='sandbox_host').
-              throw new Error('project is being deleted');
-            }
-            throw err;
-          }
-          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-          await assertProjectNotDeleting(c.get('db'), projectId);
-        }
-
         // === ASSET UPLOAD PHASE ===
         currentStep = 'asset_upload';
         await updateDeploymentStatus(c.get('db'), deployment.id, 'uploading');
@@ -2935,10 +2920,7 @@ app.post('/:id/deploy', async (c) => {
           text,
         }));
         const websocketBindings = buildWebSocketUploadBindings(manifest.websocket);
-        const sandboxBindings = buildSandboxUploadBindings(
-          manifest.sandbox,
-          sandboxHostInfo ? { scriptName: sandboxHostInfo.scriptName } : null,
-        );
+        const sandboxBindings = buildSandboxUploadBindings(manifest.sandbox);
         const allBindings = [
           ...plainTextBindings,
           ...secretBindings,
@@ -2959,12 +2941,8 @@ app.post('/:id/deploy', async (c) => {
         const durableObjectMigrations = buildDurableObjectUploadMigrations(
           manifest.websocket?.migrations,
           manifest.sandbox?.migrations,
-          sandboxHostInfo ? { scriptName: sandboxHostInfo.scriptName } : null,
         );
-        const containers = buildSandboxUploadContainers(
-          manifest.sandbox,
-          sandboxHostInfo ? { scriptName: sandboxHostInfo.scriptName } : null,
-        );
+        const containers = buildSandboxUploadContainers(manifest.sandbox);
         const tailServiceName = c.env.TAIL_SERVICE_NAME ?? DEFAULT_TAIL_SERVICE_NAME;
         const metadata: Record<string, unknown> = {
           main_module: manifest.workerMain ?? 'index.js',
@@ -3040,13 +3018,78 @@ app.post('/:id/deploy', async (c) => {
           },
         );
         workerUploaded = true;
+
+        // Persist the worker bundle to R2 BEFORE the cancel/delete checks so
+        // the invariant `bundle_stored=true ⇒ rollbackable` holds. If the
+        // bundle write throws, the deploy aborts via the outer catch; the
+        // freshly-uploaded user worker is torn down on the pre-routing
+        // cleanup path. Cancellation only kicks in AFTER the bundle is
+        // durably written + flagged, which is what we want — a deploy that
+        // was canceled mid-write would otherwise leave `bundle_stored=false`
+        // on a script that did upload, blocking rollback to it later.
+        //
+        // Static / SPA deploys (`!hasWorkerFiles`) skip this — their assets
+        // are already content-addressed in R2, and they have no worker
+        // module to replay, so their `bundle_stored` stays false.
+        if (hasWorkerFiles) {
+          try {
+            await persistWorkerBundle(
+              c.env.STATIC_ASSETS_R2,
+              projectId,
+              deployment.id,
+              workerFiles,
+            );
+          } catch (err) {
+            // The bounded-worker pool inside persistWorkerBundle awaits all
+            // in-flight puts before throwing, so the R2 set is stable here.
+            // Successful puts before the throw are otherwise unreferenced —
+            // bundle_stored never flips true and no other code path will
+            // reap them.
+            await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, deployment.id).catch((e) =>
+              console.error(
+                `[deploy] failed to clean up partial worker bundle for ${deployment!.id}:`,
+                e,
+              ),
+            );
+            throw err;
+          }
+          await markDeploymentBundleStored(c.get('db'), deployment.id);
+          bundleStored = true;
+        }
+
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
         await assertProjectNotDeleting(c.get('db'), projectId);
 
-        // Note: the sandbox host script + container application are now
-        // provisioned BEFORE the user worker upload (design-doc 0067 §4).
-        // The user-worker metadata above carries cross-script DO bindings to
-        // `do-host-${slug}`; no per-deploy container plumbing happens here.
+        // Per-deploy sandbox container provisioning. Must run AFTER the user
+        // worker PUT because the container app's `durable_objects.namespace_id`
+        // points at the freshly-minted DO namespace owned by the per-deploy
+        // user worker. CF rejects cross-script DO bindings into dispatch
+        // namespaces, so each deploy mints its own namespace + container.
+        if (manifest.sandbox && hasWorkerFiles) {
+          currentStep = 'sandbox_container';
+          sandboxContainerAppName = perDeployContainerApplicationName(
+            projectId,
+            deployment.id,
+            manifest.sandbox.containerName ?? 'void-sandbox',
+          );
+          const { containerApplicationId } = await provisionPerDeployContainer(
+            c.env.CF_ACCOUNT_ID,
+            c.env.CF_API_TOKEN,
+            dispatchNamespace,
+            workerName,
+            sandboxContainerAppName,
+            manifest.sandbox.bindingName,
+            manifest.sandbox.className,
+            {
+              image: manifest.sandbox.image,
+              instanceType: manifest.sandbox.instanceType,
+              maxInstances: manifest.sandbox.maxInstances,
+            },
+          );
+          sandboxContainerAppId = containerApplicationId;
+          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
+          await assertProjectNotDeleting(c.get('db'), projectId);
+        }
 
         emit({ event: 'worker_upload_done' });
 
@@ -3499,34 +3542,158 @@ app.post('/:id/deploy', async (c) => {
           }
 
           for (const old of toEvict) {
-            const oldWorkerName = `user-${project.slug}-${old.id}`;
-            await deleteDispatchScript(
-              c.env.CF_ACCOUNT_ID,
-              c.env.CF_API_TOKEN,
-              dispatchNamespace,
-              oldWorkerName,
-            );
-            // Evict mirrored assets + serving manifest written by prior
-            // WfP deploys under this plan (pre-mirror deploys have neither).
-            if (retainedHashes && old.asset_hashes) {
-              const evictedManifest = JSON.parse(old.asset_hashes) as Record<
-                string,
-                { hash: string }
-              >;
-              const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
-              await deleteUnreferencedAssets(
-                c.env.STATIC_ASSETS,
-                c.env.STATIC_ASSETS_R2,
-                evictedHashes,
-                retainedHashes,
-                projectId,
+            // Phase 1: flip `retained=false` inside a per-project FOR UPDATE
+            // lock so this serializes with rollback's transaction.
+            //
+            // Rollback acquires the same project lock and gates on
+            // `target.retained === true` BEFORE writing routing. Without
+            // serialization, a rollback that read `retained=true` could
+            // race with this loop's `markDeploymentRetained(false)` and
+            // proceed to point production routing at a deployment whose
+            // worker / container / bundle is being torn down below.
+            //
+            // The lock is held only for the pg flip (and a defensive
+            // active-deployment re-read). External CF deletes run AFTER
+            // the transaction commits — holding the lock across multi-
+            // second CF API calls would needlessly block rollback. Once
+            // `retained=false` is durably committed, any rollback that
+            // acquires the lock afterwards observes the flag and aborts
+            // with 400 before writing routing.
+            const evictionSkipped = await c.get('db').transaction(async (tx) => {
+              await tx.execute(
+                drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
               );
-              await c.env.ROUTING.delete(`manifest:${old.id}`);
+              const txDb = tx as unknown as Db;
+
+              // Defensive re-read: if a concurrent rollback won the lock
+              // race and promoted this deployment back to active before
+              // we acquired it, skip eviction. Without this check we
+              // would unretain (and tear down) the project's currently
+              // live deployment.
+              const lockedProject = await getProject(txDb, projectId);
+              if (lockedProject?.active_deployment_id === old.id) {
+                return true;
+              }
+
+              await markDeploymentRetained(txDb, old.id, false);
+              return false;
+            });
+            if (evictionSkipped) {
+              continue;
             }
-            await markDeploymentRetained(c.get('db'), old.id, false);
-            await clearIsrCache(c.env.ISR_CACHE, projectId, old.id).catch((e) =>
-              console.error(`[deploy] failed to clear ISR cache for evicted ${old.id}:`, e),
-            );
+
+            // Phase 2: external deletes (CF worker, container, bundle,
+            // mirrored assets, ROUTING manifest, ISR cache). Safe outside
+            // the lock — `retained=false` is already durably committed,
+            // so any rollback racing with these deletes will fail its
+            // `target.retained` precheck and abort cleanly without
+            // writing routing.
+            //
+            // After Phase 1 (markDeploymentRetained=false) commits, partial
+            // failure of external cleanup leaves CF/KV/R2 state orphaned.
+            // Best-effort + log because flipping retained=false is the
+            // rollback-race anti-corruption barrier — must commit first.
+            // Future retention passes only scan retained=true rows, so a
+            // throw here would strand the deployment in leaked-state with
+            // no retry. A periodic orphan-sweep cron is future work for
+            // this rare failure mode.
+            try {
+              const oldWorkerName = `user-${project.slug}-${old.id}`;
+              await deleteDispatchScript(
+                c.env.CF_ACCOUNT_ID,
+                c.env.CF_API_TOKEN,
+                dispatchNamespace,
+                oldWorkerName,
+              ).catch((e) => {
+                console.warn(`[deploy] failed to delete dispatch script for evicted ${old.id}:`, e);
+              });
+              // Evict mirrored assets + serving manifest written by prior
+              // WfP deploys under this plan (pre-mirror deploys have neither).
+              if (retainedHashes && old.asset_hashes) {
+                try {
+                  const evictedManifest = JSON.parse(old.asset_hashes) as Record<
+                    string,
+                    { hash: string }
+                  >;
+                  const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
+                  await deleteUnreferencedAssets(
+                    c.env.STATIC_ASSETS,
+                    c.env.STATIC_ASSETS_R2,
+                    evictedHashes,
+                    retainedHashes,
+                    projectId,
+                  ).catch((e) => {
+                    console.warn(
+                      `[deploy] failed to delete unreferenced assets for evicted ${old.id}:`,
+                      e,
+                    );
+                  });
+                  await c.env.ROUTING.delete(`manifest:${old.id}`).catch((e) => {
+                    console.warn(
+                      `[deploy] failed to delete routing manifest for evicted ${old.id}:`,
+                      e,
+                    );
+                  });
+                } catch (e) {
+                  console.warn(`[deploy] failed to parse asset_hashes for evicted ${old.id}:`, e);
+                }
+              }
+
+              if (old.manifest) {
+                try {
+                  const oldManifest = JSON.parse(old.manifest) as DeployManifest;
+                  if (oldManifest.sandbox) {
+                    const oldContainerAppName = perDeployContainerApplicationName(
+                      projectId,
+                      old.id,
+                      oldManifest.sandbox.containerName ?? 'void-sandbox',
+                    );
+                    const existing = await findContainerApplication(
+                      c.env.CF_ACCOUNT_ID,
+                      c.env.CF_API_TOKEN,
+                      oldContainerAppName,
+                    );
+                    if (existing) {
+                      await deleteContainerApplicationIdempotent(
+                        c.env.CF_ACCOUNT_ID,
+                        c.env.CF_API_TOKEN,
+                        existing.id,
+                      );
+                    }
+                  }
+                } catch (e) {
+                  console.error(
+                    `[deploy] failed to delete sandbox container app for evicted ${old.id}:`,
+                    e,
+                  );
+                }
+              }
+
+              if (old.bundle_stored) {
+                try {
+                  await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, old.id);
+                } catch (e) {
+                  console.error(
+                    `[deploy] failed to delete worker bundle for evicted ${old.id}:`,
+                    e,
+                  );
+                }
+              }
+
+              await clearIsrCache(c.env.ISR_CACHE, projectId, old.id).catch((e) =>
+                console.error(`[deploy] failed to clear ISR cache for evicted ${old.id}:`, e),
+              );
+            } catch (e) {
+              // Top-level guard: any unhandled throw above leaves CF/KV/R2
+              // state orphaned, but Phase 1's retained=false flip already
+              // committed (preserves the rollback-race fix). Surface a
+              // warning and continue to the next eviction.
+              console.warn(
+                `[deploy] partial failure during retention eviction for ${old.id} (state may be orphaned):`,
+                e,
+              );
+              continue;
+            }
           }
         }
 
@@ -3608,6 +3775,55 @@ app.post('/:id/deploy', async (c) => {
               headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
             }).catch((e) => console.error(`[deploy] failed to delete orphaned worker ${wn}:`, e));
           }
+          // The worker bundle is otherwise orphaned: bundle_stored=true but
+          // the deployment never reaches 'live', so retention's eviction
+          // sweep won't see it and there is no rollback target to keep.
+          if (bundleStored) {
+            await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, dep.id).catch((e) =>
+              console.error(`[deploy] failed to delete worker bundle for ${dep.id}:`, e),
+            );
+          }
+          // Per-deploy container apps are tracked only by deterministic name
+          // (no DB row); teardown enumerates by project, not by deploy, so a
+          // container created in this deploy attempt won't be reaped by any
+          // other path. Delete independently of the worker DELETE above —
+          // they are separate CF resources and either can fail without
+          // implicating the other. Retry once with a short backoff to absorb
+          // transient CF failures during the teardown-race cancellation
+          // window; persistent failures are logged and left for teardown's
+          // orphan recovery to reap.
+          if (sandboxContainerAppId) {
+            await deleteContainerApplicationWithRetry(
+              c.env.CF_ACCOUNT_ID,
+              c.env.CF_API_TOKEN,
+              sandboxContainerAppId,
+            );
+          } else if (sandboxContainerAppName) {
+            // provisionPerDeployContainer rejected after CF accepted the POST
+            // (network drop / response-parse failure), so we never learned the
+            // application id. Look up the orphan by deterministic name and
+            // delete it — without this, the app is lost forever (no DB row,
+            // and teardown enumerates by project, not by deploy).
+            try {
+              const orphan = await findContainerApplication(
+                c.env.CF_ACCOUNT_ID,
+                c.env.CF_API_TOKEN,
+                sandboxContainerAppName,
+              );
+              if (orphan) {
+                await deleteContainerApplicationWithRetry(
+                  c.env.CF_ACCOUNT_ID,
+                  c.env.CF_API_TOKEN,
+                  orphan.id,
+                );
+              }
+            } catch (e) {
+              console.error(
+                `[deploy] failed to recover orphan container app ${sandboxContainerAppName}:`,
+                e,
+              );
+            }
+          }
           await updateDeploymentStatus(c.get('db'), dep.id, 'failed', msg).catch(() => {});
           emit({ event: 'error', message: msg, step: currentStep });
         } else if (routingSwitched) {
@@ -3654,6 +3870,54 @@ app.post('/:id/deploy', async (c) => {
           await deleteDispatchScript(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, dn, wn).catch((e) =>
             console.error(`[deploy] failed to clean up worker script ${wn}:`, e),
           );
+          // The worker bundle is otherwise orphaned: bundle_stored=true but
+          // the deployment ends in 'failed'/'canceled', so retention's
+          // eviction sweep skips it (it filters on retained=true) and there
+          // is no rollback target.
+          if (bundleStored) {
+            await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, dep.id).catch((e) =>
+              console.error(`[deploy] failed to delete worker bundle for ${dep.id}:`, e),
+            );
+          }
+          // Per-deploy container apps are tracked only by deterministic name
+          // (no DB row), so retention/teardown can't find this one if we leak
+          // it here — the deployment never reached 'live' status, so the
+          // retention sweep that enumerates retained deployments will skip it.
+          // Retry once with a short backoff to absorb transient CF failures;
+          // persistent failures are logged and left for teardown's orphan
+          // recovery (when the project is eventually deleted).
+          if (sandboxContainerAppId) {
+            await deleteContainerApplicationWithRetry(
+              c.env.CF_ACCOUNT_ID,
+              c.env.CF_API_TOKEN,
+              sandboxContainerAppId,
+            );
+          } else if (sandboxContainerAppName) {
+            // provisionPerDeployContainer rejected after CF accepted the POST
+            // (network drop / response-parse failure), so we never learned the
+            // application id. Look up the orphan by deterministic name and
+            // delete it — without this, the app is lost forever (no DB row,
+            // and teardown enumerates by project, not by deploy).
+            try {
+              const orphan = await findContainerApplication(
+                c.env.CF_ACCOUNT_ID,
+                c.env.CF_API_TOKEN,
+                sandboxContainerAppName,
+              );
+              if (orphan) {
+                await deleteContainerApplicationWithRetry(
+                  c.env.CF_ACCOUNT_ID,
+                  c.env.CF_API_TOKEN,
+                  orphan.id,
+                );
+              }
+            } catch (e) {
+              console.error(
+                `[deploy] failed to recover orphan container app ${sandboxContainerAppName}:`,
+                e,
+              );
+            }
+          }
           await clearIsrCache(c.env.ISR_CACHE, projectId, dep.id).catch((e) =>
             console.error(`[deploy] failed to clear ISR cache for ${dep.id}:`, e),
           );
