@@ -1,7 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'pathe';
 import { afterEach, describe, expect, it } from 'vitest';
-import { needsWrapper, generateWrapper } from '../../src/cli/wrapper.ts';
+import {
+  needsWrapper,
+  generateWrapper,
+  selectBundledEntryFilename,
+} from '../../src/cli/wrapper.ts';
 import type { WrapperFeatures } from '../../src/cli/wrapper.ts';
 
 const base: WrapperFeatures = {
@@ -39,6 +43,18 @@ describe('needsWrapper', () => {
 
   it('returns false when hasMigrations is false', () => {
     expect(needsWrapper({ ...base, hasMigrations: false })).toBe(false);
+  });
+});
+
+describe('selectBundledEntryFilename', () => {
+  it('selects the exact bundled entry when index-prefixed chunks sort first', () => {
+    expect(selectBundledEntryFilename(['index-server-Bo4VDtw5.js', 'index.js'])).toBe('index.js');
+  });
+
+  it('throws a helpful error when no exact bundled entry exists', () => {
+    expect(() => selectBundledEntryFilename(['index-server-Bo4VDtw5.js'])).toThrow(
+      'deploy: Bundled worker entry not found',
+    );
   });
 });
 

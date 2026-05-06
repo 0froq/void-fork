@@ -31,6 +31,18 @@ export interface WrapperResult {
   outputDir: string;
 }
 
+const BUNDLED_ENTRY_RE = /^index\.(?:m?js|cjs)$/;
+
+export function selectBundledEntryFilename(outFiles: Array<string>): string {
+  const entryFilename = outFiles.find((file) => BUNDLED_ENTRY_RE.test(file));
+  if (!entryFilename) {
+    throw new Error(
+      `deploy: Bundled worker entry not found. Expected index.js, index.mjs, or index.cjs in bundle output. Found: ${outFiles.join(', ') || '(none)'}`,
+    );
+  }
+  return entryFilename;
+}
+
 /**
  * Determine whether a wrapper is needed based on the features.
  */
@@ -171,9 +183,10 @@ export async function bundleEntry(root: string, entry: string): Promise<WrapperR
     },
   });
 
-  // Read actual output filename from the output directory
-  const outFiles = readdirSync(outDir).filter((f) => f.startsWith('index'));
-  const entryFilename = outFiles[0] ?? 'index.mjs';
+  // Read actual entry filename from the output directory. Vite/Rollup can also
+  // emit sibling chunks like index-server-*.js, and readdir order is
+  // filesystem-dependent.
+  const entryFilename = selectBundledEntryFilename(readdirSync(outDir));
 
   return { entryFilename, outputDir: outDir };
 }
