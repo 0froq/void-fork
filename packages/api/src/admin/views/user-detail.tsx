@@ -114,6 +114,14 @@ export function UserDetailPage({
             <td>KV storage</td>
             <td>{formatLimit(limits.kvStorageBytes, 'bytes')}</td>
           </tr>
+          <tr>
+            <td>AI neurons / month</td>
+            <td>{formatLimit(limits.aiNeuronsPerMonth)}</td>
+          </tr>
+          <tr>
+            <td>Retained deployments</td>
+            <td>{formatLimit(limits.retainedDeployments)}</td>
+          </tr>
         </tbody>
       </table>
 
