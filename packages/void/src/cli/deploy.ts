@@ -623,6 +623,10 @@ async function runFrameworkDeploy(
   // 2. Verify output paths
   const workerDir = join(root, fwPreset.workerDir);
   const assetsDir = join(root, fwPreset.assetsDir);
+  const frameworkAssetIgnorePatterns =
+    fwPreset.workerDir === fwPreset.assetsDir && fwPreset.workerMain === '_worker.js'
+      ? [`/${fwPreset.workerMain}`, '/_routes.json']
+      : [];
 
   // Merge framework-generated `_headers` / `_redirects` + void.json routing rules.
   // Netlify-symmetric phases:
@@ -791,7 +795,9 @@ async function runFrameworkDeploy(
 
   // Preflight: hash assets and check which ones changed
   s.start('Checking for changes...');
-  const { assetManifest } = await collectAndHashAssets(assetsDir, onProgress);
+  const { assetManifest } = await collectAndHashAssets(assetsDir, onProgress, {
+    ignorePatterns: frameworkAssetIgnorePatterns,
+  });
   const { needed, skipped } = await client.preflight(config.projectId, assetManifest, true);
   s.stop('Checked for changes');
 
@@ -827,6 +833,7 @@ async function runFrameworkDeploy(
     redirectRules,
     fallbackRules,
     dialect,
+    assetIgnorePatterns: frameworkAssetIgnorePatterns,
     onProgress,
   });
   formData.append('assetManifest', JSON.stringify(assetManifest));

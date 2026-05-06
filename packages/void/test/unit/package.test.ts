@@ -898,6 +898,18 @@ describe('_worker.js safety guard', () => {
     );
   });
 
+  it('lets framework deploys ignore co-located worker control files during preflight', async () => {
+    writeFileSync(join(TMP, 'index.html'), '<html></html>');
+    writeFileSync(join(TMP, '_worker.js'), 'export default {}');
+    writeFileSync(join(TMP, '_routes.json'), '{}');
+
+    const { assetManifest } = await collectAndHashAssets(TMP, undefined, {
+      ignorePatterns: ['/_worker.js', '/_routes.json'],
+    });
+
+    expect(Object.keys(assetManifest).sort()).toEqual(['/index.html']);
+  });
+
   it('guards packageBuild client assets against _worker.js', async () => {
     // Set up worker dir so packageBuild doesn't fail
     const workerDir = join(TMP, 'worker');
@@ -948,5 +960,41 @@ describe('_worker.js safety guard', () => {
         },
       }),
     ).rejects.toThrow('deploy: Refusing to upload _worker.js file as an asset');
+  });
+
+  it('lets framework deploys ignore co-located worker control files during packaging', async () => {
+    const workerDir = join(TMP, 'server');
+    const assetsDir = join(TMP, 'public');
+    mkdirSync(workerDir, { recursive: true });
+    mkdirSync(assetsDir, { recursive: true });
+    writeFileSync(join(workerDir, 'index.js'), 'export default {}');
+    writeFileSync(join(assetsDir, 'index.html'), '<html></html>');
+    writeFileSync(join(assetsDir, '_worker.js'), 'export default {}');
+    writeFileSync(join(assetsDir, '_routes.json'), '{}');
+
+    const form = await packageFrameworkBuild({
+      frameworkName: 'sveltekit',
+      workerDir,
+      workerMain: 'index.js',
+      assetsDir,
+      assetIgnorePatterns: ['/_worker.js', '/_routes.json'],
+      bindings: {
+        needsD1: false,
+        needsKV: false,
+        needsR2: false,
+        needsAuth: false,
+        needsQueues: false,
+        needsAI: false,
+        needsSandbox: false,
+      },
+    });
+
+    const assetKeys: Array<string> = [];
+    for (const [key] of form.entries()) {
+      if (key.startsWith('asset:')) {
+        assetKeys.push(key.slice('asset:'.length));
+      }
+    }
+    expect(assetKeys.sort()).toEqual(['index.html']);
   });
 });

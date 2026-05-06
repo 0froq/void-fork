@@ -153,14 +153,17 @@ export function computeAssetHash(content: Buffer, filePath: string): string {
 
 /**
  * Create a filter function that excludes .assetsignore, _headers, _redirects,
- * and any patterns listed in a .assetsignore file. Matches Wrangler's
- * createAssetsIgnoreFunction from workers-shared/utils/helpers.ts.
+ * deploy-internal patterns, and any patterns listed in a .assetsignore file.
+ * Matches Wrangler's createAssetsIgnoreFunction from workers-shared/utils/helpers.ts.
  */
-function createAssetsIgnoreFunction(dir: string): {
+function createAssetsIgnoreFunction(
+  dir: string,
+  extraPatterns: Array<string> = [],
+): {
   isIgnored: (relativePath: string) => boolean;
   assetsIgnoreFilePresent: boolean;
 } {
-  const patterns = ['/.assetsignore', '/_redirects', '/_headers'];
+  const patterns = ['/.assetsignore', '/_redirects', '/_headers', ...extraPatterns];
   const assetsIgnorePath = join(dir, '.assetsignore');
   let assetsIgnoreFilePresent = false;
   if (existsSync(assetsIgnorePath)) {
@@ -211,6 +214,7 @@ export interface AssetManifestEntry {
 export async function collectAndHashAssets(
   dir: string,
   onProgress?: ProgressCallback,
+  opts: { ignorePatterns?: Array<string> } = {},
 ): Promise<{
   assetManifest: Record<string, AssetManifestEntry>;
   assetFiles: Map<string, Buffer>;
@@ -219,7 +223,10 @@ export async function collectAndHashAssets(
   const assetFiles = new Map<string, Buffer>();
 
   try {
-    const { isIgnored, assetsIgnoreFilePresent } = createAssetsIgnoreFunction(dir);
+    const { isIgnored, assetsIgnoreFilePresent } = createAssetsIgnoreFunction(
+      dir,
+      opts.ignorePatterns,
+    );
     const files = collectFiles(dir);
     let processed = 0;
     for (const filePath of files) {
@@ -640,6 +647,7 @@ export async function packageFrameworkBuild(opts: {
   fallbackRules?: Array<DevRedirectRule>;
   dialect?: 'sqlite' | 'postgresql';
   webSockets?: Array<WebSocketRouteDefinition>;
+  assetIgnorePatterns?: Array<string>;
   onProgress?: ProgressCallback;
 }): Promise<FormData> {
   const formData = new FormData();
@@ -754,7 +762,10 @@ export async function packageFrameworkBuild(opts: {
 
   // Asset files
   try {
-    const { isIgnored, assetsIgnoreFilePresent } = createAssetsIgnoreFunction(opts.assetsDir);
+    const { isIgnored, assetsIgnoreFilePresent } = createAssetsIgnoreFunction(
+      opts.assetsDir,
+      opts.assetIgnorePatterns,
+    );
     const assetFiles = collectFiles(opts.assetsDir);
     let processed = 0;
     for (const filePath of assetFiles) {
