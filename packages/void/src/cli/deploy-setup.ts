@@ -28,7 +28,7 @@ export async function maybeSetupDeployProject(root: string): Promise<ProjectConf
   const shouldSetup = await confirm({
     message: existingToken
       ? 'Link your Void project now?'
-      : 'Set up your Void project now? (log in + link project)',
+      : 'Log in now and link or create a Void project?',
   });
   if (isCancel(shouldSetup)) {
     cancel('Setup cancelled.');

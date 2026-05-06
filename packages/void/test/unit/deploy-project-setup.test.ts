@@ -77,6 +77,22 @@ describe('promptDeployProjectConfig', () => {
     expect(JSON.parse(readFileSync(join(root, '.void', 'project.json'), 'utf-8'))).toEqual(config);
   });
 
+  it('rejects short free-plan project slugs at the prompt', async () => {
+    const { promptProjectSlug } = await import('../../src/cli/prompt.ts');
+    mockText.mockResolvedValueOnce('valid-app');
+
+    await expect(promptProjectSlug('demo-app')).resolves.toBe('valid-app');
+
+    const promptConfig = mockText.mock.calls[0]?.[0] as {
+      validate: (value: string) => string | undefined;
+    };
+    expect(promptConfig.validate('abcde')).toBe(
+      'Slugs of 5 characters or fewer require a paid plan. Use at least 6 characters.',
+    );
+    expect(promptConfig.validate('abcdef')).toBeUndefined();
+    expect(promptConfig.validate('ABC')).toBe('Slug must be lowercase alphanumeric with dashes.');
+  });
+
   it('does not show project names when creating with existing projects available', async () => {
     const { promptDeployProjectConfig } = await import('../../src/cli/deploy.ts');
     const client = createClient();

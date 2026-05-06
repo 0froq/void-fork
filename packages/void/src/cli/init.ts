@@ -1925,10 +1925,9 @@ function setupGithubActions(root: string, state: ProjectState): void {
   log.success('Created .github/workflows/deploy.yml');
 
   note(
-    '1. Run: npx void auth token\n' +
-      '2. In your repo → Settings → Secrets → Actions → New secret\n' +
-      '3. Name: VOID_TOKEN, paste the token as value',
-    'Add your deploy token as a GitHub secret',
+    'After init completes, run `npx void auth token` to copy a deploy token.\n' +
+      'Then add it in GitHub under Settings → Secrets and variables → Actions as `VOID_TOKEN`.',
+    'GitHub Actions deploy token',
   );
 }
 
@@ -3513,7 +3512,9 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
       // --github flag: run directly without prompting
       setupGithubActions(root, state);
     } else {
-      const setupGha = await confirm({ message: 'Set up GitHub Actions deployment?' });
+      const setupGha = await confirm({
+        message: 'Create .github/workflows/deploy.yml to deploy on pushes to main?',
+      });
       if (isCancel(setupGha)) {
         cancel('Setup cancelled.');
         process.exit(0);
@@ -3542,10 +3543,6 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     }
   }
 
-  if (!targeted) {
-    await maybeSetupDeployProject(root);
-  }
-
   if (scaffoldAddedDependencies) {
     installProjectDependencies(root, state.packageManager);
   }
@@ -3555,6 +3552,10 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     // `buildDrizzleKitSpawnEnv`, so it works under PnP the same way
     // `gen.ts:runMigration` does. No skip branch needed.
     generateStarterMigration(root, scaffoldedStarterMode);
+  }
+
+  if (!targeted) {
+    await maybeSetupDeployProject(root);
   }
 
   if (workspaceSubpackageSkip) {

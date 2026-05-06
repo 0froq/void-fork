@@ -451,22 +451,12 @@ async function runAiSetupPrompt(
 
   if (result === '__create__') {
     const defaultSlug = inferDefaultSlug(root);
+    const { validateProjectSlug } = await import('./cli/project-slug.ts');
     const slugResult = await text({
       message: 'Choose a slug for your new Void project:',
       placeholder: 'my-app',
       initialValue: defaultSlug,
-      validate(value) {
-        const s = (value ?? '').trim();
-        if (s.length === 0) {
-          return 'Project slug is required.';
-        }
-        const valid =
-          s.length === 1 ? /^[a-z0-9]$/.test(s) : /^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(s);
-        if (!valid) {
-          return 'Slug must be lowercase alphanumeric with dashes.';
-        }
-        return undefined;
-      },
+      validate: validateProjectSlug,
     });
     if (isCancel(slugResult)) {
       return;

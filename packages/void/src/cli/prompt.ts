@@ -1,6 +1,7 @@
 import { select, text, isCancel, cancel } from '@clack/prompts';
 import { getSiteDomain } from './auth.ts';
 import type { ProjectResponse } from './client.ts';
+import { validateProjectSlug } from './project-slug.ts';
 
 interface SelectResult {
   action: 'select';
@@ -75,21 +76,7 @@ export async function promptProjectSlug(defaultSlug: string): Promise<string> {
     message: 'Choose a slug for your new Void project:',
     placeholder: 'my-app',
     initialValue: defaultSlug,
-    validate(value) {
-      const slug = (value ?? '').trim();
-      if (slug.length === 0) {
-        return 'Project slug is required.';
-      }
-
-      // Allows lowercase alphanumeric with interior dashes.
-      const valid =
-        slug.length === 1 ? /^[a-z0-9]$/.test(slug) : /^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slug);
-      if (!valid) {
-        return 'Slug must be lowercase alphanumeric with dashes.';
-      }
-
-      return undefined;
-    },
+    validate: validateProjectSlug,
   });
 
   if (isCancel(result)) {

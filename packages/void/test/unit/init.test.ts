@@ -59,6 +59,11 @@ vi.mock('../../src/cli/auth', () => ({
 }));
 
 vi.mock('../../src/cli/client', () => ({
+  PlatformApiError: class PlatformApiError extends Error {
+    status = 500;
+    code = undefined;
+    body = undefined;
+  },
   PlatformClient: class {
     listProjects(...args: Array<unknown>) {
       return mockListProjects(...args);
@@ -1148,6 +1153,9 @@ describe('isScaffoldableEmptyProject', () => {
       const viteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
       expect(viteConfig).toContain('import { voidPlugin } from "void";');
       expect(viteConfig).toContain('plugins: [voidPlugin()]');
+      expect(mockConfirm).toHaveBeenCalledWith({
+        message: 'Create .github/workflows/deploy.yml to deploy on pushes to main?',
+      });
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'npm',
         ['install'],
@@ -1156,6 +1164,28 @@ describe('isScaffoldableEmptyProject', () => {
           stdio: 'inherit',
           shell: process.platform === 'win32',
         }),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('explains GitHub Actions token setup as an after-init step', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+    try {
+      writeFileSync(
+        join(root, 'package.json'),
+        JSON.stringify({ name: 'existing-app', private: true }, null, 2) + '\n',
+      );
+
+      await runInitCommand(root, { github: true, tsconfig: false, agents: false });
+
+      expect(readFileSync(join(root, '.github', 'workflows', 'deploy.yml'), 'utf-8')).toContain(
+        'VOID_TOKEN: ${{ secrets.VOID_TOKEN }}',
+      );
+      expect(mockNote).toHaveBeenCalledWith(
+        expect.stringContaining('After init completes, run `npx void auth token`'),
+        'GitHub Actions deploy token',
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -1906,7 +1936,7 @@ export default config;
       await runInitCommand(root);
 
       expect(mockConfirm.mock.calls[1]?.[0]).toMatchObject({
-        message: 'Set up your Void project now? (log in + link project)',
+        message: 'Log in now and link or create a Void project?',
       });
       expect(mockRunLogin).toHaveBeenCalledWith(root, 'github', expect.any(Function));
       expect(mockSaveToken).toHaveBeenCalledWith('token_123', root);
@@ -1916,6 +1946,34 @@ export default config;
         projectId: 'proj_live',
         slug: 'my-live-app',
       });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('installs starter dependencies before optional project creation', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+    try {
+      mockSelect
+        .mockResolvedValueOnce('react')
+        .mockResolvedValueOnce('sqlite')
+        .mockResolvedValueOnce('generic')
+        .mockResolvedValueOnce('github');
+      mockConfirm.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+      mockText.mockResolvedValueOnce('my-live-app');
+      mockCreateProject.mockRejectedValueOnce(new Error('project create failed'));
+
+      await expect(runInitCommand(root)).rejects.toThrow('project create failed');
+
+      const installCalls = mockSpawnSync.mock.calls.filter(
+        (call) => Array.isArray(call[1]) && call[1][0] === 'install',
+      );
+      expect(installCalls.length).toBeGreaterThan(0);
+
+      const drizzleCalls = mockSpawnSync.mock.calls.filter(
+        (call) => Array.isArray(call[1]) && call[1][1] === 'generate',
+      );
+      expect(drizzleCalls.length).toBeGreaterThan(0);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
