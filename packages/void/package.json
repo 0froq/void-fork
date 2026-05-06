@@ -61,6 +61,11 @@
     "./routes": {
       "types": "./dist/routes-stub.d.mts"
     },
+    "./sveltekit": {
+      "types": "./dist/sveltekit.d.mts",
+      "import": "./dist/sveltekit.mjs",
+      "require": "./dist/sveltekit.mjs"
+    },
     "./client": {
       "types": "./dist/runtime/client.d.mts",
       "import": "./dist/runtime/client.mjs",

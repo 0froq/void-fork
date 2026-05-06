@@ -107,6 +107,7 @@ export default defineConfig({
     'src/runtime/migration-handler.ts',
     'src/runtime/migration-handler-pg.ts',
     'src/runtime/ws-server.ts',
+    'src/sveltekit.ts',
     'src/pages/index.ts',
     'src/pages/protocol.ts',
     'src/pages/head.ts',

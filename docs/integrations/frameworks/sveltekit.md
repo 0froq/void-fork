@@ -25,9 +25,15 @@ npm install -D @sveltejs/adapter-cloudflare void
 
 ```js
 import adapter from '@sveltejs/adapter-cloudflare';
+import { withVoidTSConfig } from 'void/sveltekit';
 
 export default {
-  kit: { adapter: adapter() },
+  kit: {
+    adapter: adapter(),
+    typescript: {
+      config: withVoidTSConfig(),
+    },
+  },
 };
 ```
 
@@ -55,7 +61,24 @@ SvelteKit's adapter reads bindings from `wrangler.jsonc` for local dev. `voidPlu
 }
 ```
 
-### 6. Deploy
+### 6. Configure `tsconfig.json`
+
+SvelteKit generates `.svelte-kit/tsconfig.json` and expects your root config to extend it. Void generates `.void/tsconfig.json` for project-specific aliases such as `void/db` and `@schema`.
+
+Do not add Void's `compilerOptions.paths` to the root `tsconfig.json`; SvelteKit warns because root-level paths override its generated aliases. The `withVoidTSConfig()` hook above merges Void's generated files and aliases into SvelteKit's generated config instead.
+
+```json
+{
+  "extends": "./.svelte-kit/tsconfig.json",
+  "compilerOptions": {
+    "types": ["void/env"]
+  }
+}
+```
+
+Run `void prepare` after a fresh clone or before typechecking in CI so `.void/tsconfig.json` exists before SvelteKit syncs its config.
+
+### 7. Deploy
 
 ```bash
 void auth login
