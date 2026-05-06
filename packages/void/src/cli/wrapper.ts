@@ -102,12 +102,16 @@ export async function generateWrapper(
     migrations = collectMigrations(migrationsDir);
     // Copy the migration handler runtime into the worker directory.
     // Pick the PG handler when the dialect is PostgreSQL, otherwise use the D1 handler.
-    // Primary path: ../runtime/ relative to import.meta.dirname (dist/cli/ → dist/runtime/).
+    // Bundled CLI chunks are emitted directly in dist/, while an unbundled CLI
+    // entry would live in dist/cli/. Support both layouts plus source tests.
     const handlerFilename_ =
       features.migrationDialect === 'postgresql'
         ? 'migration-handler-pg.mjs'
         : 'migration-handler.mjs';
-    let handlerPath = join(import.meta.dirname, '..', 'runtime', handlerFilename_);
+    let handlerPath = join(import.meta.dirname, 'runtime', handlerFilename_);
+    if (!existsSync(handlerPath)) {
+      handlerPath = join(import.meta.dirname, '..', 'runtime', handlerFilename_);
+    }
     if (!existsSync(handlerPath)) {
       // Fallback for running from source (src/cli/) in tests — dist/runtime/ is two levels up.
       handlerPath = join(import.meta.dirname, '..', '..', 'dist', 'runtime', handlerFilename_);
