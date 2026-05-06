@@ -131,17 +131,9 @@ import { render } from "svelte/server";
 import App from "@void/svelte/App.svelte";
 import { createSsrRouter, idleNavigationState } from "void/pages-client";
 import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
+import { serializePageData } from "void/pages-server";
 
 ${generateComponentManifest(scan, pagesDir)}
-
-function serializePageData(pageObj) {
-  return JSON.stringify(pageObj)
-    .replaceAll("<", "\\u003c")
-    .replaceAll(">", "\\u003e")
-    .replaceAll("&", "\\u0026")
-    .replaceAll("\u2028", "\\u2028")
-    .replaceAll("\u2029", "\\u2029");
-}
 
 export async function renderPage(pageObj, assetTags) {
   const PageComponent = (await components[pageObj.component]()).default;
