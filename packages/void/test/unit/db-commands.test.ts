@@ -157,6 +157,35 @@ describe('getAppliedMigrations', () => {
   });
 });
 
+describe('getLocalD1PersistRoot', () => {
+  it('uses .void for Void apps', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-db-persist-'));
+    try {
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: { void: '*' } }));
+
+      const { getLocalD1PersistRoot } = await import('../../src/cli/db.ts');
+      expect(getLocalD1PersistRoot(root)).toBe(join(root, '.void'));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('uses Wrangler state for framework apps that own the Cloudflare emulator', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-db-persist-'));
+    try {
+      writeFileSync(
+        join(root, 'package.json'),
+        JSON.stringify({ dependencies: { '@sveltejs/kit': '*' } }),
+      );
+
+      const { getLocalD1PersistRoot } = await import('../../src/cli/db.ts');
+      expect(getLocalD1PersistRoot(root)).toBe(join(root, '.wrangler', 'state'));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 const rootsToClean: Array<string> = [];
 
 function createRenameProjectRoot(options: {
@@ -228,6 +257,7 @@ describe('void db drizzle-kit subprocesses', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     mockExecFileSync.mockReset();
+    mockGetMiniflareDatabasePath.mockReset();
     for (const root of rootsToClean.splice(0, rootsToClean.length)) {
       rmSync(root, { recursive: true, force: true });
     }
@@ -248,6 +278,22 @@ describe('void db drizzle-kit subprocesses', () => {
       join(root, '.void', 'drizzle.config.json'),
     ]);
     expect(options).toEqual({ cwd: root, stdio: 'inherit' });
+  });
+
+  it('uses the framework emulator store for SQLite push in SvelteKit apps', async () => {
+    const root = createDrizzleProjectRoot();
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ dependencies: { '@sveltejs/kit': '*' } }),
+    );
+    mockGetMiniflareDatabasePath.mockReturnValue(join(root, 'local.sqlite'));
+
+    await runDbCommand(root, { action: 'push' });
+
+    expect(mockGetMiniflareDatabasePath).toHaveBeenCalledWith(
+      join(root, '.wrangler', 'state'),
+      'local',
+    );
   });
 });
 
