@@ -8,8 +8,8 @@ import { parseDotenvFile } from './shared/dotenv.ts';
 /**
  * Prints a one-shot hint on dev server start when the project has crons
  * or queues, explaining how to trigger them locally. Both default Void mode
- * and framework mode (SvelteKit/Nuxt/Analog/Astro) expose
- * `/__void/scheduled` and `/__void/queue`.
+ * and framework mode (SvelteKit, Nuxt, Analog, Astro, TanStack Start, React
+ * Router, vinext) expose `/__void/scheduled` and `/__void/queue`.
  */
 export function devTriggersHintPlugin(
   root: string,
@@ -52,6 +52,15 @@ export function devTriggersHintPlugin(
 
         console.log();
         voidLog(`Detected ${summary.join(' and ')}. Trigger locally:`);
+        // `__VOID_PROXY_TOKEN` is the platform's prod handshake header, mirrored
+        // locally via `.dev.vars` (which @cloudflare/vite-plugin populates into
+        // worker bindings). Other env sources are intentionally NOT considered:
+        // `.env`/process.env entries are stripped by `stripInternalEnvKeys` on
+        // the Void path, and wrangler `[vars]` go through the CF plugin which
+        // also surfaces them via the worker env — but that's a deploy-config
+        // path, not a dev-trigger ergonomics one. `.dev.vars` is the single
+        // place a developer is expected to define this token, so it's the
+        // single source we consult here to keep hint and dispatcher in sync.
         const configuredProxyToken = parseDotenvFile(join(root, '.dev.vars'), {
           expand: false,
         }).__VOID_PROXY_TOKEN;

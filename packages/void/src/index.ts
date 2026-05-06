@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { cloudflare, type PluginConfig, type WorkerConfig } from '@cloudflare/vite-plugin';
 import { join } from 'pathe';
@@ -28,6 +36,7 @@ import {
   frameworkTriggersDispatchPath,
   frameworkTriggersPlugin,
   nitroDevTriggerInjectPlugin,
+  writeFrameworkTriggersDispatch,
 } from './plugin-framework-triggers.ts';
 import {
   inferProjectBindings,
@@ -46,6 +55,81 @@ import { SANDBOX_MIGRATION_TAG, isSandboxEnabled, resolveSandboxConfig } from '.
 import { filterLoadedEnv, resolveRemoteMode, stripInternalEnvKeys } from './shared/env.ts';
 import { DEFAULT_PROXY_URL, STAGING_PROXY_URL } from './shared/proxy.ts';
 import { validateSsrEntry } from './ssr/entry.ts';
+
+/**
+ * Persist the dev-trigger token at `<root>/.void/dev-trigger-token` so
+ * every voidPlugin() invocation against the same project reads the same
+ * value. This matters because `@cloudflare/vite-plugin` spawns a
+ * worker-environment child Vite that re-imports vite.config.ts and calls
+ * voidPlugin() again — without persistence the parent and child would
+ * generate different UUIDs, the dispatch file would embed one and the
+ * hint plugin would print the other, and curls would land on
+ * `unauthorized`.
+ *
+ * The file persists across dev sessions by design — it lives under `.void/`
+ * (gitignored), and `cleanupWrapper` in `void deploy` explicitly preserves
+ * it across its own wipe so saved curl scripts keep working between deploys.
+ * The token is local to the project and only honored by a worker bound to
+ * localhost; treat it like the rest of `.void/` — disposable scratch state,
+ * safe to remove manually if desired.
+ */
+/**
+ * Best-effort detection of `vite build` (and `vite preview`) so we can skip
+ * dev-only side effects — writing the dev-trigger token and the dispatch
+ * file — when no dev server will run. Vite's CLI passes the subcommand as
+ * `process.argv[2]`; programmatic API users (and `vite` with no subcommand)
+ * default to `dev`, which we detect as the absence of a build-shaped first
+ * positional. This is intentionally permissive: when in doubt, we behave as
+ * if we're in dev so first-request correctness is preserved.
+ */
+function isViteBuildOrPreview(): boolean {
+  const subcommand = process.argv[2];
+  return subcommand === 'build' || subcommand === 'preview';
+}
+
+function getOrCreateDevTriggerToken(root: string): string {
+  const tokenPath = join(root, '.void', 'dev-trigger-token');
+  const readExisting = (): string | undefined => {
+    try {
+      const existing = readFileSync(tokenPath, 'utf-8').trim();
+      return existing.length > 0 ? existing : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const existing = readExisting();
+  if (existing) {
+    return existing;
+  }
+
+  // Atomic create — `wx` fails with EEXIST if the file appeared between the
+  // read above and the write below (parent + child Vite both racing). On
+  // EEXIST we re-read the winner's token and use that, so both processes
+  // converge on the same UUID.
+  mkdirSync(join(root, '.void'), { recursive: true });
+  const fresh = crypto.randomUUID();
+  try {
+    const fd = openSync(tokenPath, 'wx');
+    try {
+      writeSync(fd, fresh);
+    } finally {
+      closeSync(fd);
+    }
+    return fresh;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw err;
+    }
+    const winner = readExisting();
+    if (winner) {
+      return winner;
+    }
+    // EEXIST but file is empty — extreme edge case (interrupted writer).
+    // Fall through and accept the fresh UUID; subsequent reads will win.
+    return fresh;
+  }
+}
 
 /**
  * Warn when the project's `package.json` does not declare `"type": "module"`.
@@ -81,8 +165,42 @@ function warnIfPackageJsonIsNotEsm(root: string): void {
   );
 }
 
-/** Resolve the server entry module for a Class A framework. */
-function getFrameworkEntry(framework: Framework, root: string): string {
+/**
+ * Resolve the server entry module for a Class A framework. We always wrap
+ * the framework's own entry with a tiny shim that intercepts
+ * `/__void/{scheduled,queue}` in dev so cron and queue handlers run with
+ * the worker's full CF bindings. The interception block is gated on
+ * `import.meta.env.DEV` and the dispatch module is loaded via dynamic
+ * `import()` so the entire dev path (including user cron imports) is
+ * dead-code-eliminated in `vite build`. Production deploys go through
+ * `cli/wrapper.ts` instead.
+ */
+function getFrameworkEntry(framework: Framework, root: string, devTriggerToken: string): string {
+  const isBuild = isViteBuildOrPreview();
+  // In dev, eagerly write the dispatch file so the wrapper's dynamic
+  // import resolves on the very first request (the plugin's
+  // `configResolved` hook also rewrites it, but we can't rely on that
+  // having run before the first request hits the worker).
+  //
+  // In `vite build`, we instead emit a dispatch-free wrapper, so the
+  // dispatch file is unreferenced and we don't write it. Rolldown
+  // would otherwise emit it as a separate chunk in the prod bundle —
+  // an `if (import.meta.env.DEV)` guard around `await import()` is
+  // *not* enough to suppress chunk emission, because chunk splitting
+  // runs before constant folding eliminates the dead branch.
+  if (!isBuild) {
+    writeFrameworkTriggersDispatch(root, devTriggerToken);
+  }
+  return generateClassATriggerWrapper(
+    root,
+    framework,
+    getOriginalFrameworkEntry(framework, root),
+    isBuild,
+  );
+}
+
+/** The framework's own server entry, before our trigger wrapper. */
+function getOriginalFrameworkEntry(framework: Framework, root: string): string {
   switch (framework) {
     case 'tanstack-start':
       return '@tanstack/react-start/server-entry';
@@ -93,6 +211,61 @@ function getFrameworkEntry(framework: Framework, root: string): string {
     case 'vinext-pages':
       return generateVinextPagesEntry(root);
   }
+}
+
+/**
+ * Generate `<root>/.void/<framework>-trigger-wrapper.ts`. This file becomes
+ * `workerConfig.main` so the dev miniflare/workerd evaluates *our* fetch
+ * first, dispatches `/__void/{scheduled,queue}` if it matches, and otherwise
+ * delegates to the framework's original entry.
+ *
+ * We emit two shapes of the wrapper depending on the Vite command:
+ *
+ * - Serve: dispatch is dynamically imported and gets a chance to handle
+ *   `/__void/{scheduled,queue}` before falling through to the framework.
+ * - Build: dispatch is omitted entirely. The wrapper just delegates fetch.
+ *
+ * We can't simply gate the dynamic import on `import.meta.env.DEV` and
+ * trust DCE: rolldown emits chunks for dynamic imports during chunk
+ * splitting, *before* constant folding removes the dead branch, so the
+ * dispatch file (and its transitive user-cron/queue imports + dev token)
+ * would still ship in the production bundle.
+ */
+function generateClassATriggerWrapper(
+  root: string,
+  framework: Framework,
+  original: string,
+  isBuild: boolean,
+): string {
+  const outDir = join(root, '.void');
+  mkdirSync(outDir, { recursive: true });
+  const wrapperPath = join(outDir, `${framework}-trigger-wrapper.ts`);
+  const body = isBuild
+    ? `// @ts-nocheck — Auto-generated by Void for vite build. Do NOT edit.
+import original from ${JSON.stringify(original)};
+
+export default {
+  ...original,
+  async fetch(request, env, ctx) {
+    return original.fetch(request, env, ctx);
+  },
+};
+`
+    : `// @ts-nocheck — Auto-generated by Void in dev. Do NOT edit.
+import original from ${JSON.stringify(original)};
+
+export default {
+  ...original,
+  async fetch(request, env, ctx) {
+    const { handleDevTrigger } = await import(${JSON.stringify(frameworkTriggersDispatchPath(root))});
+    const response = await handleDevTrigger(request, env, ctx);
+    if (response) return response;
+    return original.fetch(request, env, ctx);
+  },
+};
+`;
+  writeFileSync(wrapperPath, body);
+  return wrapperPath;
 }
 
 /** Generate a worker entry for vinext Pages Router projects. */
@@ -350,7 +523,13 @@ export function voidPlugin(options?: {
   // Resolve root relative to CWD — this runs at config time
   const root = process.cwd();
   warnIfPackageJsonIsNotEsm(root);
-  const devTriggerToken = crypto.randomUUID();
+  // Token only matters in serve — the dispatch module that uses it is
+  // DCE'd from production worker bundles. In build/preview we still need
+  // *some* string (the wrapper embeds it for completeness), but we skip
+  // persisting it so build-only CI workflows don't materialize dev state.
+  const devTriggerToken = isViteBuildOrPreview()
+    ? crypto.randomUUID()
+    : getOrCreateDevTriggerToken(root);
   const config = readConfig(root);
   const dialect = getDatabaseDialect(config);
   const detected = detectFramework(root);
@@ -998,7 +1177,7 @@ export function voidPlugin(options?: {
   };
 
   if (framework) {
-    workerConfig.main = getFrameworkEntry(framework, root);
+    workerConfig.main = getFrameworkEntry(framework, root, devTriggerToken);
     const existingFlags = (workerConfig.compatibility_flags as Array<string> | undefined) ?? [];
     if (!existingFlags.includes('nodejs_compat')) {
       workerConfig.compatibility_flags = [...existingFlags, 'nodejs_compat'];
@@ -1058,6 +1237,7 @@ export function voidPlugin(options?: {
       }),
       migrationPlugin(root, getDatabaseDialect(config)),
       ...(vinextCompat ? [vinextCompat] : []),
+      frameworkTriggersPlugin(root, { devTriggerToken }),
       devTriggersHintPlugin(root, { framework: true, devTriggerToken }),
       ...cloudflare({
         ...inspectorPortOption,

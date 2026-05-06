@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'pathe';
-import type { Plugin } from 'vite';
+import { normalizePath, type Plugin } from 'vite';
 import { scanJobsSync, type JobDefinition } from './crons/scan.ts';
 import { voidWarn } from './log.ts';
 import { scanQueuesSync, type QueueDefinition } from './queues/scan.ts';
@@ -15,6 +15,20 @@ export function frameworkTriggersDispatchPath(root: string): string {
 }
 
 /**
+ * Synchronously emit `<root>/.void/dev-triggers.ts`. We expose this directly
+ * (in addition to the Vite plugin below) so callers like the Class A entry
+ * wrapper can guarantee the file exists at the moment they reference it,
+ * without depending on `configResolved` ordering.
+ */
+export function writeFrameworkTriggersDispatch(root: string, devTriggerToken: string): void {
+  const jobs = scanJobsSync(root);
+  const queues = scanQueuesSync(root);
+  const target = frameworkTriggersDispatchPath(root);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, generateModule(root, jobs, queues, devTriggerToken));
+}
+
+/**
  * Writes a real file at `<root>/.void/dev-triggers.ts` exporting
  * `handleDevTrigger(request, env, ctx)`. We use a real file (not a Vite
  * virtual module) because Nitro and Astro have their own server bundlers
@@ -23,13 +37,8 @@ export function frameworkTriggersDispatchPath(root: string): string {
  * with the framework adapter's real bindings.
  */
 export function frameworkTriggersPlugin(root: string, options: FrameworkTriggersOptions): Plugin {
-  const writeDispatch = () => {
-    const jobs = scanJobsSync(root);
-    const queues = scanQueuesSync(root);
-    const target = frameworkTriggersDispatchPath(root);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, generateModule(root, jobs, queues, options.devTriggerToken));
-  };
+  const writeDispatch = () => writeFrameworkTriggersDispatch(root, options.devTriggerToken);
+  const dispatchPath = frameworkTriggersDispatchPath(root);
 
   return {
     name: 'void:framework-triggers',
@@ -38,20 +47,42 @@ export function frameworkTriggersPlugin(root: string, options: FrameworkTriggers
       writeDispatch();
     },
     configureServer(server) {
-      // Re-emit on cron or queue file add/remove so newly-added handlers are
-      // routable without a full restart.
-      const isInteresting = (file: string) =>
-        file.startsWith(join(root, 'crons')) || file.startsWith(join(root, 'queues'));
-      server.watcher.on('add', (file) => {
-        if (isInteresting(file)) {
-          writeDispatch();
+      // Re-emit on any cron/queue file mutation so add/remove and edits to
+      // the schedule string or queue name (which are baked into the
+      // generated `__jobs`/`__queues` table at codegen time) are picked up
+      // without a full restart.
+      //
+      // chokidar emits POSIX-style paths on every platform, so normalize the
+      // root prefixes to match — otherwise this comparison silently no-ops
+      // on Windows where `join(root, 'crons')` uses backslashes.
+      const cronsPrefix = normalizePath(join(root, 'crons'));
+      const queuesPrefix = normalizePath(join(root, 'queues'));
+      const isInteresting = (file: string) => {
+        const normalized = normalizePath(file);
+        return normalized.startsWith(cronsPrefix) || normalized.startsWith(queuesPrefix);
+      };
+      const onChange = (file: string) => {
+        if (!isInteresting(file)) {
+          return;
         }
-      });
-      server.watcher.on('unlink', (file) => {
-        if (isInteresting(file)) {
-          writeDispatch();
+        writeDispatch();
+        // The dispatch file lives under `.void/`, which `envPlugin.config`
+        // adds to `server.watch.ignored` (to stop miniflare's SQLite writes
+        // from triggering infinite HMR). Without explicit invalidation the
+        // worker environment would keep returning the cached dispatch
+        // module on the next dynamic import, so a renamed/added cron would
+        // never route until the dev server restarts. Walk every Vite
+        // environment and drop the cached dispatch module.
+        for (const env of Object.values(server.environments)) {
+          const mod = env.moduleGraph.getModuleById(dispatchPath);
+          if (mod) {
+            env.moduleGraph.invalidateModule(mod);
+          }
         }
-      });
+      };
+      server.watcher.on('add', onChange);
+      server.watcher.on('change', onChange);
+      server.watcher.on('unlink', onChange);
     },
   };
 }
@@ -143,9 +174,11 @@ async function __dispatchScheduled(request, env, ctx) {
 
 async function __dispatchQueue(request, env) {
   const payload = await request.json();
-  const q = __queues.find(
-    (entry) => entry.name === payload.queue || payload.queue.endsWith("-" + entry.name),
-  );
+  // Exact match only — payload.queue is the user-typed queue name from the
+  // dev curl. The prod platform-side dispatch suffix-matches against
+  // project-prefixed queue names, but that isn't relevant here and would
+  // cause false positives between e.g. "events" and "user-events".
+  const q = __queues.find((entry) => entry.name === payload.queue);
   if (!q) {
     return __json({ error: \`No queue handler matches "\${payload.queue}"\` }, 404);
   }
@@ -161,15 +194,17 @@ async function __dispatchQueue(request, env) {
       for (const m of messages) m.retry(opts);
     },
   };
-  let ok = true;
   try {
     await q.handler(batch, env);
   } catch (err) {
-    ok = false;
     console.error("[void] queue handler threw:", err);
+    // CF queues retry the entire batch when a consumer throws, regardless
+    // of any ack/retry calls made before the throw — drop partial decisions
+    // so dev-mode response semantics match prod.
+    return __json({ ok: false });
   }
   return __json({
-    ok,
+    ok: true,
     ...(decisions.size > 0 ? { decisions: Object.fromEntries(decisions) } : {}),
   });
 }
@@ -199,9 +234,12 @@ export async function handleDevTrigger(request, env, ctx) {
 const NITRO_MIDDLEWARE_FILENAME = '__void-dev-trigger.ts';
 
 function nitroMiddlewareSource(dispatchPath: string): string {
-  // Plain async default export, no h3 imports. Works in both Nuxt's real
-  // Nitro pipeline and @analogjs/vite-plugin-nitro's dev loader, which
-  // evaluates middleware via Vite SSR without applying Nitro's auto-imports.
+  // Plain async default export, no h3 imports — kept dependency-free so the
+  // same source compiles under Nuxt's real Nitro pipeline. Analog uses a
+  // different injection path (`analogDevTriggerInjectPlugin` below) because
+  // `@analogjs/vite-plugin-nitro` evaluates middleware via Vite SSR before
+  // its `nitro-cloudflare-dev` plugin populates `event.context.cloudflare`,
+  // so this middleware shape would never see CF bindings there.
   return `// @ts-nocheck — Auto-generated by Void in dev. Do NOT edit. Removed when the dev server stops.
 import { handleDevTrigger } from ${JSON.stringify(dispatchPath)};
 
