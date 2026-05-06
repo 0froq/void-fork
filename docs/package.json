@@ -9,10 +9,10 @@
     "preview": "vitepress preview"
   },
   "devDependencies": {
-    "@iconify/vue": "5.0.0",
+    "@iconify/vue": "5.0.1",
     "@voidzero-dev/vitepress-theme": "^4.8.4",
     "oxc-minify": "^0.129.0",
-    "reka-ui": "2.9.6",
+    "reka-ui": "2.9.7",
     "vitepress": "2.0.0-alpha.16",
     "vitepress-plugin-group-icons": "^1.7.5",
     "void": "workspace:@void-sdk/void@*"

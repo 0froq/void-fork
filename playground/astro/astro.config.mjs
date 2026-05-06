@@ -1,5 +1,5 @@
 import cloudflare from '@astrojs/cloudflare';
-import { defineConfig } from 'astro/config';
+import { defineConfig, sessionDrivers } from 'astro/config';
 import { voidPlugin } from 'void';
 
 function vite8AstroDevToolbarCompat() {
@@ -19,6 +19,9 @@ function vite8AstroDevToolbarCompat() {
 
 export default defineConfig({
   adapter: cloudflare({ configPath: './wrangler.build.jsonc' }),
+  session: {
+    driver: sessionDrivers.lruCache(),
+  },
   vite: {
     plugins: [voidPlugin(), vite8AstroDevToolbarCompat()],
   },

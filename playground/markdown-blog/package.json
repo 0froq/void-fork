@@ -17,6 +17,6 @@
     "typescript": "~6.0.3",
     "vite": "catalog:",
     "void": "workspace:@void-sdk/void@*",
-    "vue-tsc": "^3.2.7"
+    "vue-tsc": "^3.2.8"
   }
 }
