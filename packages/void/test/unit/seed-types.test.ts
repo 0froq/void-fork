@@ -1,0 +1,37 @@
+import { describe, expect, it } from 'vitest';
+import { integer, sqliteTable, text as sqliteText } from '../../src/runtime/schema-d1.ts';
+import { pgTable, serial, text as pgText, timestamp } from '../../src/runtime/schema-pg.ts';
+import { defineSeed } from '../../src/runtime/seed.ts';
+
+const sqliteSchema = {
+  messages: sqliteTable('messages', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    text: sqliteText('text').notNull(),
+  }),
+};
+
+const postgresSchema = {
+  messages: pgTable('messages', {
+    id: serial('id').primaryKey(),
+    text: pgText('text').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  }),
+};
+
+type PostgresSchema = typeof postgresSchema;
+type SqliteSchema = typeof sqliteSchema;
+
+const sqliteSeed = defineSeed<SqliteSchema>(async ({ db, schema }) => {
+  await db.insert(schema.messages).values([{ text: 'hello from sqlite' }]);
+});
+
+const postgresSeed = defineSeed<PostgresSchema>(async ({ db, schema }) => {
+  await db.insert(schema.messages).values([{ text: 'hello from postgresql' }]);
+});
+
+describe('defineSeed types', () => {
+  it('accepts generated seed callbacks for schema-specific dialects', () => {
+    expect(typeof sqliteSeed).toBe('function');
+    expect(typeof postgresSeed).toBe('function');
+  });
+});

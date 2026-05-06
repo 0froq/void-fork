@@ -17,9 +17,41 @@ export interface PostgresSeedContext<
   schema: TSchema;
 }
 
+type DrizzleTableForDialect<TDialect extends string> = {
+  readonly _: {
+    readonly config: {
+      readonly dialect: TDialect;
+    };
+  };
+};
+
+type SchemaHasTableDialect<TSchema extends Record<string, unknown>, TDialect extends string> = [
+  Extract<TSchema[keyof TSchema], DrizzleTableForDialect<TDialect>>,
+] extends [never]
+  ? false
+  : true;
+
+type SchemaHasSqliteTables<TSchema extends Record<string, unknown>> = SchemaHasTableDialect<
+  TSchema,
+  'sqlite'
+>;
+
+type SchemaHasPostgresTables<TSchema extends Record<string, unknown>> = SchemaHasTableDialect<
+  TSchema,
+  'pg'
+>;
+
+type FallbackSeedContext<TSchema extends Record<string, unknown>> =
+  SchemaHasSqliteTables<TSchema> extends false
+    ? SchemaHasPostgresTables<TSchema> extends false
+      ? SqliteSeedContext<TSchema> | PostgresSeedContext<TSchema>
+      : never
+    : never;
+
 export type SeedContext<TSchema extends Record<string, unknown> = Record<string, never>> =
-  | SqliteSeedContext<TSchema>
-  | PostgresSeedContext<TSchema>;
+  | (SchemaHasSqliteTables<TSchema> extends true ? SqliteSeedContext<TSchema> : never)
+  | (SchemaHasPostgresTables<TSchema> extends true ? PostgresSeedContext<TSchema> : never)
+  | FallbackSeedContext<TSchema>;
 
 export type SeedFn<TSchema extends Record<string, unknown> = Record<string, never>> = (
   context: SeedContext<TSchema>,
