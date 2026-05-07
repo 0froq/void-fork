@@ -142,10 +142,11 @@ describe('GET /projects', () => {
     mockCfApi({
       analyticsQuery: (_url, init) => {
         expect(init?.body).toContain('FROM void_requests');
+        expect(init?.body).toContain('WHERE index1 IN');
         return Response.json({
           data: [
             {
-              blob1: alpha.id,
+              project_id: alpha.id,
               bucket: bucketNow - 15,
               last_seen: lastSeen,
               requests: 4,
@@ -153,7 +154,7 @@ describe('GET /projects', () => {
               responses_5xx: 0,
             },
             {
-              blob1: beta.id,
+              project_id: beta.id,
               bucket: bucketNow,
               last_seen: lastSeen,
               requests: 9,

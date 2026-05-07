@@ -1,3 +1,4 @@
+import Stack, { VStack } from '@nkzw/stack';
 import { AppHeader, FooterNav, ThemeContextProvider } from '@voidcloud/ui';
 import heroBackground from '@voidcloud/ui/assets/hero-background.jpg';
 import monoIcon from '@voidcloud/ui/assets/icons/void-icon.svg';
@@ -9,9 +10,11 @@ import type { Props } from './login.server.ts';
 
 function FlexibleSpacer() {
   return (
-    <section
+    <Stack
       aria-hidden="true"
-      className="wrapper wrapper--ticks min-h-12 w-full flex-1 border-t"
+      as="section"
+      className="wrapper wrapper--ticks min-h-12 w-full border-t"
+      flex1
     />
   );
 }
@@ -49,17 +52,21 @@ function LoginPageShell({ children }: { children: ReactNode }) {
         <AppHeader />
         <main className="login-public-main flex min-h-[calc(100vh-206px)] flex-col">
           <section className="login-public-hero wrapper wrapper--ticks grid w-full divide-x divide-stroke border-t border-stroke md:grid-cols-2 dark:divide-nickel dark:border-nickel">
-            <div className="login-public-copy flex flex-col items-center justify-center p-5 md:items-start">
-              <div className="login-public-copy-inner flex max-w-[30rem] flex-col items-center gap-5 text-center md:items-start md:text-left">
+            <VStack center className="login-public-copy items-center p-5 md:items-start">
+              <VStack
+                className="login-public-copy-inner max-w-[30rem] items-center text-center md:items-start md:text-left"
+                gap={20}
+              >
                 {children}
-              </div>
-            </div>
-            <div className="login-public-art-column flex min-h-[9rem] flex-col sm:min-h-[18rem]">
-              <div
-                className="login-public-art relative flex h-full flex-col justify-center overflow-clip bg-cover bg-center py-8 pl-6 sm:py-16 sm:pl-16"
+              </VStack>
+            </VStack>
+            <VStack className="login-public-art-column min-h-[9rem] sm:min-h-[18rem]">
+              <VStack
+                center
+                className="login-public-art relative h-full overflow-clip bg-cover bg-center py-8 pl-6 sm:py-16 sm:pl-16"
                 style={{ backgroundImage: `url(${heroBackground})` }}
               />
-            </div>
+            </VStack>
           </section>
           <FlexibleSpacer />
         </main>
@@ -73,14 +80,14 @@ export default function LoginPage({ githubUrl, googleUrl }: Props) {
   return (
     <LoginPageShell>
       <h1 className="max-w-[25rem] text-pretty">Sign in to your dashboard.</h1>
-      <div className="mt-8 flex flex-col items-center gap-5 sm:flex-row">
+      <Stack alignCenter className="mt-8 sm:!flex-row" gap={20} vertical>
         <a className="button button--primary text-white! hover:text-white!" href={githubUrl}>
           <span className="text-white">Continue with GitHub</span>
         </a>
         <a className="button" href={googleUrl}>
           Continue with Google
         </a>
-      </div>
+      </Stack>
     </LoginPageShell>
   );
 }

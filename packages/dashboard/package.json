@@ -12,6 +12,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@nkzw/stack": "2.3.2",
     "@voidcloud/ui": "workspace:*",
     "hono": "catalog:",
     "react": "^19.2.5",

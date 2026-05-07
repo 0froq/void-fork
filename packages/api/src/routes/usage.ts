@@ -123,7 +123,7 @@ interface TopProjectTrafficEntry {
 }
 
 interface ProjectRequestOverviewRow {
-  blob1: string;
+  project_id: string;
   bucket: number;
   last_seen: string;
   requests: number;
@@ -345,16 +345,16 @@ async function queryProjectRequestOverview(
   const inList = projectIds.map((id) => `'${id}'`).join(', ');
   const query = `
     SELECT
-      blob1,
+      index1 as project_id,
       intDiv(toUnixTimestamp(timestamp), ${bucketSizeSeconds}) * ${bucketSizeSeconds} as bucket,
       MAX(timestamp) as last_seen,
       SUM(_sample_interval * double1) as requests,
       SUM(if(blob4 LIKE '4%', _sample_interval * double1, 0)) as responses_4xx,
       SUM(if(blob4 LIKE '5%', _sample_interval * double1, 0)) as responses_5xx
     FROM ${requestsDataset}
-    WHERE blob1 IN (${inList})
+    WHERE index1 IN (${inList})
       AND timestamp >= toDateTime('${sinceStr}')
-    GROUP BY blob1, bucket
+    GROUP BY index1, bucket
     ORDER BY bucket ASC
   `;
 
@@ -386,7 +386,7 @@ async function queryProjectRequestOverview(
     (bucketCount - 1) * bucketSizeSeconds;
 
   for (const row of json.data ?? []) {
-    const entry = overview.get(row.blob1);
+    const entry = overview.get(row.project_id);
     if (!entry) {
       continue;
     }

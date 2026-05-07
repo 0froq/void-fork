@@ -1,3 +1,4 @@
+import Stack, { VStack } from '@nkzw/stack';
 import { Link } from '@void/react';
 import { Badge, HeadingSection, Spacer } from '@voidcloud/ui';
 import type { Props } from './index.server.ts';
@@ -176,9 +177,9 @@ function ProjectListItem({ project, siteDomain }: { project: Project; siteDomain
         className="squircle absolute inset-0 z-10 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-electric focus-visible:ring-offset-2"
         href={`/projects/${project.id}`}
       />
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(15rem,0.95fr)_minmax(20rem,1.15fr)_1rem] lg:items-center">
-        <div className="flex min-w-0 flex-col gap-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
+      <div className="grid gap-4 pr-7 lg:grid-cols-[minmax(0,1.35fr)_minmax(15rem,0.95fr)_minmax(20rem,1.15fr)] lg:items-center">
+        <VStack className="min-w-0" gap={8}>
+          <Stack alignCenter className="min-w-0" gap={12} wrap>
             <code className="squircle bg-beige p-1 dark:bg-slate">{project.slug}</code>
             <Badge
               className="border-stroke bg-white text-grey uppercase dark:border-nickel dark:bg-primary dark:text-white"
@@ -186,42 +187,46 @@ function ProjectListItem({ project, siteDomain }: { project: Project; siteDomain
             >
               {project.type}
             </Badge>
-          </div>
-          <a
-            className="relative z-20 flex min-w-0 items-center gap-1 text-sm text-grey underline decoration-1 underline-offset-2 hover:text-primary hover:no-underline dark:hover:text-white"
-            href={domainHref}
-            rel="noopener noreferrer"
-            target="_blank"
-          >
-            <span className="truncate">{domain}</span>
-            <ExternalLinkIcon />
-          </a>
-        </div>
-
-        <div className="flex min-w-0 flex-col gap-2 text-sm">
-          <div className="flex flex-wrap items-center gap-2">
+          </Stack>
+          <Stack>
+            <Stack
+              alignCenter
+              as="a"
+              className="relative z-20 text-sm text-grey underline decoration-1 underline-offset-2 hover:text-primary hover:no-underline dark:hover:text-white"
+              gap={4}
+              href={domainHref}
+              inline
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              <span className="truncate">{domain}</span>
+              <ExternalLinkIcon />
+            </Stack>
+          </Stack>
+        </VStack>
+        <VStack className="min-w-0 text-sm" gap={8}>
+          <Stack alignCenter gap={8} wrap>
             <span
               className={`squircle border px-2 py-1 text-xs uppercase ${deployStatusClass(deployment?.status)}`}
             >
               {displayDeployStatus(deployment?.status)}
             </span>
             <span className="text-grey">{formatRelativeTime(deployTime(project))}</span>
-          </div>
+          </Stack>
           <div className="min-w-0 truncate text-xs text-grey">
             {deployMeta || 'No commit/source'}
           </div>
-        </div>
-
+        </VStack>
         <div className="grid min-w-0 gap-3 sm:grid-cols-[118px_minmax(0,1fr)] sm:items-center">
           <Sparkline values={project.traffic.sparkline5m} />
           <div className="grid gap-1 text-sm">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <Stack alignCenter columnGap={12} rowGap={4} wrap>
               <span className="text-primary dark:text-white">
                 {formatNumber(project.traffic.requests5m)} req / 5m
               </span>
               <span className="text-xs text-grey">{lastSeen}</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            </Stack>
+            <Stack alignCenter className="text-xs" columnGap={12} rowGap={4} wrap>
               <span className={has5xx ? 'text-fire' : 'text-grey'}>
                 {formatNumber(project.health.responses5xx15m)} 5xx
                 {has5xx ? ` · ${formatPercent(project.health.errorRate5xx15m)}` : ''}
@@ -229,13 +234,15 @@ function ProjectListItem({ project, siteDomain }: { project: Project; siteDomain
               <span className={has4xx ? 'text-grey' : 'text-grey/70'}>
                 {formatNumber(project.health.responses4xx15m)} 4xx
               </span>
-            </div>
+            </Stack>
           </div>
         </div>
-
-        <div aria-hidden="true" className="text-primary dark:text-white">
-          <ChevronRightIcon />
-        </div>
+      </div>
+      <div
+        aria-hidden="true"
+        className="absolute top-1/2 right-4 -translate-y-1/2 text-primary dark:text-white"
+      >
+        <ChevronRightIcon />
       </div>
     </div>
   );
@@ -260,10 +267,9 @@ export default function DashboardPage(props: Props) {
   return (
     <main className="bg-white dark:bg-primary">
       <section className="wrapper wrapper--ticks border-t bg-white px-10 py-8 dark:bg-primary">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-3xl text-primary dark:text-white">Projects</h2>
-          <p className="max-w-md text-grey">Deployments connected to your Void account.</p>
-        </div>
+        <VStack gap={8}>
+          <h2 className="text-3xl text-primary dark:text-white">Void Projects</h2>
+        </VStack>
       </section>
       <section className="wrapper wrapper--ticks border-t bg-white dark:bg-primary">
         {props.projects.length === 0 ? (
@@ -271,14 +277,13 @@ export default function DashboardPage(props: Props) {
             No projects yet. Deploy an app with the Void CLI and it will appear here.
           </div>
         ) : (
-          <div className="flex flex-col gap-3 p-5">
+          <VStack gap={12} padding={20}>
             {props.projects.map((project) => (
               <ProjectListItem key={project.id} project={project} siteDomain={props.siteDomain} />
             ))}
-          </div>
+          </VStack>
         )}
       </section>
-      <Spacer />
     </main>
   );
 }

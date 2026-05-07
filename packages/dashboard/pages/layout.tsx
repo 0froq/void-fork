@@ -67,7 +67,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               { icon: 'lucide:log-out', link: '/logout', text: 'Logout' },
             ]}
           />
-          <div className="min-h-[calc(100vh-206px)]">{children}</div>
+          {children}
           <FooterNav footer={footerConfig} />
         </div>
       </ThemeContextProvider>

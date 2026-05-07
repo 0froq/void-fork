@@ -39,4 +39,3 @@
 - Production-backed local dashboard testing: production may not yet expose new API fields. Prefer a localhost-only access bypass over committed or ad hoc allowlists.
 - Dashboard Worker local env: if `packages/dashboard/.dev.vars` exists, put local Worker vars such as `API_URL` and `SITE_DOMAIN` there or in `wrangler.jsonc` vars.
 - Dashboard Tailwind colors: `packages/ui/src/styles/tokens.css` resets the palette with `--color-*: initial`; define needed scales in `@theme` before using utilities such as `bg-gray-*`.
-- Playground UI: match the existing minimal demo style unless the user asks for design work.
