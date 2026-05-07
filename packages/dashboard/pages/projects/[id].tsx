@@ -158,7 +158,11 @@ function DomainRow({
           <DomainLink domain={hostname} />
           <Stack alignCenter className="text-xs text-grey" gap={8} wrap>
             <span>{status}</span>
-            {isPrimary ? <span>primary display domain</span> : null}
+            {isPrimary ? (
+              <>
+                &middot;<span>primary display domain</span>
+              </>
+            ) : null}
           </Stack>
         </VStack>
         {children}

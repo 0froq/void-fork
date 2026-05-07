@@ -349,8 +349,8 @@ async function queryProjectRequestOverview(
       intDiv(toUnixTimestamp(timestamp), ${bucketSizeSeconds}) * ${bucketSizeSeconds} as bucket,
       MAX(timestamp) as last_seen,
       SUM(_sample_interval * double1) as requests,
-      SUM(if(blob4 LIKE '4%', _sample_interval * double1, 0)) as responses_4xx,
-      SUM(if(blob4 LIKE '5%', _sample_interval * double1, 0)) as responses_5xx
+      SUM(if(blob4 LIKE '4%', _sample_interval * double1, 0.0)) as responses_4xx,
+      SUM(if(blob4 LIKE '5%', _sample_interval * double1, 0.0)) as responses_5xx
     FROM ${requestsDataset}
     WHERE blob1 IN (${inList})
       AND timestamp >= toDateTime('${sinceStr}')
