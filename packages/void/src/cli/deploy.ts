@@ -64,6 +64,7 @@ import {
   getDeployEnvDefaults,
   validateProdEnv,
 } from './env-validation.ts';
+import { collectGitDeployMetadata, type GitDeployMetadata } from './git-metadata.ts';
 import { lintDestinationSplats, lintDuplicateSources, mergeRoutingRules } from './headers.ts';
 import { openDeployLog, type CliLogger } from './log-file.ts';
 import { promptForLoginToken } from './login.ts';
@@ -280,7 +281,10 @@ async function runDeployInner(
           name: detected.name,
           class: detected.class,
         });
-        const gitCommit = options?.skipBuild ? null : getGitCommit(root);
+        const gitMetadata = collectGitDeployMetadata(
+          root,
+          options?.skipBuild ? null : getGitCommit(root),
+        );
         const fwPreset = FRAMEWORK_PRESETS[detected.name];
         if (detected.class === 'b' || detected.class === 'c') {
           if (!fwPreset) {
@@ -295,7 +299,7 @@ async function runDeployInner(
             fwPreset,
             voidConfig,
             options?.skipBuild,
-            gitCommit,
+            gitMetadata,
             cliLog,
           );
         } else {
@@ -306,7 +310,7 @@ async function runDeployInner(
             client,
             fwPreset,
             options?.skipBuild,
-            gitCommit,
+            gitMetadata,
             detected,
             cliLog,
           );
@@ -340,7 +344,10 @@ async function runDeployInner(
       // appType === "void" or "framework" → preset stays null → full deploy
 
       // Detect git commit before build (only when not skipping build)
-      const gitCommit = options?.skipBuild ? null : getGitCommit(root);
+      const gitMetadata = collectGitDeployMetadata(
+        root,
+        options?.skipBuild ? null : getGitCommit(root),
+      );
 
       if (preset) {
         preset = {
@@ -357,7 +364,7 @@ async function runDeployInner(
           client,
           preset,
           options?.skipBuild,
-          gitCommit,
+          gitMetadata,
           undefined,
           undefined,
           undefined,
@@ -372,7 +379,7 @@ async function runDeployInner(
           client,
           undefined,
           options?.skipBuild,
-          gitCommit,
+          gitMetadata,
           undefined,
           cliLog,
         );
@@ -584,13 +591,29 @@ function formatKnownAssetSummary(result: DeployDoneEvent, skipped: number): stri
     : `${result.assets} static asset(s)`;
 }
 
+function appendDeployMetadata(formData: FormData, gitMetadata?: GitDeployMetadata): void {
+  formData.append('source', getTokenSource());
+  if (gitMetadata?.commit) {
+    formData.append('commit', gitMetadata.commit);
+  }
+  if (gitMetadata?.repositoryUrl) {
+    formData.append('repositoryUrl', gitMetadata.repositoryUrl);
+  }
+  if (gitMetadata?.commitUrl) {
+    formData.append('commitUrl', gitMetadata.commitUrl);
+  }
+  if (gitMetadata?.gitRef) {
+    formData.append('gitRef', gitMetadata.gitRef);
+  }
+}
+
 async function runStaticDeploy(
   root: string,
   config: ProjectConfig,
   client: PlatformClient,
   preset: StaticPreset,
   skipBuild?: boolean,
-  commit?: string | null,
+  gitMetadata?: GitDeployMetadata,
   hashedAssetsPrefix?: string,
   headerRules?: Array<HeaderRule>,
   redirectRules?: Array<DevRedirectRule>,
@@ -664,10 +687,7 @@ async function runStaticDeploy(
     onProgress,
   );
   formData.append('assetManifest', JSON.stringify(assetManifest));
-  formData.append('source', getTokenSource());
-  if (commit) {
-    formData.append('commit', commit);
-  }
+  appendDeployMetadata(formData, gitMetadata);
   cliLog?.info('package_end', {
     mode: 'static',
     durationMs: Date.now() - packageStartedAt,
@@ -708,7 +728,7 @@ async function runFrameworkDeploy(
   fwPreset: FrameworkPreset,
   voidConfig: VoidConfig,
   skipBuild?: boolean,
-  commit?: string | null,
+  gitMetadata?: GitDeployMetadata,
   cliLog?: CliLogger,
 ): Promise<void> {
   log.info(`${detected.name} framework deploy`);
@@ -956,10 +976,7 @@ async function runFrameworkDeploy(
     onProgress,
   });
   formData.append('assetManifest', JSON.stringify(assetManifest));
-  formData.append('source', getTokenSource());
-  if (commit) {
-    formData.append('commit', commit);
-  }
+  appendDeployMetadata(formData, gitMetadata);
   cliLog?.info('package_end', {
     mode: 'framework',
     durationMs: Date.now() - packageStartedAt,
@@ -1004,7 +1021,7 @@ async function runFullDeploy(
   client: PlatformClient,
   fwPreset?: FrameworkPreset,
   skipBuild?: boolean,
-  commit?: string | null,
+  gitMetadata?: GitDeployMetadata,
   detected?: DetectedFramework,
   cliLog?: CliLogger,
 ): Promise<void> {
@@ -1253,7 +1270,7 @@ async function runFullDeploy(
           appType: 'static',
         },
         true,
-        commit,
+        gitMetadata,
         assetsPrefix,
         headerRules,
         redirectRules,
@@ -1380,10 +1397,7 @@ async function runFullDeploy(
     onProgress,
   );
   formData.append('assetManifest', JSON.stringify(assetManifest));
-  formData.append('source', getTokenSource());
-  if (commit) {
-    formData.append('commit', commit);
-  }
+  appendDeployMetadata(formData, gitMetadata);
   cliLog?.info('package_end', {
     mode: 'full',
     durationMs: Date.now() - packageStartedAt,
@@ -1442,6 +1456,11 @@ async function createProjectFromSlug(
 
 function getGitCommit(root: string): string | null {
   try {
+    const githubSha = process.env.GITHUB_SHA?.trim();
+    if (githubSha && /^[0-9a-f]{7,64}$/i.test(githubSha)) {
+      return githubSha;
+    }
+
     // Check if in a git repo
     execSync('git rev-parse --is-inside-work-tree', { cwd: root, stdio: 'ignore' });
     // Check if working tree is clean
