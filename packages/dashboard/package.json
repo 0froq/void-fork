@@ -15,8 +15,8 @@
     "@nkzw/stack": "2.3.2",
     "@voidcloud/ui": "workspace:*",
     "hono": "catalog:",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
