@@ -88,7 +88,7 @@ importers:
         specifier: ^1.7.5
         version: 1.7.5(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4))
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../packages/void
 
   packages/create-void:
@@ -155,7 +155,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../void
       vue:
         specifier: ^3.5.33
@@ -192,7 +192,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../void
 
   packages/solid:
@@ -217,7 +217,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../void
 
   packages/svelte:
@@ -242,7 +242,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../void
 
   packages/void:
@@ -262,7 +262,7 @@ importers:
       '@napi-rs/keyring':
         specifier: 1.3.0
         version: 1.3.0
-      '@void-sdk/md':
+      '@void/md':
         specifier: workspace:*
         version: link:../md
       better-auth:
@@ -382,7 +382,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../void
       vue:
         specifier: ^3.5.33
@@ -443,7 +443,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
       wrangler:
         specifier: 'catalog:'
@@ -465,7 +465,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/kitchen-sink:
@@ -481,7 +481,7 @@ importers:
         version: 3.5.33(typescript@6.0.3)
     devDependencies:
       '@void/vue':
-        specifier: workspace:@void-sdk/vue@*
+        specifier: workspace:*
         version: link:../../packages/vue
       typescript:
         specifier: ~6.0.3
@@ -490,7 +490,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
       vue-tsc:
         specifier: ^3.2.8
@@ -503,10 +503,10 @@ importers:
         version: 3.5.33(typescript@6.0.3)
     devDependencies:
       '@void/md':
-        specifier: workspace:@void-sdk/md@*
+        specifier: workspace:*
         version: link:../../packages/md
       '@void/vue':
-        specifier: workspace:@void-sdk/vue@*
+        specifier: workspace:*
         version: link:../../packages/vue
       typescript:
         specifier: ~6.0.3
@@ -515,7 +515,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
       vue-tsc:
         specifier: ^3.2.8
@@ -543,16 +543,16 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260505.1
       '@void/md':
-        specifier: workspace:@void-sdk/md@*
+        specifier: workspace:*
         version: link:../../packages/md
       '@void/react':
-        specifier: workspace:@void-sdk/react@*
+        specifier: workspace:*
         version: link:../../packages/react
       vite:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/node-app:
@@ -577,13 +577,13 @@ importers:
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.14)
       '@void/react':
-        specifier: workspace:@void-sdk/react@*
+        specifier: workspace:*
         version: link:../../packages/react
       vite:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/node-static:
@@ -608,7 +608,7 @@ importers:
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.14)
       '@void/react':
-        specifier: workspace:@void-sdk/react@*
+        specifier: workspace:*
         version: link:../../packages/react
       pathe:
         specifier: 'catalog:'
@@ -617,7 +617,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/nuxt:
@@ -636,7 +636,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
       wrangler:
         specifier: 'catalog:'
@@ -667,13 +667,13 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260505.1
       '@void/react':
-        specifier: workspace:@void-sdk/react@*
+        specifier: workspace:*
         version: link:../../packages/react
       vite:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/react-pages:
@@ -701,13 +701,13 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260505.1
       '@void/react':
-        specifier: workspace:@void-sdk/react@*
+        specifier: workspace:*
         version: link:../../packages/react
       vite:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/react-router:
@@ -735,7 +735,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/solid-pages:
@@ -754,13 +754,13 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260505.1
       '@void/solid':
-        specifier: workspace:@void-sdk/solid@*
+        specifier: workspace:*
         version: link:../../packages/solid
       vite:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/spa:
@@ -794,7 +794,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/ssr:
@@ -825,7 +825,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/static-pages:
@@ -838,13 +838,13 @@ importers:
         version: 3.5.33(typescript@6.0.3)
     devDependencies:
       '@void/vue':
-        specifier: workspace:@void-sdk/vue@*
+        specifier: workspace:*
         version: link:../../packages/vue
       vite:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/svelte-pages:
@@ -863,13 +863,13 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260505.1
       '@void/svelte':
-        specifier: workspace:@void-sdk/svelte@*
+        specifier: workspace:*
         version: link:../../packages/svelte
       vite:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/sveltekit:
@@ -894,7 +894,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/tanstack-start:
@@ -931,7 +931,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/vinext-app:
@@ -965,7 +965,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/vinext-pages:
@@ -993,7 +993,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/vue-pages:
@@ -1009,7 +1009,7 @@ importers:
         version: 3.5.33(typescript@6.0.3)
     devDependencies:
       '@void/vue':
-        specifier: workspace:@void-sdk/vue@*
+        specifier: workspace:*
         version: link:../../packages/vue
       typescript:
         specifier: ~6.0.3
@@ -1018,7 +1018,7 @@ importers:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
       vue-tsc:
         specifier: ^3.2.8
@@ -1049,13 +1049,13 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260505.1
       '@void/react':
-        specifier: workspace:@void-sdk/react@*
+        specifier: workspace:*
         version: link:../../packages/react
       vite:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
   playground/zero-js:
@@ -1065,16 +1065,16 @@ importers:
         version: 3.5.33(typescript@6.0.3)
     devDependencies:
       '@void/md':
-        specifier: workspace:@void-sdk/md@*
+        specifier: workspace:*
         version: link:../../packages/md
       '@void/vue':
-        specifier: workspace:@void-sdk/vue@*
+        specifier: workspace:*
         version: link:../../packages/vue
       vite:
         specifier: ^8.0.10
         version: 8.0.10(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
       void:
-        specifier: workspace:@void-sdk/void@*
+        specifier: workspace:*
         version: link:../../packages/void
 
 packages:

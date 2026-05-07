@@ -19,7 +19,6 @@ import {
   isScaffoldableEmptyProject,
   isVoidResolvableFrom,
   runInitCommand,
-  toAliasedPreviewSpec,
 } from '../../src/cli/init.ts';
 import { buildDrizzleKitSpawnEnv } from '../../src/cli/yarn-pnp.ts';
 
@@ -892,8 +891,8 @@ describe('isScaffoldableEmptyProject', () => {
           {
             name: 'my-app',
             devDependencies: {
-              void: 'npm:@void-sdk/void@^0.2.3',
-              '@void/react': 'npm:@void-sdk/react@^0.2.3',
+              void: '^0.2.3',
+              '@void/react': '^0.2.3',
             },
           },
           null,
@@ -1243,7 +1242,7 @@ describe('isScaffoldableEmptyProject', () => {
             private: true,
             dependencies: {
               nuxt: '^4.0.0',
-              void: 'npm:@void-sdk/void@^0.6.0',
+              void: '^0.6.0',
             },
           },
           null,
@@ -1283,7 +1282,7 @@ describe('isScaffoldableEmptyProject', () => {
             },
             devDependencies: {
               vite: '^8.0.10',
-              void: 'npm:@void-sdk/void@^0.6.0',
+              void: '^0.6.0',
             },
           },
           null,
@@ -1341,7 +1340,7 @@ export default defineConfig({
             name: 'nested-vite-plugins-app',
             devDependencies: {
               vite: '^8.0.10',
-              void: 'npm:@void-sdk/void@^0.6.0',
+              void: '^0.6.0',
             },
           },
           null,
@@ -1393,7 +1392,7 @@ export default defineConfig({
             name: 'nested-vite-no-top-level-plugins-app',
             devDependencies: {
               vite: '^8.0.10',
-              void: 'npm:@void-sdk/void@^0.6.0',
+              void: '^0.6.0',
             },
           },
           null,
@@ -1441,7 +1440,7 @@ export default defineConfig({
             name: 'dynamic-vite-app',
             devDependencies: {
               vite: '^8.0.10',
-              void: 'npm:@void-sdk/void@^0.6.0',
+              void: '^0.6.0',
             },
           },
           null,
@@ -1484,7 +1483,7 @@ export default config;
             name: 'dynamic-nested-vite-app',
             devDependencies: {
               vite: '^8.0.10',
-              void: 'npm:@void-sdk/void@^0.6.0',
+              void: '^0.6.0',
             },
           },
           null,
@@ -1794,8 +1793,8 @@ export default config;
             name: 'my-app',
             private: true,
             devDependencies: {
-              void: 'npm:@void-sdk/void@^0.2.3',
-              '@void/react': 'npm:@void-sdk/react@^0.2.3',
+              void: '^0.2.3',
+              '@void/react': '^0.2.3',
             },
           },
           null,
@@ -1811,8 +1810,8 @@ export default config;
 
       const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
       expect(pkg.scripts.dev).toBe('vite');
-      expect(pkg.devDependencies.void).toBe('npm:@void-sdk/void@^0.2.3');
-      expect(pkg.devDependencies['@void/react']).toBe('npm:@void-sdk/react@^0.2.3');
+      expect(pkg.devDependencies.void).toBe('^0.2.3');
+      expect(pkg.devDependencies['@void/react']).toBe('^0.2.3');
       expect(pkg.devDependencies['@rolldown/plugin-babel']).toBe('^0.2.3');
       expect(pkg.devDependencies['@vitejs/plugin-react']).toBe('^6.0.1');
       expect(pkg.devDependencies['babel-plugin-react-compiler']).toBe('^1.0.0');
@@ -3522,8 +3521,8 @@ export default config;
   // `generateStarterMigration` for a workspace subpackage that
   // pre-declared `void + adapter`, because `scaffoldPagesApp`'s
   // `dependencyAdded` would stay false. That is unreachable in practice:
-  // `isScaffoldableEmptyProject` only allows `void`/`@void-sdk/void` +
-  // the adapter packages in declared deps (see
+  // `isScaffoldableEmptyProject` only allows `void` + the adapter
+  // packages in declared deps (see
   // `EMPTY_PROJECT_ALLOWED_PACKAGES`), but the Vue+sqlite template at
   // `template.ts:169..177` pulls in `hono`, `vue`, `vite`, and
   // `typescript` — none of which the allowlist permits. So whenever
@@ -4043,7 +4042,7 @@ describe('ensureVoidDependency', () => {
             name: 'pinned-void-app',
             private: true,
             devDependencies: {
-              void: 'npm:@void-sdk/void@^0.2.3',
+              void: '^0.2.3',
             },
           },
           null,
@@ -4054,7 +4053,7 @@ describe('ensureVoidDependency', () => {
       ensureVoidDependency(root);
 
       const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-      expect(pkg.devDependencies.void).toBe('npm:@void-sdk/void@^0.2.3');
+      expect(pkg.devDependencies.void).toBe('^0.2.3');
       expect(pkg.type).toBeUndefined();
     });
   });
@@ -4118,796 +4117,6 @@ describe('ensureVoidDependency', () => {
     });
   });
 
-  it('rewrites a bare `workspace:*` preview spec to the pnpm aliased form (pnpm project)', () => {
-    // Regression: when the scaffold target has `@void-sdk/void:
-    // "workspace:*"` in devDependencies (no `void` alias yet), the
-    // previous `toAliasedPreviewSpec` returned `"workspace:*"` unchanged
-    // because its `@void-sdk/<name>` regex found nothing to replace. pnpm
-    // then interpreted `"void": "workspace:*"` as a request for a
-    // workspace package literally named `void` — which does not exist —
-    // and the demo scaffold's install step failed. The fix rewrites the
-    // bare spec into pnpm's aliased-workspace form so `void` resolves to
-    // the real `@void-sdk/void` workspace package. Gated on
-    // `isPnpmProject` since round 26, so this test seeds a pnpm lockfile.
-    withTempDir((root) => {
-      writeFileSync(
-        join(root, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'workspace-star-app',
-            private: true,
-            devDependencies: {
-              '@void-sdk/void': 'workspace:*',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-      writeFileSync(join(root, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n");
-
-      ensureVoidDependency(root);
-
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-      expect(pkg.devDependencies.void).toBe('workspace:@void-sdk/void@*');
-      // The pre-existing preview declaration is untouched.
-      expect(pkg.devDependencies['@void-sdk/void']).toBe('workspace:*');
-    });
-  });
-
-  it('rewrites a bare `workspace:^1.2.3` preview spec to the pnpm aliased form (pnpm project)', () => {
-    // Same bug as `workspace:*`, but with a pinned semver range. The bare
-    // form `workspace:^1.2.3` contains no `@void-sdk/` substring, so the
-    // old regex was a no-op and the result would have been
-    // `"void": "workspace:^1.2.3"` — still interpreted by pnpm as a
-    // lookup for a workspace package literally named `void`. The bare
-    // branch must preserve the range alongside the aliased name. Gated
-    // on `isPnpmProject` since round 26.
-    withTempDir((root) => {
-      writeFileSync(
-        join(root, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'workspace-range-app',
-            private: true,
-            devDependencies: {
-              '@void-sdk/void': 'workspace:^1.2.3',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-      writeFileSync(join(root, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n");
-
-      ensureVoidDependency(root);
-
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-      expect(pkg.devDependencies.void).toBe('workspace:@void-sdk/void@^1.2.3');
-      expect(pkg.devDependencies['@void-sdk/void']).toBe('workspace:^1.2.3');
-    });
-  });
-
-  it('falls back to the portable `npm:<alias>@<version>` form for a bare `workspace:*` on a non-pnpm project', () => {
-    // Regression for void-sdk/void#6 round 26: the pnpm aliased-workspace
-    // form `workspace:<alias>@<range>` is pnpm-specific. Yarn Berry and
-    // Bun workspaces don't understand that syntax — a project with a
-    // `@void-sdk/void: "workspace:*"` source spec under npm/yarn/bun would
-    // get a `void: "workspace:@void-sdk/void@*"` entry that the subsequent
-    // install rejects as invalid. For non-pnpm signals, fall back to the
-    // `npm:<alias>@<range>` alias form, which every package manager
-    // accepts. The range degenerates to the caller's fallback version
-    // (the installed void version) when the source is bare `workspace:*`.
-    withTempDir((root) => {
-      writeFileSync(
-        join(root, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'workspace-star-non-pnpm-app',
-            private: true,
-            devDependencies: {
-              '@void-sdk/void': 'workspace:*',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-      // Signal npm via package-lock.json — no pnpm-lock, no packageManager
-      // field. `isPnpmProject` returns false.
-      writeFileSync(join(root, 'package-lock.json'), '{}\n');
-
-      ensureVoidDependency(root);
-
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-      // Must NOT emit `workspace:@void-sdk/void@*` on a non-pnpm project.
-      expect(pkg.devDependencies.void).not.toBe('workspace:@void-sdk/void@*');
-      // Must be the portable npm alias form pinned to a concrete
-      // version (the caller's fallback — `getOwnVersion()` at runtime).
-      expect(pkg.devDependencies.void).toMatch(/^npm:@void-sdk\/void@[^*]/);
-      // The pre-existing preview declaration stays untouched.
-      expect(pkg.devDependencies['@void-sdk/void']).toBe('workspace:*');
-    });
-  });
-
-  it('leaves a `workspace:../path` preview spec unchanged', () => {
-    // Path-form workspace specs (e.g. `workspace:../packages/void`)
-    // resolve to a workspace package at that relative path — pnpm picks
-    // the package by location, not by name. The previous bare-workspace
-    // branch wrapped the path in pnpm's aliased form, producing
-    // `workspace:@void-sdk/void@../packages/void`, which pnpm rejects.
-    // Path specs must pass through to the aliased `void` entry untouched.
-    withTempDir((root) => {
-      writeFileSync(
-        join(root, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'workspace-parent-path-app',
-            private: true,
-            devDependencies: {
-              '@void-sdk/void': 'workspace:../packages/void',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      ensureVoidDependency(root);
-
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-      expect(pkg.devDependencies.void).toBe('workspace:../packages/void');
-      expect(pkg.devDependencies['@void-sdk/void']).toBe('workspace:../packages/void');
-    });
-  });
-
-  it('leaves a `workspace:./path` preview spec unchanged', () => {
-    // Same path-form rationale as `workspace:../path`, but with the
-    // current-directory `./` prefix. Both must pass through unchanged.
-    withTempDir((root) => {
-      writeFileSync(
-        join(root, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'workspace-current-path-app',
-            private: true,
-            devDependencies: {
-              '@void-sdk/void': 'workspace:./vendor/void',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      ensureVoidDependency(root);
-
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-      expect(pkg.devDependencies.void).toBe('workspace:./vendor/void');
-      expect(pkg.devDependencies['@void-sdk/void']).toBe('workspace:./vendor/void');
-    });
-  });
-
-  it('adds the pnpm built-dep allowlist when the project uses pnpm', () => {
-    // Regression for void-sdk/void#6 round 19: the demo scaffold path
-    // (scaffoldDemo -> ensureVoidDependency) must mirror scaffoldPagesApp's
-    // `pnpm.onlyBuiltDependencies` treatment so existing pnpm projects that
-    // accept the demo don't break on first local DB / dev commands — pnpm
-    // 10 ignores build scripts (better-sqlite3/esbuild/workerd) unless they
-    // are explicitly allowlisted.
-    withTempDir((root) => {
-      writeFileSync(
-        join(root, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'existing-pnpm-app',
-            private: true,
-            dependencies: {},
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-      // Signal pnpm via lockfile presence — mirrors detectProjectState.
-      writeFileSync(join(root, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n");
-
-      ensureVoidDependency(root);
-
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-      expect(pkg.pnpm?.onlyBuiltDependencies).toEqual(
-        expect.arrayContaining(['better-sqlite3', 'esbuild', 'workerd']),
-      );
-      // Sanity: the void dep was still added in the same pass.
-      expect(typeof pkg.devDependencies.void).toBe('string');
-    });
-  });
-
-  it('adds the pnpm built-dep allowlist when package.json#packageManager is pnpm with no lockfile', () => {
-    // Regression for void-sdk/void#6 round 22: round 21 extended
-    // `detectProjectState` to honor `package.json#packageManager` (Corepack
-    // pin) when no lockfile is committed yet, so a fresh repo can be "pnpm"
-    // without `pnpm-lock.yaml`. `runInitCommand` then runs `pnpm install`
-    // against it. The lockfile-only predicate previously gating
-    // `ensurePnpmBuiltDependencies` here missed that case, so a freshly
-    // scaffolded demo would skip the allowlist and break on first local
-    // DB / dev commands. Both pnpm signals must trigger the allowlist.
-    withTempDir((root) => {
-      writeFileSync(
-        join(root, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'fresh-pnpm-pin',
-            private: true,
-            packageManager: 'pnpm@10.2.3',
-            dependencies: {},
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-      // No pnpm-lock.yaml — Corepack pin is the only pnpm signal.
-
-      ensureVoidDependency(root);
-
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-      expect(pkg.pnpm?.onlyBuiltDependencies).toEqual(
-        expect.arrayContaining(['better-sqlite3', 'esbuild', 'workerd']),
-      );
-      // Sanity: the void dep was still added in the same pass.
-      expect(typeof pkg.devDependencies.void).toBe('string');
-      // Sanity: the Corepack pin was preserved verbatim.
-      expect(pkg.packageManager).toBe('pnpm@10.2.3');
-    });
-  });
-
-  it('returns false and leaves package.json untouched when void is already declared and project is not pnpm', () => {
-    // Regression for void-sdk/void#6 round 24: workspace subpackages that
-    // already declare `void` as a `workspace:` spec but have no local
-    // lockfile or `package.json#packageManager` pin. `detectProjectState`
-    // falls back to `npm`, and the previous demo path unconditionally
-    // forced a post-demo `npm install` which aborts immediately on
-    // `workspace:` ranges. The fix is for `ensureVoidDependency` to
-    // surface a `changed` signal so the demo path only installs when it
-    // actually mutated `package.json`.
-    withTempDir((root) => {
-      const pkgJson =
-        JSON.stringify(
-          {
-            name: 'existing-subpackage',
-            private: true,
-            type: 'module',
-            devDependencies: {
-              void: 'workspace:../packages/void',
-            },
-          },
-          null,
-          2,
-        ) + '\n';
-      writeFileSync(join(root, 'package.json'), pkgJson);
-      // No pnpm-lock.yaml, no packageManager field — so
-      // `detectProjectState` would fall back to `npm` and
-      // `isPnpmProject` returns false.
-
-      const changed = ensureVoidDependency(root);
-
-      expect(changed).toBe(false);
-      // package.json must be byte-for-byte unchanged — no spurious write.
-      expect(readFileSync(join(root, 'package.json'), 'utf-8')).toBe(pkgJson);
-    });
-  });
-
-  it('returns true when the void dep is newly added', () => {
-    withTempDir((root) => {
-      writeFileSync(
-        join(root, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'no-void-yet',
-            private: true,
-            type: 'module',
-            dependencies: {},
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      const changed = ensureVoidDependency(root);
-
-      expect(changed).toBe(true);
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-      expect(typeof pkg.devDependencies.void).toBe('string');
-    });
-  });
-
-  it('returns true when only the pnpm built-dep allowlist is added (void already declared)', () => {
-    withTempDir((root) => {
-      writeFileSync(
-        join(root, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'existing-pnpm-with-void',
-            private: true,
-            type: 'module',
-            devDependencies: {
-              void: 'workspace:../packages/void',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-      // Signal pnpm via lockfile presence — mirrors detectProjectState.
-      writeFileSync(join(root, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n");
-
-      const changed = ensureVoidDependency(root);
-
-      expect(changed).toBe(true);
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-      // The allowlist must have been written.
-      expect(pkg.pnpm?.onlyBuiltDependencies).toEqual(
-        expect.arrayContaining(['better-sqlite3', 'esbuild', 'workerd']),
-      );
-      // The pre-existing void spec must be preserved verbatim.
-      expect(pkg.devDependencies.void).toBe('workspace:../packages/void');
-    });
-  });
-
-  it('emits the pnpm aliased-workspace form in a pnpm workspace subpackage (ancestor marker only)', () => {
-    // Round 32: a pnpm workspace subpackage often has no local pnpm
-    // markers — the lockfile lives at the workspace root, and the
-    // subpackage's own `package.json` frequently omits the
-    // `packageManager` field. Before the ancestor-walking fix,
-    // `isPnpmProject(root, pkg)` returned false for that shape and
-    // `resolveScaffoldDependencySpec` rewrote the subpackage's bare
-    // `@void-sdk/void: "workspace:*"` source spec to the portable
-    // `npm:@void-sdk/void@<fallback>` form — which the subsequent
-    // workspace install would try to fetch from the registry instead
-    // of linking to the local workspace package.
-    //
-    // With the ancestor walk, the subpackage inherits the workspace
-    // root's `pnpm-workspace.yaml` signal, `isPnpm` is true, and the
-    // rewrite emits `workspace:@void-sdk/void@*` which pnpm resolves
-    // to the local workspace package.
-    const wsroot = mkdtempSync(join(tmpdir(), 'void-init-'));
-    try {
-      writeFileSync(join(wsroot, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
-      // Workspace root has no local `packageManager` pin and no
-      // pnpm-lock yet — only `pnpm-workspace.yaml` declares the shape.
-      const subpkgRoot = join(wsroot, 'packages', 'app');
-      mkdirSync(subpkgRoot, { recursive: true });
-      writeFileSync(
-        join(subpkgRoot, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'ancestor-pnpm-sub',
-            private: true,
-            type: 'module',
-            devDependencies: {
-              '@void-sdk/void': 'workspace:*',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      ensureVoidDependency(subpkgRoot);
-
-      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf-8'));
-      // Ancestor pnpm markers must be honored: the rewritten `void`
-      // spec is pnpm's aliased-workspace form, NOT a published
-      // `npm:@void-sdk/void@<fallback>` spec.
-      expect(pkg.devDependencies.void).toBe('workspace:@void-sdk/void@*');
-      // The pre-existing preview spec is untouched.
-      expect(pkg.devDependencies['@void-sdk/void']).toBe('workspace:*');
-    } finally {
-      rmSync(wsroot, { recursive: true, force: true });
-    }
-  });
-
-  it('emits the pnpm aliased-workspace form when the workspace root pins pnpm via Corepack (ancestor marker only)', () => {
-    // Round 32: the ancestor walk also honors a
-    // `package.json#packageManager: pnpm@...` pin at an ancestor
-    // workspace root, even when neither `pnpm-workspace.yaml` nor
-    // `pnpm-lock.yaml` is present at that root yet. This covers fresh
-    // monorepos using the npm/yarn/bun `workspaces` array shape that
-    // still pin pnpm via Corepack.
-    const wsroot = mkdtempSync(join(tmpdir(), 'void-init-'));
-    try {
-      writeFileSync(
-        join(wsroot, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'ancestor-corepack-pnpm-root',
-            private: true,
-            workspaces: ['packages/*'],
-            packageManager: 'pnpm@10.2.3',
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      const subpkgRoot = join(wsroot, 'packages', 'app');
-      mkdirSync(subpkgRoot, { recursive: true });
-      writeFileSync(
-        join(subpkgRoot, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'ancestor-corepack-sub',
-            private: true,
-            type: 'module',
-            devDependencies: {
-              '@void-sdk/void': 'workspace:*',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      ensureVoidDependency(subpkgRoot);
-
-      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf-8'));
-      expect(pkg.devDependencies.void).toBe('workspace:@void-sdk/void@*');
-      expect(pkg.devDependencies['@void-sdk/void']).toBe('workspace:*');
-    } finally {
-      rmSync(wsroot, { recursive: true, force: true });
-    }
-  });
-
-  // Regression for void-sdk/void#6 round 33: round 32's ancestor-walk
-  // for pnpm markers returned true for any nested app under a pnpm
-  // workspace ancestor — even when the local subpackage had its own
-  // explicit, non-pnpm package-manager markers (a `bun.lockb`,
-  // `yarn.lock`, or `packageManager: bun@…`/`yarn@…` Corepack pin).
-  // That made `resolveScaffoldDependencySpec` emit the pnpm-only
-  // `workspace:@void-sdk/void@*` form, and the subsequent bun/yarn
-  // install rejected it as invalid. Local package-manager signals
-  // must outrank ancestor pnpm markers.
-
-  it('treats a bun subproject under a pnpm workspace ancestor as non-pnpm when a local `bun.lockb` is present', () => {
-    const wsroot = mkdtempSync(join(tmpdir(), 'void-init-'));
-    try {
-      // Ancestor: shaped like a pnpm workspace root.
-      writeFileSync(join(wsroot, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
-
-      // Subpackage: has its OWN local `bun.lockb` → bun is the
-      // governing manager, not the ancestor pnpm workspace.
-      const subpkgRoot = join(wsroot, 'packages', 'app');
-      mkdirSync(subpkgRoot, { recursive: true });
-      writeFileSync(join(subpkgRoot, 'bun.lockb'), '');
-      writeFileSync(
-        join(subpkgRoot, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'bun-under-pnpm',
-            private: true,
-            type: 'module',
-            devDependencies: {
-              '@void-sdk/void': 'workspace:*',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      ensureVoidDependency(subpkgRoot);
-
-      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf-8'));
-      // Bun cannot parse pnpm's `workspace:<alias>@<range>` syntax.
-      // The local `bun.lockb` must force the non-pnpm rewrite path,
-      // which emits a portable `npm:@void-sdk/void@<version>` spec.
-      expect(pkg.devDependencies.void).not.toBe('workspace:@void-sdk/void@*');
-      expect(pkg.devDependencies.void).toMatch(/^npm:@void-sdk\/void@/);
-    } finally {
-      rmSync(wsroot, { recursive: true, force: true });
-    }
-  });
-
-  it('treats a yarn subproject under a pnpm workspace ancestor as non-pnpm when a local `yarn.lock` is present', () => {
-    const wsroot = mkdtempSync(join(tmpdir(), 'void-init-'));
-    try {
-      writeFileSync(join(wsroot, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
-
-      const subpkgRoot = join(wsroot, 'packages', 'app');
-      mkdirSync(subpkgRoot, { recursive: true });
-      writeFileSync(join(subpkgRoot, 'yarn.lock'), '');
-      writeFileSync(
-        join(subpkgRoot, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'yarn-under-pnpm',
-            private: true,
-            type: 'module',
-            devDependencies: {
-              '@void-sdk/void': 'workspace:*',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      ensureVoidDependency(subpkgRoot);
-
-      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf-8'));
-      expect(pkg.devDependencies.void).not.toBe('workspace:@void-sdk/void@*');
-      expect(pkg.devDependencies.void).toMatch(/^npm:@void-sdk\/void@/);
-    } finally {
-      rmSync(wsroot, { recursive: true, force: true });
-    }
-  });
-
-  it('treats a local `packageManager: bun@…` Corepack pin as outranking an ancestor pnpm workspace', () => {
-    const wsroot = mkdtempSync(join(tmpdir(), 'void-init-'));
-    try {
-      writeFileSync(join(wsroot, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
-
-      const subpkgRoot = join(wsroot, 'packages', 'app');
-      mkdirSync(subpkgRoot, { recursive: true });
-      // No local lockfile — only the Corepack pin declares the
-      // governing manager.
-      writeFileSync(
-        join(subpkgRoot, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'bun-pin-under-pnpm',
-            private: true,
-            type: 'module',
-            packageManager: 'bun@1.1.0',
-            devDependencies: {
-              '@void-sdk/void': 'workspace:*',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      ensureVoidDependency(subpkgRoot);
-
-      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf-8'));
-      expect(pkg.devDependencies.void).not.toBe('workspace:@void-sdk/void@*');
-      expect(pkg.devDependencies.void).toMatch(/^npm:@void-sdk\/void@/);
-    } finally {
-      rmSync(wsroot, { recursive: true, force: true });
-    }
-  });
-
-  it('still honors the ancestor pnpm walk for a pristine subpackage with no local package-manager markers', () => {
-    // Regression guard: round 32's ancestor-walk behavior must still
-    // apply when the subpackage has NO local lockfile AND NO local
-    // Corepack pin — the "pristine subpackage" case that motivated the
-    // round-32 fix. Without this we'd lose the round-32 fix.
-    const wsroot = mkdtempSync(join(tmpdir(), 'void-init-'));
-    try {
-      writeFileSync(join(wsroot, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
-
-      const subpkgRoot = join(wsroot, 'packages', 'app');
-      mkdirSync(subpkgRoot, { recursive: true });
-      // No local `packageManager`, no local lockfile of any flavor —
-      // this is the pristine pnpm subpackage shape.
-      writeFileSync(
-        join(subpkgRoot, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'pristine-pnpm-sub',
-            private: true,
-            type: 'module',
-            devDependencies: {
-              '@void-sdk/void': 'workspace:*',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      ensureVoidDependency(subpkgRoot);
-
-      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf-8'));
-      // Ancestor pnpm marker is honored — this is the round-32 behavior.
-      expect(pkg.devDependencies.void).toBe('workspace:@void-sdk/void@*');
-    } finally {
-      rmSync(wsroot, { recursive: true, force: true });
-    }
-  });
-
-  // Regression for void-sdk/void#6 round 43: `hasAncestorPnpmMarkers`
-  // previously returned `true` as soon as it found ANY pnpm marker in
-  // any ancestor directory, without verifying that the subpackage was
-  // actually declared as a member of that workspace. For a standalone
-  // scratch app at e.g. `<wsroot>/scratch/my-app` whose ancestor
-  // `pnpm-workspace.yaml` only lists `packages/*`, the old walk
-  // misclassified it as pnpm. `resolveScaffoldDependencySpec` then
-  // emitted `workspace:@void-sdk/void@*`, but `runInitCommand` correctly
-  // detected the app as standalone (via `isWorkspaceSubpackage`) and
-  // ran `pnpm install` locally — which then rejected the workspace:
-  // spec because the directory isn't a workspace member. The fix ties
-  // `hasAncestorPnpmMarkers` to the same membership check.
-
-  it('does NOT emit the pnpm aliased form for a nested scratch app outside the workspace glob', () => {
-    // Shape: `<wsroot>/scratch/my-app` under a `pnpm-workspace.yaml`
-    // that only declares `packages/*`. The scratch app is NOT a
-    // declared member, so the scaffold must fall back to the portable
-    // `npm:<alias>@<version>` rewrite — not the pnpm-only
-    // `workspace:@void-sdk/void@*` form.
-    const wsroot = mkdtempSync(join(tmpdir(), 'void-init-'));
-    try {
-      writeFileSync(join(wsroot, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
-
-      const subpkgRoot = join(wsroot, 'scratch', 'my-app');
-      mkdirSync(subpkgRoot, { recursive: true });
-      writeFileSync(
-        join(subpkgRoot, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'nested-scratch-non-member',
-            private: true,
-            type: 'module',
-            devDependencies: {
-              '@void-sdk/void': 'workspace:*',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      ensureVoidDependency(subpkgRoot);
-
-      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf-8'));
-      // Non-member scratch app must NOT get the pnpm aliased form.
-      expect(pkg.devDependencies.void).not.toBe('workspace:@void-sdk/void@*');
-      // Falls back to the portable `npm:@void-sdk/void@<version>` form.
-      expect(pkg.devDependencies.void).toMatch(/^npm:@void-sdk\/void@/);
-    } finally {
-      rmSync(wsroot, { recursive: true, force: true });
-    }
-  });
-
-  it('DOES emit the pnpm aliased form when the workspace glob includes the nested path', () => {
-    // Symmetric regression guard: when the ancestor workspace root's
-    // glob actually matches the nested path, membership holds and
-    // `hasAncestorPnpmMarkers` must still return true. Without this
-    // guard the round-43 fix could over-restrict and strip out
-    // legitimate pnpm membership detection.
-    const wsroot = mkdtempSync(join(tmpdir(), 'void-init-'));
-    try {
-      writeFileSync(join(wsroot, 'pnpm-workspace.yaml'), "packages:\n  - 'scratch/*'\n");
-
-      const subpkgRoot = join(wsroot, 'scratch', 'my-app');
-      mkdirSync(subpkgRoot, { recursive: true });
-      writeFileSync(
-        join(subpkgRoot, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'nested-scratch-member',
-            private: true,
-            type: 'module',
-            devDependencies: {
-              '@void-sdk/void': 'workspace:*',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      ensureVoidDependency(subpkgRoot);
-
-      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf-8'));
-      expect(pkg.devDependencies.void).toBe('workspace:@void-sdk/void@*');
-    } finally {
-      rmSync(wsroot, { recursive: true, force: true });
-    }
-  });
-
-  it('does NOT treat a lone ancestor pnpm-lock.yaml (no workspace declaration) as pnpm governance', () => {
-    // Shape: ancestor has `pnpm-lock.yaml` but NO `pnpm-workspace.yaml`
-    // and no `workspaces` field in `package.json`. The ancestor isn't
-    // actually a workspace root, so `findWorkspaceRoot` returns
-    // `undefined` and the nested app must not inherit pnpm governance
-    // from a stray lockfile higher in the tree. Pre-round-43, the
-    // ancestor walk would return true on sight of the lockfile alone.
-    const wsroot = mkdtempSync(join(tmpdir(), 'void-init-'));
-    try {
-      // A pnpm-lock.yaml sitting at an ancestor directory that is NOT
-      // a workspace root — e.g. a parent checkout from another
-      // project, or a lockfile left behind by a previous experiment.
-      writeFileSync(join(wsroot, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n");
-      writeFileSync(
-        join(wsroot, 'package.json'),
-        JSON.stringify({ name: 'ancestor-non-workspace', private: true }, null, 2) + '\n',
-      );
-
-      const subpkgRoot = join(wsroot, 'nested', 'app');
-      mkdirSync(subpkgRoot, { recursive: true });
-      writeFileSync(
-        join(subpkgRoot, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'ancestor-non-workspace-sub',
-            private: true,
-            type: 'module',
-            devDependencies: {
-              '@void-sdk/void': 'workspace:*',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      ensureVoidDependency(subpkgRoot);
-
-      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf-8'));
-      // No declared workspace → not pnpm-governed → non-pnpm rewrite.
-      expect(pkg.devDependencies.void).not.toBe('workspace:@void-sdk/void@*');
-      expect(pkg.devDependencies.void).toMatch(/^npm:@void-sdk\/void@/);
-    } finally {
-      rmSync(wsroot, { recursive: true, force: true });
-    }
-  });
-
-  it('does NOT treat a yarn/npm/bun ancestor workspace root as pnpm, even for a declared member', () => {
-    // Shape: ancestor has a `package.json` with a `workspaces: ["packages/*"]`
-    // array (the yarn/npm/bun convention) and a Corepack pin of
-    // `yarn@4.0.0`. The subpackage IS a declared member of that
-    // workspace, so membership holds — but the workspace is yarn-shaped,
-    // not pnpm. Round 43's tightened `hasAncestorPnpmMarkers` must not
-    // promote this case onto the pnpm branch, or `ensureVoidDependency`
-    // would emit a `workspace:@void-sdk/void@*` spec that the
-    // subsequent yarn install rejects.
-    const wsroot = mkdtempSync(join(tmpdir(), 'void-init-'));
-    try {
-      writeFileSync(
-        join(wsroot, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'yarn-workspace-root',
-            private: true,
-            workspaces: ['packages/*'],
-            packageManager: 'yarn@4.0.0',
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      const subpkgRoot = join(wsroot, 'packages', 'my-app');
-      mkdirSync(subpkgRoot, { recursive: true });
-      writeFileSync(
-        join(subpkgRoot, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'yarn-workspace-member',
-            private: true,
-            type: 'module',
-            devDependencies: {
-              '@void-sdk/void': 'workspace:*',
-            },
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-
-      ensureVoidDependency(subpkgRoot);
-
-      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf-8'));
-      // Yarn workspace shape — no pnpm markers at the root — must
-      // fall back to the portable `npm:<alias>@<version>` form.
-      expect(pkg.devDependencies.void).not.toBe('workspace:@void-sdk/void@*');
-      expect(pkg.devDependencies.void).toMatch(/^npm:@void-sdk\/void@/);
-    } finally {
-      rmSync(wsroot, { recursive: true, force: true });
-    }
-  });
-
   it('does NOT add a duplicate `void` entry when `void` is already declared in `peerDependencies`', () => {
     // Regression for codex review issue #4: the previous "already
     // declared" check only looked at `dependencies` and `devDependencies`,
@@ -4962,220 +4171,6 @@ describe('ensureVoidDependency', () => {
       expect(pkg.optionalDependencies.void).toBe('^2.5.1');
       expect(pkg.devDependencies?.void).toBeUndefined();
     });
-  });
-});
-
-describe('toAliasedPreviewSpec', () => {
-  // Regression for void-sdk/void#6 round 23: round 20 added a path-form
-  // passthrough branch so pnpm monorepos pinning `@void-sdk/void` at a
-  // relative path (e.g. `workspace:../packages/void`) would keep that spec
-  // for the `void` dep. `resolveScaffoldDependencySpec` also reuses this
-  // helper to derive adapter package specs (`@void-sdk/react`, `@void-sdk/
-  // vue`, …) from the existing `@void-sdk/void` spec. In that branch the
-  // target package differs from the source, so passing the same path
-  // through would install the core package under the adapter name — the
-  // adapter import in `vite.config.ts` would then fail to resolve its
-  // expected exports. The path-form passthrough must gate on source ===
-  // target; otherwise fall back to a workspace-wide pin.
-
-  it('leaves a path-form spec unchanged when target equals source', () => {
-    // Same-package case: the lookup found the exact preview package we're
-    // about to install, so the path still points at the right workspace
-    // package. Passthrough preserves the round 20 fix.
-    expect(
-      toAliasedPreviewSpec(
-        '@void-sdk/void',
-        'workspace:../packages/void',
-        '0.0.0',
-        '@void-sdk/void',
-      ),
-    ).toBe('workspace:../packages/void');
-  });
-
-  it('rewrites a path-form spec to `workspace:<target>@*` when target differs from source (isPnpm=true)', () => {
-    // Derived-adapter case: source is `@void-sdk/void` (the `void` spec
-    // the user pinned), target is the adapter we're resolving. The path
-    // points at the core package, not the adapter, so reusing it would
-    // install core under the adapter name. Fall back to the workspace-
-    // wide pin so pnpm resolves the adapter to whatever version the
-    // workspace has. The `workspace:<alias>@<range>` form is pnpm-only,
-    // so the `isPnpm=true` flag is required.
-    expect(
-      toAliasedPreviewSpec(
-        '@void-sdk/react',
-        'workspace:../packages/void',
-        '0.0.0',
-        '@void-sdk/void',
-        true,
-      ),
-    ).toBe('workspace:@void-sdk/react@*');
-  });
-
-  it('rewrites a `./` path-form spec to `workspace:<target>@*` when target differs from source (isPnpm=true)', () => {
-    // Same rationale as `../` but with the current-directory prefix.
-    expect(
-      toAliasedPreviewSpec(
-        '@void-sdk/vue',
-        'workspace:./vendor/void',
-        '0.0.0',
-        '@void-sdk/void',
-        true,
-      ),
-    ).toBe('workspace:@void-sdk/vue@*');
-  });
-
-  // Regression for void-sdk/void#6 round 33: earlier rounds emitted
-  // `workspace:<alias>@*` unconditionally for path-form sources when the
-  // derived target differed from the source. That syntax is pnpm-only —
-  // yarn/bun monorepos that pin `@void-sdk/void` at a relative path would
-  // receive an invalid `workspace:@void-sdk/react@*` entry and the
-  // subsequent install step would fail. Gate the aliased-workspace
-  // rewrite on `isPnpm` and fall back to the portable
-  // `npm:<alias>@<fallbackVersion>` form for everyone else. `*` is
-  // intentionally avoided for the npm form because it would resolve to
-  // whatever is latest on the registry and defeat the preview alias.
-
-  it('rewrites a `../` path-form spec to `npm:<target>@<fallback>` when target differs from source and isPnpm=false', () => {
-    expect(
-      toAliasedPreviewSpec(
-        '@void-sdk/react',
-        'workspace:../packages/void',
-        '0.2.3',
-        '@void-sdk/void',
-        false,
-      ),
-    ).toBe('npm:@void-sdk/react@0.2.3');
-  });
-
-  it('rewrites a `./` path-form spec to `npm:<target>@<fallback>` when target differs from source and isPnpm=false', () => {
-    expect(
-      toAliasedPreviewSpec(
-        '@void-sdk/vue',
-        'workspace:./vendor/void',
-        '0.2.3',
-        '@void-sdk/void',
-        false,
-      ),
-    ).toBe('npm:@void-sdk/vue@0.2.3');
-  });
-
-  it('leaves a `./` path-form spec unchanged when target equals source', () => {
-    // Same-package case for the current-directory prefix variant.
-    expect(
-      toAliasedPreviewSpec('@void-sdk/void', 'workspace:./vendor/void', '0.0.0', '@void-sdk/void'),
-    ).toBe('workspace:./vendor/void');
-  });
-
-  // Regression for void-sdk/void#6 round 26: rounds 23-25 emitted the pnpm-
-  // specific `workspace:<alias>@<range>` form unconditionally for any bare
-  // `workspace:*` / `workspace:^x.y.z` source. Yarn Berry and Bun workspaces
-  // don't understand that syntax — a non-pnpm workspace that had
-  // `@void-sdk/void: "workspace:*"` in devDependencies would end up with a
-  // `void: "workspace:@void-sdk/void@*"` entry that the subsequent install
-  // rejects as invalid. Gate the aliased-workspace rewrite on `isPnpm` and
-  // fall back to the portable `npm:<alias>@<range>` form for everyone else
-  // (npm, yarn, bun all accept it).
-
-  it('emits the pnpm aliased-workspace form for a bare `workspace:*` when isPnpm=true', () => {
-    expect(
-      toAliasedPreviewSpec('@void-sdk/void', 'workspace:*', '0.0.0', '@void-sdk/void', true),
-    ).toBe('workspace:@void-sdk/void@*');
-  });
-
-  it('emits the pnpm aliased-workspace form for a bare `workspace:^1.2.3` when isPnpm=true', () => {
-    expect(
-      toAliasedPreviewSpec('@void-sdk/void', 'workspace:^1.2.3', '0.0.0', '@void-sdk/void', true),
-    ).toBe('workspace:@void-sdk/void@^1.2.3');
-  });
-
-  it('falls back to `npm:<alias>@<fallback>` for a bare `workspace:*` when isPnpm=false', () => {
-    // Non-pnpm workspaces (yarn berry, bun) don't understand
-    // `workspace:<alias>@<range>`. Fall back to the portable npm alias
-    // form so every package manager accepts it. `workspace:*` carries no
-    // explicit range, so use the caller's fallback (the installed void
-    // version) instead of an unpinned `*` that would resolve to whatever
-    // is latest on npm and defeat the point of the preview alias.
-    expect(
-      toAliasedPreviewSpec('@void-sdk/void', 'workspace:*', '0.2.3', '@void-sdk/void', false),
-    ).toBe('npm:@void-sdk/void@0.2.3');
-  });
-
-  it('falls back to `npm:<alias>@<range>` for a bare `workspace:^1.2.3` when isPnpm=false', () => {
-    // Same portability rationale as `workspace:*`, but with an explicit
-    // semver range that must be preserved (not replaced with the
-    // fallback version).
-    expect(
-      toAliasedPreviewSpec('@void-sdk/void', 'workspace:^1.2.3', '0.0.0', '@void-sdk/void', false),
-    ).toBe('npm:@void-sdk/void@^1.2.3');
-  });
-
-  // Regression for void-sdk/void#6 round 32: `workspace:^` and
-  // `workspace:~` are valid pnpm shorthands meaning "current workspace
-  // version, published with caret/tilde". The bare modifier on its own
-  // is NOT a valid semver, so rewrites that paste it directly into a
-  // `workspace:<alias>@^` or `npm:<alias>@^` produce a spec every
-  // package manager rejects. Treat these (and the unpinned `*` / empty
-  // forms) as "no meaningful range" and fall back to `*` (pnpm) or the
-  // caller's fallback version (non-pnpm).
-
-  it('treats `workspace:^` as "no meaningful range" on pnpm', () => {
-    expect(
-      toAliasedPreviewSpec('@void-sdk/void', 'workspace:^', '0.0.0', '@void-sdk/void', true),
-    ).toBe('workspace:@void-sdk/void@*');
-  });
-
-  it('treats `workspace:~` as "no meaningful range" on pnpm', () => {
-    expect(
-      toAliasedPreviewSpec('@void-sdk/void', 'workspace:~', '0.0.0', '@void-sdk/void', true),
-    ).toBe('workspace:@void-sdk/void@*');
-  });
-
-  it('treats `workspace:^` as "no meaningful range" on non-pnpm', () => {
-    expect(
-      toAliasedPreviewSpec('@void-sdk/void', 'workspace:^', '0.2.3', '@void-sdk/void', false),
-    ).toBe('npm:@void-sdk/void@0.2.3');
-  });
-
-  it('treats `workspace:~` as "no meaningful range" on non-pnpm', () => {
-    expect(
-      toAliasedPreviewSpec('@void-sdk/void', 'workspace:~', '0.2.3', '@void-sdk/void', false),
-    ).toBe('npm:@void-sdk/void@0.2.3');
-  });
-
-  it('rewrites `workspace:1.2.3` to the pnpm aliased form on pnpm', () => {
-    // Pinned exact versions are valid semver ranges and must be
-    // preserved through the rewrite — they pin the adapter / void dep
-    // to a specific version in the workspace.
-    expect(
-      toAliasedPreviewSpec('@void-sdk/void', 'workspace:1.2.3', '0.0.0', '@void-sdk/void', true),
-    ).toBe('workspace:@void-sdk/void@1.2.3');
-  });
-
-  it('rewrites `workspace:1.2.3` to the npm alias form on non-pnpm', () => {
-    expect(
-      toAliasedPreviewSpec('@void-sdk/void', 'workspace:1.2.3', '0.0.0', '@void-sdk/void', false),
-    ).toBe('npm:@void-sdk/void@1.2.3');
-  });
-
-  it('rewrites `workspace:` (bare, no suffix) to the pnpm aliased form on pnpm', () => {
-    expect(
-      toAliasedPreviewSpec('@void-sdk/void', 'workspace:', '0.0.0', '@void-sdk/void', true),
-    ).toBe('workspace:@void-sdk/void@*');
-  });
-
-  it('falls back to `npm:<alias>@<fallback>` for `workspace:` (bare) on non-pnpm', () => {
-    expect(
-      toAliasedPreviewSpec('@void-sdk/void', 'workspace:', '0.2.3', '@void-sdk/void', false),
-    ).toBe('npm:@void-sdk/void@0.2.3');
-  });
-
-  it('leaves a plain semver spec untouched (not a workspace form)', () => {
-    // Regression guard: the new `workspace:` handling must not touch
-    // a plain semver spec — those specs fall through to the npm-alias
-    // branch at the bottom of the function.
-    expect(toAliasedPreviewSpec('@void-sdk/void', '^1.0.0', '0.0.0', '@void-sdk/void', false)).toBe(
-      'npm:@void-sdk/void@^1.0.0',
-    );
   });
 });
 

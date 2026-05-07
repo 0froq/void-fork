@@ -117,23 +117,13 @@ export interface PagesStarterTemplate {
   files: Record<string, string>;
 }
 
-function toPreviewPackageName(publicPackageName: string): string {
-  if (publicPackageName === 'void') {
-    return '@void-sdk/void';
-  }
-  if (publicPackageName.startsWith('@void/')) {
-    return publicPackageName.replace(/^@void\//, '@void-sdk/');
-  }
-  return publicPackageName;
-}
-
 export function detectScaffoldFrameworkFromDependencies(
   deps: Record<string, unknown>,
 ): ScaffoldFramework | undefined {
   for (const [framework, config] of Object.entries(SCAFFOLD_FRAMEWORKS) as Array<
     [ScaffoldFramework, ScaffoldFrameworkConfig]
   >) {
-    if (config.adapterPackage in deps || toPreviewPackageName(config.adapterPackage) in deps) {
+    if (config.adapterPackage in deps) {
       return framework;
     }
   }

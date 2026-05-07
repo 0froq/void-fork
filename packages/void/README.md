@@ -15,32 +15,13 @@ Vite plugin and CLI for building and deploying apps on Void.
 
 ## Quick Start
 
-Void is currently in private preview. To install it for the first time, keep importing `void` and `@void/*` in source code, but install the preview artifacts with npm aliases.
-
-1. Create a project `.npmrc` with the scope mapping:
-
-```ini
-@void-sdk:registry=https://npm.pkg.github.com
-```
-
-2. Create a GitHub classic PAT with `read:packages`:
-
-- Token creation: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic
-- Packages permissions: https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages
-
-3. Put the token in your user `~/.npmrc` instead of the project:
-
-```ini
-//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT
-```
-
-4. Install the preview CLI using a package alias:
+Install the Void CLI:
 
 ```bash
-npm install -D void@npm:@void-sdk/void
+npm install -D void
 ```
 
-If you run `void init` in an empty directory, the scaffold flow adds the matching Pages adapter and Vite dependencies for you. Use the same alias pattern for the other adapters and `@void/md` when you add them manually later.
+If you run `void init` in an empty directory, the scaffold flow adds the matching Pages adapter and Vite dependencies for you.
 
 Then run `npx void init`. In an empty directory, the full interactive flow can scaffold a starter, configure local project files, log you in, and link or create your Void project so the next step is just `npx void deploy`. In an existing app, it configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`.
 

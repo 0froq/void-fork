@@ -14,10 +14,10 @@
     "vue": "^3.5.33"
   },
   "devDependencies": {
-    "@void/vue": "workspace:@void-sdk/vue@*",
+    "@void/vue": "workspace:*",
     "typescript": "~6.0.3",
     "vite": "catalog:",
-    "void": "workspace:@void-sdk/void@*",
+    "void": "workspace:*",
     "vue-tsc": "^3.2.8"
   }
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@void-sdk/svelte",
+  "name": "@void/svelte",
   "version": "0.7.0",
   "files": [
     "dist",
@@ -28,7 +28,7 @@
     }
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "access": "public"
   },
   "scripts": {
     "build": "tsdown",
@@ -44,11 +44,11 @@
     "svelte": "^5.55.5",
     "tsdown": "catalog:",
     "vite": "catalog:",
-    "void": "workspace:@void-sdk/void@*"
+    "void": "workspace:*"
   },
   "peerDependencies": {
     "svelte": "^5.0.0",
     "vite": "catalog:",
-    "void": "workspace:@void-sdk/void@*"
+    "void": "workspace:*"
   }
 }

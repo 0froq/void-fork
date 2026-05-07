@@ -1,5 +1,5 @@
 {
-  "name": "@void-sdk/solid",
+  "name": "@void/solid",
   "version": "0.7.0",
   "files": [
     "dist",
@@ -27,7 +27,7 @@
     }
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "access": "public"
   },
   "scripts": {
     "build": "tsdown",
@@ -43,11 +43,11 @@
     "solid-js": "^1.9.12",
     "tsdown": "catalog:",
     "vite": "catalog:",
-    "void": "workspace:@void-sdk/void@*"
+    "void": "workspace:*"
   },
   "peerDependencies": {
     "solid-js": "^1.9.0",
     "vite": "catalog:",
-    "void": "workspace:@void-sdk/void@*"
+    "void": "workspace:*"
   }
 }

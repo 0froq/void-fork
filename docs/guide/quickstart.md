@@ -6,83 +6,33 @@ outline: deep
 
 ## Start in an Empty Directory
 
-Void is currently in private preview. Keep imports in your app on `void` and `@void/*`. In the preview, only the installed package identities change.
-
-1. Add the GitHub Packages registry mapping to your project's `.npmrc`:
-
-```sh
-echo "@void-sdk:registry=https://npm.pkg.github.com" >> .npmrc
-```
-
-2. Create a GitHub classic PAT with `read:packages`:
-
-- Visit https://github.com/settings/tokens/new
-- Enable `read:packages`
-- Click "Generate Token"
-
-See also [token creation](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic) and [packages permissions](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages) for details.
-
-3. Add the token to your user `~/.npmrc` so it stays out of source control:
-
-```sh
-echo "//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT" >> ~/.npmrc
-```
-
-4. For CI, configure `NODE_AUTH_TOKEN` with your PAT under GitHub repo settings "Secrets and variables" > "Actions":
-
-```yaml
-- uses: actions/setup-node@v4
-  with:
-    node-version: lts/*
-    cache: pnpm
-    registry-url: https://npm.pkg.github.com
-    scope: '@void-sdk'
-- run: pnpm install
-  env:
-    NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
-```
-
-5. Install the Void CLI from GitHub Packages using a package alias:
+Install the Void CLI from npm:
 
 `npm`
 
 ```sh
-npm install -D void@npm:@void-sdk/void --legacy-peer-deps
+npm install -D void
 ```
 
 `pnpm`
 
 ```sh
-pnpm add -D void@npm:@void-sdk/void
+pnpm add -D void
 ```
 
 `yarn`
 
 ```sh
-yarn add -D void@npm:@void-sdk/void
+yarn add -D void
 ```
 
 `bun`
 
 ```sh
-bun add -D void@npm:@void-sdk/void
+bun add -D void
 ```
 
-::: warning npm package aliases
-npm has a known issue resolving peer dependencies with package aliases. Use `--legacy-peer-deps` for npm installs during the private preview.
-:::
-
-Your `package.json` will then contain an alias like:
-
-```json
-{
-  "devDependencies": {
-    "void": "npm:@void-sdk/void@VERSION"
-  }
-}
-```
-
-In an empty directory, `void init` adds the matching Pages adapter and starter dependencies after you choose a framework. Use the same alias pattern for `@void/react`, `@void/vue`, `@void/svelte`, `@void/solid`, and `@void/md` when you add them manually later.
+In an empty directory, `void init` adds the matching Pages adapter and starter dependencies after you choose a framework.
 
 As part of `void init`, you'll choose a Pages framework (React, Vue, Svelte, or Solid) and a starter type. D1 is the default top option and scaffolds a DB-backed page loader, schema, generated migration, `db/seed.ts`, and API route. PostgreSQL scaffolds the same starter and writes `"database": "pg"` to `void.json`. Static Pages skips the database and server starter files so you can start with static content and add Void features later.
 
@@ -141,24 +91,22 @@ Void as a platform supports Vite-based meta frameworks, but the Void SDK itself 
 
 ## Adding to an Existing Vite App
 
-Void is currently in private preview, so use the alias install shown above instead of the plain `void` package name.
-
 ::: code-group
 
 ```sh [npm]
-npm install -D void@npm:@void-sdk/void --legacy-peer-deps
+npm install -D void
 ```
 
 ```sh [pnpm]
-pnpm add -D void@npm:@void-sdk/void
+pnpm add -D void
 ```
 
 ```sh [yarn]
-yarn add -D void@npm:@void-sdk/void
+yarn add -D void
 ```
 
 ```sh [bun]
-bun add -D void@npm:@void-sdk/void
+bun add -D void
 ```
 
 :::

@@ -1,22 +1,7 @@
 Void is a fullstack Vite framework and deployment platform for Cloudflare.
-Void is currently in private preview. In an empty directory, set up a new app like this:
+In an empty directory, set up a new app like this:
 
-In the project, create `.npmrc` with this content:
-
-@void-sdk:registry=https://npm.pkg.github.com
-
-Then create a GitHub classic PAT with read:packages:
-
-https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic
-https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages
-
-Store the token in your user ~/.npmrc:
-
-//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT
-
-Then install:
-
-npm install -D void@npm:@void-sdk/void
+npm install -D void
 
 Then run:
 

@@ -120,15 +120,10 @@ const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '.
 
 const EMPTY_PROJECT_ALLOWED_PACKAGES = new Set([
   'void',
-  '@void-sdk/void',
   '@void/react',
   '@void/vue',
   '@void/svelte',
   '@void/solid',
-  '@void-sdk/react',
-  '@void-sdk/vue',
-  '@void-sdk/svelte',
-  '@void-sdk/solid',
 ]);
 
 const VITE_CONFIG_FILES = [
@@ -480,20 +475,13 @@ function parsePackageManagerField(pkg: unknown): ProjectState['packageManager'] 
  * pnpm markers is still pnpm-managed if the enclosing workspace root has
  * `pnpm-workspace.yaml`, a `pnpm-lock.yaml`, or `packageManager: pnpm@...`.
  *
- * Without the ancestor check, `resolveScaffoldDependencySpec` would
- * incorrectly treat such subpackages as non-pnpm and rewrite their
- * `workspace:*` specs to published `npm:@void-sdk/void@<version>` specs,
- * breaking the link to the local workspace package.
- *
  * Round 33: local non-pnpm signals MUST outrank the ancestor walk. A bun
  * or yarn subproject nested under a pnpm workspace ancestor is still
  * bun/yarn — its local `bun.lockb` / `yarn.lock` / `package-lock.json` or
  * a local Corepack pin for bun/yarn/npm proves the ancestor's pnpm shape
  * does not govern this subpackage. `detectProjectState` would pick
- * bun/yarn for such a project and try to install with that manager, but
- * the round-32 ancestor walk incorrectly declared it pnpm and rewrote
- * `workspace:*` specs to `workspace:@void-sdk/void@*` — which bun and
- * yarn then reject.
+ * bun/yarn for such a project and try to install with that manager, so
+ * the pnpm check must not inherit ancestor workspace state too eagerly.
  */
 function isPnpmProject(root: string, pkg: JsonObject): boolean {
   // 1. Strong local pnpm signals — immediate true.
@@ -541,9 +529,9 @@ function isPnpmProject(root: string, pkg: JsonObject): boolean {
  * that repo's pnpm install. A scratch app nested under a pnpm
  * monorepo is a separate project when its path doesn't match the
  * workspace globs. Previously this returned `true` too eagerly, and
- * `ensureVoidDependency` / `scaffoldPagesApp` then emitted
- * `workspace:@void-sdk/void@*` specs that the subsequent local
- * `pnpm install` (the standalone fallback path) rejected.
+ * `ensureVoidDependency` / `scaffoldPagesApp` then treated it like a
+ * workspace member even though the subsequent local install used the
+ * standalone fallback path.
  *
  * Delegate workspace membership to `findWorkspaceRoot` +
  * `isWorkspaceSubpackage` — the same check used by the
@@ -1218,113 +1206,6 @@ function getDeclaredDependencySpec(root: string, packageName: string): string | 
   return undefined;
 }
 
-function toPreviewPackageName(publicPackageName: string): string {
-  if (publicPackageName === 'void') {
-    return '@void-sdk/void';
-  }
-  if (publicPackageName.startsWith('@void/')) {
-    return publicPackageName.replace(/^@void\//, '@void-sdk/');
-  }
-  return publicPackageName;
-}
-
-export function toAliasedPreviewSpec(
-  previewPackageName: string,
-  spec: string,
-  fallbackVersion: string,
-  sourcePreviewPackageName: string = previewPackageName,
-  isPnpm: boolean = false,
-): string {
-  if (spec.startsWith('npm:')) {
-    return spec.replace(/@void-sdk\/[^@]+/, previewPackageName);
-  }
-  if (spec.startsWith('workspace:')) {
-    // Fully-qualified aliased spec like `workspace:@void-sdk/foo@^1.0.0` —
-    // just swap the embedded package name through.
-    if (spec.includes('@void-sdk/')) {
-      return spec.replace(/@void-sdk\/[^@]+/, previewPackageName);
-    }
-    const rest = spec.slice('workspace:'.length);
-    // Path-form workspace specs like `workspace:../packages/void` or
-    // `workspace:./packages/void` resolve to a workspace package at that
-    // relative path — the package-at-path determines the name, not an
-    // alias. pnpm rejects `workspace:@void-sdk/void@../packages/void`, so
-    // wrapping the path form in an alias would break both empty-project
-    // scaffolds and `ensureVoidDependency()` in monorepos that use path-
-    // based workspace links.
-    //
-    // BUT a path-form spec is only meaningful for the exact package the
-    // path points at. Reusing an `@void-sdk/void` path for derived adapter
-    // specs (`@void-sdk/react`, `@void-sdk/vue`, …) would install the core
-    // package under the adapter name, and the adapter import in
-    // `vite.config.ts` would no longer resolve the expected exports. When
-    // the target differs from the source we cannot derive an adapter path
-    // without walking `pnpm-workspace.yaml`; fall back to a workspace-wide
-    // pin so the adapter resolves to whichever version the workspace
-    // currently has.
-    if (/^\.\.?\//.test(rest)) {
-      if (previewPackageName === sourcePreviewPackageName) {
-        return spec;
-      }
-      // Derived-adapter case on a non-same-package path-form source. The
-      // pnpm-only `workspace:<alias>@<range>` form is unsafe for yarn/bun
-      // monorepos that use path-based workspace refs — emitting it there
-      // produces an invalid dep and the install step fails. Fall back to
-      // the portable `npm:<alias>@<fallbackVersion>` form outside pnpm;
-      // every package manager (npm, yarn, bun, pnpm) accepts it. `*` is
-      // intentionally avoided for the npm form because it would resolve
-      // to whatever is latest on the public registry and defeat the
-      // point of the preview alias — pin to the caller's fallback version
-      // (the installed void version at scaffold time).
-      if (isPnpm) {
-        return `workspace:${previewPackageName}@*`;
-      }
-      return `npm:${previewPackageName}@${fallbackVersion}`;
-    }
-    // Bare workspace spec like `workspace:*`, `workspace:^`, `workspace:~`,
-    // or `workspace:1.2.3`. pnpm supports `workspace:<alias>@<range>`, which
-    // resolves `void` to the preview `@void-sdk/void` workspace package at
-    // the declared range. Other package managers (yarn berry, bun) don't
-    // understand that syntax — emitting it on a non-pnpm project produces
-    // an invalid dep and the subsequent install fails. Fall back to the
-    // portable `npm:<alias>@<range>` form outside pnpm; every package
-    // manager (npm, yarn, bun, pnpm) accepts it.
-    //
-    // `workspace:^` and `workspace:~` are pnpm-specific shorthands meaning
-    // "current workspace version, published with caret/tilde". The bare
-    // modifier on its own is not a valid semver, so emitting
-    // `workspace:@void-sdk/void@^` or `npm:@void-sdk/void@^` produces a
-    // spec every package manager rejects. Treat these (and the unpinned
-    // `*` / empty forms) as "no meaningful range" and pin to the caller's
-    // fallback version, which is the installed void version at
-    // scaffold time.
-    const hasMeaningfulRange = rest !== '' && rest !== '*' && rest !== '^' && rest !== '~';
-    if (isPnpm) {
-      const range = hasMeaningfulRange ? rest : '*';
-      return `workspace:${previewPackageName}@${range}`;
-    }
-    // `npm:<alias>@*` resolves to the latest published version, which
-    // defeats the point of the preview alias — pin to the caller's
-    // `fallbackVersion` (the installed void version) whenever the
-    // workspace spec carries no explicit range.
-    const range = hasMeaningfulRange ? rest : fallbackVersion;
-    return `npm:${previewPackageName}@${range}`;
-  }
-  if (spec.startsWith('catalog:')) {
-    return spec;
-  }
-  return `npm:${previewPackageName}@${spec || fallbackVersion}`;
-}
-
-function usesPreviewPackageAliases(root: string): boolean {
-  const publicVoidSpec = getDeclaredDependencySpec(root, 'void');
-  if (typeof publicVoidSpec === 'string' && publicVoidSpec.includes('@void-sdk/void')) {
-    return true;
-  }
-
-  return typeof getDeclaredDependencySpec(root, '@void-sdk/void') === 'string';
-}
-
 function resolveScaffoldDependencySpec(
   root: string,
   packageName: string,
@@ -1335,53 +1216,7 @@ function resolveScaffoldDependencySpec(
     return explicit;
   }
 
-  // `toAliasedPreviewSpec` needs to know whether to emit the pnpm-only
-  // `workspace:<alias>@<range>` form or the portable `npm:<alias>@<range>`
-  // fallback for bare workspace specs. Read `package.json` once so
-  // `isPnpmProject` can honor both the lockfile and Corepack signals.
-  let pkg: JsonObject = {};
-  try {
-    pkg = asRecord(JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'))) ?? {};
-  } catch {
-    // no package.json yet — `isPnpmProject` only needs the lockfile signal
-  }
-  const isPnpm = isPnpmProject(root, pkg);
-
-  const previewPackageName = toPreviewPackageName(packageName);
-  const previewSpec = getDeclaredDependencySpec(root, previewPackageName);
-  if (previewSpec) {
-    // Source and target preview package names match: this lookup found the
-    // spec under the exact preview name we're about to install. Path-form
-    // specs are safe to pass through unchanged in this branch.
-    return toAliasedPreviewSpec(
-      previewPackageName,
-      previewSpec,
-      fallbackVersion,
-      previewPackageName,
-      isPnpm,
-    );
-  }
-
-  const existingVoidSpec =
-    getDeclaredDependencySpec(root, 'void') ?? getDeclaredDependencySpec(root, '@void-sdk/void');
-  if (packageName !== 'void' && existingVoidSpec && usesPreviewPackageAliases(root)) {
-    // Source is `@void-sdk/void`, target is a derived adapter like
-    // `@void-sdk/react`. For range-form specs this rewrite is fine, but a
-    // path-form source spec cannot be meaningfully reused — it points at
-    // the void package on disk, not the adapter. Passing the source name
-    // here lets `toAliasedPreviewSpec` detect the different-package case
-    // and fall back to `workspace:<adapter>@*` instead of installing the
-    // core package under the adapter name.
-    return toAliasedPreviewSpec(
-      previewPackageName,
-      existingVoidSpec,
-      fallbackVersion,
-      '@void-sdk/void',
-      isPnpm,
-    );
-  }
-
-  return `npm:${previewPackageName}@${fallbackVersion}`;
+  return fallbackVersion;
 }
 
 function setupTsconfig(
@@ -2868,8 +2703,8 @@ function setupExistingProject(
  * the caller runs `installProjectDependencies` +
  * `generateStarterMigration`; otherwise `drizzle-kit generate` cannot
  * resolve the schema imports. This function ensures `void` is declared,
- * preserving whatever spec is already there or adding the preview-alias
- * spec the rest of the init flow uses for greenfield scaffolds.
+ * preserving whatever spec is already there or adding the current CLI
+ * version used by greenfield scaffolds.
  * `scaffoldPagesApp` has the same contract via its template; we just
  * replicate the "ensure void dep" slice here for the demo path.
  */
@@ -3009,12 +2844,8 @@ export function ensureVoidDependency(root: string): boolean {
   const devDependencies = asRecord(pkg.devDependencies) ?? {};
   pkg.devDependencies = devDependencies;
 
-  // Only touch `void` if it's not already declared as the public name in
-  // ANY dependency group (deps, devDeps, peerDeps, optionalDeps). We
-  // intentionally ignore `@void-sdk/void` here — the aliasing logic
-  // above writes a separate `void` entry that resolves to the preview
-  // alias, so a user with only `@void-sdk/void` declared still needs
-  // the public-name entry added.
+  // Only touch `void` if it's not already declared in any dependency
+  // group (deps, devDeps, peerDeps, optionalDeps).
   const voidAlreadyDeclared = DEPENDENCY_FIELDS.some((field) => {
     const group = asRecord(pkg[field]);
     return typeof group?.void === 'string';
@@ -3431,11 +3262,10 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
         // `void/schema-d1` through Node's ancestor `node_modules` walk.
         // The demo install is only necessary when that resolution would
         // fail — i.e. `void` is not present anywhere from `root` upward.
-        // `scaffoldDemo` (via `ensureVoidDependency`) may write the alias
+        // `scaffoldDemo` (via `ensureVoidDependency`) may write `void`
         // to the local `package.json` even when `void` is already
-        // hoisted at an ancestor `node_modules/void`; the alias write
-        // alone is desirable (so the next real install picks up the
-        // dep) but does NOT justify an install here. In hoisted
+        // hoisted at an ancestor `node_modules/void`; that manifest
+        // update alone does NOT justify an install here. In hoisted
         // monorepos `isVoidResolvableFrom` returns true via the ancestor
         // walk, so we skip the install — which is important because
         // workspace subpackages with `workspace:` specs often reject

@@ -14,72 +14,17 @@ export default defineConfig({
 });
 ```
 
-## Authentication
-
-Void is currently in private preview. You need to set up a GitHub Personal Access Token (PAT) for the GitHub Packages registry.
-
-1. Add the GitHub Packages registry mapping to your project's `.npmrc`:
-
-```sh
-echo "@void-sdk:registry=https://npm.pkg.github.com" >> .npmrc
-```
-
-2. Create a GitHub classic PAT with `read:packages` to install private packages:
-
-- Visit https://github.com/settings/tokens/new
-- Enable `read:packages`
-- Click "Generate Token"
-
-See also [token creation](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic) and [packages permissions](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages) for details.
-
-3. Add the token to your user `~/.npmrc` so you do not commit credentials into the project:
-
-```sh
-echo "//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT" >> ~/.npmrc
-```
-
-4. For CI, configure `NODE_AUTH_TOKEN` with your PAT under GitHub repo settings "Secrets and variables" > "Actions":
-
-```yaml
-- uses: actions/setup-node@v4
-  with:
-    node-version: lts/*
-    cache: pnpm
-    registry-url: https://npm.pkg.github.com
-    scope: '@void-sdk'
-- run: pnpm install
-  env:
-    NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
-```
-
 ## Starting a New Project
 
-1. Install the preview CLI using a package alias:
+1. Install the Void CLI:
 
 ```sh
 mkdir your-project
 cd your-project
-pnpm add -D void@npm:@void-sdk/void
+pnpm add -D void
 ```
 
-> [!WARNING]
-> **Using npm?** npm has a known issue resolving peer dependencies with package aliases. Add the `--legacy-peer-deps` flag.
-
-```sh
-npm install -D void@npm:@void-sdk/void --legacy-peer-deps
-```
-
-For example, the resulting `package.json` entry looks like this:
-
-```json
-{
-  "devDependencies": {
-    "void": "npm:@void-sdk/void@VERSION"
-  }
-}
-```
-
-When you run `void init` in a scaffoldable empty directory, it scaffolds the starter and adds the matching framework adapter plus Vite dependencies for you. In an existing app, `void init` configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`. Framework and support packages still follow the same alias pattern when you add them manually later: `@void/react@npm:@void-sdk/react`, `@void/vue@npm:@void-sdk/vue`, `@void/svelte@npm:@void-sdk/svelte`, `@void/solid@npm:@void-sdk/solid`, and `@void/md@npm:@void-sdk/md`.
+When you run `void init` in a scaffoldable empty directory, it scaffolds the starter and adds the matching framework adapter plus Vite dependencies for you. In an existing app, `void init` configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`.
 
 Then run:
 
@@ -91,17 +36,10 @@ pnpm void deploy     # deploy to void.app
 
 ## Adding Void to an Existing Project
 
-1. Install the preview package using a package alias:
+1. Install Void:
 
 ```sh
-pnpm add -D void@npm:@void-sdk/void
-```
-
-> [!WARNING]
-> **Using npm?** npm has a known issue resolving peer dependencies with package aliases. Add the `--legacy-peer-deps` flag.
-
-```sh
-npm install -D void@npm:@void-sdk/void --legacy-peer-deps
+pnpm add -D void
 ```
 
 2. Enable the plugin in `vite.config.ts`:
@@ -177,11 +115,11 @@ pnpm dev:docs          # local docs dev server
 
 Deploy and publish workflows require three GitHub environments:
 
-| Environment | Trigger | Secret              | Purpose                                                                        |
-| ----------- | ------- | ------------------- | ------------------------------------------------------------------------------ |
-| `Prod`      | `prod`  | `VOID_TOKEN`        | Auth token for `void deploy` (production docs)                                 |
-| `Staging`   | `main`  | `VOID_TOKEN`        | Auth token for `void deploy` (staging docs)                                    |
-| `Release`   | `v*`    | `GH_PACKAGES_TOKEN` | GitHub Packages private beta publish token via `.github/workflows/publish.yml` |
+| Environment | Trigger | Secret       | Purpose                                               |
+| ----------- | ------- | ------------ | ----------------------------------------------------- |
+| `Prod`      | `prod`  | `VOID_TOKEN` | Auth token for `void deploy` (production docs)        |
+| `Staging`   | `main`  | `VOID_TOKEN` | Auth token for `void deploy` (staging docs)           |
+| `Release`   | `v*`    | `NPM_TOKEN`  | npm publish token via `.github/workflows/publish.yml` |
 
 Note both prod and staging docs are self-hosted on the **production** environment of the platform, so `VOID_TOKEN` for both Prod and Staging envs should be issued from the production API.
 

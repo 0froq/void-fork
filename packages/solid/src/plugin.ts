@@ -20,18 +20,15 @@ export interface VoidSolidOptions {
 // transform, emitting `import { jsx } from "react/jsx-runtime"` — which then
 // fails to resolve in a Solid project. Letting `vite-plugin-solid` see the
 // source directly keeps JSX compilation correct.
-// TODO: remove the *-sdk alias later
-const VOID_SOLID_PKGS = ['@void/solid', '@void-sdk/solid'];
-
 function configPlugin(): Plugin {
   return {
     name: 'void:solid:config',
     config() {
       return {
-        optimizeDeps: { exclude: VOID_SOLID_PKGS },
+        optimizeDeps: { exclude: ['@void/solid'] },
         ssr: {
-          noExternal: VOID_SOLID_PKGS,
-          optimizeDeps: { exclude: VOID_SOLID_PKGS },
+          noExternal: ['@void/solid'],
+          optimizeDeps: { exclude: ['@void/solid'] },
         },
       };
     },
