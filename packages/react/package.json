@@ -1,6 +1,11 @@
 {
   "name": "@void/react",
   "version": "0.7.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/voidzero-dev/void.git",
+    "directory": "packages/react"
+  },
   "files": [
     "dist"
   ],

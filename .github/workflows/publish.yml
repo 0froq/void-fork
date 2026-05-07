@@ -17,7 +17,8 @@ jobs:
 
   publish:
     needs: ci
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
+    environment: Release
     permissions:
       contents: read
       id-token: write
@@ -26,7 +27,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@26f6d4f2c533a43e6b5da0b4a5dd983f98f7b49a # v6.0.4
-      - run: echo "NODE_AUTH_TOKEN=${{ secrets.NPM_TOKEN }}" >> "$GITHUB_ENV"
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0 # zizmor: ignore[cache-poisoning]
         with:
           node-version-file: .node-version
@@ -40,9 +40,19 @@ jobs:
           node-version-file: .node-version
           registry-url: https://registry.npmjs.org
 
-      - run: pnpm --filter ./packages/void publish --provenance --access public --no-git-checks
-      - run: pnpm --filter ./packages/md publish --provenance --access public --no-git-checks
-      - run: pnpm --filter ./packages/react publish --provenance --access public --no-git-checks
-      - run: pnpm --filter ./packages/vue publish --provenance --access public --no-git-checks
-      - run: pnpm --filter ./packages/svelte publish --provenance --access public --no-git-checks
-      - run: pnpm --filter ./packages/solid publish --provenance --access public --no-git-checks
+      - run: mkdir -p .publish
+      - run: pnpm --filter ./packages/void pack --pack-destination .publish
+      - run: pnpm --filter ./packages/create-void pack --pack-destination .publish
+      - run: pnpm --filter ./packages/md pack --pack-destination .publish
+      - run: pnpm --filter ./packages/react pack --pack-destination .publish
+      - run: pnpm --filter ./packages/vue pack --pack-destination .publish
+      - run: pnpm --filter ./packages/svelte pack --pack-destination .publish
+      - run: pnpm --filter ./packages/solid pack --pack-destination .publish
+
+      - run: npm publish .publish/void-[0-9]*.tgz --access public
+      - run: npm publish .publish/create-void-*.tgz --access public
+      - run: npm publish .publish/void-md-*.tgz --access public
+      - run: npm publish .publish/void-react-*.tgz --access public
+      - run: npm publish .publish/void-vue-*.tgz --access public
+      - run: npm publish .publish/void-svelte-*.tgz --access public
+      - run: npm publish .publish/void-solid-*.tgz --access public

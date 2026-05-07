@@ -1,6 +1,11 @@
 {
   "name": "@void/vue",
   "version": "0.7.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/voidzero-dev/void.git",
+    "directory": "packages/vue"
+  },
   "files": [
     "dist"
   ],

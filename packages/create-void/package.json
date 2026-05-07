@@ -1,7 +1,11 @@
 {
   "name": "create-void",
   "version": "0.7.0",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/voidzero-dev/void.git",
+    "directory": "packages/create-void"
+  },
   "bin": {
     "create-void": "dist/index.mjs"
   },
@@ -9,6 +13,9 @@
     "dist"
   ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsgo --noEmit"
