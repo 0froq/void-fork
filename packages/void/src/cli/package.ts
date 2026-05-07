@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { hash as blake3hash } from 'blake3-jit';
 import ignore from 'ignore';
@@ -152,6 +153,93 @@ export function computeAssetHash(content: Buffer, filePath: string): string {
 }
 
 /**
+ * Map of common asset file extensions → content type. Mirrors
+ * `packages/dispatch/src/static.ts`'s MIME_TYPES table so the value the CLI
+ * declares for the R2 PUT signature matches what dispatch will serve later
+ * (dispatch reads `obj.httpMetadata?.contentType` first, falling back to
+ * path-based inference). Keeping the tables aligned avoids a needless
+ * mismatch where R2-stored content-type and serve-time content-type
+ * disagree on the same asset.
+ */
+const ASSET_MIME_TYPES: Record<string, string> = {
+  html: 'text/html; charset=utf-8',
+  htm: 'text/html; charset=utf-8',
+  css: 'text/css; charset=utf-8',
+  js: 'text/javascript; charset=utf-8',
+  mjs: 'text/javascript; charset=utf-8',
+  json: 'application/json; charset=utf-8',
+  xml: 'application/xml; charset=utf-8',
+  svg: 'image/svg+xml; charset=utf-8',
+  txt: 'text/plain; charset=utf-8',
+  csv: 'text/csv; charset=utf-8',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  ico: 'image/x-icon',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  woff: 'font/woff',
+  woff2: 'font/woff2',
+  ttf: 'font/ttf',
+  otf: 'font/otf',
+  eot: 'application/vnd.ms-fontobject',
+  pdf: 'application/pdf',
+  wasm: 'application/wasm',
+  webmanifest: 'application/manifest+json; charset=utf-8',
+  map: 'application/json; charset=utf-8',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mp3: 'audio/mpeg',
+  ogg: 'audio/ogg',
+};
+
+/**
+ * Resolve the content-type to declare on a direct-to-R2 PUT for `path`.
+ * The value is part of the signed Content-Type header on the presigned
+ * URL — if the bytes are uploaded with a different content-type, R2
+ * rejects the PUT (signature mismatch). Defaults to
+ * `application/octet-stream` for unknown extensions.
+ */
+export function getAssetContentType(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() ?? '';
+  return ASSET_MIME_TYPES[ext] ?? 'application/octet-stream';
+}
+
+/**
+ * Compute MD5 of raw content as a 32-char lowercase hex string.
+ *
+ * Used as the wire-level upload-integrity primitive on direct-to-R2 PUTs:
+ * R2's S3 compatibility layer enforces `Content-MD5` (RFC 1864) on PutObject,
+ * so the upload itself fails if uploaded bytes don't match the declared MD5.
+ * MD5 collision resistance is acceptable here because (a) this hash is purely
+ * an upload-integrity primitive (BLAKE3 remains the canonical content key),
+ * and (b) project-scoped storage (`assets/${projectId}/${blake3}`) means any
+ * collision attack is exploitable only against the attacker's own project.
+ */
+export function computeMd5(content: Buffer): string {
+  return createHash('md5').update(content).digest('hex');
+}
+
+/**
+ * Compute both BLAKE3 (CF-compatible asset hash) and MD5 (wire-level R2
+ * upload-integrity checksum) from a single in-memory buffer. Returned in
+ * the v2 manifest entry shape for direct-to-R2 deploys.
+ *
+ * Single-pass: callers read the file once into `content`; this function
+ * then derives both digests from that buffer. The file is never read twice.
+ */
+export function computeAssetHashes(
+  content: Buffer,
+  filePath: string,
+): { blake3: string; md5: string } {
+  return {
+    blake3: computeAssetHash(content, filePath),
+    md5: computeMd5(content),
+  };
+}
+
+/**
  * Create a filter function that excludes .assetsignore, _headers, _redirects,
  * deploy-internal patterns, and any patterns listed in a .assetsignore file.
  * Matches Wrangler's createAssetsIgnoreFunction from workers-shared/utils/helpers.ts.
@@ -202,14 +290,32 @@ function checkWorkerJsAsset(relativePath: string, assetsIgnoreFilePresent: boole
   }
 }
 
+/**
+ * Asset manifest entry — v2 shape. Carries both hashes:
+ *   - `blake3`: 32 hex chars; the canonical content-addressed storage key
+ *     (`assets/${projectId}/${blake3}`). Compatible with Cloudflare's
+ *     Workers Static Assets upload API.
+ *   - `md5`: 32 hex chars; the wire-level upload-integrity primitive used
+ *     by R2's `Content-MD5` (RFC 1864) enforcement on direct PUTs.
+ *
+ * The `hash` field is a deprecated v1 alias kept equal to `blake3` so
+ * existing CLI/test code that reads `entry.hash` keeps working for one
+ * release. Remove in a follow-up PR after consumers migrate to `blake3`.
+ */
 export interface AssetManifestEntry {
-  hash: string;
+  blake3: string;
+  md5: string;
   size: number;
+  /** @deprecated v1 alias of `blake3`; remove in next release. */
+  hash: string;
 }
 
 /**
  * Collect all files in a directory, compute hashes, and return both the
  * manifest (for preflight) and the raw file map (for selective packaging).
+ *
+ * Each file is read from disk exactly once. Both BLAKE3 (storage key) and
+ * MD5 (R2 upload-integrity) digests are derived from that single buffer.
  */
 export async function collectAndHashAssets(
   dir: string,
@@ -237,10 +343,17 @@ export async function collectAndHashAssets(
         continue;
       }
       checkWorkerJsAsset(relativePath, assetsIgnoreFilePresent);
+      // Single disk read per file; both hashes are derived from the same buffer.
       const content = readFileSync(filePath);
+      const { blake3, md5 } = computeAssetHashes(content, filePath);
       assetManifest[relativePath] = {
-        hash: computeAssetHash(content, filePath),
+        blake3,
+        md5,
         size: content.length,
+        // Deprecated v1 alias — kept equal to blake3 for one release so any
+        // consumer still reading `entry.hash` keeps working. Remove in a
+        // follow-up PR.
+        hash: blake3,
       };
       assetFiles.set(relativePath, content);
     }
@@ -257,32 +370,6 @@ export async function collectAndHashAssets(
   return { assetManifest, assetFiles };
 }
 
-/**
- * Append asset files to FormData, filtered by the set of needed paths.
- * If neededPaths is null, all assets are included (no preflight).
- */
-export function appendAssets(
-  formData: FormData,
-  assetFiles: Map<string, Buffer>,
-  neededPaths: Set<string> | null,
-): void {
-  for (const [path, content] of assetFiles) {
-    if (neededPaths && !neededPaths.has(path)) {
-      continue;
-    }
-    const key = path.startsWith('/') ? path.slice(1) : path;
-    formData.append(`asset:${key}`, new Blob([new Uint8Array(content)]), key);
-  }
-}
-
-/**
- * Package the build output into a FormData ready for upload.
- *
- * Build output structure:
- *   dist/
- *     <workerDir>/     ← worker output (index.js + chunks)
- *     client/          ← static SPA assets
- */
 /** Optional overrides for binding names and worker metadata. */
 export interface PackageOptions {
   /** Custom binding names (e.g. { d1: "MY_DB" }). Defaults: DB, KV, STORAGE. */
@@ -328,33 +415,78 @@ function toSandboxManifest(sandbox: ResolvedSandboxConfig): SandboxManifestMeta 
   };
 }
 
-export async function packageBuild(
-  distDir: string,
-  workerDirName: string,
-  bindings: InferredBindings,
-  migrations?: Array<MigrationFile>,
-  schedules?: Array<ScheduleMeta>,
-  ssr?: boolean,
-  framework?: string,
-  revalidate?: number | Record<string, number>,
-  vars?: Record<string, string>,
-  queues?: Array<QueueMeta>,
-  prerender?: Array<string>,
-  assetConfig?: AssetConfig,
-  options?: PackageOptions,
-  neededAssets?: Set<string> | null,
-  hashedAssetsPrefix?: string,
-  headerRules?: Array<HeaderRule>,
-  redirectRules?: Array<DevRedirectRule>,
-  fallbackRules?: Array<DevRedirectRule>,
-  dialect?: 'sqlite' | 'postgresql',
-  webSockets?: Array<WebSocketRouteDefinition>,
-  onProgress?: ProgressCallback,
-): Promise<FormData> {
-  const formData = new FormData();
+/**
+ * If the user configured `routing.fallbacks` on a non-SPA app, the platform
+ * still applies the rules but no `/* -> /index.html` SPA shell is synthesised
+ * — unmatched paths fall through to the platform 404. Returns the warning
+ * message string when that mismatch is detected, or `null` otherwise. Pure
+ * function; callers decide whether/how to surface the message (CLI progress,
+ * `console.warn`, etc.).
+ */
+export function detectNonSpaFallbackWarning(
+  assetConfig: AssetConfig | undefined,
+  fallbackRules: Array<DevRedirectRule> | undefined,
+): string | null {
+  if (assetConfig?.not_found_handling === 'single-page-application') {
+    return null;
+  }
+  if (!fallbackRules || fallbackRules.length === 0) {
+    return null;
+  }
+  return (
+    `routing.fallbacks is set but appType is not "spa"; fallbacks will be applied, ` +
+    `but no "/* -> /index.html" SPA shell fallback is synthesised — unmatched paths fall through to the platform 404.`
+  );
+}
 
-  // Build manifest from inferred bindings
-  const manifest: DeployManifest = { version: 3, bindings: {} };
+/**
+ * Build a Void-app deploy manifest from the inferred bindings + per-feature
+ * inputs. Pure shape transformation: reads no files, has no I/O.
+ *
+ * Note: callers are responsible for surfacing the non-SPA-fallbacks warning
+ * (see `detectNonSpaFallbackWarning`) before invoking this builder. The
+ * builder itself stays I/O-free.
+ */
+export function buildVoidManifest(opts: {
+  bindings: InferredBindings;
+  migrations?: Array<MigrationFile>;
+  schedules?: Array<ScheduleMeta>;
+  ssr?: boolean;
+  framework?: string;
+  revalidate?: number | Record<string, number>;
+  vars?: Record<string, string>;
+  queues?: Array<QueueMeta>;
+  prerender?: Array<string>;
+  assetConfig?: AssetConfig;
+  options?: PackageOptions;
+  hashedAssetsPrefix?: string;
+  headerRules?: Array<HeaderRule>;
+  redirectRules?: Array<DevRedirectRule>;
+  fallbackRules?: Array<DevRedirectRule>;
+  dialect?: 'sqlite' | 'postgresql';
+  webSockets?: Array<WebSocketRouteDefinition>;
+}): DeployManifest {
+  const {
+    bindings,
+    migrations,
+    schedules,
+    ssr,
+    framework,
+    revalidate,
+    vars,
+    queues,
+    prerender,
+    assetConfig,
+    options,
+    hashedAssetsPrefix,
+    headerRules,
+    redirectRules,
+    fallbackRules,
+    dialect,
+    webSockets,
+  } = opts;
+
+  const manifest: DeployManifest = { version: 3, assetManifestVersion: 2, bindings: {} };
   if (bindings.needsAuth) {
     manifest.auth = true;
   }
@@ -385,18 +517,11 @@ export async function packageBuild(
     });
   }
 
-  // Add migration metadata to manifest + SQL content as FormData entries
   if (migrations && migrations.length > 0) {
     manifest.migrations = {
       dialect: dialect ?? 'sqlite',
       pending: migrations.length,
     };
-    onProgress?.(
-      `Packaging ${migrations.length} migration${migrations.length === 1 ? '' : 's'}...`,
-    );
-    for (const m of migrations) {
-      formData.append(`migration:${m.name}`, new Blob([m.sql]), m.name);
-    }
   }
 
   if (schedules && schedules.length > 0) {
@@ -437,25 +562,16 @@ export async function packageBuild(
   // platform-level SPA switch and append a synthetic catch-all rule so user
   // fallbacks are evaluated first and the SPA default only fires when none
   // matched.
+  //
+  // The non-SPA-fallbacks mismatch warning that used to live here moved to
+  // the callers (see `detectNonSpaFallbackWarning`); this function stays
+  // I/O-free per its documented contract.
   let resolvedAssetConfig = assetConfig;
   let resolvedFallbackRules = fallbackRules;
   if (assetConfig?.not_found_handling === 'single-page-application') {
     const chain = resolveSpaFallbackChain('spa', fallbackRules);
     resolvedAssetConfig = { ...assetConfig, ...chain.assetConfig };
     resolvedFallbackRules = chain.fallbackRules;
-  } else if (fallbackRules && fallbackRules.length > 0) {
-    // Fallbacks ship for any app type, but the SPA-shell chain (appending
-    // `/* -> /index.html`) only runs when `not_found_handling` is
-    // `single-page-application`. On SSR / Void / framework apps, user
-    // fallbacks still fire post-lookup, but no SPA shell is synthesised —
-    // callers relying on the rules to provide an `/index.html` safety net
-    // will hit the platform's default 404 on unmatched paths. Warn so the
-    // expectation mismatch surfaces at build time.
-    const msg =
-      `routing.fallbacks is set but appType is not "spa"; fallbacks will be applied, ` +
-      `but no "/* -> /index.html" SPA shell fallback is synthesised — unmatched paths fall through to the platform 404.`;
-    onProgress?.(msg);
-    console.warn(`[void] ${msg}`);
   }
 
   if (resolvedAssetConfig) {
@@ -497,71 +613,48 @@ export async function packageBuild(
     manifest.websocket = websocketManifest;
   }
 
-  formData.append('manifest', JSON.stringify(manifest));
+  return manifest;
+}
 
-  // Add worker files
-  onProgress?.('Packaging worker files...');
-  const workerDir = join(distDir, workerDirName);
-  const workerFiles = collectFiles(workerDir);
-  for (const filePath of workerFiles) {
+/**
+ * Read every worker module under `workerDir` once and return them as a map
+ * keyed by relative path. Skipped files (build metadata, wrangler config,
+ * non-module extensions) are filtered out by `isWorkerModule`. Reads each
+ * file from disk exactly once — buffer threading downstream is the caller's
+ * responsibility.
+ */
+export function collectWorkerFiles(workerDir: string): Map<string, Buffer> {
+  const out = new Map<string, Buffer>();
+  let workerPaths: Array<string>;
+  try {
+    workerPaths = collectFiles(workerDir);
+  } catch (err) {
+    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return out;
+    }
+    throw err;
+  }
+  for (const filePath of workerPaths) {
     const relativePath = toSlash(relative(workerDir, filePath));
     if (!isWorkerModule(relativePath)) {
       continue;
     }
-    const content = readFileSync(filePath);
-    formData.append(`worker:${relativePath}`, new Blob([content]), relativePath);
+    out.set(relativePath, readFileSync(filePath));
   }
-
-  // Add client assets
-  const clientDir = join(distDir, 'client');
-  try {
-    const { isIgnored, assetsIgnoreFilePresent } = createAssetsIgnoreFunction(clientDir);
-    const clientFiles = collectFiles(clientDir);
-    let processed = 0;
-    for (const filePath of clientFiles) {
-      processed++;
-      await tickProgress(processed, clientFiles.length, onProgress, 'Packaging assets');
-      const relativePath = toSlash(relative(clientDir, filePath));
-      if (isIgnored('/' + relativePath)) {
-        continue;
-      }
-      checkWorkerJsAsset(relativePath, assetsIgnoreFilePresent);
-      if (neededAssets && !neededAssets.has('/' + relativePath)) {
-        continue;
-      }
-      const content = readFileSync(filePath);
-      formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
-    }
-  } catch (err) {
-    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-      // No client directory — API-only project
-    } else {
-      throw err;
-    }
-  }
-
-  if (neededAssets) {
-    formData.append('preflight', 'true');
-  }
-
-  return formData;
+  return out;
 }
 
 /**
- * Package a static build (no worker) into a FormData ready for upload.
+ * Build a static-deploy manifest. Pure shape transformation — no I/O.
  */
-export async function packageStaticBuild(
-  outputDir: string,
-  appType: 'spa' | 'static',
-  neededAssets?: Set<string> | null,
-  hashedAssetsPrefix?: string,
-  headerRules?: Array<HeaderRule>,
-  redirectRules?: Array<DevRedirectRule>,
-  fallbackRules?: Array<DevRedirectRule>,
-  onProgress?: ProgressCallback,
-): Promise<FormData> {
-  const formData = new FormData();
-
+export function buildStaticManifest(opts: {
+  appType: 'spa' | 'static';
+  hashedAssetsPrefix?: string;
+  headerRules?: Array<HeaderRule>;
+  redirectRules?: Array<DevRedirectRule>;
+  fallbackRules?: Array<DevRedirectRule>;
+}): DeployManifest {
+  const { appType, hashedAssetsPrefix, headerRules, redirectRules, fallbackRules } = opts;
   const { assetConfig, fallbackRules: resolvedFallbackRules } = resolveSpaFallbackChain(
     appType,
     fallbackRules,
@@ -569,6 +662,7 @@ export async function packageStaticBuild(
 
   const manifest: DeployManifest = {
     version: 3,
+    assetManifestVersion: 2,
     bindings: {},
     type: appType,
     assetConfig,
@@ -590,46 +684,15 @@ export async function packageStaticBuild(
     manifest.fallbackRules = stripDevOnlyRuleFields(resolvedFallbackRules);
   }
 
-  formData.append('manifest', JSON.stringify(manifest));
-
-  const { isIgnored, assetsIgnoreFilePresent } = createAssetsIgnoreFunction(outputDir);
-  const files = collectFiles(outputDir);
-  let processed = 0;
-  for (const filePath of files) {
-    processed++;
-    await tickProgress(processed, files.length, onProgress, 'Packaging assets');
-    const relativePath = toSlash(relative(outputDir, filePath));
-    if (isIgnored('/' + relativePath)) {
-      continue;
-    }
-    checkWorkerJsAsset(relativePath, assetsIgnoreFilePresent);
-    if (neededAssets && !neededAssets.has('/' + relativePath)) {
-      continue;
-    }
-    const content = readFileSync(filePath);
-    formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
-  }
-
-  if (neededAssets) {
-    formData.append('preflight', 'true');
-  }
-
-  return formData;
+  return manifest;
 }
 
 /**
- * Package a framework build (Class B/C) into a FormData ready for upload.
- *
- * Unlike `packageBuild`, the worker and assets directories are absolute paths
- * (resolved from the project root + preset), and the worker directory may be
- * inside the assets directory (SvelteKit, Astro). Worker files are excluded
- * from asset collection when directories overlap.
+ * Build a framework-deploy manifest. Pure shape transformation — no I/O.
  */
-export async function packageFrameworkBuild(opts: {
+export function buildFrameworkManifest(opts: {
   frameworkName: string;
-  workerDir: string;
   workerMain: string;
-  assetsDir: string;
   bindings: InferredBindings;
   migrations?: Array<MigrationFile>;
   schedules?: Array<ScheduleMeta>;
@@ -640,21 +703,16 @@ export async function packageFrameworkBuild(opts: {
   assetConfig?: AssetConfig;
   vars?: Record<string, string>;
   packageOptions?: PackageOptions;
-  neededAssets?: Set<string> | null;
   hashedAssetsPrefix?: string;
   headerRules?: Array<HeaderRule>;
   redirectRules?: Array<DevRedirectRule>;
   fallbackRules?: Array<DevRedirectRule>;
   dialect?: 'sqlite' | 'postgresql';
   webSockets?: Array<WebSocketRouteDefinition>;
-  assetIgnorePatterns?: Array<string>;
-  onProgress?: ProgressCallback;
-}): Promise<FormData> {
-  const formData = new FormData();
+}): DeployManifest {
   const po = opts.packageOptions;
 
-  // Build manifest
-  const manifest: DeployManifest = { version: 3, bindings: {} };
+  const manifest: DeployManifest = { version: 3, assetManifestVersion: 2, bindings: {} };
   const hasMigrations = opts.migrations && opts.migrations.length > 0;
   if (opts.bindings.needsD1 || opts.bindings.needsAuth || hasMigrations) {
     if (opts.dialect === 'postgresql') {
@@ -678,12 +736,6 @@ export async function packageFrameworkBuild(opts: {
       dialect: opts.dialect ?? 'sqlite',
       pending: opts.migrations.length,
     };
-    opts.onProgress?.(
-      `Packaging ${opts.migrations.length} migration${opts.migrations.length === 1 ? '' : 's'}...`,
-    );
-    for (const m of opts.migrations) {
-      formData.append(`migration:${m.name}`, new Blob([m.sql]), m.name);
-    }
   }
 
   if (opts.schedules && opts.schedules.length > 0) {
@@ -740,65 +792,7 @@ export async function packageFrameworkBuild(opts: {
     manifest.websocket = websocketManifest;
   }
 
-  formData.append('manifest', JSON.stringify(manifest));
-
-  // Collect worker files and asset files, handling directory overlap
-  const workerDirNorm = opts.workerDir.replace(/\\/g, '/');
-  const assetsDirNorm = opts.assetsDir.replace(/\\/g, '/');
-  const isOverlap =
-    workerDirNorm.startsWith(assetsDirNorm + '/') || workerDirNorm === assetsDirNorm;
-
-  // Worker files
-  opts.onProgress?.('Packaging worker files...');
-  const workerFiles = collectFiles(opts.workerDir);
-  for (const filePath of workerFiles) {
-    const relativePath = toSlash(relative(opts.workerDir, filePath));
-    if (!isWorkerModule(relativePath)) {
-      continue;
-    }
-    const content = readFileSync(filePath);
-    formData.append(`worker:${relativePath}`, new Blob([content]), relativePath);
-  }
-
-  // Asset files
-  try {
-    const { isIgnored, assetsIgnoreFilePresent } = createAssetsIgnoreFunction(
-      opts.assetsDir,
-      opts.assetIgnorePatterns,
-    );
-    const assetFiles = collectFiles(opts.assetsDir);
-    let processed = 0;
-    for (const filePath of assetFiles) {
-      processed++;
-      await tickProgress(processed, assetFiles.length, opts.onProgress, 'Packaging assets');
-      // Skip worker files when workerDir overlaps with assetsDir
-      if (isOverlap && filePath.replace(/\\/g, '/').startsWith(workerDirNorm)) {
-        continue;
-      }
-      const relativePath = toSlash(relative(opts.assetsDir, filePath));
-      if (isIgnored('/' + relativePath)) {
-        continue;
-      }
-      checkWorkerJsAsset(relativePath, assetsIgnoreFilePresent);
-      if (opts.neededAssets && !opts.neededAssets.has('/' + relativePath)) {
-        continue;
-      }
-      const content = readFileSync(filePath);
-      formData.append(`asset:${relativePath}`, new Blob([content]), relativePath);
-    }
-  } catch (err) {
-    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-      // No assets directory
-    } else {
-      throw err;
-    }
-  }
-
-  if (opts.neededAssets) {
-    formData.append('preflight', 'true');
-  }
-
-  return formData;
+  return manifest;
 }
 
 /**
