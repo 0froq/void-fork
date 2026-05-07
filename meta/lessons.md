@@ -39,3 +39,4 @@
 - Production-backed local dashboard testing: production may not yet expose new API fields. Prefer a localhost-only access bypass over committed or ad hoc allowlists.
 - Dashboard Worker local env: if `packages/dashboard/.dev.vars` exists, put local Worker vars such as `API_URL` and `SITE_DOMAIN` there or in `wrangler.jsonc` vars.
 - Dashboard Tailwind colors: `packages/ui/src/styles/tokens.css` resets the palette with `--color-*: initial`; define needed scales in `@theme` before using utilities such as `bg-gray-*`.
+- Requests Analytics Engine queries should consistently key projects by `blob1`; dispatch also writes `index1`, but billing and top-traffic queries use `blob1`, so dashboard traffic summaries should match that established path.

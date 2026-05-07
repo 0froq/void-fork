@@ -142,7 +142,7 @@ describe('GET /projects', () => {
     mockCfApi({
       analyticsQuery: (_url, init) => {
         expect(init?.body).toContain('FROM void_requests');
-        expect(init?.body).toContain('WHERE index1 IN');
+        expect(init?.body).toContain('WHERE blob1 IN');
         return Response.json({
           data: [
             {
