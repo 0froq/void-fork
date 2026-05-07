@@ -1439,6 +1439,9 @@ app.post('/:id/deploy', async (c) => {
   let declaredAssetManifest: Record<string, AssetManifestEntry> | null = null;
   let source: string | null = null;
   let commit: string | null = null;
+  let repositoryUrl: string | null = null;
+  let commitUrl: string | null = null;
+  let gitRef: string | null = null;
   let preflightRaw: string | null = null;
   // Worker modules are stored as a `Blob` built once, inside `readPartAsBlob`,
   // from the raw chunks. We never name a `Uint8Array` in the parse loop, so
@@ -1879,6 +1882,18 @@ app.post('/:id/deploy', async (c) => {
           }
           if (part.name === 'commit') {
             commit = await readPartText(part.body, 'commit', MAX_SMALL_TEXT_BYTES);
+            continue;
+          }
+          if (part.name === 'repositoryUrl') {
+            repositoryUrl = await readPartText(part.body, 'repositoryUrl', MAX_SMALL_TEXT_BYTES);
+            continue;
+          }
+          if (part.name === 'commitUrl') {
+            commitUrl = await readPartText(part.body, 'commitUrl', MAX_SMALL_TEXT_BYTES);
+            continue;
+          }
+          if (part.name === 'gitRef') {
+            gitRef = await readPartText(part.body, 'gitRef', MAX_SMALL_TEXT_BYTES);
             continue;
           }
           if (part.name === 'preflight') {
@@ -2403,6 +2418,11 @@ app.post('/:id/deploy', async (c) => {
           finalManifestRaw,
           source,
           commit,
+          {
+            repositoryUrl,
+            commitUrl,
+            gitRef,
+          },
         );
       });
       currentDeploymentId = deployment.id;

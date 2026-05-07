@@ -5932,11 +5932,14 @@ describe('POST /projects/:id/deploy (edge cases)', () => {
     mockCfApi();
 
     // Parts that are accepted without the manifest-precedence check
-    // (source/commit/preflight). A regression that defaults the manifest
+    // (source/commit/git metadata/preflight). A regression that defaults the manifest
     // would let this body create an empty live deployment.
     const form = new FormData();
     form.append('source', 'cli');
     form.append('commit', 'deadbeef');
+    form.append('repositoryUrl', 'https://github.com/voidzero-dev/void');
+    form.append('commitUrl', 'https://github.com/voidzero-dev/void/commit/deadbeef');
+    form.append('gitRef', 'main');
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {

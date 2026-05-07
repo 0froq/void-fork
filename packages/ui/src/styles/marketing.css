@@ -7,7 +7,7 @@
 @layer marketing {
   /* Marketing component classes - prefixed with .vz- to avoid conflicts */
   .wrapper {
-    @apply relative mx-auto max-w-[calc(100vw-2rem)] divide-stroke overflow-x-clip border-r border-l border-stroke min-[90rem]:max-w-[90rem] dark:divide-nickel dark:border-nickel;
+    @apply relative mx-auto w-full max-w-[calc(100vw-2rem)] divide-stroke overflow-x-clip border-r border-l border-stroke min-[90rem]:max-w-[90rem] dark:divide-nickel dark:border-nickel;
   }
 
   .wrapper--ticks::before,

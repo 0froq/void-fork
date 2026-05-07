@@ -39,9 +39,42 @@ function formatDate(value: string | null): string {
   }).format(new Date(value));
 }
 
+function externalHttpUrl(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function deploymentDisplayStatus({
+  active,
+  retained,
+  status,
+}: {
+  active: boolean;
+  retained: boolean;
+  status: string;
+}): string {
+  if (status === 'live') {
+    if (active) {
+      return 'live';
+    }
+    return retained ? 'ready' : 'archived';
+  }
+  return status;
+}
+
 function statusClass(status: string): string {
   if (status === 'live') {
     return 'border-zest/30 bg-zest/10 text-zest';
+  }
+  if (status === 'ready') {
+    return 'border-stroke bg-beige text-grey dark:border-nickel dark:bg-slate dark:text-white/80';
   }
   if (status === 'failed' || status === 'canceled') {
     return 'border-fire/30 bg-fire/10 text-fire';
@@ -96,6 +129,34 @@ function DomainLink({ domain }: { domain: string }) {
   );
 }
 
+function CommitLink({ commit, href }: { commit: string | null; href?: string | null }) {
+  if (!commit) {
+    return '-';
+  }
+
+  const shortCommit = commit.slice(0, 7);
+  const commitUrl = externalHttpUrl(href);
+  if (!commitUrl) {
+    return shortCommit;
+  }
+
+  return (
+    <Stack
+      alignCenter
+      as="a"
+      className="w-fit max-w-full text-primary underline decoration-1 underline-offset-2 hover:text-grey hover:no-underline dark:text-white dark:hover:text-grey"
+      gap={4}
+      href={commitUrl}
+      inline
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      <span>{shortCommit}</span>
+      <ExternalLinkIcon />
+    </Stack>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 px-5 py-4">
@@ -129,14 +190,21 @@ function SectionHeader({
   );
 }
 
-function DeploymentStatus({ active, status }: { active: boolean; status: string }) {
+function DeploymentStatus({
+  active,
+  retained,
+  status,
+}: {
+  active: boolean;
+  retained: boolean;
+  status: string;
+}) {
+  const displayStatus = deploymentDisplayStatus({ active, retained, status });
+
   return (
-    <Stack alignCenter gap={8} wrap>
-      <span className={`squircle border px-2 py-1 text-xs uppercase ${statusClass(status)}`}>
-        {status}
-      </span>
-      {active ? <span className="text-xs text-grey">active</span> : null}
-    </Stack>
+    <span className={`squircle border px-2 py-1 text-xs uppercase ${statusClass(displayStatus)}`}>
+      {displayStatus}
+    </span>
   );
 }
 
@@ -238,6 +306,7 @@ export default function ProjectPage({
                         <td className="border-t border-stroke px-5 py-3.5 first:pl-10 last:pr-10 dark:border-nickel">
                           <DeploymentStatus
                             active={deployment.id === deployments.activeDeploymentId}
+                            retained={deployment.retained}
                             status={deployment.status}
                           />
                         </td>
@@ -247,7 +316,7 @@ export default function ProjectPage({
                           </span>
                         </td>
                         <td className="border-t border-stroke px-5 py-3.5 font-mono text-xs text-primary first:pl-10 last:pr-10 dark:border-nickel dark:text-white">
-                          {deployment.commit ? deployment.commit.slice(0, 7) : '-'}
+                          <CommitLink commit={deployment.commit} href={deployment.commit_url} />
                         </td>
                         <td className="border-t border-stroke px-5 py-3.5 text-grey first:pl-10 last:pr-10 dark:border-nickel">
                           {formatDate(deployment.created_at)}

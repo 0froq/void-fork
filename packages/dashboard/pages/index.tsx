@@ -166,9 +166,6 @@ function ProjectListItem({ project, siteDomain }: { project: Project; siteDomain
   const deployMeta = [commit, deployment?.source].filter(Boolean).join(' · ');
   const has5xx = project.health.responses5xx15m > 0;
   const has4xx = project.health.responses4xx15m > 0;
-  const lastSeen = project.traffic.lastSeenAt
-    ? `last ${formatRelativeTime(project.traffic.lastSeenAt)}`
-    : 'No traffic';
 
   return (
     <div className="squircle relative border p-4 transition-colors hover:bg-beige/50 dark:hover:bg-nickel/30">
@@ -224,7 +221,6 @@ function ProjectListItem({ project, siteDomain }: { project: Project; siteDomain
               <span className="text-primary dark:text-white">
                 {formatNumber(project.traffic.requests5m)} req / 5m
               </span>
-              <span className="text-xs text-grey">{lastSeen}</span>
             </Stack>
             <Stack alignCenter className="text-xs" columnGap={12} rowGap={4} wrap>
               <span className={has5xx ? 'text-fire' : 'text-grey'}>

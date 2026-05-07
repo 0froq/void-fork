@@ -275,6 +275,11 @@ export async function createDeployment(
   manifest: string | null,
   source?: string | null,
   commit?: string | null,
+  metadata?: {
+    commitUrl?: string | null;
+    gitRef?: string | null;
+    repositoryUrl?: string | null;
+  },
 ): Promise<Deployment> {
   const id = generateId('dpl');
   const [row] = await db
@@ -285,13 +290,16 @@ export async function createDeployment(
       manifest,
       source: source ?? null,
       commit: commit ?? null,
+      repository_url: metadata?.repositoryUrl ?? null,
+      commit_url: metadata?.commitUrl ?? null,
+      git_ref: metadata?.gitRef ?? null,
     })
     .returning();
   return row;
 }
 
 /**
- * Fill in the manifest/source/commit on a deployment row that was inserted
+ * Fill in the manifest/source/git metadata on a deployment row that was inserted
  * pre-parse as an atomic concurrent-deploy claim (see the early FOR UPDATE
  * precheck in `routes/deploy.ts`). The row is created with NULL values for
  * these columns; this helper writes them once the multipart manifest has
@@ -303,6 +311,11 @@ export async function updateDeploymentManifest(
   manifest: string,
   source: string | null,
   commit: string | null,
+  metadata?: {
+    commitUrl?: string | null;
+    gitRef?: string | null;
+    repositoryUrl?: string | null;
+  },
 ): Promise<Deployment> {
   const [row] = await db
     .update(deployments)
@@ -310,6 +323,9 @@ export async function updateDeploymentManifest(
       manifest,
       source,
       commit,
+      repository_url: metadata?.repositoryUrl ?? null,
+      commit_url: metadata?.commitUrl ?? null,
+      git_ref: metadata?.gitRef ?? null,
       updated_at: sql`now()`,
     })
     .where(eq(deployments.id, id))

@@ -33,6 +33,10 @@ const footerConfig = {
   ],
 };
 
+function FlexibleFooterSpacer() {
+  return <div aria-hidden="true" className="wrapper min-h-0 flex-1 bg-white dark:bg-primary" />;
+}
+
 export default function Layout({ children }: { children: ReactNode }) {
   const { user, canAccessDashboard } = useShared<DashboardShared>();
   const navigation = useNavigation();
@@ -59,7 +63,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           monoIcon,
         }}
       >
-        <div className="marketing-layout min-h-screen bg-white text-primary dark:bg-primary dark:text-white">
+        <div className="marketing-layout flex min-h-screen flex-col bg-white text-primary dark:bg-primary dark:text-white">
           <AppHeader
             accountMenuLabel={user.login}
             accountMenuItems={[
@@ -67,7 +71,10 @@ export default function Layout({ children }: { children: ReactNode }) {
               { icon: 'lucide:log-out', link: '/logout', text: 'Logout' },
             ]}
           />
-          {children}
+          <div className="flex flex-1 flex-col">
+            {children}
+            <FlexibleFooterSpacer />
+          </div>
           <FooterNav footer={footerConfig} />
         </div>
       </ThemeContextProvider>

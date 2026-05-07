@@ -48,9 +48,9 @@ function LoginPageShell({ children }: { children: ReactNode }) {
         monoIcon,
       }}
     >
-      <div className="login-public-shell marketing-layout min-h-screen bg-white text-primary dark:bg-primary dark:text-white">
+      <div className="login-public-shell marketing-layout flex min-h-screen flex-col bg-white text-primary dark:bg-primary dark:text-white">
         <AppHeader />
-        <main className="login-public-main flex min-h-[calc(100vh-206px)] flex-col">
+        <main className="login-public-main flex flex-1 flex-col">
           <section className="login-public-hero wrapper wrapper--ticks grid w-full divide-x divide-stroke border-t border-stroke md:grid-cols-2 dark:divide-nickel dark:border-nickel">
             <VStack center className="login-public-copy items-center p-5 md:items-start">
               <VStack

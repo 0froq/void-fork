@@ -418,11 +418,15 @@ describe('GET /projects/:id/deployments', () => {
     expect(body.activeDeploymentId).toBeNull();
   });
 
-  it('returns deployments with source field', async () => {
+  it('returns deployments with source and git metadata fields', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
 
-    const d1 = await createDeployment(env.db, project.id, null, 'manual');
+    const d1 = await createDeployment(env.db, project.id, null, 'manual', 'abc1234', {
+      commitUrl: 'https://github.com/voidzero-dev/void/commit/abc1234',
+      gitRef: 'main',
+      repositoryUrl: 'https://github.com/voidzero-dev/void',
+    });
     await updateDeploymentStatus(env.db, d1.id, 'live');
     const d2 = await createDeployment(env.db, project.id, null, 'ci');
 
@@ -434,15 +438,28 @@ describe('GET /projects/:id/deployments', () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      deployments: Array<{ id: string; source: string | null; status: string }>;
+      deployments: Array<{
+        commit: string | null;
+        commit_url: string | null;
+        git_ref: string | null;
+        id: string;
+        repository_url: string | null;
+        source: string | null;
+        status: string;
+      }>;
       activeDeploymentId: string | null;
     };
     expect(body.deployments).toHaveLength(2);
 
     const byId = Object.fromEntries(body.deployments.map((d) => [d.id, d]));
     expect(byId[d1.id].source).toBe('manual');
+    expect(byId[d1.id].commit).toBe('abc1234');
+    expect(byId[d1.id].repository_url).toBe('https://github.com/voidzero-dev/void');
+    expect(byId[d1.id].commit_url).toBe('https://github.com/voidzero-dev/void/commit/abc1234');
+    expect(byId[d1.id].git_ref).toBe('main');
     expect(byId[d1.id].status).toBe('live');
     expect(byId[d2.id].source).toBe('ci');
+    expect(byId[d2.id].commit_url).toBeNull();
     expect(byId[d2.id].status).toBe('pending');
   });
 });
