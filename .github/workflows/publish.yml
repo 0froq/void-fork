@@ -40,19 +40,5 @@ jobs:
           node-version-file: .node-version
           registry-url: https://registry.npmjs.org
 
-      - run: mkdir -p .publish
-      - run: pnpm --filter ./packages/void pack --pack-destination .publish
-      - run: pnpm --filter ./packages/create-void pack --pack-destination .publish
-      - run: pnpm --filter ./packages/md pack --pack-destination .publish
-      - run: pnpm --filter ./packages/react pack --pack-destination .publish
-      - run: pnpm --filter ./packages/vue pack --pack-destination .publish
-      - run: pnpm --filter ./packages/svelte pack --pack-destination .publish
-      - run: pnpm --filter ./packages/solid pack --pack-destination .publish
-
-      - run: npm publish .publish/void-[0-9]*.tgz --access public
-      - run: npm publish .publish/create-void-*.tgz --access public
-      - run: npm publish .publish/void-md-*.tgz --access public
-      - run: npm publish .publish/void-react-*.tgz --access public
-      - run: npm publish .publish/void-vue-*.tgz --access public
-      - run: npm publish .publish/void-svelte-*.tgz --access public
-      - run: npm publish .publish/void-solid-*.tgz --access public
+      - run: npm install -g npm@latest
+      - run: pnpm publish -r --access public --tag latest --provenance --no-git-checks
