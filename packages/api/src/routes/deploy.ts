@@ -61,6 +61,7 @@ import {
   parseMultipart,
   PartTooLargeError,
 } from '../multipart.ts';
+import { createDeployLogger, type DeployLogger } from '../observability/logger.ts';
 import {
   BETTER_AUTH_SECRET_NAME,
   decryptProjectSecret,
@@ -83,6 +84,7 @@ import {
   SUPPORTED_MANIFEST_VERSIONS,
   type DeployManifest,
   type DeployEvent,
+  type DeploymentStatus,
   type SandboxMigrationMeta,
   type WebSocketMigrationMeta,
 } from '../types.ts';
@@ -1316,6 +1318,19 @@ app.post('/:id/deploy', async (c) => {
 
   const user = c.get('user');
 
+  // Request-scoped structured logger. Carries projectId/projectSlug/userId
+  // through the entire deploy pipeline; `branch` and `deploymentId` are
+  // filled in via `.with(...)` once the handler determines the deploy mode
+  // and the placeholder/real deployment row exists. Passed as a local
+  // variable rather than via `c.set(...)` to match the existing handler's
+  // convention (which doesn't use Hono context for cross-cutting state).
+  let logger: DeployLogger = createDeployLogger({
+    projectId,
+    projectSlug: project.slug,
+    userId: user.id,
+    branch: null,
+  });
+
   const currentLiveDeployment = project.active_deployment_id
     ? await getDeployment(c.get('db'), project.active_deployment_id)
     : null;
@@ -1363,10 +1378,17 @@ app.post('/:id/deploy', async (c) => {
           throw new ConcurrentDeployError(activeDeploy.id);
         }
         // Stale — auto-fail and proceed
+        const staleNext = activeDeploy.status === 'canceling' ? 'canceled' : 'failed';
+        logger.info('status_transition', 'status_change', {
+          deploymentId: activeDeploy.id,
+          from: activeDeploy.status,
+          to: staleNext,
+          reason: 'precheck_reap_timeout',
+        });
         await updateDeploymentStatus(
           txDb,
           activeDeploy.id,
-          activeDeploy.status === 'canceling' ? 'canceled' : 'failed',
+          staleNext,
           'timed out',
           activeDeploy.status === 'canceling' ? { force: true } : undefined,
         );
@@ -1539,10 +1561,10 @@ app.post('/:id/deploy', async (c) => {
       const id = wfpMirroredManifestDeploymentId;
       wfpMirroredManifestDeploymentId = null;
       await c.env.ROUTING.delete(`manifest:${id}`).catch((err) =>
-        console.warn(
-          `[deploy] failed to evict mirrored manifest for aborted ${id}`,
-          err instanceof Error ? err.message : err,
-        ),
+        logger.warn('catch', 'mirrored_manifest_evict_failed', {
+          deploymentId: id,
+          err: err instanceof Error ? err.message : String(err),
+        }),
       );
     }
     if (streamedHashStores.size === 0) {
@@ -1634,10 +1656,9 @@ app.post('/:id/deploy', async (c) => {
       // left orphaned by a transient DB/KV/R2 failure on the first attempt.
       streamedHashStores.clear();
     } catch (err) {
-      console.warn(
-        `[deploy] streamed asset cleanup failed for project ${projectId}`,
-        err instanceof Error ? err.message : err,
-      );
+      logger.warn('catch', 'streamed_asset_cleanup_failed', {
+        err: err instanceof Error ? err.message : String(err),
+      });
     }
   };
 
@@ -1675,7 +1696,34 @@ app.post('/:id/deploy', async (c) => {
   // phase carry the correct deployment id (the row exists from the
   // atomic precheck-and-claim transaction at route entry).
   let currentDeploymentId = preDeployment.id;
+  // In-memory mirror of the deployment row's `status` column. The
+  // precheck-and-claim transaction inserts the placeholder with the default
+  // status of 'pending'; every `updateDeploymentStatus` call below must keep
+  // this variable in sync so `status_transition` log records carry the
+  // correct `from` value even when optional pipeline phases (migrations,
+  // prerender) are skipped.
+  let currentStatus: DeploymentStatus = 'pending';
+  // Phase-boundary tracker. `markPhase(name)` logs `phase_end` for the
+  // previous phase (with elapsed durationMs since the last call) then
+  // `phase_start` for the new one. Cheap — pure local state, no async.
+  let phaseName = 'parsing';
+  let phaseStartMs = Date.now();
+  const markPhase = (next: string): void => {
+    const now = Date.now();
+    logger.info(phaseName, 'phase_end', { durationMs: now - phaseStartMs });
+    phaseName = next;
+    phaseStartMs = now;
+    logger.info(next, 'phase_start');
+  };
   const emit = (event: DeployEvent): void => {
+    // Mirror every NDJSON event into structured logs so postmortem analysis
+    // from Tail can reconstruct the wire stream without separately
+    // instrumenting each call site. Wire contract is unchanged — this only
+    // adds one structured log line per emit (heartbeats are high-frequency
+    // but also include `currentPhase` which is exactly what postmortem
+    // needs). Logged BEFORE the writer.write so a closed stream still
+    // captures the event in tail.
+    logger.info('emit', 'ndjson_event', event as unknown as Record<string, unknown>);
     if (!streamOpen) {
       return;
     }
@@ -1687,11 +1735,7 @@ app.post('/:id/deploy', async (c) => {
     // rejections for the remainder of the pipeline.
     writer.write(encoder.encode(JSON.stringify(event) + '\n')).catch((err) => {
       streamOpen = false;
-      console.warn(
-        `[deploy] ${projectId}: deploy stream closed while emitting ${event.event}: ${
-          err instanceof Error ? err.message : err
-        }`,
-      );
+      logger.warn('emit', 'stream_closed', { event: event.event, err: String(err) });
     });
   };
   // Heartbeat cadence is hard-coded in production (15s) but overridable via
@@ -1708,6 +1752,9 @@ app.post('/:id/deploy', async (c) => {
       : 15_000;
 
   void (async () => {
+    logger.info('multipart_parse', 'phase_start');
+    phaseName = 'multipart_parse';
+    phaseStartMs = Date.now();
     let routingSwitched = false;
     // Track every ROUTING KV key written by this deploy so the catch-path
     // can roll them ALL back if teardown wins the race or pre-routing fails
@@ -2183,6 +2230,7 @@ app.post('/:id/deploy', async (c) => {
 
       // === POST-PARSE VALIDATION ===
       currentStep = 'validating';
+      markPhase('manifest_validate');
       // Reuse the eagerly-parsed manifest from the `assetManifest` part
       // handler above — same input string, never mutated during parse, and
       // the declared manifest can be up to `MAX_ASSET_MANIFEST_BYTES` (32 MiB)
@@ -2359,6 +2407,7 @@ app.post('/:id/deploy', async (c) => {
       });
       currentDeploymentId = deployment.id;
       cleanupExcludeDeploymentId = deployment.id;
+      logger = logger.with({ deploymentId: deployment.id });
       if (manifestVersionChanged) {
         await updateProjectWebSocketVersion(
           c.get('db'),
@@ -2393,7 +2442,13 @@ app.post('/:id/deploy', async (c) => {
 
         // === ASSET UPLOAD PHASE ===
         currentStep = 'asset_upload';
+        markPhase('asset_upload');
+        logger.info('status_transition', 'status_change', {
+          from: currentStatus,
+          to: 'uploading',
+        });
         await updateDeploymentStatus(c.get('db'), deployment.id, 'uploading');
+        currentStatus = 'uploading';
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
         await assertProjectNotDeleting(c.get('db'), projectId);
 
@@ -2426,6 +2481,7 @@ app.post('/:id/deploy', async (c) => {
 
         // Determine if this is a static-only deploy (no worker files in FormData)
         const isStaticOnly = !hasWorkerFiles;
+        logger = logger.with({ branch: isStaticOnly ? 'static' : 'wfp' });
 
         // CF's `assets-upload-session` API can return empty/incomplete buckets
         // when its dedupe index is in a bad state for some hashes — entries get
@@ -2557,12 +2613,15 @@ app.post('/:id/deploy', async (c) => {
           });
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
           await assertProjectNotDeleting(c.get('db'), projectId);
+          markPhase('routing_switch');
           await c.env.ROUTING.put(project.slug, routingJson);
           // Record AFTER successful put — a rejected put must not appear in
           // the rollback set, otherwise the catch path would delete a
           // previous deployment's still-live route on a transient KV failure.
           writtenRoutingKeys.push(project.slug);
           routingSwitched = true;
+          logger = logger.with({ routingSwitched: true });
+          logger.info('routing_switch', 'slug_routed', { slug: project.slug });
 
           for (const domain of projectDomains) {
             if (domain.status === 'active') {
@@ -2577,6 +2636,12 @@ app.post('/:id/deploy', async (c) => {
           // `projects.status='deleting'` between the pre-routing checks and
           // here can't sneak past — see the WfP path for the same pattern
           // and design-doc 0067 §7.
+          markPhase('db_finalize');
+          logger.info('status_transition', 'status_change', {
+            from: currentStatus,
+            to: 'live',
+            reason: 'static_deploy',
+          });
           await c.get('db').transaction(async (tx) => {
             await tx.execute(
               drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
@@ -2591,6 +2656,7 @@ app.post('/:id/deploy', async (c) => {
             });
             await updateProjectType(txDb, projectId, type);
           });
+          currentStatus = 'live';
           await setActiveDeployment(c.get('db'), projectId, deployment.id);
           await markDeploymentRetained(c.get('db'), deployment.id, true);
 
@@ -2630,6 +2696,7 @@ app.post('/:id/deploy', async (c) => {
           }
 
           // Static retention cleanup — STATIC_RETENTION_LIMIT (100) instead of per-plan limits
+          markPhase('retention_cleanup');
           if (STATIC_RETENTION_LIMIT > 0) {
             // STATIC_RETENTION_LIMIT includes the active deployment, so keep (limit - 1) others
             const toEvict = retained.slice(STATIC_RETENTION_LIMIT - 1);
@@ -2699,6 +2766,7 @@ app.post('/:id/deploy', async (c) => {
         // Full deploy path
         // Provision bindings (D1, KV, R2) — creates CF resources if needed
         currentStep = 'provisioning';
+        markPhase('provisioning');
 
         // Derive binding labels from the manifest upfront so we can show the
         // spinner BEFORE the (potentially slow) CF API provisioning calls.
@@ -2778,6 +2846,7 @@ app.post('/:id/deploy', async (c) => {
         let completionJwt: string | undefined;
         if (assetCount > 0) {
           currentStep = 'asset_upload';
+          markPhase('asset_upload');
           const newAssets = assetsByHash.size;
           emit({
             event: 'asset_upload',
@@ -2793,9 +2862,11 @@ app.post('/:id/deploy', async (c) => {
             workerName,
             assetManifest,
           );
-          console.log(
-            `[deploy] ${projectId}: asset session created, ${Object.keys(assetManifest).length} manifest entries, ${session.buckets.length} bucket(s), ${assetsByHash.size} blobs available`,
-          );
+          logger.info('asset_upload', 'session_created', {
+            manifestEntries: Object.keys(assetManifest).length,
+            buckets: session.buckets.length,
+            blobsAvailable: assetsByHash.size,
+          });
 
           // Upload asset buckets to CF. When all assets are cached (empty buckets),
           // the session JWT is already the completion token — no exchange needed.
@@ -2807,9 +2878,9 @@ app.post('/:id/deploy', async (c) => {
           );
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
           await assertProjectNotDeleting(c.get('db'), projectId);
-          console.log(
-            `[deploy] ${projectId}: asset upload complete, got completion JWT: ${completionJwt ? 'yes' : 'no'}`,
-          );
+          logger.info('asset_upload', 'upload_complete', {
+            hasCompletionJwt: completionJwt !== undefined,
+          });
           emit({ event: 'asset_upload_done' });
 
           // Persist the asset manifest as soon as CF acknowledges the bytes.
@@ -2886,6 +2957,7 @@ app.post('/:id/deploy', async (c) => {
 
         // 1. Upload worker to dispatch namespace via CF API
         currentStep = 'worker_upload';
+        markPhase('worker_upload');
         const workerFormData = new FormData();
 
         // Worker modules were already buffered during the streaming body parse.
@@ -2909,9 +2981,7 @@ app.post('/:id/deploy', async (c) => {
         const secretNames = new Set(secretBindings.map((s) => s.name));
         const collisions = userVarNames.filter((n) => secretNames.has(n));
         if (collisions.length > 0) {
-          console.warn(
-            `[deploy] manifest vars collide with project secrets (secrets win): ${collisions.join(', ')}`,
-          );
+          logger.warn('worker_upload', 'var_secret_collisions', { collisions });
         }
 
         const plainTextBindings = Object.entries(manifest.vars ?? {}).map(([name, text]) => ({
@@ -2932,9 +3002,7 @@ app.post('/:id/deploy', async (c) => {
 
         // Add metadata part (include provisioned bindings + assets)
         if (!manifest.compatibilityDate) {
-          console.warn(
-            `[deploy] manifest missing compatibilityDate for project ${project.id}, using fallback`,
-          );
+          logger.warn('worker_upload', 'missing_compatibility_date');
         }
 
         const assetConfig = manifest.assetConfig ?? { not_found_handling: 'none' };
@@ -2988,7 +3056,8 @@ app.post('/:id/deploy', async (c) => {
         // worker DELETE ran before our PUT (orphan recovery).
         workerUploadUrl = `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`;
         await retryWithBackoff(
-          async () => {
+          async (attempt) => {
+            const attemptStart = Date.now();
             const cfResponse = await fetch(workerUploadUrl!, {
               method: 'PUT',
               headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
@@ -2997,17 +3066,25 @@ app.post('/:id/deploy', async (c) => {
 
             if (!cfResponse.ok) {
               const error = await cfResponse.text();
-              console.error(
-                `[deploy] ${projectId}: worker upload failed (${cfResponse.status}): ${error.slice(0, 500)}`,
-              );
+              logger.error('worker_upload', 'attempt_failed', new Error(error), {
+                attempt,
+                maxAttempts: CF_RETRY.maxRetries + 1,
+                latencyMs: Date.now() - attemptStart,
+                status: cfResponse.status,
+                bodyPreview: error.slice(0, 500),
+              });
               throw new Error(`worker upload failed: ${error}`);
             }
 
             const cfBody = await cfResponse.text();
             if (isCfAssetPlainText(cfBody)) {
-              console.warn(
-                `[deploy] ${projectId}: worker upload got CF plain-text response, retrying: ${cfBody.slice(0, 100)}`,
-              );
+              logger.warn('worker_upload', 'attempt_failed', {
+                attempt,
+                maxAttempts: CF_RETRY.maxRetries + 1,
+                latencyMs: Date.now() - attemptStart,
+                code: 'cf_plain_text',
+                bodyPreview: cfBody.slice(0, 100),
+              });
               return undefined; // retry
             }
             return true;
@@ -3046,10 +3123,9 @@ app.post('/:id/deploy', async (c) => {
             // bundle_stored never flips true and no other code path will
             // reap them.
             await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, deployment.id).catch((e) =>
-              console.error(
-                `[deploy] failed to clean up partial worker bundle for ${deployment!.id}:`,
-                e,
-              ),
+              logger.error('worker_upload', 'partial_bundle_cleanup_failed', e, {
+                deploymentId: deployment!.id,
+              }),
             );
             throw err;
           }
@@ -3067,6 +3143,7 @@ app.post('/:id/deploy', async (c) => {
         // namespaces, so each deploy mints its own namespace + container.
         if (manifest.sandbox && hasWorkerFiles) {
           currentStep = 'sandbox_container';
+          markPhase('sandbox_container');
           sandboxContainerAppName = perDeployContainerApplicationName(
             projectId,
             deployment.id,
@@ -3100,7 +3177,13 @@ app.post('/:id/deploy', async (c) => {
         let migrationsApplied = 0;
         if (manifest.migrations && manifest.migrations.pending > 0) {
           currentStep = 'migration';
+          markPhase('migrate');
+          logger.info('status_transition', 'status_change', {
+            from: currentStatus,
+            to: 'migrating',
+          });
           await updateDeploymentStatus(c.get('db'), deployment.id, 'migrating');
+          currentStatus = 'migrating';
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
           await assertProjectNotDeleting(c.get('db'), projectId);
           emit({ event: 'migration_start', pending: manifest.migrations.pending });
@@ -3111,7 +3194,9 @@ app.post('/:id/deploy', async (c) => {
           // Returns "ready" when the endpoint confirms, or "compat" when the worker
           // is live but doesn't expose /__void/ready (older framework version).
           const probeResult = await retryWithBackoff<'ready' | 'compat'>(
-            async () => {
+            async (attempt) => {
+              const attemptStart = Date.now();
+              const maxAttempts = CF_READINESS_RETRY.maxRetries + 1;
               try {
                 const userWorker = c.env.DISPATCH.get(workerName);
                 const readyResponse = await userWorker.fetch(
@@ -3121,9 +3206,13 @@ app.post('/:id/deploy', async (c) => {
                 );
                 const text = await readyResponse.text();
                 if (isCfAssetPlainText(text)) {
-                  console.warn(
-                    `[deploy] ${projectId}: readiness probe returned CF plain text: ${text}`,
-                  );
+                  logger.warn('migrate', 'readiness_probe_attempt_failed', {
+                    attempt,
+                    maxAttempts,
+                    latencyMs: Date.now() - attemptStart,
+                    code: 'cf_plain_text',
+                    bodyPreview: text.slice(0, 200),
+                  });
                   return undefined; // retry
                 }
                 try {
@@ -3140,19 +3229,31 @@ app.post('/:id/deploy', async (c) => {
                 }
                 if (readyResponse.ok) {
                   // 2xx but not { ready: true } — likely CF propagation lag
-                  console.warn(
-                    `[deploy] ${projectId}: readiness probe returned non-JSON 2xx, retrying: ${text.slice(0, 200)}`,
-                  );
+                  logger.warn('migrate', 'readiness_probe_attempt_failed', {
+                    attempt,
+                    maxAttempts,
+                    latencyMs: Date.now() - attemptStart,
+                    code: 'non_json_2xx',
+                    status: readyResponse.status,
+                    bodyPreview: text.slice(0, 200),
+                  });
                   return undefined;
                 }
-                console.warn(
-                  `[deploy] ${projectId}: readiness probe returned ${readyResponse.status}, retrying`,
-                );
+                logger.warn('migrate', 'readiness_probe_attempt_failed', {
+                  attempt,
+                  maxAttempts,
+                  latencyMs: Date.now() - attemptStart,
+                  status: readyResponse.status,
+                });
                 return undefined;
               } catch (err) {
-                console.warn(
-                  `[deploy] ${projectId}: readiness probe threw: ${err instanceof Error ? err.message : err}`,
-                );
+                logger.warn('migrate', 'readiness_probe_attempt_failed', {
+                  attempt,
+                  maxAttempts,
+                  latencyMs: Date.now() - attemptStart,
+                  code: 'threw',
+                  err: err instanceof Error ? err.message : String(err),
+                });
                 return undefined; // retry on timeout / network errors
               }
             },
@@ -3179,7 +3280,9 @@ app.post('/:id/deploy', async (c) => {
             error?: string;
           };
           const result = await retryWithBackoff<MigrationResult>(
-            async () => {
+            async (attempt) => {
+              const attemptStart = Date.now();
+              const maxAttempts = migrationRetry.maxRetries + 1;
               const userWorker = c.env.DISPATCH.get(workerName);
               const migrateResponse = await userWorker.fetch(
                 new Request('https://internal/__void/migrate', {
@@ -3192,7 +3295,13 @@ app.post('/:id/deploy', async (c) => {
               const text = await migrateResponse.text();
               // CF dispatch can regress between consecutive calls; re-check
               if (isCfAssetPlainText(text)) {
-                console.warn(`[deploy] migration dispatch returned CF plain text: ${text}`);
+                logger.warn('migrate', 'attempt_failed', {
+                  attempt,
+                  maxAttempts,
+                  latencyMs: Date.now() - attemptStart,
+                  code: 'cf_plain_text',
+                  bodyPreview: text.slice(0, 200),
+                });
                 return undefined; // retry
               }
 
@@ -3200,9 +3309,14 @@ app.post('/:id/deploy', async (c) => {
                 return JSON.parse(text) as MigrationResult;
               } catch {
                 if (migrateResponse.ok) {
-                  console.warn(
-                    `[deploy] migration returned non-JSON 2xx, retrying: ${text.slice(0, 500)}`,
-                  );
+                  logger.warn('migrate', 'attempt_failed', {
+                    attempt,
+                    maxAttempts,
+                    latencyMs: Date.now() - attemptStart,
+                    code: 'non_json_2xx',
+                    status: migrateResponse.status,
+                    bodyPreview: text.slice(0, 500),
+                  });
                   return undefined; // retry
                 }
                 throw new Error(
@@ -3235,6 +3349,7 @@ app.post('/:id/deploy', async (c) => {
 
         // 2b. Configure queue consumers (dispatch worker relays to user workers)
         currentStep = 'queue_setup';
+        markPhase('queue_setup');
         const queueNames = (manifest.queues ?? []).map((q) => q.name);
         if (queueNames.length > 0) {
           emit({ event: 'queue_setup', queues: queueNames });
@@ -3327,8 +3442,14 @@ app.post('/:id/deploy', async (c) => {
         // 3b. Prerender pages (write ISR cache entries before going live)
         currentStep = 'prerender';
         if (manifest.prerender && manifest.prerender.length > 0 && manifest.revalidate) {
+          markPhase('prerender');
           emit({ event: 'prerender', pages: manifest.prerender.length });
+          logger.info('status_transition', 'status_change', {
+            from: currentStatus,
+            to: 'prerendering',
+          });
           await updateDeploymentStatus(c.get('db'), deployment.id, 'prerendering');
+          currentStatus = 'prerendering';
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
           await assertProjectNotDeleting(c.get('db'), projectId);
           const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
@@ -3396,6 +3517,7 @@ app.post('/:id/deploy', async (c) => {
         });
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
         await assertProjectNotDeleting(c.get('db'), projectId);
+        markPhase('routing_switch');
         await c.env.ROUTING.put(project.slug, routingJson);
         // Record AFTER successful put — see queue route comment above.
         writtenRoutingKeys.push(project.slug);
@@ -3403,6 +3525,8 @@ app.post('/:id/deploy', async (c) => {
         // Traffic can now reach the new worker via project.slug.
         // Set the flag immediately so the outer catch never deletes a live worker.
         routingSwitched = true;
+        logger = logger.with({ routingSwitched: true });
+        logger.info('routing_switch', 'slug_routed', { slug: project.slug });
 
         // Update KV routing for active custom domains
         for (const domain of projectDomains) {
@@ -3422,6 +3546,12 @@ app.post('/:id/deploy', async (c) => {
         // FOR UPDATE lock and re-check status. If teardown won the race, we
         // throw `PROJECT_DELETING_ERROR_MESSAGE` so the catch-path branch
         // below rolls back the routing entries we just wrote.
+        markPhase('db_finalize');
+        logger.info('status_transition', 'status_change', {
+          from: currentStatus,
+          to: 'live',
+          reason: 'wfp_deploy',
+        });
         await c.get('db').transaction(async (tx) => {
           await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
           const txDb = tx as unknown as Db;
@@ -3438,6 +3568,7 @@ app.post('/:id/deploy', async (c) => {
             manifest.type ?? (manifest.framework ? 'framework' : 'void'),
           );
         });
+        currentStatus = 'live';
 
         // 5b. Set active deployment + mark retained
         await setActiveDeployment(c.get('db'), projectId, deployment.id);
@@ -3459,6 +3590,7 @@ app.post('/:id/deploy', async (c) => {
         // `hasCrons`, which is omitted when false and missing on older
         // entries.
         currentStep = 'cron_setup';
+        markPhase('cron_sync');
         const cronSyncPromise = (async () => {
           try {
             if (hasCrons) {
@@ -3474,11 +3606,7 @@ app.post('/:id/deploy', async (c) => {
               await clearCronScheduler(c.env, projectId);
             }
           } catch (err) {
-            console.error(
-              `[deploy] cron sync failed for ${projectId} after routing switch: ${
-                err instanceof Error ? err.message : err
-              }`,
-            );
+            logger.error('cron_sync', 'cron_sync_failed_post_routing', err);
           }
         })();
         // Prefer waitUntil so we don't extend the user-visible deploy time;
@@ -3508,6 +3636,7 @@ app.post('/:id/deploy', async (c) => {
         );
 
         // Retention cleanup — delete old worker scripts beyond plan limit
+        markPhase('retention_cleanup');
         const retentionLimit = planLimits.retainedDeployments;
         if (retentionLimit > 0) {
           const retained = await getRetainedDeploymentsExcluding(
@@ -3605,7 +3734,10 @@ app.post('/:id/deploy', async (c) => {
                 dispatchNamespace,
                 oldWorkerName,
               ).catch((e) => {
-                console.warn(`[deploy] failed to delete dispatch script for evicted ${old.id}:`, e);
+                logger.warn('retention_cleanup', 'evicted_dispatch_script_delete_failed', {
+                  evictedDeploymentId: old.id,
+                  err: e instanceof Error ? e.message : String(e),
+                });
               });
               // Evict mirrored assets + serving manifest written by prior
               // WfP deploys under this plan (pre-mirror deploys have neither).
@@ -3623,19 +3755,22 @@ app.post('/:id/deploy', async (c) => {
                     retainedHashes,
                     projectId,
                   ).catch((e) => {
-                    console.warn(
-                      `[deploy] failed to delete unreferenced assets for evicted ${old.id}:`,
-                      e,
-                    );
+                    logger.warn('retention_cleanup', 'evicted_unreferenced_assets_delete_failed', {
+                      evictedDeploymentId: old.id,
+                      err: e instanceof Error ? e.message : String(e),
+                    });
                   });
                   await c.env.ROUTING.delete(`manifest:${old.id}`).catch((e) => {
-                    console.warn(
-                      `[deploy] failed to delete routing manifest for evicted ${old.id}:`,
-                      e,
-                    );
+                    logger.warn('retention_cleanup', 'evicted_routing_manifest_delete_failed', {
+                      evictedDeploymentId: old.id,
+                      err: e instanceof Error ? e.message : String(e),
+                    });
                   });
                 } catch (e) {
-                  console.warn(`[deploy] failed to parse asset_hashes for evicted ${old.id}:`, e);
+                  logger.warn('retention_cleanup', 'evicted_asset_hashes_parse_failed', {
+                    evictedDeploymentId: old.id,
+                    err: e instanceof Error ? e.message : String(e),
+                  });
                 }
               }
 
@@ -3662,10 +3797,9 @@ app.post('/:id/deploy', async (c) => {
                     }
                   }
                 } catch (e) {
-                  console.error(
-                    `[deploy] failed to delete sandbox container app for evicted ${old.id}:`,
-                    e,
-                  );
+                  logger.error('retention_cleanup', 'evicted_sandbox_container_delete_failed', e, {
+                    evictedDeploymentId: old.id,
+                  });
                 }
               }
 
@@ -3673,25 +3807,26 @@ app.post('/:id/deploy', async (c) => {
                 try {
                   await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, old.id);
                 } catch (e) {
-                  console.error(
-                    `[deploy] failed to delete worker bundle for evicted ${old.id}:`,
-                    e,
-                  );
+                  logger.error('retention_cleanup', 'evicted_worker_bundle_delete_failed', e, {
+                    evictedDeploymentId: old.id,
+                  });
                 }
               }
 
               await clearIsrCache(c.env.ISR_CACHE, projectId, old.id).catch((e) =>
-                console.error(`[deploy] failed to clear ISR cache for evicted ${old.id}:`, e),
+                logger.error('retention_cleanup', 'evicted_isr_cache_clear_failed', e, {
+                  evictedDeploymentId: old.id,
+                }),
               );
             } catch (e) {
               // Top-level guard: any unhandled throw above leaves CF/KV/R2
               // state orphaned, but Phase 1's retained=false flip already
               // committed (preserves the rollback-race fix). Surface a
               // warning and continue to the next eviction.
-              console.warn(
-                `[deploy] partial failure during retention eviction for ${old.id} (state may be orphaned):`,
-                e,
-              );
+              logger.warn('retention_cleanup', 'eviction_partial_failure', {
+                evictedDeploymentId: old.id,
+                err: e instanceof Error ? e.message : String(e),
+              });
               continue;
             }
           }
@@ -3720,8 +3855,17 @@ app.post('/:id/deploy', async (c) => {
         const raw = err instanceof Error ? err.message : String(err);
         const msg = sanitizeDeployErrorMessage(raw);
         if (msg !== raw) {
-          console.error(`[deploy] raw error before sanitization for ${workerName}: ${raw}`);
+          logger.error('catch', 'raw_error_before_sanitization', err, {
+            workerName,
+            currentPhase: currentStep,
+          });
         }
+        logger.error('catch', 'pipeline_error', err, {
+          currentPhase: currentStep,
+          routingSwitched,
+          workerUploaded,
+          bundleStored,
+        });
 
         // Sweep streamed static assets only if the slug/domain routing has
         // not yet switched over to this deployment. Once `routingSwitched`
@@ -3756,12 +3900,13 @@ app.post('/:id/deploy', async (c) => {
         // leaving an orphan that won't be cleaned up by anyone else.
         const teardownRaceLost = routingSwitched && raw === PROJECT_DELETING_ERROR_MESSAGE;
         if (teardownRaceLost) {
-          console.error(
-            `[deploy] teardown won race against route flip for ${wn}; rolling back routing entries`,
-          );
+          logger.error('catch', 'teardown_race_lost', err, {
+            workerName: wn,
+            writtenRoutingKeyCount: writtenRoutingKeys.length,
+          });
           for (const key of writtenRoutingKeys) {
             await c.env.ROUTING.delete(key).catch((e) =>
-              console.error(`[deploy] failed to roll back ROUTING ${key}:`, e),
+              logger.error('catch', 'routing_rollback_failed', e, { key }),
             );
           }
           // Orphan-recovery: if teardown's DELETE on the worker script
@@ -3773,14 +3918,16 @@ app.post('/:id/deploy', async (c) => {
             await fetch(workerUploadUrl, {
               method: 'DELETE',
               headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
-            }).catch((e) => console.error(`[deploy] failed to delete orphaned worker ${wn}:`, e));
+            }).catch((e) =>
+              logger.error('catch', 'orphan_worker_delete_failed', e, { workerName: wn }),
+            );
           }
           // The worker bundle is otherwise orphaned: bundle_stored=true but
           // the deployment never reaches 'live', so retention's eviction
           // sweep won't see it and there is no rollback target to keep.
           if (bundleStored) {
             await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, dep.id).catch((e) =>
-              console.error(`[deploy] failed to delete worker bundle for ${dep.id}:`, e),
+              logger.error('catch', 'worker_bundle_delete_failed', e, { deploymentId: dep.id }),
             );
           }
           // Per-deploy container apps are tracked only by deterministic name
@@ -3818,23 +3965,39 @@ app.post('/:id/deploy', async (c) => {
                 );
               }
             } catch (e) {
-              console.error(
-                `[deploy] failed to recover orphan container app ${sandboxContainerAppName}:`,
-                e,
-              );
+              logger.error('catch', 'orphan_container_recovery_failed', e, {
+                sandboxContainerAppName,
+              });
             }
           }
+          logger.info('status_transition', 'status_change', {
+            deploymentId: dep.id,
+            from: currentStatus,
+            to: 'failed',
+            reason: 'teardown_race_lost',
+          });
           await updateDeploymentStatus(c.get('db'), dep.id, 'failed', msg).catch(() => {});
+          currentStatus = 'failed';
           emit({ event: 'error', message: msg, step: currentStep });
         } else if (routingSwitched) {
           // Routing already points to this worker — it IS serving live traffic.
           // Mark as "live" so DB state matches reality. The late-step failure
           // (retention cleanup, asset_hashes update, etc.) is non-critical and
           // will self-correct on the next deploy.
-          console.error(`[deploy] post-routing step failed for ${wn}: ${msg}`);
+          logger.error('catch', 'post_routing_step_failed', err, {
+            workerName: wn,
+            currentPhase: currentStep,
+          });
+          logger.info('status_transition', 'status_change', {
+            deploymentId: dep.id,
+            from: currentStatus,
+            to: 'live',
+            reason: 'post_routing_recovery',
+          });
           await updateDeploymentStatus(c.get('db'), dep.id, 'live', undefined, {
             force: true,
           }).catch(() => {});
+          currentStatus = 'live';
           await updateProjectType(
             c.get('db'),
             projectId,
@@ -3864,11 +4027,11 @@ app.post('/:id/deploy', async (c) => {
             latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status);
           for (const key of writtenRoutingKeys) {
             await c.env.ROUTING.delete(key).catch((e) =>
-              console.error(`[deploy] failed to roll back ROUTING ${key}:`, e),
+              logger.error('catch', 'routing_rollback_failed', e, { key }),
             );
           }
           await deleteDispatchScript(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, dn, wn).catch((e) =>
-            console.error(`[deploy] failed to clean up worker script ${wn}:`, e),
+            logger.error('catch', 'worker_script_cleanup_failed', e, { workerName: wn }),
           );
           // The worker bundle is otherwise orphaned: bundle_stored=true but
           // the deployment ends in 'failed'/'canceled', so retention's
@@ -3876,7 +4039,7 @@ app.post('/:id/deploy', async (c) => {
           // is no rollback target.
           if (bundleStored) {
             await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, dep.id).catch((e) =>
-              console.error(`[deploy] failed to delete worker bundle for ${dep.id}:`, e),
+              logger.error('catch', 'worker_bundle_delete_failed', e, { deploymentId: dep.id }),
             );
           }
           // Per-deploy container apps are tracked only by deterministic name
@@ -3912,40 +4075,51 @@ app.post('/:id/deploy', async (c) => {
                 );
               }
             } catch (e) {
-              console.error(
-                `[deploy] failed to recover orphan container app ${sandboxContainerAppName}:`,
-                e,
-              );
+              logger.error('catch', 'orphan_container_recovery_failed', e, {
+                sandboxContainerAppName,
+              });
             }
           }
           await clearIsrCache(c.env.ISR_CACHE, projectId, dep.id).catch((e) =>
-            console.error(`[deploy] failed to clear ISR cache for ${dep.id}:`, e),
+            logger.error('catch', 'isr_cache_clear_failed', e, { deploymentId: dep.id }),
           );
           // No cron-DO unwind here: cron sync runs only AFTER the routing
           // switch (step 5c above), so a pre-routing failure means we never
           // touched the DO and the previous deployment's cron state is
           // intact. A post-routing cron-sync failure is logged in step 5c's
           // own try/catch and does not bubble to this branch.
+          logger.info('status_transition', 'status_change', {
+            deploymentId: dep.id,
+            from: currentStatus,
+            to: wasCanceled ? 'canceled' : 'failed',
+            reason: 'pre_routing_failure',
+            wasCanceled,
+          });
           if (!wasCanceled) {
             await updateDeploymentStatus(c.get('db'), dep.id, 'failed', msg);
+            currentStatus = 'failed';
           } else {
             await updateDeploymentStatus(c.get('db'), dep.id, 'canceled', msg, {
               force: true,
             });
+            currentStatus = 'canceled';
           }
           emit({ event: 'error', message: msg, step: currentStep });
           if (!wasCanceled && c.env.EMAIL && user.email) {
             const dashboardUrl = c.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
             c.executionCtx.waitUntil(
               sendDeployFailedEmail(c.env.EMAIL, user.email, project.slug, msg, dashboardUrl).catch(
-                (err) => console.error(`[deploy-failed-email] Failed for ${project.slug}:`, err),
+                (err) =>
+                  logger.error('catch', 'failed_email_send_failed', err, {
+                    projectSlug: project.slug,
+                  }),
               ),
             );
           }
         }
       }
     } catch (err) {
-      console.error(`[deploy] ${projectId}: unhandled error in deploy pipeline:`, err);
+      logger.error('catch', 'unhandled_pipeline_error', err, { currentPhase: currentStep });
       try {
         await cleanupStreamedAssetsOnAbort();
       } catch {
@@ -3985,12 +4159,23 @@ app.post('/:id/deploy', async (c) => {
         const latest = await getDeployment(c.get('db'), preDeployment.id);
         if (latest && latest.status === 'pending' && latest.manifest === null) {
           await c.get('db').delete(deployments).where(eq(deployments.id, preDeployment.id));
+          logger.info('placeholder_reap', 'placeholder_deleted', {
+            placeholderId: preDeployment.id,
+          });
+        } else if (latest && latest.status === 'pending' && latest.manifest !== null) {
+          // The bug class we're trying to surface: pipeline returned without
+          // landing a terminal status, manifest is set, row is stuck pending.
+          logger.warn('placeholder_reap', 'stranded_pending_row', {
+            placeholderId: preDeployment.id,
+            latestStatus: latest.status,
+            hasManifest: latest.manifest !== null,
+          });
         }
       } catch (err) {
-        console.warn(
-          `[deploy] ${projectId}: failed to reap placeholder deployment ${preDeployment.id}:`,
-          err instanceof Error ? err.message : err,
-        );
+        logger.warn('placeholder_reap', 'reap_failed', {
+          placeholderId: preDeployment.id,
+          err: err instanceof Error ? err.message : String(err),
+        });
       }
       streamOpen = false;
       try {

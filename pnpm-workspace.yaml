@@ -4,5 +4,5 @@ packages:
 catalog:
   '@cloudflare/workers-types': ^4.20260424.1
   '@typescript/native-preview': 7.0.0-dev.20260424.1
-  hono: 4.12.15
+  hono: 4.12.17
   wrangler: ^4.84.1

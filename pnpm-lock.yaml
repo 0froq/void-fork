@@ -13,8 +13,8 @@ catalogs:
       specifier: 7.0.0-dev.20260424.1
       version: 7.0.0-dev.20260424.1
     hono:
-      specifier: 4.12.15
-      version: 4.12.15
+      specifier: 4.12.17
+      version: 4.12.17
     wrangler:
       specifier: ^4.84.1
       version: 4.84.1
@@ -72,7 +72,7 @@ importers:
         version: 0.45.2(@cloudflare/workers-types@4.20260424.1)(@electric-sql/pglite@0.4.4)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.6.2)(pg@8.20.0)
       hono:
         specifier: 'catalog:'
-        version: 4.12.15
+        version: 4.12.17
       mime:
         specifier: ^4.1.0
         version: 4.1.0
@@ -116,7 +116,7 @@ importers:
         version: link:../ui
       hono:
         specifier: 'catalog:'
-        version: 4.12.15
+        version: 4.12.17
       react:
         specifier: ^19.2.5
         version: 19.2.5
@@ -190,7 +190,7 @@ importers:
     dependencies:
       hono:
         specifier: 'catalog:'
-        version: 4.12.15
+        version: 4.12.17
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
@@ -2084,8 +2084,8 @@ packages:
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
-  hono@4.12.15:
-    resolution: {integrity: sha512-qM0jDhFEaCBb4TxoW7f53Qrpv9RBiayUHo0S52JudprkhvpjIrGoU1mnnr29Fvd1U335ZFPZQY1wlkqgfGXyLg==}
+  hono@4.12.17:
+    resolution: {integrity: sha512-FbJJNb/XgX7YW0hX/V8w5oYLztKEsRLykCMZWt1WdLtsfjzMvmoqWBA4H4t5norinq8/rh20oiZYr+WSl4UzAQ==}
     engines: {node: '>=16.9.0'}
 
   hookable@6.1.1:
@@ -2811,7 +2811,7 @@ snapshots:
       '@cloudflare/containers': 0.3.3
       aws4fetch: 1.0.20
       capnweb: 0.6.1
-      hono: 4.12.15
+      hono: 4.12.17
 
   '@cloudflare/unenv-preset@2.16.0(unenv@2.0.0-rc.24)(workerd@1.20260421.1)':
     dependencies:
@@ -4003,7 +4003,7 @@ snapshots:
 
   graceful-fs@4.2.11: {}
 
-  hono@4.12.15: {}
+  hono@4.12.17: {}
 
   hookable@6.1.1: {}
 
