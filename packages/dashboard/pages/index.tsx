@@ -1,6 +1,6 @@
 import Stack, { VStack } from '@nkzw/stack';
 import { Link } from '@void/react';
-import { Badge, HeadingSection, Spacer } from '@voidcloud/ui';
+import { Badge, HeadingSection } from '@voidcloud/ui';
 import type { Props } from './index.server.ts';
 
 type Project = Extract<Props, { canAccessDashboard: true }>['projects'][number];
@@ -249,7 +249,7 @@ function PreviewGate() {
     <main className="bg-white dark:bg-primary">
       <HeadingSection
         heading="Preview access"
-        subheading="We are working hard on the Dashboard, please use the Void CLI for now."
+        subheading="The Dashboard is not quite ready yet, please use the Void CLI for now."
       />
     </main>
   );

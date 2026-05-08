@@ -30,19 +30,28 @@ export async function sendInvitationEmail(
 ): Promise<void> {
   await sendEmail(emailBinding, {
     to,
-    subject: "You're invited to Void",
+    subject: "You're invited to Void's Private Beta",
     html: emailHtml(
-      `<h2 style="margin-bottom:8px">You're invited to Void</h2>
-<p>You've been invited to join <strong>Void</strong> — the deployment platform for the Vite ecosystem.</p>
+      `<h2 style="margin-bottom:8px">Hello there!</h2>
+<p>You're invited to <strong>Void's Private Beta</strong> phase.</p>
+<p><strong>Warning:</strong> Void is still a work in progress and things may change.</p>
+<p>We'd love to get your feedback on how we can improve. There are two ways to share your thoughts:</p>
+<ul>
+<li>Join the <a href="${DISCORD_URL}" style="color:#1a1a1a">Void Discord server</a>, then write in the private feedback channel.</li>
+<li>Create an issue in <a href="${GITHUB_REPO_URL}" style="color:#1a1a1a">void-sdk/void</a> after you receive the invite.</li>
+</ul>
+<p>Thank you!</p>
+<p>Please authenticate with a GitHub or Google account that uses the same email address as this invite.</p>
 <p>${button(inviteUrl, 'Get Started')}</p>`,
       "If you didn't expect this invitation, you can ignore this email.",
     ),
-    text: `You're invited to Void\n\nYou've been invited to join Void — the deployment platform for the Vite ecosystem.\n\nGet started: ${inviteUrl}\n\nIf you didn't expect this invitation, you can ignore this email.`,
+    text: `Hello there!\n\nYou're invited to Void's Private Beta phase.\n\nWarning: Void is still a work in progress and things may change.\n\nWe'd love to get your feedback on how we can improve. There are two ways to share your thoughts:\n\nJoin the Void Discord server: ${DISCORD_URL}. Then write in the private feedback channel.\n\nCreate an issue in ${GITHUB_REPO_URL} after you receive the invite.\n\nThank you!\n\nPlease authenticate with a GitHub or Google account that uses the same email address as this invite.\n\nGet started: ${inviteUrl}\n\nIf you didn't expect this invitation, you can ignore this email.`,
   });
 }
 
-const GITHUB_SETUP_URL = 'https://github.com/void-sdk/void';
-const DISCORD_URL = 'https://discord.gg/AxmAk8PffV';
+const GUIDE_URL = 'https://void.cloud/guide/';
+const DISCORD_URL = 'https://discord.gg/QRF4nSvcQv';
+const GITHUB_REPO_URL = 'https://github.com/void-sdk/void';
 
 export async function sendWelcomeEmail(
   emailBinding: SendEmail,
@@ -57,10 +66,10 @@ export async function sendWelcomeEmail(
 <p>Your account is ready. Void is the deployment platform for the Vite ecosystem — deploy full-stack apps with file-based routing, database bindings, AI integration, and edge-first infrastructure.</p>
 <p>Join our Discord to get an early-access feedback role and chat with the team:</p>
 <p>${button(DISCORD_URL, 'Join Discord')}</p>
-<p style="margin-top:16px">To install Void, you'll need to set up GitHub Packages access — see the <a href="${GITHUB_SETUP_URL}" style="color:#1a1a1a">setup instructions</a>.</p>`,
+<p style="margin-top:16px">To get started with Void, see the <a href="${GUIDE_URL}" style="color:#1a1a1a">guide</a>.</p>`,
       'You received this email because you signed up for Void.',
     ),
-    text: `Welcome to Void, ${login}\n\nYour account is ready. Void is the deployment platform for the Vite ecosystem — deploy full-stack apps with file-based routing, database bindings, AI integration, and edge-first infrastructure.\n\nJoin our Discord to get an early-access feedback role and chat with the team: ${DISCORD_URL}\n\nTo install Void, you'll need to set up GitHub Packages access — setup instructions: ${GITHUB_SETUP_URL}\n\nYou received this email because you signed up for Void.`,
+    text: `Welcome to Void, ${login}\n\nYour account is ready. Void is the deployment platform for the Vite ecosystem — deploy full-stack apps with file-based routing, database bindings, AI integration, and edge-first infrastructure.\n\nJoin our Discord to get an early-access feedback role and chat with the team: ${DISCORD_URL}\n\nTo get started with Void, see the guide: ${GUIDE_URL}\n\nYou received this email because you signed up for Void.`,
   });
 }
 

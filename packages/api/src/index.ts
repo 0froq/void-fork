@@ -63,7 +63,7 @@ const app = new Hono<ApiEnv>()
 </body></html>`),
   )
   .get('/invite', (c) => {
-    const quickstartUrl = escapeHtml('https://github.com/void-sdk/void#quickstart');
+    const guideUrl = escapeHtml('https://void.cloud/guide/');
     return c.html(`<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
@@ -74,7 +74,7 @@ const app = new Hono<ApiEnv>()
 <div class="card">
 <h1>You're Invited to Void</h1>
 <p>Void is the deployment platform for the Vite ecosystem. Build and deploy full-stack apps with file-based routing, database bindings, AI integration, and edge-first infrastructure.</p>
-<a href="${quickstartUrl}" class="btn">Get Started</a>
+<a href="${guideUrl}" class="btn">Get Started</a>
 </div>
 </body></html>`);
   })
