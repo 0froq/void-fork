@@ -95,9 +95,9 @@ const integrationLinks = {
 };
 
 const socialLinks = [
-  { icon: 'x', link: 'https://x.com/voidcloudhq' },
+  { icon: 'x', link: 'https://x.com/voidzerodev' },
   { icon: 'discord', link: 'https://discord.gg/cC6TEVFKSx' },
-  { icon: 'github', link: 'https://github.com/voidzero-dev/void' },
+  { icon: 'github', link: 'https://github.com/voidzero-dev' },
 ];
 
 const companyLinks = {

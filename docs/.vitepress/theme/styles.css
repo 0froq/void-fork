@@ -42,40 +42,6 @@
   margin-right: 0.35rem;
 }
 
-.early-access-cta {
-  align-items: center;
-  background: var(--vp-button-brand-bg);
-  border: 1px solid var(--vp-button-brand-border);
-  border-radius: 4px;
-  color: var(--vp-button-brand-text);
-  display: none;
-  font-family: var(--vp-font-family-base);
-  font-size: 13px;
-  font-weight: 600;
-  height: 34px;
-  line-height: 1;
-  padding: 0 14px;
-  text-decoration: none;
-  transition:
-    background-color 0.2s,
-    border-color 0.2s,
-    color 0.2s,
-    opacity 0.2s;
-  white-space: nowrap;
-}
-
-.early-access-cta:hover {
-  background: var(--vp-button-brand-hover-bg);
-  border-color: var(--vp-button-brand-hover-border);
-  color: var(--vp-button-brand-hover-text);
-}
-
-@media (min-width: 1280px) {
-  .early-access-cta {
-    display: inline-flex;
-  }
-}
-
 @media (min-width: 960px) {
   .alpha-banner {
     padding: 14px 18px;

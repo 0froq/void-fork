@@ -8,7 +8,6 @@ import CodeGroupSync from './CodeGroupSync.vue';
 import 'virtual:group-icons.css';
 import './styles.css';
 import DocFooter from './DocFooter.vue';
-import EarlyAccessCta from './EarlyAccessCta.vue';
 import FileTree from './FileTree.vue';
 import PagesFileTree from './PagesFileTree.vue';
 import RoutesFileTree from './RoutesFileTree.vue';
@@ -59,14 +58,11 @@ function AsideCredit() {
 export default {
   extends: BaseTheme,
   Layout() {
-    return [
-      h(BaseTheme.Layout, null, {
-        'doc-before': () => h(AlphaBanner),
-        'aside-ads-before': () => h(AsideCredit),
-        'layout-bottom': () => [h(DocFooter), h(CodeGroupSync)],
-      }),
-      h(EarlyAccessCta, { header: true }),
-    ];
+    return h(BaseTheme.Layout, null, {
+      'doc-before': () => h(AlphaBanner),
+      'aside-ads-before': () => h(AsideCredit),
+      'layout-bottom': () => [h(DocFooter), h(CodeGroupSync)],
+    });
   },
   enhanceApp({ app }) {
     app.component('FileTree', FileTree);

@@ -11,8 +11,8 @@ hero:
       text: Get Started
       link: ./guide/
     - theme: alt
-      text: View on GitHub
-      link: https://github.com/voidzero-dev/void
+      text: Join Early Access
+      link: https://tally.so/r/D4VE85
   image:
     src: /hero.svg
     alt: Void deployment platform
