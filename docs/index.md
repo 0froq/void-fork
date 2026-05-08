@@ -38,7 +38,7 @@ features:
     details: '`void deploy` builds your app, runs migrations, provisions resources, and deploys to Cloudflare Workers, without requiring a Cloudflare account or knowledge about the infra.'
 
 footer_heading: Build and Deploy at Warp Speed
-footer_subheading: npm install void
+footer_subheading: Vite. Optimized. Isomorphic. Deploy.
 ---
 
 <script setup>
