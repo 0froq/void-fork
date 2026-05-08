@@ -249,6 +249,41 @@ function defineClientTests(getBase: () => string) {
     }
   });
 
+  it('keeps the current route visible while back navigation loads', async () => {
+    const page = await newPage();
+
+    try {
+      await page.route('**/users?keep-visible=1', async (route) => {
+        if (route.request().headers()['x-voidpages']) {
+          await new Promise((resolve) => setTimeout(resolve, 750));
+        }
+        await route.continue();
+      });
+
+      await page.goto(BASE + '/users?keep-visible=1');
+      await waitForHydration(page);
+
+      await page.click('a[href="/users/1"]');
+      await page.waitForFunction(() =>
+        document.querySelector('h1')?.textContent?.includes('Alice'),
+      );
+
+      const back = page.goBack({ waitUntil: 'commit' });
+      await page.waitForURL(BASE + '/users?keep-visible=1');
+      await page.waitForTimeout(50);
+
+      expect(await page.textContent('body')).toContain('alice@example.com');
+
+      await back;
+      await page.waitForFunction(() =>
+        document.querySelector('h1')?.textContent?.includes('Users'),
+      );
+      expect(await page.textContent('body')).toContain('Bob');
+    } finally {
+      await page.context().close();
+    }
+  });
+
   it('form validation errors display', async () => {
     const page = await newPage();
 

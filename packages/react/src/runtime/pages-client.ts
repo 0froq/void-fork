@@ -487,7 +487,14 @@ function App({
         });
       };
 
-      startViewTransition(next, reveal, options.viewTransition ?? viewTransitions);
+      next.shell.then(
+        (result) => {
+          if (result && activePendingNavigationId === next.id) {
+            startViewTransition(next, reveal, options.viewTransition ?? viewTransitions);
+          }
+        },
+        () => {},
+      );
       return pagePromise;
     },
     [engine, mergeShared, startTransition, viewTransitions],
