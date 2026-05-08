@@ -32,6 +32,10 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
+      - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1
+        with:
+          node-version-file: .node-version
+          run-install: false
 
       - run: pnpm install --frozen-lockfile
 
@@ -40,10 +44,13 @@ jobs:
         with:
           path: framework/node_modules
           key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
-      - run: pnpm --dir framework install --frozen-lockfile
-      - run: pnpm --dir framework build
+      - run: vp install --frozen-lockfile
+        working-directory: framework
+      - run: vp run build
+        working-directory: framework
       # run install again to link
-      - run: pnpm --dir framework install
+      - run: vp install
+        working-directory: framework
 
       - name: Deploy kitchen-sink
         working-directory: framework/playground/kitchen-sink

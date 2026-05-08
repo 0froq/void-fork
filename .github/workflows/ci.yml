@@ -21,12 +21,18 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
+      - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1
+        with:
+          node-version-file: .node-version
+          run-install: false
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: framework/node_modules
           key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
-      - run: pnpm --dir framework install --frozen-lockfile
-      - run: pnpm --dir framework build
+      - run: vp install --frozen-lockfile
+        working-directory: framework
+      - run: vp run build
+        working-directory: framework
       - run: pnpm install --frozen-lockfile
       - run: mkdir -p packages/dashboard/.void && echo '{"files":[]}' > packages/dashboard/.void/tsconfig.json
       - run: pnpm lint
@@ -54,12 +60,18 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
+      - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1
+        with:
+          node-version-file: .node-version
+          run-install: false
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: framework/node_modules
           key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
-      - run: pnpm --dir framework install --frozen-lockfile
-      - run: pnpm --dir framework build
+      - run: vp install --frozen-lockfile
+        working-directory: framework
+      - run: vp run build
+        working-directory: framework
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
       - run: pnpm vitest --run ${{ matrix.pattern }}
@@ -95,12 +107,18 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
+      - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1
+        with:
+          node-version-file: .node-version
+          run-install: false
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: framework/node_modules
           key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
-      - run: pnpm --dir framework install --frozen-lockfile
-      - run: pnpm --dir framework build
+      - run: vp install --frozen-lockfile
+        working-directory: framework
+      - run: vp run build
+        working-directory: framework
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @voidcloud/api run migrate
         env:
@@ -114,8 +132,14 @@ jobs:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
       - run: git clean -fd
-      - run: pnpm --dir framework install --frozen-lockfile
-      - run: pnpm --dir framework build
+      - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1
+        with:
+          node-version-file: .node-version
+          run-install: false
+      - run: vp install --frozen-lockfile
+        working-directory: framework
+      - run: vp run build
+        working-directory: framework
       - run: pnpm install --frozen-lockfile
       - run: mkdir -p packages/dashboard/.void && echo '{"files":[]}' > packages/dashboard/.void/tsconfig.json
       - run: pnpm -r build
