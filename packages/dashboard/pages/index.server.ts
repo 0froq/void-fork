@@ -1,5 +1,5 @@
 import { defineHandler } from 'void';
-import { createClient, type API } from '../lib/api.ts';
+import { createClient, readApiJson, type API } from '../lib/api.ts';
 
 export type Props =
   | {
@@ -20,8 +20,15 @@ export const loader = defineHandler<Props>(async (c) => {
   }
 
   const client = createClient(c);
-  const projectsRes = await client.projects.$get();
-  const projects = projectsRes.ok ? await projectsRes.json() : [];
+  let projects: API<'projects'> = [];
+  try {
+    const projectsRes = await client.projects.$get();
+    projects = projectsRes.ok ? ((await readApiJson<API<'projects'>>(projectsRes)) ?? []) : [];
+  } catch (error) {
+    console.warn(
+      `[dashboard] /projects request failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   const siteDomain = (c.env as Record<string, string>).SITE_DOMAIN ?? 'void.app';
 
   return {

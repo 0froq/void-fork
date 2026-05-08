@@ -3,6 +3,10 @@ import type { Context } from 'hono';
 import { hc, type InferResponseType } from 'hono/client';
 
 export type Client = ReturnType<typeof hc<ApiRoutes>>;
+export type ApiResponse = Pick<
+  Response,
+  'headers' | 'json' | 'ok' | 'status' | 'statusText' | 'text'
+>;
 
 /** Extract the 200 JSON response type from an hc client route key. */
 export type API<K extends keyof B, B = Client> = InferResponseType<
@@ -11,6 +15,7 @@ export type API<K extends keyof B, B = Client> = InferResponseType<
 >;
 
 const API_URL = 'https://api.void.cloud';
+const DEFAULT_API_TIMEOUT_MS = 10_000;
 
 function getApiUrl(c: Context): string {
   return (c.env as Record<string, string | undefined>).API_URL ?? API_URL;
@@ -34,6 +39,30 @@ function getApiFetch(c: Context): typeof fetch {
   return globalThis.fetch;
 }
 
+function getApiTimeoutMs(c: Context): number {
+  const raw = (c.env as Record<string, string | undefined>).API_TIMEOUT_MS;
+  if (!raw) {
+    return DEFAULT_API_TIMEOUT_MS;
+  }
+
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_API_TIMEOUT_MS;
+}
+
+function withTimeout(init: RequestInit | undefined, timeoutMs: number): RequestInit | undefined {
+  if (init?.signal || typeof AbortSignal.timeout !== 'function') {
+    return init;
+  }
+  return { ...init, signal: AbortSignal.timeout(timeoutMs) };
+}
+
+function getTimedApiFetch(c: Context): typeof fetch {
+  const apiFetch = getApiFetch(c);
+  const timeoutMs = getApiTimeoutMs(c);
+  return ((input: RequestInfo | URL, init?: RequestInit) =>
+    apiFetch(input, withTimeout(init, timeoutMs))) as typeof fetch;
+}
+
 function getToken(c: Context): string | undefined {
   return c.get('token') as string | undefined;
 }
@@ -54,6 +83,9 @@ function getCfAccessHeaders(c: Context): Record<string, string> {
 
 export function getHeaders(c: Context, headers?: HeadersInit): Headers {
   const out = new Headers(headers);
+  if (!out.has('Accept')) {
+    out.set('Accept', 'application/json');
+  }
   for (const [key, value] of Object.entries(getCfAccessHeaders(c))) {
     out.set(key, value);
   }
@@ -83,7 +115,7 @@ export async function fetchApi(c: Context, path: string, options?: RequestInit):
     headers.set('Content-Type', 'application/json');
   }
 
-  return getApiFetch(c)(`${getApiUrl(c)}${path}`, {
+  return getTimedApiFetch(c)(`${getApiUrl(c)}${path}`, {
     ...options,
     headers,
   });
@@ -94,16 +126,17 @@ export function createClient(c: Context) {
   const token = getToken(c);
   const baseUrl = getApiUrl(c);
   const headers = getCfAccessHeaders(c);
+  headers.Accept = 'application/json';
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
   return hc<ApiRoutes>(baseUrl, {
-    fetch: getApiFetch(c),
+    fetch: getTimedApiFetch(c),
     headers,
   });
 }
 
-export async function getApiErrorMessage(res: Response): Promise<string> {
+export async function getApiErrorMessage(res: ApiResponse): Promise<string> {
   const body = await res.text();
   if (!body) {
     return `${res.status} ${res.statusText}`;
@@ -124,6 +157,27 @@ export async function getApiErrorMessage(res: Response): Promise<string> {
   return body;
 }
 
+export async function readApiJson<T>(res: ApiResponse): Promise<T | null> {
+  const contentType = res.headers.get('content-type') ?? '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    const body = await res.text();
+    const preview = body.trim().replace(/\s+/g, ' ').slice(0, 160);
+    console.warn(
+      `[dashboard] expected JSON from API, got ${contentType || 'unknown content type'}${preview ? `: ${preview}` : ''}`,
+    );
+    return null;
+  }
+
+  try {
+    return (await res.json()) as T;
+  } catch (error) {
+    console.warn(
+      `[dashboard] failed to parse API JSON response: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
+}
+
 export async function getCurrentUser(c: Context): Promise<API<'me'> | null> {
   let res: Response;
   try {
@@ -139,7 +193,7 @@ export async function getCurrentUser(c: Context): Promise<API<'me'> | null> {
     console.warn(`[dashboard] /me returned ${res.status}: ${await getApiErrorMessage(res)}`);
     return null;
   }
-  return (await res.json()) as API<'me'>;
+  return readApiJson<API<'me'>>(res);
 }
 
 export class ApiError extends Error {

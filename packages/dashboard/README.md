@@ -46,7 +46,8 @@ API_URL=https://api.staging.void.cloud SITE_DOMAIN=staging.void.app pnpm -C pack
 ```
 
 You can also put `API_URL`, `SITE_DOMAIN`, and `CF_ACCESS_TOKEN` in
-`packages/dashboard/.dev.vars`.
+`packages/dashboard/.dev.vars`. `pnpm dev` refreshes an expired staging
+`CF_ACCESS_TOKEN` through `cloudflared` before Vite starts.
 
 To run against a local API instead:
 

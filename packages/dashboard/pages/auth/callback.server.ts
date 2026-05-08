@@ -1,6 +1,6 @@
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { defineHandler } from 'void';
-import { fetchApi } from '../../lib/api.ts';
+import { fetchApi, readApiJson } from '../../lib/api.ts';
 
 export const loader = defineHandler(async (c) => {
   const homeUrl = new URL('/', c.req.url).toString();
@@ -26,9 +26,12 @@ export const loader = defineHandler(async (c) => {
     if (!resp.ok) {
       return c.redirect('/login');
     }
-    const { token } = (await resp.json()) as { token: string };
+    const exchange = await readApiJson<{ token: string }>(resp);
+    if (!exchange?.token) {
+      return c.redirect('/login');
+    }
     const host = c.req.header('host') ?? '';
-    setCookie(c, 'void_token', token, {
+    setCookie(c, 'void_token', exchange.token, {
       httpOnly: true,
       secure: !(host.startsWith('localhost') || host.startsWith('127.0.0.1')),
       sameSite: 'Lax',
