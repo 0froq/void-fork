@@ -6,6 +6,7 @@
 - Design/doc work: stay in design mode until the user asks for implementation. If a feature is not live yet, prefer a clean cutover over legacy migration work.
 - Docs/progress: code is the source of truth, but public docs may intentionally omit paused features. Describe root scripts exactly as implemented; root `dev` and `build` are dashboard-only. Track "implemented", "shipped", and "done" separately unless the user says they are equivalent.
 - Commands: avoid HEREDOC commit messages with apostrophes; run `pnpm test <path-or-pattern>` without `--`; in `framework/`, use `pnpm build:all` for a full build.
+- `vp run` argv: unlike `pnpm`, `vp run <script> -- <args>` forwards the literal `--` to the script. For wrangler the `--` separator hides `--env`, so the deploy silently targets the top-level (prod) env. Always write `vp run --filter <pkg> deploy --env staging` (no `--` separator).
 
 ## Framework And Schema
 
