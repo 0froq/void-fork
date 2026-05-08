@@ -1,9 +1,23 @@
+import type { Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { defineHandler } from 'void';
-import { fetchApi, readApiJson } from '../../lib/api.ts';
+import { fetchApi, getApiErrorMessage, readApiJson } from '../../lib/api.ts';
+
+function loginUrl(c: Context): string {
+  return `${requestOrigin(c)}/login`;
+}
+
+function requestOrigin(c: Context): string {
+  const host = c.req.header('host');
+  if (!host) {
+    return new URL(c.req.url).origin;
+  }
+  const isLocal = host.startsWith('localhost') || host.startsWith('127.0.0.1');
+  return `${isLocal ? 'http' : 'https'}://${host}`;
+}
 
 export const loader = defineHandler(async (c) => {
-  const homeUrl = new URL('/', c.req.url).toString();
+  const homeUrl = `${requestOrigin(c)}/`;
 
   // Production/staging: exchange short-lived auth code for JWT via API
   const code = c.req.query('code');
@@ -16,20 +30,25 @@ export const loader = defineHandler(async (c) => {
     const nonceCookie = getCookie(c, 'void_auth_nonce');
     const nonceParam = c.req.query('login_nonce');
     if (!nonceCookie || !nonceParam || nonceCookie !== nonceParam) {
-      return c.redirect('/login');
+      console.warn('[dashboard] auth callback nonce mismatch');
+      return c.redirect(loginUrl(c));
     }
-    deleteCookie(c, 'void_auth_nonce', { path: '/auth' });
     const resp = await fetchApi(c, '/auth/exchange', {
       method: 'POST',
       body: JSON.stringify({ code }),
     });
     if (!resp.ok) {
-      return c.redirect('/login');
+      console.warn(
+        `[dashboard] /auth/exchange returned ${resp.status}: ${await getApiErrorMessage(resp)}`,
+      );
+      return c.redirect(loginUrl(c));
     }
     const exchange = await readApiJson<{ token: string }>(resp);
     if (!exchange?.token) {
-      return c.redirect('/login');
+      console.warn('[dashboard] /auth/exchange returned no token');
+      return c.redirect(loginUrl(c));
     }
+    deleteCookie(c, 'void_auth_nonce', { path: '/auth' });
     const host = c.req.header('host') ?? '';
     setCookie(c, 'void_token', exchange.token, {
       httpOnly: true,
@@ -48,7 +67,7 @@ export const loader = defineHandler(async (c) => {
   if (token) {
     const host = c.req.header('host') ?? '';
     if (!host.startsWith('localhost') && !host.startsWith('127.0.0.1')) {
-      return c.redirect('/login');
+      return c.redirect(loginUrl(c));
     }
     setCookie(c, 'void_token', token, {
       httpOnly: true,
@@ -60,5 +79,5 @@ export const loader = defineHandler(async (c) => {
     return c.redirect(homeUrl);
   }
 
-  return c.redirect('/login');
+  return c.redirect(loginUrl(c));
 });

@@ -31,6 +31,7 @@ import type { ApiEnv } from '../env.ts';
 import { isSignupAllowed, getAllowlist } from '../signup-allowlist.ts';
 
 const DEFAULT_REDIRECT_URI = 'https://api.void.cloud/auth/callback';
+const DASHBOARD_AUTH_CODE_TTL_SECONDS = 5 * 60;
 
 const app = new Hono<ApiEnv>();
 
@@ -290,7 +291,7 @@ app.get('/callback', async (c) => {
     // Stored in PostgreSQL (not KV) for strong cross-colo consistency and atomic single-use
     // via DELETE … RETURNING — same rationale as the OAuth nonce flow.
     const authCode = crypto.randomUUID();
-    await storeAuthCode(db, authCode, jwt, 60);
+    await storeAuthCode(db, authCode, jwt, DASHBOARD_AUTH_CODE_TTL_SECONDS);
     redirectUrl.searchParams.set('code', authCode);
   }
 

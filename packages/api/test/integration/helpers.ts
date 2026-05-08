@@ -19,6 +19,7 @@ import {
   domains,
   invitations,
   oauthNonces,
+  authCodes,
 } from '../../src/schema.ts';
 import type { PlanId } from '../../src/tiers.ts';
 import { loadPGliteTemplateBundle } from './db-template.ts';
@@ -57,6 +58,8 @@ export type TestEnv = {
   GITHUB_PREVIEW_REPO_PAT?: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
+  DASHBOARD_URL?: string;
+  AUTH_REDIRECT_URI?: string;
   DEV_AUTH_BYPASS?: string;
   SITE_DOMAIN?: string;
   REQUESTS_DATASET?: string;
@@ -439,6 +442,7 @@ export async function clearTables(db: Db): Promise<void> {
   await db.delete(oauthAccounts);
   await db.delete(users);
   await db.delete(oauthNonces);
+  await db.delete(authCodes);
 }
 
 export async function seedOAuthNonce(db: Db, nonce: string): Promise<void> {
