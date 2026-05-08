@@ -48,6 +48,7 @@ import {
 } from '../db.ts';
 import { sendDeployFailedEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
+import { checkCliVersionOrRespond } from '../middleware/cli-version.ts';
 import { createDeployLogger, type DeployLogger } from '../observability/logger.ts';
 import {
   BETTER_AUTH_SECRET_NAME,
@@ -1288,6 +1289,20 @@ app.post('/:id/deploy/upload-urls', async (c) => {
   if (project.status === 'deleting') {
     return c.json({ error: 'project is being deleted' }, 410);
   }
+  // CLI version gate runs BEFORE body parsing so a stale CLI sending a
+  // multipart body gets the friendly 426 upgrade message instead of an
+  // opaque "invalid JSON body" 400 from the JSON parse below. Runs AFTER
+  // the unlocked 410 fast-path so a stale CLI hitting an already-deleting
+  // project still sees the more specific 410 ("upgrading won't bring the
+  // project back"). The remaining 426-vs-410 race window — where the
+  // status flips to `deleting` between the unlocked check and this gate
+  // — is microseconds (no I/O between them) and surfaces as 426 to the
+  // CLI; that's a UX wart, not a correctness bug, since the user does
+  // need to upgrade anyway.
+  const versionReject = checkCliVersionOrRespond(c);
+  if (versionReject) {
+    return versionReject;
+  }
   // TODO(orphan-gc): authenticated users can upload bytes via upload-urls
   // without ever finalizing a deploy, leaving durable orphans. Teardown
   // cleans these up; for active projects, abandoned uploads accumulate
@@ -1482,6 +1497,15 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
   }
   if (project.status === 'deleting') {
     return c.json({ error: 'project is being deleted' }, 410);
+  }
+  // CLI version gate runs AFTER project authz so a stale CLI hitting a
+  // missing/foreign/deleting project still gets the more specific
+  // 404/403/410 first. The multipart sniff inside the helper is
+  // header-only — it does not read the request body, so calling it
+  // here does not interfere with the streaming JSON parse below.
+  const versionReject = checkCliVersionOrRespond(c);
+  if (versionReject) {
+    return versionReject;
   }
 
   const user = c.get('user');
@@ -3628,6 +3652,21 @@ app.post('/:id/deploy/preflight', async (c) => {
 
   if (project.user_id !== c.get('user').id) {
     return c.json({ error: 'forbidden' }, 403);
+  }
+  // Mirror /upload-urls and handleManifestOnlyDeploy: short-circuit when
+  // the project is being torn down so callers get the more specific 410
+  // before any body parsing or version-gate work. A stale CLI on a
+  // deleting project should see "project is being deleted", not "upgrade
+  // your CLI" — upgrading won't make the project come back.
+  if (project.status === 'deleting') {
+    return c.json({ error: 'project is being deleted' }, 410);
+  }
+  // CLI version gate runs AFTER project authz + status so a stale CLI
+  // hitting a missing/foreign/deleting project gets the more specific
+  // 404/403/410 first instead of a misleading "upgrade your CLI" 426.
+  const versionReject = checkCliVersionOrRespond(c);
+  if (versionReject) {
+    return versionReject;
   }
 
   const body = await c.req.json<{
