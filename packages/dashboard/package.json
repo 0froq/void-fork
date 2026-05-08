@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "deploy": "pnpm build && wrangler deploy",
-    "deploy:staging": "CLOUDFLARE_ENV=staging pnpm build && wrangler deploy",
-    "dev": "node scripts/refresh-access-token.mjs && vite",
-    "preview": "vite preview",
+    "build": "vp build",
+    "deploy": "vp build && wrangler deploy",
+    "deploy:staging": "CLOUDFLARE_ENV=staging vp build && wrangler deploy",
+    "dev": "node scripts/refresh-access-token.mjs && vp dev",
+    "preview": "vp preview",
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
@@ -28,7 +28,8 @@
     "@voidcloud/api": "workspace:*",
     "tailwindcss": "^4.2.4",
     "typescript": "~6.0.3",
-    "vite": "8.0.10",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
     "void": "link:../../framework/packages/void",
     "wrangler": "catalog:"
   }

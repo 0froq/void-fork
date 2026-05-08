@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vite-plus/test';
 import { applyHeaderRules, type HeaderRule } from '../../src/headers.ts';
 
 describe('applyHeaderRules', () => {

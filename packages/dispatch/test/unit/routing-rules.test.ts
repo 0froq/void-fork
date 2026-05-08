@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vite-plus/test';
 import { applyRoutingRules, mergeQueryIntoLocation } from '../../src/routing-rules.ts';
 
 describe('applyRoutingRules', () => {

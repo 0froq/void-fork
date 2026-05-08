@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vite-plus/test';
 import { resolveResource, clearResolveCache } from '../../src/resolve.ts';
 
 const JWT_SECRET = 'test-secret-key';

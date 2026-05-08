@@ -85,8 +85,8 @@ git submodule status
    - Every implementation plan should include the following:
    - During plan generation: ask clarifying questions when necessary, especially around developer-experience defining design decisions.
    - Verification:
-     - Run `pnpm check` for typecheck after completing a batch of tasks.
-     - Run `pnpm test` on tests relevant to the current feature only during feature development. Only run the full test suite when everything is done for final verification.
+     - Run `vp run check` for typecheck after completing a batch of tasks.
+     - Run `vp test run` on tests relevant to the current feature only during feature development. Only run the full test suite when everything is done for final verification.
      - If there are tests hanging or running particularly slow, investigate right there and attempt to fix. Testing velocity is something that should be maintained or improved at every opportunity.
    - Documentation: after verification, update all docs if relevant and applicable:
      - `README.md` (this file)
@@ -95,18 +95,20 @@ git submodule status
 
 ## Quick Reference
 
-| Command                             | Purpose                                                                                             |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `pnpm dev`                          | Start the dashboard dev server only                                                                 |
-| `pnpm build`                        | Build the dashboard only                                                                            |
-| `pnpm test`                         | Run vitest (unit + integration tests)                                                               |
-| `pnpm lint`                         | Run oxlint                                                                                          |
-| `pnpm fmt`                          | Run oxfmt                                                                                           |
-| `pnpm check`                        | Run package `typecheck` scripts (`tsgo --noEmit` in most packages, `vue-tsc --noEmit` in dashboard) |
-| `pnpm run deploy`                   | Deploy `proxy` → `tail` → `api` → `dispatch` → `dashboard`                                          |
-| `pnpm run deploy:dashboard`         | Deploy the dashboard only                                                                           |
-| `pnpm run deploy:staging`           | Deploy staging `proxy` → `tail` → `api` → `dispatch` → `dashboard`                                  |
-| `pnpm run deploy:staging:dashboard` | Deploy the staging dashboard only                                                                   |
+| Command                           | Purpose                                                                                             |
+| --------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `vp run dev`                      | Start the dashboard dev server only                                                                 |
+| `vp run build`                    | Build the dashboard only                                                                            |
+| `vp run build:all`                | Build all platform surfaces that define a build                                                     |
+| `vp test run`                     | Run Vite+ test (unit + integration tests)                                                           |
+| `vp lint`                         | Run oxlint through Vite+                                                                            |
+| `vp fmt`                          | Run oxfmt through Vite+                                                                             |
+| `vp run check`                    | Run package `typecheck` scripts (`tsgo --noEmit` in most packages, `vue-tsc --noEmit` in dashboard) |
+| `vp run test:all`                 | Run format check, lint, build, typecheck, and tests                                                 |
+| `vp run deploy`                   | Deploy `proxy` → `tail` → `api` → `dispatch` → `dashboard`                                          |
+| `vp run deploy:dashboard`         | Deploy the dashboard only                                                                           |
+| `vp run deploy:staging`           | Deploy staging `proxy` → `tail` → `api` → `dispatch` → `dashboard`                                  |
+| `vp run deploy:staging:dashboard` | Deploy the staging dashboard only                                                                   |
 
 Root `dev` and `build` are intentionally dashboard-only. Dashboard deploys run after the platform workers in the main deploy pipeline.
 
@@ -126,10 +128,10 @@ Then open `http://localhost:8787/admin/`.
 If you also need the dashboard, run it separately:
 
 ```bash
-pnpm dev
+vp run dev
 ```
 
-Root `pnpm dev` is the dashboard only. It does not start the platform API worker.
+Root `vp run dev` is the dashboard only. It does not start the platform API worker.
 
 ## Monorepo Structure
 
@@ -178,7 +180,7 @@ Void is split across two codebases in this repo:
 | User-facing dashboard                                                         | `packages/dashboard/pages/*`, `packages/dashboard/middleware/01.auth.ts`, `packages/dashboard/lib/api.ts`                                         |
 | Shared internal styling                                                       | `packages/ui/src/base.css`, `packages/ui/src/theme.css`                                                                                           |
 
-The dashboard depends on `void` and `@void/vue`, resolved via `pnpm.overrides` to `link:framework/...` (the git submodule). CI checks out the submodule and builds it before `pnpm install`.
+The dashboard depends on `void` and `@void/react`, resolved via pnpm workspace overrides to `link:framework/...` (the git submodule). CI checks out the submodule and builds it before the platform `vp install`.
 
 ## Framework Repo Overview
 
@@ -269,20 +271,21 @@ The runtime log pipeline.
 
 ## Tooling
 
-| Tool     | Version       | Purpose                                                                                        |
-| -------- | ------------- | ---------------------------------------------------------------------------------------------- |
-| Node.js  | 24.13.1       | Runtime (TS type stripping enabled natively — no `tsx` or `--experimental-strip-types` needed) |
-| pnpm     | 10.x          | Package manager with workspaces + catalog                                                      |
-| wrangler | 4.x           | CF Worker dev/deploy (api, dispatch)                                                           |
-| drizzle  | 0.45.x        | Type-safe ORM for API PostgreSQL (schema + queries + migrations)                               |
-| vitest   | 4.x           | Unit + integration tests                                                                       |
-| oxlint   | 1.47.x        | Linting                                                                                        |
-| oxfmt    | 0.32.x        | Formatting (double quotes, semis)                                                              |
-| vite     | 8.0.0-beta.14 | Dev server + build (dashboard)                                                                 |
+| Tool     | Version   | Purpose                                                                                        |
+| -------- | --------- | ---------------------------------------------------------------------------------------------- |
+| Node.js  | 24.13.1   | Runtime (TS type stripping enabled natively — no `tsx` or `--experimental-strip-types` needed) |
+| Vite+    | 0.1.x     | Unified toolchain (`vp`, Vite, Vitest, Oxlint, Oxfmt)                                          |
+| pnpm     | 10.x      | Package manager with workspaces + catalog                                                      |
+| wrangler | 4.x       | CF Worker dev/deploy (api, dispatch)                                                           |
+| drizzle  | 0.45.x    | Type-safe ORM for API PostgreSQL (schema + queries + migrations)                               |
+| vitest   | via Vite+ | Unit + integration tests                                                                       |
+| oxlint   | via Vite+ | Linting                                                                                        |
+| oxfmt    | via Vite+ | Formatting                                                                                     |
+| vite     | via Vite+ | Dev server + build (dashboard)                                                                 |
 
 ## Testing
 
-Tests run from root with `pnpm test` (vitest). See each package README for detailed test listings.
+Tests run from root with `vp test run`. See each package README for detailed test listings.
 
 ## Operations
 
@@ -297,10 +300,10 @@ There are five deployable platform packages/surfaces:
 | `packages/dispatch`  | `*.void.app` / `*.staging.void.app`             | User traffic router                            |
 
 ```
-pnpm run deploy                     # proxy -> tail -> api -> dispatch -> dashboard
-pnpm run deploy:dashboard           # dashboard only
-pnpm run deploy:staging             # staging proxy -> tail -> api -> dispatch -> dashboard
-pnpm run deploy:staging:dashboard   # staging dashboard only
+vp run deploy                     # proxy -> tail -> api -> dispatch -> dashboard
+vp run deploy:dashboard           # dashboard only
+vp run deploy:staging             # staging proxy -> tail -> api -> dispatch -> dashboard
+vp run deploy:staging:dashboard   # staging dashboard only
 ```
 
 See [`meta/operations.md`](./meta/operations.md) for the full operations reference — CF resources, secrets, environment variables, DNS setup, GitHub Actions, and fresh environment provisioning.

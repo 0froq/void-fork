@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vite-plus/test';
 import type { Db } from '../../src/db.ts';
 import { provisionBindings } from '../../src/provisioning/provision.ts';
 import type { DeployManifest, Resource } from '../../src/types.ts';

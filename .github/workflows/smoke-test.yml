@@ -26,18 +26,13 @@ jobs:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
 
-      - uses: pnpm/action-setup@26f6d4f2c533a43e6b5da0b4a5dd983f98f7b49a # v6.0.4
-
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .node-version
-          cache: pnpm
       - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1
         with:
+          cache: true
           node-version-file: .node-version
           run-install: false
 
-      - run: pnpm install --frozen-lockfile
+      - run: vp install --frozen-lockfile
 
       # Build framework packages (void CLI + vue adapter needed for deploy)
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -54,7 +49,7 @@ jobs:
 
       - name: Deploy kitchen-sink
         working-directory: framework/playground/kitchen-sink
-        run: npx void deploy --project kitchen-sink
+        run: vp exec void deploy --project kitchen-sink
         env:
           VOID_TOKEN: ${{ secrets.VOID_TOKEN_STAGING }}
           VOID_API_URL: https://api.staging.void.cloud
@@ -63,7 +58,7 @@ jobs:
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_STAGING }}
 
       # Install Chromium for Playwright
-      - run: npx playwright install chromium
+      - run: vp exec playwright install chromium
 
       - name: Reset app state
         run: |

@@ -311,28 +311,28 @@ Callers:
 Root `package.json` orchestrates deployment:
 
 ```
-pnpm run deploy           # Production: deploy proxy, then migrate (drizzle-kit) + deploy api, then dispatch, then dashboard
-pnpm run deploy:staging   # Staging: same with --env staging
+vp run deploy           # Production: deploy proxy, then migrate (drizzle-kit) + deploy api, then dispatch, then dashboard
+vp run deploy:staging   # Staging: same with --env staging
 ```
 
 Broken down:
 
 ```
 deploy
-├── deploy:proxy        → pnpm -F proxy run deploy        (wrangler deploy)
-├── deploy:tail         → pnpm -F tail run deploy         (wrangler deploy)
-├── deploy:api          → pnpm -F api migrate             (drizzle-kit migrate — requires DATABASE_URL)
-│                       → pnpm -F api run deploy          (wrangler deploy)
-├── deploy:dispatch     → pnpm -F dispatch run deploy     (wrangler deploy)
-└── deploy:dashboard    → pnpm -F dashboard run deploy    (vite build && wrangler deploy)
+├── deploy:proxy        → vp run --filter @voidcloud/proxy deploy        (wrangler deploy)
+├── deploy:tail         → vp run --filter @voidcloud/tail deploy         (wrangler deploy)
+├── deploy:api          → vp run --filter @voidcloud/api migrate         (drizzle-kit migrate — requires DATABASE_URL)
+│                       → vp run --filter @voidcloud/api deploy          (wrangler deploy)
+├── deploy:dispatch     → vp run --filter @voidcloud/dispatch deploy     (wrangler deploy)
+└── deploy:dashboard    → vp run --filter @voidcloud/dashboard deploy    (vp build && wrangler deploy)
 
 deploy:staging
-├── deploy:staging:proxy     → pnpm -F proxy run deploy --env staging
-├── deploy:staging:tail      → pnpm -F tail run deploy --env staging
-├── deploy:staging:api       → pnpm -F api migrate:staging  (DATABASE_URL=$STAGING_DATABASE_URL drizzle-kit migrate)
-│                            → pnpm -F api run deploy --env staging
-├── deploy:staging:dispatch  → pnpm -F dispatch run deploy --env staging
-└── deploy:staging:dashboard → pnpm -F dashboard run deploy:staging
+├── deploy:staging:proxy     → vp run --filter @voidcloud/proxy deploy -- --env staging
+├── deploy:staging:tail      → vp run --filter @voidcloud/tail deploy -- --env staging
+├── deploy:staging:api       → vp run --filter @voidcloud/api migrate:staging  (DATABASE_URL=$STAGING_DATABASE_URL drizzle-kit migrate)
+│                            → vp run --filter @voidcloud/api deploy -- --env staging
+├── deploy:staging:dispatch  → vp run --filter @voidcloud/dispatch deploy -- --env staging
+└── deploy:staging:dashboard → vp run --filter @voidcloud/dashboard deploy:staging
 ```
 
 Deploy order matters: proxy deploys first (user workers depend on it via service binding), then api runs PostgreSQL migrations via drizzle-kit before deploying (ensures schema is ready for new code), then dispatch deploys, and dashboard deploys only after the platform worker deploys succeed.
@@ -342,7 +342,7 @@ Deploy order matters: proxy deploys first (user workers depend on it via service
 When rolling out the API version that introduces encrypted DB-backed project secrets:
 
 1. set `PROJECT_SECRET_KEYS_JSON` and `PROJECT_SECRET_ACTIVE_KEY_VERSION` on the API worker before deploy
-2. run the normal API migrate-then-deploy flow (`pnpm deploy:api` or `pnpm deploy:staging:api`)
+2. run the normal API migrate-then-deploy flow (`vp run deploy:api` or `vp run deploy:staging:api`)
 3. roll out the framework/runtime side after the API is live
 
 The API migration creates the `project_secrets` table. The deploy scripts above already run the migration before `wrangler deploy`.
@@ -355,24 +355,24 @@ Three workflows in `.github/workflows/`:
 
 **`ci.yml`** — runs on PRs to `main` and as a reusable workflow:
 
-1. Install pnpm + Node.js (from `.node-version`)
-2. `pnpm install --frozen-lockfile`
-3. `pnpm -r build` (build all packages)
-4. `pnpm lint` (oxlint)
-5. `pnpm check` (typecheck all packages)
-6. `pnpm test` (full test suite)
+1. Set up Vite+ and Node.js (from `.node-version`)
+2. `vp install --frozen-lockfile`
+3. `vp run build:all` (build all platform surfaces that define a build)
+4. `vp lint` (oxlint through Vite+)
+5. `vp run check` (typecheck all packages)
+6. `vp test run` (full test suite)
 
 **`deploy.yml`** — runs on push to `prod` (production, environment: `Prod`):
 
 1. Runs CI workflow first
 2. Builds the framework packages used by the dashboard
-3. `pnpm run deploy` (proxy, tail, api with drizzle-kit migrations, dispatch, dashboard)
+3. `vp run deploy` (proxy, tail, api with drizzle-kit migrations, dispatch, dashboard)
 
 **`deploy-staging.yml`** — runs on push to `main` (staging, environment: `Staging`):
 
 1. Runs CI workflow first
 2. Builds the framework packages used by the dashboard
-3. `pnpm run deploy:staging` (proxy, tail, api with drizzle-kit migrations, dispatch, dashboard — all to staging)
+3. `vp run deploy:staging` (proxy, tail, api with drizzle-kit migrations, dispatch, dashboard — all to staging)
 
 ### Health Checks
 
@@ -465,7 +465,7 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
 
 7. **GitHub Actions** — if CI/CD should deploy to this environment, add a workflow file and configure GitHub environment secrets (`CF_API_TOKEN`, `CF_ACCOUNT_ID`, `DATABASE_URL` or `STAGING_DATABASE_URL` for drizzle-kit migrations).
 
-8. **Deploy** — run `pnpm run deploy --env <name>` or equivalent.
+8. **Deploy** — run `vp run deploy:<name>` or equivalent.
 
 ## Signup Allowlist (Private Beta)
 

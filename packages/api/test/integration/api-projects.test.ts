@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vite-plus/test';
 import {
   createDeployment,
   updateDeploymentStatus,

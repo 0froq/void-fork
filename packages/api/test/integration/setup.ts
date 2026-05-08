@@ -1,4 +1,4 @@
-import { vi } from 'vitest';
+import { vi } from 'vite-plus/test';
 
 // Polyfill the Cloudflare-Workers-only `FixedLengthStream` global for Node,
 // so code paths that rely on it (e.g. `streamStaticAssetToR2` in assets.ts)

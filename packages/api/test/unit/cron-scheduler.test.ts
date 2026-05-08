@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vite-plus/test';
 
 // Mock cloudflare:workers since DurableObject base class isn't available in unit tests
 vi.mock('cloudflare:workers', () => ({

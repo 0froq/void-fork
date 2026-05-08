@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import { createErrorResponse, shouldServeHtmlErrorPage } from '../../src/error-page.ts';
 
 describe('dispatch default error pages', () => {

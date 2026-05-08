@@ -6,7 +6,7 @@
  *
  * Imports `RedirectRule` directly from the framework submodule source so
  * framework-side drift (a new optional field, a type change, a rename) is
- * caught by `pnpm check` on the platform side. The relative path is the
+ * caught by `vp run check` on the platform side. The relative path is the
  * honest representation of the cross-repo contract — CI already runs
  * `git submodule update --init` before typecheck, so resolution works.
  *
@@ -14,7 +14,7 @@
  * imports, and `skipLibCheck: true` in the dispatch tsconfig keeps the
  * transitive graph cheap.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vite-plus/test';
 // eslint-disable-next-line import/no-relative-packages -- intentional cross-submodule contract reference
 import type { RedirectRule as FrameworkRule } from '../../../../framework/packages/void/src/cli/types.ts';
 import type { RedirectRule as ApiRule } from '../../../api/src/types.ts';

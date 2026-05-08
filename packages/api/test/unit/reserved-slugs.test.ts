@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vite-plus/test';
 import { RESERVED_SLUGS } from '../../src/routes/projects.ts';
 
 describe('reserved slugs (real implementation)', () => {

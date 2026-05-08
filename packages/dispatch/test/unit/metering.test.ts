@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vite-plus/test';
 import type { Env } from '../../src/env.ts';
 import { recordRequest } from '../../src/metering.ts';
 

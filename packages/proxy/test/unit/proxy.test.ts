@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vite-plus/test';
 import worker from '../../src/index.ts';
 
 const JWT_SECRET = 'test-secret-key';

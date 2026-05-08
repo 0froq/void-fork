@@ -3,7 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
 import { drizzle } from 'drizzle-orm/pglite';
 import pg from 'pg';
-import { vi } from 'vitest';
+import { vi } from 'vite-plus/test';
 import { signJwt } from '../../src/auth/jwt.ts';
 import type { Db } from '../../src/db.ts';
 import { generateId } from '../../src/id.ts';

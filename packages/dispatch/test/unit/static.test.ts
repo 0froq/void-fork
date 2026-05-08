@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vite-plus/test';
 import { resolveStaticPath, getContentType } from '../../src/static.ts';
 import type { AssetConfig } from '../../src/static.ts';
 

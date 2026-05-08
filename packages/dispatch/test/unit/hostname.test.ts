@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vite-plus/test';
 import { extractSlug } from '../../src/hostname.ts';
 
 describe('extractSlug', () => {

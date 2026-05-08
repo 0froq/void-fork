@@ -1,5 +1,14 @@
 import { hashOriginalUrl } from '@voidcloud/isr-shared';
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterAll,
+  afterEach,
+  vi,
+} from 'vite-plus/test';
 import { hmacSignState } from '../../src/auth/hmac.ts';
 import app from '../../src/index.ts';
 import { domains } from '../../src/schema.ts';

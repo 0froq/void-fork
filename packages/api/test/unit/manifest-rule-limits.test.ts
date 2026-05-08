@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import {
   MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES,
   MAX_ROUTING_RULES,

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vite-plus/test';
 import { presignAssetPut } from '../../src/r2-presign.ts';
 
 const FIXED_NOW = new Date('2026-05-07T12:00:00.000Z');

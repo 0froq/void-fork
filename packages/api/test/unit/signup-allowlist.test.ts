@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vite-plus/test';
 import { isSignupAllowed, type AllowlistEntry } from '../../src/signup-allowlist.ts';
 
 describe('isSignupAllowed', () => {

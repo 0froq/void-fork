@@ -13,6 +13,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
     "@typescript/native-preview": "catalog:",
+    "vite-plus": "catalog:",
     "wrangler": "catalog:"
   }
 }

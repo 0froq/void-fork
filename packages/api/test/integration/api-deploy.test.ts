@@ -1,5 +1,14 @@
 import { desc, eq, sql } from 'drizzle-orm';
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterAll,
+  afterEach,
+  vi,
+} from 'vite-plus/test';
 import { computeAssetHash } from '../../src/assets.ts';
 import { updateDeploymentStatus } from '../../src/db.ts';
 import app from '../../src/index.ts';

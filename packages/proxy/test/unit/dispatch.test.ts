@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vite-plus/test';
 import { clearWorkerNameCache } from '../../src/dispatch.ts';
 import worker from '../../src/index.ts';
 

@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vite-plus/test';
 import { upsertContainerResource } from '../../src/db.ts';
 import { resources } from '../../src/schema.ts';
 import {

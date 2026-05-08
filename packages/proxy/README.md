@@ -108,11 +108,11 @@ test/unit/
 ## Deploy
 
 ```bash
-pnpm -C packages/proxy deploy
-pnpm -C packages/proxy deploy --env staging
+vp run --filter @voidcloud/proxy deploy
+vp run --filter @voidcloud/proxy deploy -- --env staging
 ```
 
-Deployed as part of the root `pnpm run deploy` and `pnpm run deploy:staging` scripts.
+Deployed as part of the root `vp run deploy` and `vp run deploy:staging` scripts.
 
 ## Tests
 

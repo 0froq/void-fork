@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vite-plus/test';
 import { backfillQueueTokens } from '../../src/admin/backfill-queue-tokens.ts';
 import { hmacSignState } from '../../src/auth/hmac.ts';
 import type { ProxyTokenLookup } from '../../src/provisioning/cloudflare-api.ts';

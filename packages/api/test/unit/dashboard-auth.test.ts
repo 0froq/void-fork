@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import { authenticateDashboardToken } from '../../src/auth/dashboard.ts';
 import { signJwt } from '../../src/auth/jwt.ts';
 

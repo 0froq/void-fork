@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, test, expect, beforeAll, afterAll, beforeEach, vi } from 'vite-plus/test';
 import { app } from '../../src/index.ts';
 import { deployments, invitations, projects, users } from '../../src/schema.ts';
 import {

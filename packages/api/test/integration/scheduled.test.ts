@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vite-plus/test';
 import { scheduled } from '../../src/index.ts';
 import {
   setupEnv,

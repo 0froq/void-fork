@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vite-plus/test';
 import { SUPPORTED_MANIFEST_VERSIONS } from '../../src/types.ts';
 import type { DeployManifest } from '../../src/types.ts';
 

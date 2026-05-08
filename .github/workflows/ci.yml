@@ -16,13 +16,9 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
-      - uses: pnpm/action-setup@26f6d4f2c533a43e6b5da0b4a5dd983f98f7b49a # v6.0.4
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .node-version
-          cache: pnpm
       - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1
         with:
+          cache: true
           node-version-file: .node-version
           run-install: false
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -33,12 +29,12 @@ jobs:
         working-directory: framework
       - run: vp run build
         working-directory: framework
-      - run: pnpm install --frozen-lockfile
+      - run: vp install --frozen-lockfile
       - run: mkdir -p packages/dashboard/.void && echo '{"files":[]}' > packages/dashboard/.void/tsconfig.json
-      - run: pnpm lint
-      - run: pnpm fmt --check
-      - run: pnpm -r build
-      - run: pnpm check
+      - run: vp lint
+      - run: vp fmt --check
+      - run: vp run build:all
+      - run: vp run check
 
   test:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -55,13 +51,9 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
-      - uses: pnpm/action-setup@26f6d4f2c533a43e6b5da0b4a5dd983f98f7b49a # v6.0.4
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .node-version
-          cache: pnpm
       - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1
         with:
+          cache: true
           node-version-file: .node-version
           run-install: false
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -72,9 +64,9 @@ jobs:
         working-directory: framework
       - run: vp run build
         working-directory: framework
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm -r build
-      - run: pnpm vitest --run ${{ matrix.pattern }}
+      - run: vp install --frozen-lockfile
+      - run: vp run build:all
+      - run: vp test run ${{ matrix.pattern }}
 
   schema-compat:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -102,13 +94,9 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
-      - uses: pnpm/action-setup@26f6d4f2c533a43e6b5da0b4a5dd983f98f7b49a # v6.0.4
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .node-version
-          cache: pnpm
       - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1
         with:
+          cache: true
           node-version-file: .node-version
           run-install: false
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -119,8 +107,8 @@ jobs:
         working-directory: framework
       - run: vp run build
         working-directory: framework
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @voidcloud/api run migrate
+      - run: vp install --frozen-lockfile
+      - run: vp run --filter @voidcloud/api migrate
         env:
           DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
 
@@ -134,15 +122,16 @@ jobs:
       - run: git clean -fd
       - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1
         with:
+          cache: true
           node-version-file: .node-version
           run-install: false
       - run: vp install --frozen-lockfile
         working-directory: framework
       - run: vp run build
         working-directory: framework
-      - run: pnpm install --frozen-lockfile
+      - run: vp install --frozen-lockfile
       - run: mkdir -p packages/dashboard/.void && echo '{"files":[]}' > packages/dashboard/.void/tsconfig.json
-      - run: pnpm -r build
-      - run: pnpm vitest --run
+      - run: vp run build
+      - run: vp run test
         env:
           VOID_TEST_DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}

@@ -2,53 +2,33 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm -F dashboard build",
-    "check": "pnpm -r --parallel typecheck",
-    "deploy": "pnpm deploy:proxy && pnpm deploy:tail && pnpm deploy:api && pnpm deploy:dispatch && pnpm deploy:dashboard",
-    "deploy:api": "pnpm -F api migrate && pnpm -F api run deploy",
-    "deploy:dashboard": "pnpm -F dashboard run deploy",
-    "deploy:dispatch": "pnpm -F dispatch run deploy",
-    "deploy:proxy": "pnpm -F proxy run deploy",
-    "deploy:staging": "pnpm deploy:staging:proxy && pnpm deploy:staging:tail && pnpm deploy:staging:api && pnpm deploy:staging:dispatch && pnpm deploy:staging:dashboard",
-    "deploy:staging:api": "pnpm -F api migrate:staging && pnpm -F api run deploy --env staging",
-    "deploy:staging:dashboard": "pnpm -F dashboard run deploy:staging",
-    "deploy:staging:dispatch": "pnpm -F dispatch run deploy --env staging",
-    "deploy:staging:proxy": "pnpm -F proxy run deploy --env staging",
-    "deploy:staging:tail": "pnpm -F tail run deploy --env staging",
-    "deploy:tail": "pnpm -F tail run deploy",
-    "dev": "pnpm -F dashboard dev",
-    "fmt": "oxfmt",
+    "build": "vp run --filter @voidcloud/dashboard build",
+    "check": "vp run -r --parallel typecheck",
+    "deploy": "vp run deploy:proxy && vp run deploy:tail && vp run deploy:api && vp run deploy:dispatch && vp run deploy:dashboard",
+    "deploy:api": "vp run --filter @voidcloud/api migrate && vp run --filter @voidcloud/api deploy",
+    "deploy:dashboard": "vp run --filter @voidcloud/dashboard deploy",
+    "deploy:dispatch": "vp run --filter @voidcloud/dispatch deploy",
+    "deploy:proxy": "vp run --filter @voidcloud/proxy deploy",
+    "deploy:staging": "vp run deploy:staging:proxy && vp run deploy:staging:tail && vp run deploy:staging:api && vp run deploy:staging:dispatch && vp run deploy:staging:dashboard",
+    "deploy:staging:api": "vp run --filter @voidcloud/api migrate:staging && vp run --filter @voidcloud/api deploy -- --env staging",
+    "deploy:staging:dashboard": "vp run --filter @voidcloud/dashboard deploy:staging",
+    "deploy:staging:dispatch": "vp run --filter @voidcloud/dispatch deploy -- --env staging",
+    "deploy:staging:proxy": "vp run --filter @voidcloud/proxy deploy -- --env staging",
+    "deploy:staging:tail": "vp run --filter @voidcloud/tail deploy -- --env staging",
+    "deploy:tail": "vp run --filter @voidcloud/tail deploy",
+    "dev": "vp run --filter @voidcloud/dashboard dev",
+    "fmt": "vp fmt --write .",
     "health": "node packages/api/scripts/health.ts",
     "health:staging": "node packages/api/scripts/health.ts --staging",
-    "lint": "oxlint --type-aware --ignore-pattern 'framework/**'",
-    "prepare": "husky",
-    "test": "vitest --run"
+    "lint": "vp lint",
+    "prepare": "vp config",
+    "test": "vp test run"
   },
   "devDependencies": {
     "@typescript/native-preview": "catalog:",
-    "husky": "^9.1.7",
-    "lint-staged": "^16.4.0",
-    "oxfmt": "^0.48.0",
-    "oxlint": "^1.61.0",
-    "oxlint-tsgolint": "^0.22.0",
     "playwright": "^1.59.1",
-    "vitest": "^4.1.5"
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
   },
-  "lint-staged": {
-    "*": "oxfmt --no-error-on-unmatched-pattern",
-    "*.{js,jsx,ts,tsx,mjs,cjs}": "oxlint"
-  },
-  "packageManager": "pnpm@10.33.2",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "esbuild",
-      "workerd"
-    ],
-    "overrides": {
-      "void": "link:framework/packages/void",
-      "@void/react": "link:framework/packages/react",
-      "@void/vue": "link:framework/packages/vue"
-    }
-  }
+  "packageManager": "pnpm@10.33.2"
 }
