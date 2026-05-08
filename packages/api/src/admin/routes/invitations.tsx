@@ -17,6 +17,17 @@ const PAGE_SIZE = 50;
 
 const app = new Hono<ApiEnv>();
 
+function parseInvitationEmails(input: string): Array<string> {
+  return Array.from(
+    new Set(
+      input
+        .split(/[\s,]+/)
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+}
+
 // GET /invitations
 app.get('/', async (c) => {
   const db = c.get('db');
@@ -44,52 +55,59 @@ app.get('/', async (c) => {
 app.post('/send', async (c) => {
   const db = c.get('db');
   const body = await c.req.parseBody();
-  const email = (body.email as string)?.trim().toLowerCase();
+  const emails = parseInvitationEmails((body.email as string) ?? '');
 
-  if (!email || !email.includes('@')) {
-    return c.html('<h1>Invalid email address</h1>', 400);
+  if (emails.length === 0 || emails.some((email) => !email.includes('@'))) {
+    return c.html('<h1>Invalid email address list</h1>', 400);
   }
 
-  const [existingUser, existingInvitation, entries] = await Promise.all([
-    getUserByEmail(db, email),
-    getPendingInvitationByEmail(db, email),
+  const [existingUsers, existingInvitations, entries] = await Promise.all([
+    Promise.all(emails.map((email) => getUserByEmail(db, email))),
+    Promise.all(emails.map((email) => getPendingInvitationByEmail(db, email))),
     getAllowlist(c.env.ROUTING),
   ]);
 
-  if (existingUser) {
-    return c.html('<h1>A user with this email already exists</h1>', 400);
+  if (existingUsers.some(Boolean)) {
+    return c.html('<h1>A user with one of these emails already exists</h1>', 400);
   }
 
-  if (existingInvitation) {
-    return c.html('<h1>A pending invitation already exists for this email</h1>', 400);
+  if (existingInvitations.some(Boolean)) {
+    return c.html('<h1>A pending invitation already exists for one of these emails</h1>', 400);
   }
 
-  if (entries.some((e) => e.type === 'email' && e.pattern.toLowerCase() === email)) {
-    return c.html('<h1>This email is already on the signup allowlist</h1>', 400);
+  const allowlistedEmails = new Set(
+    entries.filter((e) => e.type === 'email').map((e) => e.pattern.toLowerCase()),
+  );
+  if (emails.some((email) => allowlistedEmails.has(email))) {
+    return c.html('<h1>One of these emails is already on the signup allowlist</h1>', 400);
   }
 
   const userId = c.get('user').id;
   const login = c.get('user').login;
 
-  await createInvitation(db, email, userId);
+  await Promise.all(emails.map((email) => createInvitation(db, email, userId)));
 
-  entries.push({ type: 'email', pattern: email, note: `Invited by ${login}` });
+  for (const email of emails) {
+    entries.push({ type: 'email', pattern: email, note: `Invited by ${login}` });
+  }
   try {
     await putAllowlist(c.env.ROUTING, entries);
   } catch (err) {
-    console.error(`Failed to update signup allowlist after inviting ${email}:`, err);
-    return c.html('<h1>Invitation created but failed to update signup allowlist</h1>', 500);
+    console.error(`Failed to update signup allowlist after inviting ${emails.join(', ')}:`, err);
+    return c.html('<h1>Invitations created but failed to update signup allowlist</h1>', 500);
   }
 
-  // Send email (non-fatal — invitation + allowlist are already committed)
+  // Send emails (non-fatal — invitations + allowlist are already committed)
   if (c.env.EMAIL) {
-    try {
-      const baseUrl = c.req.url.startsWith('https://api.staging')
-        ? 'https://api.staging.void.cloud'
-        : 'https://api.void.cloud';
-      await sendInvitationEmail(c.env.EMAIL, email, `${baseUrl}/invite`);
-    } catch (err) {
-      console.error(`Failed to send invitation email to ${email}:`, err);
+    const baseUrl = c.req.url.startsWith('https://api.staging')
+      ? 'https://api.staging.void.cloud'
+      : 'https://api.void.cloud';
+    for (const email of emails) {
+      try {
+        await sendInvitationEmail(c.env.EMAIL, email, `${baseUrl}/invite`);
+      } catch (err) {
+        console.error(`Failed to send invitation email to ${email}:`, err);
+      }
     }
   }
 

@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { app } from '../../src/index.ts';
-import { deployments, projects, users } from '../../src/schema.ts';
+import { deployments, invitations, projects, users } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -852,6 +852,68 @@ describe('POST /admin/signup-control/add + delete', () => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /admin/invitations/send', () => {
+  test('invites multiple comma or whitespace separated emails', async () => {
+    const admin = await createTestUser(env.db, 'admin-inv1', 'github', undefined, 'free', 'admin');
+    await env.ROUTING.delete('signup:allowlist');
+
+    const body = new URLSearchParams({
+      email: 'abc@x.com, zyc@gmail.com\nThird@Example.com  abc@x.com',
+    });
+    const res = await req('/admin/invitations/send', admin.adminJwt, {
+      method: 'POST',
+      body: body.toString(),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+
+    expect(res.status).toBe(302);
+
+    const rows = await env.db.select().from(invitations);
+    expect(rows.map((row) => row.email).sort()).toEqual([
+      'abc@x.com',
+      'third@example.com',
+      'zyc@gmail.com',
+    ]);
+
+    const raw = await env.ROUTING.get('signup:allowlist');
+    expect(JSON.parse(raw!)).toEqual([
+      { type: 'email', pattern: 'abc@x.com', note: 'Invited by admin-inv1' },
+      { type: 'email', pattern: 'zyc@gmail.com', note: 'Invited by admin-inv1' },
+      { type: 'email', pattern: 'third@example.com', note: 'Invited by admin-inv1' },
+    ]);
+
+    await env.ROUTING.delete('signup:allowlist');
+  });
+
+  test('rejects a batch if any email is already invited', async () => {
+    const admin = await createTestUser(env.db, 'admin-inv2', 'github', undefined, 'free', 'admin');
+    await env.ROUTING.delete('signup:allowlist');
+
+    const firstBody = new URLSearchParams({ email: 'existing@example.com' });
+    const firstRes = await req('/admin/invitations/send', admin.adminJwt, {
+      method: 'POST',
+      body: firstBody.toString(),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+    expect(firstRes.status).toBe(302);
+
+    const secondBody = new URLSearchParams({
+      email: 'new@example.com, existing@example.com',
+    });
+    const secondRes = await req('/admin/invitations/send', admin.adminJwt, {
+      method: 'POST',
+      body: secondBody.toString(),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+
+    expect(secondRes.status).toBe(400);
+    const rows = await env.db.select().from(invitations);
+    expect(rows.map((row) => row.email)).toEqual(['existing@example.com']);
+
+    await env.ROUTING.delete('signup:allowlist');
   });
 });
 

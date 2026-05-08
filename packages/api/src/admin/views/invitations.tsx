@@ -34,16 +34,16 @@ export function InvitationsPage({
       <form
         method="post"
         action="/admin/invitations/send"
-        style="margin-bottom: 20px; display: flex; gap: 8px; align-items: center"
+        style="margin-bottom: 20px; display: flex; gap: 8px; align-items: flex-start"
       >
-        <input
-          type="email"
+        <textarea
           name="email"
-          placeholder="user@example.com"
+          placeholder="user@example.com, teammate@example.com"
           required
-          style="width: 300px"
+          rows={3}
+          style="width: 360px"
         />
-        <button type="submit">Send Invite</button>
+        <button type="submit">Send Invites</button>
       </form>
 
       <table>
