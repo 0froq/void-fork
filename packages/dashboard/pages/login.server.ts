@@ -1,7 +1,7 @@
 import apkProtocolMedium from '@voidcloud/ui/fonts/APK-Protocol-Medium.woff2';
 import interRomanLatin from '@voidcloud/ui/fonts/inter-roman-latin.woff2';
 import khTekaMonoRegular from '@voidcloud/ui/fonts/KHTekaMono-Regular.woff2';
-import { getCookie, setCookie } from 'hono/cookie';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { defineHandler, defineHead } from 'void';
 import { getPublicApiUrl } from '../lib/api.ts';
 
@@ -37,9 +37,10 @@ export const loader = defineHandler<Props>((c) => {
     httpOnly: true,
     secure: !isLocal,
     sameSite: 'Lax',
-    path: '/auth',
+    path: '/',
     maxAge: 300,
   });
+  deleteCookie(c, 'void_auth_nonce', { path: '/auth' });
 
   const callbackWithNonce = `${callbackUrl}?login_nonce=${nonce}`;
   const githubUrl = `${platformUrl}/auth/login?provider=github&redirect=${encodeURIComponent(callbackWithNonce)}`;

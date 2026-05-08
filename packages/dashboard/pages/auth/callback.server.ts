@@ -48,6 +48,7 @@ export const loader = defineHandler(async (c) => {
       console.warn('[dashboard] /auth/exchange returned no token');
       return c.redirect(loginUrl(c));
     }
+    deleteCookie(c, 'void_auth_nonce', { path: '/' });
     deleteCookie(c, 'void_auth_nonce', { path: '/auth' });
     const host = c.req.header('host') ?? '';
     setCookie(c, 'void_token', exchange.token, {
