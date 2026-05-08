@@ -241,7 +241,8 @@ export function computeAssetHashes(
 
 /**
  * Create a filter function that excludes .assetsignore, _headers, _redirects,
- * deploy-internal patterns, and any patterns listed in a .assetsignore file.
+ * OS metadata files, deploy-internal patterns, and any patterns listed in a
+ * .assetsignore file.
  * Matches Wrangler's createAssetsIgnoreFunction from workers-shared/utils/helpers.ts.
  */
 function createAssetsIgnoreFunction(
@@ -251,7 +252,7 @@ function createAssetsIgnoreFunction(
   isIgnored: (relativePath: string) => boolean;
   assetsIgnoreFilePresent: boolean;
 } {
-  const patterns = ['/.assetsignore', '/_redirects', '/_headers', ...extraPatterns];
+  const patterns = ['/.assetsignore', '/_redirects', '/_headers', '.DS_Store', ...extraPatterns];
   const assetsIgnorePath = join(dir, '.assetsignore');
   let assetsIgnoreFilePresent = false;
   if (existsSync(assetsIgnorePath)) {

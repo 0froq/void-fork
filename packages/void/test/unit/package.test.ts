@@ -206,6 +206,18 @@ describe('collectAndHashAssets', () => {
     expect(assetFiles.size).toBe(1);
   });
 
+  it('excludes macOS .DS_Store metadata files from manifest', async () => {
+    mkdirSync(join(TMP, 'assets'), { recursive: true });
+    writeFileSync(join(TMP, 'index.html'), '<html></html>');
+    writeFileSync(join(TMP, '.DS_Store'), 'metadata');
+    writeFileSync(join(TMP, 'assets', '.DS_Store'), 'metadata');
+
+    const { assetManifest, assetFiles } = await collectAndHashAssets(TMP);
+
+    expect(Object.keys(assetManifest)).toEqual(['/index.html']);
+    expect(assetFiles.size).toBe(1);
+  });
+
   it('honors custom .assetsignore patterns', async () => {
     mkdirSync(join(TMP, 'secret'), { recursive: true });
     writeFileSync(join(TMP, 'index.html'), '<html></html>');
