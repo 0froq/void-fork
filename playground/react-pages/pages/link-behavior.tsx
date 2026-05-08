@@ -1,5 +1,5 @@
 import { Link, useNavigation, useRouter } from '@void/react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Props } from './link-behavior.server.ts';
 
 type LinkBehaviorWindow = Window & {
@@ -12,6 +12,8 @@ type LinkBehaviorWindow = Window & {
 };
 
 export default function LinkBehaviorPage({ title }: Props) {
+  const [abortTestStatus, setAbortTestStatus] = useState('Not run');
+
   useEffect(() => {
     const linkWindow = window as LinkBehaviorWindow;
     linkWindow.__hashNavigationStarts = 0;
@@ -22,6 +24,46 @@ export default function LinkBehaviorPage({ title }: Props) {
   const router = useRouter();
   const navigation = useNavigation();
   const previousNavigationState = useRef(navigation.state);
+  const abortTestCleanupRef = useRef<() => void>(() => {});
+
+  const runAbortNavigationTest = () => {
+    const observedErrors: Array<string> = [];
+    const recordError = (error: unknown) => {
+      observedErrors.push(error instanceof Error ? error.message : String(error));
+    };
+    const onError = (event: ErrorEvent) => {
+      recordError(event.error ?? event.message);
+    };
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      recordError(event.reason);
+    };
+    const cleanup = () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onUnhandledRejection);
+      abortTestCleanupRef.current = () => {};
+    };
+
+    abortTestCleanupRef.current();
+    abortTestCleanupRef.current = cleanup;
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
+    setAbortTestStatus('Running...');
+
+    void router.visit('/link-behavior?abort-slow=1');
+    window.setTimeout(() => {
+      void router.visit('#abort-test-complete');
+    }, 50);
+    window.setTimeout(() => {
+      cleanup();
+      setAbortTestStatus(
+        observedErrors.some(
+          (error) => error.includes('Navigation aborted') || error.includes('AbortError'),
+        )
+          ? `Failed: ${observedErrors.join(', ')}`
+          : 'Passed: interrupted GET navigation did not surface an abort error.',
+      );
+    }, 800);
+  };
 
   useEffect(() => {
     const linkWindow = window as LinkBehaviorWindow;
@@ -134,12 +176,24 @@ export default function LinkBehaviorPage({ title }: Props) {
       </p>
       <p data-testid="navigation-state">{navigation.state}</p>
 
+      <section>
+        <h2>Aborted GET navigation check</h2>
+        <button type="button" onClick={runAbortNavigationTest}>
+          Run interrupted navigation check
+        </button>
+        <p data-testid="abort-navigation-status">{abortTestStatus}</p>
+      </section>
+
       <section id="hash-target">
         <h2>Hash target</h2>
       </section>
 
       <section id="plain-hash-target">
         <h2>Plain hash target</h2>
+      </section>
+
+      <section id="abort-test-complete">
+        <h2>Abort test complete</h2>
       </section>
     </div>
   );

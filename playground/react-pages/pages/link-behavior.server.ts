@@ -4,7 +4,15 @@ export interface Props {
   title: string;
 }
 
-export const loader = defineHandler<Props>(() => {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export const loader = defineHandler<Props>(async (c) => {
+  if (c.req.query('abort-slow')) {
+    await sleep(1000);
+  }
+
   return { title: 'Link Behavior' };
 });
 
