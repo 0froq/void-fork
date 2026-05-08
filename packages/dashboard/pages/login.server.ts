@@ -18,7 +18,20 @@ export const head = defineHead<Props>(() => ({
   ],
 }));
 
+export function getAuthCallbackForwardPath(url: string): string | null {
+  const parsed = new URL(url);
+  if (!parsed.searchParams.has('code') && !parsed.searchParams.has('token')) {
+    return null;
+  }
+  return `/auth/callback${parsed.search}`;
+}
+
 export const loader = defineHandler<Props>((c) => {
+  const callbackForwardPath = getAuthCallbackForwardPath(c.req.url);
+  if (callbackForwardPath) {
+    return c.redirect(callbackForwardPath);
+  }
+
   const platformUrl = getPublicApiUrl(c);
 
   // Derive origin from Host header — c.req.url can be localhost in prod
