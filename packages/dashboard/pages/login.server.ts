@@ -1,7 +1,7 @@
 import apkProtocolMedium from '@voidcloud/ui/fonts/APK-Protocol-Medium.woff2';
 import interRomanLatin from '@voidcloud/ui/fonts/inter-roman-latin.woff2';
 import khTekaMonoRegular from '@voidcloud/ui/fonts/KHTekaMono-Regular.woff2';
-import { setCookie } from 'hono/cookie';
+import { getCookie, setCookie } from 'hono/cookie';
 import { defineHandler, defineHead } from 'void';
 import { getPublicApiUrl } from '../lib/api.ts';
 
@@ -32,7 +32,7 @@ export const loader = defineHandler<Props>((c) => {
   // The nonce is included in both a cookie and the redirect URL. The callback
   // verifies the cookie value matches the URL param — an attacker's crafted
   // callback URL won't match the victim's cookie.
-  const nonce = crypto.randomUUID();
+  const nonce = getCookie(c, 'void_auth_nonce') ?? crypto.randomUUID();
   setCookie(c, 'void_auth_nonce', nonce, {
     httpOnly: true,
     secure: !isLocal,
