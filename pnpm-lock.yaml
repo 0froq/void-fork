@@ -21,14 +21,8 @@ catalogs:
     pathe:
       specifier: ^2.0.3
       version: 2.0.3
-    vite:
-      specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
-      version: 0.1.20
     vite-plus:
       specifier: ^0.1.20
-      version: 0.1.20
-    vitest:
-      specifier: npm:@voidzero-dev/vite-plus-test@0.1.20
       version: 0.1.20
     wrangler:
       specifier: ^4.90.0
@@ -62,7 +56,7 @@ importers:
         specifier: 'catalog:'
         version: 0.1.20(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(vite@8.0.10(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4))(yaml@2.8.4)
       vitest:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-test@0.1.20
         version: '@voidzero-dev/vite-plus-test@0.1.20(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(vite@8.0.10(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4))(yaml@2.8.4)'
 
   docs:
@@ -143,7 +137,7 @@ importers:
         specifier: ^0.2.16
         version: 0.2.16
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
     devDependencies:
       '@types/node':
@@ -165,7 +159,7 @@ importers:
         specifier: ^6.0.1
         version: 6.0.1(@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4))
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
     devDependencies:
       '@types/node':
@@ -196,7 +190,7 @@ importers:
   packages/solid:
     dependencies:
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plugin-solid:
         specifier: ^2.11.12
@@ -224,7 +218,7 @@ importers:
         specifier: ^7.1.2
         version: 7.1.2(@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4))(svelte@5.55.5(@typescript-eslint/types@8.57.2))
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
     devDependencies:
       '@types/node':
@@ -300,7 +294,7 @@ importers:
         specifier: ^8.20.0
         version: 8.20.0
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       wrangler:
         specifier: 'catalog:'
@@ -367,7 +361,7 @@ importers:
         specifier: ^6.0.6
         version: 6.0.6(@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4))(vue@3.5.34(typescript@6.0.3))
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
     devDependencies:
       '@types/node':
@@ -438,7 +432,7 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -463,7 +457,7 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260507.1
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -491,7 +485,7 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -519,7 +513,7 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -559,7 +553,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/react
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -593,7 +587,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/react
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -630,7 +624,7 @@ importers:
         specifier: 'catalog:'
         version: 2.0.3
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -652,7 +646,7 @@ importers:
         specifier: 'catalog:'
         version: 2.0.3
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -692,7 +686,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/react
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -729,7 +723,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/react
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -760,7 +754,7 @@ importers:
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.14)
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -788,7 +782,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/solid
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -825,7 +819,7 @@ importers:
         specifier: ^6.0.1
         version: 6.0.1(@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4))
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -859,7 +853,7 @@ importers:
         specifier: ^6.0.1
         version: 6.0.1(@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4))
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -881,7 +875,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/vue
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -909,7 +903,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/svelte
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -937,7 +931,7 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260507.1
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -977,7 +971,7 @@ importers:
         specifier: ^6.0.1
         version: 6.0.1(@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4))
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -1014,7 +1008,7 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260507.1
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -1045,7 +1039,7 @@ importers:
         specifier: 'catalog:'
         version: 7.0.0-dev.20260507.1
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -1073,7 +1067,7 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -1113,7 +1107,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/react
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -1135,7 +1129,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/vue
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@0.1.20
         version: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vite-plus:
         specifier: 'catalog:'
@@ -11454,7 +11448,7 @@ snapshots:
       std-env: 4.1.0
       ufo: 1.6.4
       unctx: 2.5.0
-      unstorage: 1.17.5(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3))(ioredis@5.10.1)
+      unstorage: 1.17.5(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3))(ioredis@5.10.1)
       vue: 3.5.34(typescript@6.0.3)
       vue-bundle-renderer: 2.2.0
       vue-devtools-stub: 0.1.0
@@ -14086,7 +14080,7 @@ snapshots:
       ultrahtml: 1.6.0
       unifont: 0.7.4
       unist-util-visit: 5.1.0
-      unstorage: 1.17.5(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3))(ioredis@5.10.1)
+      unstorage: 1.17.5(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3))(ioredis@5.10.1)
       vfile: 6.0.3
       vite: '@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4)'
       vitefu: 1.1.3(@voidzero-dev/vite-plus-core@0.1.20(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.97.3)(terser@5.47.1)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.4))
@@ -14693,7 +14687,7 @@ snapshots:
 
   csstype@3.2.3: {}
 
-  db0@0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3):
+  db0@0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3):
     optionalDependencies:
       '@electric-sql/pglite': 0.4.5
       better-sqlite3: 12.9.0
@@ -16396,7 +16390,7 @@ snapshots:
       cookie-es: 2.0.1
       croner: 10.0.1
       crossws: 0.3.5
-      db0: 0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3)
+      db0: 0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3)
       defu: 6.1.7
       destr: 2.0.5
       dot-prop: 10.1.0
@@ -16442,7 +16436,7 @@ snapshots:
       unenv: 2.0.0-rc.24
       unimport: 6.2.0(oxc-parser@0.128.0)
       unplugin-utils: 0.3.1
-      unstorage: 1.17.5(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3))(ioredis@5.10.1)
+      unstorage: 1.17.5(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3))(ioredis@5.10.1)
       untyped: 2.0.0
       unwasm: 0.5.3
       youch: 4.1.1
@@ -18429,7 +18423,7 @@ snapshots:
       escape-string-regexp: 5.0.0
       ufo: 1.6.4
 
-  unstorage@1.17.5(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3))(ioredis@5.10.1):
+  unstorage@1.17.5(aws4fetch@1.0.20)(db0@0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3))(ioredis@5.10.1):
     dependencies:
       anymatch: 3.1.3
       chokidar: 5.0.0
@@ -18441,7 +18435,7 @@ snapshots:
       ufo: 1.6.4
     optionalDependencies:
       aws4fetch: 1.0.20
-      db0: 0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3)
+      db0: 0.3.4(@electric-sql/pglite@0.4.5)(better-sqlite3@12.9.0)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260508.1)(@electric-sql/pglite@0.4.5)(@opentelemetry/api@1.9.0)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3))(typescript@6.0.3))(@types/better-sqlite3@7.6.13)(@types/pg@8.20.0)(better-sqlite3@12.9.0)(kysely@0.28.17)(mysql2@3.15.3)(pg@8.20.0)(postgres@3.4.7)(prisma@7.4.2(@types/react@19.2.14)(better-sqlite3@12.9.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)))(mysql2@3.15.3)
       ioredis: 5.10.1
 
   untun@0.1.3:
